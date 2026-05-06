@@ -34,6 +34,16 @@
 - This phase should centralize resource-kind and runtime definitions to reduce drift across modules.
 - Do not break existing tests without replacing them with equivalent `.aof/` expectations.
 
+**Plans:**
+- Wave 1: `01-01-PLAN.md` — Workspace discovery, `.aof` init output, explicit `aof migrate`, and BDD coverage.
+- Wave 2 *(blocked on Wave 1 completion)*: `01-02-PLAN.md` — Central model/capability table, file-backed assets, runtime overrides, and schema alignment.
+- Wave 3 *(blocked on Wave 2 completion)*: `01-03-PLAN.md` — Rule mapping semantics, docs, and full verification sweep.
+
+**Cross-cutting constraints:**
+- BDD tests are required for all new functionality.
+- `.aof/aof.config.json` is authoritative over legacy root `aof.config.json`.
+- Runtime capability behavior is handled capability-by-capability from a central model.
+
 ### Phase 2: Runtime Rendering And Lock State
 
 **Goal:** Render `.aof/` assets into Claude Code and Codex folder layouts while preserving dry-run behavior, generated-output boundaries, and reproducible lock state.

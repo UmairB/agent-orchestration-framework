@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 1 - `.aof` Workspace Model
-**Status:** Phase 1 context gathered
+**Status:** Ready to execute Phase 1
 
 ## Project Reference
 
@@ -20,8 +20,8 @@ Phase 1 establishes `.aof/` as the source of truth for configuration, source ass
 
 ## Resume
 
-**Stopped at:** Phase 1 context gathered
-**Resume file:** `.planning/phases/01-aof-workspace-model/01-CONTEXT.md`
+**Stopped at:** Phase 1 planned
+**Resume file:** `.planning/phases/01-aof-workspace-model/01-01-PLAN.md`
 
 ## Memory
 
@@ -30,4 +30,5 @@ Phase 1 establishes `.aof/` as the source of truth for configuration, source ass
 - User selected YOLO mode, standard granularity, parallel execution, git-tracked docs, research enabled, plan check enabled, verifier enabled, and balanced model profile.
 - UI v1 is intentionally config editing only; CLI remains responsible for execution.
 - Phase 1 context is captured in `.planning/phases/01-aof-workspace-model/01-CONTEXT.md`.
+- Phase 1 planning produced 3 plans in `.planning/phases/01-aof-workspace-model/`.
 - Global decision: BDD tests are required for all new functionality.
