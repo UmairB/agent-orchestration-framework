@@ -1,0 +1,115 @@
+import os from "node:os";
+import path from "node:path";
+
+export const RUNTIMES = {
+  claude: {
+    id: "claude",
+    name: "Claude Code",
+    localRoot: ".claude",
+    globalRoot: path.join(os.homedir(), ".claude"),
+    commandPrefix: "/"
+  },
+  codex: {
+    id: "codex",
+    name: "Codex",
+    localRoot: ".codex",
+    globalRoot: path.join(os.homedir(), ".codex"),
+    commandPrefix: "$"
+  }
+};
+
+export const RESOURCE_KINDS = {
+  skill: {
+    id: "skill",
+    plural: "skills",
+    defaultBodyFile: "SKILL.md"
+  },
+  command: {
+    id: "command",
+    plural: "commands",
+    defaultBodyFile: "COMMAND.md"
+  },
+  agent: {
+    id: "agent",
+    plural: "agents",
+    defaultBodyFile: "AGENT.md"
+  },
+  rule: {
+    id: "rule",
+    plural: "rules",
+    defaultBodyFile: "RULE.md"
+  }
+};
+
+export const CAPABILITY_STATUS = {
+  native: "native",
+  mapped: "mapped",
+  unsupportedWarning: "unsupported-warning",
+  unsupportedFail: "unsupported-fail",
+  future: "future"
+};
+
+export const CAPABILITIES = {
+  skill: {
+    claude: CAPABILITY_STATUS.native,
+    codex: CAPABILITY_STATUS.native
+  },
+  command: {
+    claude: CAPABILITY_STATUS.native,
+    codex: CAPABILITY_STATUS.native
+  },
+  agent: {
+    claude: CAPABILITY_STATUS.native,
+    codex: CAPABILITY_STATUS.native
+  },
+  rule: {
+    claude: CAPABILITY_STATUS.native,
+    codex: CAPABILITY_STATUS.mapped
+  },
+  pathScopedRule: {
+    claude: CAPABILITY_STATUS.native,
+    codex: CAPABILITY_STATUS.mapped
+  },
+  codexExecutionPolicyRule: {
+    claude: CAPABILITY_STATUS.unsupportedFail,
+    codex: CAPABILITY_STATUS.future
+  }
+};
+
+export const IDENTITY_FIELDS = new Set(["id", "kind"]);
+
+export function supportedRuntimes() {
+  return Object.keys(RUNTIMES);
+}
+
+export function supportedResourceKinds() {
+  return Object.keys(RESOURCE_KINDS);
+}
+
+export function defaultBodyFile(kind) {
+  const definition = RESOURCE_KINDS[kind];
+  if (!definition) {
+    throw new Error(`Invalid resource kind "${kind}". Expected ${supportedResourceKinds().join(", ")}.`);
+  }
+  return definition.defaultBodyFile;
+}
+
+export function mergeRuntimeOverride(resource, runtime) {
+  const override = resource.overrides?.[runtime];
+  if (!override) return resource;
+
+  for (const field of IDENTITY_FIELDS) {
+    if (Object.hasOwn(override, field) && override[field] !== resource[field]) {
+      throw new Error(`Runtime override for "${resource.id}" cannot change identity field "${field}".`);
+    }
+  }
+
+  return {
+    ...resource,
+    ...override,
+    id: resource.id,
+    kind: resource.kind,
+    runtimes: resource.runtimes,
+    overrides: resource.overrides
+  };
+}

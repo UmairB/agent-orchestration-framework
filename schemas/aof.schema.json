@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aof.local/schemas/aof.schema.json",
+  "title": "AOF Config",
+  "type": "object",
+  "required": ["name", "resources"],
+  "properties": {
+    "name": { "type": "string" },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source"],
+        "properties": {
+          "id": { "type": "string" },
+          "source": { "type": "string" },
+          "runtimes": {
+            "type": "array",
+            "items": { "enum": ["claude", "codex"] }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "runtimes": {
+      "type": "array",
+      "items": { "enum": ["claude", "codex"] }
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["skill", "command", "agent", "rule"] },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": ["claude", "codex"] }
+        },
+        "body": { "type": "string" },
+        "prompt": { "type": "string" },
+        "instructions": { "type": "string" },
+        "path": { "type": "string" },
+        "model": { "type": "string" },
+        "tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "overrides": {
+          "type": "object",
+          "properties": {
+            "claude": { "$ref": "#/$defs/runtimeOverride" },
+            "codex": { "$ref": "#/$defs/runtimeOverride" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "runtimeOverride": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "body": { "type": "string" },
+            "prompt": { "type": "string" },
+            "instructions": { "type": "string" },
+            "model": { "type": "string" },
+            "tools": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "paths": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  }
+}
