@@ -94,44 +94,44 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WORK-01 | Pending | Pending |
-| WORK-02 | Pending | Pending |
-| WORK-03 | Pending | Pending |
-| ASST-01 | Pending | Pending |
-| ASST-02 | Pending | Pending |
-| ASST-03 | Pending | Pending |
-| ASST-04 | Pending | Pending |
-| ASST-05 | Pending | Pending |
-| RTOV-01 | Pending | Pending |
-| RTOV-02 | Pending | Pending |
-| RTOV-03 | Pending | Pending |
-| RTOV-04 | Pending | Pending |
-| REND-01 | Pending | Pending |
-| REND-02 | Pending | Pending |
-| REND-03 | Pending | Pending |
-| REND-04 | Pending | Pending |
-| FRAM-01 | Pending | Pending |
-| FRAM-02 | Pending | Pending |
-| FRAM-03 | Pending | Pending |
-| FRAM-04 | Pending | Pending |
-| CLI-01 | Pending | Pending |
-| CLI-02 | Pending | Pending |
-| CLI-03 | Pending | Pending |
-| CLI-04 | Pending | Pending |
-| UI-01 | Pending | Pending |
-| UI-02 | Pending | Pending |
-| UI-03 | Pending | Pending |
-| UI-04 | Pending | Pending |
-| UI-05 | Pending | Pending |
-| VERI-01 | Pending | Pending |
-| VERI-02 | Pending | Pending |
-| VERI-03 | Pending | Pending |
+| WORK-01 | Phase 1 | Pending |
+| WORK-02 | Phase 1 | Pending |
+| WORK-03 | Phase 1 | Pending |
+| ASST-01 | Phase 1 | Pending |
+| ASST-02 | Phase 1 | Pending |
+| ASST-03 | Phase 1 | Pending |
+| ASST-04 | Phase 1 | Pending |
+| ASST-05 | Phase 1 | Pending |
+| RTOV-01 | Phase 1 | Pending |
+| RTOV-02 | Phase 1 | Pending |
+| RTOV-03 | Phase 1 | Pending |
+| RTOV-04 | Phase 4 | Pending |
+| REND-01 | Phase 2 | Pending |
+| REND-02 | Phase 2 | Pending |
+| REND-03 | Phase 2 | Pending |
+| REND-04 | Phase 2 | Pending |
+| FRAM-01 | Phase 3 | Pending |
+| FRAM-02 | Phase 3 | Pending |
+| FRAM-03 | Phase 3 | Pending |
+| FRAM-04 | Phase 2 | Pending |
+| CLI-01 | Phase 3 | Pending |
+| CLI-02 | Phase 3 | Pending |
+| CLI-03 | Phase 2 | Pending |
+| CLI-04 | Phase 2 | Pending |
+| UI-01 | Phase 4 | Pending |
+| UI-02 | Phase 4 | Pending |
+| UI-03 | Phase 4 | Pending |
+| UI-04 | Phase 4 | Pending |
+| UI-05 | Phase 4 | Pending |
+| VERI-01 | Phase 5 | Pending |
+| VERI-02 | Phase 5 | Pending |
+| VERI-03 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 32 total
-- Mapped to phases: 0
-- Unmapped: 32
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-06*
-*Last updated: 2026-05-06 after initial definition*
+*Last updated: 2026-05-06 after roadmap creation*
