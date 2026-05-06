@@ -21,14 +21,14 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ GSD can be delegated to its npm installer through `src/frameworks.mjs` — existing
 - ✓ A setup UI exists for viewing and creating catalog skills and agents through `src/setup-ui.mjs` and `ui/src/main.tsx` — existing
 - ✓ Unit and BDD-style integration tests cover core CLI behavior — existing
+- ✓ AOF creates and owns repo-local `.aof/` workspace files for config, source assets, runtime overrides, and lock state — Phase 1
+- ✓ Existing root `aof.config.json` can be explicitly migrated into `.aof/` with `aof migrate` — Phase 1
+- ✓ Skills, commands, agents, and shared rules/instructions can be represented in the `.aof/` model with runtime targets and overrides — Phase 1
 
 ### Active
 
-- [ ] AOF creates and owns a repo-local `.aof/` directory for configuration, catalog/source assets, runtime override data, and lock/install state.
 - [ ] AOF treats `.claude/`, `.codex/`, and future assistant folders as generated output from `.aof/`.
-- [ ] Users can define core assistant assets: skills, commands, agents, and shared rules/instructions.
-- [ ] Users can specify shared defaults plus Claude Code-specific and Codex-specific runtime overrides.
-- [ ] Runtime support is explicit: Claude Code and Codex are the concrete v1 targets.
+- [ ] Runtime support is explicit in rendering behavior: Claude Code and Codex are the concrete v1 targets.
 - [ ] AOF manages GSD as a first-class framework package for Claude Code and Codex installs.
 - [ ] CLI supports both automation-friendly commands and an interactive install-oriented workflow.
 - [ ] Setup UI acts as a configuration editor for valid `.aof/` config, including runtime targets, runtime capability visibility, and runtime-specific overrides.
@@ -80,12 +80,12 @@ The long-term product direction includes task management: kanban boards, task as
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| `.aof/` is the repo-local source of truth | Users need one durable place for config, assets, overrides, and lock state | — Pending |
+| `.aof/` is the repo-local source of truth | Users need one durable place for config, assets, overrides, and lock state | Implemented in Phase 1 |
 | `.claude/` and `.codex/` are generated output | Avoids hand-maintained runtime drift | — Pending |
-| v1 targets Claude Code and Codex | These are the immediate assistant runtimes to support concretely | — Pending |
-| v1 includes core assets plus GSD framework management | Skills, commands, agents, rules/instructions, and GSD are the core value slice | — Pending |
+| v1 targets Claude Code and Codex | These are the immediate assistant runtimes to support concretely | Model implemented in Phase 1; rendering expands in Phase 2 |
+| v1 includes core assets plus GSD framework management | Skills, commands, agents, rules/instructions, and GSD are the core value slice | Core asset model implemented in Phase 1 |
 | UI v1 is a configuration editor only | Keeps execution in the CLI while making config creation easier | — Pending |
-| Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | — Pending |
+| Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | Implemented in Phase 1 |
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
 
 ## Evolution
@@ -106,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 after initialization*
+*Last updated: 2026-05-06 after Phase 1 verification*

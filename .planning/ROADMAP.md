@@ -20,6 +20,8 @@
 
 ### Phase 1: `.aof` Workspace Model
 
+**Status:** Complete — verified 2026-05-06.
+
 **Goal:** Establish `.aof/` as the repo-local source of truth for configuration, source assets, runtime targeting, and runtime override data.
 
 **Requirements:** WORK-01, WORK-02, WORK-03, ASST-01, ASST-02, ASST-03, ASST-04, ASST-05, RTOV-01, RTOV-02, RTOV-03

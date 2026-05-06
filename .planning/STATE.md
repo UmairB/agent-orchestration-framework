@@ -1,8 +1,8 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 1 - `.aof` Workspace Model
-**Status:** Ready to execute Phase 1
+**Current phase:** Phase 2 - Runtime Rendering And Lock State
+**Status:** Phase 1 complete; ready to discuss Phase 2
 
 ## Project Reference
 
@@ -16,12 +16,12 @@ See: `.planning/ROADMAP.md`
 
 ## Current Focus
 
-Phase 1 establishes `.aof/` as the source of truth for configuration, source assets, runtime targeting, and runtime override data.
+Phase 1 is complete. Phase 2 should render `.aof/` assets into Claude Code and Codex folder layouts while preserving dry-run behavior, generated-output boundaries, and reproducible lock state.
 
 ## Resume
 
-**Stopped at:** Phase 1 planned
-**Resume file:** `.planning/phases/01-aof-workspace-model/01-01-PLAN.md`
+**Stopped at:** Phase 1 complete
+**Resume file:** `.planning/phases/01-aof-workspace-model/01-VERIFICATION.md`
 
 ## Memory
 
@@ -31,4 +31,5 @@ Phase 1 establishes `.aof/` as the source of truth for configuration, source ass
 - UI v1 is intentionally config editing only; CLI remains responsible for execution.
 - Phase 1 context is captured in `.planning/phases/01-aof-workspace-model/01-CONTEXT.md`.
 - Phase 1 planning produced 3 plans in `.planning/phases/01-aof-workspace-model/`.
+- Phase 1 execution completed and passed verification in `.planning/phases/01-aof-workspace-model/01-VERIFICATION.md`.
 - Global decision: BDD tests are required for all new functionality.

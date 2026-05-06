@@ -7,23 +7,23 @@
 
 ### Workspace
 
-- [ ] **WORK-01**: User can initialize a repo-local `.aof/` workspace.
-- [ ] **WORK-02**: User can store AOF configuration, source assets, runtime overrides, and lock state under `.aof/`.
-- [ ] **WORK-03**: User can migrate or reconcile existing root `aof.config.json` data into the `.aof/` model.
+- [x] **WORK-01**: User can initialize a repo-local `.aof/` workspace. — Validated in Phase 1.
+- [x] **WORK-02**: User can store AOF configuration, source assets, runtime overrides, and lock state under `.aof/`. — Validated in Phase 1.
+- [x] **WORK-03**: User can migrate or reconcile existing root `aof.config.json` data into the `.aof/` model. — Validated in Phase 1.
 
 ### Assets
 
-- [ ] **ASST-01**: User can define assistant skills once in AOF.
-- [ ] **ASST-02**: User can define assistant commands once in AOF.
-- [ ] **ASST-03**: User can define assistant agents once in AOF.
-- [ ] **ASST-04**: User can define shared rules/instructions once in AOF.
-- [ ] **ASST-05**: User can assign runtime targets per asset.
+- [x] **ASST-01**: User can define assistant skills once in AOF. — Validated in Phase 1.
+- [x] **ASST-02**: User can define assistant commands once in AOF. — Validated in Phase 1.
+- [x] **ASST-03**: User can define assistant agents once in AOF. — Validated in Phase 1.
+- [x] **ASST-04**: User can define shared rules/instructions once in AOF. — Validated in Phase 1.
+- [x] **ASST-05**: User can assign runtime targets per asset. — Validated in Phase 1.
 
 ### Runtime Overrides
 
-- [ ] **RTOV-01**: User can define shared defaults for an asset.
-- [ ] **RTOV-02**: User can define Claude Code-specific overrides.
-- [ ] **RTOV-03**: User can define Codex-specific overrides.
+- [x] **RTOV-01**: User can define shared defaults for an asset. — Validated in Phase 1.
+- [x] **RTOV-02**: User can define Claude Code-specific overrides. — Validated in Phase 1.
+- [x] **RTOV-03**: User can define Codex-specific overrides. — Validated in Phase 1.
 - [ ] **RTOV-04**: User can see when an asset capability is runtime-specific or unsupported for a target runtime.
 
 ### Rendering
@@ -94,17 +94,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WORK-01 | Phase 1 | Pending |
-| WORK-02 | Phase 1 | Pending |
-| WORK-03 | Phase 1 | Pending |
-| ASST-01 | Phase 1 | Pending |
-| ASST-02 | Phase 1 | Pending |
-| ASST-03 | Phase 1 | Pending |
-| ASST-04 | Phase 1 | Pending |
-| ASST-05 | Phase 1 | Pending |
-| RTOV-01 | Phase 1 | Pending |
-| RTOV-02 | Phase 1 | Pending |
-| RTOV-03 | Phase 1 | Pending |
+| WORK-01 | Phase 1 | Complete |
+| WORK-02 | Phase 1 | Complete |
+| WORK-03 | Phase 1 | Complete |
+| ASST-01 | Phase 1 | Complete |
+| ASST-02 | Phase 1 | Complete |
+| ASST-03 | Phase 1 | Complete |
+| ASST-04 | Phase 1 | Complete |
+| ASST-05 | Phase 1 | Complete |
+| RTOV-01 | Phase 1 | Complete |
+| RTOV-02 | Phase 1 | Complete |
+| RTOV-03 | Phase 1 | Complete |
 | RTOV-04 | Phase 4 | Pending |
 | REND-01 | Phase 2 | Pending |
 | REND-02 | Phase 2 | Pending |
@@ -134,4 +134,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-05-06*
-*Last updated: 2026-05-06 after roadmap creation*
+*Last updated: 2026-05-06 after Phase 1 verification*
