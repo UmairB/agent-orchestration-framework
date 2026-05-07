@@ -7,9 +7,10 @@ Feature: AOF CLI
     When I run `--help`
     Then the command should succeed
     And stdout should contain `aof - Assistant Ops Framework`
-    And stdout should contain `aof install [--no-serve]`
     And stdout should contain `aof init [dir] [--items id,id] [--defaults]`
+    And stdout should contain `aof add <kind> <id>`
     And stdout should contain `aof migrate`
+    And text `aof validate [--json] [--strict]` should appear before `aof install [--no-serve]` in stdout
 
   Scenario: Install AOF and create the catalog database
     Given an empty project
@@ -165,18 +166,32 @@ Feature: AOF CLI
 
   Scenario: Validate invalid config for automation
     Given a project with invalid .aof config
+    When I run `validate`
+    Then the command should fail
+    And stdout should contain `invalid:`
     When I run `config validate --json`
     Then the command should fail
     And stdout should contain `"valid": false`
     And stdout should contain `Unsupported runtime`
+    When I run `validate --json`
+    Then the command should fail
+    And stdout should contain `"valid": false`
+    And stdout should contain `"errors"`
 
   Scenario: Doctor reports package intent and stale legacy config
     Given a project with .aof package config and stale legacy config
+    When I run `doctor`
+    Then the command should succeed
+    And stdout should contain `package-intent`
+    And stdout should contain `legacy-config`
     When I run `config doctor`
     Then the command should succeed
     And stdout should contain `package-intent`
     And stdout should contain `legacy-config`
     And stdout should contain `aof install gsd --dry-run`
+    When I run `doctor --strict`
+    Then the command should fail
+    And stdout should contain `warning: legacy-config`
 
   Scenario: Preview config-declared GSD installer commands
     Given a project with .aof package config

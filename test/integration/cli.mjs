@@ -400,6 +400,17 @@ async function runStep(context, step) {
     return;
   }
 
+  match = step.match(/^text `(.+)` should appear before `(.+)` in stdout$/);
+  if (match) {
+    assertLastResult(context);
+    const first = context.lastResult.stdout.indexOf(match[1]);
+    const second = context.lastResult.stdout.indexOf(match[2]);
+    assert.ok(first >= 0, `Expected stdout to contain ${match[1]}`);
+    assert.ok(second >= 0, `Expected stdout to contain ${match[2]}`);
+    assert.ok(first < second, `Expected ${match[1]} to appear before ${match[2]} in stdout`);
+    return;
+  }
+
   throw new Error(`Unsupported BDD step: ${step}`);
 }
 

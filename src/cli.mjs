@@ -70,6 +70,16 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "validate") {
+    await validateCommand(rest);
+    return;
+  }
+
+  if (command === "doctor") {
+    await doctorCommand(rest);
+    return;
+  }
+
   if (command === "install") {
     await installCommand(rest);
     return;
@@ -297,42 +307,76 @@ async function configCommand(args) {
   }
 
   if (subcommand === "validate") {
-    const diagnostics = await validateConfig(targetDir, options);
-    const errors = diagnostics.filter((item) => item.severity === "error");
-    if (options.json) {
-      printJson({ valid: errors.length === 0, diagnostics });
-    } else if (errors.length === 0) {
-      console.log("valid: config passed validation");
-    } else {
-      console.log(`invalid: ${errors.length} error(s)`);
-      for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
-    }
-    if (errors.length > 0) process.exitCode = 1;
+    await validateCommand(rest);
     return;
   }
 
   if (subcommand === "doctor") {
-    const report = await doctorConfig(targetDir, {
-      ...options,
-      runtimes: parseRuntimes(options)
-    });
-    const errors = report.checks.filter((item) => item.severity === "error");
-    if (options.json) {
-      printJson({ healthy: errors.length === 0, ...report });
-    } else {
-      console.log(`doctor: ${errors.length === 0 ? "healthy" : "issues found"}`);
-      for (const check of report.checks) {
-        console.log(`${check.severity}: ${check.id} - ${check.message}`);
-      }
-      for (const suggestion of report.suggestions) {
-        console.log(`next: ${suggestion}`);
-      }
-    }
-    if (errors.length > 0) process.exitCode = 1;
+    await doctorCommand(rest);
     return;
   }
 
   throw new Error(`Unknown config command "${subcommand}".`);
+}
+
+async function validateCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const diagnostics = await validateConfig(targetDir, options);
+  const errors = diagnostics.filter((item) => item.severity === "error");
+  const warnings = diagnostics.filter((item) => item.severity === "warning");
+  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
+
+  if (options.json) {
+    printJson({
+      valid: !failed,
+      strict: Boolean(options.strict),
+      errors: errors.length,
+      warnings: warnings.length,
+      diagnostics
+    });
+  } else if (!failed) {
+    console.log("valid: config passed validation");
+    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
+  } else {
+    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
+    console.log(`invalid: ${reason}`);
+    for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
+  }
+
+  if (failed) process.exitCode = 1;
+}
+
+async function doctorCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const report = await doctorConfig(targetDir, {
+    ...options,
+    runtimes: parseRuntimes(options)
+  });
+  const errors = report.checks.filter((item) => item.severity === "error");
+  const warnings = report.checks.filter((item) => item.severity === "warning");
+  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
+
+  if (options.json) {
+    printJson({
+      healthy: !failed,
+      strict: Boolean(options.strict),
+      errors: errors.length,
+      warnings: warnings.length,
+      ...report
+    });
+  } else {
+    console.log(`doctor: ${failed ? "issues found" : "healthy"}`);
+    for (const check of report.checks) {
+      console.log(`${check.severity}: ${check.id} - ${check.message}`);
+    }
+    for (const suggestion of report.suggestions) {
+      console.log(`next: ${suggestion}`);
+    }
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 async function frameworkInstallCommand(framework, options) {
@@ -577,7 +621,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock", "strict"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -657,11 +701,18 @@ function helpText() {
   return `aof - Assistant Ops Framework
 
 Usage:
-  aof install [--no-serve] [--db path] [--port 4177]
   aof init [dir] [--items id,id] [--defaults] [--claude] [--codex] [--force] [--db path]
+  aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]
   aof migrate [dir] [--force] [--dry-run]
   aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force]
-  aof config show|validate|doctor [--json]
+  aof sync [--claude] [--codex] [--global] [--dry-run] [--force] [--install]
+  aof validate [--json] [--strict]
+  aof doctor [--json] [--strict]
+  aof clean [--dry-run] [--force]
+
+Supporting commands:
+  aof install [--no-serve] [--db path] [--port 4177]
+  aof config show [--json]
   aof catalog init|list|path [--db path]
   aof install gsd [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
   aof install --interactive
