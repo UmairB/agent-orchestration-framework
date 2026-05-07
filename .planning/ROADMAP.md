@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-07 after Phase 7 completion
+**Last updated:** 2026-05-07 after Phase 8 planning
 
 ## Milestones
 
@@ -94,11 +94,24 @@
 
 **Requirements:** ADPT-01, ADPT-02, ADPT-03, ADPT-04
 
+**Status:** Planned - 3 implementation waves ready for execution.
+
 **Success criteria:**
 1. Unsupported runtime features produce skip warnings naming the source file, target, and reason.
 2. Lossy fallback behavior produces inline warnings naming the fallback output.
 3. Runtime-namespaced extensions pass through only to matching targets without noisy warnings.
 4. Strict mode turns adapter warnings into command failures suitable for CI.
+
+**Plans:**
+- [ ] Wave 1: `08-01-PLAN.md` - Shared adapter warning model.
+- [ ] Wave 2: `08-02-PLAN.md` - CLI warning output and strict gates.
+- [ ] Wave 3: `08-03-PLAN.md` - Review surfaces and policy documentation.
+
+**Cross-cutting constraints:**
+- Adapter warnings are computed at command time and are not stored in `.aof/aof.lock.json`.
+- `apply --strict` and `sync --strict` must fail before generated files, lock state, or installers change anything.
+- `--force` only affects generated-output drift and must not bypass strict adapter warnings.
+- Existing Codex rule guidance output to `AGENTS.md` remains intentional mapped output, not warning noise.
 
 ### Phase 9: Framework Package Semantics
 
@@ -129,8 +142,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 6/6 | 10/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 9/9 | 10/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-discuss-phase 8` to start Adapter Degradation Policy.
+Run `$gsd-execute-phase 8` to implement Adapter Degradation Policy.
