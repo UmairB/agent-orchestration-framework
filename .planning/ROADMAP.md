@@ -48,6 +48,8 @@
 
 ### Phase 2: Runtime Rendering And Lock State
 
+**Status:** Complete — verified 2026-05-06.
+
 **Goal:** Render `.aof/` assets into Claude Code and Codex folder layouts while preserving dry-run behavior, generated-output boundaries, and reproducible lock state.
 
 **Requirements:** REND-01, REND-02, REND-03, REND-04, FRAM-04, CLI-03, CLI-04
@@ -63,7 +65,20 @@
 - Keep the existing adapter pattern, but make `.aof/` the input boundary.
 - Lock state should be useful for audit and re-apply behavior, not just a timestamp.
 
+**Plans:**
+- Wave 1: `02-01-PLAN.md` — Render-plan and lock-manifest infrastructure, generated markers, deterministic Codex `AGENTS.md` merging, and unit tests.
+- Wave 2 *(blocked on Wave 1 completion)*: `02-02-PLAN.md` — CLI apply integration for action reporting, dry-run, drift protection, force overwrite, stale pruning, and BDD coverage.
+- Wave 3 *(blocked on Wave 2 completion)*: `02-03-PLAN.md` — Framework intent lock entries, documentation, final verification sweep, and planning state closure.
+
+**Cross-cutting constraints:**
+- Real apply and dry-run must share one action-plan analysis path.
+- `.aof/aof.lock.json` is authoritative for generated ownership, hashes, drift detection, stale pruning, and framework intent.
+- Drifted generated files must be skipped by default and require an explicit force flag to overwrite.
+- BDD tests are required for all new user-facing rendering, dry-run, lock, drift, pruning, and framework-intent behavior.
+
 ### Phase 3: CLI And GSD Framework Flow
+
+**Status:** Complete — verified 2026-05-07.
 
 **Goal:** Provide a complete CLI path for initializing, applying, inspecting, and installing `.aof/` projects, including managed GSD setup for Claude Code and Codex.
 
@@ -80,7 +95,21 @@
 - Preserve dry-run behavior around framework installation.
 - Keep networked installer boundaries explicit in command output.
 
+**Plans:**
+- Wave 1: `03-01-PLAN.md` — Config inspection, validation, doctor diagnostics, JSON output, and BDD coverage.
+- Wave 2 *(blocked on Wave 1 completion)*: `03-02-PLAN.md` — Config-aware GSD install preview/execution, attempt recording, skip/force policy, and lock replay.
+- Wave 3 *(blocked on Wave 2 completion)*: `03-03-PLAN.md` — Interactive install flow, docs, and final Phase 3 verification.
+
+**Cross-cutting constraints:**
+- BDD tests are required for all new user-facing CLI behavior.
+- `.aof/aof.config.json` is authoritative for managed package intent unless CLI flags override it for one run.
+- Framework dry-runs must be side-effect-free and print exact commands.
+- Real GSD installer execution must print an explicit npm/network boundary before running commands.
+- `.aof/aof.lock.json` remains authoritative for generated ownership, framework intent, install attempts, and replay.
+
 ### Phase 4: UI Configuration Editor
+
+**Status:** Complete — verified 2026-05-07.
 
 **Goal:** Evolve the setup UI into a configuration editor that writes valid `.aof/` configuration while leaving execution to the CLI.
 
@@ -98,6 +127,8 @@
 - Use the shared `.aof/` schema/model rather than creating a separate UI-only shape.
 
 ### Phase 5: Verification And Hardening
+
+**Status:** Complete — verified 2026-05-07.
 
 **Goal:** Add coverage and hardening for the new source-of-truth model, rendering behavior, runtime overrides, lock state, and UI config editing.
 

@@ -1,0 +1,167 @@
+import assert from "node:assert/strict";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { doctorConfig, inspectConfig, validateConfig } from "../src/config-inspect.mjs";
+
+export const configInspectTests = [
+  {
+    name: "inspects valid config with resources and packages",
+    run: inspectsValidConfig
+  },
+  {
+    name: "validates multiple semantic config errors",
+    run: validatesSemanticErrors
+  },
+  {
+    name: "doctor reports stale legacy config and package intent",
+    run: doctorReportsHealth
+  },
+  {
+    name: "reports malformed config JSON as structured diagnostic",
+    run: reportsMalformedConfigJson
+  },
+  {
+    name: "reports malformed runtime override JSON as structured diagnostic",
+    run: reportsMalformedOverrideJson
+  },
+  {
+    name: "tolerates extension fields while validating core fields",
+    run: toleratesExtensionFields
+  }
+];
+
+async function inspectsValidConfig() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    await writeProject(targetDir);
+    const report = await inspectConfig(targetDir);
+    assert.equal(report.name, "demo");
+    assert.equal(report.resources[0].id, "context");
+    assert.equal(report.packages[0].id, "gsd");
+    assert.deepEqual(report.diagnostics, []);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesSemanticErrors() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    await mkdir(path.join(targetDir, ".aof"), { recursive: true });
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      resources: [
+        { kind: "unknown", id: "bad", path: "missing.md", runtimes: ["other"], overrides: { other: {} } }
+      ],
+      packages: [
+        { id: "other", source: "git:example", runtimes: [] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.length >= 5);
+    assert.ok(diagnostics.some((item) => item.path === "resources[0].kind"));
+    assert.ok(diagnostics.some((item) => item.code === "missing-file"));
+    assert.ok(diagnostics.some((item) => item.path === "packages[0].id"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function doctorReportsHealth() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    await writeProject(targetDir);
+    await writeFile(path.join(targetDir, "aof.config.json"), "{}\n", "utf8");
+    const report = await doctorConfig(targetDir, { runtimes: ["codex"] });
+    assert.equal(report.legacyConfigIsStale, true);
+    assert.ok(report.checks.some((item) => item.id === "legacy-config" && item.severity === "warning"));
+    assert.ok(report.checks.some((item) => item.id === "package-intent" && item.severity === "info"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function reportsMalformedConfigJson() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    await mkdir(path.join(targetDir, ".aof"), { recursive: true });
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), "{ not json\n", "utf8");
+    const diagnostics = await validateConfig(targetDir);
+    assert.equal(diagnostics[0].path, "config");
+    assert.equal(diagnostics[0].code, "malformed-json");
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function reportsMalformedOverrideJson() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "skills", "context", "overrides"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "skills", "context", "SKILL.md"), "Body\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "skills", "context", "overrides", "codex.json"), "{ bad\n", "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        {
+          kind: "skill",
+          id: "context",
+          path: "assets/skills/context/SKILL.md",
+          overrides: { codex: "assets/skills/context/overrides/codex.json" }
+        }
+      ],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.path === "resources[0].overrides.codex" && item.code === "malformed-json"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function toleratesExtensionFields() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "skills", "context"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "skills", "context", "SKILL.md"), "Body\n", "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      "x-project": true,
+      resources: [
+        {
+          kind: "skill",
+          id: "context",
+          path: "assets/skills/context/SKILL.md",
+          "x-resource": { keep: true },
+          overrides: {
+            codex: { body: "Codex", "x-override": true }
+          }
+        }
+      ],
+      packages: [
+        { id: "gsd", source: "npm:get-shit-done-cc@latest", "x-package": true }
+      ]
+    }, null, 2)}\n`, "utf8");
+    assert.deepEqual(await validateConfig(targetDir), []);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function writeProject(targetDir) {
+  const workspaceDir = path.join(targetDir, ".aof");
+  await mkdir(path.join(workspaceDir, "assets", "skills", "context"), { recursive: true });
+  await writeFile(path.join(workspaceDir, "assets", "skills", "context", "SKILL.md"), "Body\n", "utf8");
+  await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+    name: "demo",
+    resources: [
+      { kind: "skill", id: "context", path: "assets/skills/context/SKILL.md", runtimes: ["codex"] }
+    ],
+    packages: [
+      { id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
+    ]
+  }, null, 2)}\n`, "utf8");
+}

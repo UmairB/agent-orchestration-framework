@@ -4,9 +4,21 @@ import { pathTests } from "../test/paths.test.mjs";
 import { promptTests } from "../test/prompt.test.mjs";
 import { modelTests } from "../test/model.test.mjs";
 import { workspaceTests } from "../test/workspace.test.mjs";
+import { renderPlanTests } from "../test/render-plan.test.mjs";
+import { configInspectTests } from "../test/config-inspect.test.mjs";
+import { configEditorTests } from "../test/config-editor.test.mjs";
+import { frameworkTests } from "../test/frameworks.test.mjs";
+import { setupUiTests } from "../test/setup-ui.test.mjs";
+import { schemaTests } from "../test/schema.test.mjs";
 
 const tests = [
   ...adapterTests,
+  ...renderPlanTests,
+  ...configInspectTests,
+  ...configEditorTests,
+  ...frameworkTests,
+  ...setupUiTests,
+  ...schemaTests,
   ...modelTests,
   ...workspaceTests,
   ...pathTests,

@@ -1,0 +1,10 @@
+node_modules/
+coverage/
+.claude/
+.codex/
+.aof-test/
+.aof/
+*.sqlite
+*.sqlite-journal
+.DS_Store
+*.log

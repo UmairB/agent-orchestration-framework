@@ -14,6 +14,9 @@ The initial target is local CLI usage:
 npm link
 aof init
 aof migrate
+aof config show
+aof config validate
+aof config doctor
 aof catalog init
 aof install --select
 ```
@@ -23,6 +26,12 @@ Dry-run the generated files:
 ```sh
 aof apply --dry-run
 ```
+
+`aof apply --dry-run` prints the same action plan that a real apply would use
+without writing runtime files, deleting stale files, or updating
+`.aof/aof.lock.json`. Each action includes the runtime, source asset, and reason
+so automation can distinguish creates, updates, deletes, skips, and drift
+warnings.
 
 Initialize and inspect the global catalog database:
 
@@ -72,13 +81,81 @@ Preview the GSD installer commands without running networked installs:
 aof install gsd --dry-run
 ```
 
+When `.aof/aof.config.json` declares a managed `gsd` package, `aof install
+gsd` uses that package source and runtime list by default. Runtime and scope
+flags such as `--claude`, `--codex`, and `--global` override that intent for
+one run. Dry-run output prints the exact `npx get-shit-done-cc@...` commands
+and does not write lock state or run npm.
+
+Real GSD installs print a network boundary before each runtime command. The
+boundary includes the command, package source, runtime, scope, and a warning
+that npm package code may run. Each runtime attempt is recorded in
+`.aof/aof.lock.json`, including successes and failures. Successful matching
+attempts are skipped on later runs unless `--force` is supplied.
+
+Replay managed framework intent from lock state:
+
+```sh
+aof install --from-lock --dry-run
+aof install --from-lock
+```
+
+Inspect `.aof/` configuration for automation:
+
+```sh
+aof config show
+aof config show --json
+aof config validate
+aof config validate --json
+aof config doctor
+aof config doctor --json
+```
+
+`config validate` checks JSON shape, resource kinds, runtimes, file-backed
+asset paths, runtime override identity, package ids, package sources, and
+package runtime support. `config doctor` adds project health checks such as
+stale root config detection, generated-output drift summary, missing assets,
+managed package intent, and suggested next commands.
+
+Use the guided terminal install flow:
+
+```sh
+aof install --interactive
+```
+
+The guided flow asks for catalog items and runtimes, shows proposed config,
+render, and framework plans, then asks separately before writing `.aof/`,
+writing runtime files, or running GSD installer commands.
+
+Start the local setup UI:
+
+```sh
+aof install
+```
+
+The setup UI is a `.aof/` configuration editor. It edits file-backed skills,
+commands, agents, and rules; runtime targets; and runtime-specific overrides.
+It shows runtime capability differences before apply, including mapped behavior
+such as Codex rule guidance rendering through `AGENTS.md`.
+
+The UI writes source-of-truth files under `.aof/` only. It does not run
+`aof init`, `aof apply`, dry-run, `aof install`, or shell commands. Use the
+Review tab for validation, capability summaries, package intent, and the next
+CLI commands to run in a terminal.
+
+The setup UI binds to `127.0.0.1` and is intended for local repository editing.
+Its API still treats request bodies and static paths as untrusted input:
+malformed JSON, invalid asset routes, oversized bodies, unsupported catalog
+items, and static path traversal attempts are rejected with structured JSON
+errors.
+
 ## DSL
 
 The project keeps reproducibility metadata locally:
 
 ```txt
 .aof/aof.config.json  # desired project defaults and asset metadata
-.aof/aof.lock.json    # generated install/migration record
+.aof/aof.lock.json    # generated output manifest and install intent
 .aof/assets/          # source asset bodies and runtime overrides
 ```
 
@@ -89,6 +166,9 @@ aof migrate
 ```
 
 Migration leaves the root `aof.config.json` untouched and writes the new workspace files under `.aof/`.
+Editor saves also write `.aof/aof.config.json`; they do not silently mutate a
+legacy root config. `aof config doctor` reports a warning when both files exist
+so stale root config is visible.
 
 Catalog items currently support four portable resource kinds:
 
@@ -145,7 +225,11 @@ Rules render differently per runtime:
 - Codex: `AGENTS.md` or nested `AGENTS.md` for natural-language guidance.
 - Codex `.codex/rules/*.rules` files are execution-policy rules, not natural-language guidance. AOF treats them as a separate future asset type.
 
-Generated assistant folders such as `.claude/` and `.codex/` are install output, not source of truth for this project. They are ignored by git here; the catalog database and project config define what should be installed.
+Generated assistant folders such as `.claude/` and `.codex/` are output, not source of truth for this project. AOF writes small generated markers into Markdown output where the format allows it, but `.aof/aof.lock.json` is authoritative for ownership. The lock manifest records generated file paths, target runtimes, source asset ids and kinds, content hashes, managed framework intent, and framework install attempts.
+
+When `aof apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. Re-run with `aof apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
+
+Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof apply`. `aof apply` does not run framework installers; use commands such as `aof install gsd` for installer execution.
 
 ## Tests
 
@@ -177,4 +261,32 @@ Run everything through the main test entrypoint:
 
 ```sh
 node ./scripts/test.mjs
+```
+
+Run the focused real process-boundary smoke test:
+
+```sh
+npm run test:smoke:cli
+```
+
+Build the setup UI through the cross-platform wrapper:
+
+```sh
+npm run ui:build
+```
+
+The wrapper runs TypeScript and Vite through Node entry points from the UI
+workspace, avoiding platform-specific npm shell shims. For troubleshooting, the
+direct equivalent commands are:
+
+```powershell
+cd ui
+node ..\node_modules\typescript\bin\tsc -b
+node ..\node_modules\vite\bin\vite.js build
+```
+
+Run the full closeout check:
+
+```sh
+npm run check
 ```

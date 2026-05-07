@@ -2,12 +2,15 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { loadConfig } from "./dsl.mjs";
 import { applyConfig, supportedRuntimes } from "./adapters.mjs";
-import { installFramework, installFrameworkItems, knownFrameworks } from "./frameworks.mjs";
+import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, installFrameworkItems, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
+import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
+import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
 import { readJson, writeText } from "./fs.mjs";
-import { RESOURCE_KINDS, defaultBodyFile } from "./model.mjs";
+import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { defaultDbPath } from "./paths.mjs";
-import { selectItems, selectRuntimes } from "./prompt.mjs";
+import { confirmAction, selectItems, selectRuntimes } from "./prompt.mjs";
 import { findProjectConfig, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { doctorConfig, inspectConfig, validateConfig } from "./config-inspect.mjs";
 
 const DEFAULT_CONFIG = `{
   "$schema": "./schemas/aof.schema.json",
@@ -74,6 +77,11 @@ export async function run(argv) {
 
   if (command === "catalog") {
     await catalogCommand(rest);
+    return;
+  }
+
+  if (command === "config") {
+    await configCommand(rest);
     return;
   }
 
@@ -144,17 +152,42 @@ async function applyCommand(args) {
   const options = parseOptions(args);
   const targetDir = path.resolve(options.target ?? process.cwd());
   const configPath = await findProjectConfig(targetDir, options.config);
+  const paths = workspacePaths(targetDir);
   const config = await loadConfig(configPath);
-  const writes = await applyConfig(config, {
+  const runtimes = parseRuntimes(options);
+  const desiredOutputs = await createRenderPlan(config, {
     targetDir,
-    runtimes: parseRuntimes(options),
-    global: Boolean(options.global),
-    dryRun: Boolean(options.dryRun)
+    runtimes,
+    global: Boolean(options.global)
+  });
+  const previousLock = await readLock(paths.lockPath);
+  const actions = await planApplyActions(desiredOutputs, previousLock, {
+    targetDir,
+    force: Boolean(options.force)
   });
 
-  for (const write of writes) {
-    console.log(`${write.action}: ${write.path}`);
+  for (const item of actions) {
+    console.log(formatApplyAction(item));
   }
+
+  const manifest = createLockManifest({
+    actions,
+    desiredOutputs,
+    previousLock,
+    config,
+    runtimes,
+    global: Boolean(options.global)
+  });
+
+  if (options.dryRun) {
+    const summary = summarizeLockManifest(manifest);
+    console.log(`lock-preview: ${summary.files} file(s), ${summary.frameworks} framework intent(s)`);
+    return;
+  }
+
+  await executeApplyActions(actions);
+  await writeLock(paths.lockPath, manifest);
+  console.log(`lock: ${paths.lockPath}`);
 }
 
 async function migrateCommand(args) {
@@ -205,16 +238,18 @@ async function installCommand(args) {
   const options = parseOptions(args);
   const framework = options._[0];
 
-  if (framework && !framework.startsWith("--")) {
-    const commands = installFramework(framework, {
-      runtimes: parseRuntimes(options),
-      global: Boolean(options.global),
-      dryRun: Boolean(options.dryRun)
-    });
+  if (options.fromLock) {
+    await installFromLockCommand(options);
+    return;
+  }
 
-    for (const command of commands) {
-      console.log(command);
-    }
+  if (options.interactive && !framework) {
+    await interactiveInstallCommand(options);
+    return;
+  }
+
+  if (framework && !framework.startsWith("--")) {
+    await frameworkInstallCommand(framework, options);
     return;
   }
 
@@ -233,6 +268,222 @@ async function installCommand(args) {
     await new Promise(() => {});
   } finally {
     if (options.noServe || options.dryRun) catalog.close();
+  }
+}
+
+async function configCommand(args) {
+  const [subcommand = "show", ...rest] = args;
+  const options = parseOptions(rest);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+
+  if (subcommand === "show") {
+    const inspection = await inspectConfig(targetDir, options);
+    if (options.json) {
+      printJson(inspection);
+      return;
+    }
+    console.log(`config: ${inspection.configPath}`);
+    console.log(`name: ${inspection.name ?? "(unresolved)"}`);
+    console.log(`resources: ${inspection.resources.length}`);
+    for (const resource of inspection.resources) {
+      console.log(`- ${resource.kind}:${resource.id} runtimes=${resource.runtimes.join(",")}`);
+    }
+    console.log(`packages: ${inspection.packages.length}`);
+    for (const pkg of inspection.packages) {
+      console.log(`- ${pkg.id} source=${pkg.source} runtimes=${(pkg.runtimes ?? []).join(",")}`);
+    }
+    if (inspection.legacyConfigIsStale) console.log(`warning: root aof.config.json is legacy; ${inspection.configPath} is authoritative`);
+    return;
+  }
+
+  if (subcommand === "validate") {
+    const diagnostics = await validateConfig(targetDir, options);
+    const errors = diagnostics.filter((item) => item.severity === "error");
+    if (options.json) {
+      printJson({ valid: errors.length === 0, diagnostics });
+    } else if (errors.length === 0) {
+      console.log("valid: config passed validation");
+    } else {
+      console.log(`invalid: ${errors.length} error(s)`);
+      for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
+    }
+    if (errors.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (subcommand === "doctor") {
+    const report = await doctorConfig(targetDir, {
+      ...options,
+      runtimes: parseRuntimes(options)
+    });
+    const errors = report.checks.filter((item) => item.severity === "error");
+    if (options.json) {
+      printJson({ healthy: errors.length === 0, ...report });
+    } else {
+      console.log(`doctor: ${errors.length === 0 ? "healthy" : "issues found"}`);
+      for (const check of report.checks) {
+        console.log(`${check.severity}: ${check.id} - ${check.message}`);
+      }
+      for (const suggestion of report.suggestions) {
+        console.log(`next: ${suggestion}`);
+      }
+    }
+    if (errors.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  throw new Error(`Unknown config command "${subcommand}".`);
+}
+
+async function frameworkInstallCommand(framework, options) {
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const paths = workspacePaths(targetDir);
+  let config = null;
+  try {
+    config = await loadConfig(await findProjectConfig(targetDir, options.config));
+  } catch (error) {
+    if (options.config) throw error;
+  }
+  const pkg = framework === "gsd" ? gsdPackageFromConfig(config) : null;
+  const previousLock = await readLock(paths.lockPath);
+  const source = options.package ?? options.source ?? pkg?.source;
+  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : (pkg?.runtimes ?? parseRuntimes(options));
+  const plan = planFrameworkInstall(framework, {
+    source,
+    runtimes,
+    global: Boolean(options.global),
+    force: Boolean(options.force),
+    previousLock
+  });
+
+  if (options.dryRun) {
+    if (options.json) {
+      printJson({ dryRun: true, network: false, commands: plan });
+      return;
+    }
+    console.log("dry-run: no network or installer commands will run");
+    for (const item of plan) console.log(item.skipped ? `skip: ${item.command} reason=${item.skipReason}` : item.command);
+    return;
+  }
+
+  for (const item of plan) {
+    if (item.skipped) {
+      console.log(`skip: ${item.runtime} ${item.skipReason}`);
+      continue;
+    }
+    console.log(`network-boundary: running ${item.command}`);
+    console.log(`package: ${item.packageSource} runtime=${item.runtime} scope=${item.scope}`);
+    console.log("warning: this command may access the network and execute npm package code");
+  }
+
+  const attempts = executeFrameworkInstallPlan(plan);
+  await writeLock(paths.lockPath, mergeFrameworkInstallAttempts(previousLock, attempts));
+  for (const attempt of attempts) {
+    console.log(`attempt: ${attempt.runtime} status=${attempt.status} exit=${attempt.exitStatus}`);
+  }
+  const failed = attempts.filter((attempt) => attempt.status === "failed");
+  if (failed.length > 0) {
+    for (const attempt of failed) console.log(`retry: ${attempt.command}`);
+    throw new Error(`Framework install failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
+  }
+}
+
+async function installFromLockCommand(options) {
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const paths = workspacePaths(targetDir);
+  const previousLock = await readLock(paths.lockPath);
+  if (!previousLock) throw new Error(`No lock file found at ${paths.lockPath}.`);
+  const plan = frameworkPlanFromLock(previousLock, { previousLock });
+  if (plan.length === 0) throw new Error("No framework intent found in lock state.");
+
+  if (options.dryRun) {
+    if (options.json) {
+      printJson({ dryRun: true, fromLock: true, network: false, commands: plan });
+      return;
+    }
+    console.log("dry-run: no network or installer commands will run");
+    for (const item of plan) console.log(item.command);
+    return;
+  }
+
+  for (const item of plan) {
+    console.log(`network-boundary: replaying ${item.command}`);
+    console.log(`package: ${item.packageSource} runtime=${item.runtime} scope=${item.scope}`);
+    console.log("warning: this command may access the network and execute npm package code");
+  }
+  const attempts = executeFrameworkInstallPlan(plan);
+  await writeLock(paths.lockPath, mergeFrameworkInstallAttempts(previousLock, attempts));
+  const failed = attempts.filter((attempt) => attempt.status === "failed");
+  if (failed.length > 0) throw new Error(`Framework replay failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
+}
+
+async function interactiveInstallCommand(options) {
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const { itemsToConfig, openCatalog } = await import("./catalog.mjs");
+  const catalog = await openCatalog({ db: options.db });
+  try {
+    catalog.seedBuiltins();
+    const selectedItems = await resolveInstallItems(catalog, { ...options, select: true });
+    const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : await selectRuntimes();
+    const selectedConfig = {
+      ...itemsToConfig(selectedItems),
+      $schema: "../schemas/aof.schema.json",
+      name: path.basename(targetDir),
+      items: selectedItems.map((item) => item.id),
+      runtimes
+    };
+    const existingInspection = await inspectConfig(targetDir).catch(() => null);
+    const configExists = existingInspection?.workspaceConfigExists;
+    const config = configExists ? mergeInteractiveConfig(await loadConfig(existingInspection.configPath), selectedConfig, runtimes) : selectedConfig;
+    const frameworkItems = selectedItems.filter((item) => item.kind === "framework");
+    const desiredOutputs = await createRenderPlan(await import("./dsl.mjs").then(({ resolveConfig }) => resolveConfig(config, targetDir)), {
+      targetDir,
+      runtimes,
+      global: Boolean(options.global)
+    });
+    const previousLock = await readLock(workspacePaths(targetDir).lockPath);
+    const renderActions = await planApplyActions(desiredOutputs, previousLock, { targetDir, force: Boolean(options.force) });
+    const frameworkPlan = frameworkItems.flatMap((item) => planFrameworkInstall(item.id, {
+      source: item.source,
+      runtimes: runtimes.filter((runtime) => item.runtimes.includes(runtime)),
+      global: Boolean(options.global),
+      previousLock,
+      force: Boolean(options.force)
+    }));
+
+    console.log(configExists ? "interactive: existing .aof config found; proposed changes follow" : "interactive: proposed .aof config follows");
+    console.log(`resources: ${config.resources.length}`);
+    console.log(`packages: ${config.packages.length}`);
+    for (const action of renderActions) console.log(formatApplyAction(action));
+    for (const item of frameworkPlan) console.log(`framework: ${item.command}`);
+
+    if (await confirmAction("Write .aof config?", false)) {
+      await writeWorkspaceConfig(targetDir, config);
+      console.log(`config: ${workspacePaths(targetDir).configPath}`);
+    } else {
+      console.log("skip: .aof config not written");
+    }
+
+    if (await confirmAction("Write runtime files?", false)) {
+      await executeApplyActions(renderActions);
+      const manifest = createLockManifest({ actions: renderActions, desiredOutputs, previousLock, config, runtimes, global: Boolean(options.global) });
+      await writeLock(workspacePaths(targetDir).lockPath, manifest);
+      console.log(`lock: ${workspacePaths(targetDir).lockPath}`);
+    } else {
+      console.log("skip: runtime files not written");
+    }
+
+    if (frameworkPlan.length > 0 && await confirmAction("Run GSD installer commands?", false)) {
+      const latestLock = await readLock(workspacePaths(targetDir).lockPath);
+      const attempts = executeFrameworkInstallPlan(frameworkPlan);
+      await writeLock(workspacePaths(targetDir).lockPath, mergeFrameworkInstallAttempts(latestLock, attempts));
+      const failed = attempts.filter((attempt) => attempt.status === "failed");
+      if (failed.length > 0) throw new Error(`Framework install failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
+    } else if (frameworkPlan.length > 0) {
+      console.log("skip: GSD installer not run");
+    }
+  } finally {
+    catalog.close();
   }
 }
 
@@ -313,39 +564,6 @@ async function writeInstallLock(targetDir, items, runtimes, dbPath) {
   await writeText(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
 }
 
-async function writeWorkspaceConfig(targetDir, config) {
-  const paths = workspacePaths(targetDir);
-  const resources = [];
-
-  for (const resource of config.resources ?? []) {
-    const resourcePath = assetBodyPath(resource);
-    const content = resource.body ?? resource.prompt ?? resource.instructions ?? "";
-    await writeText(path.join(paths.workspaceDir, resourcePath), `${content.trim()}\n`);
-
-    const metadata = { ...resource, path: resourcePath.replaceAll(path.sep, "/") };
-    delete metadata.body;
-    delete metadata.prompt;
-    delete metadata.instructions;
-    delete metadata.overrides;
-    resources.push(metadata);
-  }
-
-  await writeText(paths.configPath, `${JSON.stringify({
-    $schema: config.$schema ?? "../schemas/aof.schema.json",
-    name: config.name ?? "assistant-project",
-    resources,
-    packages: config.packages ?? [],
-    ...(config.items ? { items: config.items } : {}),
-    ...(config.runtimes ? { runtimes: config.runtimes } : {})
-  }, null, 2)}\n`);
-}
-
-function assetBodyPath(resource) {
-  const kind = RESOURCE_KINDS[resource.kind];
-  if (!kind) throw new Error(`Invalid resource kind "${resource.kind}".`);
-  return path.join("assets", kind.plural, resource.id, defaultBodyFile(resource.kind));
-}
-
 function parseOptions(args) {
   const options = { _: [] };
 
@@ -359,7 +577,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -368,6 +586,35 @@ function parseOptions(args) {
   }
 
   return options;
+}
+
+function mergeInteractiveConfig(existingConfig, selectedConfig, runtimes) {
+  const resources = [...existingConfig.resources];
+  for (const resource of selectedConfig.resources) {
+    if (!resources.some((item) => item.kind === resource.kind && item.id === resource.id)) {
+      resources.push({ ...resource, runtimes });
+    }
+  }
+
+  const packages = [...(existingConfig.packages ?? [])];
+  for (const pkg of selectedConfig.packages ?? []) {
+    if (!packages.some((item) => item.id === pkg.id)) {
+      packages.push({ ...pkg, runtimes: pkg.runtimes.filter((runtime) => runtimes.includes(runtime)) });
+    }
+  }
+
+  return {
+    $schema: "../schemas/aof.schema.json",
+    name: existingConfig.name ?? selectedConfig.name,
+    resources,
+    packages,
+    items: selectedConfig.items,
+    runtimes
+  };
+}
+
+function printJson(value) {
+  console.log(JSON.stringify(value, null, 2));
 }
 
 function parseRuntimes(options) {
@@ -387,6 +634,16 @@ function hasRuntimeOptions(options) {
   return Boolean(options.claude || options.codex || options.runtime);
 }
 
+function formatApplyAction(item) {
+  const parts = [
+    `${item.action}: ${item.path}`,
+    item.runtime ? `runtime=${item.runtime}` : null,
+    item.resource ? `source=${item.resource.kind}:${item.resource.id}` : null,
+    item.reason ? `reason=${item.reason}` : null
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
 async function exists(filePath) {
   try {
     await access(filePath);
@@ -403,9 +660,12 @@ Usage:
   aof install [--no-serve] [--db path] [--port 4177]
   aof init [dir] [--items id,id] [--defaults] [--claude] [--codex] [--force] [--db path]
   aof migrate [dir] [--force] [--dry-run]
-  aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run]
+  aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force]
+  aof config show|validate|doctor [--json]
   aof catalog init|list|path [--db path]
-  aof install gsd [--claude] [--codex] [--global] [--dry-run]
+  aof install gsd [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
+  aof install --interactive
+  aof install --from-lock [--dry-run]
 
 Defaults:
   install initializes the AOF catalog at ${defaultDbPath()} and starts the setup UI.

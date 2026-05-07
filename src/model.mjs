@@ -104,7 +104,7 @@ export function mergeRuntimeOverride(resource, runtime) {
     }
   }
 
-  return {
+  const merged = {
     ...resource,
     ...override,
     id: resource.id,
@@ -112,4 +112,10 @@ export function mergeRuntimeOverride(resource, runtime) {
     runtimes: resource.runtimes,
     overrides: resource.overrides
   };
+
+  if (Object.hasOwn(override, "body") || Object.hasOwn(override, "prompt") || Object.hasOwn(override, "instructions")) {
+    merged.body = override.body ?? override.prompt ?? override.instructions ?? "";
+  }
+
+  return merged;
 }

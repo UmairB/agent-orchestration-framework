@@ -73,8 +73,20 @@ Feature: AOF CLI
     Given a project with .aof file-backed config
     When I run `apply --codex`
     Then the command should succeed
+    And stdout should contain `create:`
     And file `.codex/skills/file-backed/SKILL.md` should exist
     And file `.codex/skills/file-backed/SKILL.md` should contain `File-backed body`
+    And file `.aof/aof.lock.json` should exist
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/file-backed/SKILL.md`
+
+  Scenario: Preview apply without writing runtime files or lock state
+    Given a project with .aof file-backed config
+    When I run `apply --codex --dry-run`
+    Then the command should succeed
+    And stdout should contain `create:`
+    And stdout should contain `lock-preview:`
+    And file `.codex/skills/file-backed/SKILL.md` should not exist
+    And file `.aof/aof.lock.json` should not exist
 
   Scenario: Apply runtime override for a file-backed asset
     Given a project with .aof runtime override config
@@ -98,6 +110,107 @@ Feature: AOF CLI
     And file `.codex/src/AGENTS.md` should exist
     And file `.codex/src/AGENTS.md` should contain `Use scoped guidance`
     And file `.codex/rules/project-rule.rules` should not exist
+
+  Scenario: Merge multiple Codex rules into one AGENTS file
+    Given a project with .aof multiple codex rules config
+    When I run `apply --codex`
+    Then the command should succeed
+    And file `.codex/AGENTS.md` should exist
+    And file `.codex/AGENTS.md` should contain `## alpha`
+    And file `.codex/AGENTS.md` should contain `## zeta`
+    And text `## alpha` should appear before `## zeta` in file `.codex/AGENTS.md`
+
+  Scenario: Protect drifted generated files unless forced
+    Given a project with .aof file-backed config
+    When I run `apply --codex`
+    Then the command should succeed
+    When I replace file `.codex/skills/file-backed/SKILL.md` with `Manual edit`
+    And I run `apply --codex`
+    Then the command should succeed
+    And stdout should contain `drift-warning`
+    And file `.codex/skills/file-backed/SKILL.md` should contain `Manual edit`
+    When I run `apply --codex --force`
+    Then the command should succeed
+    And file `.codex/skills/file-backed/SKILL.md` should contain `File-backed body`
+
+  Scenario: Prune stale owned generated files
+    Given a project with .aof file-backed config
+    When I run `apply --codex`
+    Then the command should succeed
+    When the .aof config has no resources
+    And I run `apply --codex`
+    Then the command should succeed
+    And stdout should contain `delete:`
+    And file `.codex/skills/file-backed/SKILL.md` should not exist
+
+  Scenario: Record managed framework intent in apply lock state
+    Given a project with .aof package config
+    When I run `apply --codex`
+    Then the command should succeed
+    And file `.aof/aof.lock.json` should exist
+    And JSON file `.aof/aof.lock.json` should contain framework `gsd`
+    And stdout should not contain `npx get-shit-done-cc`
+
+  Scenario: Show config inspection in human and JSON formats
+    Given a project with .aof package config
+    When I run `config show`
+    Then the command should succeed
+    And stdout should contain `config:`
+    And stdout should contain `skill:file-backed`
+    And stdout should contain `packages: 1`
+    When I run `config show --json`
+    Then the command should succeed
+    And stdout should contain `"packages"`
+    And stdout should contain `"gsd"`
+
+  Scenario: Validate invalid config for automation
+    Given a project with invalid .aof config
+    When I run `config validate --json`
+    Then the command should fail
+    And stdout should contain `"valid": false`
+    And stdout should contain `Unsupported runtime`
+
+  Scenario: Doctor reports package intent and stale legacy config
+    Given a project with .aof package config and stale legacy config
+    When I run `config doctor`
+    Then the command should succeed
+    And stdout should contain `package-intent`
+    And stdout should contain `legacy-config`
+    And stdout should contain `aof install gsd --dry-run`
+
+  Scenario: Preview config-declared GSD installer commands
+    Given a project with .aof package config
+    When I run `install gsd --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: no network`
+    And stdout should contain `npx get-shit-done-cc@latest --codex --local`
+    And file `.aof/aof.lock.json` should not exist
+
+  Scenario: Record successful GSD install attempts without real npm in tests
+    Given a project with .aof package config
+    When I run `install gsd` with framework statuses `codex=0`
+    Then the command should succeed
+    And file `.aof/aof.lock.json` should exist
+    And JSON file `.aof/aof.lock.json` should contain framework install attempt `codex` with status `success`
+    When I run `install gsd --dry-run`
+    Then the command should succeed
+    And stdout should contain `skip:`
+
+  Scenario: Record partial GSD install failure and retry commands
+    Given a project with multi-runtime .aof package config
+    When I run `install gsd` with framework statuses `claude=0,codex=1`
+    Then the command should fail
+    And stdout should contain `retry: npx get-shit-done-cc@latest --codex --local`
+    And JSON file `.aof/aof.lock.json` should contain framework install attempt `claude` with status `success`
+    And JSON file `.aof/aof.lock.json` should contain framework install attempt `codex` with status `failed`
+
+  Scenario: Preview framework install replay from lock
+    Given a project with .aof package config
+    When I run `apply --codex`
+    Then the command should succeed
+    When I run `install --from-lock --dry-run`
+    Then the command should succeed
+    And stdout should contain `npx get-shit-done-cc@latest --codex --local`
 
   Scenario: List the catalog database
     Given an empty project
@@ -152,3 +265,12 @@ Feature: AOF CLI
     And file `.codex/skills/project-context/SKILL.md` should exist
     And file `.codex/agents/code-reviewer.md` should exist
     And file `.codex/commands/prime.md` should not exist
+
+  Scenario: Guided interactive install asks before side effects
+    Given an empty project
+    When I run `install --interactive` with input `project-context,gsd|codex|yes|no|no`
+    Then the command should succeed
+    And stdout should contain `interactive: proposed .aof config follows`
+    And file `.aof/aof.config.json` should exist
+    And file `.codex/skills/project-context/SKILL.md` should not exist
+    And file `.aof/aof.lock.json` should not exist

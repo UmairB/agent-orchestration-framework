@@ -1,0 +1,34 @@
+{
+  "name": "aof",
+  "version": "0.1.0",
+  "description": "Portable assistant ops framework for installing skills, commands, agents, and framework packs across coding assistants.",
+  "type": "module",
+  "bin": {
+    "aof": "./bin/aof.mjs"
+  },
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "test": "node ./scripts/test.mjs",
+    "test:unit": "node ./scripts/test-unit.mjs",
+    "test:integration": "node ./test/integration/cli.mjs",
+    "test:integration:ps": "powershell -ExecutionPolicy Bypass -File ./test/integration/cli.ps1",
+    "test:smoke:cli": "node ./test/integration/cli-child-process.test.mjs",
+    "test:all": "node ./scripts/test.mjs",
+    "ui:dev": "npm --workspace @aof/ui run dev",
+    "ui:build": "node ./scripts/ui-build.mjs",
+    "check": "node ./scripts/check.mjs"
+  },
+  "keywords": [
+    "codex",
+    "claude",
+    "cli",
+    "agents",
+    "skills"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

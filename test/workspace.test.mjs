@@ -32,6 +32,19 @@ export const workspaceTests = [
     }
   },
   {
+    name: "config discovery reads legacy root when .aof config is absent",
+    async run() {
+      const projectDir = await mkdtemp(path.join(os.tmpdir(), "aof-workspace-"));
+      try {
+        const legacyPath = legacyConfigPath(projectDir);
+        await writeFile(legacyPath, "{}", "utf8");
+        assert.equal(await findProjectConfig(projectDir), legacyPath);
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    }
+  },
+  {
     name: "explicit config path overrides discovered config",
     async run() {
       const projectDir = await mkdtemp(path.join(os.tmpdir(), "aof-workspace-"));

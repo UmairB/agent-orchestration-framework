@@ -4,7 +4,7 @@
 
 AOF is a repo-local abstraction layer for coding assistant setup. It lets users define assistant-facing assets once, in an `.aof/` workspace, then initialize and synchronize concrete assistant runtimes such as Claude Code and Codex.
 
-The current codebase already provides a Node.js CLI, a SQLite-backed catalog, Claude/Codex render adapters, a small setup UI, and GSD installer delegation. The project direction is to make `.aof/` the durable source of truth for configuration, assets, runtime overrides, and install state, while generated `.claude/` and `.codex/` folders are treated as output.
+The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Codex render adapters, a setup UI configuration editor, and GSD installer delegation. `.aof/` is the durable source of truth for configuration, assets, runtime overrides, and install state, while generated `.claude/` and `.codex/` folders are treated as output.
 
 ## Core Value
 
@@ -24,16 +24,18 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ AOF creates and owns repo-local `.aof/` workspace files for config, source assets, runtime overrides, and lock state — Phase 1
 - ✓ Existing root `aof.config.json` can be explicitly migrated into `.aof/` with `aof migrate` — Phase 1
 - ✓ Skills, commands, agents, and shared rules/instructions can be represented in the `.aof/` model with runtime targets and overrides — Phase 1
+- ✓ AOF treats `.claude/`, `.codex/`, and future assistant folders as generated output from `.aof/` — Phase 2
+- ✓ Runtime support is explicit in rendering behavior: Claude Code and Codex are the concrete v1 targets — Phase 2
+- ✓ Lock state records what was installed or generated so changes are reproducible and auditable — Phase 2
+- ✓ AOF manages GSD as a first-class framework package for Claude Code and Codex installs — Phase 3
+- ✓ CLI supports automation-friendly commands and an interactive install-oriented workflow — Phase 3
+- ✓ Setup UI acts as a configuration editor for valid `.aof/` config, including runtime targets, runtime capability visibility, and runtime-specific overrides — Phase 4
+- ✓ Setup UI does not execute init/apply/install actions in v1; the CLI remains responsible for execution — Phase 4
+- ✓ v1 milestone behavior is covered by unit tests, BDD integration tests, child-process smoke, setup UI API tests, and UI build checks — Phase 5
 
 ### Active
 
-- [ ] AOF treats `.claude/`, `.codex/`, and future assistant folders as generated output from `.aof/`.
-- [ ] Runtime support is explicit in rendering behavior: Claude Code and Codex are the concrete v1 targets.
-- [ ] AOF manages GSD as a first-class framework package for Claude Code and Codex installs.
-- [ ] CLI supports both automation-friendly commands and an interactive install-oriented workflow.
-- [ ] Setup UI acts as a configuration editor for valid `.aof/` config, including runtime targets, runtime capability visibility, and runtime-specific overrides.
-- [ ] Setup UI does not execute init/apply/install actions in v1; the CLI remains responsible for execution.
-- [ ] Lock state records what was installed or generated so changes are reproducible and auditable.
+- [ ] Define the next milestone scope.
 
 ### Out of Scope
 
@@ -55,13 +57,13 @@ The existing architecture is modular:
 - `src/dsl.mjs` loads and normalizes AOF config.
 - `src/frameworks.mjs` delegates framework installs, currently including GSD.
 - `src/setup-ui.mjs` serves a local setup UI and catalog API.
-- `ui/src/main.tsx` provides the current browser-based catalog editor surface.
+- `ui/src/main.tsx` provides the browser-based `.aof/` configuration editor surface.
 
 The codebase map in `.planning/codebase/` identifies several important design pressures:
 
 - Runtime and resource-kind definitions are currently duplicated across modules.
 - The current root `aof.config.json` model and desired `.aof/` workspace model need reconciliation.
-- The setup UI only supports creating skills and agents today; it must evolve into a real config editor.
+- The setup UI now supports editing `.aof/` skills, commands, agents, rules, runtime targets, capability visibility, and runtime-specific overrides.
 - Framework installation is present but should become a managed part of `.aof/` state.
 - Rules/instructions require runtime-aware modeling because support is not symmetric across assistants.
 
@@ -81,11 +83,13 @@ The long-term product direction includes task management: kanban boards, task as
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | `.aof/` is the repo-local source of truth | Users need one durable place for config, assets, overrides, and lock state | Implemented in Phase 1 |
-| `.claude/` and `.codex/` are generated output | Avoids hand-maintained runtime drift | — Pending |
-| v1 targets Claude Code and Codex | These are the immediate assistant runtimes to support concretely | Model implemented in Phase 1; rendering expands in Phase 2 |
+| `.claude/` and `.codex/` are generated output | Avoids hand-maintained runtime drift | Implemented in Phase 2 |
+| v1 targets Claude Code and Codex | These are the immediate assistant runtimes to support concretely | Model implemented in Phase 1; rendering expanded in Phase 2 |
 | v1 includes core assets plus GSD framework management | Skills, commands, agents, rules/instructions, and GSD are the core value slice | Core asset model implemented in Phase 1 |
-| UI v1 is a configuration editor only | Keeps execution in the CLI while making config creation easier | — Pending |
-| Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | Implemented in Phase 1 |
+| Automation-friendly and guided CLI flows are first-class | Users need predictable script output and a safe terminal path for setup | Implemented in Phase 3 |
+| UI v1 is a configuration editor only | Keeps execution in the CLI while making config creation easier | Implemented in Phase 4 |
+| Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | Implemented in Phase 1; render behavior verified in Phase 2 |
+| v1 closeout uses explicit verification hardening | Milestone confidence depends on regression coverage across CLI, UI API, rendering, lock, and build paths | Implemented in Phase 5 |
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
 
 ## Evolution
@@ -106,4 +110,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-06 after Phase 1 verification*
+*Last updated: 2026-05-07 after Phase 5 verification*

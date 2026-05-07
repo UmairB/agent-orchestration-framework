@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -156,15 +156,112 @@ async function runStep(context, step) {
     return;
   }
 
+  if (step === "a project with .aof multiple codex rules config") {
+    await runStep(context, "an empty project");
+    await writeAofProject(context, [
+      {
+        kind: "rule",
+        id: "zeta",
+        description: "Zeta",
+        path: "assets/rules/zeta/RULE.md",
+        bodyPath: "assets/rules/zeta/RULE.md",
+        body: "Zeta guidance"
+      },
+      {
+        kind: "rule",
+        id: "alpha",
+        description: "Alpha",
+        path: "assets/rules/alpha/RULE.md",
+        bodyPath: "assets/rules/alpha/RULE.md",
+        body: "Alpha guidance"
+      }
+    ]);
+    return;
+  }
+
+  if (step === "a project with .aof package config") {
+    await runStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "skill",
+      id: "file-backed",
+      description: "File backed",
+      path: "assets/skills/file-backed/SKILL.md",
+      bodyPath: "assets/skills/file-backed/SKILL.md",
+      body: "File-backed body"
+    }], {
+      packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
+    });
+    return;
+  }
+
+  if (step === "a project with multi-runtime .aof package config") {
+    await runStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "skill",
+      id: "file-backed",
+      description: "File backed",
+      path: "assets/skills/file-backed/SKILL.md",
+      bodyPath: "assets/skills/file-backed/SKILL.md",
+      body: "File-backed body"
+    }], {
+      packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["claude", "codex"] }]
+    });
+    return;
+  }
+
+  if (step === "a project with .aof package config and stale legacy config") {
+    await runStep(context, "a project with .aof package config");
+    await writeFile(path.join(context.projectDir, "aof.config.json"), "{}\n", "utf8");
+    return;
+  }
+
+  if (step === "a project with invalid .aof config") {
+    await runStep(context, "an empty project");
+    const { mkdir } = await import("node:fs/promises");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      resources: [
+        { kind: "skill", id: "bad", path: "missing.md", runtimes: ["other"] }
+      ],
+      packages: [
+        { id: "other", source: "git:example", runtimes: [] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
+  if (step === "the .aof config has no resources") {
+    await writeFile(path.join(context.projectDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "empty",
+      resources: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
   let match = step.match(/^I run `(.+)` with input `([\s\S]*)`$/);
   if (match) {
-    context.lastResult = await runCli(context, match[1], `${match[2]}\n`);
+    const input = match[2].includes("|") ? match[2].split("|").join("\n") : match[2];
+    context.lastResult = await runCli(context, match[1], `${input}\n`);
+    return;
+  }
+
+  match = step.match(/^I run `(.+)` with framework statuses `([\s\S]*)`$/);
+  if (match) {
+    context.lastResult = await runCli(context, match[1], "", { frameworkStatuses: match[2] });
     return;
   }
 
   match = step.match(/^I run `(.+)`$/);
   if (match) {
     context.lastResult = await runCli(context, match[1]);
+    return;
+  }
+
+  match = step.match(/^I replace file `(.+)` with `([\s\S]+)`$/);
+  if (match) {
+    await writeFile(path.join(context.projectDir, match[1]), `${match[2]}\n`, "utf8");
     return;
   }
 
@@ -184,6 +281,13 @@ async function runStep(context, step) {
   if (match) {
     assertLastResult(context);
     assert.match(context.lastResult.stdout, escapeRegex(match[1]), formatResult(context.lastResult));
+    return;
+  }
+
+  match = step.match(/^stdout should not contain `([\s\S]+)`$/);
+  if (match) {
+    assertLastResult(context);
+    assert.doesNotMatch(context.lastResult.stdout, escapeRegex(match[1]), formatResult(context.lastResult));
     return;
   }
 
@@ -252,6 +356,50 @@ async function runStep(context, step) {
     return;
   }
 
+  match = step.match(/^JSON file `(.+)` should contain generated file `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    const json = JSON.parse(content);
+    assert.ok(
+      Array.isArray(json.files) && json.files.some((item) => normalizeFilePath(item.path) === normalizeFilePath(match[2])),
+      `Expected ${match[1]} to contain generated file ${match[2]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` should contain framework `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    const json = JSON.parse(content);
+    assert.ok(
+      Array.isArray(json.frameworks) && json.frameworks.some((item) => item.id === match[2]),
+      `Expected ${match[1]} to contain framework ${match[2]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` should contain framework install attempt `(.+)` with status `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    const json = JSON.parse(content);
+    assert.ok(
+      Array.isArray(json.frameworkInstallAttempts) && json.frameworkInstallAttempts.some((item) => item.runtime === match[2] && item.status === match[3]),
+      `Expected ${match[1]} to contain framework install attempt ${match[2]} with status ${match[3]}`
+    );
+    return;
+  }
+
+  match = step.match(/^text `(.+)` should appear before `(.+)` in file `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[3]), "utf8");
+    const first = content.indexOf(match[1]);
+    const second = content.indexOf(match[2]);
+    assert.ok(first >= 0, `Expected ${match[3]} to contain ${match[1]}`);
+    assert.ok(second >= 0, `Expected ${match[3]} to contain ${match[2]}`);
+    assert.ok(first < second, `Expected ${match[1]} to appear before ${match[2]} in ${match[3]}`);
+    return;
+  }
+
   throw new Error(`Unsupported BDD step: ${step}`);
 }
 
@@ -266,7 +414,7 @@ function legacyConfig() {
   }, null, 2)}\n`;
 }
 
-async function writeAofProject(context, resourceInputs) {
+async function writeAofProject(context, resourceInputs, options = {}) {
   const { mkdir, writeFile } = await import("node:fs/promises");
   const workspaceDir = path.join(context.projectDir, ".aof");
   const resources = [];
@@ -297,13 +445,14 @@ async function writeAofProject(context, resourceInputs) {
   await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
     $schema: "../schemas/aof.schema.json",
     name: "file-backed",
-    resources
+    resources,
+    packages: options.packages ?? []
   }, null, 2)}\n`, "utf8");
 }
 
-function runCli(context, command, input = "") {
+function runCli(context, command, input = "", options = {}) {
   if (useInProcessCli) {
-    return runCliInProcess(context, command, input);
+    return runCliInProcess(context, command, input, options);
   }
 
   const args = splitCommand(command);
@@ -312,7 +461,8 @@ function runCli(context, command, input = "") {
     env: {
       ...process.env,
       AOF_DATA_DIR: context.dataDir,
-      NODE_NO_WARNINGS: "1"
+      NODE_NO_WARNINGS: "1",
+      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
     },
     input,
     encoding: "utf8"
@@ -326,12 +476,16 @@ function runCli(context, command, input = "") {
   };
 }
 
-async function runCliInProcess(context, command, input = "") {
+async function runCliInProcess(context, command, input = "", options = {}) {
   const { run } = await import("../../src/cli.mjs");
   const previousCwd = process.cwd();
   const previousDataDir = process.env.AOF_DATA_DIR;
   const previousNoWarnings = process.env.NODE_NO_WARNINGS;
   const previousSelectionInput = process.env.AOF_TEST_SELECTION_INPUT;
+  const previousRuntimeInput = process.env.AOF_TEST_RUNTIMES_INPUT;
+  const previousConfirmInput = process.env.AOF_TEST_CONFIRM_INPUT;
+  const previousFrameworkStatus = process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS;
+  const previousExitCode = process.exitCode;
   const previousLog = console.log;
   const previousError = console.error;
   const stdout = [];
@@ -341,12 +495,19 @@ async function runCliInProcess(context, command, input = "") {
   console.error = (...args) => stderr.push(args.join(" "));
   process.env.AOF_DATA_DIR = context.dataDir;
   process.env.NODE_NO_WARNINGS = "1";
-  if (input) process.env.AOF_TEST_SELECTION_INPUT = input.trim();
+  process.exitCode = undefined;
+  if (input) {
+    const [selectionInput, runtimeInput, ...confirmations] = input.trim().split(/\r?\n/);
+    process.env.AOF_TEST_SELECTION_INPUT = selectionInput ?? "";
+    if (runtimeInput !== undefined) process.env.AOF_TEST_RUNTIMES_INPUT = runtimeInput;
+    if (confirmations.length > 0) process.env.AOF_TEST_CONFIRM_INPUT = confirmations.join(",");
+  }
+  if (options.frameworkStatuses) process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = options.frameworkStatuses;
   process.chdir(context.projectDir);
 
   try {
     await run(splitCommand(command));
-    return { status: 0, stdout: stdout.join("\n"), stderr: stderr.join("\n"), error: null };
+    return { status: process.exitCode ?? 0, stdout: stdout.join("\n"), stderr: stderr.join("\n"), error: null };
   } catch (error) {
     stderr.push(error.message);
     return { status: 1, stdout: stdout.join("\n"), stderr: stderr.join("\n"), error };
@@ -372,6 +533,26 @@ async function runCliInProcess(context, command, input = "") {
     } else {
       process.env.AOF_TEST_SELECTION_INPUT = previousSelectionInput;
     }
+
+    if (previousRuntimeInput === undefined) {
+      delete process.env.AOF_TEST_RUNTIMES_INPUT;
+    } else {
+      process.env.AOF_TEST_RUNTIMES_INPUT = previousRuntimeInput;
+    }
+
+    if (previousConfirmInput === undefined) {
+      delete process.env.AOF_TEST_CONFIRM_INPUT;
+    } else {
+      process.env.AOF_TEST_CONFIRM_INPUT = previousConfirmInput;
+    }
+
+    if (previousFrameworkStatus === undefined) {
+      delete process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS;
+    } else {
+      process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = previousFrameworkStatus;
+    }
+
+    process.exitCode = previousExitCode;
   }
 }
 
@@ -405,4 +586,8 @@ function formatResult(result) {
     "stderr:",
     result.stderr
   ].filter((part) => part !== null).join("\n");
+}
+
+function normalizeFilePath(filePath) {
+  return String(filePath).replaceAll("\\", "/");
 }

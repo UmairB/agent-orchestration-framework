@@ -1,0 +1,33 @@
+{
+  "$schema": "./schemas/aof.schema.json",
+  "name": "assistant-project",
+  "resources": [
+    {
+      "kind": "skill",
+      "id": "project-context",
+      "name": "project-context",
+      "description": "Shared project context for assistant coding sessions.",
+      "body": "Read the repository before changing code. Prefer existing project patterns, keep edits scoped, and verify behavior with the narrowest meaningful checks."
+    },
+    {
+      "kind": "command",
+      "id": "prime",
+      "description": "Prime the assistant with repository context.",
+      "prompt": "Inspect the repository structure, identify the stack, summarize the main modules, and call out anything risky before making changes."
+    },
+    {
+      "kind": "agent",
+      "id": "code-reviewer",
+      "name": "code-reviewer",
+      "description": "Reviews changes for bugs, regressions, and missing verification.",
+      "instructions": "Review the diff from a senior engineering perspective. Lead with concrete findings using file and line references, then summarize residual risk."
+    }
+  ],
+  "packages": [
+    {
+      "id": "gsd",
+      "source": "npm:get-shit-done-cc@latest",
+      "runtimes": ["claude", "codex"]
+    }
+  ]
+}

@@ -21,6 +21,10 @@ export const adapterTests = [
   {
     name: "applies runtime override bodies",
     run: appliesRuntimeOverrideBodies
+  },
+  {
+    name: "applies runtime overrides across resource kinds",
+    run: appliesRuntimeOverridesAcrossKinds
   }
 ];
 
@@ -42,6 +46,7 @@ async function rendersPortableResources() {
     const claudeCommand = await readFile(path.join(targetDir, ".claude", "commands", "prime.md"), "utf8");
     const codexCommand = await readFile(path.join(targetDir, ".codex", "commands", "prime.md"), "utf8");
 
+    assert.match(claudeCommand, /aof-generated: true/);
     assert.match(claudeCommand, /aof-invocation: \/prime/);
     assert.match(codexCommand, /aof-invocation: \$prime/);
   } finally {
@@ -96,6 +101,49 @@ async function appliesRuntimeOverrideBodies() {
 
     assert.match(codexSkill, /Codex body/);
     assert.doesNotMatch(codexSkill, /Shared body/);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function appliesRuntimeOverridesAcrossKinds() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [
+        {
+          kind: "skill",
+          id: "context",
+          body: "Shared skill.",
+          overrides: { claude: { body: "Claude skill." } }
+        },
+        {
+          kind: "command",
+          id: "prime",
+          prompt: "Shared command.",
+          overrides: { codex: { prompt: "Codex command.", description: "Codex prime" } }
+        },
+        {
+          kind: "agent",
+          id: "reviewer",
+          instructions: "Shared agent.",
+          overrides: { claude: { instructions: "Claude agent.", model: "sonnet" } }
+        },
+        {
+          kind: "rule",
+          id: "guidance",
+          body: "Shared rule.",
+          overrides: { codex: { body: "Codex rule.", paths: ["src"] } }
+        }
+      ]
+    });
+
+    await applyConfig(config, { targetDir });
+    assert.match(await readFile(path.join(targetDir, ".claude", "skills", "context", "SKILL.md"), "utf8"), /Claude skill/);
+    assert.match(await readFile(path.join(targetDir, ".codex", "commands", "prime.md"), "utf8"), /Codex command/);
+    assert.match(await readFile(path.join(targetDir, ".claude", "agents", "reviewer.md"), "utf8"), /model: sonnet/);
+    assert.match(await readFile(path.join(targetDir, ".codex", "src", "AGENTS.md"), "utf8"), /Codex rule/);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

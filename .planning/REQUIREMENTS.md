@@ -24,42 +24,42 @@
 - [x] **RTOV-01**: User can define shared defaults for an asset. — Validated in Phase 1.
 - [x] **RTOV-02**: User can define Claude Code-specific overrides. — Validated in Phase 1.
 - [x] **RTOV-03**: User can define Codex-specific overrides. — Validated in Phase 1.
-- [ ] **RTOV-04**: User can see when an asset capability is runtime-specific or unsupported for a target runtime.
+- [x] **RTOV-04**: User can see when an asset capability is runtime-specific or unsupported for a target runtime. — Validated in Phase 4.
 
 ### Rendering
 
-- [ ] **REND-01**: User can render `.aof/` assets into Claude Code folder layout.
-- [ ] **REND-02**: User can render `.aof/` assets into Codex folder layout.
-- [ ] **REND-03**: Generated `.claude/` and `.codex/` files are treated as output, not source of truth.
-- [ ] **REND-04**: User can dry-run rendering before writing files.
+- [x] **REND-01**: User can render `.aof/` assets into Claude Code folder layout. — Validated in Phase 2.
+- [x] **REND-02**: User can render `.aof/` assets into Codex folder layout. — Validated in Phase 2.
+- [x] **REND-03**: Generated `.claude/` and `.codex/` files are treated as output, not source of truth. — Validated in Phase 2.
+- [x] **REND-04**: User can dry-run rendering before writing files. — Validated in Phase 2.
 
 ### Frameworks
 
-- [ ] **FRAM-01**: User can declare GSD as a managed framework package in AOF.
-- [ ] **FRAM-02**: User can install or preview GSD setup for Claude Code.
-- [ ] **FRAM-03**: User can install or preview GSD setup for Codex.
-- [ ] **FRAM-04**: Lock state records managed framework install intent.
+- [x] **FRAM-01**: User can declare GSD as a managed framework package in AOF. — Validated in Phase 3.
+- [x] **FRAM-02**: User can install or preview GSD setup for Claude Code. — Validated in Phase 3.
+- [x] **FRAM-03**: User can install or preview GSD setup for Codex. — Validated in Phase 3.
+- [x] **FRAM-04**: Lock state records managed framework install intent. — Validated in Phase 2.
 
 ### CLI
 
-- [ ] **CLI-01**: User can run automation-friendly commands for init, apply, install, and catalog/config inspection.
-- [ ] **CLI-02**: User can use an interactive install-oriented flow.
-- [ ] **CLI-03**: User receives clear output about what files will be written or changed.
-- [ ] **CLI-04**: User can reproduce an install from lock state.
+- [x] **CLI-01**: User can run automation-friendly commands for init, apply, install, and catalog/config inspection. — Validated in Phase 3.
+- [x] **CLI-02**: User can use an interactive install-oriented flow. — Validated in Phase 3.
+- [x] **CLI-03**: User receives clear output about what files will be written or changed. — Validated in Phase 2.
+- [x] **CLI-04**: User can reproduce an install from lock state. — Validated in Phase 2.
 
 ### UI
 
-- [ ] **UI-01**: User can edit `.aof/` configuration through the setup UI.
-- [ ] **UI-02**: User can create and edit skills, commands, agents, and rules/instructions in the UI.
-- [ ] **UI-03**: User can configure runtime targets and runtime-specific overrides in the UI.
-- [ ] **UI-04**: UI clearly shows runtime capability differences before config is applied.
-- [ ] **UI-05**: UI v1 writes valid configuration but does not execute init/apply/install actions.
+- [x] **UI-01**: User can edit `.aof/` configuration through the setup UI. — Validated in Phase 4.
+- [x] **UI-02**: User can create and edit skills, commands, agents, and rules/instructions in the UI. — Validated in Phase 4.
+- [x] **UI-03**: User can configure runtime targets and runtime-specific overrides in the UI. — Validated in Phase 4.
+- [x] **UI-04**: UI clearly shows runtime capability differences before config is applied. — Validated in Phase 4.
+- [x] **UI-05**: UI v1 writes valid configuration but does not execute init/apply/install actions. — Validated in Phase 4.
 
 ### Verification
 
-- [ ] **VERI-01**: Existing CLI behavior remains covered by unit and BDD integration tests.
-- [ ] **VERI-02**: `.aof/` config parsing, rendering, runtime overrides, and lock state are covered by tests.
-- [ ] **VERI-03**: UI configuration editing paths are covered by build or targeted tests.
+- [x] **VERI-01**: Existing CLI behavior remains covered by unit and BDD integration tests. — Validated in Phase 5.
+- [x] **VERI-02**: `.aof/` config parsing, rendering, runtime overrides, and lock state are covered by tests. — Validated in Phase 5.
+- [x] **VERI-03**: UI configuration editing paths are covered by build or targeted tests. — Validated in Phase 5.
 
 ## v2 Requirements
 
@@ -105,27 +105,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | RTOV-01 | Phase 1 | Complete |
 | RTOV-02 | Phase 1 | Complete |
 | RTOV-03 | Phase 1 | Complete |
-| RTOV-04 | Phase 4 | Pending |
-| REND-01 | Phase 2 | Pending |
-| REND-02 | Phase 2 | Pending |
-| REND-03 | Phase 2 | Pending |
-| REND-04 | Phase 2 | Pending |
-| FRAM-01 | Phase 3 | Pending |
-| FRAM-02 | Phase 3 | Pending |
-| FRAM-03 | Phase 3 | Pending |
-| FRAM-04 | Phase 2 | Pending |
-| CLI-01 | Phase 3 | Pending |
-| CLI-02 | Phase 3 | Pending |
-| CLI-03 | Phase 2 | Pending |
-| CLI-04 | Phase 2 | Pending |
-| UI-01 | Phase 4 | Pending |
-| UI-02 | Phase 4 | Pending |
-| UI-03 | Phase 4 | Pending |
-| UI-04 | Phase 4 | Pending |
-| UI-05 | Phase 4 | Pending |
-| VERI-01 | Phase 5 | Pending |
-| VERI-02 | Phase 5 | Pending |
-| VERI-03 | Phase 5 | Pending |
+| RTOV-04 | Phase 4 | Complete |
+| REND-01 | Phase 2 | Complete |
+| REND-02 | Phase 2 | Complete |
+| REND-03 | Phase 2 | Complete |
+| REND-04 | Phase 2 | Complete |
+| FRAM-01 | Phase 3 | Complete |
+| FRAM-02 | Phase 3 | Complete |
+| FRAM-03 | Phase 3 | Complete |
+| FRAM-04 | Phase 2 | Complete |
+| CLI-01 | Phase 3 | Complete |
+| CLI-02 | Phase 3 | Complete |
+| CLI-03 | Phase 2 | Complete |
+| CLI-04 | Phase 2 | Complete |
+| UI-01 | Phase 4 | Complete |
+| UI-02 | Phase 4 | Complete |
+| UI-03 | Phase 4 | Complete |
+| UI-04 | Phase 4 | Complete |
+| UI-05 | Phase 4 | Complete |
+| VERI-01 | Phase 5 | Complete |
+| VERI-02 | Phase 5 | Complete |
+| VERI-03 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 32 total
@@ -134,4 +134,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-05-06*
-*Last updated: 2026-05-06 after Phase 1 verification*
+*Last updated: 2026-05-07 after Phase 5 verification*
