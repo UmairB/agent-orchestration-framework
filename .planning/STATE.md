@@ -1,8 +1,8 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 7: Expanded DSL Primitives
-**Status:** Phase 7 planned; ready to execute
+**Current phase:** Phase 8: Adapter Degradation Policy
+**Status:** Phase 7 complete; ready to discuss Phase 8
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 7: expanding the `.aof/` DSL to cover MCP servers, hooks, project docs, and settings while preserving v1 primitives.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is starting Phase 8: making unsupported or lossy runtime behavior explicit, warnable, and enforceable.
 
 ## Current Position
 
-Phase: 7 - Expanded DSL Primitives
-Plan: 3 plans ready
-Status: Ready to execute
-Last activity: 2026-05-07 — Phase 7 plans created
+Phase: 8 - Adapter Degradation Policy
+Plan: Not planned
+Status: Ready to discuss
+Last activity: 2026-05-07 — Phase 7 completed and verified
 
 ## Resume
 
-**Stopped at:** Phase 7 planned
-**Resume file:** `.planning/phases/07-expanded-dsl-primitives/07-01-PLAN.md`
+**Stopped at:** Phase 7 complete
+**Resume file:** `.planning/phases/07-expanded-dsl-primitives/07-VERIFICATION.md`
 
 ## Memory
 
@@ -74,3 +74,5 @@ Last activity: 2026-05-07 — Phase 7 plans created
 - Phase 7 planning proceeded without a CONTEXT.md because the user explicitly invoked `$gsd-plan-phase 7` after the discussion prompt.
 - Phase 7 research is captured in `.planning/phases/07-expanded-dsl-primitives/07-RESEARCH.md`.
 - Phase 7 planning produced 3 plans in `.planning/phases/07-expanded-dsl-primitives/`.
+- Phase 7 execution completed with commits for DSL model validation, runtime rendering, and UI/docs editing surfaces.
+- Phase 7 verification is captured in `.planning/phases/07-expanded-dsl-primitives/07-VERIFICATION.md`; `npm run test:unit`, `npm run ui:build`, and `npm test` passed.

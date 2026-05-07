@@ -16,11 +16,11 @@
 
 ### DSL Primitives
 
-- [ ] **DSL-01**: User can define MCP servers in `.aof/` and render them to supported Claude Code and Codex configuration outputs.
-- [ ] **DSL-02**: User can define common-core hooks in `.aof/` and render them to supported Claude Code and Codex hook outputs.
-- [ ] **DSL-03**: User can define project documentation in `.aof/` and render it to AGENTS.md and CLAUDE.md with deterministic include behavior.
-- [ ] **DSL-04**: User can define project-level settings in `.aof/` with vendor-neutral defaults and runtime-specific escape hatches.
-- [ ] **DSL-05**: User can continue using existing v1 skills, commands, agents, and rules through the expanded DSL model without migration regressions.
+- [x] **DSL-01**: User can define MCP servers in `.aof/` and render them to supported Claude Code and Codex configuration outputs. Validated in Phase 7.
+- [x] **DSL-02**: User can define common-core hooks in `.aof/` and render them to supported Claude Code and Codex hook outputs. Validated in Phase 7.
+- [x] **DSL-03**: User can define project documentation in `.aof/` and render it to AGENTS.md and CLAUDE.md with deterministic include behavior. Validated in Phase 7.
+- [x] **DSL-04**: User can define project-level settings in `.aof/` with vendor-neutral defaults and runtime-specific escape hatches. Validated in Phase 7.
+- [x] **DSL-05**: User can continue using existing v1 skills, commands, agents, and rules through the expanded DSL model without migration regressions. Validated in Phase 7.
 
 ### Adapter Degradation
 
@@ -85,11 +85,11 @@
 | CLI-07 | Phase 6 | Complete |
 | CLI-08 | Phase 6 | Complete |
 | CLI-09 | Phase 6 | Complete |
-| DSL-01 | Phase 7 | Pending |
-| DSL-02 | Phase 7 | Pending |
-| DSL-03 | Phase 7 | Pending |
-| DSL-04 | Phase 7 | Pending |
-| DSL-05 | Phase 7 | Pending |
+| DSL-01 | Phase 7 | Complete |
+| DSL-02 | Phase 7 | Complete |
+| DSL-03 | Phase 7 | Complete |
+| DSL-04 | Phase 7 | Complete |
+| DSL-05 | Phase 7 | Complete |
 | ADPT-01 | Phase 8 | Pending |
 | ADPT-02 | Phase 8 | Pending |
 | ADPT-03 | Phase 8 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-07 after Phase 6 completion*
+*Last updated: 2026-05-07 after Phase 7 completion*

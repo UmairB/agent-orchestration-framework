@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-07 after Phase 7 planning
+**Last updated:** 2026-05-07 after Phase 7 completion
 
 ## Milestones
 
@@ -68,7 +68,7 @@
 
 **Requirements:** DSL-01, DSL-02, DSL-03, DSL-04, DSL-05
 
-**Status:** Planned — 3 waves ready to execute.
+**Status:** Complete — implemented and verified 2026-05-07.
 
 **Success criteria:**
 1. MCP server definitions render to Claude Code and Codex configuration outputs where supported.
@@ -78,9 +78,9 @@
 5. Existing v1 `.aof/` configs remain valid or receive intentional migration diagnostics.
 
 **Plans:**
-- [ ] Wave 1: `07-01-PLAN.md` — Expanded DSL model and validation.
-- [ ] Wave 2 *(blocked on Wave 1 completion)*: `07-02-PLAN.md` — Runtime rendering for MCP, hooks, docs, and settings.
-- [ ] Wave 3 *(blocked on Wave 1 and Wave 2 completion)*: `07-03-PLAN.md` — UI editing and documentation for expanded DSL.
+- [x] Wave 1: `07-01-PLAN.md` — Expanded DSL model and validation.
+- [x] Wave 2: `07-02-PLAN.md` — Runtime rendering for MCP, hooks, docs, and settings.
+- [x] Wave 3: `07-03-PLAN.md` — UI editing and documentation for expanded DSL.
 
 **Cross-cutting constraints:**
 - Preserve `resources[]` behavior for existing skills, commands, agents, and rules.
@@ -129,8 +129,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 6/6 | 5/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 6/6 | 10/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-execute-phase 7` to implement Expanded DSL Primitives.
+Run `$gsd-discuss-phase 8` to start Adapter Degradation Policy.

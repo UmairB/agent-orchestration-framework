@@ -8,7 +8,7 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. The milestone archive is recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`. Phase 6 of v1.1 is complete.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. The milestone archive is recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`. Phases 6 and 7 of v1.1 are complete.
 
 ## Current Milestone: v1.1 Aligned Core Hardening
 
@@ -47,10 +47,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Setup UI does not execute init/apply/install actions in v1; the CLI remains responsible for execution — Phase 4
 - ✓ v1 milestone behavior is covered by unit tests, BDD integration tests, child-process smoke, setup UI API tests, and UI build checks — Phase 5
 - ✓ Users can manage the first aligned-core lifecycle slice through first-class CLI commands for add, sync, validate, doctor, and clean — Phase 6
+- ✓ Users can define MCP servers, hooks, project docs, and settings in `.aof/` alongside existing skills, commands, agents, and rules — Phase 7
+- ✓ Expanded DSL primitives render to Claude Code and Codex project outputs through lock-owned generated files — Phase 7
 
 ### Active
 
-- [ ] Users can define MCP servers, hooks, project docs, and settings in `.aof/` alongside existing skills, commands, agents, and rules.
 - [ ] Users can install framework packages with namespace, dependency, lock, and conflict semantics that prevent silent overwrites.
 - [ ] Users can see and enforce portability degradation warnings across Claude Code and Codex targets.
 - [ ] New lifecycle, package, adapter, and validation behavior is covered by BDD scenarios.
@@ -112,6 +113,7 @@ The long-term product direction includes task management: kanban boards, task as
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
 | v1.1 focuses on aligned-core hardening before new runtimes or Rust migration | The architecture review surfaced core gaps that should be solved before broad adapter expansion or a language port | — Pending |
 | CLI lifecycle commands are first-class before deeper DSL expansion | Users need a safe operational path for adding, syncing, validating, diagnosing, and cleaning `.aof/` projects | Implemented in Phase 6 |
+| Expanded primitives are top-level DSL sections | MCP servers, hooks, project docs, and settings are structurally different from prompt-like resources and need direct runtime config rendering | Implemented in Phase 7 |
 
 ## Next Milestone Goals
 
@@ -135,4 +137,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after Phase 6 completion*
+*Last updated: 2026-05-07 after Phase 7 completion*
