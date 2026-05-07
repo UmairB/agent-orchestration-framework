@@ -112,6 +112,12 @@ async function runStep(context, step) {
     return;
   }
 
+  if (step === "a project with expanded .aof DSL config") {
+    await runStep(context, "an empty project");
+    await writeExpandedAofProject(context);
+    return;
+  }
+
   if (step === "a project with .aof runtime override config") {
     await runStep(context, "an empty project");
     await writeAofProject(context, [{
@@ -469,6 +475,32 @@ async function writeAofProject(context, resourceInputs, options = {}) {
     name: "file-backed",
     resources,
     packages: options.packages ?? []
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeExpandedAofProject(context) {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const workspaceDir = path.join(context.projectDir, ".aof");
+  await mkdir(path.join(workspaceDir, "assets", "docs", "partials"), { recursive: true });
+  await writeFile(path.join(workspaceDir, "assets", "docs", "root.md"), "Root guidance\n{{include partials/shared.md}}\n", "utf8");
+  await writeFile(path.join(workspaceDir, "assets", "docs", "partials", "shared.md"), "Included guidance\n", "utf8");
+  await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+    $schema: "../schemas/aof.schema.json",
+    name: "expanded",
+    resources: [],
+    mcpServers: [
+      { id: "docs", transport: "http", url: "https://example.test/mcp" }
+    ],
+    hooks: [
+      { id: "test-after-write", event: "PostToolUse", matcher: "Write", command: "npm test" }
+    ],
+    projectDocs: [
+      { id: "root", path: "assets/docs/root.md", targets: ["AGENTS.md", "CLAUDE.md"] }
+    ],
+    settings: {
+      claude: { permissions: { allow: ["Bash(npm test)"] } },
+      codex: { model: "gpt-5.4", approval_policy: "on-request" }
+    }
   }, null, 2)}\n`, "utf8");
 }
 

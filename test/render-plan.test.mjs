@@ -34,6 +34,10 @@ export const renderPlanTests = [
   {
     name: "renders selective golden outputs for codex agents and claude rules",
     run: rendersSelectiveGoldenOutputs
+  },
+  {
+    name: "tracks expanded DSL root outputs through lock drift protection",
+    run: tracksExpandedDslRootOutputDrift
   }
 ];
 
@@ -207,6 +211,37 @@ async function rendersSelectiveGoldenOutputs() {
     assert.ok(claudeRule);
     assert.match(claudeRule.content, /aof-generated: true/);
     assert.match(claudeRule.content, /aof-runtime: claude/);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function tracksExpandedDslRootOutputDrift() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [],
+      projectDocs: [
+        { id: "root", targets: ["AGENTS.md"], runtimes: ["codex"], body: "Generated root guidance." }
+      ]
+    });
+
+    const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
+    assert.equal(desired.length, 1);
+    assert.equal(desired[0].path, "AGENTS.md");
+    assert.equal(desired[0].resource.kind, "project-doc");
+
+    let actions = await planApplyActions(desired, null, { targetDir });
+    assert.equal(actions[0].action, "create");
+    await executeApplyActions(actions);
+
+    const prior = createLockManifest({ actions, desiredOutputs: desired, config, runtimes: ["codex"] });
+    assert.equal(prior.files[0].path, "AGENTS.md");
+
+    await writeFile(path.join(targetDir, "AGENTS.md"), "Manual edit.\n", "utf8");
+    actions = await planApplyActions(desired, prior, { targetDir });
+    assert.equal(actions[0].action, "drift-warning");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

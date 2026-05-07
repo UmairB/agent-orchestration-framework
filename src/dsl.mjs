@@ -132,7 +132,8 @@ async function resolveProjectDoc(doc, baseDir) {
 
   const id = normalizeId(doc.id);
   const targets = normalizeProjectDocTargets(doc.targets);
-  const body = await resolveBody(doc, baseDir);
+  const sourcePath = doc.path ? path.resolve(baseDir, doc.path) : null;
+  const body = await resolveProjectDocBody(doc, baseDir, sourcePath);
 
   return {
     ...doc,
@@ -176,6 +177,56 @@ async function resolveBody(resource, baseDir) {
   if (resource.prompt) return resource.prompt;
   if (resource.instructions) return resource.instructions;
   return "";
+}
+
+async function resolveProjectDocBody(doc, baseDir, sourcePath) {
+  const body = await resolveBody(doc, baseDir);
+  const sourceDir = sourcePath ? path.dirname(sourcePath) : baseDir;
+  const seen = new Set(sourcePath ? [sourcePath] : []);
+  return expandIncludes(body, sourceDir, baseDir, seen);
+}
+
+async function expandIncludes(content, sourceDir, rootDir, seen) {
+  const includePattern = /\{\{\s*include\s+([^}]+?)\s*\}\}/g;
+  let rendered = "";
+  let cursor = 0;
+
+  for (const match of content.matchAll(includePattern)) {
+    rendered += content.slice(cursor, match.index);
+    const includePath = resolveIncludePath(match[1].trim(), sourceDir, rootDir);
+    if (seen.has(includePath)) {
+      throw new Error(`Project doc include cycle detected at ${path.relative(rootDir, includePath)}.`);
+    }
+
+    let includeBody;
+    try {
+      includeBody = await readFile(includePath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        throw new Error(`Project doc include not found: ${path.relative(rootDir, includePath)}.`);
+      }
+      throw error;
+    }
+
+    rendered += await expandIncludes(includeBody, path.dirname(includePath), rootDir, new Set([...seen, includePath]));
+    cursor = match.index + match[0].length;
+  }
+
+  rendered += content.slice(cursor);
+  return rendered;
+}
+
+function resolveIncludePath(includePath, sourceDir, rootDir) {
+  if (path.isAbsolute(includePath)) {
+    throw new Error(`Project doc include must be relative: ${includePath}.`);
+  }
+
+  const resolved = path.resolve(sourceDir, includePath);
+  const relative = path.relative(rootDir, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Project doc include escapes .aof: ${includePath}.`);
+  }
+  return resolved;
 }
 
 async function resolveOverrides(resource, baseDir) {

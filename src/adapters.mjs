@@ -2,6 +2,14 @@ import path from "node:path";
 import { writeText } from "./fs.mjs";
 import { hashContent } from "./lock.mjs";
 import { RUNTIMES, mergeRuntimeOverride } from "./model.mjs";
+import {
+  claudeMcpJson,
+  claudeSettingsJson,
+  codexConfigToml,
+  projectDocContent,
+  projectDocOutputPath,
+  targetForProjectDocRuntime
+} from "./runtime-config.mjs";
 
 export function supportedRuntimes() {
   return Object.keys(RUNTIMES);
@@ -36,7 +44,89 @@ export function renderConfigOutputs(config, options = {}) {
     }
   }
 
+  outputs.push(...renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, { global: options.global }));
   return outputs;
+}
+
+function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, options = {}) {
+  if (options.global) return [];
+
+  const outputs = [];
+  const runtimes = new Set(requestedRuntimes);
+  const claudeMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("claude") && server.runtimes.includes("claude"));
+  const codexMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("codex") && server.runtimes.includes("codex"));
+  const claudeHooks = (config.hooks ?? []).filter((hook) => runtimes.has("claude") && hook.runtimes.includes("claude"));
+  const codexHooks = (config.hooks ?? []).filter((hook) => runtimes.has("codex") && hook.runtimes.includes("codex"));
+
+  if (claudeMcpServers.length > 0) {
+    outputs.push(renderedRuntimeConfig(targetDir, ".mcp.json", "claude", "mcp", "mcpServers", claudeMcpJson(claudeMcpServers)));
+  }
+
+  if (claudeHooks.length > 0 || hasRuntimeSettings(config.settings, "claude")) {
+    outputs.push(renderedRuntimeConfig(
+      targetDir,
+      path.join(".claude", "settings.json"),
+      "claude",
+      "settings",
+      "claude-settings",
+      claudeSettingsJson({ hooks: claudeHooks, settings: config.settings })
+    ));
+  }
+
+  if (codexMcpServers.length > 0 || codexHooks.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
+    outputs.push(renderedRuntimeConfig(
+      targetDir,
+      path.join(".codex", "config.toml"),
+      "codex",
+      "settings",
+      "codex-config",
+      codexConfigToml({ mcpServers: codexMcpServers, hooks: codexHooks, settings: config.settings })
+    ));
+  }
+
+  outputs.push(...renderProjectDocs(targetDir, requestedRuntimes, config.projectDocs ?? []));
+  return outputs;
+}
+
+function renderProjectDocs(targetDir, requestedRuntimes, docs) {
+  const outputs = [];
+  for (const runtime of requestedRuntimes) {
+    const target = targetForProjectDocRuntime(runtime);
+    if (!target) continue;
+
+    const matchingDocs = docs.filter((doc) => doc.runtimes.includes(runtime) && doc.targets.includes(target));
+    if (matchingDocs.length === 0) continue;
+
+    outputs.push(renderedRuntimeConfig(
+      targetDir,
+      path.relative(targetDir, projectDocOutputPath(targetDir, target)),
+      runtime,
+      "project-doc",
+      target,
+      projectDocContent(target, matchingDocs),
+      matchingDocs
+    ));
+  }
+  return outputs;
+}
+
+function renderedRuntimeConfig(targetDir, relativePath, runtime, kind, id, content, source = null) {
+  const filePath = path.join(targetDir, relativePath);
+  return {
+    absolutePath: filePath,
+    path: relativePath,
+    runtime,
+    resource: { id, kind },
+    source,
+    body: content,
+    content,
+    hash: hashContent(content)
+  };
+}
+
+function hasRuntimeSettings(settings, runtime) {
+  const runtimeSettings = settings?.[runtime];
+  return Boolean(runtimeSettings && typeof runtimeSettings === "object" && !Array.isArray(runtimeSettings) && Object.keys(runtimeSettings).length > 0);
 }
 
 function renderedResource(targetDir, root, runtime, adapter, resource) {

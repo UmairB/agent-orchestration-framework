@@ -25,6 +25,10 @@ export const adapterTests = [
   {
     name: "applies runtime overrides across resource kinds",
     run: appliesRuntimeOverridesAcrossKinds
+  },
+  {
+    name: "renders expanded DSL primitives into runtime config outputs",
+    run: rendersExpandedDslRuntimeOutputs
   }
 ];
 
@@ -162,6 +166,63 @@ async function respectsResourceRuntimeFilters() {
     const writes = await applyConfig(config, { targetDir });
     assert.equal(writes.length, 1);
     assert.equal(path.relative(targetDir, writes[0].path), path.join(".codex", "skills", "codex-only", "SKILL.md"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function rendersExpandedDslRuntimeOutputs() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [],
+      mcpServers: [
+        {
+          id: "docs",
+          transport: "http",
+          url: "https://example.test/mcp",
+          headers: { Authorization: "Bearer ${TOKEN}" }
+        },
+        {
+          id: "local-tools",
+          transport: "stdio",
+          command: "node",
+          args: ["server.mjs"],
+          env: { NODE_ENV: "test" },
+          runtimes: ["codex"]
+        }
+      ],
+      hooks: [
+        { id: "test-after-write", event: "PostToolUse", matcher: "Write", command: "npm test" }
+      ],
+      projectDocs: [
+        { id: "root", targets: ["AGENTS.md", "CLAUDE.md"], body: "Use generated guidance." }
+      ],
+      settings: {
+        claude: { permissions: { allow: ["Bash(npm test)"] } },
+        codex: { model: "gpt-5.4", approval_policy: "on-request" }
+      }
+    });
+
+    const writes = await applyConfig(config, { targetDir });
+    assert.equal(writes.length, 5);
+
+    const claudeMcp = await readFile(path.join(targetDir, ".mcp.json"), "utf8");
+    const claudeSettings = await readFile(path.join(targetDir, ".claude", "settings.json"), "utf8");
+    const codexConfig = await readFile(path.join(targetDir, ".codex", "config.toml"), "utf8");
+    const agents = await readFile(path.join(targetDir, "AGENTS.md"), "utf8");
+    const claudeDoc = await readFile(path.join(targetDir, "CLAUDE.md"), "utf8");
+
+    assert.match(claudeMcp, /"docs"/);
+    assert.match(claudeMcp, /"type": "http"/);
+    assert.match(claudeSettings, /"hooks"/);
+    assert.match(claudeSettings, /"PostToolUse"/);
+    assert.match(codexConfig, /\[mcp_servers\.docs\]/);
+    assert.match(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
+    assert.match(codexConfig, /approval_policy = "on-request"/);
+    assert.match(agents, /Use generated guidance/);
+    assert.match(claudeDoc, /Use generated guidance/);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

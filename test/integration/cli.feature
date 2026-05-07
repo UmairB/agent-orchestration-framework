@@ -110,6 +110,18 @@ Feature: AOF CLI
     And file `.aof/aof.lock.json` should exist
     And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/file-backed/SKILL.md`
 
+  Scenario: Apply expanded DSL primitives
+    Given a project with expanded .aof DSL config
+    When I run `apply`
+    Then the command should succeed
+    And file `.mcp.json` should exist
+    And file `.codex/config.toml` should contain `[mcp_servers.docs]`
+    And file `.codex/config.toml` should contain `[[hooks.PostToolUse]]`
+    And file `.claude/settings.json` should contain `"hooks"`
+    And file `AGENTS.md` should contain `Included guidance`
+    And file `CLAUDE.md` should contain `Included guidance`
+    And JSON file `.aof/aof.lock.json` should contain generated file `AGENTS.md`
+
   Scenario: Preview apply without writing runtime files or lock state
     Given a project with .aof file-backed config
     When I run `apply --codex --dry-run`

@@ -17,6 +17,10 @@ export const dslPrimitiveTests = [
   {
     name: "validates expanded DSL primitive diagnostics",
     run: validatesExpandedPrimitiveDiagnostics
+  },
+  {
+    name: "expands project doc include macros safely",
+    run: expandsProjectDocIncludesSafely
   }
 ];
 
@@ -114,6 +118,41 @@ async function validatesExpandedPrimitiveDiagnostics() {
     assert.ok(diagnostics.some((item) => item.path === "settings.trust"));
     assert.ok(diagnostics.some((item) => item.path === "settings.autoCompact"));
     assert.ok(diagnostics.some((item) => item.path === "settings.codex"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function expandsProjectDocIncludesSafely() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-dsl-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "docs", "partials"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "docs", "root.md"), "Root\n{{include partials/shared.md}}\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "docs", "partials", "shared.md"), "Included guidance\n", "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      resources: [],
+      projectDocs: [
+        { id: "root", path: "assets/docs/root.md", targets: ["AGENTS.md"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    const config = await loadConfig(path.join(workspaceDir, "aof.config.json"));
+    assert.match(config.projectDocs[0].body, /Root/);
+    assert.match(config.projectDocs[0].body, /Included guidance/);
+
+    await writeFile(path.join(workspaceDir, "assets", "docs", "root.md"), "Root\n{{include ../../../outside.md}}\n", "utf8");
+    await assert.rejects(
+      () => loadConfig(path.join(workspaceDir, "aof.config.json")),
+      /include escapes \.aof/
+    );
+
+    await writeFile(path.join(workspaceDir, "assets", "docs", "root.md"), "Root\n{{include loop.md}}\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "docs", "loop.md"), "{{include root.md}}\n", "utf8");
+    await assert.rejects(
+      () => loadConfig(path.join(workspaceDir, "aof.config.json")),
+      /include cycle/
+    );
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
