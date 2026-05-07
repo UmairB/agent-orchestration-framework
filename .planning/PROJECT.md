@@ -6,6 +6,10 @@ AOF is a repo-local abstraction layer for coding assistant setup. It lets users 
 
 The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Codex render adapters, a setup UI configuration editor, and GSD installer delegation. `.aof/` is the durable source of truth for configuration, assets, runtime overrides, and install state, while generated `.claude/` and `.codex/` folders are treated as output.
 
+## Current State
+
+v1 shipped on 2026-05-07 as the assistant configuration foundation. The milestone archive is recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+
 ## Core Value
 
 Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
@@ -35,7 +39,7 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 
 ### Active
 
-- [ ] Define the next milestone scope.
+- [ ] Define the next milestone scope with `$gsd-new-milestone`.
 
 ### Out of Scope
 
@@ -92,6 +96,10 @@ The long-term product direction includes task management: kanban boards, task as
 | v1 closeout uses explicit verification hardening | Milestone confidence depends on regression coverage across CLI, UI API, rendering, lock, and build paths | Implemented in Phase 5 |
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
 
+## Next Milestone Goals
+
+The next milestone is not defined yet. Likely candidate areas are broader runtime support, UI-driven execution of safe CLI actions, or the deferred task-management direction. Define the next scope through fresh requirements rather than extending v1 requirements in place.
+
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
@@ -110,4 +118,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after Phase 5 verification*
+*Last updated: 2026-05-07 after v1 milestone*

@@ -1,12 +1,12 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Milestone v1 complete
-**Status:** All v1 phases complete and verified; ready to complete/archive milestone
+**Current phase:** Planning next milestone
+**Status:** v1 milestone archived and ready for next milestone definition
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-07)
+See: `.planning/PROJECT.md` (updated 2026-05-07 after v1 milestone)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -14,14 +14,18 @@ See: `.planning/PROJECT.md` (updated 2026-05-07)
 
 See: `.planning/ROADMAP.md`
 
+## Milestone Reference
+
+See: `.planning/MILESTONES.md`
+
 ## Current Focus
 
-Milestone v1 is functionally complete. Phase artifacts verify the `.aof` workspace model, runtime rendering and lock state, CLI and GSD framework flow, setup UI configuration editor, and verification/hardening closeout.
+v1 is shipped and archived. Current focus is defining the next milestone scope and fresh requirements.
 
 ## Resume
 
-**Stopped at:** v1 milestone audit complete
-**Resume file:** `.planning/v1-MILESTONE-AUDIT.md`
+**Stopped at:** v1 milestone archived
+**Resume file:** `.planning/MILESTONES.md`
 
 ## Memory
 
@@ -49,4 +53,5 @@ Milestone v1 is functionally complete. Phase artifacts verify the `.aof` workspa
 - Phase 5 research is captured in `.planning/phases/05-verification-and-hardening/05-RESEARCH.md`.
 - Phase 5 planning produced 3 plans in `.planning/phases/05-verification-and-hardening/`.
 - Phase 5 execution completed and passed verification in `.planning/phases/05-verification-and-hardening/05-VERIFICATION.md`.
-- Milestone v1 audit is captured in `.planning/v1-MILESTONE-AUDIT.md`; it finds no critical product gaps.
+- Milestone v1 audit is archived in `.planning/milestones/v1-MILESTONE-AUDIT.md`; it finds no critical product gaps.
+- Milestone v1 roadmap and requirements are archived in `.planning/milestones/`; live roadmap is collapsed for constant-size planning context.
