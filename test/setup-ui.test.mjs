@@ -14,6 +14,10 @@ export const setupUiTests = [
     run: rejectsMalformedJsonAndRouteMismatch
   },
   {
+    name: "setup UI saves and validates expanded config sections",
+    run: savesAndValidatesExpandedSections
+  },
+  {
     name: "setup UI hardens catalog endpoint validation",
     run: hardensCatalogEndpointValidation
   },
@@ -96,6 +100,55 @@ async function rejectsMalformedJsonAndRouteMismatch() {
     payload = await response.json();
     assert.equal(response.status, 400);
     assert.equal(payload.code, "invalid-kind");
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function savesAndValidatesExpandedSections() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
+  try {
+    let response = await fetch(`${url}api/config/sections`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ settings: "bad" })
+    });
+    let payload = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(payload.ok, false);
+    assert.ok(payload.diagnostics.some((item) => item.path === "settings"));
+
+    response = await fetch(`${url}api/config/sections`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        mcpServers: [
+          { id: "docs", transport: "http", url: "https://example.test/mcp", runtimes: ["codex"] }
+        ],
+        hooks: [
+          { id: "test-after-write", event: "PostToolUse", command: "npm test", runtimes: ["codex"] }
+        ],
+        projectDocs: [
+          { id: "root", body: "Guidance", targets: ["AGENTS.md"], runtimes: ["codex"] }
+        ],
+        settings: {
+          codex: { approval_policy: "on-request" }
+        }
+      })
+    });
+    payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(payload.ok, true);
+
+    const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.equal(config.mcpServers[0].id, "docs");
+    assert.equal(config.settings.codex.approval_policy, "on-request");
   } finally {
     server.close();
     await rm(targetDir, { recursive: true, force: true });

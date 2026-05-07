@@ -122,6 +122,16 @@ Feature: AOF CLI
     And file `CLAUDE.md` should contain `Included guidance`
     And JSON file `.aof/aof.lock.json` should contain generated file `AGENTS.md`
 
+  Scenario: Preview expanded DSL primitives before applying
+    Given a project with expanded .aof DSL config
+    When I run `sync --dry-run`
+    Then the command should succeed
+    And stdout should contain `create:`
+    And stdout should contain `lock-preview:`
+    And file `AGENTS.md` should not exist
+    And file `.codex/config.toml` should not exist
+    And file `.aof/aof.lock.json` should not exist
+
   Scenario: Preview apply without writing runtime files or lock state
     Given a project with .aof file-backed config
     When I run `apply --codex --dry-run`

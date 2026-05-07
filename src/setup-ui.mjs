@@ -2,7 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { capabilitiesPayload, loadEditableConfig, saveEditableResource } from "./config-editor.mjs";
+import { capabilitiesPayload, loadEditableConfig, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -36,6 +36,17 @@ export async function serveSetupUi(catalog, options = {}) {
 
     if (request.method === "GET" && requestUrl.pathname === "/api/capabilities") {
       sendJson(response, 200, capabilitiesPayload());
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === "/api/config/sections") {
+      try {
+        const sections = await readJsonBody(request);
+        const result = await saveEditableSections(projectDir, sections);
+        sendJson(response, result.ok ? 200 : 400, result);
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
       return;
     }
 

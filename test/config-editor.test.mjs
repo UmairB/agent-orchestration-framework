@@ -3,7 +3,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
-import { capabilitiesPayload, loadEditableConfig, saveEditableResource, validateEditableResource } from "../src/config-editor.mjs";
+import { capabilitiesPayload, loadEditableConfig, saveEditableResource, saveEditableSections, validateEditableResource } from "../src/config-editor.mjs";
 
 export const configEditorTests = [
   {
@@ -17,6 +17,10 @@ export const configEditorTests = [
   {
     name: "loads editable config with resolved body",
     run: loadsEditableConfig
+  },
+  {
+    name: "loads and saves expanded editable sections",
+    run: loadsAndSavesExpandedSections
   },
   {
     name: "rejects invalid editable resource saves",
@@ -103,6 +107,53 @@ async function rejectsInvalidSave() {
     const result = await saveEditableResource(targetDir, { kind: "skill", id: "bad", runtimes: [] });
     assert.equal(result.ok, false);
     assert.ok(result.diagnostics.some((item) => item.blocking));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function loadsAndSavesExpandedSections() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const save = await saveEditableSections(targetDir, {
+      mcpServers: [
+        { id: "docs", transport: "http", url: "https://example.test/mcp", runtimes: ["codex"] }
+      ],
+      hooks: [
+        { id: "test-after-write", event: "PostToolUse", command: "npm test", runtimes: ["codex"] }
+      ],
+      projectDocs: [
+        { id: "root", body: "Guidance", targets: ["AGENTS.md"], runtimes: ["codex"] }
+      ],
+      settings: {
+        codex: { approval_policy: "on-request" }
+      }
+    });
+
+    assert.equal(save.ok, true);
+    const payload = await loadEditableConfig(targetDir);
+    assert.equal(payload.mcpServers[0].id, "docs");
+    assert.equal(payload.hooks[0].id, "test-after-write");
+    assert.equal(payload.projectDocs[0].body, "Guidance");
+    assert.equal(payload.settings.codex.approval_policy, "on-request");
+
+    const resourceSave = await saveEditableResource(targetDir, {
+      kind: "skill",
+      id: "context",
+      body: "Body",
+      runtimes: ["codex"]
+    });
+    assert.equal(resourceSave.ok, true);
+    const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.equal(config.mcpServers[0].id, "docs");
+
+    const invalid = await saveEditableSections(targetDir, {
+      hooks: [
+        { id: "bad", event: "Nope", command: "npm test" }
+      ]
+    });
+    assert.equal(invalid.ok, false);
+    assert.ok(invalid.diagnostics.some((item) => item.path === "hooks[0].event"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

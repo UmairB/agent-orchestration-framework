@@ -177,8 +177,10 @@ aof install
 
 The setup UI is a `.aof/` configuration editor. It edits file-backed skills,
 commands, agents, and rules; runtime targets; and runtime-specific overrides.
-It shows runtime capability differences before apply, including mapped behavior
-such as Codex rule guidance rendering through `AGENTS.md`.
+It also exposes compact JSON editors for MCP servers, hooks, project docs, and
+runtime settings. It shows runtime capability differences before apply,
+including mapped behavior such as Codex rule guidance rendering through
+`AGENTS.md`.
 
 The UI writes source-of-truth files under `.aof/` only. It does not run
 `aof init`, `aof apply`, dry-run, `aof install`, or shell commands. Use the
@@ -267,9 +269,83 @@ Rules render differently per runtime:
 - Codex: `AGENTS.md` or nested `AGENTS.md` for natural-language guidance.
 - Codex `.codex/rules/*.rules` files are execution-policy rules, not natural-language guidance. AOF treats them as a separate future asset type.
 
+Expanded project primitives live beside `resources[]` in `.aof/aof.config.json`.
+They are rendered by `aof apply` and `aof sync` like other generated outputs:
+
+```json
+{
+  "name": "demo",
+  "resources": [],
+  "mcpServers": [
+    {
+      "id": "docs",
+      "transport": "http",
+      "url": "https://example.test/mcp",
+      "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" },
+      "runtimes": ["claude", "codex"]
+    },
+    {
+      "id": "local-tools",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["tools/mcp-server.mjs"],
+      "env": { "NODE_ENV": "development" },
+      "runtimes": ["codex"]
+    }
+  ],
+  "hooks": [
+    {
+      "id": "test-after-write",
+      "event": "PostToolUse",
+      "matcher": "Write",
+      "type": "command",
+      "command": "npm test",
+      "runtimes": ["claude", "codex"]
+    }
+  ],
+  "projectDocs": [
+    {
+      "id": "root-guidance",
+      "path": "assets/docs/root.md",
+      "targets": ["AGENTS.md", "CLAUDE.md"],
+      "runtimes": ["claude", "codex"]
+    }
+  ],
+  "settings": {
+    "claude": {
+      "permissions": { "allow": ["Bash(npm test)"] }
+    },
+    "codex": {
+      "model": "gpt-5.4",
+      "approval_policy": "on-request"
+    }
+  }
+}
+```
+
+`mcpServers[]` renders to root `.mcp.json` for Claude Code and
+`.codex/config.toml` for Codex. `hooks[]` currently supports the common Phase 7
+command-hook shape and renders to `.claude/settings.json` and
+`.codex/config.toml`; richer hook degradation and warnings are planned for the
+next phase. Runtime-specific `claude` and `codex` objects are passed only to the
+matching runtime.
+
+`projectDocs[]` renders root `AGENTS.md` for Codex and root `CLAUDE.md` for
+Claude Code. File-backed docs can include other `.aof/` files relative to the
+source doc:
+
+```md
+Shared project guidance.
+
+{{include partials/testing.md}}
+```
+
+Includes are rejected when they are missing, recursive, absolute, or escape the
+`.aof/` workspace. Multiple docs targeting the same root file are ordered by id.
+
 Generated assistant folders such as `.claude/` and `.codex/` are output, not source of truth for this project. AOF writes small generated markers into Markdown output where the format allows it, but `.aof/aof.lock.json` is authoritative for ownership. The lock manifest records generated file paths, target runtimes, source asset ids and kinds, content hashes, managed framework intent, and framework install attempts.
 
-When `aof apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. Re-run with `aof apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
+When `aof apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. This includes root `AGENTS.md`, root `CLAUDE.md`, root `.mcp.json`, `.claude/settings.json`, and `.codex/config.toml` when they are generated from expanded primitives. Re-run with `aof apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
 
 Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof apply`. `aof apply` does not run framework installers; use commands such as `aof install gsd` for installer execution.
 

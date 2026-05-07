@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 type RuntimeId = "claude" | "codex";
 type ResourceKind = "skill" | "command" | "agent" | "rule";
+type SectionKind = "mcpServers" | "hooks" | "projectDocs" | "settings";
 
 type Diagnostic = {
   severity: "error" | "warning" | "info" | "ok";
@@ -50,6 +51,10 @@ type ConfigPayload = {
   name: string;
   resources: EditableResource[];
   packages: Array<{ id: string; source: string; runtimes?: RuntimeId[] }>;
+  mcpServers: unknown[];
+  hooks: unknown[];
+  projectDocs: unknown[];
+  settings: Record<string, unknown>;
   diagnostics: Diagnostic[];
   capabilities: {
     runtimes: Record<RuntimeId, { id: RuntimeId; name: string }>;
@@ -66,10 +71,16 @@ const kinds: Array<{ id: ResourceKind; label: string; icon: React.ReactNode }> =
 ];
 
 const runtimes: RuntimeId[] = ["claude", "codex"];
+const sections: Array<{ id: SectionKind; label: string; icon: React.ReactNode }> = [
+  { id: "mcpServers", label: "MCP Servers", icon: <Library className="h-4 w-4" aria-hidden="true" /> },
+  { id: "hooks", label: "Hooks", icon: <Code2 className="h-4 w-4" aria-hidden="true" /> },
+  { id: "projectDocs", label: "Project Docs", icon: <FileText className="h-4 w-4" aria-hidden="true" /> },
+  { id: "settings", label: "Settings", icon: <Settings2 className="h-4 w-4" aria-hidden="true" /> }
+];
 
 function App() {
   const [payload, setPayload] = useState<ConfigPayload | null>(null);
-  const [activeKind, setActiveKind] = useState<ResourceKind | "review">("skill");
+  const [activeKind, setActiveKind] = useState<ResourceKind | SectionKind | "review">("skill");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditableResource | null>(null);
   const [message, setMessage] = useState("");
@@ -79,12 +90,12 @@ function App() {
   }, []);
 
   const activeResources = useMemo(() => {
-    if (!payload || activeKind === "review") return [];
+    if (!payload || !isResourceKind(activeKind)) return [];
     return payload.resources.filter((resource) => resource.kind === activeKind);
   }, [activeKind, payload]);
 
   const selectedResource = useMemo(() => {
-    if (!selectedId || activeKind === "review") return null;
+    if (!selectedId || !isResourceKind(activeKind)) return null;
     return activeResources.find((resource) => resource.id === selectedId) ?? null;
   }, [activeKind, activeResources, selectedId]);
 
@@ -172,6 +183,25 @@ function App() {
                 <span className="mono text-xs">{payload.resources.filter((resource) => resource.kind === kind.id).length}</span>
               </button>
             ))}
+            <div className="pt-3">
+              <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
+              {sections.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveKind(section.id);
+                    setSelectedId(null);
+                    setDraft(null);
+                    setMessage("");
+                  }}
+                  className={`flex h-10 w-full items-center justify-between rounded-md px-3 text-left text-sm transition ${activeKind === section.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                >
+                  <span className="flex items-center gap-2">{section.icon}{section.label}</span>
+                  <span className="mono text-xs">{sectionCount(payload, section.id)}</span>
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => {
@@ -195,6 +225,8 @@ function App() {
 
         {activeKind === "review" ? (
           <ReviewPanel payload={payload} />
+        ) : isSectionKind(activeKind) ? (
+          <SectionEditor activeSection={activeKind} payload={payload} refreshConfig={refreshConfig} />
         ) : (
           <section className="grid min-h-screen grid-cols-[320px_minmax(0,1fr)] max-[1050px]:grid-cols-1">
             <div className="border-r border-border p-5 max-[1050px]:border-b max-[1050px]:border-r-0">
@@ -436,6 +468,74 @@ function OverrideSection({ runtime, draft, setDraft, payload }: { runtime: Runti
   );
 }
 
+function SectionEditor({ activeSection, payload, refreshConfig }: { activeSection: SectionKind; payload: ConfigPayload; refreshConfig: () => Promise<void> }) {
+  const [draft, setDraft] = useState(() => sectionJson(payload, activeSection));
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    setDraft(sectionJson(payload, activeSection));
+    setMessage("");
+  }, [payload, activeSection]);
+
+  async function saveSection(event: React.FormEvent) {
+    event.preventDefault();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(draft);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Invalid JSON");
+      return;
+    }
+
+    const response = await fetch("/api/config/sections", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ [activeSection]: parsed })
+    });
+    const result = await response.json();
+    if (!response.ok || result.ok === false) {
+      setMessage(result.error ?? result.diagnostics?.[0]?.message ?? "Save failed");
+      return;
+    }
+
+    setMessage(`Saved ${sectionLabel(activeSection)}`);
+    await refreshConfig();
+  }
+
+  const relatedDiagnostics = payload.diagnostics.filter((item) => item.path === activeSection || item.path.startsWith(`${activeSection}[`) || item.path.startsWith(`${activeSection}.`));
+
+  return (
+    <section className="p-5">
+      <form className="mx-auto max-w-5xl space-y-5" onSubmit={saveSection}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold">{sectionLabel(activeSection)}</h2>
+            <p className="text-sm text-muted-foreground">{sectionHint(activeSection)}</p>
+          </div>
+          <Button type="submit">
+            <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+
+        {message ? <p className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">{message}</p> : null}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{sectionLabel(activeSection)}</CardTitle>
+            <CardDescription>{sectionSchemaHint(activeSection)}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Textarea className="mono min-h-[420px]" value={draft} onChange={(event) => setDraft(event.target.value)} />
+          </CardContent>
+        </Card>
+
+        <ValidationPanel diagnostics={relatedDiagnostics} />
+      </form>
+    </section>
+  );
+}
+
 function ReviewPanel({ payload }: { payload: ConfigPayload }) {
   const allDiagnostics = [
     ...payload.diagnostics,
@@ -499,6 +599,20 @@ function ReviewPanel({ payload }: { payload: ConfigPayload }) {
           <CardContent className="space-y-2 text-sm">
             {payload.packages.length === 0 ? <p className="text-muted-foreground">No managed packages.</p> : payload.packages.map((item) => (
               <p key={item.id} className="mono text-xs">{item.id} {item.source}</p>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Expanded DSL</CardTitle>
+            <CardDescription>Generated project config</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {sections.map((section) => (
+              <div key={section.id} className="flex items-center justify-between gap-3">
+                <span>{section.label}</span>
+                <span className="mono text-xs">{sectionCount(payload, section.id)}</span>
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -660,6 +774,40 @@ function splitList(value: string) {
 
 function labelForKind(kind: ResourceKind) {
   return kinds.find((item) => item.id === kind)?.label ?? kind;
+}
+
+function isResourceKind(value: ResourceKind | SectionKind | "review"): value is ResourceKind {
+  return kinds.some((kind) => kind.id === value);
+}
+
+function isSectionKind(value: ResourceKind | SectionKind | "review"): value is SectionKind {
+  return sections.some((section) => section.id === value);
+}
+
+function sectionLabel(section: SectionKind) {
+  return sections.find((item) => item.id === section)?.label ?? section;
+}
+
+function sectionJson(payload: ConfigPayload, section: SectionKind) {
+  return `${JSON.stringify(payload[section], null, 2)}\n`;
+}
+
+function sectionCount(payload: ConfigPayload, section: SectionKind) {
+  if (section === "settings") return Object.keys(payload.settings ?? {}).length;
+  const value = payload[section];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function sectionHint(section: SectionKind) {
+  if (section === "mcpServers") return "Project MCP declarations rendered to runtime config files.";
+  if (section === "hooks") return "Common command hooks with runtime-specific escape hatches.";
+  if (section === "projectDocs") return "Root assistant guidance rendered to AGENTS.md and CLAUDE.md.";
+  return "Runtime-specific settings merged into generated project config.";
+}
+
+function sectionSchemaHint(section: SectionKind) {
+  if (section === "settings") return "JSON object";
+  return "JSON array";
 }
 
 function runtimeName(runtime: RuntimeId) {

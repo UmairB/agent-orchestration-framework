@@ -39,6 +39,10 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
       name: path.basename(path.resolve(projectDir)),
       resources: [],
       packages: [],
+      mcpServers: [],
+      hooks: [],
+      projectDocs: [],
+      settings: {},
       diagnostics: [],
       capabilities: capabilitiesPayload(),
       nextCommands: nextCommands([])
@@ -56,6 +60,10 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
     name: config.name ?? path.basename(path.resolve(projectDir)),
     resources: (config.resources ?? []).map((resource) => editableResource(resource)),
     packages: config.packages ?? [],
+    mcpServers: config.mcpServers ?? [],
+    hooks: config.hooks ?? [],
+    projectDocs: config.projectDocs ?? [],
+    settings: config.settings ?? {},
     diagnostics,
     capabilities: capabilitiesPayload(),
     nextCommands: nextCommands(config.packages ?? [])
@@ -97,6 +105,10 @@ export async function saveEditableResource(projectDir = process.cwd(), input = {
     name: existing.name ?? path.basename(path.resolve(projectDir)),
     resources,
     packages: existing.packages ?? [],
+    ...(existing.mcpServers ? { mcpServers: existing.mcpServers } : {}),
+    ...(existing.hooks ? { hooks: existing.hooks } : {}),
+    ...(existing.projectDocs ? { projectDocs: existing.projectDocs } : {}),
+    ...(existing.settings ? { settings: existing.settings } : {}),
     ...(existing.items ? { items: existing.items } : {}),
     ...(existing.runtimes ? { runtimes: existing.runtimes } : {})
   };
@@ -108,6 +120,46 @@ export async function saveEditableResource(projectDir = process.cwd(), input = {
     diagnostics,
     resource: editableResource({ ...metadata, body: resource.body, overrides: resource.overrides }),
     configPath: paths.configPath
+  };
+}
+
+export async function saveEditableSections(projectDir = process.cwd(), input = {}, options = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {
+      ok: false,
+      diagnostics: [diagnostic("error", "sections", "Expanded section payload must be an object.", true)]
+    };
+  }
+
+  const paths = workspacePaths(projectDir);
+  const configPath = await findProjectConfig(projectDir, options.config);
+  const existing = await readExistingConfig(projectDir, configPath);
+  const config = {
+    $schema: existing.$schema ?? "../schemas/aof.schema.json",
+    name: existing.name ?? path.basename(path.resolve(projectDir)),
+    resources: existing.resources ?? [],
+    packages: existing.packages ?? [],
+    ...(Object.hasOwn(input, "mcpServers") ? { mcpServers: input.mcpServers } : existing.mcpServers ? { mcpServers: existing.mcpServers } : {}),
+    ...(Object.hasOwn(input, "hooks") ? { hooks: input.hooks } : existing.hooks ? { hooks: existing.hooks } : {}),
+    ...(Object.hasOwn(input, "projectDocs") ? { projectDocs: input.projectDocs } : existing.projectDocs ? { projectDocs: existing.projectDocs } : {}),
+    ...(Object.hasOwn(input, "settings") ? { settings: input.settings } : existing.settings ? { settings: existing.settings } : {}),
+    ...(existing.items ? { items: existing.items } : {}),
+    ...(existing.runtimes ? { runtimes: existing.runtimes } : {})
+  };
+
+  const validationPath = path.join(paths.workspaceDir, "aof.config.validate.json");
+  await writeText(validationPath, `${JSON.stringify(config, null, 2)}\n`);
+  const diagnostics = await validateConfig(projectDir, { ...options, config: validationPath });
+  await rm(validationPath, { force: true });
+  if (diagnostics.some((item) => item.severity === "error")) {
+    return { ok: false, diagnostics };
+  }
+
+  await writeText(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
+  return {
+    ok: true,
+    diagnostics,
+    config: await loadEditableConfig(projectDir, { ...options, config: paths.configPath })
   };
 }
 
