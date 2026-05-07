@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 6: CLI Lifecycle Commands
-**Status:** Phase 6 context gathered; ready for planning
+**Status:** Phase 6 planned; ready to execute
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is planning Phase 6: adding first-class CLI lifecycle commands for scaffold, sync, validate, doctor, and clean behavior.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 6: adding first-class CLI lifecycle commands for scaffold, sync, validate, doctor, and clean behavior.
 
 ## Current Position
 
 Phase: 6 - CLI Lifecycle Commands
-Plan: —
-Status: Context gathered; ready for planning
-Last activity: 2026-05-07 — Phase 6 context captured
+Plan: 3 plans ready
+Status: Ready to execute
+Last activity: 2026-05-07 — Phase 6 plans created
 
 ## Resume
 
-**Stopped at:** Phase 6 context gathered
-**Resume file:** `.planning/phases/06-cli-lifecycle-commands/06-CONTEXT.md`
+**Stopped at:** Phase 6 planned
+**Resume file:** `.planning/phases/06-cli-lifecycle-commands/06-01-PLAN.md`
 
 ## Memory
 
@@ -67,3 +67,5 @@ Last activity: 2026-05-07 — Phase 6 context captured
 - Deferred from v1.1: broad runtime expansion, Rust migration, UI execution, hosted registry, and task management.
 - The local `gsd-sdk` binary does not expose the `query` subcommands referenced by the installed GSD workflow, so v1.1 planning files were updated manually.
 - Phase 6 context is captured in `.planning/phases/06-cli-lifecycle-commands/06-CONTEXT.md`.
+- Phase 6 research is captured in `.planning/phases/06-cli-lifecycle-commands/06-RESEARCH.md`.
+- Phase 6 planning produced 3 plans in `.planning/phases/06-cli-lifecycle-commands/`.

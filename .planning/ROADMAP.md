@@ -48,6 +48,18 @@
 4. `aof doctor` reports project setup health, stale lock/package state, and actionable remediation hints.
 5. `aof clean` removes AOF-owned generated outputs while preserving `.aof/` source files.
 
+**Plans:**
+- Wave 1: `06-01-PLAN.md` — Top-level diagnostics and lifecycle help.
+- Wave 2 *(blocked on Wave 1 completion)*: `06-02-PLAN.md` — File-backed scaffold command.
+- Wave 3 *(blocked on Wave 1 and Wave 2 completion)*: `06-03-PLAN.md` — Sync and clean lifecycle commands.
+
+**Cross-cutting constraints:**
+- Human-readable output remains the default; `--json` is added where automation benefits.
+- Dry-run paths must be side-effect-free and print exact planned operations.
+- Generated-output drift is preserved by default.
+- Networked package installer execution must remain opt-in and explicit.
+- New user-facing CLI behavior requires BDD coverage.
+
 ### Phase 7: Expanded DSL Primitives
 
 **Goal:** Expand the source model to cover MCP servers, hooks, project docs, and settings while keeping v1 skills, commands, agents, and rules stable.
@@ -102,7 +114,7 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 0/0 | 0/22 | Planning | — |
+| v1.1 Aligned Core Hardening | 6-10 | 3/3 | 0/22 | Planning | — |
 
 ## Next
 
