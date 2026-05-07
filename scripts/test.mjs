@@ -9,6 +9,7 @@ import { configInspectTests } from "../test/config-inspect.test.mjs";
 import { configEditorTests } from "../test/config-editor.test.mjs";
 import { frameworkTests } from "../test/frameworks.test.mjs";
 import { cleanTests } from "../test/clean.test.mjs";
+import { dslPrimitiveTests } from "../test/dsl-primitives.test.mjs";
 import { setupUiTests } from "../test/setup-ui.test.mjs";
 import { schemaTests } from "../test/schema.test.mjs";
 
@@ -19,6 +20,7 @@ const tests = [
   ...configEditorTests,
   ...frameworkTests,
   ...cleanTests,
+  ...dslPrimitiveTests,
   ...setupUiTests,
   ...schemaTests,
   ...modelTests,

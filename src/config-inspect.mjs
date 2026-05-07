@@ -3,12 +3,25 @@ import { access, readFile } from "node:fs/promises";
 import { loadConfig } from "./dsl.mjs";
 import { readLock } from "./lock.mjs";
 import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
-import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
+import {
+  supportedHookEvents,
+  supportedHookTypes,
+  supportedMcpTransports,
+  supportedProjectDocTargets,
+  supportedResourceKinds,
+  supportedRuntimes,
+  supportedTrustModes
+} from "./model.mjs";
 import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_PACKAGES = new Set(["gsd"]);
+const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
+const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
+const VALID_HOOK_TYPES = new Set(supportedHookTypes());
+const VALID_DOC_TARGETS = new Set(supportedProjectDocTargets());
+const VALID_TRUST_MODES = new Set(supportedTrustModes());
 
 export async function inspectConfig(projectDir = process.cwd(), options = {}) {
   const paths = workspacePaths(projectDir);
@@ -36,6 +49,10 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
       runtimes: resource.runtimes
     })) ?? [],
     packages: config?.packages ?? [],
+    mcpServers: config?.mcpServers?.map((server) => ({ id: server.id, transport: server.transport, runtimes: server.runtimes })) ?? [],
+    hooks: config?.hooks?.map((hook) => ({ id: hook.id, event: hook.event, type: hook.type, runtimes: hook.runtimes })) ?? [],
+    projectDocs: config?.projectDocs?.map((doc) => ({ id: doc.id, targets: doc.targets, runtimes: doc.runtimes })) ?? [],
+    settings: config?.settings ?? {},
     diagnostics
   };
 }
@@ -64,6 +81,18 @@ export async function validateConfig(projectDir = process.cwd(), options = {}) {
   if (raw.packages !== undefined && !Array.isArray(raw.packages)) {
     diagnostics.push(diagnostic("error", "packages", "packages must be an array when provided."));
   }
+  if (raw.mcpServers !== undefined && !Array.isArray(raw.mcpServers)) {
+    diagnostics.push(diagnostic("error", "mcpServers", "mcpServers must be an array when provided."));
+  }
+  if (raw.hooks !== undefined && !Array.isArray(raw.hooks)) {
+    diagnostics.push(diagnostic("error", "hooks", "hooks must be an array when provided."));
+  }
+  if (raw.projectDocs !== undefined && !Array.isArray(raw.projectDocs)) {
+    diagnostics.push(diagnostic("error", "projectDocs", "projectDocs must be an array when provided."));
+  }
+  if (raw.settings !== undefined && (!raw.settings || typeof raw.settings !== "object" || Array.isArray(raw.settings))) {
+    diagnostics.push(diagnostic("error", "settings", "settings must be an object when provided."));
+  }
 
   const baseDir = path.dirname(configPath);
   for (const [index, resource] of (Array.isArray(raw.resources) ? raw.resources : []).entries()) {
@@ -73,6 +102,11 @@ export async function validateConfig(projectDir = process.cwd(), options = {}) {
   for (const [index, pkg] of (Array.isArray(raw.packages) ? raw.packages : []).entries()) {
     validatePackage(pkg, index, diagnostics);
   }
+  validateDuplicates(raw.resources, "resources", (item) => item && `${item.kind}:${item.id}`, diagnostics);
+  await validateMcpServers(Array.isArray(raw.mcpServers) ? raw.mcpServers : [], baseDir, diagnostics);
+  validateHooks(Array.isArray(raw.hooks) ? raw.hooks : [], diagnostics);
+  await validateProjectDocs(Array.isArray(raw.projectDocs) ? raw.projectDocs : [], baseDir, diagnostics);
+  validateSettings(raw.settings, diagnostics);
 
   return diagnostics;
 }
@@ -189,6 +223,122 @@ async function validateResource(resource, index, baseDir, diagnostics) {
   }
 }
 
+async function validateMcpServers(servers, baseDir, diagnostics) {
+  validateDuplicates(servers, "mcpServers", (server) => server?.id, diagnostics);
+  for (const [index, server] of servers.entries()) {
+    const location = `mcpServers[${index}]`;
+    if (!server || typeof server !== "object" || Array.isArray(server)) {
+      diagnostics.push(diagnostic("error", location, "Each MCP server must be an object."));
+      continue;
+    }
+    validateId(server.id, `${location}.id`, "MCP server id is required.", diagnostics);
+    const transport = server.transport ?? (server.url ? "http" : "stdio");
+    if (!VALID_MCP_TRANSPORTS.has(transport)) {
+      diagnostics.push(diagnostic("error", `${location}.transport`, `Unsupported MCP transport "${transport}".`));
+    }
+    if (transport === "stdio" && (typeof server.command !== "string" || server.command.trim() === "")) {
+      diagnostics.push(diagnostic("error", `${location}.command`, "stdio MCP servers require a command."));
+    }
+    if ((transport === "http" || transport === "sse") && (typeof server.url !== "string" || server.url.trim() === "")) {
+      diagnostics.push(diagnostic("error", `${location}.url`, `${transport} MCP servers require a url.`));
+    }
+    if (server.args !== undefined && !Array.isArray(server.args)) {
+      diagnostics.push(diagnostic("error", `${location}.args`, "MCP server args must be an array when provided."));
+    }
+    if (server.env !== undefined && (!server.env || typeof server.env !== "object" || Array.isArray(server.env))) {
+      diagnostics.push(diagnostic("error", `${location}.env`, "MCP server env must be an object when provided."));
+    }
+    if (server.headers !== undefined && (!server.headers || typeof server.headers !== "object" || Array.isArray(server.headers))) {
+      diagnostics.push(diagnostic("error", `${location}.headers`, "MCP server headers must be an object when provided."));
+    }
+    if (server.path) {
+      await requireFile(path.resolve(baseDir, server.path), `${location}.path`, diagnostics);
+    }
+    validateRuntimes(server.runtimes, `${location}.runtimes`, diagnostics);
+    validateRuntimeExtensionObjects(server, location, diagnostics);
+  }
+}
+
+function validateHooks(hooks, diagnostics) {
+  validateDuplicates(hooks, "hooks", (hook) => hook?.id, diagnostics);
+  for (const [index, hook] of hooks.entries()) {
+    const location = `hooks[${index}]`;
+    if (!hook || typeof hook !== "object" || Array.isArray(hook)) {
+      diagnostics.push(diagnostic("error", location, "Each hook must be an object."));
+      continue;
+    }
+    validateId(hook.id, `${location}.id`, "Hook id is required.", diagnostics);
+    if (!VALID_HOOK_EVENTS.has(hook.event)) {
+      diagnostics.push(diagnostic("error", `${location}.event`, `Unsupported hook event "${hook.event}".`));
+    }
+    const type = hook.type ?? "command";
+    if (!VALID_HOOK_TYPES.has(type)) {
+      diagnostics.push(diagnostic("error", `${location}.type`, `Unsupported hook type "${type}".`));
+    }
+    if (type === "command" && (typeof hook.command !== "string" || hook.command.trim() === "")) {
+      diagnostics.push(diagnostic("error", `${location}.command`, "Command hooks require a command."));
+    }
+    if (hook.matcher !== undefined && typeof hook.matcher !== "string") {
+      diagnostics.push(diagnostic("error", `${location}.matcher`, "Hook matcher must be a string when provided."));
+    }
+    validateRuntimes(hook.runtimes, `${location}.runtimes`, diagnostics);
+    validateRuntimeExtensionObjects(hook, location, diagnostics);
+  }
+}
+
+async function validateProjectDocs(docs, baseDir, diagnostics) {
+  validateDuplicates(docs, "projectDocs", (doc) => doc?.id, diagnostics);
+  for (const [index, doc] of docs.entries()) {
+    const location = `projectDocs[${index}]`;
+    if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+      diagnostics.push(diagnostic("error", location, "Each project doc must be an object."));
+      continue;
+    }
+    validateId(doc.id, `${location}.id`, "Project doc id is required.", diagnostics);
+    if (!doc.path && typeof doc.body !== "string") {
+      diagnostics.push(diagnostic("error", location, "Project docs require either path or body."));
+    }
+    if (doc.path) {
+      const docPath = path.resolve(baseDir, doc.path);
+      if (!isInside(baseDir, docPath)) {
+        diagnostics.push(diagnostic("error", `${location}.path`, "Project doc path must stay inside the .aof workspace."));
+      } else {
+        await requireFile(docPath, `${location}.path`, diagnostics);
+      }
+    }
+    if (doc.targets !== undefined) {
+      if (!Array.isArray(doc.targets) || doc.targets.length === 0) {
+        diagnostics.push(diagnostic("error", `${location}.targets`, "Project doc targets must be a non-empty array when provided."));
+      } else {
+        for (const target of doc.targets) {
+          if (!VALID_DOC_TARGETS.has(target)) {
+            diagnostics.push(diagnostic("error", `${location}.targets`, `Unsupported project doc target "${target}".`));
+          }
+        }
+      }
+    }
+    if (doc.includes !== undefined && !Array.isArray(doc.includes)) {
+      diagnostics.push(diagnostic("error", `${location}.includes`, "Project doc includes must be an array when provided."));
+    }
+    validateRuntimes(doc.runtimes, `${location}.runtimes`, diagnostics);
+    validateRuntimeExtensionObjects(doc, location, diagnostics);
+  }
+}
+
+function validateSettings(settings, diagnostics) {
+  if (settings === undefined || !settings || typeof settings !== "object" || Array.isArray(settings)) return;
+  if (settings.model !== undefined && typeof settings.model !== "string") {
+    diagnostics.push(diagnostic("error", "settings.model", "settings.model must be a string when provided."));
+  }
+  if (settings.trust !== undefined && !VALID_TRUST_MODES.has(settings.trust)) {
+    diagnostics.push(diagnostic("error", "settings.trust", `Unsupported trust mode "${settings.trust}".`));
+  }
+  if (settings.autoCompact !== undefined && typeof settings.autoCompact !== "boolean") {
+    diagnostics.push(diagnostic("error", "settings.autoCompact", "settings.autoCompact must be a boolean when provided."));
+  }
+  validateRuntimeExtensionObjects(settings, "settings", diagnostics);
+}
+
 function validatePackage(pkg, index, diagnostics) {
   const location = `packages[${index}]`;
   if (!pkg || typeof pkg !== "object" || Array.isArray(pkg)) {
@@ -218,6 +368,40 @@ function validateRuntimes(runtimes, location, diagnostics) {
       diagnostics.push(diagnostic("error", location, `Unsupported runtime "${runtime}".`));
     }
   }
+}
+
+function validateId(id, location, message, diagnostics) {
+  if (typeof id !== "string" || id.trim() === "") {
+    diagnostics.push(diagnostic("error", location, message));
+  }
+}
+
+function validateDuplicates(items, collectionName, keyFor, diagnostics) {
+  const seen = new Map();
+  for (const [index, item] of (items ?? []).entries()) {
+    const key = keyFor(item);
+    if (!key || String(key).includes("undefined")) continue;
+    const normalized = String(key).toLowerCase();
+    if (seen.has(normalized)) {
+      diagnostics.push(diagnostic("error", `${collectionName}[${index}].id`, `Duplicate ${collectionName} id also used at ${collectionName}[${seen.get(normalized)}].`));
+      continue;
+    }
+    seen.set(normalized, index);
+  }
+}
+
+function validateRuntimeExtensionObjects(item, location, diagnostics) {
+  for (const runtime of VALID_RUNTIMES) {
+    const value = item?.[runtime];
+    if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) {
+      diagnostics.push(diagnostic("error", `${location}.${runtime}`, `${runtime} extension must be an object when provided.`));
+    }
+  }
+}
+
+function isInside(root, filePath) {
+  const relative = path.relative(root, filePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function readOverride(filePath, location, diagnostics) {

@@ -76,6 +76,39 @@ export const CAPABILITIES = {
   }
 };
 
+export const MCP_TRANSPORTS = {
+  stdio: "stdio",
+  http: "http",
+  sse: "sse"
+};
+
+export const HOOK_EVENTS = {
+  PreToolUse: "PreToolUse",
+  PostToolUse: "PostToolUse",
+  Notification: "Notification",
+  Stop: "Stop",
+  SubagentStop: "SubagentStop",
+  UserPromptSubmit: "UserPromptSubmit",
+  SessionStart: "SessionStart",
+  SessionEnd: "SessionEnd",
+  PreCompact: "PreCompact"
+};
+
+export const HOOK_TYPES = {
+  command: "command"
+};
+
+export const PROJECT_DOC_TARGETS = {
+  agents: "AGENTS.md",
+  claude: "CLAUDE.md"
+};
+
+export const TRUST_MODES = {
+  readOnly: "read-only",
+  workspace: "workspace",
+  full: "full"
+};
+
 export const IDENTITY_FIELDS = new Set(["id", "kind"]);
 
 export function supportedRuntimes() {
@@ -84,6 +117,26 @@ export function supportedRuntimes() {
 
 export function supportedResourceKinds() {
   return Object.keys(RESOURCE_KINDS);
+}
+
+export function supportedMcpTransports() {
+  return Object.values(MCP_TRANSPORTS);
+}
+
+export function supportedHookEvents() {
+  return Object.values(HOOK_EVENTS);
+}
+
+export function supportedHookTypes() {
+  return Object.values(HOOK_TYPES);
+}
+
+export function supportedProjectDocTargets() {
+  return Object.values(PROJECT_DOC_TARGETS);
+}
+
+export function supportedTrustModes() {
+  return Object.values(TRUST_MODES);
 }
 
 export function defaultBodyFile(kind) {

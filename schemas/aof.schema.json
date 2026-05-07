@@ -26,6 +26,19 @@
         "additionalProperties": true
       }
     },
+    "mcpServers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mcpServer" }
+    },
+    "hooks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hook" }
+    },
+    "projectDocs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/projectDoc" }
+    },
+    "settings": { "$ref": "#/$defs/settings" },
     "items": {
       "type": "array",
       "items": { "type": "string" }
@@ -96,6 +109,108 @@
           "additionalProperties": true
         }
       ]
+    },
+    "mcpServer": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "transport": { "enum": ["stdio", "http", "sse"] },
+        "command": { "type": "string" },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "url": { "type": "string" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": ["claude", "codex"] }
+        },
+        "claude": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "codex": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "hook": {
+      "type": "object",
+      "required": ["id", "event"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "event": { "enum": ["PreToolUse", "PostToolUse", "Notification", "Stop", "SubagentStop", "UserPromptSubmit", "SessionStart", "SessionEnd", "PreCompact"] },
+        "matcher": { "type": "string" },
+        "type": { "enum": ["command"] },
+        "command": { "type": "string" },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": ["claude", "codex"] }
+        },
+        "claude": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "codex": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "projectDoc": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "path": { "type": "string" },
+        "body": { "type": "string" },
+        "targets": {
+          "type": "array",
+          "items": { "enum": ["AGENTS.md", "CLAUDE.md"] }
+        },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": ["claude", "codex"] }
+        },
+        "claude": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "codex": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "trust": { "enum": ["read-only", "workspace", "full"] },
+        "autoCompact": { "type": "boolean" },
+        "claude": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "codex": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

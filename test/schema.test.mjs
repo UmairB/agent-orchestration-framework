@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { RESOURCE_KINDS, supportedResourceKinds, supportedRuntimes } from "../src/model.mjs";
+import {
+  RESOURCE_KINDS,
+  supportedHookEvents,
+  supportedHookTypes,
+  supportedMcpTransports,
+  supportedProjectDocTargets,
+  supportedResourceKinds,
+  supportedRuntimes,
+  supportedTrustModes
+} from "../src/model.mjs";
 
 export const schemaTests = [
   {
@@ -25,12 +34,17 @@ async function schemaEnumsAlignWithModel() {
   assert.deepEqual(schema.properties.runtimes.items.enum.sort(), supportedRuntimes().sort());
   assert.deepEqual(schema.properties.packages.items.properties.runtimes.items.enum.sort(), supportedRuntimes().sort());
   assert.deepEqual(Object.keys(resource.properties.overrides.properties).sort(), supportedRuntimes().sort());
+  assert.deepEqual(schema.$defs.mcpServer.properties.transport.enum.sort(), supportedMcpTransports().sort());
+  assert.deepEqual(schema.$defs.hook.properties.event.enum.sort(), supportedHookEvents().sort());
+  assert.deepEqual(schema.$defs.hook.properties.type.enum.sort(), supportedHookTypes().sort());
+  assert.deepEqual(schema.$defs.projectDoc.properties.targets.items.enum.sort(), supportedProjectDocTargets().sort());
+  assert.deepEqual(schema.$defs.settings.properties.trust.enum.sort(), supportedTrustModes().sort());
 }
 
 async function schemaFieldsAlign() {
   const schema = await loadSchema();
   const resource = schema.$defs.resource;
-  for (const field of ["resources", "packages", "items", "runtimes"]) {
+  for (const field of ["resources", "packages", "mcpServers", "hooks", "projectDocs", "settings", "items", "runtimes"]) {
     assert.ok(schema.properties[field], `Missing config field ${field}`);
   }
   for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "overrides"]) {
