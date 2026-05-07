@@ -60,6 +60,11 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "add") {
+    await addCommand(rest);
+    return;
+  }
+
   if (command === "apply") {
     await applyCommand(rest);
     return;
@@ -156,6 +161,35 @@ async function initCommand(args) {
   } finally {
     catalog.close();
   }
+}
+
+async function addCommand(args) {
+  const options = parseOptions(args);
+  const [kind, id] = options._;
+  if (!kind || !id) {
+    throw new Error("Usage: aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]");
+  }
+
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const { scaffoldResource } = await import("./scaffold.mjs");
+  const result = await scaffoldResource(targetDir, {
+    kind,
+    id,
+    name: options.name,
+    description: options.description,
+    runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes(),
+    force: Boolean(options.force),
+    dryRun: Boolean(options.dryRun)
+  });
+
+  if (result.dryRun) {
+    console.log(`write: ${result.assetPath}`);
+    console.log(`write: ${result.configPath}`);
+    return;
+  }
+
+  console.log(`Created ${result.assetPath}`);
+  console.log(`Updated ${result.configPath}`);
 }
 
 async function applyCommand(args) {

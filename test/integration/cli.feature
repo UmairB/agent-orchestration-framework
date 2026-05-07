@@ -42,6 +42,36 @@ Feature: AOF CLI
     Then the command should fail
     And stderr should contain `Config already exists`
 
+  Scenario: Add a file-backed skill from the CLI
+    Given an empty project
+    When I run `add skill code-review --codex --description "Review code changes"`
+    Then the command should succeed
+    And stdout should contain `Created`
+    And file `.aof/aof.config.json` should exist
+    And file `.aof/aof.config.json` should contain `"id": "code-review"`
+    And file `.aof/aof.config.json` should contain `"path": "assets/skills/code-review/SKILL.md"`
+    And file `.aof/assets/skills/code-review/SKILL.md` should exist
+    And file `.aof/assets/skills/code-review/SKILL.md` should contain `Review code changes`
+
+  Scenario: Add refuses scaffold collisions unless forced
+    Given an empty project
+    When I run `add skill code-review --codex`
+    Then the command should succeed
+    When I run `add skill code-review --codex`
+    Then the command should fail
+    And stderr should contain `Resource already exists`
+    When I run `add skill code-review --codex --force --description "Forced replacement"`
+    Then the command should succeed
+    And file `.aof/assets/skills/code-review/SKILL.md` should contain `Forced replacement`
+
+  Scenario: Add scaffolds non-skill kinds
+    Given an empty project
+    When I run `add rule infra-files --runtime codex --description "Infrastructure guidance"`
+    Then the command should succeed
+    And file `.aof/assets/rules/infra-files/RULE.md` should exist
+    And file `.aof/aof.config.json` should contain `"kind": "rule"`
+    And file `.aof/aof.config.json` should contain `"codex"`
+
   Scenario: Refuse to silently migrate a legacy root config during init
     Given a project initialized with legacy AOF config
     When I run `init --items project-context --codex`
