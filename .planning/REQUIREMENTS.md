@@ -105,7 +105,7 @@
 
 **Coverage:**
 - v1.1 requirements: 22 total
-- Mapped to phases: 23
+- Mapped to phases: 22
 - Unmapped: 0
 
 ---
