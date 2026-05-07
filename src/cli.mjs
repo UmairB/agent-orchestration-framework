@@ -70,6 +70,16 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "sync") {
+    await syncCommand(rest);
+    return;
+  }
+
+  if (command === "clean") {
+    await cleanCommand(rest);
+    return;
+  }
+
   if (command === "migrate") {
     await migrateCommand(rest);
     return;
@@ -232,6 +242,89 @@ async function applyCommand(args) {
   await executeApplyActions(actions);
   await writeLock(paths.lockPath, manifest);
   console.log(`lock: ${paths.lockPath}`);
+}
+
+async function syncCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const { createSyncPlan, executeSyncPlan } = await import("./sync.mjs");
+  const plan = await createSyncPlan(targetDir, {
+    ...options,
+    runtimes: parseRuntimes(options)
+  });
+
+  if (options.dryRun) {
+    console.log("dry-run: no files, lock, or package installers will run");
+  }
+
+  for (const item of plan.actions) {
+    console.log(formatApplyAction(item));
+  }
+  for (const item of plan.frameworkPlan) {
+    console.log(item.skipped ? `installer-skip: ${item.command} reason=${item.skipReason}` : `installer: ${item.command}`);
+  }
+
+  const summary = plan.lockSummary;
+  console.log(`lock-preview: ${summary.files} file(s), ${summary.frameworks} framework intent(s)`);
+
+  if (options.dryRun) return;
+
+  if (plan.frameworkPlan.length > 0 && !options.install) {
+    console.log("network: disabled; use --install to run package installers");
+  }
+
+  if (options.install) {
+    for (const item of plan.frameworkPlan) {
+      if (item.skipped) {
+        console.log(`skip: ${item.runtime} ${item.skipReason}`);
+        continue;
+      }
+      console.log(`network-boundary: running ${item.command}`);
+      console.log(`package: ${item.packageSource} runtime=${item.runtime} scope=${item.scope}`);
+      console.log("warning: this command may access the network and execute npm package code");
+    }
+  }
+
+  const result = await executeSyncPlan(plan, { install: Boolean(options.install) });
+  console.log(`lock: ${plan.lockPath}`);
+  for (const attempt of result.attempts) {
+    console.log(`attempt: ${attempt.runtime} status=${attempt.status} exit=${attempt.exitStatus}`);
+  }
+  const failed = result.attempts.filter((attempt) => attempt.status === "failed");
+  if (failed.length > 0) {
+    for (const attempt of failed) console.log(`retry: ${attempt.command}`);
+    throw new Error(`Framework install failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
+  }
+}
+
+async function cleanCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const { createCleanPlan, executeCleanPlan } = await import("./clean.mjs");
+  const plan = await createCleanPlan(targetDir);
+
+  if (!plan.lock) {
+    console.log(`clean: no lock file found at ${plan.lockPath}`);
+    return;
+  }
+
+  if (options.dryRun) {
+    console.log("dry-run: no generated files or lock entries will be removed");
+  }
+
+  if (plan.actions.length === 0) {
+    console.log("clean: no generated file entries in lock");
+  }
+
+  for (const item of plan.actions) {
+    console.log(formatApplyAction(item));
+  }
+  console.log(`lock-preview: remove ${plan.removedCount} file entr${plan.removedCount === 1 ? "y" : "ies"}`);
+
+  if (options.dryRun) return;
+
+  await executeCleanPlan(plan);
+  console.log(`lock: ${plan.lockPath}`);
 }
 
 async function migrateCommand(args) {
@@ -655,7 +748,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock", "strict"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock", "strict", "install"].includes(key)) {
       options[key] = true;
       continue;
     }

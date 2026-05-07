@@ -367,6 +367,17 @@ async function runStep(context, step) {
     return;
   }
 
+  match = step.match(/^JSON file `(.+)` should not contain generated file `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    const json = JSON.parse(content);
+    assert.ok(
+      !Array.isArray(json.files) || !json.files.some((item) => normalizeFilePath(item.path) === normalizeFilePath(match[2])),
+      `Expected ${match[1]} not to contain generated file ${match[2]}`
+    );
+    return;
+  }
+
   match = step.match(/^JSON file `(.+)` should contain framework `(.+)`$/);
   if (match) {
     const content = await readFile(path.join(context.projectDir, match[1]), "utf8");

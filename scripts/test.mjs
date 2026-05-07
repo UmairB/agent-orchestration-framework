@@ -8,6 +8,7 @@ import { renderPlanTests } from "../test/render-plan.test.mjs";
 import { configInspectTests } from "../test/config-inspect.test.mjs";
 import { configEditorTests } from "../test/config-editor.test.mjs";
 import { frameworkTests } from "../test/frameworks.test.mjs";
+import { cleanTests } from "../test/clean.test.mjs";
 import { setupUiTests } from "../test/setup-ui.test.mjs";
 import { schemaTests } from "../test/schema.test.mjs";
 
@@ -17,6 +18,7 @@ const tests = [
   ...configInspectTests,
   ...configEditorTests,
   ...frameworkTests,
+  ...cleanTests,
   ...setupUiTests,
   ...schemaTests,
   ...modelTests,

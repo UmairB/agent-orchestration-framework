@@ -257,6 +257,60 @@ Feature: AOF CLI
     Then the command should succeed
     And stdout should contain `npx get-shit-done-cc@latest --codex --local`
 
+  Scenario: Sync previews packages and generated outputs without writes
+    Given a project with .aof package config
+    When I run `sync --codex --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: no files`
+    And stdout should contain `create:`
+    And stdout should contain `lock-preview:`
+    And stdout should contain `npx get-shit-done-cc@latest --codex --local`
+    And file `.codex/skills/file-backed/SKILL.md` should not exist
+    And file `.aof/aof.lock.json` should not exist
+
+  Scenario: Sync applies outputs without running installers by default
+    Given a project with .aof package config
+    When I run `sync --codex`
+    Then the command should succeed
+    And stdout should contain `network: disabled`
+    And stdout should contain `npx get-shit-done-cc@latest --codex --local`
+    And stdout should not contain `network-boundary`
+    And file `.codex/skills/file-backed/SKILL.md` should exist
+    And JSON file `.aof/aof.lock.json` should contain framework `gsd`
+
+  Scenario: Sync can explicitly run package installers
+    Given a project with .aof package config
+    When I run `sync --codex --install` with framework statuses `codex=0`
+    Then the command should succeed
+    And stdout should contain `network-boundary: running`
+    And JSON file `.aof/aof.lock.json` should contain framework install attempt `codex` with status `success`
+
+  Scenario: Clean previews and removes matching lock-owned outputs
+    Given a project with .aof file-backed config
+    When I run `apply --codex`
+    Then the command should succeed
+    When I run `clean --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: no generated files`
+    And stdout should contain `delete:`
+    And file `.codex/skills/file-backed/SKILL.md` should exist
+    When I run `clean`
+    Then the command should succeed
+    And stdout should contain `delete:`
+    And file `.codex/skills/file-backed/SKILL.md` should not exist
+    And JSON file `.aof/aof.lock.json` should not contain generated file `.codex/skills/file-backed/SKILL.md`
+
+  Scenario: Clean preserves drifted lock-owned outputs
+    Given a project with .aof file-backed config
+    When I run `apply --codex`
+    Then the command should succeed
+    When I replace file `.codex/skills/file-backed/SKILL.md` with `Manual edit`
+    And I run `clean`
+    Then the command should succeed
+    And stdout should contain `drift-warning`
+    And file `.codex/skills/file-backed/SKILL.md` should contain `Manual edit`
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/file-backed/SKILL.md`
+
   Scenario: List the catalog database
     Given an empty project
     When I run `catalog init`
