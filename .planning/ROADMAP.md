@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-07 after Phase 6 completion
+**Last updated:** 2026-05-07 after Phase 7 planning
 
 ## Milestones
 
@@ -68,12 +68,25 @@
 
 **Requirements:** DSL-01, DSL-02, DSL-03, DSL-04, DSL-05
 
+**Status:** Planned — 3 waves ready to execute.
+
 **Success criteria:**
 1. MCP server definitions render to Claude Code and Codex configuration outputs where supported.
 2. Common-core hook definitions render to both runtime targets where supported.
 3. Project docs render deterministically to AGENTS.md and CLAUDE.md, including documented include behavior.
 4. Settings support vendor-neutral defaults and runtime-specific escape hatches.
 5. Existing v1 `.aof/` configs remain valid or receive intentional migration diagnostics.
+
+**Plans:**
+- [ ] Wave 1: `07-01-PLAN.md` — Expanded DSL model and validation.
+- [ ] Wave 2 *(blocked on Wave 1 completion)*: `07-02-PLAN.md` — Runtime rendering for MCP, hooks, docs, and settings.
+- [ ] Wave 3 *(blocked on Wave 1 and Wave 2 completion)*: `07-03-PLAN.md` — UI editing and documentation for expanded DSL.
+
+**Cross-cutting constraints:**
+- Preserve `resources[]` behavior for existing skills, commands, agents, and rules.
+- Use top-level config sections for structurally different primitives: `mcpServers`, `hooks`, `projectDocs`, and `settings`.
+- Implement common-core rendering now; defer strict unsupported/lossy warning policy to Phase 8.
+- Keep setup UI as valid configuration editing and review only; CLI remains the execution surface.
 
 ### Phase 8: Adapter Degradation Policy
 
@@ -116,8 +129,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 3/3 | 5/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 6/6 | 5/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-discuss-phase 7` to gather context for Expanded DSL Primitives.
+Run `$gsd-execute-phase 7` to implement Expanded DSL Primitives.

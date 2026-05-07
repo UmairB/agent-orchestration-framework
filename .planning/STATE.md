@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 7: Expanded DSL Primitives
-**Status:** Phase 6 complete; ready to discuss Phase 7
+**Status:** Phase 7 planned; ready to execute
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is preparing Phase 7: expanding the `.aof/` DSL to cover MCP servers, hooks, project docs, and settings while preserving v1 primitives.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 7: expanding the `.aof/` DSL to cover MCP servers, hooks, project docs, and settings while preserving v1 primitives.
 
 ## Current Position
 
 Phase: 7 - Expanded DSL Primitives
-Plan: Not planned yet
-Status: Ready to discuss
-Last activity: 2026-05-07 — Phase 6 executed and verified
+Plan: 3 plans ready
+Status: Ready to execute
+Last activity: 2026-05-07 — Phase 7 plans created
 
 ## Resume
 
-**Stopped at:** Phase 6 complete
-**Resume file:** `.planning/phases/06-cli-lifecycle-commands/06-VERIFICATION.md`
+**Stopped at:** Phase 7 planned
+**Resume file:** `.planning/phases/07-expanded-dsl-primitives/07-01-PLAN.md`
 
 ## Memory
 
@@ -71,3 +71,6 @@ Last activity: 2026-05-07 — Phase 6 executed and verified
 - Phase 6 planning produced 3 plans in `.planning/phases/06-cli-lifecycle-commands/`.
 - Phase 6 execution completed with commits for diagnostics/help, scaffold, and sync/clean lifecycle commands.
 - Phase 6 verification is captured in `.planning/phases/06-cli-lifecycle-commands/06-VERIFICATION.md`; `npm run test:unit` and `npm test` passed.
+- Phase 7 planning proceeded without a CONTEXT.md because the user explicitly invoked `$gsd-plan-phase 7` after the discussion prompt.
+- Phase 7 research is captured in `.planning/phases/07-expanded-dsl-primitives/07-RESEARCH.md`.
+- Phase 7 planning produced 3 plans in `.planning/phases/07-expanded-dsl-primitives/`.
