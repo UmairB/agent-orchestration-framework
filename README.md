@@ -13,7 +13,12 @@ The initial target is local CLI usage:
 ```sh
 npm link
 aof init
+aof add skill project-context
 aof migrate
+aof sync --dry-run
+aof validate
+aof doctor
+aof clean --dry-run
 aof config show
 aof config validate
 aof config doctor
@@ -32,6 +37,39 @@ without writing runtime files, deleting stale files, or updating
 `.aof/aof.lock.json`. Each action includes the runtime, source asset, and reason
 so automation can distinguish creates, updates, deletes, skips, and drift
 warnings.
+
+Scaffold a file-backed `.aof/` asset:
+
+```sh
+aof add skill project-context --codex
+```
+
+`aof add <kind> <id>` writes source files under `.aof/assets/` and updates
+`.aof/aof.config.json`. It refuses config or file collisions unless `--force`
+is supplied.
+
+Synchronize generated outputs and managed package intent:
+
+```sh
+aof sync --codex --dry-run
+aof sync --codex
+aof sync --codex --install
+```
+
+`aof sync` applies generated runtime outputs and writes lock state while keeping
+networked package installers disabled by default. It still prints the installer
+commands so automation can decide whether to run `aof sync --install`.
+
+Remove lock-owned generated outputs:
+
+```sh
+aof clean --dry-run
+aof clean
+```
+
+`aof clean` deletes only generated files recorded in `.aof/aof.lock.json` whose
+current content still matches the recorded hash. Drifted files are preserved and
+remain in the lock.
 
 Initialize and inspect the global catalog database:
 
@@ -103,6 +141,10 @@ aof install --from-lock
 Inspect `.aof/` configuration for automation:
 
 ```sh
+aof validate
+aof validate --json
+aof doctor
+aof doctor --json
 aof config show
 aof config show --json
 aof config validate
@@ -111,9 +153,9 @@ aof config doctor
 aof config doctor --json
 ```
 
-`config validate` checks JSON shape, resource kinds, runtimes, file-backed
+`aof validate` checks JSON shape, resource kinds, runtimes, file-backed
 asset paths, runtime override identity, package ids, package sources, and
-package runtime support. `config doctor` adds project health checks such as
+package runtime support. `aof doctor` adds project health checks such as
 stale root config detection, generated-output drift summary, missing assets,
 managed package intent, and suggested next commands.
 

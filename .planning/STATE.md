@@ -1,12 +1,12 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 6: CLI Lifecycle Commands
-**Status:** Phase 6 planned; ready to execute
+**Current phase:** Phase 7: Expanded DSL Primitives
+**Status:** Phase 6 complete; ready to discuss Phase 7
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-07 after starting v1.1 milestone)
+See: `.planning/PROJECT.md` (updated 2026-05-07 after Phase 6 completion)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 6: adding first-class CLI lifecycle commands for scaffold, sync, validate, doctor, and clean behavior.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is preparing Phase 7: expanding the `.aof/` DSL to cover MCP servers, hooks, project docs, and settings while preserving v1 primitives.
 
 ## Current Position
 
-Phase: 6 - CLI Lifecycle Commands
-Plan: 3 plans ready
-Status: Ready to execute
-Last activity: 2026-05-07 — Phase 6 plans created
+Phase: 7 - Expanded DSL Primitives
+Plan: Not planned yet
+Status: Ready to discuss
+Last activity: 2026-05-07 — Phase 6 executed and verified
 
 ## Resume
 
-**Stopped at:** Phase 6 planned
-**Resume file:** `.planning/phases/06-cli-lifecycle-commands/06-01-PLAN.md`
+**Stopped at:** Phase 6 complete
+**Resume file:** `.planning/phases/06-cli-lifecycle-commands/06-VERIFICATION.md`
 
 ## Memory
 
@@ -69,3 +69,5 @@ Last activity: 2026-05-07 — Phase 6 plans created
 - Phase 6 context is captured in `.planning/phases/06-cli-lifecycle-commands/06-CONTEXT.md`.
 - Phase 6 research is captured in `.planning/phases/06-cli-lifecycle-commands/06-RESEARCH.md`.
 - Phase 6 planning produced 3 plans in `.planning/phases/06-cli-lifecycle-commands/`.
+- Phase 6 execution completed with commits for diagnostics/help, scaffold, and sync/clean lifecycle commands.
+- Phase 6 verification is captured in `.planning/phases/06-cli-lifecycle-commands/06-VERIFICATION.md`; `npm run test:unit` and `npm test` passed.

@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-06
+last_mapped: 2026-05-07
 focus: quality
 ---
 
@@ -23,8 +23,17 @@ The project has a custom lightweight test harness rather than a third-party test
 - `scripts/test-unit.mjs` imports test arrays from:
   - `test/adapters.test.mjs`
   - `test/catalog.test.mjs`
+  - `test/clean.test.mjs`
+  - `test/config-editor.test.mjs`
+  - `test/config-inspect.test.mjs`
+  - `test/frameworks.test.mjs`
+  - `test/model.test.mjs`
   - `test/paths.test.mjs`
   - `test/prompt.test.mjs`
+  - `test/render-plan.test.mjs`
+  - `test/schema.test.mjs`
+  - `test/setup-ui.test.mjs`
+  - `test/workspace.test.mjs`
 - Each test entry has a `name` and async or sync `run` function.
 - Assertions use Node's built-in `node:assert/strict`.
 - Failures print stack traces and set `process.exitCode = 1`.
@@ -46,7 +55,11 @@ The BDD feature covers:
 - `aof install --no-serve` catalog creation.
 - `aof init --items ... --codex` project initialization.
 - Refusal to overwrite existing config.
+- File-backed `aof add` scaffolding and collision behavior.
+- Top-level `aof validate` and `aof doctor` diagnostics.
 - Applying a legacy config to Codex only.
+- `aof sync` dry-run, apply-only, and explicit installer execution behavior.
+- `aof clean` dry-run, lock-owned deletion, and drift preservation behavior.
 - Catalog initialization and listing.
 - Default catalog item initialization.
 - Dry-run install preview.
@@ -56,6 +69,7 @@ The BDD feature covers:
 
 - `test/adapters.test.mjs` verifies rendering into Claude and Codex folders and runtime filtering.
 - `test/catalog.test.mjs` verifies built-in catalog seed behavior and `itemsToConfig()`.
+- `test/clean.test.mjs` verifies cleanup planning, deletion, drift preservation, and framework lock preservation.
 - `test/paths.test.mjs` verifies Windows and Linux data directory resolution.
 - `test/prompt.test.mjs` verifies item selection and runtime selection parsing.
 
@@ -75,16 +89,11 @@ The BDD feature covers:
 
 ## Gaps
 
-- No schema validation tests for `schemas/aof.schema.json`.
-- No tests for file-backed resource body resolution through `path` in `src/dsl.mjs`.
-- No tests for `src/frameworks.mjs` command construction except indirect README expectations.
-- No tests for setup UI API routes in `src/setup-ui.mjs`.
 - No tests for invalid database row JSON or SQLite migration compatibility.
 - No coverage reporting is configured.
 
 ## Useful Test Additions
 
-- Add unit tests around `loadConfig()` and `resolveConfig()` for invalid kinds, invalid runtimes, file-backed bodies, and package preservation.
-- Add tests for `installFramework(..., { dryRun: true })`.
-- Add setup UI server tests for `GET /api/items`, valid `POST /api/items`, invalid kind rejection, and malformed JSON handling.
-- Add integration scenarios for `aof install gsd --dry-run` and runtime combinations.
+- Add coverage reporting for source and branch-level confidence.
+- Add more direct unit coverage for missing-lock and absent-file clean planner branches.
+- Add invalid SQLite row and migration compatibility tests.

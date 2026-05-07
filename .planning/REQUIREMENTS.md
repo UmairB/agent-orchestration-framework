@@ -8,11 +8,11 @@
 
 ### CLI Lifecycle
 
-- [ ] **CLI-05**: User can scaffold a new `.aof/` primitive from the CLI without hand-editing JSON.
-- [ ] **CLI-06**: User can run one command that reconciles declared packages and generated runtime outputs.
-- [ ] **CLI-07**: User can validate `.aof/` configuration and DSL source files with machine-readable diagnostics.
-- [ ] **CLI-08**: User can diagnose project setup issues including stale lock state, package drift, missing assistant support, and unwritable outputs.
-- [ ] **CLI-09**: User can remove generated outputs owned by AOF without deleting source `.aof/` files.
+- [x] **CLI-05**: User can scaffold a new `.aof/` primitive from the CLI without hand-editing JSON. Validated in Phase 6.
+- [x] **CLI-06**: User can run one command that reconciles declared packages and generated runtime outputs. Validated in Phase 6.
+- [x] **CLI-07**: User can validate `.aof/` configuration and DSL source files with machine-readable diagnostics. Validated in Phase 6.
+- [x] **CLI-08**: User can diagnose project setup issues including stale lock state, package drift, missing assistant support, and unwritable outputs. Validated in Phase 6.
+- [x] **CLI-09**: User can remove generated outputs owned by AOF without deleting source `.aof/` files. Validated in Phase 6.
 
 ### DSL Primitives
 
@@ -80,11 +80,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-05 | Phase 6 | Pending |
-| CLI-06 | Phase 6 | Pending |
-| CLI-07 | Phase 6 | Pending |
-| CLI-08 | Phase 6 | Pending |
-| CLI-09 | Phase 6 | Pending |
+| CLI-05 | Phase 6 | Complete |
+| CLI-06 | Phase 6 | Complete |
+| CLI-07 | Phase 6 | Complete |
+| CLI-08 | Phase 6 | Complete |
+| CLI-09 | Phase 6 | Complete |
 | DSL-01 | Phase 7 | Pending |
 | DSL-02 | Phase 7 | Pending |
 | DSL-03 | Phase 7 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-07 after v1.1 roadmap creation*
+*Last updated: 2026-05-07 after Phase 6 completion*

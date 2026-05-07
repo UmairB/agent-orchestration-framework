@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-07 after v1.1 milestone creation
+**Last updated:** 2026-05-07 after Phase 6 completion
 
 ## Milestones
 
@@ -41,6 +41,8 @@
 
 **Requirements:** CLI-05, CLI-06, CLI-07, CLI-08, CLI-09
 
+**Status:** Complete — implemented and verified 2026-05-07.
+
 **Success criteria:**
 1. `aof add` scaffolds supported primitives into `.aof/` with valid defaults and collision checks.
 2. `aof sync` reconciles declared packages and generated runtime outputs through one automation-friendly command.
@@ -49,9 +51,9 @@
 5. `aof clean` removes AOF-owned generated outputs while preserving `.aof/` source files.
 
 **Plans:**
-- Wave 1: `06-01-PLAN.md` — Top-level diagnostics and lifecycle help.
-- Wave 2 *(blocked on Wave 1 completion)*: `06-02-PLAN.md` — File-backed scaffold command.
-- Wave 3 *(blocked on Wave 1 and Wave 2 completion)*: `06-03-PLAN.md` — Sync and clean lifecycle commands.
+- [x] Wave 1: `06-01-PLAN.md` — Top-level diagnostics and lifecycle help.
+- [x] Wave 2: `06-02-PLAN.md` — File-backed scaffold command.
+- [x] Wave 3: `06-03-PLAN.md` — Sync and clean lifecycle commands.
 
 **Cross-cutting constraints:**
 - Human-readable output remains the default; `--json` is added where automation benefits.
@@ -114,8 +116,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 3/3 | 0/22 | Planning | — |
+| v1.1 Aligned Core Hardening | 6-10 | 3/3 | 5/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-discuss-phase 6` to gather context for CLI Lifecycle Commands.
+Run `$gsd-discuss-phase 7` to gather context for Expanded DSL Primitives.

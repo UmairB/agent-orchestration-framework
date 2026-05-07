@@ -32,10 +32,10 @@ None.
 
 ## v1.1 — Aligned Core Hardening
 
-**Status:** Planning
+**Status:** In Progress
 **Started:** 2026-05-07
 **Phases:** 6-10
-**Requirements:** 22 planned
+**Requirements:** 5/22 complete
 
 ### Goal
 
@@ -48,3 +48,7 @@ Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned
 3. Formalize adapter degradation warnings, inlining behavior, pass-through extensions, and strict mode.
 4. Add framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
 5. Expand BDD coverage for lifecycle, primitives, packages, and degradation behavior.
+
+### Progress
+
+- Phase 6: CLI Lifecycle Commands — complete 2026-05-07.

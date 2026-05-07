@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-06
+last_mapped: 2026-05-07
 focus: arch
 ---
 
@@ -7,7 +7,7 @@ focus: arch
 
 ## Summary
 
-AOF is structured as a thin CLI orchestrator over focused modules: DSL loading, catalog persistence, runtime adapters, framework installation, setup UI serving, prompting, and path resolution. The architecture favors small synchronous command flows and explicit file writes over long-running background services.
+AOF is structured as a thin CLI orchestrator over focused modules: DSL loading, catalog persistence, runtime adapters, framework installation, lifecycle scaffold/sync/clean planning, setup UI serving, prompting, and path resolution. The architecture favors small synchronous command flows and explicit file writes over long-running background services.
 
 ## Entry Points
 
@@ -21,7 +21,11 @@ AOF is structured as a thin CLI orchestrator over focused modules: DSL loading, 
 `src/cli.mjs` parses the first CLI argument and routes to:
 
 - `initCommand()` for `aof init`
+- `addCommand()` for `aof add`
 - `applyCommand()` for `aof apply`
+- `syncCommand()` for `aof sync`
+- `cleanCommand()` for `aof clean`
+- `validateCommand()` and `doctorCommand()` for top-level diagnostics
 - `installCommand()` for `aof install`
 - `catalogCommand()` for `aof catalog`
 
@@ -46,6 +50,31 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 3. `src/adapters.mjs` renders each portable resource to each selected runtime.
 4. `src/fs.mjs` writes output files, unless dry-run mode is active.
 
+## Core Flow: add
+
+1. `src/cli.mjs` routes `aof add <kind> <id>` to `src/scaffold.mjs`.
+2. `src/scaffold.mjs` resolves `.aof/aof.config.json` and source asset paths.
+3. It writes a minimal file-backed asset under `.aof/assets/`.
+4. It updates `.aof/aof.config.json` with resource metadata and runtime selections.
+5. It refuses config or file collisions unless `--force` is supplied.
+
+## Core Flow: sync
+
+1. `src/sync.mjs` loads `.aof/` config and previous lock state.
+2. It builds generated output actions through render-plan primitives.
+3. It builds framework installer intent through `src/frameworks.mjs`.
+4. `aof sync --dry-run` prints output actions, installer commands, and lock preview without writing.
+5. `aof sync` writes generated outputs and lock state while leaving installers disabled.
+6. `aof sync --install` executes the explicit network-boundary installer path and records attempts.
+
+## Core Flow: clean
+
+1. `src/clean.mjs` reads generated file entries from `.aof/aof.lock.json`.
+2. It hashes current files and plans delete, skip, or drift-warning actions.
+3. Matching lock-owned generated files are deleted.
+4. Drifted generated files are preserved.
+5. Lock file entries are removed only for deleted or already-absent generated outputs, while framework intent is preserved.
+
 ## Core Flow: catalog
 
 - `aof catalog init` seeds built-in items.
@@ -62,6 +91,9 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 
 - `src/cli.mjs`: orchestration, option parsing, command output.
 - `src/catalog.mjs`: SQLite migration, built-in catalog item seed data, catalog CRUD methods, selected item conversion.
+- `src/scaffold.mjs`: file-backed `.aof/` asset scaffolding and config updates.
+- `src/sync.mjs`: combined render/package reconciliation planning and execution.
+- `src/clean.mjs`: lock-owned generated output cleanup planning and execution.
 - `src/dsl.mjs`: AOF config validation and body resolution.
 - `src/adapters.mjs`: runtime-specific render targets and frontmatter rendering.
 - `src/frameworks.mjs`: framework package install command construction and execution.

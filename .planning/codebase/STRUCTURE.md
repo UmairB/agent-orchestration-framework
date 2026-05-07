@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-06
+last_mapped: 2026-05-07
 focus: arch
 ---
 
@@ -13,7 +13,7 @@ focus: arch
 - `aof.config.json` is a sample/current local AOF project configuration.
 - `schemas/aof.schema.json` defines the JSON schema for AOF config files.
 - `bin/aof.mjs` is the CLI executable.
-- `src/` contains CLI, DSL, catalog, adapter, framework, filesystem, path, prompt, and setup UI server modules.
+- `src/` contains CLI, DSL, catalog, adapter, framework, scaffold, sync, clean, filesystem, path, prompt, and setup UI server modules.
 - `test/` contains unit tests and integration tests.
 - `scripts/` contains test runners.
 - `ui/` contains the React/Vite setup UI workspace.
@@ -23,6 +23,9 @@ focus: arch
 - `src/cli.mjs`: top-level command orchestration and option parsing.
 - `src/catalog.mjs`: built-in catalog items, SQLite migration, catalog persistence, and catalog-to-config conversion.
 - `src/adapters.mjs`: renders skills, commands, and agents into Claude/Codex filesystem layouts.
+- `src/scaffold.mjs`: scaffolds file-backed `.aof/` source assets and updates config entries.
+- `src/sync.mjs`: reconciles generated outputs and managed package intent.
+- `src/clean.mjs`: removes lock-owned generated outputs while preserving drifted files.
 - `src/dsl.mjs`: loads and normalizes `aof.config.json` style configuration.
 - `src/frameworks.mjs`: handles framework installer command generation and execution.
 - `src/fs.mjs`: shared JSON, text write, and ID normalization helpers.
@@ -33,6 +36,7 @@ focus: arch
 ## Test Files
 
 - `test/adapters.test.mjs`: verifies resource rendering into `.claude` and `.codex`.
+- `test/clean.test.mjs`: verifies lock-owned cleanup planning and drift preservation.
 - `test/catalog.test.mjs`: verifies SQLite catalog seeding and item-to-config conversion.
 - `test/paths.test.mjs`: verifies OS-specific data path selection.
 - `test/prompt.test.mjs`: verifies item and runtime selection parsing.
@@ -74,6 +78,7 @@ focus: arch
 ## Important Paths For Future Work
 
 - CLI behavior changes usually start in `src/cli.mjs`.
+- Lifecycle behavior changes often involve `src/scaffold.mjs`, `src/sync.mjs`, `src/clean.mjs`, or `src/render-plan.mjs`.
 - Config format changes require touching `src/dsl.mjs`, `schemas/aof.schema.json`, tests, and README examples.
 - Runtime rendering changes belong in `src/adapters.mjs`.
 - Catalog persistence changes belong in `src/catalog.mjs`.
@@ -84,7 +89,7 @@ focus: arch
 
 Source-scale files excluding dependencies are small enough for direct review:
 
-- Root CLI source: 9 files under `src/` plus `bin/aof.mjs`.
-- Unit tests: 4 files under `test/`.
+- Root CLI source: 19 files under `src/` plus `bin/aof.mjs`.
+- Unit tests: 13 files under `test/`.
 - Integration tests: 3 files under `test/integration/`.
 - UI source/config: Vite config, TypeScript configs, CSS, React entry, and UI primitives.

@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-06
+last_mapped: 2026-05-07
 focus: quality
 ---
 
@@ -16,7 +16,7 @@ focus: quality
 
 - Public module functions are exported with named exports.
 - Private helper functions are kept in the same module below the exported command functions.
-- `src/cli.mjs` uses command-specific helper functions rather than separate command files.
+- `src/cli.mjs` uses command-specific helper functions for routing/output, while reusable lifecycle planning is split into focused modules such as `src/scaffold.mjs`, `src/sync.mjs`, and `src/clean.mjs`.
 - `src/catalog.mjs` encapsulates the database connection in a `Catalog` class returned by `openCatalog()`.
 
 ## Error Handling
@@ -61,6 +61,7 @@ focus: quality
 - Rendered files include YAML-style frontmatter followed by the item body.
 - Claude commands use `/` invocation prefixes.
 - Codex commands use `$` invocation prefixes.
+- Generated output writes and cleanup are lock-aware; drifted generated files are reported and preserved unless an explicit force path is used.
 
 ## UI Pattern
 
