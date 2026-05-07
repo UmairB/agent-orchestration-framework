@@ -29,3 +29,22 @@ AOF now lets users define assistant-facing assets once in `.aof/`, render them t
 ### Known Deferred Items
 
 None.
+
+## v1.1 — Aligned Core Hardening
+
+**Status:** Planning
+**Started:** 2026-05-07
+**Phases:** 6-10
+**Requirements:** 22 planned
+
+### Goal
+
+Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned-core DSL and CLI lifecycle that is easier to validate, synchronize, diagnose, and extend.
+
+### Planned Scope
+
+1. Add first-class CLI lifecycle commands for scaffold, sync, validate, doctor, and clean.
+2. Expand `.aof/` primitives to cover MCP servers, hooks, project docs, and settings.
+3. Formalize adapter degradation warnings, inlining behavior, pass-through extensions, and strict mode.
+4. Add framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
+5. Expand BDD coverage for lifecycle, primitives, packages, and degradation behavior.

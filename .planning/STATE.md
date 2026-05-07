@@ -1,12 +1,12 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Planning next milestone
-**Status:** v1 milestone archived and ready for next milestone definition
+**Current phase:** Phase 6: CLI Lifecycle Commands
+**Status:** Milestone v1.1 planning complete; ready for phase discussion
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-07 after v1 milestone)
+See: `.planning/PROJECT.md` (updated 2026-05-07 after starting v1.1 milestone)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -20,12 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1 is shipped and archived. Current focus is defining the next milestone scope and fresh requirements.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is Phase 6: adding first-class CLI lifecycle commands for scaffold, sync, validate, doctor, and clean behavior.
+
+## Current Position
+
+Phase: 6 - CLI Lifecycle Commands
+Plan: —
+Status: Ready for phase discussion
+Last activity: 2026-05-07 — Milestone v1.1 started and roadmap created
 
 ## Resume
 
-**Stopped at:** v1 milestone archived
-**Resume file:** `.planning/MILESTONES.md`
+**Stopped at:** v1.1 milestone initialized
+**Resume file:** `.planning/ROADMAP.md`
 
 ## Memory
 
@@ -55,3 +62,7 @@ v1 is shipped and archived. Current focus is defining the next milestone scope a
 - Phase 5 execution completed and passed verification in `.planning/phases/05-verification-and-hardening/05-VERIFICATION.md`.
 - Milestone v1 audit is archived in `.planning/milestones/v1-MILESTONE-AUDIT.md`; it finds no critical product gaps.
 - Milestone v1 roadmap and requirements are archived in `.planning/milestones/`; live roadmap is collapsed for constant-size planning context.
+- Milestone v1.1 was derived from `C:\Users\Umair\Downloads\architecture-design-vendor-neutral-coding-assistant-dsl.html`.
+- Useful architecture deltas selected for v1.1: CLI lifecycle commands, expanded `.aof/` primitives, adapter degradation policy, framework package semantics, and BDD hardening.
+- Deferred from v1.1: broad runtime expansion, Rust migration, UI execution, hosted registry, and task management.
+- The local `gsd-sdk` binary does not expose the `query` subcommands referenced by the installed GSD workflow, so v1.1 planning files were updated manually.

@@ -10,6 +10,16 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 v1 shipped on 2026-05-07 as the assistant configuration foundation. The milestone archive is recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
+## Current Milestone: v1.1 Aligned Core Hardening
+
+**Goal:** Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned-core DSL and CLI lifecycle that is easier to validate, synchronize, diagnose, and extend.
+
+**Target features:**
+- First-class CLI lifecycle commands for adding primitives, syncing install/apply work, validating configuration, diagnosing project setup, and cleaning generated outputs.
+- Expanded `.aof/` DSL primitives for MCP servers, hooks, project documents, and settings, with explicit runtime support and graceful degradation behavior.
+- Framework package semantics for namespace enforcement, dependency metadata, package lock resolution, and conflict detection before writes.
+- BDD coverage for the aligned-core lifecycle and degradation behavior.
+
 ## Core Value
 
 Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
@@ -39,7 +49,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 
 ### Active
 
-- [ ] Define the next milestone scope with `$gsd-new-milestone`.
+- [ ] Users can manage the full aligned-core lifecycle through first-class CLI commands.
+- [ ] Users can define MCP servers, hooks, project docs, and settings in `.aof/` alongside existing skills, commands, agents, and rules.
+- [ ] Users can install framework packages with namespace, dependency, lock, and conflict semantics that prevent silent overwrites.
+- [ ] Users can see and enforce portability degradation warnings across Claude Code and Codex targets.
+- [ ] New lifecycle, package, adapter, and validation behavior is covered by BDD scenarios.
 
 ### Out of Scope
 
@@ -70,6 +84,7 @@ The codebase map in `.planning/codebase/` identifies several important design pr
 - The setup UI now supports editing `.aof/` skills, commands, agents, rules, runtime targets, capability visibility, and runtime-specific overrides.
 - Framework installation is present but should become a managed part of `.aof/` state.
 - Rules/instructions require runtime-aware modeling because support is not symmetric across assistants.
+- The reviewed architecture document at `C:\Users\Umair\Downloads\architecture-design-vendor-neutral-coding-assistant-dsl.html` identifies useful next-step deltas: CLI lifecycle commands, MCP/hooks/project-doc/settings primitives, framework package dependencies and conflict detection, graceful degradation policy, and shared BDD scenarios.
 
 The long-term product direction includes task management: kanban boards, task assignment to agents, progress visibility, and orchestration. That future should inform the data model enough to avoid painting the project into a corner, but v1 should prioritize assistant asset configuration and runtime synchronization.
 
@@ -95,10 +110,11 @@ The long-term product direction includes task management: kanban boards, task as
 | Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | Implemented in Phase 1; render behavior verified in Phase 2 |
 | v1 closeout uses explicit verification hardening | Milestone confidence depends on regression coverage across CLI, UI API, rendering, lock, and build paths | Implemented in Phase 5 |
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
+| v1.1 focuses on aligned-core hardening before new runtimes or Rust migration | The architecture review surfaced core gaps that should be solved before broad adapter expansion or a language port | — Pending |
 
 ## Next Milestone Goals
 
-The next milestone is not defined yet. Likely candidate areas are broader runtime support, UI-driven execution of safe CLI actions, or the deferred task-management direction. Define the next scope through fresh requirements rather than extending v1 requirements in place.
+v1.1 focuses on aligned-core hardening. Broader runtime support, UI-driven execution, task management, and Rust migration remain future directions until the DSL lifecycle, package model, adapter degradation policy, and BDD safety net are stronger.
 
 ## Evolution
 
@@ -118,4 +134,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-07 after v1 milestone*
+*Last updated: 2026-05-07 after starting v1.1 milestone*
