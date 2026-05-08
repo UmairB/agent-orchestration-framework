@@ -304,6 +304,69 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  if (step === "a project with referenced global assets") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "shared-review",
+      description: "Shared reviewer",
+      body: "Global review body",
+      override: { body: "Codex global override body" }
+    });
+    await writeGlobalAofResource(context, {
+      kind: "rule",
+      id: "team-standards",
+      description: "Team standards",
+      body: "Follow team standards"
+    }, { append: true });
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "shared-review" },
+        { kind: "rule", id: "team-standards" }
+      ]
+    });
+    return;
+  }
+
+  if (step === "a project with a missing global reference") {
+    await runSharedCliStep(context, "an empty project");
+    await mkdir(context.globalDir, { recursive: true });
+    await writeFile(path.join(context.globalDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "https://aof.local/schemas/aof.schema.json",
+      name: "aof-global",
+      resources: []
+    }, null, 2)}\n`, "utf8");
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "missing-shared" }
+      ]
+    });
+    return;
+  }
+
+  if (step === "a project with a local and global asset conflict") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "shared-review",
+      description: "Shared reviewer",
+      body: "Global review body"
+    });
+    await writeAofProject(context, [{
+      kind: "skill",
+      id: "shared-review",
+      description: "Local reviewer",
+      path: "assets/skills/shared-review/SKILL.md",
+      bodyPath: "assets/skills/shared-review/SKILL.md",
+      body: "Local review body"
+    }], {
+      globalRefs: [
+        { kind: "skill", id: "shared-review" }
+      ]
+    });
+    return;
+  }
+
   if (step === "a malformed global AOF config") {
     await runSharedCliStep(context, "an empty project");
     await mkdir(context.globalDir, { recursive: true });
@@ -373,6 +436,16 @@ export async function runSharedCliStep(context, step) {
     assert.ok(
       Array.isArray(json.files) && json.files.some((item) => normalizeFilePath(item.path) === normalizeFilePath(match[2])),
       `Expected ${match[1]} to contain generated file ${match[2]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` should contain global resource `(.+)`$/);
+  if (match) {
+    const json = JSON.parse(await readFile(path.join(context.projectDir, match[1]), "utf8"));
+    assert.ok(
+      Array.isArray(json.files) && json.files.some((item) => item.resource?.scope === "global" && item.resource?.id === match[2]),
+      `Expected ${match[1]} to contain global resource ${match[2]}`
     );
     return;
   }
@@ -516,7 +589,45 @@ async function writeAofProject(context, resourceInputs, options = {}) {
     $schema: "../schemas/aof.schema.json",
     name: "file-backed",
     resources,
+    globalRefs: options.globalRefs ?? [],
     packages: options.packages ?? []
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeGlobalAofResource(context, input, options = {}) {
+  const plural = input.kind === "skill" ? "skills" : input.kind === "agent" ? "agents" : "rules";
+  const bodyFile = input.kind === "skill" ? "SKILL.md" : input.kind === "agent" ? "AGENT.md" : "RULE.md";
+  const resourcePath = path.join("assets", plural, input.id, bodyFile).replaceAll(path.sep, "/");
+  const resourceDir = path.join(context.globalDir, "assets", plural, input.id);
+  await mkdir(resourceDir, { recursive: true });
+  await writeFile(path.join(resourceDir, bodyFile), `${input.body}\n`, "utf8");
+
+  const resource = {
+    kind: input.kind,
+    id: input.id,
+    description: input.description,
+    path: resourcePath,
+    runtimes: ["claude", "codex"]
+  };
+
+  if (input.override) {
+    const overridePath = path.join("assets", plural, input.id, "overrides", "codex.json").replaceAll(path.sep, "/");
+    await mkdir(path.join(resourceDir, "overrides"), { recursive: true });
+    await writeFile(path.join(context.globalDir, overridePath), `${JSON.stringify(input.override, null, 2)}\n`, "utf8");
+    resource.overrides = { codex: overridePath };
+  }
+
+  let resources = [];
+  if (options.append && await fileExists(path.join(context.globalDir, "aof.config.json"))) {
+    resources = JSON.parse(await readFile(path.join(context.globalDir, "aof.config.json"), "utf8")).resources ?? [];
+  }
+  resources.push(resource);
+
+  await mkdir(context.globalDir, { recursive: true });
+  await writeFile(path.join(context.globalDir, "aof.config.json"), `${JSON.stringify({
+    $schema: "https://aof.local/schemas/aof.schema.json",
+    name: "aof-global",
+    resources
   }, null, 2)}\n`, "utf8");
 }
 

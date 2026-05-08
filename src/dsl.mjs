@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { readJson, normalizeId } from "./fs.mjs";
 import { normalizePackages } from "./packages.mjs";
+import { globalWorkspacePaths } from "./workspace.mjs";
 import {
   supportedHookEvents,
   supportedHookTypes,
@@ -13,6 +14,7 @@ import {
 } from "./model.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
+const VALID_GLOBAL_REF_KINDS = new Set(["skill", "agent", "rule"]);
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
 const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
@@ -26,6 +28,48 @@ export async function loadConfig(configPath) {
   return resolveConfig(config, baseDir);
 }
 
+export async function loadProjectConfig(configPath, options = {}) {
+  const config = await readJson(configPath);
+  const baseDir = path.dirname(configPath);
+  const resolved = await resolveConfig(config, baseDir);
+  const globalRefs = normalizeGlobalRefs(config.globalRefs);
+  if (globalRefs.length === 0) {
+    return {
+      ...resolved,
+      resources: resolved.resources.map((resource) => withSource(resource, { scope: "local", configPath })),
+      globalRefs
+    };
+  }
+
+  const paths = globalWorkspacePaths(options);
+  const globalConfig = await readJson(paths.configPath);
+  const globalBaseDir = path.dirname(paths.configPath);
+  const globalResources = [];
+
+  for (const ref of globalRefs) {
+    const resource = (globalConfig.resources ?? []).find((item) => item.kind === ref.kind && typeof item.id === "string" && normalizeId(item.id) === ref.id);
+    if (!resource) {
+      throw new Error(`Global resource not found: ${ref.kind}:${ref.id}`);
+    }
+    globalResources.push(withSource(await resolveResource(resource, globalBaseDir), {
+      scope: "global",
+      kind: ref.kind,
+      id: ref.id,
+      configPath: paths.configPath,
+      workspaceDir: paths.workspaceDir
+    }));
+  }
+
+  return {
+    ...resolved,
+    resources: [
+      ...resolved.resources.map((resource) => withSource(resource, { scope: "local", configPath })),
+      ...globalResources
+    ],
+    globalRefs
+  };
+}
+
 export async function resolveConfig(config, baseDir = process.cwd()) {
   if (!config || typeof config !== "object") {
     throw new Error("AOF config must be a JSON object.");
@@ -36,11 +80,38 @@ export async function resolveConfig(config, baseDir = process.cwd()) {
   return {
     name: config.name ?? "assistant-project",
     resources,
+    globalRefs: normalizeGlobalRefs(config.globalRefs),
     packages: normalizePackages(config.packages ?? []),
     mcpServers: (config.mcpServers ?? []).map(resolveMcpServer),
     hooks: (config.hooks ?? []).map(resolveHook),
     projectDocs,
     settings: resolveSettings(config.settings)
+  };
+}
+
+function normalizeGlobalRefs(globalRefs) {
+  if (!globalRefs) return [];
+  if (!Array.isArray(globalRefs)) {
+    throw new Error("globalRefs must be an array when provided.");
+  }
+  return globalRefs.map((ref) => {
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) {
+      throw new Error("Each global reference must be an object.");
+    }
+    if (!VALID_GLOBAL_REF_KINDS.has(ref.kind)) {
+      throw new Error(`Unsupported global reference kind "${ref.kind}". Expected skill, agent, or rule.`);
+    }
+    return {
+      ...ref,
+      id: normalizeId(ref.id)
+    };
+  });
+}
+
+function withSource(resource, source) {
+  return {
+    ...resource,
+    _aofSource: source
   };
 }
 

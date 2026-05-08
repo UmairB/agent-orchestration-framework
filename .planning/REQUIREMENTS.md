@@ -15,17 +15,17 @@
 
 ### Project References
 
-- [ ] **GREF-01**: User can reference global assets by ID from a project `.aof` config without copying the asset into the project.
-- [ ] **GREF-02**: User receives clear validation errors when a project references a missing global asset.
-- [ ] **GREF-03**: AOF detects local/global asset ID conflicts and requires an explicit resolution rather than silently choosing one.
-- [ ] **GREF-04**: Project diagnostics show whether each rendered asset came from project-local source or the global library.
+- [x] **GREF-01**: User can reference global assets by ID from a project `.aof` config without copying the asset into the project.
+- [x] **GREF-02**: User receives clear validation errors when a project references a missing global asset.
+- [x] **GREF-03**: AOF detects local/global asset ID conflicts and requires an explicit resolution rather than silently choosing one.
+- [x] **GREF-04**: Project diagnostics show whether each rendered asset came from project-local source or the global library.
 
 ### Rendering And Lock State
 
-- [ ] **GRND-01**: `aof apply` renders referenced global assets into Claude Code and Codex outputs alongside local project assets.
-- [ ] **GRND-02**: `aof sync` includes referenced global assets in validation, warning analysis, and render planning.
-- [ ] **GRND-03**: Lock state records global asset source scope for generated outputs.
-- [ ] **GRND-04**: Runtime overrides on global assets are honored during rendering.
+- [x] **GRND-01**: `aof apply` renders referenced global assets into Claude Code and Codex outputs alongside local project assets.
+- [x] **GRND-02**: `aof sync` includes referenced global assets in validation, warning analysis, and render planning.
+- [x] **GRND-03**: Lock state records global asset source scope for generated outputs.
+- [x] **GRND-04**: Runtime overrides on global assets are honored during rendering.
 
 ### Code-Bearing Assets
 
@@ -83,14 +83,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GLIB-02 | Phase 11 | Complete |
 | GLIB-03 | Phase 11 | Complete |
 | GLIB-04 | Phase 11 | Complete |
-| GREF-01 | Phase 12 | Pending |
-| GREF-02 | Phase 12 | Pending |
-| GREF-03 | Phase 12 | Pending |
-| GREF-04 | Phase 12 | Pending |
-| GRND-01 | Phase 12 | Pending |
-| GRND-02 | Phase 12 | Pending |
-| GRND-03 | Phase 12 | Pending |
-| GRND-04 | Phase 12 | Pending |
+| GREF-01 | Phase 12 | Complete |
+| GREF-02 | Phase 12 | Complete |
+| GREF-03 | Phase 12 | Complete |
+| GREF-04 | Phase 12 | Complete |
+| GRND-01 | Phase 12 | Complete |
+| GRND-02 | Phase 12 | Complete |
+| GRND-03 | Phase 12 | Complete |
+| GRND-04 | Phase 12 | Complete |
 | CODE-01 | Phase 13 | Pending |
 | CODE-02 | Phase 13 | Pending |
 | CODE-03 | Phase 13 | Pending |
@@ -106,8 +106,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.2 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
-- Complete: 4
+- Complete: 12
 
 ---
 *Requirements defined: 2026-05-08*
-*Last updated: 2026-05-08 after Phase 11 completion*
+*Last updated: 2026-05-08 after Phase 12 completion*

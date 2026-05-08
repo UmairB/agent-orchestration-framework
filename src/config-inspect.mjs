@@ -1,6 +1,7 @@
 import path from "node:path";
 import { access, readFile } from "node:fs/promises";
-import { loadConfig } from "./dsl.mjs";
+import { loadConfig, loadProjectConfig } from "./dsl.mjs";
+import { normalizeId } from "./fs.mjs";
 import { readLock } from "./lock.mjs";
 import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
@@ -18,6 +19,7 @@ import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace
 import { globalWorkspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
+const VALID_GLOBAL_REF_KINDS = new Set(["skill", "agent", "rule"]);
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
 const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
@@ -36,7 +38,7 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
   let adapterWarnings = [];
 
   if (!diagnostics.some((item) => item.severity === "error")) {
-    config = await loadConfig(configPath);
+    config = await loadProjectConfig(configPath, options);
     adapterWarnings = collectAdapterWarnings(config, {
       targetDir: projectDir,
       runtimes: options.runtimes ?? supportedRuntimes(),
@@ -54,8 +56,10 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
     resources: config?.resources?.map((resource) => ({
       id: resource.id,
       kind: resource.kind,
-      runtimes: resource.runtimes
+      runtimes: resource.runtimes,
+      source: resource._aofSource?.scope ?? "local"
     })) ?? [],
+    globalRefs: config?.globalRefs ?? [],
     packages: config?.packages ?? [],
     mcpServers: config?.mcpServers?.map((server) => ({ id: server.id, transport: server.transport, runtimes: server.runtimes })) ?? [],
     hooks: config?.hooks?.map((hook) => ({ id: hook.id, event: hook.event, type: hook.type, runtimes: hook.runtimes })) ?? [],
@@ -96,7 +100,7 @@ export async function adapterWarningsForConfig(projectDir = process.cwd(), optio
   const configPath = await findProjectConfig(projectDir, options.config);
   const diagnostics = await validateConfig(projectDir, options);
   if (diagnostics.some((item) => item.severity === "error")) return [];
-  return collectAdapterWarnings(await loadConfig(configPath), {
+  return collectAdapterWarnings(await loadProjectConfig(configPath, options), {
     targetDir: projectDir,
     runtimes: options.runtimes ?? supportedRuntimes(),
     global: Boolean(options.global)
@@ -105,7 +109,7 @@ export async function adapterWarningsForConfig(projectDir = process.cwd(), optio
 
 export async function validateConfig(projectDir = process.cwd(), options = {}) {
   const configPath = await findProjectConfig(projectDir, options.config);
-  return validateConfigFile(configPath);
+  return validateConfigFile(configPath, { validateGlobalRefs: true, globalOptions: options });
 }
 
 export async function validateGlobalConfig(options = {}) {
@@ -114,7 +118,7 @@ export async function validateGlobalConfig(options = {}) {
   return validateConfigFile(paths.configPath);
 }
 
-async function validateConfigFile(configPath) {
+async function validateConfigFile(configPath, options = {}) {
   const diagnostics = [];
   let raw;
 
@@ -146,6 +150,9 @@ async function validateConfigFile(configPath) {
   if (raw.projectDocs !== undefined && !Array.isArray(raw.projectDocs)) {
     diagnostics.push(diagnostic("error", "projectDocs", "projectDocs must be an array when provided."));
   }
+  if (raw.globalRefs !== undefined && !Array.isArray(raw.globalRefs)) {
+    diagnostics.push(diagnostic("error", "globalRefs", "globalRefs must be an array when provided."));
+  }
   if (raw.settings !== undefined && (!raw.settings || typeof raw.settings !== "object" || Array.isArray(raw.settings))) {
     diagnostics.push(diagnostic("error", "settings", "settings must be an object when provided."));
   }
@@ -153,6 +160,11 @@ async function validateConfigFile(configPath) {
   const baseDir = path.dirname(configPath);
   for (const [index, resource] of (Array.isArray(raw.resources) ? raw.resources : []).entries()) {
     await validateResource(resource, index, baseDir, diagnostics);
+  }
+
+  const globalRefs = validateGlobalRefs(raw, diagnostics);
+  if (options.validateGlobalRefs) {
+    await validateReferencedGlobals(raw, globalRefs, diagnostics, options.globalOptions ?? {});
   }
 
   for (const [index, pkg] of (Array.isArray(raw.packages) ? raw.packages : []).entries()) {
@@ -196,7 +208,7 @@ export async function doctorConfig(projectDir = process.cwd(), options = {}) {
   }
 
   if (!inspection.diagnostics.some((item) => item.severity === "error")) {
-    const config = await loadConfig(inspection.configPath);
+    const config = await loadProjectConfig(inspection.configPath, options);
     const paths = workspacePaths(projectDir);
     const desiredOutputs = await createRenderPlan(config, {
       targetDir: projectDir,
@@ -240,8 +252,86 @@ export async function doctorConfig(projectDir = process.cwd(), options = {}) {
   };
 }
 
-async function validateResource(resource, index, baseDir, diagnostics) {
-  const location = `resources[${index}]`;
+function validateGlobalRefs(raw, diagnostics) {
+  if (!Array.isArray(raw.globalRefs)) return [];
+  const refs = [];
+  for (const [index, ref] of raw.globalRefs.entries()) {
+    const location = `globalRefs[${index}]`;
+    if (!ref || typeof ref !== "object" || Array.isArray(ref)) {
+      diagnostics.push(diagnostic("error", location, "Each global reference must be an object."));
+      continue;
+    }
+    if (!VALID_GLOBAL_REF_KINDS.has(ref.kind)) {
+      diagnostics.push(diagnostic("error", `${location}.kind`, `Unsupported global reference kind "${ref.kind}".`));
+      continue;
+    }
+    if (typeof ref.id !== "string" || ref.id.trim() === "") {
+      diagnostics.push(diagnostic("error", `${location}.id`, "Global reference id is required."));
+      continue;
+    }
+    let id;
+    try {
+      id = normalizeId(ref.id);
+    } catch (error) {
+      diagnostics.push(diagnostic("error", `${location}.id`, error.message));
+      continue;
+    }
+    refs.push({ index, kind: ref.kind, id });
+  }
+
+  validateDuplicates(refs, "globalRefs", (ref) => `${ref.kind}:${ref.id}`, diagnostics, (ref) => ref.index);
+  validateLocalGlobalConflicts(raw.resources, refs, diagnostics);
+  return refs;
+}
+
+async function validateReferencedGlobals(raw, refs, diagnostics, options = {}) {
+  if (refs.length === 0) return;
+  const paths = globalWorkspacePaths(options);
+  let globalRaw;
+  try {
+    globalRaw = await readJsonWithDiagnostic(paths.configPath);
+  } catch (error) {
+    diagnostics.push(diagnostic("error", "globalRefs", `Cannot read global config: ${error.message}`, error.code ?? "unreadable-global-config"));
+    return;
+  }
+
+  if (!globalRaw || typeof globalRaw !== "object" || Array.isArray(globalRaw)) {
+    diagnostics.push(diagnostic("error", "globalRefs", "Global AOF config must be a JSON object.", "invalid-global-config"));
+    return;
+  }
+
+  const globalResources = Array.isArray(globalRaw.resources) ? globalRaw.resources : [];
+  const globalBaseDir = path.dirname(paths.configPath);
+  for (const ref of refs) {
+    const resource = globalResources.find((item) => item?.kind === ref.kind && typeof item.id === "string" && normalizeId(item.id) === ref.id);
+    if (!resource) {
+      diagnostics.push(diagnostic("error", `globalRefs[${ref.index}]`, `Missing global resource: ${ref.kind}:${ref.id}`, "missing-global-resource"));
+      continue;
+    }
+    await validateResource(resource, ref.index, globalBaseDir, diagnostics, `globalRefs[${ref.index}].resource`);
+  }
+}
+
+function validateLocalGlobalConflicts(resources, refs, diagnostics) {
+  if (!Array.isArray(resources) || refs.length === 0) return;
+  const localKeys = new Set(resources.flatMap((resource) => {
+    if (!resource?.kind || typeof resource.id !== "string") return [];
+    try {
+      return [`${resource.kind}:${normalizeId(resource.id)}`];
+    } catch {
+      return [];
+    }
+  }));
+  for (const ref of refs) {
+    const key = `${ref.kind}:${ref.id}`;
+    if (localKeys.has(key)) {
+      diagnostics.push(diagnostic("error", `globalRefs[${ref.index}]`, `Global reference conflicts with local resource ${key}.`, "local-global-conflict"));
+    }
+  }
+}
+
+async function validateResource(resource, index, baseDir, diagnostics, locationOverride = null) {
+  const location = locationOverride ?? `resources[${index}]`;
   if (!resource || typeof resource !== "object" || Array.isArray(resource)) {
     diagnostics.push(diagnostic("error", location, "Each resource must be an object."));
     return;
@@ -447,17 +537,19 @@ function validateId(id, location, message, diagnostics) {
   }
 }
 
-function validateDuplicates(items, collectionName, keyFor, diagnostics) {
+function validateDuplicates(items, collectionName, keyFor, diagnostics, indexFor = (_item, index) => index) {
   const seen = new Map();
   for (const [index, item] of (items ?? []).entries()) {
     const key = keyFor(item);
     if (!key || String(key).includes("undefined")) continue;
     const normalized = String(key).toLowerCase();
     if (seen.has(normalized)) {
-      diagnostics.push(diagnostic("error", `${collectionName}[${index}].id`, `Duplicate ${collectionName} id also used at ${collectionName}[${seen.get(normalized)}].`));
+      const currentIndex = indexFor(item, index);
+      const seenIndex = seen.get(normalized);
+      diagnostics.push(diagnostic("error", `${collectionName}[${currentIndex}].id`, `Duplicate ${collectionName} id also used at ${collectionName}[${seenIndex}].`));
       continue;
     }
-    seen.set(normalized, index);
+    seen.set(normalized, indexFor(item, index));
   }
 }
 

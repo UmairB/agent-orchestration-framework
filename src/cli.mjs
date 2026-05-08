@@ -1,6 +1,6 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
-import { loadConfig } from "./dsl.mjs";
+import { loadConfig, loadProjectConfig } from "./dsl.mjs";
 import { applyConfig, supportedRuntimes } from "./adapters.mjs";
 import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, installFrameworkItems, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
 import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
@@ -357,7 +357,7 @@ async function applyCommand(args) {
   const targetDir = path.resolve(options.target ?? process.cwd());
   const configPath = await findProjectConfig(targetDir, options.config);
   const paths = workspacePaths(targetDir);
-  const config = await loadConfig(configPath);
+  const config = await loadProjectConfig(configPath);
   const runtimes = parseRuntimes(options);
   const adapterWarnings = collectAdapterWarnings(config, {
     targetDir,
@@ -605,7 +605,11 @@ async function configCommand(args) {
     console.log(`name: ${inspection.name ?? "(unresolved)"}`);
     console.log(`resources: ${inspection.resources.length}`);
     for (const resource of inspection.resources) {
-      console.log(`- ${resource.kind}:${resource.id} runtimes=${resource.runtimes.join(",")}`);
+      console.log(`- ${resource.kind}:${resource.id} source=${resource.source ?? "local"} runtimes=${resource.runtimes.join(",")}`);
+    }
+    console.log(`globalRefs: ${inspection.globalRefs.length}`);
+    for (const ref of inspection.globalRefs) {
+      console.log(`- global:${ref.kind}:${ref.id}`);
     }
     console.log(`packages: ${inspection.packages.length}`);
     for (const pkg of inspection.packages) {

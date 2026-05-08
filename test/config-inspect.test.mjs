@@ -41,6 +41,14 @@ export const configInspectTests = [
   {
     name: "project validation does not scan unrelated malformed global drafts",
     run: projectValidationIgnoresUnreferencedGlobalDrafts
+  },
+  {
+    name: "validates referenced global resources",
+    run: validatesReferencedGlobalResources
+  },
+  {
+    name: "reports missing and conflicting global references",
+    run: reportsMissingAndConflictingGlobalReferences
   }
 ];
 
@@ -231,6 +239,54 @@ async function projectValidationIgnoresUnreferencedGlobalDrafts() {
   }
 }
 
+async function validatesReferencedGlobalResources() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    await writeGlobalResource(globalDir, { kind: "skill", id: "shared", body: "Global body" });
+    await writeProjectWithGlobalRefs(targetDir, [{ kind: "skill", id: "shared" }]);
+
+    assert.deepEqual(await validateConfig(targetDir), []);
+    const inspection = await inspectConfig(targetDir, { runtimes: ["codex"] });
+    assert.equal(inspection.globalRefs[0].id, "shared");
+    assert.ok(inspection.resources.some((resource) => resource.id === "shared" && resource.source === "global"));
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
+async function reportsMissingAndConflictingGlobalReferences() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    await writeGlobalResource(globalDir, { kind: "skill", id: "shared", body: "Global body" });
+    await writeProjectWithGlobalRefs(targetDir, [
+      { kind: "skill", id: "shared" },
+      { kind: "skill", id: "missing" },
+      { kind: "skill", id: "missing" }
+    ], {
+      resources: [
+        { kind: "skill", id: "shared", path: "assets/skills/shared/SKILL.md", body: "Local body" }
+      ]
+    });
+
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "missing-global-resource"));
+    assert.ok(diagnostics.some((item) => item.code === "local-global-conflict"));
+    assert.ok(diagnostics.some((item) => item.path === "globalRefs[2].id"));
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
 async function writeProject(targetDir) {
   const workspaceDir = path.join(targetDir, ".aof");
   await mkdir(path.join(workspaceDir, "assets", "skills", "context"), { recursive: true });
@@ -242,6 +298,42 @@ async function writeProject(targetDir) {
     ],
     packages: [
       { id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
+    ]
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeProjectWithGlobalRefs(targetDir, globalRefs, options = {}) {
+  const workspaceDir = path.join(targetDir, ".aof");
+  await mkdir(workspaceDir, { recursive: true });
+  const resources = [];
+  for (const resource of options.resources ?? []) {
+    const resourcePath = path.join(workspaceDir, resource.path);
+    await mkdir(path.dirname(resourcePath), { recursive: true });
+    await writeFile(resourcePath, `${resource.body}\n`, "utf8");
+    resources.push({
+      kind: resource.kind,
+      id: resource.id,
+      path: resource.path,
+      runtimes: ["codex"]
+    });
+  }
+  await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+    name: "demo",
+    resources,
+    globalRefs
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeGlobalResource(globalDir, input) {
+  const plural = input.kind === "skill" ? "skills" : input.kind === "agent" ? "agents" : "rules";
+  const bodyFile = input.kind === "skill" ? "SKILL.md" : input.kind === "agent" ? "AGENT.md" : "RULE.md";
+  const resourceDir = path.join(globalDir, "assets", plural, input.id);
+  await mkdir(resourceDir, { recursive: true });
+  await writeFile(path.join(resourceDir, bodyFile), `${input.body}\n`, "utf8");
+  await writeFile(path.join(globalDir, "aof.config.json"), `${JSON.stringify({
+    name: "aof-global",
+    resources: [
+      { kind: input.kind, id: input.id, path: `assets/${plural}/${input.id}/${bodyFile}`, runtimes: ["codex"] }
     ]
   }, null, 2)}\n`, "utf8");
 }

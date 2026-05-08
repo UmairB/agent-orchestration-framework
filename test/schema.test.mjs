@@ -44,9 +44,10 @@ async function schemaEnumsAlignWithModel() {
 async function schemaFieldsAlign() {
   const schema = await loadSchema();
   const resource = schema.$defs.resource;
-  for (const field of ["resources", "packages", "mcpServers", "hooks", "projectDocs", "settings", "items", "runtimes"]) {
+  for (const field of ["resources", "globalRefs", "packages", "mcpServers", "hooks", "projectDocs", "settings", "items", "runtimes"]) {
     assert.ok(schema.properties[field], `Missing config field ${field}`);
   }
+  assert.deepEqual(schema.$defs.globalRef.properties.kind.enum.sort(), ["agent", "rule", "skill"]);
   for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "overrides"]) {
     assert.ok(resource.properties[field], `Missing resource field ${field}`);
   }

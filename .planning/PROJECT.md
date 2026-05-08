@@ -8,7 +8,7 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, and Phase 12 added project references that render global assets with lock traceability. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
 ## Current Milestone: v1.2 Global Asset Library
 
@@ -57,11 +57,14 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Users can create global skills, agents, and rules in `~/.aof` — Phase 11
 - ✓ Users can list and inspect global assets independently from project-local assets — Phase 11
 - ✓ Users receive clear validation errors when a global asset is malformed or missing required files — Phase 11
+- ✓ Project `.aof` configs can reference global assets by ID without copying them into the project workspace — Phase 12
+- ✓ Missing global references and local/global ID conflicts produce clear validation errors — Phase 12
+- ✓ `aof apply` and `aof sync` render referenced global assets into Claude Code and Codex outputs — Phase 12
+- ✓ Runtime overrides on global assets are honored during rendering — Phase 12
+- ✓ Lock and diagnostic output identify global asset source scope — Phase 12
 
 ### Active
 
-- [ ] Project `.aof` configs can reference global assets by ID without copying them into the project workspace.
-- [ ] AOF renders referenced global assets into Claude Code and Codex project outputs during apply/sync.
 - [ ] Setup UI can create and edit global assets alongside project assets.
 - [ ] Global assets can include associated files or executable helper code that renders with the owning asset.
 
@@ -128,6 +131,8 @@ The long-term product direction includes task management: kanban boards, task as
 | BDD scenarios are split by product domain and shared by Node and PowerShell runners | Future core/runtime changes need user-facing behavioral parity across runner implementations | Implemented in Phase 10 |
 | `~/.aof` is the user-global AOF source workspace | Reusable assets need a runtime-neutral home distinct from project `.aof` and generated assistant output folders | Implemented in Phase 11 |
 | `aof global ...` is the source-library command namespace | Global source asset operations should not overload runtime-output `--global` behavior | Implemented in Phase 11 |
+| Project global references use top-level `globalRefs` | Source ownership stays explicit and project-local `resources` remain project-owned | Implemented in Phase 12 |
+| Global reference rendering preserves source scope in lock state | Users need to audit whether generated outputs came from project-local assets, global assets, or packages | Implemented in Phase 12 |
 
 ## Next Milestone Goals
 
@@ -151,4 +156,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after Phase 11 completion*
+*Last updated: 2026-05-08 after Phase 12 completion*

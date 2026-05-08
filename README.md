@@ -66,6 +66,30 @@ currently create and inspect skills, agents, and rules. This is separate from
 the existing `--global` flag on runtime commands such as `aof apply --global`
 or `aof install gsd --global`, which targets assistant runtime home folders.
 
+Reference global assets from a project without copying their source files into
+project `.aof`:
+
+```json
+{
+  "name": "project",
+  "resources": [],
+  "globalRefs": [
+    { "kind": "skill", "id": "shared-review" }
+  ]
+}
+```
+
+Then render normally:
+
+```sh
+aof apply --codex
+```
+
+Referenced global skills, agents, and rules render alongside project-local
+resources. Runtime overrides declared on the global asset are honored, and lock
+entries record global source scope. Associated helper/code files for global
+asset directories are handled in a later phase.
+
 Synchronize generated outputs and managed package intent:
 
 ```sh

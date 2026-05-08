@@ -10,6 +10,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/resource" }
     },
+    "globalRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/globalRef" }
+    },
     "packages": {
       "type": "array",
       "items": {
@@ -76,6 +80,15 @@
     }
   },
   "$defs": {
+    "globalRef": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["skill", "agent", "rule"] },
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" }
+      },
+      "additionalProperties": true
+    },
     "resource": {
       "type": "object",
       "required": ["kind", "id"],

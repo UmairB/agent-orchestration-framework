@@ -167,6 +167,16 @@ function packageResourcesForRuntime(packages, runtime) {
 
 function resourceMetadata(resource) {
   const metadata = { id: resource.id, kind: resource.kind };
+  if (resource._aofSource?.scope) {
+    metadata.scope = resource._aofSource.scope;
+    if (resource._aofSource.scope === "global") {
+      metadata.global = {
+        id: resource._aofSource.id ?? resource.id,
+        kind: resource._aofSource.kind ?? resource.kind,
+        configPath: resource._aofSource.configPath
+      };
+    }
+  }
   if (resource._aofPackage) {
     metadata.package = resource._aofPackage;
     metadata.originalId = resource.originalId;

@@ -182,6 +182,9 @@ function describeOutput(output) {
   if (resource.package) {
     return `package:${resource.package.namespace}/${resource.package.id}:${resource.kind}:${resource.originalId ?? resource.id}`;
   }
+  if (resource.scope === "global") {
+    return `global:${resource.kind}:${resource.id}`;
+  }
   if (resource.kind) {
     return `local:${resource.kind}:${resource.id}`;
   }

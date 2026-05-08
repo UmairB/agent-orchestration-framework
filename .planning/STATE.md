@@ -2,8 +2,8 @@
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
-**Current phase:** Phase 12 - Project Reference Rendering
-**Status:** Phase 12 planned
+**Current phase:** Phase 13 - Code-Bearing Asset Files
+**Status:** Phase 12 complete
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 12 has three executable plans and is ready to implement project `globalRefs`, reference validation, render integration, and lock traceability.
+Phase 12 is complete. Phase 13 is ready for discussion and planning around global asset associated files and helper code.
 
 ## Current Position
 
-Phase: 12 - Project Reference Rendering
-Plan: 3 plans ready
-Status: Ready for `$gsd-execute-phase 12`
-Last activity: 2026-05-08 - Phase 12 planned
+Phase: 13 - Code-Bearing Asset Files
+Plan: Not started
+Status: Ready for `$gsd-discuss-phase 13`
+Last activity: 2026-05-08 - Phase 12 completed
 
 ## Resume
 
-**Stopped at:** Phase 12 planned
-**Resume file:** `.planning/phases/12-project-reference-rendering/12-01-PLAN.md`
+**Stopped at:** Phase 12 completed
+**Resume file:** `.planning/phases/12-project-reference-rendering/12-VERIFICATION.md`
 
 ## Memory
 
@@ -105,3 +105,4 @@ Last activity: 2026-05-08 - Phase 12 planned
 - Phase 11 execution completed with global workspace path helpers, `aof global add/list/show/validate`, global validation coverage, README updates, and completion artifacts; `npm run test:unit` and `npm test` passed.
 - Phase 12 discussion locked decisions: project configs use top-level `globalRefs` entries shaped as `{ kind, id }`; global assets own body and runtime overrides; missing refs, duplicate refs, and local/global `kind:id` conflicts are validation errors; only referenced global assets affect project validation; render planning and lock state must preserve global source scope.
 - Phase 12 planning produced 3 plans: 12-01 global reference model and validation, 12-02 apply and sync global reference rendering, and 12-03 global reference diagnostics and lock traceability.
+- Phase 12 execution completed with `globalRefs` schema/model support, referenced global validation, apply/sync rendering, runtime override handling, config diagnostics, lock source scope, README updates, and completion artifacts; `npm run test:unit` and `npm test` passed.

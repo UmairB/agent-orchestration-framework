@@ -106,6 +106,42 @@ Feature: AOF CLI lifecycle
     Then the command should fail
     And stdout should contain `Cannot read config`
 
+  Scenario: Render referenced global assets
+    Given a project with referenced global assets
+    When I run `apply --codex`
+    Then the command should succeed
+    And file `.codex/skills/shared-review/SKILL.md` should exist
+    And file `.codex/skills/shared-review/SKILL.md` should contain `Codex global override body`
+    And file `.codex/AGENTS.md` should exist
+    And file `.codex/AGENTS.md` should contain `Follow team standards`
+    And file `.aof/assets/skills/shared-review/SKILL.md` should not exist
+    And JSON file `.aof/aof.lock.json` should contain global resource `shared-review`
+    When I run `config show`
+    Then the command should succeed
+    And stdout should contain `globalRefs: 2`
+    And stdout should contain `source=global`
+
+  Scenario: Sync referenced global assets
+    Given a project with referenced global assets
+    When I run `sync --codex --dry-run`
+    Then the command should succeed
+    And stdout should contain `create:`
+    And file `.codex/skills/shared-review/SKILL.md` should not exist
+    When I run `sync --codex`
+    Then the command should succeed
+    And file `.codex/skills/shared-review/SKILL.md` should exist
+    And JSON file `.aof/aof.lock.json` should contain global resource `shared-review`
+
+  Scenario: Report invalid global references
+    Given a project with a missing global reference
+    When I run `validate`
+    Then the command should fail
+    And stdout should contain `Missing global resource: skill:missing-shared`
+    Given a project with a local and global asset conflict
+    When I run `validate`
+    Then the command should fail
+    And stdout should contain `Global reference conflicts with local resource skill:shared-review`
+
   Scenario: Refuse to silently migrate a legacy root config during init
     Given a project initialized with legacy AOF config
     When I run `init --items project-context --codex`

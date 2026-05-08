@@ -1,4 +1,4 @@
-import { loadConfig } from "./dsl.mjs";
+import { loadProjectConfig } from "./dsl.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { executeFrameworkInstallPlan, planFrameworkInstall } from "./frameworks.mjs";
 import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
@@ -8,7 +8,7 @@ import { findProjectConfig, workspacePaths } from "./workspace.mjs";
 export async function createSyncPlan(projectDir = process.cwd(), options = {}) {
   const configPath = await findProjectConfig(projectDir, options.config);
   const paths = workspacePaths(projectDir);
-  const config = await loadConfig(configPath);
+  const config = await loadProjectConfig(configPath, options);
   const previousLock = await readLock(paths.lockPath);
   const runtimes = options.runtimes;
   const desiredOutputs = await createRenderPlan(config, {
