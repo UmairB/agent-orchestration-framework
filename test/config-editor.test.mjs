@@ -86,7 +86,7 @@ async function loadsEditableConfig() {
         resources: [
           { kind: "command", id: "prime", path: "assets/commands/prime/COMMAND.md", runtimes: ["codex"] }
         ],
-        packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
+        packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
       }, null, 2)}\n`, "utf8")
     ]));
 

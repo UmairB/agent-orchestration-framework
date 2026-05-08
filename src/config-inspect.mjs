@@ -4,6 +4,7 @@ import { loadConfig } from "./dsl.mjs";
 import { readLock } from "./lock.mjs";
 import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
+import { normalizePackage } from "./packages.mjs";
 import {
   supportedHookEvents,
   supportedHookTypes,
@@ -17,7 +18,6 @@ import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_RUNTIMES = new Set(supportedRuntimes());
-const VALID_PACKAGES = new Set(["gsd"]);
 const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
 const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
 const VALID_HOOK_TYPES = new Set(supportedHookTypes());
@@ -374,12 +374,18 @@ function validatePackage(pkg, index, diagnostics) {
     return;
   }
 
-  if (!VALID_PACKAGES.has(pkg.id)) {
-    diagnostics.push(diagnostic("error", `${location}.id`, `Unsupported package id "${pkg.id}".`));
+  validateId(pkg.id, `${location}.id`, "Package id is required.", diagnostics);
+
+  if (typeof pkg.namespace !== "string" || pkg.namespace.trim() === "") {
+    diagnostics.push(diagnostic("error", `${location}.namespace`, "Package namespace is required."));
   }
 
-  if (typeof pkg.source !== "string" || !pkg.source.startsWith("npm:")) {
-    diagnostics.push(diagnostic("error", `${location}.source`, "Package source must be an npm: source."));
+  try {
+    normalizePackage(pkg, index);
+  } catch (error) {
+    const message = error.message;
+    const pathMatch = message.match(/^(packages\[\d+\](?:\.[A-Za-z0-9_]+)?)/);
+    diagnostics.push(diagnostic("error", pathMatch?.[1] ?? location, message));
   }
 
   validateRuntimes(pkg.runtimes, `${location}.runtimes`, diagnostics);

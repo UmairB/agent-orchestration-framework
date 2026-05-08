@@ -14,10 +14,37 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "source"],
+        "required": ["id", "namespace", "source"],
         "properties": {
-          "id": { "type": "string" },
-          "source": { "type": "string" },
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+          "namespace": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+          "source": {
+            "oneOf": [
+              { "type": "string" },
+              { "$ref": "#/$defs/packageSource" }
+            ]
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+                {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+                    "namespace": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" }
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/resource" }
+          },
           "runtimes": {
             "type": "array",
             "items": { "enum": ["claude", "codex"] }
@@ -84,6 +111,42 @@
         }
       },
       "additionalProperties": true
+    },
+    "packageSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "npm" },
+            "package": { "type": "string" },
+            "name": { "type": "string" },
+            "version": { "type": "string" },
+            "tag": { "type": "string" },
+            "range": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["type", "url"],
+          "properties": {
+            "type": { "const": "git" },
+            "url": { "type": "string" },
+            "ref": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "file" },
+            "path": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      ]
     },
     "runtimeOverride": {
       "oneOf": [

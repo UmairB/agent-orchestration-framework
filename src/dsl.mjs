@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { readJson, normalizeId } from "./fs.mjs";
+import { normalizePackages } from "./packages.mjs";
 import {
   supportedHookEvents,
   supportedHookTypes,
@@ -35,7 +36,7 @@ export async function resolveConfig(config, baseDir = process.cwd()) {
   return {
     name: config.name ?? "assistant-project",
     resources,
-    packages: config.packages ?? [],
+    packages: normalizePackages(config.packages ?? []),
     mcpServers: (config.mcpServers ?? []).map(resolveMcpServer),
     hooks: (config.hooks ?? []).map(resolveHook),
     projectDocs,

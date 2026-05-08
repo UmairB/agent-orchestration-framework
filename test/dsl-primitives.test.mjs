@@ -71,7 +71,7 @@ async function preservesV1ResourceCompatibility() {
       { kind: "skill", id: "context", body: "Body", runtimes: ["codex"] }
     ],
     packages: [
-      { id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
+      { id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
     ]
   });
 

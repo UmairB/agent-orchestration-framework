@@ -201,7 +201,7 @@ async function runStep(context, step) {
       bodyPath: "assets/skills/file-backed/SKILL.md",
       body: "File-backed body"
     }], {
-      packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
+        packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
     });
     return;
   }
@@ -216,7 +216,7 @@ async function runStep(context, step) {
       bodyPath: "assets/skills/file-backed/SKILL.md",
       body: "File-backed body"
     }], {
-      packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["claude", "codex"] }]
+        packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["claude", "codex"] }]
     });
     return;
   }

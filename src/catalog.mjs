@@ -212,6 +212,7 @@ export function itemsToConfig(items) {
     })),
     packages: items.filter((item) => item.kind === "framework").map((item) => ({
       id: item.id,
+      namespace: item.id,
       source: item.source,
       runtimes: item.runtimes
     }))

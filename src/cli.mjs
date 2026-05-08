@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = `{
   "packages": [
     {
       "id": "gsd",
+      "namespace": "gsd",
       "source": "npm:get-shit-done-cc@latest",
       "runtimes": ["claude", "codex"]
     }

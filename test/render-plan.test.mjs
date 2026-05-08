@@ -132,7 +132,7 @@ async function createsLockManifest() {
     const config = await resolveConfig({
       name: "demo",
       resources: [{ kind: "skill", id: "context", body: "Body." }],
-      packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
+      packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
     });
     const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
     const actions = await planApplyActions(desired, null, { targetDir });

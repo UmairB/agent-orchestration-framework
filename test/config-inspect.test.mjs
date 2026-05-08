@@ -66,7 +66,7 @@ async function validatesSemanticErrors() {
     assert.ok(diagnostics.length >= 5);
     assert.ok(diagnostics.some((item) => item.path === "resources[0].kind"));
     assert.ok(diagnostics.some((item) => item.code === "missing-file"));
-    assert.ok(diagnostics.some((item) => item.path === "packages[0].id"));
+    assert.ok(diagnostics.some((item) => item.path === "packages[0].namespace"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -146,7 +146,7 @@ async function toleratesExtensionFields() {
         }
       ],
       packages: [
-        { id: "gsd", source: "npm:get-shit-done-cc@latest", "x-package": true }
+        { id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", "x-package": true }
       ]
     }, null, 2)}\n`, "utf8");
     assert.deepEqual(await validateConfig(targetDir), []);
@@ -190,7 +190,7 @@ async function writeProject(targetDir) {
       { kind: "skill", id: "context", path: "assets/skills/context/SKILL.md", runtimes: ["codex"] }
     ],
     packages: [
-      { id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
+      { id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
     ]
   }, null, 2)}\n`, "utf8");
 }
