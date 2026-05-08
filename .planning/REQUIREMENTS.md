@@ -31,10 +31,10 @@
 
 ### Framework Packages
 
-- [ ] **PKG-01**: User can install framework packages from npm, git, or local file sources through a consistent package descriptor.
-- [ ] **PKG-02**: User can rely on package namespaces being enforced for emitted files to avoid path collisions.
-- [ ] **PKG-03**: User can declare package dependencies and record resolved package versions in lock state.
-- [ ] **PKG-04**: User is blocked before writes when multiple packages or local primitives would claim the same generated output path.
+- [x] **PKG-01**: User can install framework packages from npm, git, or local file sources through a consistent package descriptor. Validated in Phase 9.
+- [x] **PKG-02**: User can rely on package namespaces being enforced for emitted files to avoid path collisions. Validated in Phase 9.
+- [x] **PKG-03**: User can declare package dependencies and record resolved package versions in lock state. Validated in Phase 9.
+- [x] **PKG-04**: User is blocked before writes when multiple packages or local primitives would claim the same generated output path. Validated in Phase 9.
 
 ### Verification
 
@@ -94,10 +94,10 @@
 | ADPT-02 | Phase 8 | Complete |
 | ADPT-03 | Phase 8 | Complete |
 | ADPT-04 | Phase 8 | Complete |
-| PKG-01 | Phase 9 | Pending |
-| PKG-02 | Phase 9 | Pending |
-| PKG-03 | Phase 9 | Pending |
-| PKG-04 | Phase 9 | Pending |
+| PKG-01 | Phase 9 | Complete |
+| PKG-02 | Phase 9 | Complete |
+| PKG-03 | Phase 9 | Complete |
+| PKG-04 | Phase 9 | Complete |
 | BDD-01 | Phase 10 | Pending |
 | BDD-02 | Phase 10 | Pending |
 | BDD-03 | Phase 10 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-08 after Phase 8 completion*
+*Last updated: 2026-05-08 after Phase 9 completion*

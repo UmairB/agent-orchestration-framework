@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 9 planning
+**Last updated:** 2026-05-08 after Phase 9 completion
 
 ## Milestones
 
@@ -119,7 +119,7 @@
 
 **Requirements:** PKG-01, PKG-02, PKG-03, PKG-04
 
-**Status:** Planned - ready to execute.
+**Status:** Complete - implemented and verified 2026-05-08.
 
 **Success criteria:**
 1. Packages can be declared from npm, git, and local file sources.
@@ -128,9 +128,9 @@
 4. Conflicting generated output claims fail before any write and identify the packages or local primitives involved.
 
 **Plans:**
-- [ ] Wave 1: `09-01-PLAN.md` - Package descriptor normalization and validation.
-- [ ] Wave 2: `09-02-PLAN.md` - Package resolution and lock metadata.
-- [ ] Wave 3: `09-03-PLAN.md` - Package output claims and conflict gates.
+- [x] Wave 1: `09-01-PLAN.md` - Package descriptor normalization and validation.
+- [x] Wave 2: `09-02-PLAN.md` - Package resolution and lock metadata.
+- [x] Wave 3: `09-03-PLAN.md` - Package output claims and conflict gates.
 
 **Cross-cutting constraints:**
 - Existing string package sources remain supported while structured npm/git/file descriptors are added.
@@ -156,8 +156,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 12/12 | 14/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 12/12 | 18/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-execute-phase 9` to implement Framework Package Semantics.
+Run `$gsd-discuss-phase 10` to prepare BDD Parity And Hardening.

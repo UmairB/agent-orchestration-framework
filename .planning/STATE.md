@@ -1,8 +1,8 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 9: Framework Package Semantics
-**Status:** Phase 9 planned; ready to execute Phase 9
+**Current phase:** Phase 10: BDD Parity And Hardening
+**Status:** Phase 9 complete; ready to discuss Phase 10
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 9: framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is preparing Phase 10: BDD parity and hardening across lifecycle, package, adapter, and validation behavior.
 
 ## Current Position
 
-Phase: 9 - Framework Package Semantics
-Plan: 3 plans created
-Status: Ready to execute
-Last activity: 2026-05-08 - Phase 9 planned
+Phase: 10 - BDD Parity And Hardening
+Plan: not yet created
+Status: Ready to discuss
+Last activity: 2026-05-08 - Phase 9 completed and verified
 
 ## Resume
 
-**Stopped at:** Phase 9 planned
-**Resume file:** `.planning/phases/09-framework-package-semantics/09-01-PLAN.md`
+**Stopped at:** Phase 9 completed
+**Resume file:** `.planning/phases/09-framework-package-semantics/09-VERIFICATION.md`
 
 ## Memory
 
@@ -86,3 +86,5 @@ Last activity: 2026-05-08 - Phase 9 planned
 - Phase 9 discussion locked decisions for compatible package descriptor normalization, explicit package namespaces, direct resolved package lock metadata, and pre-write conflict failures with known safe merge exceptions only.
 - Phase 9 research is captured in `.planning/phases/09-framework-package-semantics/09-RESEARCH.md`.
 - Phase 9 planning produced 3 plans in `.planning/phases/09-framework-package-semantics/`.
+- Phase 9 execution completed with commits for package descriptor normalization, package lock/install metadata, and package output conflict gates.
+- Phase 9 verification is captured in `.planning/phases/09-framework-package-semantics/09-VERIFICATION.md`; `npm run test:unit` and `npm test` passed. UI build was not needed because no UI files changed.
