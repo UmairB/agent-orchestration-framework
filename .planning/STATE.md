@@ -1,8 +1,8 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 8: Adapter Degradation Policy
-**Status:** Phase 8 planned; ready to execute
+**Current phase:** Phase 9: Framework Package Semantics
+**Status:** Phase 8 complete; ready to discuss Phase 9
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 8: making unsupported or lossy runtime behavior explicit, warnable, and enforceable.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is discussing Phase 9: framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
 
 ## Current Position
 
-Phase: 8 - Adapter Degradation Policy
-Plan: 08-01-PLAN.md, 08-02-PLAN.md, 08-03-PLAN.md
-Status: Ready to execute
-Last activity: 2026-05-07 - Phase 8 planned
+Phase: 9 - Framework Package Semantics
+Plan: Not started
+Status: Ready to discuss
+Last activity: 2026-05-08 - Phase 8 completed
 
 ## Resume
 
-**Stopped at:** Phase 8 planned
-**Resume file:** `.planning/phases/08-adapter-degradation-policy/08-01-PLAN.md`
+**Stopped at:** Phase 8 completed
+**Resume file:** `.planning/ROADMAP.md`
 
 ## Memory
 
@@ -80,3 +80,5 @@ Last activity: 2026-05-07 - Phase 8 planned
 - Phase 8 discussion locked decisions for adapter warning surfaces, strict-mode pre-write gates, mapped/lossy/unsupported classification, and warning detail/JSON shape.
 - Phase 8 research is captured in `.planning/phases/08-adapter-degradation-policy/08-RESEARCH.md`.
 - Phase 8 planning produced 3 plans in `.planning/phases/08-adapter-degradation-policy/`.
+- Phase 8 execution completed with commits for the shared adapter warning analyzer, CLI warning/strict gates, and UI/docs review surfaces.
+- Phase 8 verification is captured in `.planning/phases/08-adapter-degradation-policy/08-VERIFICATION.md`; `npm run test:unit`, `npm run ui:build`, and `npm test` passed.

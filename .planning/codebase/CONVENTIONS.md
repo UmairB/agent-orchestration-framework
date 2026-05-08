@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-07
+last_mapped: 2026-05-08
 focus: quality
 ---
 
@@ -62,6 +62,15 @@ focus: quality
 - Claude commands use `/` invocation prefixes.
 - Codex commands use `$` invocation prefixes.
 - Generated output writes and cleanup are lock-aware; drifted generated files are reported and preserved unless an explicit force path is used.
+
+## Adapter Warning Pattern
+
+- `src/adapter-warnings.mjs` owns command-time degradation policy.
+- Adapter warning objects keep a stable shape: `code`, `severity`, `path`, `kind`, `id`, `runtime`, `generatedPath`, `reason`, and `remediation`.
+- Adapter warnings are not mixed into structural validation diagnostics and are not stored in `.aof/aof.lock.json`.
+- `src/cli.mjs` prints human `adapter-warnings:` blocks before apply/sync actions and exposes top-level `adapterWarnings` in JSON output.
+- `--strict` promotes adapter warnings to command failures; for apply/sync this gate runs before generated files, lock writes, or installers.
+- Runtime-specific `claude` and `codex` extension objects are pass-through escape hatches for matching runtimes and silent for non-matching runtimes.
 
 ## UI Pattern
 

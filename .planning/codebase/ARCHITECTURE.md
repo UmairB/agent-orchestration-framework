@@ -1,5 +1,5 @@
 ---
-last_mapped: 2026-05-07
+last_mapped: 2026-05-08
 focus: arch
 ---
 
@@ -47,8 +47,11 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 
 1. `src/cli.mjs` loads a config with `loadConfig()` from `src/dsl.mjs`.
 2. `src/dsl.mjs` resolves inline bodies or file-backed bodies.
-3. `src/adapters.mjs` renders each portable resource to each selected runtime.
-4. `src/fs.mjs` writes output files, unless dry-run mode is active.
+3. `src/adapter-warnings.mjs` computes command-time adapter warnings for the selected runtimes.
+4. `src/adapters.mjs` renders each portable resource to each selected runtime.
+5. `src/render-plan.mjs` plans create/update/delete/skip/drift actions and lock manifest entries.
+6. `src/cli.mjs` prints adapter warnings before actions; `--strict` exits before writes when warnings exist.
+7. `src/fs.mjs` writes output files, unless dry-run mode is active.
 
 ## Core Flow: add
 
@@ -61,11 +64,22 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 ## Core Flow: sync
 
 1. `src/sync.mjs` loads `.aof/` config and previous lock state.
-2. It builds generated output actions through render-plan primitives.
-3. It builds framework installer intent through `src/frameworks.mjs`.
-4. `aof sync --dry-run` prints output actions, installer commands, and lock preview without writing.
-5. `aof sync` writes generated outputs and lock state while leaving installers disabled.
-6. `aof sync --install` executes the explicit network-boundary installer path and records attempts.
+2. It computes adapter warnings through `src/adapter-warnings.mjs`.
+3. It builds generated output actions through render-plan primitives.
+4. It builds framework installer intent through `src/frameworks.mjs`.
+5. `aof sync --dry-run` prints adapter warnings, output actions, installer commands, and lock preview without writing.
+6. `aof sync --strict` exits before file actions, lock writes, or installers when adapter warnings exist.
+7. `aof sync` writes generated outputs and lock state while leaving installers disabled.
+8. `aof sync --install` executes the explicit network-boundary installer path and records attempts.
+
+## Core Flow: adapter warnings
+
+1. `src/adapter-warnings.mjs` receives a normalized config plus selected runtimes.
+2. It emits stable warning objects with code, severity, config path, primitive kind/id, runtime, generated path, reason, and remediation.
+3. `src/config-inspect.mjs` exposes warning arrays in validation/doctor inspection payloads.
+4. `src/cli.mjs` formats warnings for human output and JSON output.
+5. `src/config-editor.mjs` exposes the same warning objects to the setup UI Review tab.
+6. Warnings are computed at command time and are not persisted in `.aof/aof.lock.json`.
 
 ## Core Flow: clean
 
@@ -95,6 +109,7 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 - `src/sync.mjs`: combined render/package reconciliation planning and execution.
 - `src/clean.mjs`: lock-owned generated output cleanup planning and execution.
 - `src/dsl.mjs`: AOF config validation and body resolution.
+- `src/adapter-warnings.mjs`: command-time degradation warning policy for runtime fidelity and skipped outputs.
 - `src/adapters.mjs`: runtime-specific render targets and frontmatter rendering.
 - `src/frameworks.mjs`: framework package install command construction and execution.
 - `src/fs.mjs`: low-level JSON/text filesystem helpers.
@@ -127,7 +142,7 @@ Option parsing is local to `src/cli.mjs` through `parseOptions()`. Runtime selec
 
 ## Extensibility Points
 
-- Add new portable resource kinds by updating `src/dsl.mjs`, `src/adapters.mjs`, and `schemas/aof.schema.json`.
+- Add new portable resource kinds by updating `src/dsl.mjs`, `src/adapters.mjs`, `src/adapter-warnings.mjs`, and `schemas/aof.schema.json`.
 - Add new assistant runtimes by extending `RUNTIMES` in `src/adapters.mjs` and runtime validation in `src/dsl.mjs` and `src/prompt.mjs`.
 - Add framework integrations by extending `FRAMEWORKS` in `src/frameworks.mjs`.
 - Add catalog UI capabilities by extending `src/setup-ui.mjs` API routes and `ui/src/main.tsx`.

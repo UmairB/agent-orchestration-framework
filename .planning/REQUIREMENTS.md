@@ -24,10 +24,10 @@
 
 ### Adapter Degradation
 
-- [ ] **ADPT-01**: User receives explicit warnings when a primitive or feature is skipped for an unsupported runtime.
-- [ ] **ADPT-02**: User receives explicit warnings when a primitive is inlined into a less precise runtime output.
-- [ ] **ADPT-03**: User can use runtime-namespaced extensions that pass through only to matching targets.
-- [ ] **ADPT-04**: User can promote adapter warnings to command failures with strict mode for CI use.
+- [x] **ADPT-01**: User receives explicit warnings when a primitive or feature is skipped for an unsupported runtime. Validated in Phase 8.
+- [x] **ADPT-02**: User receives explicit warnings when a primitive is inlined into a less precise runtime output. Validated in Phase 8.
+- [x] **ADPT-03**: User can use runtime-namespaced extensions that pass through only to matching targets. Validated in Phase 8.
+- [x] **ADPT-04**: User can promote adapter warnings to command failures with strict mode for CI use. Validated in Phase 8.
 
 ### Framework Packages
 
@@ -90,10 +90,10 @@
 | DSL-03 | Phase 7 | Complete |
 | DSL-04 | Phase 7 | Complete |
 | DSL-05 | Phase 7 | Complete |
-| ADPT-01 | Phase 8 | Pending |
-| ADPT-02 | Phase 8 | Pending |
-| ADPT-03 | Phase 8 | Pending |
-| ADPT-04 | Phase 8 | Pending |
+| ADPT-01 | Phase 8 | Complete |
+| ADPT-02 | Phase 8 | Complete |
+| ADPT-03 | Phase 8 | Complete |
+| ADPT-04 | Phase 8 | Complete |
 | PKG-01 | Phase 9 | Pending |
 | PKG-02 | Phase 9 | Pending |
 | PKG-03 | Phase 9 | Pending |
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-07 after Phase 7 completion*
+*Last updated: 2026-05-08 after Phase 8 completion*
