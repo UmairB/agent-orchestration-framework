@@ -37,6 +37,11 @@
 <summary>🔵 v1.2 Global Asset Library (Phases 11-15) — PLANNED</summary>
 
 - [ ] Phase 11: Global Library Workspace — define `~/.aof` source storage and global asset CRUD.
+  - Plans: 11-01 Global Workspace Path And Manifest Foundation; 11-02 Global CLI Asset Operations; 11-03 Global Validation And Phase Hardening.
+  - Wave 1: 11-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 11-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 11-03.
+  - Cross-cutting constraints: `~/.aof` mirrors project workspace shape; use explicit `aof global ...` commands; `~/.aof/aof.config.json` is canonical; project validation only fails for referenced malformed global assets.
 - [ ] Phase 12: Project Reference Rendering — resolve global references from project configs and render them with lock traceability.
 - [ ] Phase 13: Code-Bearing Asset Files — preserve associated files and validate asset-owned helper code.
 - [ ] Phase 14: Global Asset Setup UI — create, edit, label, and reference global assets through the UI.
@@ -50,7 +55,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 0/0 | 0/22 | Planned | - |
+| v1.2 Global Asset Library | 11-15 | 3/3 planned | 0/22 | Planned | - |
 
 ## Phase Details
 
