@@ -29,12 +29,14 @@ export function runCli(context, command, input = "", options = {}) {
   }
 
   const args = splitCommand(command);
+  const promptEnv = promptInputEnv(input);
   const result = spawnSync(process.execPath, ["--no-warnings", cliPath, ...args], {
     cwd: context.projectDir,
     env: {
       ...process.env,
       AOF_DATA_DIR: context.dataDir,
       NODE_NO_WARNINGS: "1",
+      ...promptEnv,
       ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
     },
     input,
@@ -69,11 +71,8 @@ export async function runCliInProcess(context, command, input = "", options = {}
   process.env.AOF_DATA_DIR = context.dataDir;
   process.env.NODE_NO_WARNINGS = "1";
   process.exitCode = undefined;
-  if (input) {
-    const [selectionInput, runtimeInput, ...confirmations] = input.trim().split(/\r?\n/);
-    process.env.AOF_TEST_SELECTION_INPUT = selectionInput ?? "";
-    if (runtimeInput !== undefined) process.env.AOF_TEST_RUNTIMES_INPUT = runtimeInput;
-    if (confirmations.length > 0) process.env.AOF_TEST_CONFIRM_INPUT = confirmations.join(",");
+  for (const [name, value] of Object.entries(promptInputEnv(input))) {
+    process.env[name] = value;
   }
   if (options.frameworkStatuses) process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = options.frameworkStatuses;
   process.chdir(context.projectDir);
@@ -100,6 +99,16 @@ export async function runCliInProcess(context, command, input = "", options = {}
 
 export function splitCommand(command) {
   return command.match(/"[^"]+"|'[^']+'|\S+/g)?.map((token) => token.replace(/^["']|["']$/g, "")) ?? [];
+}
+
+function promptInputEnv(input) {
+  if (!input) return {};
+  const [selectionInput, runtimeInput, ...confirmations] = input.trim().split(/\r?\n/);
+  return {
+    AOF_TEST_SELECTION_INPUT: selectionInput ?? "",
+    ...(runtimeInput !== undefined ? { AOF_TEST_RUNTIMES_INPUT: runtimeInput } : {}),
+    ...(confirmations.length > 0 ? { AOF_TEST_CONFIRM_INPUT: confirmations.join(",") } : {})
+  };
 }
 
 function restoreEnv(name, value) {

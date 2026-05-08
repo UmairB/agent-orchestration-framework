@@ -10,21 +10,21 @@ import {
   normalizeFilePath
 } from "../support/assertions.mjs";
 
-export async function runStep(context, step) {
+export async function runSharedCliStep(context, step) {
   if (step === "an empty project") {
     await mkdir(context.projectDir, { recursive: true });
     return;
   }
 
   if (step === "a project initialized with legacy AOF config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeFile(path.join(context.projectDir, "aof.config.json"), legacyConfig(), "utf8");
     context.lastResult = null;
     return;
   }
 
   if (step === "a project initialized with AOF config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     const result = await runCli(context, "init --items project-context,prime --codex");
     assert.equal(result.status, 0, formatResult(result));
     context.lastResult = result;
@@ -32,7 +32,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof file-backed config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "file-backed",
@@ -45,19 +45,19 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with expanded .aof DSL config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeExpandedAofProject(context);
     return;
   }
 
   if (step === "a project with adapter warning .aof config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAdapterWarningAofProject(context);
     return;
   }
 
   if (step === "a project with .aof runtime override config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "overridden",
@@ -72,7 +72,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof invalid identity override config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "bad-override",
@@ -87,7 +87,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof rule config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "rule",
       id: "project-rule",
@@ -101,7 +101,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof multiple codex rules config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [
       {
         kind: "rule",
@@ -124,7 +124,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof package config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "file-backed",
@@ -138,8 +138,36 @@ export async function runStep(context, step) {
     return;
   }
 
+  if (step === "a project with npm git and file package descriptors") {
+    await runSharedCliStep(context, "an empty project");
+    await writeAofProject(context, [], {
+      packages: [
+        {
+          id: "npm-pack",
+          namespace: "vendor",
+          source: { type: "npm", package: "@vendor/npm-pack", version: "latest" },
+          runtimes: ["codex"]
+        },
+        {
+          id: "git-pack",
+          namespace: "vendor",
+          source: { type: "git", url: "https://example.test/vendor/git-pack.git", ref: "v1" },
+          runtimes: ["codex"]
+        },
+        {
+          id: "file-pack",
+          namespace: "vendor",
+          source: { type: "file", path: "../packs/file-pack" },
+          runtimes: ["codex"],
+          dependencies: [{ id: "git-pack", namespace: "vendor" }]
+        }
+      ]
+    });
+    return;
+  }
+
   if (step === "a project with multi-runtime .aof package config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "file-backed",
@@ -154,7 +182,7 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with package resource collision") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     await writeAofProject(context, [{
       kind: "skill",
       id: "vendor-context",
@@ -177,13 +205,13 @@ export async function runStep(context, step) {
   }
 
   if (step === "a project with .aof package config and stale legacy config") {
-    await runStep(context, "a project with .aof package config");
+    await runSharedCliStep(context, "a project with .aof package config");
     await writeFile(path.join(context.projectDir, "aof.config.json"), "{}\n", "utf8");
     return;
   }
 
   if (step === "a project with invalid .aof config") {
-    await runStep(context, "an empty project");
+    await runSharedCliStep(context, "an empty project");
     const workspaceDir = path.join(context.projectDir, ".aof");
     await mkdir(workspaceDir, { recursive: true });
     await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
@@ -355,6 +383,38 @@ export async function runStep(context, step) {
     assert.ok(
       Array.isArray(json.packages) && json.packages.some((item) => item.id === match[2]),
       `Expected ${match[1]} to contain package ${match[2]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` package `(.+)` should record dependency `(.+)`$/);
+  if (match) {
+    const json = JSON.parse(await readFile(path.join(context.projectDir, match[1]), "utf8"));
+    const pkg = Array.isArray(json.packages) ? json.packages.find((item) => item.id === match[2]) : null;
+    assert.ok(pkg, `Expected ${match[1]} to contain package ${match[2]}`);
+    assert.ok(
+      Array.isArray(pkg.dependencies) && pkg.dependencies.some((dependency) => dependency === match[3] || dependency?.id === match[3]),
+      `Expected package ${match[2]} to record dependency ${match[3]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` package `(.+)` should have resolution status `(.+)`$/);
+  if (match) {
+    const json = JSON.parse(await readFile(path.join(context.projectDir, match[1]), "utf8"));
+    const pkg = Array.isArray(json.packages) ? json.packages.find((item) => item.id === match[2]) : null;
+    assert.ok(pkg, `Expected ${match[1]} to contain package ${match[2]}`);
+    assert.equal(pkg.resolution?.status, match[3], `Expected package ${match[2]} resolution status ${match[3]}`);
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` should not contain adapter warning `(.+)`$/);
+  if (match) {
+    const json = JSON.parse(await readFile(path.join(context.projectDir, match[1]), "utf8"));
+    assert.equal(
+      JSON.stringify(json).includes(match[2]),
+      false,
+      `Expected ${match[1]} not to contain adapter warning ${match[2]}`
     );
     return;
   }
