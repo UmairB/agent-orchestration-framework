@@ -32,10 +32,12 @@ None.
 
 ## v1.1 — Aligned Core Hardening
 
-**Status:** In Progress
+**Status:** Complete; audit found process tech debt
 **Started:** 2026-05-07
+**Completed:** 2026-05-08
 **Phases:** 6-10
-**Requirements:** 5/22 complete
+**Requirements:** 22/22 complete
+**Audit:** Tech debt - missing Nyquist validation artifacts for phases 6-10
 
 ### Goal
 
@@ -52,3 +54,11 @@ Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned
 ### Progress
 
 - Phase 6: CLI Lifecycle Commands — complete 2026-05-07.
+- Phase 7: Expanded DSL Primitives — complete 2026-05-07.
+- Phase 8: Adapter Degradation Policy — complete 2026-05-08.
+- Phase 9: Framework Package Semantics — complete 2026-05-08.
+- Phase 10: BDD Parity And Hardening — complete 2026-05-08.
+
+### Audit
+
+- [v1.1-MILESTONE-AUDIT.md](v1.1-MILESTONE-AUDIT.md)
