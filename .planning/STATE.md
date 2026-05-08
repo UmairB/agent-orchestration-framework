@@ -1,12 +1,13 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Between milestones
-**Status:** v1.1 archived; ready to start next milestone
+**Current milestone:** v1.2 Global Asset Library
+**Current phase:** Not started
+**Status:** Defining requirements
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-07 after Phase 6 completion)
+See: `.planning/PROJECT.md` (updated 2026-05-08 after v1.2 milestone start)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -20,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-No active milestone is currently planned. Current focus is starting the next milestone cycle when ready.
+Milestone v1.2 is defining requirements for reusable global AOF assets stored under `~/.aof` and referenced from project `.aof` configs.
 
 ## Current Position
 
-Phase: Between milestones
-Plan: None active
-Status: Ready for `$gsd-new-milestone`
-Last activity: 2026-05-08 - v1.1 archived
+Phase: Not started (defining requirements)
+Plan: -
+Status: Defining requirements
+Last activity: 2026-05-08 - Milestone v1.2 started
 
 ## Resume
 
-**Stopped at:** v1.1 milestone archived
-**Resume file:** `.planning/MILESTONES.md`
+**Stopped at:** v1.2 requirements definition
+**Resume file:** `.planning/PROJECT.md`
 
 ## Memory
 
@@ -96,3 +97,5 @@ Last activity: 2026-05-08 - v1.1 archived
 - Phase 10 verification is captured in `.planning/phases/10-bdd-parity-and-hardening/10-VERIFICATION.md`; `npm run test:unit`, `npm test`, and `npm run test:integration:ps` passed.
 - Milestone v1.1 archive is captured in `.planning/milestones/v1.1-ROADMAP.md`, `.planning/milestones/v1.1-REQUIREMENTS.md`, and `.planning/milestones/v1.1-MILESTONE-AUDIT.md`.
 - Accepted process debt at v1.1 closeout: Nyquist validation artifacts were not generated for phases 6-10.
+- Milestone v1.2 started on 2026-05-08 as Global Asset Library.
+- v1.2 user decisions: global assets live under `~/.aof`; project `.aof` configs reference global asset IDs rather than copying global assets into project workspaces; setup UI must support creating global assets; global assets may include associated files or helper code such as Python scripts.

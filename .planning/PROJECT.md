@@ -10,9 +10,16 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-## Current Milestone
+## Current Milestone: v1.2 Global Asset Library
 
-No active milestone is currently planned. Start the next cycle with `$gsd-new-milestone`.
+**Goal:** Let users create reusable global AOF assets once in `~/.aof` and reference them from any project without copying them into project-local `.aof`.
+
+**Target features:**
+- Global asset storage under `~/.aof` for skills, agents, and rules.
+- Project `.aof` configs can reference global assets by ID; `aof apply` renders those assets into Claude Code and Codex project outputs.
+- Setup UI supports creating and editing global assets as well as project assets.
+- Global assets can include associated files/code, such as Python scripts used by skills or agents.
+- Project-local `.aof` remains local project configuration, not a copy of the global library.
 
 ## Core Value
 
@@ -49,7 +56,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 
 ### Active
 
-(None — define the next milestone with `$gsd-new-milestone`.)
+- [ ] Users can create and maintain global skills, agents, and rules in `~/.aof`.
+- [ ] Project `.aof` configs can reference global assets by ID without copying them into the project workspace.
+- [ ] AOF renders referenced global assets into Claude Code and Codex project outputs during apply/sync.
+- [ ] Setup UI can create and edit global assets alongside project assets.
+- [ ] Global assets can include associated files or executable helper code that renders with the owning asset.
 
 ### Out of Scope
 
@@ -115,7 +126,7 @@ The long-term product direction includes task management: kanban boards, task as
 
 ## Next Milestone Goals
 
-Broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions now that the DSL lifecycle, package model, adapter degradation policy, and BDD safety net are stronger.
+After global asset reuse, broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
 
 ## Evolution
 
@@ -135,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after v1.1 milestone archival*
+*Last updated: 2026-05-08 after v1.2 milestone start*
