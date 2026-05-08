@@ -12,8 +12,10 @@ import { cleanTests } from "../test/clean.test.mjs";
 import { dslPrimitiveTests } from "../test/dsl-primitives.test.mjs";
 import { setupUiTests } from "../test/setup-ui.test.mjs";
 import { schemaTests } from "../test/schema.test.mjs";
+import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
 
 const tests = [
+  ...adapterWarningTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
