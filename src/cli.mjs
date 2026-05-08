@@ -10,7 +10,8 @@ import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { defaultDbPath } from "./paths.mjs";
 import { confirmAction, selectItems, selectRuntimes } from "./prompt.mjs";
 import { findProjectConfig, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
-import { doctorConfig, inspectConfig, validateConfig } from "./config-inspect.mjs";
+import { collectAdapterWarnings } from "./adapter-warnings.mjs";
+import { adapterWarningsForConfig, doctorConfig, inspectConfig, validateConfig } from "./config-inspect.mjs";
 
 const DEFAULT_CONFIG = `{
   "$schema": "./schemas/aof.schema.json",
@@ -209,6 +210,11 @@ async function applyCommand(args) {
   const paths = workspacePaths(targetDir);
   const config = await loadConfig(configPath);
   const runtimes = parseRuntimes(options);
+  const adapterWarnings = collectAdapterWarnings(config, {
+    targetDir,
+    runtimes,
+    global: Boolean(options.global)
+  });
   const desiredOutputs = await createRenderPlan(config, {
     targetDir,
     runtimes,
@@ -219,10 +225,6 @@ async function applyCommand(args) {
     targetDir,
     force: Boolean(options.force)
   });
-
-  for (const item of actions) {
-    console.log(formatApplyAction(item));
-  }
 
   const manifest = createLockManifest({
     actions,
@@ -235,8 +237,24 @@ async function applyCommand(args) {
 
   if (options.dryRun) {
     const summary = summarizeLockManifest(manifest);
+    if (options.json) {
+      printJson({ dryRun: true, strict: Boolean(options.strict), adapterWarnings, actions, lockPreview: summary });
+      if (options.strict && adapterWarnings.length > 0) process.exitCode = 1;
+      return;
+    }
+    printAdapterWarnings(adapterWarnings);
+    if (strictAdapterWarningsFailed(options, adapterWarnings)) return;
+    for (const item of actions) {
+      console.log(formatApplyAction(item));
+    }
     console.log(`lock-preview: ${summary.files} file(s), ${summary.frameworks} framework intent(s)`);
     return;
+  }
+
+  printAdapterWarnings(adapterWarnings);
+  if (strictAdapterWarningsFailed(options, adapterWarnings)) return;
+  for (const item of actions) {
+    console.log(formatApplyAction(item));
   }
 
   await executeApplyActions(actions);
@@ -254,8 +272,23 @@ async function syncCommand(args) {
   });
 
   if (options.dryRun) {
+    if (options.json) {
+      printJson({
+        dryRun: true,
+        strict: Boolean(options.strict),
+        adapterWarnings: plan.adapterWarnings,
+        actions: plan.actions,
+        frameworkPlan: plan.frameworkPlan,
+        lockPreview: plan.lockSummary
+      });
+      if (options.strict && plan.adapterWarnings.length > 0) process.exitCode = 1;
+      return;
+    }
     console.log("dry-run: no files, lock, or package installers will run");
   }
+
+  printAdapterWarnings(plan.adapterWarnings);
+  if (strictAdapterWarningsFailed(options, plan.adapterWarnings)) return;
 
   for (const item of plan.actions) {
     console.log(formatApplyAction(item));
@@ -450,25 +483,33 @@ async function validateCommand(args) {
   const options = parseOptions(args);
   const targetDir = path.resolve(options.target ?? process.cwd());
   const diagnostics = await validateConfig(targetDir, options);
+  const adapterWarnings = await adapterWarningsForConfig(targetDir, {
+    ...options,
+    runtimes: parseRuntimes(options)
+  });
   const errors = diagnostics.filter((item) => item.severity === "error");
   const warnings = diagnostics.filter((item) => item.severity === "warning");
-  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
+  const warningCount = warnings.length + adapterWarnings.length;
+  const failed = errors.length > 0 || (options.strict && warningCount > 0);
 
   if (options.json) {
     printJson({
       valid: !failed,
       strict: Boolean(options.strict),
       errors: errors.length,
-      warnings: warnings.length,
-      diagnostics
+      warnings: warningCount,
+      diagnostics,
+      adapterWarnings
     });
   } else if (!failed) {
     console.log("valid: config passed validation");
-    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
+    if (warningCount > 0) console.log(`warnings: ${warningCount}`);
+    printAdapterWarnings(adapterWarnings);
   } else {
-    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
+    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warningCount} warning(s) under --strict`;
     console.log(`invalid: ${reason}`);
     for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
+    printAdapterWarnings(adapterWarnings);
   }
 
   if (failed) process.exitCode = 1;
@@ -498,6 +539,7 @@ async function doctorCommand(args) {
     for (const check of report.checks) {
       console.log(`${check.severity}: ${check.id} - ${check.message}`);
     }
+    printAdapterWarnings(report.adapterWarnings);
     for (const suggestion of report.suggestions) {
       console.log(`next: ${suggestion}`);
     }
@@ -831,8 +873,8 @@ Usage:
   aof init [dir] [--items id,id] [--defaults] [--claude] [--codex] [--force] [--db path]
   aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]
   aof migrate [dir] [--force] [--dry-run]
-  aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force]
-  aof sync [--claude] [--codex] [--global] [--dry-run] [--force] [--install]
+  aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force] [--strict]
+  aof sync [--claude] [--codex] [--global] [--dry-run] [--force] [--strict] [--install]
   aof validate [--json] [--strict]
   aof doctor [--json] [--strict]
   aof clean [--dry-run] [--force]
@@ -849,5 +891,25 @@ Defaults:
   install initializes the AOF catalog at ${defaultDbPath()} and starts the setup UI.
   init selects catalog items and coding assistants for the current repository.
   install gsd runs: npx get-shit-done-cc@latest with the selected runtime flags.
+  --strict promotes adapter warnings to command failures for CI.
 `;
+}
+
+function printAdapterWarnings(warnings = []) {
+  if (warnings.length === 0) return;
+  console.log("adapter-warnings:");
+  for (const warning of warnings) {
+    const source = warning.kind && warning.id ? `${warning.kind}:${warning.id}` : warning.kind;
+    const output = warning.generatedPath ? ` output=${warning.generatedPath}` : "";
+    console.log(`- [${warning.code}] ${warning.path} runtime=${warning.runtime} source=${source}${output}`);
+    console.log(`  reason: ${warning.reason}`);
+    console.log(`  remediation: ${warning.remediation}`);
+  }
+}
+
+function strictAdapterWarningsFailed(options, warnings = []) {
+  if (!options.strict || warnings.length === 0) return false;
+  console.log(`strict: ${warnings.length} adapter warning(s) treated as failure`);
+  process.exitCode = 1;
+  return true;
 }

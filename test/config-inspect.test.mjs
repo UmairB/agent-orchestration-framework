@@ -29,6 +29,10 @@ export const configInspectTests = [
   {
     name: "tolerates extension fields while validating core fields",
     run: toleratesExtensionFields
+  },
+  {
+    name: "inspection and doctor expose adapter warnings",
+    run: exposesAdapterWarnings
   }
 ];
 
@@ -146,6 +150,31 @@ async function toleratesExtensionFields() {
       ]
     }, null, 2)}\n`, "utf8");
     assert.deepEqual(await validateConfig(targetDir), []);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function exposesAdapterWarnings() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [],
+      hooks: [
+        { id: "notify", event: "PostToolUse", command: "npm test", timeout: 30 }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    const inspection = await inspectConfig(targetDir, { runtimes: ["codex"] });
+    assert.equal(inspection.adapterWarnings.length, 1);
+    assert.equal(inspection.adapterWarnings[0].code, "adapter.skipped-runtime-output");
+
+    const report = await doctorConfig(targetDir, { runtimes: ["codex"] });
+    assert.ok(report.checks.some((item) => item.id === "adapter-degradation" && item.severity === "warning"));
+    assert.equal(report.adapterWarnings.length, 1);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

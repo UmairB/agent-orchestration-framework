@@ -1,6 +1,7 @@
 import path from "node:path";
 import { writeText } from "./fs.mjs";
 import { hashContent } from "./lock.mjs";
+import { hasUnsupportedCommonHookFields } from "./adapter-warnings.mjs";
 import { RUNTIMES, mergeRuntimeOverride } from "./model.mjs";
 import {
   claudeMcpJson,
@@ -55,8 +56,9 @@ function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, option
   const runtimes = new Set(requestedRuntimes);
   const claudeMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("claude") && server.runtimes.includes("claude"));
   const codexMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("codex") && server.runtimes.includes("codex"));
-  const claudeHooks = (config.hooks ?? []).filter((hook) => runtimes.has("claude") && hook.runtimes.includes("claude"));
-  const codexHooks = (config.hooks ?? []).filter((hook) => runtimes.has("codex") && hook.runtimes.includes("codex"));
+  const renderableHooks = (config.hooks ?? []).filter((hook) => !hasUnsupportedCommonHookFields(hook));
+  const claudeHooks = renderableHooks.filter((hook) => runtimes.has("claude") && hook.runtimes.includes("claude"));
+  const codexHooks = renderableHooks.filter((hook) => runtimes.has("codex") && hook.runtimes.includes("codex"));
 
   if (claudeMcpServers.length > 0) {
     outputs.push(renderedRuntimeConfig(targetDir, ".mcp.json", "claude", "mcp", "mcpServers", claudeMcpJson(claudeMcpServers)));

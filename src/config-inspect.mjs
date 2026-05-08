@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { loadConfig } from "./dsl.mjs";
 import { readLock } from "./lock.mjs";
 import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
+import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import {
   supportedHookEvents,
   supportedHookTypes,
@@ -31,9 +32,15 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
   const workspaceConfigExists = await exists(paths.configPath);
   const diagnostics = await validateConfig(projectDir, options);
   let config = null;
+  let adapterWarnings = [];
 
   if (!diagnostics.some((item) => item.severity === "error")) {
     config = await loadConfig(configPath);
+    adapterWarnings = collectAdapterWarnings(config, {
+      targetDir: projectDir,
+      runtimes: options.runtimes ?? supportedRuntimes(),
+      global: Boolean(options.global)
+    });
   }
 
   return {
@@ -53,8 +60,20 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
     hooks: config?.hooks?.map((hook) => ({ id: hook.id, event: hook.event, type: hook.type, runtimes: hook.runtimes })) ?? [],
     projectDocs: config?.projectDocs?.map((doc) => ({ id: doc.id, targets: doc.targets, runtimes: doc.runtimes })) ?? [],
     settings: config?.settings ?? {},
-    diagnostics
+    diagnostics,
+    adapterWarnings
   };
+}
+
+export async function adapterWarningsForConfig(projectDir = process.cwd(), options = {}) {
+  const configPath = await findProjectConfig(projectDir, options.config);
+  const diagnostics = await validateConfig(projectDir, options);
+  if (diagnostics.some((item) => item.severity === "error")) return [];
+  return collectAdapterWarnings(await loadConfig(configPath), {
+    targetDir: projectDir,
+    runtimes: options.runtimes ?? supportedRuntimes(),
+    global: Boolean(options.global)
+  });
 }
 
 export async function validateConfig(projectDir = process.cwd(), options = {}) {
@@ -159,6 +178,15 @@ export async function doctorConfig(projectDir = process.cwd(), options = {}) {
       details: summarizeActions(actions)
     });
   }
+
+  checks.push({
+    id: "adapter-degradation",
+    severity: inspection.adapterWarnings.length > 0 ? "warning" : "ok",
+    message: inspection.adapterWarnings.length > 0
+      ? `${inspection.adapterWarnings.length} adapter warning(s) found.`
+      : "No adapter degradation warnings detected.",
+    details: summarizeWarnings(inspection.adapterWarnings)
+  });
 
   const packageCount = inspection.packages.length;
   checks.push({
@@ -445,7 +473,17 @@ function suggestionsFor(inspection, checks) {
   if (checks.some((check) => check.id === "generated-output-drift" && check.severity === "warning")) {
     suggestions.push("Review drift warnings or rerun aof apply --force when overwriting generated output is intended.");
   }
+  if (inspection.adapterWarnings.length > 0) {
+    suggestions.push("Review adapter warnings or rerun with --strict in CI to fail on portability degradation.");
+  }
   return suggestions;
+}
+
+function summarizeWarnings(warnings) {
+  return warnings.reduce((summary, item) => {
+    summary[item.code] = (summary[item.code] ?? 0) + 1;
+    return summary;
+  }, {});
 }
 
 async function exists(filePath) {

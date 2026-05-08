@@ -1,4 +1,5 @@
 import { loadConfig } from "./dsl.mjs";
+import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { executeFrameworkInstallPlan, planFrameworkInstall } from "./frameworks.mjs";
 import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
@@ -11,6 +12,11 @@ export async function createSyncPlan(projectDir = process.cwd(), options = {}) {
   const previousLock = await readLock(paths.lockPath);
   const runtimes = options.runtimes;
   const desiredOutputs = await createRenderPlan(config, {
+    targetDir: projectDir,
+    runtimes,
+    global: Boolean(options.global)
+  });
+  const adapterWarnings = collectAdapterWarnings(config, {
     targetDir: projectDir,
     runtimes,
     global: Boolean(options.global)
@@ -41,6 +47,7 @@ export async function createSyncPlan(projectDir = process.cwd(), options = {}) {
     config,
     previousLock,
     desiredOutputs,
+    adapterWarnings,
     actions,
     manifest,
     lockSummary: summarizeLockManifest(manifest),

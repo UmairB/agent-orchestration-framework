@@ -118,6 +118,12 @@ async function runStep(context, step) {
     return;
   }
 
+  if (step === "a project with adapter warning .aof config") {
+    await runStep(context, "an empty project");
+    await writeAdapterWarningAofProject(context);
+    return;
+  }
+
   if (step === "a project with .aof runtime override config") {
     await runStep(context, "an empty project");
     await writeAofProject(context, [{
@@ -501,6 +507,34 @@ async function writeExpandedAofProject(context) {
       claude: { permissions: { allow: ["Bash(npm test)"] } },
       codex: { model: "gpt-5.4", approval_policy: "on-request" }
     }
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeAdapterWarningAofProject(context) {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const workspaceDir = path.join(context.projectDir, ".aof");
+  await mkdir(path.join(workspaceDir, "assets", "skills", "file-backed"), { recursive: true });
+  await writeFile(path.join(workspaceDir, "assets", "skills", "file-backed", "SKILL.md"), "File-backed body\n", "utf8");
+  await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+    $schema: "../schemas/aof.schema.json",
+    name: "adapter-warning",
+    resources: [
+      {
+        kind: "skill",
+        id: "file-backed",
+        path: "assets/skills/file-backed/SKILL.md",
+        runtimes: ["codex"]
+      }
+    ],
+    hooks: [
+      {
+        id: "notify",
+        event: "PostToolUse",
+        command: "npm test",
+        timeout: 30,
+        runtimes: ["codex"]
+      }
+    ]
   }, null, 2)}\n`, "utf8");
 }
 
