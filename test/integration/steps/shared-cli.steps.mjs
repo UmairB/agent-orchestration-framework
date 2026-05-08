@@ -328,6 +328,44 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  if (step === "a project with referenced global skill helper files") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "research-helper",
+      description: "Research helper",
+      body: "Use the helper script.",
+      files: [
+        { path: "scripts/search.py", body: "print('search')\n" }
+      ]
+    });
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "research-helper" }
+      ]
+    });
+    return;
+  }
+
+  if (step === "a project with unsafe global skill helper files") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "unsafe-helper",
+      description: "Unsafe helper",
+      body: "Unsafe helper.",
+      files: [
+        { path: "../escape.py", body: "print('escape')\n" }
+      ]
+    });
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "unsafe-helper" }
+      ]
+    });
+    return;
+  }
+
   if (step === "a project with a missing global reference") {
     await runSharedCliStep(context, "an empty project");
     await mkdir(context.globalDir, { recursive: true });
@@ -616,6 +654,12 @@ async function writeGlobalAofResource(context, input, options = {}) {
     await writeFile(path.join(context.globalDir, overridePath), `${JSON.stringify(input.override, null, 2)}\n`, "utf8");
     resource.overrides = { codex: overridePath };
   }
+  for (const file of input.files ?? []) {
+    const associatedPath = path.join(resourceDir, file.path);
+    await mkdir(path.dirname(associatedPath), { recursive: true });
+    await writeFile(associatedPath, file.body ?? "", "utf8");
+  }
+  if (input.files) resource.files = input.files.map((file) => file.path);
 
   let resources = [];
   if (options.append && await fileExists(path.join(context.globalDir, "aof.config.json"))) {

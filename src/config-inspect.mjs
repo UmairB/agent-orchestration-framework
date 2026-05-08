@@ -1,5 +1,5 @@
 import path from "node:path";
-import { access, readFile } from "node:fs/promises";
+import { access, lstat, readFile, realpath } from "node:fs/promises";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
 import { normalizeId } from "./fs.mjs";
 import { readLock } from "./lock.mjs";
@@ -351,6 +351,8 @@ async function validateResource(resource, index, baseDir, diagnostics, locationO
     await requireFile(path.resolve(baseDir, resource.path), `${location}.path`, diagnostics);
   }
 
+  await validateAssociatedFiles(resource, baseDir, location, diagnostics);
+
   const overrides = resource.overrides ?? {};
   if (overrides && typeof overrides !== "object") {
     diagnostics.push(diagnostic("error", `${location}.overrides`, "overrides must be an object."));
@@ -553,6 +555,71 @@ function validateDuplicates(items, collectionName, keyFor, diagnostics, indexFor
   }
 }
 
+async function validateAssociatedFiles(resource, baseDir, location, diagnostics) {
+  if (resource.files === undefined) return;
+  if (!Array.isArray(resource.files)) {
+    diagnostics.push(diagnostic("error", `${location}.files`, "files must be an array when provided."));
+    return;
+  }
+  if (resource.kind !== "skill") {
+    diagnostics.push(diagnostic("error", `${location}.files`, "Associated files are supported for skill resources only.", "unsupported-associated-files"));
+    return;
+  }
+  if (!resource.path) {
+    diagnostics.push(diagnostic("error", `${location}.files`, "Associated files require a file-backed resource path.", "associated-files-require-path"));
+    return;
+  }
+
+  const bodyPath = path.resolve(baseDir, resource.path);
+  const assetDir = path.dirname(bodyPath);
+  const bodyFileName = path.basename(bodyPath);
+
+  for (const [fileIndex, entry] of resource.files.entries()) {
+    const entryLocation = `${location}.files[${fileIndex}]`;
+    if (typeof entry !== "string" || entry.trim() === "") {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path must be a non-empty string.", "invalid-associated-file"));
+      continue;
+    }
+    if (path.isAbsolute(entry)) {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path must be relative to the asset directory.", "associated-file-escape"));
+      continue;
+    }
+
+    const normalizedEntry = entry.replaceAll("\\", "/");
+    const resolved = path.resolve(assetDir, normalizedEntry);
+    if (!isInside(assetDir, resolved)) {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path must stay inside the asset directory.", "associated-file-escape"));
+      continue;
+    }
+    if (normalizePath(path.relative(assetDir, resolved)) === normalizePath(bodyFileName)) {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path cannot target the primary body file.", "associated-file-body"));
+      continue;
+    }
+
+    try {
+      const stat = await lstat(resolved);
+      if (stat.isSymbolicLink()) {
+        const real = await realpath(resolved);
+        if (!isInside(assetDir, real)) {
+          diagnostics.push(diagnostic("error", entryLocation, "Associated file symlink must stay inside the asset directory.", "associated-file-escape"));
+          continue;
+        }
+        diagnostics.push(diagnostic("error", entryLocation, "Associated file symlinks are not supported.", "associated-file-symlink"));
+        continue;
+      }
+      if (!stat.isFile()) {
+        diagnostics.push(diagnostic("error", entryLocation, "Associated file path must point to a regular file.", "associated-file-not-file"));
+      }
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        diagnostics.push(diagnostic("error", entryLocation, `Missing associated file: ${resolved}`, "missing-associated-file"));
+      } else {
+        diagnostics.push(diagnostic("error", entryLocation, `Cannot read associated file: ${error.message}`, error.code ?? "unreadable-associated-file"));
+      }
+    }
+  }
+}
+
 function validateRuntimeExtensionObjects(item, location, diagnostics) {
   for (const runtime of VALID_RUNTIMES) {
     const value = item?.[runtime];
@@ -565,6 +632,10 @@ function validateRuntimeExtensionObjects(item, location, diagnostics) {
 function isInside(root, filePath) {
   const relative = path.relative(root, filePath);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizePath(filePath) {
+  return String(filePath).replaceAll("\\", "/");
 }
 
 async function readOverride(filePath, location, diagnostics) {

@@ -48,7 +48,7 @@ async function schemaFieldsAlign() {
     assert.ok(schema.properties[field], `Missing config field ${field}`);
   }
   assert.deepEqual(schema.$defs.globalRef.properties.kind.enum.sort(), ["agent", "rule", "skill"]);
-  for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "overrides"]) {
+  for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "files", "overrides"]) {
     assert.ok(resource.properties[field], `Missing resource field ${field}`);
   }
   for (const kind of supportedResourceKinds()) {

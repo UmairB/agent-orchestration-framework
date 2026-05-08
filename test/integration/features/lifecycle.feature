@@ -132,6 +132,30 @@ Feature: AOF CLI lifecycle
     And file `.codex/skills/shared-review/SKILL.md` should exist
     And JSON file `.aof/aof.lock.json` should contain global resource `shared-review`
 
+  Scenario: Render referenced global skill helper files
+    Given a project with referenced global skill helper files
+    When I run `apply --codex`
+    Then the command should succeed
+    And file `.codex/skills/research-helper/scripts/search.py` should exist
+    And file `.codex/skills/research-helper/scripts/search.py` should contain `print('search')`
+    And file `.aof/assets/skills/research-helper/scripts/search.py` should not exist
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/research-helper/scripts/search.py`
+    And JSON file `.aof/aof.lock.json` should contain global resource `research-helper`
+
+  Scenario: Preview referenced global skill helper files
+    Given a project with referenced global skill helper files
+    When I run `sync --codex --dry-run`
+    Then the command should succeed
+    And stdout should contain `.codex`
+    And stdout should contain `scripts`
+    And file `.codex/skills/research-helper/scripts/search.py` should not exist
+
+  Scenario: Report unsafe global skill helper files
+    Given a project with unsafe global skill helper files
+    When I run `validate`
+    Then the command should fail
+    And stdout should contain `Associated file path must stay inside the asset directory`
+
   Scenario: Report invalid global references
     Given a project with a missing global reference
     When I run `validate`

@@ -88,7 +88,27 @@ aof apply --codex
 Referenced global skills, agents, and rules render alongside project-local
 resources. Runtime overrides declared on the global asset are honored, and lock
 entries record global source scope. Associated helper/code files for global
-asset directories are handled in a later phase.
+skill directories can be listed explicitly with `files`:
+
+```json
+{
+  "kind": "skill",
+  "id": "research-helper",
+  "path": "assets/skills/research-helper/SKILL.md",
+  "files": [
+    "scripts/search.py",
+    "templates/query.md"
+  ],
+  "runtimes": ["codex"]
+}
+```
+
+Associated file paths are relative to the asset directory containing `SKILL.md`
+and cannot escape that directory. For a referenced global skill, the example
+above renders to `.codex/skills/research-helper/scripts/search.py` and
+`.codex/skills/research-helper/templates/query.md` alongside the generated
+`SKILL.md`. Phase 13 supports associated files for skills; other resource kinds
+remain single-file outputs.
 
 Synchronize generated outputs and managed package intent:
 

@@ -8,7 +8,7 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, and Phase 12 added project references that render global assets with lock traceability. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, and Phase 13 added explicit associated files for skill helper code. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
 ## Current Milestone: v1.2 Global Asset Library
 
@@ -62,11 +62,13 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ `aof apply` and `aof sync` render referenced global assets into Claude Code and Codex outputs — Phase 12
 - ✓ Runtime overrides on global assets are honored during rendering — Phase 12
 - ✓ Lock and diagnostic output identify global asset source scope — Phase 12
+- ✓ Global assets can own explicit associated files under their asset directory — Phase 13
+- ✓ Rendering preserves associated files for skill runtime directories such as Codex skill helper scripts — Phase 13
+- ✓ Validation rejects associated file escapes, missing files, directories, unsupported symlinks, primary-body duplication, and unsupported resource kinds — Phase 13
 
 ### Active
 
 - [ ] Setup UI can create and edit global assets alongside project assets.
-- [ ] Global assets can include associated files or executable helper code that renders with the owning asset.
 
 ### Out of Scope
 
@@ -133,6 +135,8 @@ The long-term product direction includes task management: kanban boards, task as
 | `aof global ...` is the source-library command namespace | Global source asset operations should not overload runtime-output `--global` behavior | Implemented in Phase 11 |
 | Project global references use top-level `globalRefs` | Source ownership stays explicit and project-local `resources` remain project-owned | Implemented in Phase 12 |
 | Global reference rendering preserves source scope in lock state | Users need to audit whether generated outputs came from project-local assets, global assets, or packages | Implemented in Phase 12 |
+| Associated asset files are explicit manifest entries | Helper code should be deliberate, reviewable, and constrained to the asset directory rather than discovered by scanning | Implemented in Phase 13 |
+| Phase 13 associated-file rendering is skill-only | Skills are the directory-shaped runtime asset needed for helper code now; other resource kinds remain single-file until a concrete runtime shape requires more | Implemented in Phase 13 |
 
 ## Next Milestone Goals
 
@@ -156,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after Phase 12 completion*
+*Last updated: 2026-05-08 after Phase 13 completion*

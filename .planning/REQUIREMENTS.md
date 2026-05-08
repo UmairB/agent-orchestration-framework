@@ -29,9 +29,9 @@
 
 ### Code-Bearing Assets
 
-- [ ] **CODE-01**: Global assets can own associated files under their asset directory.
-- [ ] **CODE-02**: Rendering preserves associated files for runtime asset shapes that require directories, such as skills with helper scripts.
-- [ ] **CODE-03**: Validation rejects associated files that escape the asset directory or would overwrite unrelated generated output.
+- [x] **CODE-01**: Global assets can own associated files under their asset directory.
+- [x] **CODE-02**: Rendering preserves associated files for runtime asset shapes that require directories, such as skills with helper scripts.
+- [x] **CODE-03**: Validation rejects associated files that escape the asset directory or would overwrite unrelated generated output.
 
 ### Setup UI
 
@@ -91,9 +91,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GRND-02 | Phase 12 | Complete |
 | GRND-03 | Phase 12 | Complete |
 | GRND-04 | Phase 12 | Complete |
-| CODE-01 | Phase 13 | Pending |
-| CODE-02 | Phase 13 | Pending |
-| CODE-03 | Phase 13 | Pending |
+| CODE-01 | Phase 13 | Complete |
+| CODE-02 | Phase 13 | Complete |
+| CODE-03 | Phase 13 | Complete |
 | GUI-01 | Phase 14 | Pending |
 | GUI-02 | Phase 14 | Pending |
 | GUI-03 | Phase 14 | Pending |
@@ -106,8 +106,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.2 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
-- Complete: 12
+- Complete: 15
 
 ---
 *Requirements defined: 2026-05-08*
-*Last updated: 2026-05-08 after Phase 12 completion*
+*Last updated: 2026-05-08 after Phase 13 completion*

@@ -41,10 +41,10 @@ export function renderConfigOutputs(config, options = {}) {
     const root = options.global ? adapter.globalRoot : path.join(targetDir, adapter.localRoot);
     for (const resource of config.resources) {
       if (!resource.runtimes.includes(runtime)) continue;
-      outputs.push(renderedResource(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
+      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
     }
     for (const resource of packageResourcesForRuntime(config.packages ?? [], runtime)) {
-      outputs.push(renderedResource(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
+      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
     }
   }
 
@@ -149,6 +149,47 @@ function renderedResource(targetDir, root, runtime, adapter, resource) {
     content,
     hash: hashContent(content)
   };
+}
+
+function renderedResourceOutputs(targetDir, root, runtime, adapter, resource) {
+  const main = renderedResource(targetDir, root, runtime, adapter, resource);
+  if (resource.kind !== "skill" || !Array.isArray(resource.associatedFiles) || resource.associatedFiles.length === 0) {
+    return [main];
+  }
+
+  const skillDir = path.dirname(main.absolutePath);
+  return [
+    main,
+    ...resource.associatedFiles.map((file) => renderedAssociatedFile(targetDir, skillDir, runtime, resource, file))
+  ];
+}
+
+function renderedAssociatedFile(targetDir, skillDir, runtime, resource, file) {
+  const filePath = path.join(skillDir, file.path);
+  if (!isInside(skillDir, filePath)) {
+    throw new Error(`Associated file output escapes skill directory: ${file.path}`);
+  }
+  const projectRelative = path.relative(targetDir, filePath);
+  const content = file.content;
+  return {
+    absolutePath: filePath,
+    path: projectRelative.startsWith("..") ? filePath : projectRelative,
+    runtime,
+    resource: {
+      ...resourceMetadata(resource),
+      artifact: "associated-file",
+      file: file.path
+    },
+    source: resource,
+    body: content,
+    content,
+    hash: hashContent(content)
+  };
+}
+
+function isInside(root, filePath) {
+  const relative = path.relative(root, filePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function packageResourcesForRuntime(packages, runtime) {

@@ -128,13 +128,16 @@ async function resolveResource(resource, baseDir) {
   const runtimes = normalizeRuntimes(resource.runtimes);
   const body = await resolveBody(resource, baseDir);
   const overrides = await resolveOverrides(resource, baseDir);
+  const associatedFiles = await resolveAssociatedFiles(resource, baseDir);
 
   return {
     ...resource,
     id,
     runtimes,
     body,
-    overrides
+    overrides,
+    associatedFiles,
+    _aofAssetDir: resource.path ? path.dirname(path.resolve(baseDir, resource.path)) : null
   };
 }
 
@@ -328,4 +331,43 @@ async function resolveOverrides(resource, baseDir) {
   }
 
   return overrides;
+}
+
+async function resolveAssociatedFiles(resource, baseDir) {
+  if (!Array.isArray(resource.files) || resource.files.length === 0) return [];
+  if (resource.kind !== "skill") return [];
+  if (!resource.path) return [];
+
+  const assetDir = path.dirname(path.resolve(baseDir, resource.path));
+  const bodyPath = path.resolve(baseDir, resource.path);
+  return Promise.all(resource.files.map(async (filePath) => {
+    if (typeof filePath !== "string" || filePath.trim() === "") {
+      throw new Error("Associated file path must be a non-empty string.");
+    }
+    const normalizedPath = normalizeAssociatedPath(filePath);
+    if (path.isAbsolute(filePath)) {
+      throw new Error(`Associated file path must be relative to the asset directory: ${filePath}`);
+    }
+    const absolutePath = path.resolve(assetDir, normalizedPath);
+    if (!isInside(assetDir, absolutePath)) {
+      throw new Error(`Associated file path escapes the asset directory: ${filePath}`);
+    }
+    if (path.relative(assetDir, absolutePath) === path.relative(assetDir, bodyPath)) {
+      throw new Error(`Associated file path cannot target the primary body file: ${filePath}`);
+    }
+    return {
+      path: normalizedPath,
+      absolutePath,
+      content: await readFile(absolutePath, "utf8")
+    };
+  }));
+}
+
+function normalizeAssociatedPath(filePath) {
+  return String(filePath).replaceAll("\\", "/");
+}
+
+function isInside(root, filePath) {
+  const relative = path.relative(root, filePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

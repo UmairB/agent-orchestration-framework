@@ -46,6 +46,14 @@ export const renderPlanTests = [
   {
     name: "fails package and local output path conflicts before writes",
     run: failsPackageLocalOutputConflicts
+  },
+  {
+    name: "renders associated skill files with lock ownership",
+    run: rendersAssociatedSkillFiles
+  },
+  {
+    name: "protects drifted associated skill files",
+    run: protectsDriftedAssociatedSkillFiles
   }
 ];
 
@@ -324,6 +332,77 @@ async function failsPackageLocalOutputConflicts() {
       () => createRenderPlan(config, { targetDir, runtimes: ["codex"] }),
       /Generated output conflict at .*local:skill:vendor-context.*package:vendor\/assistant-pack:skill:context/
     );
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function rendersAssociatedSkillFiles() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const assetDir = path.join(targetDir, ".aof", "assets", "skills", "context");
+    await mkdir(path.join(assetDir, "scripts"), { recursive: true });
+    await writeFile(path.join(assetDir, "SKILL.md"), "Skill body.\n", "utf8");
+    await writeFile(path.join(assetDir, "scripts", "helper.py"), "print('helper')\n", "utf8");
+
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [
+        {
+          kind: "skill",
+          id: "context",
+          path: path.join(".aof", "assets", "skills", "context", "SKILL.md"),
+          files: ["scripts/helper.py"],
+          runtimes: ["codex"]
+        }
+      ]
+    }, targetDir);
+
+    const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
+    const helper = desired.find((item) => item.path === path.join(".codex", "skills", "context", "scripts", "helper.py"));
+    assert.ok(helper);
+    assert.equal(helper.content, "print('helper')\n");
+    assert.equal(helper.resource.artifact, "associated-file");
+    assert.equal(helper.resource.file, "scripts/helper.py");
+
+    const actions = await planApplyActions(desired, null, { targetDir });
+    assert.ok(actions.some((item) => item.path === helper.path && item.action === "create"));
+    const manifest = createLockManifest({ actions, desiredOutputs: desired, config, runtimes: ["codex"] });
+    assert.ok(manifest.files.some((item) => item.path === helper.path && item.resource.artifact === "associated-file"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function protectsDriftedAssociatedSkillFiles() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const assetDir = path.join(targetDir, ".aof", "assets", "skills", "context");
+    await mkdir(path.join(assetDir, "scripts"), { recursive: true });
+    await writeFile(path.join(assetDir, "SKILL.md"), "Skill body.\n", "utf8");
+    await writeFile(path.join(assetDir, "scripts", "helper.py"), "print('helper')\n", "utf8");
+
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [
+        {
+          kind: "skill",
+          id: "context",
+          path: path.join(".aof", "assets", "skills", "context", "SKILL.md"),
+          files: ["scripts/helper.py"],
+          runtimes: ["codex"]
+        }
+      ]
+    }, targetDir);
+    const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
+    const actions = await planApplyActions(desired, null, { targetDir });
+    await executeApplyActions(actions);
+    const prior = createLockManifest({ actions, desiredOutputs: desired, config, runtimes: ["codex"] });
+    const helper = desired.find((item) => item.resource.artifact === "associated-file");
+    await writeFile(helper.absolutePath, "manual edit\n", "utf8");
+
+    const nextActions = await planApplyActions(desired, prior, { targetDir });
+    assert.ok(nextActions.some((item) => item.path === helper.path && item.action === "drift-warning"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

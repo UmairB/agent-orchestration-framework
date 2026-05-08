@@ -114,6 +114,10 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "overrides": {
           "type": "object",
           "properties": {
