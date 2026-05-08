@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
 **Current phase:** Phase 11 - Global Library Workspace
-**Status:** Roadmap planned
+**Status:** Phase context gathered
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Milestone v1.2 is planned. Current focus is Phase 11: Global Library Workspace.
+Milestone v1.2 is planned. Phase 11 context has been gathered and is ready for planning.
 
 ## Current Position
 
 Phase: 11 - Global Library Workspace
 Plan: Not started
-Status: Ready for `$gsd-discuss-phase 11` or `$gsd-plan-phase 11`
-Last activity: 2026-05-08 - Milestone v1.2 roadmap created
+Status: Ready for `$gsd-plan-phase 11`
+Last activity: 2026-05-08 - Phase 11 context gathered
 
 ## Resume
 
-**Stopped at:** v1.2 roadmap created
-**Resume file:** `.planning/ROADMAP.md`
+**Stopped at:** Phase 11 context gathered
+**Resume file:** `.planning/phases/11-global-library-workspace/11-CONTEXT.md`
 
 ## Memory
 
@@ -100,3 +100,4 @@ Last activity: 2026-05-08 - Milestone v1.2 roadmap created
 - Milestone v1.2 started on 2026-05-08 as Global Asset Library.
 - v1.2 user decisions: global assets live under `~/.aof`; project `.aof` configs reference global asset IDs rather than copying global assets into project workspaces; setup UI must support creating global assets; global assets may include associated files or helper code such as Python scripts.
 - v1.2 roadmap uses phases 11-15: Global Library Workspace, Project Reference Rendering, Code-Bearing Asset Files, Global Asset Setup UI, and Global Asset Verification.
+- Phase 11 discussion locked decisions: `~/.aof` mirrors project workspace shape with `aof.config.json`; use explicit `aof global ...` commands; global config is canonical; project validation fails only for referenced malformed global assets while `aof global validate` checks the whole library.
