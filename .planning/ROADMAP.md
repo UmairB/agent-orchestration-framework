@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 8 completion
+**Last updated:** 2026-05-08 after Phase 9 planning
 
 ## Milestones
 
@@ -119,11 +119,25 @@
 
 **Requirements:** PKG-01, PKG-02, PKG-03, PKG-04
 
+**Status:** Planned - ready to execute.
+
 **Success criteria:**
 1. Packages can be declared from npm, git, and local file sources.
 2. Package namespaces are required and applied to emitted files before writes.
 3. Dependency metadata and resolved package versions are recorded in lock state.
 4. Conflicting generated output claims fail before any write and identify the packages or local primitives involved.
+
+**Plans:**
+- [ ] Wave 1: `09-01-PLAN.md` - Package descriptor normalization and validation.
+- [ ] Wave 2: `09-02-PLAN.md` - Package resolution and lock metadata.
+- [ ] Wave 3: `09-03-PLAN.md` - Package output claims and conflict gates.
+
+**Cross-cutting constraints:**
+- Existing string package sources remain supported while structured npm/git/file descriptors are added.
+- Package namespaces are explicit and required.
+- Lock state records direct package metadata, not a full transitive dependency graph.
+- Package conflict checks must fail before generated files, lock state, or installers change anything.
+- Networked package installer execution remains opt-in and explicit.
 
 ### Phase 10: BDD Parity And Hardening
 
@@ -142,8 +156,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 9/9 | 14/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 12/12 | 14/22 | In Progress | — |
 
 ## Next
 
-Run `$gsd-discuss-phase 9` to start Framework Package Semantics.
+Run `$gsd-execute-phase 9` to implement Framework Package Semantics.
