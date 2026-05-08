@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 10: BDD Parity And Hardening
-**Status:** Phase 9 complete; ready to discuss Phase 10
+**Status:** Phase 10 context gathered; ready to plan Phase 10
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is preparing Phase 10: BDD parity and hardening across lifecycle, package, adapter, and validation behavior.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is planning Phase 10: BDD parity and hardening across lifecycle, package, adapter, setup UI API, and validation behavior.
 
 ## Current Position
 
 Phase: 10 - BDD Parity And Hardening
 Plan: not yet created
-Status: Ready to discuss
-Last activity: 2026-05-08 - Phase 9 completed and verified
+Status: Ready to plan
+Last activity: 2026-05-08 - Phase 10 context gathered
 
 ## Resume
 
-**Stopped at:** Phase 9 completed
-**Resume file:** `.planning/phases/09-framework-package-semantics/09-VERIFICATION.md`
+**Stopped at:** Phase 10 context gathered
+**Resume file:** `.planning/phases/10-bdd-parity-and-hardening/10-CONTEXT.md`
 
 ## Memory
 
@@ -88,3 +88,5 @@ Last activity: 2026-05-08 - Phase 9 completed and verified
 - Phase 9 planning produced 3 plans in `.planning/phases/09-framework-package-semantics/`.
 - Phase 9 execution completed with commits for package descriptor normalization, package lock/install metadata, and package output conflict gates.
 - Phase 9 verification is captured in `.planning/phases/09-framework-package-semantics/09-VERIFICATION.md`; `npm run test:unit` and `npm test` passed. UI build was not needed because no UI files changed.
+- Phase 10 context is captured in `.planning/phases/10-bdd-parity-and-hardening/10-CONTEXT.md`.
+- Phase 10 discussion locked decisions for a phase-local BDD coverage matrix, split domain feature files with per-feature step modules, setup UI API BDD over real HTTP, and PowerShell integration as a separate required verification command.
