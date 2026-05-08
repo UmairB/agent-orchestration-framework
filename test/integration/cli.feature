@@ -237,7 +237,15 @@ Feature: AOF CLI
     Then the command should succeed
     And file `.aof/aof.lock.json` should exist
     And JSON file `.aof/aof.lock.json` should contain framework `gsd`
+    And JSON file `.aof/aof.lock.json` should contain package `gsd`
     And stdout should not contain `npx get-shit-done-cc`
+
+  Scenario: Refuse package resource output conflicts before writes
+    Given a project with package resource collision
+    When I run `apply --codex`
+    Then the command should fail
+    And stderr should contain `Generated output conflict`
+    And file `.codex/skills/vendor-context/SKILL.md` should not exist
 
   Scenario: Show config inspection in human and JSON formats
     Given a project with .aof package config

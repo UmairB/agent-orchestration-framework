@@ -142,7 +142,7 @@ function groupDesiredOutputs(outputs) {
     if (group.every((output) => output.runtime === "codex" && output.resource.kind === "rule" && path.basename(output.path) === "AGENTS.md")) {
       return mergeCodexAgents(group);
     }
-    throw new Error(`Multiple resources render to the same path: ${group[0].path}`);
+    throw new Error(`Generated output conflict at ${group[0].path}: ${group.map(describeOutput).join(", ")}`);
   });
 }
 
@@ -175,6 +175,17 @@ function mergeCodexAgents(group) {
     },
     sources: sorted.map((output) => output.resource)
   };
+}
+
+function describeOutput(output) {
+  const resource = output.resource ?? {};
+  if (resource.package) {
+    return `package:${resource.package.namespace}/${resource.package.id}:${resource.kind}:${resource.originalId ?? resource.id}`;
+  }
+  if (resource.kind) {
+    return `local:${resource.kind}:${resource.id}`;
+  }
+  return `runtime:${output.runtime}:${output.path}`;
 }
 
 function action(name, output, reason) {

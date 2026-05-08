@@ -38,6 +38,14 @@ export const renderPlanTests = [
   {
     name: "tracks expanded DSL root outputs through lock drift protection",
     run: tracksExpandedDslRootOutputDrift
+  },
+  {
+    name: "renders package resources with namespace ownership",
+    run: rendersPackageResourcesWithNamespace
+  },
+  {
+    name: "fails package and local output path conflicts before writes",
+    run: failsPackageLocalOutputConflicts
   }
 ];
 
@@ -247,6 +255,75 @@ async function tracksExpandedDslRootOutputDrift() {
     await writeFile(path.join(targetDir, "AGENTS.md"), "Manual edit.\n", "utf8");
     actions = await planApplyActions(desired, prior, { targetDir });
     assert.equal(actions[0].action, "drift-warning");
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function rendersPackageResourcesWithNamespace() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [],
+      packages: [
+        {
+          id: "assistant-pack",
+          namespace: "vendor",
+          source: "file:../packs/assistant-pack",
+          runtimes: ["codex"],
+          resources: [
+            { kind: "skill", id: "context", body: "Package body." }
+          ]
+        }
+      ]
+    });
+
+    const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
+    assert.equal(desired.length, 1);
+    assert.equal(desired[0].path, path.join(".codex", "skills", "vendor-context", "SKILL.md"));
+    assert.equal(desired[0].resource.package.id, "assistant-pack");
+    assert.equal(desired[0].resource.package.namespace, "vendor");
+    assert.equal(desired[0].resource.originalId, "context");
+
+    const manifest = createLockManifest({
+      actions: await planApplyActions(desired, null, { targetDir }),
+      desiredOutputs: desired,
+      config,
+      runtimes: ["codex"]
+    });
+    assert.equal(manifest.files[0].resource.package.namespace, "vendor");
+    assert.equal(manifest.packages[0].sourceDescriptor.type, "file");
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function failsPackageLocalOutputConflicts() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [
+        { kind: "skill", id: "vendor-context", body: "Local body." }
+      ],
+      packages: [
+        {
+          id: "assistant-pack",
+          namespace: "vendor",
+          source: "file:../packs/assistant-pack",
+          runtimes: ["codex"],
+          resources: [
+            { kind: "skill", id: "context", body: "Package body." }
+          ]
+        }
+      ]
+    });
+
+    await assert.rejects(
+      () => createRenderPlan(config, { targetDir, runtimes: ["codex"] }),
+      /Generated output conflict at .*local:skill:vendor-context.*package:vendor\/assistant-pack:skill:context/
+    );
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

@@ -43,6 +43,9 @@ export function renderConfigOutputs(config, options = {}) {
       if (!resource.runtimes.includes(runtime)) continue;
       outputs.push(renderedResource(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
     }
+    for (const resource of packageResourcesForRuntime(config.packages ?? [], runtime)) {
+      outputs.push(renderedResource(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
+    }
   }
 
   outputs.push(...renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, { global: options.global }));
@@ -140,12 +143,35 @@ function renderedResource(targetDir, root, runtime, adapter, resource) {
     absolutePath: filePath,
     path: projectRelative.startsWith("..") ? filePath : projectRelative,
     runtime,
-    resource: { id: resource.id, kind: resource.kind },
+    resource: resourceMetadata(resource),
     source: resource,
     body: contentFor(resource),
     content,
     hash: hashContent(content)
   };
+}
+
+function packageResourcesForRuntime(packages, runtime) {
+  return packages.flatMap((pkg) => (pkg.resources ?? [])
+    .filter((resource) => resource.runtimes.includes(runtime))
+    .map((resource) => ({
+      ...resource,
+      originalId: resource.originalId ?? resource.id,
+      id: `${pkg.namespace}-${resource.id}`,
+      _aofPackage: {
+        id: pkg.id,
+        namespace: pkg.namespace
+      }
+    })));
+}
+
+function resourceMetadata(resource) {
+  const metadata = { id: resource.id, kind: resource.kind };
+  if (resource._aofPackage) {
+    metadata.package = resource._aofPackage;
+    metadata.originalId = resource.originalId;
+  }
+  return metadata;
 }
 
 function resourcePath(runtime, resource) {

@@ -1,7 +1,8 @@
 import { normalizeId } from "./fs.mjs";
-import { supportedRuntimes } from "./model.mjs";
+import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 
 const VALID_RUNTIMES = new Set(supportedRuntimes());
+const VALID_RESOURCE_KINDS = new Set(supportedResourceKinds());
 const VALID_SOURCE_TYPES = new Set(["npm", "git", "file"]);
 
 export function normalizePackages(packages = []) {
@@ -20,15 +21,16 @@ export function normalizePackage(pkg, index = 0) {
   const namespace = normalizeNamespace(pkg.namespace, index);
   const { source, sourceDescriptor } = normalizePackageSource(pkg.source, index);
 
+  const runtimes = normalizePackageRuntimes(pkg.runtimes, index);
   return {
     ...pkg,
     id,
     namespace,
     source,
     sourceDescriptor,
-    runtimes: normalizePackageRuntimes(pkg.runtimes, index),
+    runtimes,
     dependencies: normalizePackageDependencies(pkg.dependencies ?? pkg.dependsOn ?? pkg.depends_on, index),
-    resources: normalizePackageResources(pkg.resources, index)
+    resources: normalizePackageResources(pkg.resources, index, runtimes)
   };
 }
 
@@ -207,12 +209,37 @@ function normalizePackageRuntimes(runtimes, index) {
   return [...new Set(runtimes)];
 }
 
-function normalizePackageResources(resources, index) {
+function normalizePackageResources(resources, index, packageRuntimes) {
   if (resources === undefined) return [];
   if (!Array.isArray(resources)) {
     throw new Error(`packages[${index}].resources must be an array when provided.`);
   }
-  return resources.map((resource) => ({ ...resource }));
+  return resources.map((resource, resourceIndex) => {
+    if (!resource || typeof resource !== "object" || Array.isArray(resource)) {
+      throw new Error(`packages[${index}].resources[${resourceIndex}] must be an object.`);
+    }
+    if (!VALID_RESOURCE_KINDS.has(resource.kind)) {
+      throw new Error(`packages[${index}].resources[${resourceIndex}].kind is unsupported.`);
+    }
+    return {
+      ...resource,
+      id: normalizeId(resource.id),
+      runtimes: normalizePackageResourceRuntimes(resource.runtimes, packageRuntimes, index, resourceIndex)
+    };
+  });
+}
+
+function normalizePackageResourceRuntimes(runtimes, packageRuntimes, packageIndex, resourceIndex) {
+  if (runtimes === undefined) return packageRuntimes;
+  if (!Array.isArray(runtimes) || runtimes.length === 0) {
+    throw new Error(`packages[${packageIndex}].resources[${resourceIndex}].runtimes must be a non-empty array when provided.`);
+  }
+  for (const runtime of runtimes) {
+    if (!VALID_RUNTIMES.has(runtime)) {
+      throw new Error(`packages[${packageIndex}].resources[${resourceIndex}].runtimes contains unsupported runtime "${runtime}".`);
+    }
+  }
+  return [...new Set(runtimes)];
 }
 
 function resolutionForSource(descriptor) {

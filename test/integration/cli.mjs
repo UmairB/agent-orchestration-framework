@@ -221,6 +221,29 @@ async function runStep(context, step) {
     return;
   }
 
+  if (step === "a project with package resource collision") {
+    await runStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "skill",
+      id: "vendor-context",
+      description: "Local collision",
+      path: "assets/skills/vendor-context/SKILL.md",
+      bodyPath: "assets/skills/vendor-context/SKILL.md",
+      body: "Local body"
+    }], {
+        packages: [{
+          id: "assistant-pack",
+          namespace: "vendor",
+          source: "file:../packs/assistant-pack",
+          runtimes: ["codex"],
+          resources: [
+            { kind: "skill", id: "context", body: "Package body" }
+          ]
+        }]
+    });
+    return;
+  }
+
   if (step === "a project with .aof package config and stale legacy config") {
     await runStep(context, "a project with .aof package config");
     await writeFile(path.join(context.projectDir, "aof.config.json"), "{}\n", "utf8");
@@ -397,6 +420,17 @@ async function runStep(context, step) {
     assert.ok(
       Array.isArray(json.frameworks) && json.frameworks.some((item) => item.id === match[2]),
       `Expected ${match[1]} to contain framework ${match[2]}`
+    );
+    return;
+  }
+
+  match = step.match(/^JSON file `(.+)` should contain package `(.+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    const json = JSON.parse(content);
+    assert.ok(
+      Array.isArray(json.packages) && json.packages.some((item) => item.id === match[2]),
+      `Expected ${match[1]} to contain package ${match[2]}`
     );
     return;
   }
