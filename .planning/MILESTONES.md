@@ -32,12 +32,12 @@ None.
 
 ## v1.1 — Aligned Core Hardening
 
-**Status:** Complete; audit found process tech debt
+**Status:** Shipped 2026-05-08
 **Started:** 2026-05-07
 **Completed:** 2026-05-08
 **Phases:** 6-10
 **Requirements:** 22/22 complete
-**Audit:** Tech debt - missing Nyquist validation artifacts for phases 6-10
+**Audit:** Tech debt accepted - missing Nyquist validation artifacts for phases 6-10
 
 ### Goal
 
@@ -61,4 +61,15 @@ Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned
 
 ### Audit
 
-- [v1.1-MILESTONE-AUDIT.md](v1.1-MILESTONE-AUDIT.md)
+- [v1.1-MILESTONE-AUDIT.md](milestones/v1.1-MILESTONE-AUDIT.md)
+
+### Archives
+
+- [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
+- [v1.1-REQUIREMENTS.md](milestones/v1.1-REQUIREMENTS.md)
+- [v1.1-MILESTONE-AUDIT.md](milestones/v1.1-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- Formal Nyquist validation artifacts were not generated for phases 6-10. Product requirements and cross-phase flows are complete; this is accepted process debt.
+- Browser E2E, additional runtimes, Rust/native core, UI execution, hosted registry, external package archive extraction, and task management remain future scope.

@@ -1,8 +1,8 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current phase:** Phase 10: BDD Parity And Hardening
-**Status:** Phase 10 complete; v1.1 ready for milestone audit or archival
+**Current phase:** Between milestones
+**Status:** v1.1 archived; ready to start next milestone
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is closing v1.1 after Phase 10 completed BDD parity and hardening across lifecycle, package, adapter, setup UI API, and validation behavior.
+No active milestone is currently planned. Current focus is starting the next milestone cycle when ready.
 
 ## Current Position
 
-Phase: 10 - BDD Parity And Hardening
-Plan: 4 plans created
-Status: Complete
-Last activity: 2026-05-08 - Phase 10 executed and verified
+Phase: Between milestones
+Plan: None active
+Status: Ready for `$gsd-new-milestone`
+Last activity: 2026-05-08 - v1.1 archived
 
 ## Resume
 
-**Stopped at:** Phase 10 complete
-**Resume file:** `.planning/phases/10-bdd-parity-and-hardening/10-VERIFICATION.md`
+**Stopped at:** v1.1 milestone archived
+**Resume file:** `.planning/MILESTONES.md`
 
 ## Memory
 
@@ -94,3 +94,5 @@ Last activity: 2026-05-08 - Phase 10 executed and verified
 - Phase 10 planning produced 4 plans in `.planning/phases/10-bdd-parity-and-hardening/`.
 - Phase 10 execution completed with commits for the shared BDD runner, split domain features, setup UI HTTP API BDD, and PowerShell parity over the shared feature suite.
 - Phase 10 verification is captured in `.planning/phases/10-bdd-parity-and-hardening/10-VERIFICATION.md`; `npm run test:unit`, `npm test`, and `npm run test:integration:ps` passed.
+- Milestone v1.1 archive is captured in `.planning/milestones/v1.1-ROADMAP.md`, `.planning/milestones/v1.1-REQUIREMENTS.md`, and `.planning/milestones/v1.1-MILESTONE-AUDIT.md`.
+- Accepted process debt at v1.1 closeout: Nyquist validation artifacts were not generated for phases 6-10.

@@ -8,17 +8,11 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. The milestone archive is recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`. Phases 6, 7, 8, and 9 of v1.1 are complete.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-## Current Milestone: v1.1 Aligned Core Hardening
+## Current Milestone
 
-**Goal:** Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned-core DSL and CLI lifecycle that is easier to validate, synchronize, diagnose, and extend.
-
-**Target features:**
-- First-class CLI lifecycle commands for adding primitives, syncing install/apply work, validating configuration, diagnosing project setup, and cleaning generated outputs.
-- Expanded `.aof/` DSL primitives for MCP servers, hooks, project documents, and settings, with explicit runtime support and graceful degradation behavior.
-- Framework package semantics for namespace enforcement, dependency metadata, package lock resolution, and conflict detection before writes.
-- BDD coverage for the aligned-core lifecycle and degradation behavior.
+No active milestone is currently planned. Start the next cycle with `$gsd-new-milestone`.
 
 ## Core Value
 
@@ -51,10 +45,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Expanded DSL primitives render to Claude Code and Codex project outputs through lock-owned generated files — Phase 7
 - ✓ Users can see and enforce portability degradation warnings across Claude Code and Codex targets — Phase 8
 - ✓ Framework packages support npm/git/file descriptors, explicit namespaces, dependency lock metadata, and pre-write conflict gates — Phase 9
+- ✓ New lifecycle, package, adapter, and validation behavior is covered by split-domain BDD scenarios across Node and PowerShell runners — Phase 10
 
 ### Active
 
-- [ ] New lifecycle, package, adapter, and validation behavior is covered by BDD scenarios.
+(None — define the next milestone with `$gsd-new-milestone`.)
 
 ### Out of Scope
 
@@ -85,7 +80,7 @@ The codebase map in `.planning/codebase/` identifies several important design pr
 - The setup UI now supports editing `.aof/` skills, commands, agents, rules, runtime targets, capability visibility, and runtime-specific overrides.
 - Framework installation is present but should become a managed part of `.aof/` state.
 - Rules/instructions require runtime-aware modeling because support is not symmetric across assistants.
-- The reviewed architecture document at `C:\Users\Umair\Downloads\architecture-design-vendor-neutral-coding-assistant-dsl.html` identifies useful next-step deltas: CLI lifecycle commands, MCP/hooks/project-doc/settings primitives, framework package dependencies and conflict detection, graceful degradation policy, and shared BDD scenarios.
+- The reviewed architecture document at `C:\Users\Umair\Downloads\architecture-design-vendor-neutral-coding-assistant-dsl.html` informed v1.1: CLI lifecycle commands, MCP/hooks/project-doc/settings primitives, framework package dependencies and conflict detection, graceful degradation policy, and shared BDD scenarios.
 
 The long-term product direction includes task management: kanban boards, task assignment to agents, progress visibility, and orchestration. That future should inform the data model enough to avoid painting the project into a corner, but v1 should prioritize assistant asset configuration and runtime synchronization.
 
@@ -111,15 +106,16 @@ The long-term product direction includes task management: kanban boards, task as
 | Runtime overrides are first-class | Assistant capabilities differ, especially around rules/instructions | Implemented in Phase 1; render behavior verified in Phase 2 |
 | v1 closeout uses explicit verification hardening | Milestone confidence depends on regression coverage across CLI, UI API, rendering, lock, and build paths | Implemented in Phase 5 |
 | Kanban/task management is future scope | Important long-term direction, but depends on a stable `.aof/` foundation | — Pending |
-| v1.1 focuses on aligned-core hardening before new runtimes or Rust migration | The architecture review surfaced core gaps that should be solved before broad adapter expansion or a language port | — Pending |
+| v1.1 focuses on aligned-core hardening before new runtimes or Rust migration | The architecture review surfaced core gaps that should be solved before broad adapter expansion or a language port | Implemented across Phases 6-10 |
 | CLI lifecycle commands are first-class before deeper DSL expansion | Users need a safe operational path for adding, syncing, validating, diagnosing, and cleaning `.aof/` projects | Implemented in Phase 6 |
 | Expanded primitives are top-level DSL sections | MCP servers, hooks, project docs, and settings are structurally different from prompt-like resources and need direct runtime config rendering | Implemented in Phase 7 |
 | Adapter warnings are command-time policy, not lock state | Warnings describe portability and fidelity for the current command target; lock state stays focused on generated files and framework intent | Implemented in Phase 8 |
 | Framework packages require explicit namespaces and source descriptors | Package-owned outputs need deterministic ownership, conflict detection, and replayable lock metadata | Implemented in Phase 9 |
+| BDD scenarios are split by product domain and shared by Node and PowerShell runners | Future core/runtime changes need user-facing behavioral parity across runner implementations | Implemented in Phase 10 |
 
 ## Next Milestone Goals
 
-v1.1 focuses on aligned-core hardening. Broader runtime support, UI-driven execution, task management, and Rust migration remain future directions until the DSL lifecycle, package model, adapter degradation policy, and BDD safety net are stronger.
+Broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions now that the DSL lifecycle, package model, adapter degradation policy, and BDD safety net are stronger.
 
 ## Evolution
 
@@ -139,4 +135,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after Phase 9 completion*
+*Last updated: 2026-05-08 after v1.1 milestone archival*

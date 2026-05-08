@@ -46,6 +46,53 @@
 
 ---
 
+## Milestone: v1.1 — Aligned Core Hardening
+
+**Shipped:** 2026-05-08
+**Phases:** 5 | **Plans:** 16
+
+### What Was Built
+
+- First-class CLI lifecycle commands for add, sync, validate, doctor, and clean.
+- Expanded `.aof/` DSL primitives for MCP servers, hooks, project docs, and runtime settings.
+- Adapter degradation policy with shared warning objects, strict pre-write gates, diagnostics, setup UI review payloads, and documentation.
+- Framework package semantics for npm/git/file descriptors, explicit namespaces, package lock metadata, dependency metadata, replay, and pre-write conflict checks.
+- Split-domain BDD feature suite shared by Node and PowerShell runners, plus setup UI HTTP API BDD.
+
+### What Worked
+
+- Deferring broad runtime expansion until after adapter warnings and BDD parity kept the milestone focused.
+- Keeping adapter warnings out of lock state preserved lock determinism while still surfacing portability problems.
+- Split BDD feature files made lifecycle, DSL, package, adapter-policy, and setup UI coverage easier to reason about.
+- PowerShell parity over the same feature files gave cross-runner confidence without expanding `npm test`.
+
+### What Was Inefficient
+
+- Local GSD SDK query/mutation commands were unavailable, so planning state, audit, and archive updates had to be reconciled manually.
+- Nyquist validation was enabled in config, but phase validation artifacts were not generated during execution.
+- Some older phase summaries predated the newer `requirements-completed` frontmatter convention, requiring verification cross-checks during audit.
+
+### Patterns Established
+
+- Lifecycle commands preserve dry-run and no-network defaults unless users explicitly opt in to side effects.
+- Expanded DSL sections are top-level config structures rather than squeezed into prompt-like `resources[]`.
+- Adapter warnings are command-time policy, strict mode is a pre-write gate, and `--force` does not bypass portability failures.
+- Package-owned generated resources require explicit namespaces and participate in conflict detection before writes.
+- BDD scenarios are product-domain artifacts that can be reused by multiple runner implementations.
+
+### Key Lessons
+
+1. Process toggles such as Nyquist validation need an execution checkpoint; otherwise closeout finds missing artifacts after product work is already done.
+2. Shared feature files are the right abstraction for future core/runtime rewrites because they specify user-facing behavior without binding to the Node implementation.
+3. Package metadata should stay direct and local unless the product explicitly needs full registry/archive resolution.
+
+### Cost Observations
+
+- Sessions: multiple phase-oriented GSD sessions across phases 6-10.
+- Notable: Inline execution remained necessary where GSD subagents or SDK query handlers were unavailable.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -53,14 +100,17 @@
 | Milestone | Sessions | Phases | Key Change |
 |-----------|----------|--------|------------|
 | v1 | multiple | 5 | Established `.aof` source-of-truth model and closeout audit discipline |
+| v1.1 | multiple | 5 | Hardened lifecycle, DSL, adapter, package, and BDD parity before expanding runtime scope |
 
 ### Cumulative Quality
 
 | Milestone | Tests | Coverage | Zero-Dep Additions |
 |-----------|-------|----------|-------------------|
 | v1 | unit, BDD integration, child-process smoke, PowerShell smoke, UI build | v1 requirements 32/32 verified | Node ESM implementation with Vite/React UI |
+| v1.1 | unit, BDD integration, setup UI HTTP BDD, PowerShell BDD parity, UI build where UI changed | v1.1 requirements 22/22 verified | No new external runtime dependency |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Treat runtime folders as generated output and use lock state for reproducibility.
 2. Keep UI execution boundaries explicit until the CLI workflows are stable.
+3. Keep behavior-level BDD scenarios shared across runner implementations to support future rewrites safely.
