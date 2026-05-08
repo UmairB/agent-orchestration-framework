@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
-import { doctorConfig, inspectConfig, validateConfig } from "../src/config-inspect.mjs";
+import { doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "../src/config-inspect.mjs";
 
 export const configInspectTests = [
   {
@@ -33,6 +33,14 @@ export const configInspectTests = [
   {
     name: "inspection and doctor expose adapter warnings",
     run: exposesAdapterWarnings
+  },
+  {
+    name: "validates global config from AOF_GLOBAL_HOME",
+    run: validatesGlobalConfig
+  },
+  {
+    name: "project validation does not scan unrelated malformed global drafts",
+    run: projectValidationIgnoresUnreferencedGlobalDrafts
   }
 ];
 
@@ -180,6 +188,49 @@ async function exposesAdapterWarnings() {
   }
 }
 
+async function validatesGlobalConfig() {
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    await mkdir(path.join(globalDir, "assets", "skills", "context"), { recursive: true });
+    await writeFile(path.join(globalDir, "assets", "skills", "context", "SKILL.md"), "Global body\n", "utf8");
+    await writeFile(path.join(globalDir, "aof.config.json"), `${JSON.stringify({
+      name: "aof-global",
+      resources: [
+        { kind: "skill", id: "context", path: "assets/skills/context/SKILL.md", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    assert.deepEqual(await validateGlobalConfig(), []);
+    const inspection = await inspectGlobalConfig();
+    assert.equal(inspection.resources[0].id, "context");
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
+async function projectValidationIgnoresUnreferencedGlobalDrafts() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    await writeProject(targetDir);
+    await mkdir(globalDir, { recursive: true });
+    await writeFile(path.join(globalDir, "aof.config.json"), "{ bad\n", "utf8");
+
+    assert.deepEqual(await validateConfig(targetDir), []);
+    const diagnostics = await validateGlobalConfig();
+    assert.ok(diagnostics.some((item) => item.code === "malformed-json"));
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
 async function writeProject(targetDir) {
   const workspaceDir = path.join(targetDir, ".aof");
   await mkdir(path.join(workspaceDir, "assets", "skills", "context"), { recursive: true });
@@ -193,4 +244,12 @@ async function writeProject(targetDir) {
       { id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }
     ]
   }, null, 2)}\n`, "utf8");
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

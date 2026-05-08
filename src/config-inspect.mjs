@@ -15,6 +15,7 @@ import {
   supportedTrustModes
 } from "./model.mjs";
 import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { globalWorkspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_RUNTIMES = new Set(supportedRuntimes());
@@ -65,6 +66,32 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
   };
 }
 
+export async function inspectGlobalConfig(options = {}) {
+  const paths = globalWorkspacePaths(options);
+  const configExists = await exists(paths.configPath);
+  const diagnostics = await validateGlobalConfig(options);
+  let config = null;
+
+  if (configExists && !diagnostics.some((item) => item.severity === "error")) {
+    config = await loadConfig(paths.configPath);
+  }
+
+  return {
+    configPath: paths.configPath,
+    workspaceConfigExists: configExists,
+    name: config?.name ?? null,
+    resources: config?.resources?.map((resource) => ({
+      id: resource.id,
+      kind: resource.kind,
+      name: resource.name,
+      description: resource.description,
+      path: resource.path,
+      runtimes: resource.runtimes
+    })) ?? [],
+    diagnostics
+  };
+}
+
 export async function adapterWarningsForConfig(projectDir = process.cwd(), options = {}) {
   const configPath = await findProjectConfig(projectDir, options.config);
   const diagnostics = await validateConfig(projectDir, options);
@@ -77,8 +104,18 @@ export async function adapterWarningsForConfig(projectDir = process.cwd(), optio
 }
 
 export async function validateConfig(projectDir = process.cwd(), options = {}) {
-  const diagnostics = [];
   const configPath = await findProjectConfig(projectDir, options.config);
+  return validateConfigFile(configPath);
+}
+
+export async function validateGlobalConfig(options = {}) {
+  const paths = globalWorkspacePaths(options);
+  if (!await exists(paths.configPath)) return [];
+  return validateConfigFile(paths.configPath);
+}
+
+async function validateConfigFile(configPath) {
+  const diagnostics = [];
   let raw;
 
   try {

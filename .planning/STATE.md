@@ -2,12 +2,12 @@
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
-**Current phase:** Phase 11 - Global Library Workspace
-**Status:** Phase planned
+**Current phase:** Phase 12 - Project Reference Rendering
+**Status:** Phase 11 complete
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-08 after v1.2 milestone start)
+See: `.planning/PROJECT.md` (updated 2026-05-08 after Phase 11 completion)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Milestone v1.2 is planned. Phase 11 has three executable plans and is ready to execute.
+Phase 11 is complete. Phase 12 is ready for discussion and planning around project references to global assets.
 
 ## Current Position
 
-Phase: 11 - Global Library Workspace
-Plan: 3 plans ready
-Status: Ready for `$gsd-execute-phase 11`
-Last activity: 2026-05-08 - Phase 11 planned
+Phase: 12 - Project Reference Rendering
+Plan: Not started
+Status: Ready for `$gsd-discuss-phase 12`
+Last activity: 2026-05-08 - Phase 11 completed
 
 ## Resume
 
-**Stopped at:** Phase 11 planned
-**Resume file:** `.planning/phases/11-global-library-workspace/11-01-PLAN.md`
+**Stopped at:** Phase 11 completed
+**Resume file:** `.planning/phases/11-global-library-workspace/11-VERIFICATION.md`
 
 ## Memory
 
@@ -102,3 +102,4 @@ Last activity: 2026-05-08 - Phase 11 planned
 - v1.2 roadmap uses phases 11-15: Global Library Workspace, Project Reference Rendering, Code-Bearing Asset Files, Global Asset Setup UI, and Global Asset Verification.
 - Phase 11 discussion locked decisions: `~/.aof` mirrors project workspace shape with `aof.config.json`; use explicit `aof global ...` commands; global config is canonical; project validation fails only for referenced malformed global assets while `aof global validate` checks the whole library.
 - Phase 11 planning produced 3 plans: 11-01 global workspace path and manifest foundation, 11-02 global CLI asset operations, and 11-03 global validation and hardening.
+- Phase 11 execution completed with global workspace path helpers, `aof global add/list/show/validate`, global validation coverage, README updates, and completion artifacts; `npm run test:unit` and `npm test` passed.

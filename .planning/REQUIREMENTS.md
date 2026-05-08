@@ -8,10 +8,10 @@
 
 ### Global Library
 
-- [ ] **GLIB-01**: User can initialize or access a global AOF library at `~/.aof`.
-- [ ] **GLIB-02**: User can create global skills, agents, and rules in `~/.aof`.
-- [ ] **GLIB-03**: User can list and inspect global assets independently from project-local assets.
-- [ ] **GLIB-04**: User receives clear validation errors when a global asset is malformed or missing required files.
+- [x] **GLIB-01**: User can initialize or access a global AOF library at `~/.aof`.
+- [x] **GLIB-02**: User can create global skills, agents, and rules in `~/.aof`.
+- [x] **GLIB-03**: User can list and inspect global assets independently from project-local assets.
+- [x] **GLIB-04**: User receives clear validation errors when a global asset is malformed or missing required files.
 
 ### Project References
 
@@ -79,10 +79,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GLIB-01 | Phase 11 | Pending |
-| GLIB-02 | Phase 11 | Pending |
-| GLIB-03 | Phase 11 | Pending |
-| GLIB-04 | Phase 11 | Pending |
+| GLIB-01 | Phase 11 | Complete |
+| GLIB-02 | Phase 11 | Complete |
+| GLIB-03 | Phase 11 | Complete |
+| GLIB-04 | Phase 11 | Complete |
 | GREF-01 | Phase 12 | Pending |
 | GREF-02 | Phase 12 | Pending |
 | GREF-03 | Phase 12 | Pending |
@@ -106,7 +106,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.2 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
+- Complete: 4
 
 ---
 *Requirements defined: 2026-05-08*
-*Last updated: 2026-05-08 after v1.2 requirements definition*
+*Last updated: 2026-05-08 after Phase 11 completion*

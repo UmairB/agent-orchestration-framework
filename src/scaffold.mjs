@@ -2,14 +2,38 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { readJson, writeText, normalizeId } from "./fs.mjs";
 import { defaultBodyFile, supportedResourceKinds, supportedRuntimes, RESOURCE_KINDS } from "./model.mjs";
-import { isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
+const VALID_GLOBAL_KINDS = new Set(["skill", "agent", "rule"]);
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 
 export async function scaffoldResource(projectDir = process.cwd(), input = {}) {
   const targetDir = path.resolve(projectDir);
   const paths = workspacePaths(targetDir);
+  return scaffoldResourceInWorkspace(paths, input, {
+    workspaceName: path.basename(targetDir),
+    schema: "../schemas/aof.schema.json",
+    beforeRead: async () => {
+      if (await isLegacyConfigOnlyProject(targetDir)) {
+        throw new Error(`Legacy config exists at ${legacyConfigPath(targetDir)}. Run aof migrate before adding .aof assets.`);
+      }
+    }
+  });
+}
+
+export async function scaffoldGlobalResource(input = {}, options = {}) {
+  const paths = globalWorkspacePaths(options);
+  if (!VALID_GLOBAL_KINDS.has(input.kind)) {
+    throw new Error(`Invalid global resource kind "${input.kind}". Expected skill, agent, rule.`);
+  }
+  return scaffoldResourceInWorkspace(paths, input, {
+    workspaceName: "aof-global",
+    schema: "https://aof.local/schemas/aof.schema.json"
+  });
+}
+
+async function scaffoldResourceInWorkspace(paths, input, options = {}) {
   const kind = input.kind;
   const id = normalizeId(input.id);
   const runtimes = normalizeRuntimes(input.runtimes);
@@ -19,11 +43,9 @@ export async function scaffoldResource(projectDir = process.cwd(), input = {}) {
     throw new Error(`Invalid resource kind "${kind}". Expected ${supportedResourceKinds().join(", ")}.`);
   }
 
-  if (await isLegacyConfigOnlyProject(targetDir)) {
-    throw new Error(`Legacy config exists at ${legacyConfigPath(targetDir)}. Run aof migrate before adding .aof assets.`);
-  }
+  if (options.beforeRead) await options.beforeRead();
 
-  const existing = await readExistingConfig(paths.configPath, targetDir);
+  const existing = await readExistingConfig(paths.configPath, options.workspaceName ?? path.basename(paths.workspaceDir), options.schema);
   const resourcePath = assetPath(kind, id);
   const absoluteAssetPath = path.join(paths.workspaceDir, resourcePath);
   const existingIndex = (existing.resources ?? []).findIndex((resource) => resource.kind === kind && normalizeId(resource.id) === id);
@@ -55,8 +77,8 @@ export async function scaffoldResource(projectDir = process.cwd(), input = {}) {
 
   const config = {
     ...existing,
-    $schema: existing.$schema ?? "../schemas/aof.schema.json",
-    name: existing.name ?? path.basename(targetDir),
+    $schema: existing.$schema ?? options.schema ?? "../schemas/aof.schema.json",
+    name: existing.name ?? options.workspaceName ?? path.basename(paths.workspaceDir),
     resources,
     packages: existing.packages ?? []
   };
@@ -97,11 +119,11 @@ function assetPath(kind, id) {
   return path.join("assets", definition.plural, id, defaultBodyFile(kind)).replaceAll(path.sep, "/");
 }
 
-async function readExistingConfig(configPath, projectDir) {
+async function readExistingConfig(configPath, workspaceName, schema = "../schemas/aof.schema.json") {
   if (await exists(configPath)) return readJson(configPath);
   return {
-    $schema: "../schemas/aof.schema.json",
-    name: path.basename(path.resolve(projectDir)),
+    $schema: schema,
+    name: workspaceName,
     resources: [],
     packages: []
   };

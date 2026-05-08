@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { findProjectConfig, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "../src/workspace.mjs";
+import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "../src/workspace.mjs";
 
 export const workspaceTests = [
   {
@@ -14,6 +14,17 @@ export const workspaceTests = [
       assert.equal(paths.configPath, path.join(root, ".aof", "aof.config.json"));
       assert.equal(paths.lockPath, path.join(root, ".aof", "aof.lock.json"));
       assert.equal(paths.assetsDir, path.join(root, ".aof", "assets"));
+    }
+  },
+  {
+    name: "global workspace paths mirror .aof workspace shape",
+    run() {
+      const paths = globalWorkspacePaths({ env: { AOF_GLOBAL_HOME: "/tmp/aof-global" } });
+      const root = path.resolve("/tmp/aof-global");
+      assert.equal(paths.workspaceDir, root);
+      assert.equal(paths.configPath, path.join(root, "aof.config.json"));
+      assert.equal(paths.lockPath, path.join(root, "aof.lock.json"));
+      assert.equal(paths.assetsDir, path.join(root, "assets"));
     }
   },
   {

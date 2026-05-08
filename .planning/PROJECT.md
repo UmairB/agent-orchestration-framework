@@ -8,7 +8,7 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
 ## Current Milestone: v1.2 Global Asset Library
 
@@ -53,10 +53,13 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Users can see and enforce portability degradation warnings across Claude Code and Codex targets — Phase 8
 - ✓ Framework packages support npm/git/file descriptors, explicit namespaces, dependency lock metadata, and pre-write conflict gates — Phase 9
 - ✓ New lifecycle, package, adapter, and validation behavior is covered by split-domain BDD scenarios across Node and PowerShell runners — Phase 10
+- ✓ Users can initialize or access a global AOF library at `~/.aof` — Phase 11
+- ✓ Users can create global skills, agents, and rules in `~/.aof` — Phase 11
+- ✓ Users can list and inspect global assets independently from project-local assets — Phase 11
+- ✓ Users receive clear validation errors when a global asset is malformed or missing required files — Phase 11
 
 ### Active
 
-- [ ] Users can create and maintain global skills, agents, and rules in `~/.aof`.
 - [ ] Project `.aof` configs can reference global assets by ID without copying them into the project workspace.
 - [ ] AOF renders referenced global assets into Claude Code and Codex project outputs during apply/sync.
 - [ ] Setup UI can create and edit global assets alongside project assets.
@@ -123,6 +126,8 @@ The long-term product direction includes task management: kanban boards, task as
 | Adapter warnings are command-time policy, not lock state | Warnings describe portability and fidelity for the current command target; lock state stays focused on generated files and framework intent | Implemented in Phase 8 |
 | Framework packages require explicit namespaces and source descriptors | Package-owned outputs need deterministic ownership, conflict detection, and replayable lock metadata | Implemented in Phase 9 |
 | BDD scenarios are split by product domain and shared by Node and PowerShell runners | Future core/runtime changes need user-facing behavioral parity across runner implementations | Implemented in Phase 10 |
+| `~/.aof` is the user-global AOF source workspace | Reusable assets need a runtime-neutral home distinct from project `.aof` and generated assistant output folders | Implemented in Phase 11 |
+| `aof global ...` is the source-library command namespace | Global source asset operations should not overload runtime-output `--global` behavior | Implemented in Phase 11 |
 
 ## Next Milestone Goals
 
@@ -146,4 +151,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after v1.2 milestone start*
+*Last updated: 2026-05-08 after Phase 11 completion*

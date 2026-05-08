@@ -9,9 +9,9 @@ import { readJson, writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { defaultDbPath } from "./paths.mjs";
 import { confirmAction, selectItems, selectRuntimes } from "./prompt.mjs";
-import { findProjectConfig, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
-import { adapterWarningsForConfig, doctorConfig, inspectConfig, validateConfig } from "./config-inspect.mjs";
+import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 
 const DEFAULT_CONFIG = `{
   "$schema": "./schemas/aof.schema.json",
@@ -99,6 +99,11 @@ export async function run(argv) {
 
   if (command === "install") {
     await installCommand(rest);
+    return;
+  }
+
+  if (command === "global") {
+    await globalCommand(rest);
     return;
   }
 
@@ -202,6 +207,149 @@ async function addCommand(args) {
 
   console.log(`Created ${result.assetPath}`);
   console.log(`Updated ${result.configPath}`);
+}
+
+async function globalCommand(args) {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "add") {
+    await globalAddCommand(rest);
+    return;
+  }
+
+  if (subcommand === "list") {
+    await globalListCommand(rest);
+    return;
+  }
+
+  if (subcommand === "show") {
+    await globalShowCommand(rest);
+    return;
+  }
+
+  if (subcommand === "validate") {
+    await globalValidateCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown global command "${subcommand ?? ""}". Usage: aof global add|list|show|validate`);
+}
+
+async function globalAddCommand(args) {
+  const options = parseOptions(args);
+  const [kind, id] = options._;
+  if (!kind || !id) {
+    throw new Error("Usage: aof global add <kind> <id> [--runtime claude,codex] [--description text] [--force]");
+  }
+
+  const { scaffoldGlobalResource } = await import("./scaffold.mjs");
+  const result = await scaffoldGlobalResource({
+    kind,
+    id,
+    name: options.name,
+    description: options.description,
+    runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes(),
+    force: Boolean(options.force),
+    dryRun: Boolean(options.dryRun)
+  });
+
+  if (result.dryRun) {
+    console.log(`write: ${result.assetPath}`);
+    console.log(`write: ${result.configPath}`);
+    return;
+  }
+
+  console.log(`Created ${result.assetPath}`);
+  console.log(`Updated ${result.configPath}`);
+}
+
+async function globalListCommand(args) {
+  const options = parseOptions(args);
+  const inspection = await inspectGlobalConfig();
+  if (options.json) {
+    printJson(inspection);
+    return;
+  }
+
+  console.log(`global: ${inspection.configPath}`);
+  if (inspection.resources.length === 0) {
+    console.log("resources: 0");
+    return;
+  }
+  console.log(`resources: ${inspection.resources.length}`);
+  for (const resource of inspection.resources) {
+    console.log(`- ${resource.kind}:${resource.id} runtimes=${resource.runtimes.join(",")}`);
+  }
+}
+
+async function globalShowCommand(args) {
+  const options = parseOptions(args);
+  const [kind, id] = options._;
+  if (!kind || !id) {
+    throw new Error("Usage: aof global show <kind> <id> [--json]");
+  }
+
+  const paths = globalWorkspacePaths();
+  if (!await exists(paths.configPath)) {
+    throw new Error(`Global config not found at ${paths.configPath}. Run aof global add <kind> <id> first.`);
+  }
+
+  const raw = await readJson(paths.configPath);
+  const resource = (raw.resources ?? []).find((item) => item.kind === kind && item.id === id);
+  if (!resource) {
+    throw new Error(`Global resource not found: ${kind}:${id}`);
+  }
+
+  const sourcePath = resource.path ? path.resolve(path.dirname(paths.configPath), resource.path) : null;
+  const bodyExists = sourcePath ? await exists(sourcePath) : Boolean(resource.body || resource.prompt || resource.instructions);
+  const payload = {
+    configPath: paths.configPath,
+    resource: {
+      ...resource,
+      sourcePath,
+      bodyExists
+    }
+  };
+
+  if (options.json) {
+    printJson(payload);
+    return;
+  }
+
+  console.log(`global: ${paths.configPath}`);
+  console.log(`resource: ${resource.kind}:${resource.id}`);
+  if (resource.name) console.log(`name: ${resource.name}`);
+  if (resource.description) console.log(`description: ${resource.description}`);
+  console.log(`runtimes: ${(resource.runtimes ?? supportedRuntimes()).join(",")}`);
+  if (sourcePath) console.log(`path: ${sourcePath}`);
+  console.log(`body: ${bodyExists ? "present" : "missing"}`);
+}
+
+async function globalValidateCommand(args) {
+  const options = parseOptions(args);
+  const diagnostics = await validateGlobalConfig();
+  const errors = diagnostics.filter((item) => item.severity === "error");
+  const warnings = diagnostics.filter((item) => item.severity === "warning");
+  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
+
+  if (options.json) {
+    printJson({
+      valid: !failed,
+      strict: Boolean(options.strict),
+      errors: errors.length,
+      warnings: warnings.length,
+      diagnostics
+    });
+  } else if (!failed) {
+    console.log("valid: global config passed validation");
+    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
+  } else {
+    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
+    console.log(`invalid: ${reason}`);
+    for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 async function applyCommand(args) {
@@ -885,6 +1033,8 @@ Usage:
   aof clean [--dry-run] [--force]
 
 Supporting commands:
+  aof global add <kind> <id> [--runtime claude,codex] [--description text] [--force]
+  aof global list|show|validate [--json]
   aof install [--no-serve] [--db path] [--port 4177]
   aof config show [--json]
   aof catalog init|list|path [--db path]

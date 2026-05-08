@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after v1.1 milestone archival
+**Last updated:** 2026-05-08 after Phase 11 completion
 
 ## Milestones
 
@@ -34,13 +34,13 @@
 </details>
 
 <details open>
-<summary>🔵 v1.2 Global Asset Library (Phases 11-15) — PLANNED</summary>
+<summary>🔵 v1.2 Global Asset Library (Phases 11-15) — IN PROGRESS</summary>
 
-- [ ] Phase 11: Global Library Workspace — define `~/.aof` source storage and global asset CRUD.
+- [x] Phase 11: Global Library Workspace — completed 2026-05-08. Defined `~/.aof` source storage and global asset CRUD.
   - Plans: 11-01 Global Workspace Path And Manifest Foundation; 11-02 Global CLI Asset Operations; 11-03 Global Validation And Phase Hardening.
-  - Wave 1: 11-01.
-  - Wave 2 *(blocked on Wave 1 completion)*: 11-02.
-  - Wave 3 *(blocked on Wave 2 completion)*: 11-03.
+  - Wave 1: 11-01 completed.
+  - Wave 2: 11-02 completed.
+  - Wave 3: 11-03 completed.
   - Cross-cutting constraints: `~/.aof` mirrors project workspace shape; use explicit `aof global ...` commands; `~/.aof/aof.config.json` is canonical; project validation only fails for referenced malformed global assets.
 - [ ] Phase 12: Project Reference Rendering — resolve global references from project configs and render them with lock traceability.
 - [ ] Phase 13: Code-Bearing Asset Files — preserve associated files and validate asset-owned helper code.
@@ -55,7 +55,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 3/3 planned | 0/22 | Planned | - |
+| v1.2 Global Asset Library | 11-15 | 3/3 | 4/22 | In Progress | - |
 
 ## Phase Details
 
@@ -122,4 +122,4 @@
 
 ## Next
 
-Run `$gsd-discuss-phase 11` to gather implementation context for Phase 11, or `$gsd-plan-phase 11` to plan directly.
+Run `$gsd-discuss-phase 12` to gather implementation context for Phase 12, or `$gsd-plan-phase 12` to plan directly.

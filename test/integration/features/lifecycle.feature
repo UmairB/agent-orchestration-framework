@@ -71,6 +71,41 @@ Feature: AOF CLI lifecycle
     And file `.aof/aof.config.json` should contain `"kind": "rule"`
     And file `.aof/aof.config.json` should contain `"codex"`
 
+  Scenario: Add and inspect global assets
+    Given an empty project
+    When I run `global add skill shared-review --codex --description "Shared reviewer"`
+    Then the command should succeed
+    And stdout should contain `Created`
+    And global file `aof.config.json` should contain `"id": "shared-review"`
+    And global file `assets/skills/shared-review/SKILL.md` should exist
+    And global file `assets/skills/shared-review/SKILL.md` should contain `Shared reviewer`
+    And file `.aof/aof.config.json` should not exist
+    When I run `global list`
+    Then the command should succeed
+    And stdout should contain `skill:shared-review`
+    When I run `global show skill shared-review`
+    Then the command should succeed
+    And stdout should contain `resource: skill:shared-review`
+    And stdout should contain `body: present`
+
+  Scenario: Validate global assets
+    Given an empty project
+    When I run `global add rule shared-rule --codex --description "Shared rule"`
+    Then the command should succeed
+    When I run `global validate`
+    Then the command should succeed
+    And stdout should contain `valid: global config passed validation`
+
+  Scenario: Report malformed global asset config
+    Given a malformed global AOF config
+    When I run `global validate`
+    Then the command should fail
+    And stdout should contain `invalid:`
+    And stdout should contain `Invalid JSON`
+    When I run `validate`
+    Then the command should fail
+    And stdout should contain `Cannot read config`
+
   Scenario: Refuse to silently migrate a legacy root config during init
     Given a project initialized with legacy AOF config
     When I run `init --items project-context --codex`

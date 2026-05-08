@@ -304,6 +304,26 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  if (step === "a malformed global AOF config") {
+    await runSharedCliStep(context, "an empty project");
+    await mkdir(context.globalDir, { recursive: true });
+    await writeFile(path.join(context.globalDir, "aof.config.json"), "{ bad\n", "utf8");
+    return;
+  }
+
+  match = step.match(/^global file `(.+)` should exist$/);
+  if (match) {
+    assert.equal(await fileExists(path.join(context.globalDir, match[1])), true, `Expected global file to exist: ${match[1]}`);
+    return;
+  }
+
+  match = step.match(/^global file `(.+)` should contain `([\s\S]+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.globalDir, match[1]), "utf8");
+    assert.match(content, escapeRegex(match[2]));
+    return;
+  }
+
   match = step.match(/^file `(.+)` should not exist$/);
   if (match) {
     assert.equal(await fileExists(path.join(context.projectDir, match[1])), false, `Expected file not to exist: ${match[1]}`);

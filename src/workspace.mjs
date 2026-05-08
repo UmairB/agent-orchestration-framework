@@ -1,15 +1,25 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
+import { defaultGlobalWorkspaceDir } from "./paths.mjs";
 
 export function workspacePaths(projectDir = process.cwd()) {
   const root = path.resolve(projectDir);
   const workspaceDir = path.join(root, ".aof");
+  return workspacePathsForRoot(workspaceDir, { projectDir: root });
+}
+
+export function globalWorkspacePaths(options = {}) {
+  return workspacePathsForRoot(defaultGlobalWorkspaceDir(options.env, options.platform, options.homedir), { projectDir: null });
+}
+
+export function workspacePathsForRoot(workspaceDir, options = {}) {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
   return {
-    projectDir: root,
-    workspaceDir,
-    configPath: path.join(workspaceDir, "aof.config.json"),
-    lockPath: path.join(workspaceDir, "aof.lock.json"),
-    assetsDir: path.join(workspaceDir, "assets")
+    projectDir: options.projectDir ?? path.dirname(resolvedWorkspaceDir),
+    workspaceDir: resolvedWorkspaceDir,
+    configPath: path.join(resolvedWorkspaceDir, "aof.config.json"),
+    lockPath: path.join(resolvedWorkspaceDir, "aof.lock.json"),
+    assetsDir: path.join(resolvedWorkspaceDir, "assets")
   };
 }
 

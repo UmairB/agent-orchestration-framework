@@ -22,6 +22,8 @@ aof clean --dry-run
 aof config show
 aof config validate
 aof config doctor
+aof global add skill shared-review --codex
+aof global list
 aof catalog init
 aof install --select
 ```
@@ -47,6 +49,22 @@ aof add skill project-context --codex
 `aof add <kind> <id>` writes source files under `.aof/assets/` and updates
 `.aof/aof.config.json`. It refuses config or file collisions unless `--force`
 is supplied.
+
+Create reusable global source assets:
+
+```sh
+aof global add skill shared-review --codex
+aof global list
+aof global show skill shared-review
+aof global validate
+```
+
+`aof global ...` manages source assets in the user-global AOF workspace at
+`~/.aof`. The global workspace mirrors project layout with
+`~/.aof/aof.config.json` and `~/.aof/assets/<kind>/<id>/...`. Global commands
+currently create and inspect skills, agents, and rules. This is separate from
+the existing `--global` flag on runtime commands such as `aof apply --global`
+or `aof install gsd --global`, which targets assistant runtime home folders.
 
 Synchronize generated outputs and managed package intent:
 

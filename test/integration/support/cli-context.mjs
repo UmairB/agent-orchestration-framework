@@ -15,6 +15,7 @@ export async function createCliContext() {
     root,
     projectDir: path.join(root, "project"),
     dataDir: path.join(root, "data"),
+    globalDir: path.join(root, "global-aof"),
     lastResult: null
   };
 }
@@ -35,6 +36,7 @@ export function runCli(context, command, input = "", options = {}) {
     env: {
       ...process.env,
       AOF_DATA_DIR: context.dataDir,
+      AOF_GLOBAL_HOME: context.globalDir,
       NODE_NO_WARNINGS: "1",
       ...promptEnv,
       ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
@@ -56,6 +58,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   const previousCwd = process.cwd();
   const previousDataDir = process.env.AOF_DATA_DIR;
   const previousNoWarnings = process.env.NODE_NO_WARNINGS;
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
   const previousSelectionInput = process.env.AOF_TEST_SELECTION_INPUT;
   const previousRuntimeInput = process.env.AOF_TEST_RUNTIMES_INPUT;
   const previousConfirmInput = process.env.AOF_TEST_CONFIRM_INPUT;
@@ -69,6 +72,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   console.log = (...args) => stdout.push(args.join(" "));
   console.error = (...args) => stderr.push(args.join(" "));
   process.env.AOF_DATA_DIR = context.dataDir;
+  process.env.AOF_GLOBAL_HOME = context.globalDir;
   process.env.NODE_NO_WARNINGS = "1";
   process.exitCode = undefined;
   for (const [name, value] of Object.entries(promptInputEnv(input))) {
@@ -88,6 +92,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
     console.log = previousLog;
     console.error = previousError;
     restoreEnv("AOF_DATA_DIR", previousDataDir);
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
     restoreEnv("NODE_NO_WARNINGS", previousNoWarnings);
     restoreEnv("AOF_TEST_SELECTION_INPUT", previousSelectionInput);
     restoreEnv("AOF_TEST_RUNTIMES_INPUT", previousRuntimeInput);
