@@ -178,9 +178,9 @@ aof install
 The setup UI is a `.aof/` configuration editor. It edits file-backed skills,
 commands, agents, and rules; runtime targets; and runtime-specific overrides.
 It also exposes compact JSON editors for MCP servers, hooks, project docs, and
-runtime settings. It shows runtime capability differences before apply,
-including mapped behavior such as Codex rule guidance rendering through
-`AGENTS.md`.
+runtime settings. It shows runtime capability differences and adapter warnings
+before apply, including mapped behavior such as Codex rule guidance rendering
+through `AGENTS.md`.
 
 The UI writes source-of-truth files under `.aof/` only. It does not run
 `aof init`, `aof apply`, dry-run, `aof install`, or shell commands. Use the
@@ -324,11 +324,11 @@ They are rendered by `aof apply` and `aof sync` like other generated outputs:
 ```
 
 `mcpServers[]` renders to root `.mcp.json` for Claude Code and
-`.codex/config.toml` for Codex. `hooks[]` currently supports the common Phase 7
-command-hook shape and renders to `.claude/settings.json` and
-`.codex/config.toml`; richer hook degradation and warnings are planned for the
-next phase. Runtime-specific `claude` and `codex` objects are passed only to the
-matching runtime.
+`.codex/config.toml` for Codex. `hooks[]` supports the common command-hook
+shape and renders to `.claude/settings.json` and `.codex/config.toml` when the
+target runtime can represent the shared fields. Runtime-specific `claude` and
+`codex` objects are passed only to the matching runtime; non-matching runtime
+objects are intentionally ignored without warnings.
 
 `projectDocs[]` renders root `AGENTS.md` for Codex and root `CLAUDE.md` for
 Claude Code. File-backed docs can include other `.aof/` files relative to the
@@ -348,6 +348,69 @@ Generated assistant folders such as `.claude/` and `.codex/` are output, not sou
 When `aof apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. This includes root `AGENTS.md`, root `CLAUDE.md`, root `.mcp.json`, `.claude/settings.json`, and `.codex/config.toml` when they are generated from expanded primitives. Re-run with `aof apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
 
 Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof apply`. `aof apply` does not run framework installers; use commands such as `aof install gsd` for installer execution.
+
+## Adapter Warnings
+
+AOF reports adapter warnings when a valid `.aof/` configuration asks for
+behavior that a selected runtime cannot represent cleanly. Warnings are
+computed at command time and are not written to `.aof/aof.lock.json`.
+
+Commands that surface adapter warnings:
+
+```sh
+aof validate
+aof validate --json
+aof doctor
+aof doctor --json
+aof apply --dry-run
+aof apply --dry-run --json
+aof sync --dry-run
+aof sync --dry-run --json
+```
+
+Human output uses a compact block before apply/sync actions:
+
+```txt
+adapter-warnings:
+- [adapter.skipped-runtime-output] hooks[0] runtime=codex source=hook:notify output=.codex/config.toml
+  reason: Common hook field(s) "timeout" cannot be represented directly by the codex adapter.
+  remediation: Move runtime-specific hook fields under "codex" or remove "codex" from this hook's runtimes.
+create: .codex/skills/context/SKILL.md runtime=codex source=skill:context reason=file does not exist
+```
+
+JSON output exposes a top-level `adapterWarnings` array:
+
+```json
+{
+  "adapterWarnings": [
+    {
+      "code": "adapter.skipped-runtime-output",
+      "severity": "warning",
+      "path": "hooks[0]",
+      "kind": "hook",
+      "id": "notify",
+      "runtime": "codex",
+      "generatedPath": ".codex/config.toml",
+      "reason": "Common hook field(s) \"timeout\" cannot be represented directly by the codex adapter.",
+      "remediation": "Move runtime-specific hook fields under \"codex\" or remove \"codex\" from this hook's runtimes."
+    }
+  ]
+}
+```
+
+Use `--strict` to turn adapter warnings into failures for CI:
+
+```sh
+aof validate --strict
+aof doctor --strict
+aof apply --strict
+aof sync --strict
+```
+
+For `apply --strict` and `sync --strict`, AOF stops before generated files,
+stale deletes, lock updates, or package installers run. `--force` only affects
+generated-output drift; it does not bypass adapter warning failures under
+`--strict`.
 
 ## Tests
 

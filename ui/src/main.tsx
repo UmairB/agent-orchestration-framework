@@ -22,6 +22,18 @@ type Diagnostic = {
   code?: string;
 };
 
+type AdapterWarning = {
+  code: string;
+  severity: "warning";
+  path: string;
+  kind: string;
+  id: string;
+  runtime: RuntimeId;
+  generatedPath: string | null;
+  reason: string;
+  remediation: string;
+};
+
 type RuntimeOverride = {
   enabled: boolean;
   name?: string;
@@ -56,6 +68,7 @@ type ConfigPayload = {
   projectDocs: unknown[];
   settings: Record<string, unknown>;
   diagnostics: Diagnostic[];
+  adapterWarnings: AdapterWarning[];
   capabilities: {
     runtimes: Record<RuntimeId, { id: RuntimeId; name: string }>;
     capabilities: Record<string, Record<RuntimeId, string>>;
@@ -588,6 +601,26 @@ function ReviewPanel({ payload }: { payload: ConfigPayload }) {
           <CardContent className="space-y-2">
             {issues.length === 0 ? <StatusLine ok text="Valid" /> : issues.slice(0, 8).map((item) => (
               <StatusLine key={`${item.path}-${item.message}`} ok={item.severity !== "error"} text={`${item.path}: ${item.message}`} />
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Adapter Warnings</CardTitle>
+            <CardDescription>{payload.adapterWarnings.length === 0 ? "clear" : `${payload.adapterWarnings.length} warning${payload.adapterWarnings.length === 1 ? "" : "s"}`}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {payload.adapterWarnings.length === 0 ? <StatusLine ok text="No adapter degradation warnings." /> : payload.adapterWarnings.slice(0, 6).map((warning) => (
+              <div key={`${warning.code}-${warning.path}-${warning.runtime}-${warning.id}`} className="rounded-md border border-border bg-background p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{warning.code}</Badge>
+                  <span className="mono text-xs">{warning.runtime}</span>
+                  <span className="mono text-xs">{warning.kind}:{warning.id}</span>
+                </div>
+                <p className="mt-2 text-muted-foreground">{warning.path}{warning.generatedPath ? ` -> ${warning.generatedPath}` : ""}</p>
+                <p className="mt-2">{warning.reason}</p>
+                <p className="mt-1 text-muted-foreground">{warning.remediation}</p>
+              </div>
             ))}
           </CardContent>
         </Card>

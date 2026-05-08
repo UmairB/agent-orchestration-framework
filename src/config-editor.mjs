@@ -1,6 +1,7 @@
 import path from "node:path";
 import { access, readFile, rm } from "node:fs/promises";
 import { validateConfig } from "./config-inspect.mjs";
+import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { loadConfig } from "./dsl.mjs";
 import { normalizeId, readJson, writeText } from "./fs.mjs";
 import {
@@ -44,6 +45,7 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
       projectDocs: [],
       settings: {},
       diagnostics: [],
+      adapterWarnings: [],
       capabilities: capabilitiesPayload(),
       nextCommands: nextCommands([])
     };
@@ -53,6 +55,9 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
   const config = diagnostics.some((item) => item.severity === "error")
     ? await readRawConfig(configPath)
     : await loadConfig(configPath);
+  const adapterWarnings = diagnostics.some((item) => item.severity === "error")
+    ? []
+    : collectAdapterWarnings(config);
 
   return {
     configPath,
@@ -65,6 +70,7 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
     projectDocs: config.projectDocs ?? [],
     settings: config.settings ?? {},
     diagnostics,
+    adapterWarnings,
     capabilities: capabilitiesPayload(),
     nextCommands: nextCommands(config.packages ?? [])
   };
@@ -119,7 +125,8 @@ export async function saveEditableResource(projectDir = process.cwd(), input = {
     ok: true,
     diagnostics,
     resource: editableResource({ ...metadata, body: resource.body, overrides: resource.overrides }),
-    configPath: paths.configPath
+    configPath: paths.configPath,
+    config: await loadEditableConfig(projectDir, { ...options, config: paths.configPath })
   };
 }
 

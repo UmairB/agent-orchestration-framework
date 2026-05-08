@@ -18,6 +18,10 @@ export const setupUiTests = [
     run: savesAndValidatesExpandedSections
   },
   {
+    name: "setup UI serves adapter warning review payload",
+    run: servesAdapterWarningPayload
+  },
+  {
     name: "setup UI hardens catalog endpoint validation",
     run: hardensCatalogEndpointValidation
   },
@@ -59,6 +63,35 @@ async function savesConfigResourceThroughApi() {
     const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
     assert.equal(config.resources[0].kind, "command");
     assert.equal(config.resources[0].path, "assets/commands/prime/COMMAND.md");
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function servesAdapterWarningPayload() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
+  try {
+    const save = await fetchJson(`${url}api/config/sections`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        hooks: [
+          { id: "notify", event: "PostToolUse", command: "npm test", timeout: 30, runtimes: ["codex"] }
+        ]
+      })
+    });
+    assert.equal(save.config.adapterWarnings.length, 1);
+    assert.equal(save.config.adapterWarnings[0].code, "adapter.skipped-runtime-output");
+
+    const payload = await fetchJson(`${url}api/config`);
+    assert.equal(payload.adapterWarnings.length, 1);
+    assert.equal(payload.adapterWarnings[0].runtime, "codex");
   } finally {
     server.close();
     await rm(targetDir, { recursive: true, force: true });

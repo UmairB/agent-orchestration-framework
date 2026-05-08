@@ -23,6 +23,10 @@ export const configEditorTests = [
     run: loadsAndSavesExpandedSections
   },
   {
+    name: "editable config includes adapter warnings",
+    run: includesAdapterWarnings
+  },
+  {
     name: "rejects invalid editable resource saves",
     run: rejectsInvalidSave
   }
@@ -88,7 +92,28 @@ async function loadsEditableConfig() {
 
     const payload = await loadEditableConfig(targetDir);
     assert.equal(payload.resources[0].body, "Prime body\n");
+    assert.deepEqual(payload.adapterWarnings, []);
     assert.deepEqual(payload.nextCommands, ["aof apply --dry-run", "aof install gsd --dry-run"]);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function includesAdapterWarnings() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const save = await saveEditableSections(targetDir, {
+      hooks: [
+        { id: "notify", event: "PostToolUse", command: "npm test", timeout: 30, runtimes: ["codex"] }
+      ]
+    });
+    assert.equal(save.ok, true);
+    assert.equal(save.config.adapterWarnings.length, 1);
+    assert.equal(save.config.adapterWarnings[0].code, "adapter.skipped-runtime-output");
+
+    const payload = await loadEditableConfig(targetDir);
+    assert.equal(payload.adapterWarnings.length, 1);
+    assert.equal(payload.adapterWarnings[0].path, "hooks[0]");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
