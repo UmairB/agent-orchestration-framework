@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 12 completion
+**Last updated:** 2026-05-08 after Phase 13 planning
 
 ## Milestones
 
@@ -49,6 +49,11 @@
   - Wave 3: 12-03 completed.
   - Cross-cutting constraints: project configs use top-level `globalRefs`; references do not copy source assets; only referenced global assets affect project validation; lock entries must preserve global source scope.
 - [ ] Phase 13: Code-Bearing Asset Files — preserve associated files and validate asset-owned helper code.
+  - Plans: 13-01 Associated File Model And Validation; 13-02 Associated File Rendering And Lock Ownership; 13-03 Associated File BDD Docs And Phase Hardening.
+  - Wave 1: 13-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 13-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 13-03.
+  - Cross-cutting constraints: associated files use explicit `files` entries; paths are relative to the asset directory; Phase 13 renders skill helper files; unsafe paths and output conflicts fail before writes.
 - [ ] Phase 14: Global Asset Setup UI — create, edit, label, and reference global assets through the UI.
 - [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, and build coverage for global reuse.
 
@@ -60,7 +65,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 6/6 | 12/22 | In Progress | - |
+| v1.2 Global Asset Library | 11-15 | 9/9 planned | 12/22 | In Progress | - |
 
 ## Phase Details
 
@@ -127,4 +132,4 @@
 
 ## Next
 
-Run `$gsd-discuss-phase 13` to gather implementation context for Phase 13, or `$gsd-plan-phase 13` to plan directly.
+Run `$gsd-execute-phase 13` to implement Phase 13.

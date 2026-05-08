@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
 **Current phase:** Phase 13 - Code-Bearing Asset Files
-**Status:** Phase 13 discussed
+**Status:** Phase 13 planned
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 13 discussion is complete. The phase is ready for planning around explicit associated files on code-bearing skill assets, validation, rendering, and lock traceability.
+Phase 13 has three executable plans and is ready to implement explicit associated files on code-bearing skill assets, validation, rendering, and lock traceability.
 
 ## Current Position
 
 Phase: 13 - Code-Bearing Asset Files
-Plan: Not started
-Status: Ready for `$gsd-plan-phase 13`
-Last activity: 2026-05-08 - Phase 13 discussed
+Plan: 3 plans ready
+Status: Ready for `$gsd-execute-phase 13`
+Last activity: 2026-05-08 - Phase 13 planned
 
 ## Resume
 
-**Stopped at:** Phase 13 discussed
-**Resume file:** `.planning/phases/13-code-bearing-asset-files/13-CONTEXT.md`
+**Stopped at:** Phase 13 planned
+**Resume file:** `.planning/phases/13-code-bearing-asset-files/13-01-PLAN.md`
 
 ## Memory
 
@@ -107,3 +107,4 @@ Last activity: 2026-05-08 - Phase 13 discussed
 - Phase 12 planning produced 3 plans: 12-01 global reference model and validation, 12-02 apply and sync global reference rendering, and 12-03 global reference diagnostics and lock traceability.
 - Phase 12 execution completed with `globalRefs` schema/model support, referenced global validation, apply/sync rendering, runtime override handling, config diagnostics, lock source scope, README updates, and completion artifacts; `npm run test:unit` and `npm test` passed.
 - Phase 13 discussion locked decisions: associated files are explicit `files` entries relative to the asset directory; Phase 13 renders associated files for skill resources; unsafe paths, missing files, directories, symlink escapes, and primary-body duplication are validation errors; associated files must flow through render planning, drift protection, and lock source metadata.
+- Phase 13 planning produced 3 plans: 13-01 associated file model and validation, 13-02 associated file rendering and lock ownership, and 13-03 associated file BDD docs and phase hardening.
