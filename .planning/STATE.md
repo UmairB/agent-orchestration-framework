@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 9: Framework Package Semantics
-**Status:** Phase 8 complete; ready to discuss Phase 9
+**Status:** Phase 9 context gathered; ready to plan Phase 9
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is discussing Phase 9: framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is planning Phase 9: framework package source descriptors, namespace enforcement, dependency lock state, and conflict detection.
 
 ## Current Position
 
 Phase: 9 - Framework Package Semantics
 Plan: Not started
-Status: Ready to discuss
-Last activity: 2026-05-08 - Phase 8 completed
+Status: Ready to plan
+Last activity: 2026-05-08 - Phase 9 context gathered
 
 ## Resume
 
-**Stopped at:** Phase 8 completed
-**Resume file:** `.planning/ROADMAP.md`
+**Stopped at:** Phase 9 context gathered
+**Resume file:** `.planning/phases/09-framework-package-semantics/09-CONTEXT.md`
 
 ## Memory
 
@@ -82,3 +82,5 @@ Last activity: 2026-05-08 - Phase 8 completed
 - Phase 8 planning produced 3 plans in `.planning/phases/08-adapter-degradation-policy/`.
 - Phase 8 execution completed with commits for the shared adapter warning analyzer, CLI warning/strict gates, and UI/docs review surfaces.
 - Phase 8 verification is captured in `.planning/phases/08-adapter-degradation-policy/08-VERIFICATION.md`; `npm run test:unit`, `npm run ui:build`, and `npm test` passed.
+- Phase 9 context is captured in `.planning/phases/09-framework-package-semantics/09-CONTEXT.md`.
+- Phase 9 discussion locked decisions for compatible package descriptor normalization, explicit package namespaces, direct resolved package lock metadata, and pre-write conflict failures with known safe merge exceptions only.
