@@ -2,8 +2,8 @@
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
-**Current phase:** Not started
-**Status:** Defining requirements
+**Current phase:** Phase 11 - Global Library Workspace
+**Status:** Roadmap planned
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Milestone v1.2 is defining requirements for reusable global AOF assets stored under `~/.aof` and referenced from project `.aof` configs.
+Milestone v1.2 is planned. Current focus is Phase 11: Global Library Workspace.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: -
-Status: Defining requirements
-Last activity: 2026-05-08 - Milestone v1.2 started
+Phase: 11 - Global Library Workspace
+Plan: Not started
+Status: Ready for `$gsd-discuss-phase 11` or `$gsd-plan-phase 11`
+Last activity: 2026-05-08 - Milestone v1.2 roadmap created
 
 ## Resume
 
-**Stopped at:** v1.2 requirements definition
-**Resume file:** `.planning/PROJECT.md`
+**Stopped at:** v1.2 roadmap created
+**Resume file:** `.planning/ROADMAP.md`
 
 ## Memory
 
@@ -99,3 +99,4 @@ Last activity: 2026-05-08 - Milestone v1.2 started
 - Accepted process debt at v1.1 closeout: Nyquist validation artifacts were not generated for phases 6-10.
 - Milestone v1.2 started on 2026-05-08 as Global Asset Library.
 - v1.2 user decisions: global assets live under `~/.aof`; project `.aof` configs reference global asset IDs rather than copying global assets into project workspaces; setup UI must support creating global assets; global assets may include associated files or helper code such as Python scripts.
+- v1.2 roadmap uses phases 11-15: Global Library Workspace, Project Reference Rendering, Code-Bearing Asset Files, Global Asset Setup UI, and Global Asset Verification.

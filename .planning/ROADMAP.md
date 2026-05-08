@@ -7,6 +7,7 @@
 
 - ✅ **v1 Assistant Configuration Foundation** — Phases 1-5, shipped 2026-05-07. Archive: [v1-ROADMAP.md](milestones/v1-ROADMAP.md)
 - ✅ **v1.1 Aligned Core Hardening** — Phases 6-10, shipped 2026-05-08. Archive: [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
+- 🔵 **v1.2 Global Asset Library** — Phases 11-15, planned.
 
 ## Phases
 
@@ -32,13 +33,88 @@
 
 </details>
 
+<details open>
+<summary>🔵 v1.2 Global Asset Library (Phases 11-15) — PLANNED</summary>
+
+- [ ] Phase 11: Global Library Workspace — define `~/.aof` source storage and global asset CRUD.
+- [ ] Phase 12: Project Reference Rendering — resolve global references from project configs and render them with lock traceability.
+- [ ] Phase 13: Code-Bearing Asset Files — preserve associated files and validate asset-owned helper code.
+- [ ] Phase 14: Global Asset Setup UI — create, edit, label, and reference global assets through the UI.
+- [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, and build coverage for global reuse.
+
+</details>
+
 ## Progress
 
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
+| v1.2 Global Asset Library | 11-15 | 0/0 | 0/22 | Planned | - |
+
+## Phase Details
+
+### Phase 11: Global Library Workspace
+
+**Goal:** Establish `~/.aof` as the user-global source workspace and support global asset creation, listing, inspection, and validation.
+
+**Requirements:** GLIB-01, GLIB-02, GLIB-03, GLIB-04
+
+**Success Criteria:**
+1. CLI can initialize or locate the global AOF library at `~/.aof`.
+2. CLI can create global skills, agents, and rules with the same file-backed conventions as project assets.
+3. CLI can list and inspect global assets separately from project-local assets.
+4. Validation reports malformed global assets and missing required files clearly.
+
+### Phase 12: Project Reference Rendering
+
+**Goal:** Let project `.aof` configs reference global assets by ID and include them in validation, diagnostics, rendering, and lock state.
+
+**Requirements:** GREF-01, GREF-02, GREF-03, GREF-04, GRND-01, GRND-02, GRND-03, GRND-04
+
+**Success Criteria:**
+1. Project config can declare global asset references without copying global files into project `.aof`.
+2. Missing global references and local/global ID conflicts produce actionable validation errors.
+3. `aof apply` and `aof sync` render referenced global assets into Claude Code and Codex outputs.
+4. Runtime overrides on global assets are honored.
+5. Lock and diagnostic output identify whether generated assets came from local or global source.
+
+### Phase 13: Code-Bearing Asset Files
+
+**Goal:** Support asset-owned helper files for global assets while preventing path escapes and unrelated output overwrites.
+
+**Requirements:** CODE-01, CODE-02, CODE-03
+
+**Success Criteria:**
+1. Global asset directories can include associated files such as Python scripts, templates, or examples.
+2. Rendering preserves associated files for directory-shaped runtime assets such as skills.
+3. Validation rejects associated files that escape the asset directory.
+4. Render planning prevents associated files from overwriting unrelated generated output.
+
+### Phase 14: Global Asset Setup UI
+
+**Goal:** Extend the setup UI so users can create, edit, distinguish, and reference global assets.
+
+**Requirements:** GUI-01, GUI-02, GUI-03, GUI-04
+
+**Success Criteria:**
+1. UI can switch between project asset editing and global asset editing.
+2. UI can create and edit global skills, agents, and rules.
+3. UI can add a global asset reference to the current project without copying the asset source.
+4. UI clearly labels project-local versus global asset scope.
+
+### Phase 15: Global Asset Verification
+
+**Goal:** Prove global asset behavior across unit tests, integration scenarios, UI API behavior, and UI build.
+
+**Requirements:** TEST-01, TEST-02, TEST-03
+
+**Success Criteria:**
+1. Unit tests cover path resolution, reference resolution, conflicts, associated files, and lock metadata.
+2. BDD integration tests cover global asset creation, reference rendering, missing-reference diagnostics, and UI API behavior.
+3. `npm run ui:build` passes after UI changes.
+4. Standard `npm run test:unit` and `npm test` checks pass for the milestone behavior.
 
 ## Next
 
-Run `$gsd-new-milestone` to define the next milestone.
+Run `$gsd-discuss-phase 11` to gather implementation context for Phase 11, or `$gsd-plan-phase 11` to plan directly.
