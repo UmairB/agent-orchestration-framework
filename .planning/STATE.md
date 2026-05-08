@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
 **Current phase:** Phase 12 - Project Reference Rendering
-**Status:** Phase 12 discussed
+**Status:** Phase 12 planned
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 12 discussion is complete. The phase is ready for planning around project `globalRefs`, reference validation, render integration, and lock traceability.
+Phase 12 has three executable plans and is ready to implement project `globalRefs`, reference validation, render integration, and lock traceability.
 
 ## Current Position
 
 Phase: 12 - Project Reference Rendering
-Plan: Not started
-Status: Ready for `$gsd-plan-phase 12`
-Last activity: 2026-05-08 - Phase 12 discussed
+Plan: 3 plans ready
+Status: Ready for `$gsd-execute-phase 12`
+Last activity: 2026-05-08 - Phase 12 planned
 
 ## Resume
 
-**Stopped at:** Phase 12 discussed
-**Resume file:** `.planning/phases/12-project-reference-rendering/12-CONTEXT.md`
+**Stopped at:** Phase 12 planned
+**Resume file:** `.planning/phases/12-project-reference-rendering/12-01-PLAN.md`
 
 ## Memory
 
@@ -104,3 +104,4 @@ Last activity: 2026-05-08 - Phase 12 discussed
 - Phase 11 planning produced 3 plans: 11-01 global workspace path and manifest foundation, 11-02 global CLI asset operations, and 11-03 global validation and hardening.
 - Phase 11 execution completed with global workspace path helpers, `aof global add/list/show/validate`, global validation coverage, README updates, and completion artifacts; `npm run test:unit` and `npm test` passed.
 - Phase 12 discussion locked decisions: project configs use top-level `globalRefs` entries shaped as `{ kind, id }`; global assets own body and runtime overrides; missing refs, duplicate refs, and local/global `kind:id` conflicts are validation errors; only referenced global assets affect project validation; render planning and lock state must preserve global source scope.
+- Phase 12 planning produced 3 plans: 12-01 global reference model and validation, 12-02 apply and sync global reference rendering, and 12-03 global reference diagnostics and lock traceability.

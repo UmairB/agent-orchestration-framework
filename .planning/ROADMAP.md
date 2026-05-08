@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 11 completion
+**Last updated:** 2026-05-08 after Phase 12 planning
 
 ## Milestones
 
@@ -43,6 +43,11 @@
   - Wave 3: 11-03 completed.
   - Cross-cutting constraints: `~/.aof` mirrors project workspace shape; use explicit `aof global ...` commands; `~/.aof/aof.config.json` is canonical; project validation only fails for referenced malformed global assets.
 - [ ] Phase 12: Project Reference Rendering — resolve global references from project configs and render them with lock traceability.
+  - Plans: 12-01 Global Reference Model And Validation; 12-02 Apply And Sync Global Reference Rendering; 12-03 Global Reference Diagnostics And Lock Traceability.
+  - Wave 1: 12-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 12-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 12-03.
+  - Cross-cutting constraints: project configs use top-level `globalRefs`; references do not copy source assets; only referenced global assets affect project validation; lock entries must preserve global source scope.
 - [ ] Phase 13: Code-Bearing Asset Files — preserve associated files and validate asset-owned helper code.
 - [ ] Phase 14: Global Asset Setup UI — create, edit, label, and reference global assets through the UI.
 - [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, and build coverage for global reuse.
@@ -55,7 +60,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 3/3 | 4/22 | In Progress | - |
+| v1.2 Global Asset Library | 11-15 | 6/6 planned | 4/22 | In Progress | - |
 
 ## Phase Details
 
@@ -122,4 +127,4 @@
 
 ## Next
 
-Run `$gsd-discuss-phase 12` to gather implementation context for Phase 12, or `$gsd-plan-phase 12` to plan directly.
+Run `$gsd-execute-phase 12` to implement Phase 12.
