@@ -34,7 +34,10 @@ export async function createSyncPlan(projectDir = process.cwd(), options = {}) {
     global: Boolean(options.global)
   });
   const frameworkPlan = (config.packages ?? []).flatMap((pkg) => planFrameworkInstall(pkg.id, {
+    package: pkg,
     source: pkg.source,
+    sourceDescriptor: pkg.sourceDescriptor,
+    namespace: pkg.namespace,
     runtimes: (pkg.runtimes ?? runtimes).filter((runtime) => runtimes.includes(runtime)),
     global: Boolean(options.global),
     previousLock,

@@ -27,6 +27,7 @@ export function mergeFrameworkInstallAttempts(lock, attempts, generatedAt = new 
     generatedAt: lock?.generatedAt ?? generatedAt,
     runtimes: lock?.runtimes ?? [],
     files: lock?.files ?? [],
+    packages: lock?.packages ?? [],
     frameworks: lock?.frameworks ?? [],
     frameworkInstallAttempts: [
       ...(Array.isArray(lock?.frameworkInstallAttempts) ? lock.frameworkInstallAttempts : []),

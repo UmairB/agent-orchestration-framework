@@ -561,9 +561,12 @@ async function frameworkInstallCommand(framework, options) {
   const pkg = framework === "gsd" ? gsdPackageFromConfig(config) : null;
   const previousLock = await readLock(paths.lockPath);
   const source = options.package ?? options.source ?? pkg?.source;
+  const packageOptions = pkg && source === pkg.source ? pkg : null;
   const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : (pkg?.runtimes ?? parseRuntimes(options));
   const plan = planFrameworkInstall(framework, {
+    package: packageOptions,
     source,
+    namespace: pkg?.namespace,
     runtimes,
     global: Boolean(options.global),
     force: Boolean(options.force),
@@ -658,6 +661,7 @@ async function interactiveInstallCommand(options) {
     const previousLock = await readLock(workspacePaths(targetDir).lockPath);
     const renderActions = await planApplyActions(desiredOutputs, previousLock, { targetDir, force: Boolean(options.force) });
     const frameworkPlan = frameworkItems.flatMap((item) => planFrameworkInstall(item.id, {
+      package: item,
       source: item.source,
       runtimes: runtimes.filter((runtime) => item.runtimes.includes(runtime)),
       global: Boolean(options.global),

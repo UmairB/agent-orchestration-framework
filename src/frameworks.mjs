@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { packageInstallSpec } from "./packages.mjs";
 
 const FRAMEWORKS = {
   gsd: {
@@ -8,6 +9,10 @@ const FRAMEWORKS = {
       codex: "--codex"
     }
   }
+};
+const DEFAULT_RUNTIME_FLAGS = {
+  claude: "--claude",
+  codex: "--codex"
 };
 
 export function knownFrameworks() {
@@ -32,12 +37,13 @@ export function installFramework(name, options = {}) {
 }
 
 export function planFrameworkInstall(name, options = {}) {
-  const framework = FRAMEWORKS[name];
-  if (!framework) {
-    throw new Error(`Unknown framework "${name}". Known frameworks: ${knownFrameworks().join(", ")}.`);
-  }
-
-  const packageName = sourceToPackageName(options.source) ?? options.packageName ?? framework.packageName;
+  const framework = FRAMEWORKS[name] ?? {
+    packageName: options.packageName ?? name,
+    runtimes: DEFAULT_RUNTIME_FLAGS
+  };
+  const packageName = installSpecFromOptions(options, framework);
+  const packageSourceValue = packageSource(packageName, options);
+  const namespace = options.package?.namespace ?? options.namespace ?? null;
   const scope = options.global ? "global" : "local";
   const scopeFlag = scope === "global" ? "--global" : "--local";
   const runtimes = options.runtimes ?? Object.keys(framework.runtimes);
@@ -54,15 +60,19 @@ export function planFrameworkInstall(name, options = {}) {
       attempt.framework === name &&
       attempt.runtime === runtime &&
       attempt.scope === scope &&
-      attempt.packageSource === packageSource(packageName, options.source) &&
+      attempt.packageSource === packageSourceValue &&
+      (attempt.namespace ?? null) === namespace &&
       attempt.status === "success"
     ));
     return {
       framework: name,
+      namespace,
       runtime,
       scope,
       packageName,
-      packageSource: packageSource(packageName, options.source),
+      packageSource: packageSourceValue,
+      sourceDescriptor: options.package?.sourceDescriptor ?? options.sourceDescriptor ?? null,
+      dependencies: options.package?.dependencies ?? [],
       argv,
       command,
       skipped: Boolean(alreadySucceeded && !options.force),
@@ -98,11 +108,16 @@ export function gsdPackageFromConfig(config) {
 }
 
 export function frameworkPlanFromLock(lock, options = {}) {
-  const frameworks = Array.isArray(lock?.frameworks) ? lock.frameworks : [];
-  return frameworks.flatMap((framework) => planFrameworkInstall(framework.id, {
-    source: framework.source,
-    runtimes: framework.runtimes,
-    global: framework.scope === "global",
+  const packages = Array.isArray(lock?.packages) && lock.packages.length > 0
+    ? lock.packages
+    : Array.isArray(lock?.frameworks) ? lock.frameworks : [];
+  return packages.flatMap((pkg) => planFrameworkInstall(pkg.id, {
+    package: pkg,
+    source: pkg.source,
+    sourceDescriptor: pkg.sourceDescriptor,
+    namespace: pkg.namespace,
+    runtimes: pkg.runtimes,
+    global: pkg.scope === "global",
     force: true,
     previousLock: options.previousLock
   }));
@@ -117,13 +132,15 @@ function attemptFromPlan(item, status, exitStatus, generatedAt = new Date().toIS
     status,
     exitStatus,
     timestamp: generatedAt,
+    namespace: item.namespace,
     packageSource: item.packageSource,
+    sourceDescriptor: item.sourceDescriptor,
     skipped: status === "skipped"
   };
 }
 
-function packageSource(packageName, source) {
-  return source ?? `npm:${packageName}`;
+function packageSource(packageName, options) {
+  return options.package?.source ?? options.source ?? `npm:${packageName}`;
 }
 
 function simulatedStatus(runtime) {
@@ -146,6 +163,7 @@ export function installFrameworkItems(items, options = {}) {
   const commands = [];
   for (const item of items) {
     commands.push(...installFramework(item.id, {
+      package: item,
       runtimes: options.runtimes?.filter((runtime) => item.runtimes.includes(runtime)) ?? item.runtimes,
       global: options.global,
       dryRun: options.dryRun
@@ -153,4 +171,10 @@ export function installFrameworkItems(items, options = {}) {
   }
 
   return commands;
+}
+
+function installSpecFromOptions(options, framework) {
+  if (options.package) return packageInstallSpec(options.package);
+  if (options.sourceDescriptor) return packageInstallSpec({ source: options.source, sourceDescriptor: options.sourceDescriptor });
+  return sourceToPackageName(options.source) ?? options.packageName ?? framework.packageName;
 }

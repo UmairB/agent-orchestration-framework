@@ -141,7 +141,12 @@ async function createsLockManifest() {
     assert.equal(manifest.version, 2);
     assert.equal(manifest.files.length, 1);
     assert.equal(manifest.files[0].resource.id, "context");
+    assert.equal(manifest.packages[0].id, "gsd");
+    assert.equal(manifest.packages[0].namespace, "gsd");
+    assert.equal(manifest.packages[0].sourceDescriptor.type, "npm");
+    assert.equal(manifest.packages[0].resolution.status, "requested");
     assert.equal(manifest.frameworks[0].id, "gsd");
+    assert.equal(manifest.frameworks[0].namespace, "gsd");
     assert.deepEqual(manifest.frameworks[0].runtimes, ["codex"]);
   } finally {
     await rm(targetDir, { recursive: true, force: true });

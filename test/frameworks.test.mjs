@@ -23,6 +23,14 @@ export const frameworkTests = [
     run: plansDryRunAndFiltering
   },
   {
+    name: "plans generic package commands from descriptors",
+    run: plansGenericPackageCommands
+  },
+  {
+    name: "plans replay from package lock metadata",
+    run: plansReplayFromPackageLock
+  },
+  {
     name: "force reruns successful prior framework attempts",
     run: forceRerunsPriorAttempts
   }
@@ -36,7 +44,7 @@ function plansGsdCommands() {
   });
   assert.equal(plan[0].command, "npx get-shit-done-cc@1.2.3 --claude --global");
   assert.equal(plan[1].command, "npx get-shit-done-cc@1.2.3 --codex --global");
-  assert.equal(gsdPackageFromConfig({ packages: [{ id: "gsd", source: "npm:get-shit-done-cc@latest" }] }).id, "gsd");
+  assert.equal(gsdPackageFromConfig({ packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest" }] }).id, "gsd");
 }
 
 function skipsSuccessfulPriorInstall() {
@@ -113,6 +121,43 @@ function forceRerunsPriorAttempts() {
   });
   assert.equal(plan[0].skipped, false);
   assert.equal(plan[0].packageSource, "npm:get-shit-done-cc@latest");
+}
+
+function plansGenericPackageCommands() {
+  const plan = planFrameworkInstall("vendor-pack", {
+    package: {
+      id: "vendor-pack",
+      namespace: "vendor",
+      source: "git:https://example.test/vendor-pack.git#v1",
+      sourceDescriptor: { type: "git", url: "https://example.test/vendor-pack.git", ref: "v1" },
+      dependencies: ["base-pack"]
+    },
+    runtimes: ["codex"]
+  });
+  assert.equal(plan[0].framework, "vendor-pack");
+  assert.equal(plan[0].namespace, "vendor");
+  assert.equal(plan[0].command, "npx https://example.test/vendor-pack.git#v1 --codex --local");
+  assert.deepEqual(plan[0].dependencies, ["base-pack"]);
+}
+
+function plansReplayFromPackageLock() {
+  const plan = frameworkPlanFromLock({
+    packages: [
+      {
+        id: "vendor-pack",
+        namespace: "vendor",
+        source: "file:../packs/vendor-pack",
+        sourceDescriptor: { type: "file", path: "../packs/vendor-pack" },
+        runtimes: ["claude"],
+        scope: "global"
+      }
+    ],
+    frameworks: [
+      { id: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"], scope: "local" }
+    ]
+  });
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].command, "npx ../packs/vendor-pack --claude --global");
 }
 
 function restoreEnv(name, value) {

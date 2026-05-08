@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { writeText } from "./fs.mjs";
 import { hashContent, hashFileIfExists, LOCK_VERSION } from "./lock.mjs";
 import { renderConfigOutputs } from "./adapters.mjs";
+import { resolvedPackageEntry } from "./packages.mjs";
 
 export async function createRenderPlan(config, options = {}) {
   const outputs = renderConfigOutputs(config, options);
@@ -112,6 +113,7 @@ export function createLockManifest({ actions, desiredOutputs, previousLock, conf
         })),
       ...preservedDrift
     ],
+    packages: packageIntent(config.packages ?? [], { runtimes, global }),
     frameworks: frameworkIntent(config.packages ?? [], { runtimes, global }),
     frameworkInstallAttempts: Array.isArray(previousLock?.frameworkInstallAttempts) ? previousLock.frameworkInstallAttempts : []
   };
@@ -120,6 +122,7 @@ export function createLockManifest({ actions, desiredOutputs, previousLock, conf
 export function summarizeLockManifest(manifest) {
   return {
     files: manifest.files.length,
+    packages: Array.isArray(manifest.packages) ? manifest.packages.length : 0,
     frameworks: manifest.frameworks.length,
     runtimes: manifest.runtimes
   };
@@ -202,7 +205,22 @@ function frameworkIntent(packages, options) {
     const runtimes = (pkg.runtimes ?? options.runtimes ?? []).filter((runtime) => selectedRuntimes.size === 0 || selectedRuntimes.has(runtime));
     return {
       id: pkg.id,
+      namespace: pkg.namespace,
       source: pkg.source,
+      sourceDescriptor: pkg.sourceDescriptor,
+      runtimes,
+      scope: options.global ? "global" : "local",
+      intent: "managed"
+    };
+  });
+}
+
+function packageIntent(packages, options) {
+  const selectedRuntimes = new Set(options.runtimes ?? []);
+  return packages.map((pkg) => {
+    const runtimes = (pkg.runtimes ?? options.runtimes ?? []).filter((runtime) => selectedRuntimes.size === 0 || selectedRuntimes.has(runtime));
+    return {
+      ...resolvedPackageEntry(pkg),
       runtimes,
       scope: options.global ? "global" : "local",
       intent: "managed"
