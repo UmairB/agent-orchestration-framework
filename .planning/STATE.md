@@ -2,7 +2,7 @@
 
 **Initialized:** 2026-05-06
 **Current phase:** Phase 10: BDD Parity And Hardening
-**Status:** Phase 10 context gathered; ready to plan Phase 10
+**Status:** Phase 10 planned; ready to execute Phase 10
 
 ## Project Reference
 
@@ -20,19 +20,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.1 Aligned Core Hardening is the active milestone. Current focus is planning Phase 10: BDD parity and hardening across lifecycle, package, adapter, setup UI API, and validation behavior.
+v1.1 Aligned Core Hardening is the active milestone. Current focus is executing Phase 10: BDD parity and hardening across lifecycle, package, adapter, setup UI API, and validation behavior.
 
 ## Current Position
 
 Phase: 10 - BDD Parity And Hardening
-Plan: not yet created
-Status: Ready to plan
-Last activity: 2026-05-08 - Phase 10 context gathered
+Plan: 4 plans created
+Status: Ready to execute
+Last activity: 2026-05-08 - Phase 10 planned
 
 ## Resume
 
-**Stopped at:** Phase 10 context gathered
-**Resume file:** `.planning/phases/10-bdd-parity-and-hardening/10-CONTEXT.md`
+**Stopped at:** Phase 10 planned
+**Resume file:** `.planning/phases/10-bdd-parity-and-hardening/10-01-PLAN.md`
 
 ## Memory
 
@@ -90,3 +90,5 @@ Last activity: 2026-05-08 - Phase 10 context gathered
 - Phase 9 verification is captured in `.planning/phases/09-framework-package-semantics/09-VERIFICATION.md`; `npm run test:unit` and `npm test` passed. UI build was not needed because no UI files changed.
 - Phase 10 context is captured in `.planning/phases/10-bdd-parity-and-hardening/10-CONTEXT.md`.
 - Phase 10 discussion locked decisions for a phase-local BDD coverage matrix, split domain feature files with per-feature step modules, setup UI API BDD over real HTTP, and PowerShell integration as a separate required verification command.
+- Phase 10 research is captured in `.planning/phases/10-bdd-parity-and-hardening/10-RESEARCH.md`.
+- Phase 10 planning produced 4 plans in `.planning/phases/10-bdd-parity-and-hardening/`.
