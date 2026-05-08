@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 10 planning
+**Last updated:** 2026-05-08 after Phase 10 completion
 
 ## Milestones
 
@@ -145,7 +145,7 @@
 
 **Requirements:** BDD-01, BDD-02, BDD-03, BDD-04
 
-**Status:** Planned - ready to execute.
+**Status:** Complete - implemented and verified 2026-05-08.
 
 **Success criteria:**
 1. Lifecycle commands have happy-path and error-path BDD scenarios.
@@ -154,10 +154,10 @@
 4. Degradation warnings and strict-mode failures have BDD coverage.
 
 **Plans:**
-- [ ] Wave 1: `10-01-PLAN.md` - BDD coverage matrix and runner foundation.
-- [ ] Wave 2 *(blocked on Wave 1 completion)*: `10-02-PLAN.md` - CLI domain feature split and BDD gap closure.
-- [ ] Wave 2 *(blocked on Wave 1 completion)*: `10-03-PLAN.md` - Setup UI API BDD over HTTP.
-- [ ] Wave 3 *(blocked on Wave 2 completion)*: `10-04-PLAN.md` - PowerShell BDD parity and final verification.
+- [x] Wave 1: `10-01-PLAN.md` - BDD coverage matrix and runner foundation.
+- [x] Wave 2: `10-02-PLAN.md` - CLI domain feature split and BDD gap closure.
+- [x] Wave 2: `10-03-PLAN.md` - Setup UI API BDD over HTTP.
+- [x] Wave 3: `10-04-PLAN.md` - PowerShell BDD parity and final verification.
 
 **Cross-cutting constraints:**
 - `10-BDD-COVERAGE.md` must map `BDD-01` through `BDD-04` to exact scenario names.
@@ -170,8 +170,8 @@
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
-| v1.1 Aligned Core Hardening | 6-10 | 16/16 | 18/22 | In Progress | — |
+| v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
 
 ## Next
 
-Run `$gsd-execute-phase 10` to implement BDD Parity And Hardening.
+Run `$gsd-audit-milestone` or `$gsd-complete-milestone` when ready to archive v1.1.

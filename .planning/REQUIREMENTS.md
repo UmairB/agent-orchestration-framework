@@ -38,10 +38,10 @@
 
 ### Verification
 
-- [ ] **BDD-01**: CLI lifecycle behavior for init, add, sync, validate, doctor, and clean is covered by BDD scenarios.
-- [ ] **BDD-02**: Compile/render behavior for all v1.1 primitives is covered by BDD scenarios across Claude Code and Codex targets.
-- [ ] **BDD-03**: Framework package install, dependency, lock, and conflict behavior is covered by BDD scenarios.
-- [ ] **BDD-04**: Adapter degradation warnings and strict-mode failures are covered by BDD scenarios.
+- [x] **BDD-01**: CLI lifecycle behavior for init, add, sync, validate, doctor, and clean is covered by BDD scenarios.
+- [x] **BDD-02**: Compile/render behavior for all v1.1 primitives is covered by BDD scenarios across Claude Code and Codex targets.
+- [x] **BDD-03**: Framework package install, dependency, lock, and conflict behavior is covered by BDD scenarios.
+- [x] **BDD-04**: Adapter degradation warnings and strict-mode failures are covered by BDD scenarios.
 
 ## Future Requirements
 
@@ -98,10 +98,10 @@
 | PKG-02 | Phase 9 | Complete |
 | PKG-03 | Phase 9 | Complete |
 | PKG-04 | Phase 9 | Complete |
-| BDD-01 | Phase 10 | Pending |
-| BDD-02 | Phase 10 | Pending |
-| BDD-03 | Phase 10 | Pending |
-| BDD-04 | Phase 10 | Pending |
+| BDD-01 | Phase 10 | Complete |
+| BDD-02 | Phase 10 | Complete |
+| BDD-03 | Phase 10 | Complete |
+| BDD-04 | Phase 10 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 22 total
@@ -110,4 +110,4 @@
 
 ---
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-08 after Phase 9 completion*
+*Last updated: 2026-05-08 after Phase 10 completion*

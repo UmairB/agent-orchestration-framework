@@ -4,7 +4,27 @@ $PSNativeCommandUseErrorActionPreference = $false
 $IntegrationDir = $PSScriptRoot
 $RepoRoot = Resolve-Path (Join-Path $IntegrationDir "..\..")
 $CliPath = Join-Path $RepoRoot "bin\aof.mjs"
-$FeatureFile = Join-Path $IntegrationDir "cli.feature"
+$FeaturesDir = Join-Path $IntegrationDir "features"
+$StepsDir = Join-Path $IntegrationDir "steps"
+
+if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+  Write-Output "ok - PowerShell BDD integration skipped outside Windows"
+  exit 0
+}
+
+. (Join-Path $StepsDir "lifecycle.steps.ps1")
+. (Join-Path $StepsDir "dsl.steps.ps1")
+. (Join-Path $StepsDir "packages.steps.ps1")
+. (Join-Path $StepsDir "adapter-policy.steps.ps1")
+. (Join-Path $StepsDir "setup-ui.steps.ps1")
+
+function Get-FeatureFiles {
+  if (Test-Path -LiteralPath $FeaturesDir -PathType Container) {
+    $Files = @(Get-ChildItem -LiteralPath $FeaturesDir -Filter "*.feature" -File | Sort-Object Name | Select-Object -ExpandProperty FullName)
+    if ($Files.Length -gt 0) { return $Files }
+  }
+  return @(Join-Path $IntegrationDir "cli.feature")
+}
 
 function Parse-Feature {
   param([string] $FeatureFile)
@@ -29,13 +49,28 @@ function Parse-Feature {
 }
 
 function Run-Scenario {
-  param($Scenario)
+  param($FeatureFile, $Scenario)
   $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof-bdd-" + [System.Guid]::NewGuid().ToString("N"))
-  $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; LastResult = $null }
+  $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; LastResult = $null; LastHttpResponse = $null; SetupUiProcess = $null; SetupUiUrl = $null }
   try {
-    foreach ($Step in $Scenario.Steps) { Run-Step $Context $Step }
+    foreach ($Step in $Scenario.Steps) { Run-FeatureStep $Context $Step $FeatureFile }
   } finally {
+    Stop-SetupUiServer $Context
     if (Test-Path $Root) { Remove-Item -LiteralPath $Root -Recurse -Force }
+  }
+}
+
+function Run-FeatureStep {
+  param($Context, [string] $Step, [string] $FeatureFile)
+  $FeatureName = Split-Path $FeatureFile -Leaf
+  switch ($FeatureName) {
+    "adapter-policy.feature" { Run-AdapterPolicyStep $Context $Step; return }
+    "dsl.feature" { Run-DslStep $Context $Step; return }
+    "lifecycle.feature" { Run-LifecycleStep $Context $Step; return }
+    "packages.feature" { Run-PackagesStep $Context $Step; return }
+    "setup-ui.feature" { Run-SetupUiStep $Context $Step; return }
+    "cli.feature" { Run-LifecycleStep $Context $Step; return }
+    default { throw "No step module registered for $FeatureName." }
   }
 }
 
@@ -95,15 +130,43 @@ function Run-Step {
     return
   }
 
+  if ($Step -eq "a project with expanded .aof DSL config") {
+    Run-Step $Context "an empty project"
+    Write-ExpandedAofProject $Context
+    return
+  }
+
+  if ($Step -eq "a project with adapter warning .aof config") {
+    Run-Step $Context "an empty project"
+    Write-AdapterWarningAofProject $Context
+    return
+  }
+
   if ($Step -eq "a project with .aof package config") {
     Run-Step $Context "an empty project"
-    Write-AofProject $Context @(@{ kind = "skill"; id = "file-backed"; description = "File backed"; path = "assets/skills/file-backed/SKILL.md"; bodyPath = "assets/skills/file-backed/SKILL.md"; body = "File-backed body" }) @(@{ id = "gsd"; source = "npm:get-shit-done-cc@latest"; runtimes = @("codex") })
+    Write-AofProject $Context @(@{ kind = "skill"; id = "file-backed"; description = "File backed"; path = "assets/skills/file-backed/SKILL.md"; bodyPath = "assets/skills/file-backed/SKILL.md"; body = "File-backed body" }) @(@{ id = "gsd"; namespace = "gsd"; source = "npm:get-shit-done-cc@latest"; runtimes = @("codex") })
     return
   }
 
   if ($Step -eq "a project with multi-runtime .aof package config") {
     Run-Step $Context "an empty project"
-    Write-AofProject $Context @(@{ kind = "skill"; id = "file-backed"; description = "File backed"; path = "assets/skills/file-backed/SKILL.md"; bodyPath = "assets/skills/file-backed/SKILL.md"; body = "File-backed body" }) @(@{ id = "gsd"; source = "npm:get-shit-done-cc@latest"; runtimes = @("claude", "codex") })
+    Write-AofProject $Context @(@{ kind = "skill"; id = "file-backed"; description = "File backed"; path = "assets/skills/file-backed/SKILL.md"; bodyPath = "assets/skills/file-backed/SKILL.md"; body = "File-backed body" }) @(@{ id = "gsd"; namespace = "gsd"; source = "npm:get-shit-done-cc@latest"; runtimes = @("claude", "codex") })
+    return
+  }
+
+  if ($Step -eq "a project with npm git and file package descriptors") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @() @(
+      @{ id = "npm-pack"; namespace = "vendor"; source = @{ type = "npm"; package = "@vendor/npm-pack"; version = "latest" }; runtimes = @("codex") },
+      @{ id = "git-pack"; namespace = "vendor"; source = @{ type = "git"; url = "https://example.test/vendor/git-pack.git"; ref = "v1" }; runtimes = @("codex") },
+      @{ id = "file-pack"; namespace = "vendor"; source = @{ type = "file"; path = "../packs/file-pack" }; runtimes = @("codex"); dependencies = @(@{ id = "git-pack"; namespace = "vendor" }) }
+    )
+    return
+  }
+
+  if ($Step -eq "a project with package resource collision") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @(@{ kind = "skill"; id = "vendor-context"; description = "Local collision"; path = "assets/skills/vendor-context/SKILL.md"; bodyPath = "assets/skills/vendor-context/SKILL.md"; body = "Local body" }) @(@{ id = "assistant-pack"; namespace = "vendor"; source = "file:../packs/assistant-pack"; runtimes = @("codex"); resources = @(@{ kind = "skill"; id = "context"; body = "Package body" }) })
     return
   }
 
@@ -125,6 +188,70 @@ function Run-Step {
   if ($Step -eq "the .aof config has no resources") {
     $Config = @{ '$schema' = "../schemas/aof.schema.json"; name = "empty"; resources = @() } | ConvertTo-Json -Depth 10
     Set-Content -Path (Join-Path $Context.ProjectDir ".aof\aof.config.json") -Value $Config
+    return
+  }
+
+  if ($Step -eq "a running setup UI server") {
+    Start-SetupUiServer $Context
+    return
+  }
+
+  if ($Step -eq "I request setup UI capabilities") {
+    Invoke-SetupUiJson $Context "GET" "/api/capabilities"
+    return
+  }
+
+  if ($Step -eq "I save command resource ``prime`` through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/command/prime" @{
+      id = "prime"
+      kind = "command"
+      description = "Prime repository context"
+      body = "Inspect the repository."
+      runtimes = @("codex")
+      overrides = @{}
+    }
+    return
+  }
+
+  if ($Step -eq "I save expanded sections through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/sections" @{
+      mcpServers = @(@{ id = "docs"; transport = "http"; url = "https://example.test/mcp"; runtimes = @("codex") })
+      hooks = @(@{ id = "test-after-write"; event = "PostToolUse"; command = "npm test"; runtimes = @("codex") })
+      projectDocs = @(@{ id = "root"; body = "Guidance"; targets = @("AGENTS.md"); runtimes = @("codex") })
+      settings = @{ codex = @{ approval_policy = "on-request" } }
+    }
+    return
+  }
+
+  if ($Step -eq "I save invalid expanded sections through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/sections" @{ settings = "bad" }
+    return
+  }
+
+  if ($Step -eq "I PUT malformed JSON to ``/api/config/resources/command/prime``") {
+    Invoke-SetupUiRaw $Context "PUT" "/api/config/resources/command/prime" "{ bad"
+    return
+  }
+
+  if ($Step -eq "I save a mismatched resource through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/command/prime" @{ id = "other"; kind = "command"; body = "Body"; runtimes = @("codex") }
+    return
+  }
+
+  if ($Step -eq "I save an unsupported resource kind through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/unknown/prime" @{ id = "prime"; kind = "unknown"; body = "Body"; runtimes = @("codex") }
+    return
+  }
+
+  if ($Step -eq "I save adapter warning sections through the setup UI API") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/sections" @{
+      hooks = @(@{ id = "notify"; event = "PostToolUse"; command = "npm test"; timeout = 30; runtimes = @("codex") })
+    }
+    return
+  }
+
+  if ($Step -eq "I request setup UI config") {
+    Invoke-SetupUiJson $Context "GET" "/api/config"
     return
   }
 
@@ -160,13 +287,30 @@ function Run-Step {
   if ($Step -match "^file ``(.+)`` should not exist$") { if (Test-Path -LiteralPath (Join-Path $Context.ProjectDir $Matches[1]) -PathType Leaf) { throw "Expected file not to exist: $($Matches[1])" }; return }
   if ($Step -match "^file ``(.+)`` should contain ``([\s\S]+)``$") { Assert-Contains (Get-Content (Join-Path $Context.ProjectDir $Matches[1]) -Raw) $Matches[2] "File did not contain expected text."; return }
 
+  if ($Step -match "^HTTP response status should be (\d+)$") { Assert-LastHttpResponse $Context; Assert-Equal ([int]$Matches[1]) $Context.LastHttpResponse.Status $Context.LastHttpResponse.Text; return }
+  if ($Step -match "^HTTP response field ``(.+)`` should equal ``(.+)``$") { Assert-LastHttpResponse $Context; $Actual = Get-ValueAtPath $Context.LastHttpResponse.Json $Matches[1]; $Expected = Convert-ExpectedValue $Matches[2]; Assert-Equal $Expected $Actual $Context.LastHttpResponse.Text; return }
+  if ($Step -match "^HTTP response diagnostics should include path ``(.+)``$") {
+    Assert-LastHttpResponse $Context
+    $Diagnostics = @($Context.LastHttpResponse.Json.diagnostics)
+    if ($Diagnostics.Length -eq 0 -and $null -ne $Context.LastHttpResponse.Json.config) { $Diagnostics = @($Context.LastHttpResponse.Json.config.diagnostics) }
+    $ExpectedPath = $Matches[1]
+    if (!($Diagnostics | Where-Object { $_.path -eq $ExpectedPath })) { throw "Expected diagnostics to include $ExpectedPath" }
+    return
+  }
+
   if ($Step -match "^JSON file ``(.+)`` should contain item ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ItemId = $Matches[2]; if (!($Json.items | Where-Object { $_.id -eq $ItemId -or $_ -eq $ItemId })) { throw "Expected $($Matches[1]) to contain item $ItemId" }; return }
   if ($Step -match "^JSON file ``(.+)`` should not contain item ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ItemId = $Matches[2]; if ($Json.items | Where-Object { $_.id -eq $ItemId -or $_ -eq $ItemId }) { throw "Expected $($Matches[1]) not to contain item $ItemId" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain runtime ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; if (!($Json.runtimes | Where-Object { $_ -eq $Runtime })) { throw "Expected $($Matches[1]) to contain runtime $Runtime" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain generated file ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ExpectedPath = Normalize-FilePath $Matches[2]; if (!($Json.files | Where-Object { (Normalize-FilePath $_.path) -eq $ExpectedPath })) { throw "Expected $($Matches[1]) to contain generated file $($Matches[2])" }; return }
+  if ($Step -match "^JSON file ``(.+)`` should not contain generated file ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ExpectedPath = Normalize-FilePath $Matches[2]; if ($Json.files | Where-Object { (Normalize-FilePath $_.path) -eq $ExpectedPath }) { throw "Expected $($Matches[1]) not to contain generated file $($Matches[2])" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain framework ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Framework = $Matches[2]; if (!($Json.frameworks | Where-Object { $_.id -eq $Framework })) { throw "Expected $($Matches[1]) to contain framework $Framework" }; return }
+  if ($Step -match "^JSON file ``(.+)`` should contain package ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Package = $Matches[2]; if (!($Json.packages | Where-Object { $_.id -eq $Package })) { throw "Expected $($Matches[1]) to contain package $Package" }; return }
+  if ($Step -match "^JSON file ``(.+)`` package ``(.+)`` should record dependency ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Package = $Matches[2]; $Dependency = $Matches[3]; $Pkg = $Json.packages | Where-Object { $_.id -eq $Package } | Select-Object -First 1; if ($null -eq $Pkg) { throw "Expected $($Matches[1]) to contain package $Package" }; if (!($Pkg.dependencies | Where-Object { $_ -eq $Dependency -or $_.id -eq $Dependency })) { throw "Expected package $Package to record dependency $Dependency" }; return }
+  if ($Step -match "^JSON file ``(.+)`` package ``(.+)`` should have resolution status ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Package = $Matches[2]; $Status = $Matches[3]; $Pkg = $Json.packages | Where-Object { $_.id -eq $Package } | Select-Object -First 1; if ($null -eq $Pkg) { throw "Expected $($Matches[1]) to contain package $Package" }; Assert-Equal $Status $Pkg.resolution.status "Expected package $Package resolution status $Status"; return }
+  if ($Step -match "^JSON file ``(.+)`` should not contain adapter warning ``(.+)``$") { $Text = Get-Content (Join-Path $Context.ProjectDir $Matches[1]) -Raw; if ($Text.Contains($Matches[2])) { throw "Expected $($Matches[1]) not to contain adapter warning $($Matches[2])" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain framework install attempt ``(.+)`` with status ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; $Status = $Matches[3]; if (!($Json.frameworkInstallAttempts | Where-Object { $_.runtime -eq $Runtime -and $_.status -eq $Status })) { throw "Expected $($Matches[1]) to contain framework install attempt $Runtime with status $Status" }; return }
   if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in file ``(.+)``$") { $Content = Get-Content (Join-Path $Context.ProjectDir $Matches[3]) -Raw; $First = $Content.IndexOf($Matches[1]); $Second = $Content.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in $($Matches[3])" }; return }
+  if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in stdout$") { Assert-LastResult $Context; $First = $Context.LastResult.Stdout.IndexOf($Matches[1]); $Second = $Context.LastResult.Stdout.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in stdout" }; return }
 
   throw "Unsupported BDD step: $Step"
 }
@@ -228,14 +372,146 @@ function Write-AofProject {
   Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
 }
 
+function Write-ExpandedAofProject {
+  param($Context)
+  $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+  $DocsDir = Join-Path $WorkspaceDir "assets\docs\partials"
+  New-Item -ItemType Directory -Path $DocsDir -Force | Out-Null
+  Set-Content -Path (Join-Path $WorkspaceDir "assets\docs\root.md") -Value "Root guidance`n{{include partials/shared.md}}`n" -NoNewline
+  Set-Content -Path (Join-Path $DocsDir "shared.md") -Value "Included guidance`n" -NoNewline
+  $Config = [ordered]@{
+    '$schema' = "../schemas/aof.schema.json"
+    name = "expanded"
+    resources = @()
+    mcpServers = @(@{ id = "docs"; transport = "http"; url = "https://example.test/mcp" })
+    hooks = @(@{ id = "test-after-write"; event = "PostToolUse"; matcher = "Write"; command = "npm test" })
+    projectDocs = @(@{ id = "root"; path = "assets/docs/root.md"; targets = @("AGENTS.md", "CLAUDE.md") })
+    settings = @{ claude = @{ permissions = @{ allow = @("Bash(npm test)") } }; codex = @{ model = "gpt-5.4"; approval_policy = "on-request" } }
+  } | ConvertTo-Json -Depth 10
+  Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+}
+
+function Write-AdapterWarningAofProject {
+  param($Context)
+  $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+  $SkillDir = Join-Path $WorkspaceDir "assets\skills\file-backed"
+  New-Item -ItemType Directory -Path $SkillDir -Force | Out-Null
+  Set-Content -Path (Join-Path $SkillDir "SKILL.md") -Value "File-backed body`n" -NoNewline
+  $Config = [ordered]@{
+    '$schema' = "../schemas/aof.schema.json"
+    name = "adapter-warning"
+    resources = @(@{ kind = "skill"; id = "file-backed"; path = "assets/skills/file-backed/SKILL.md"; runtimes = @("codex") })
+    hooks = @(@{ id = "notify"; event = "PostToolUse"; command = "npm test"; timeout = 30; runtimes = @("codex") })
+  } | ConvertTo-Json -Depth 10
+  Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+}
+
+function Start-SetupUiServer {
+  param($Context)
+  if ($null -ne $Context.SetupUiProcess) { return }
+  New-Item -ItemType Directory -Path $Context.ProjectDir -Force | Out-Null
+  $Script = @"
+import { serveSetupUi } from './src/setup-ui.mjs';
+const projectDir = process.argv[1];
+const savedItems = [];
+const catalog = { listItems: () => savedItems, upsertItem: (item) => savedItems.push(item) };
+const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir });
+console.log(url);
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGINT', () => server.close(() => process.exit(0)));
+setInterval(() => {}, 1000);
+"@
+  $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $StartInfo.FileName = "node"
+  $StartInfo.WorkingDirectory = $RepoRoot
+  $StartInfo.RedirectStandardOutput = $true
+  $StartInfo.RedirectStandardError = $true
+  $StartInfo.UseShellExecute = $false
+  $StartInfo.Arguments = (@("--input-type=module", "-e", $Script, $Context.ProjectDir) | ForEach-Object { Quote-ProcessArg $_ }) -join " "
+  $Process = New-Object System.Diagnostics.Process
+  $Process.StartInfo = $StartInfo
+  [void]$Process.Start()
+  $Context.SetupUiUrl = $Process.StandardOutput.ReadLine()
+  $Context.SetupUiProcess = $Process
+  if ([string]::IsNullOrWhiteSpace($Context.SetupUiUrl)) {
+    $ErrorText = $Process.StandardError.ReadToEnd()
+    throw "Setup UI server did not start.`n$ErrorText"
+  }
+}
+
+function Stop-SetupUiServer {
+  param($Context)
+  if ($null -eq $Context.SetupUiProcess) { return }
+  if (-not $Context.SetupUiProcess.HasExited) {
+    $Context.SetupUiProcess.Kill()
+    $Context.SetupUiProcess.WaitForExit()
+  }
+  $Context.SetupUiProcess = $null
+  $Context.SetupUiUrl = $null
+}
+
+function Invoke-SetupUiJson {
+  param($Context, [string] $Method, [string] $Route, $Body)
+  $BodyText = if ($null -eq $Body) { $null } else { $Body | ConvertTo-Json -Depth 20 }
+  Invoke-SetupUiRaw $Context $Method $Route $BodyText
+}
+
+function Invoke-SetupUiRaw {
+  param($Context, [string] $Method, [string] $Route, [string] $BodyText)
+  if ([string]::IsNullOrWhiteSpace($Context.SetupUiUrl)) { throw "Setup UI server has not been started." }
+  [void][System.Reflection.Assembly]::LoadWithPartialName("System.Net.Http")
+  $Client = New-Object System.Net.Http.HttpClient
+  try {
+    $Uri = [System.Uri]::new([System.Uri]$Context.SetupUiUrl, $Route.TrimStart("/"))
+    $HttpMethod = [System.Net.Http.HttpMethod]::new($Method)
+    $Request = New-Object System.Net.Http.HttpRequestMessage($HttpMethod, $Uri)
+    if (!([string]::IsNullOrEmpty($BodyText) -and $Method -eq "GET")) {
+      $Request.Content = New-Object System.Net.Http.StringContent($BodyText, [System.Text.Encoding]::UTF8, "application/json")
+    }
+    $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+    $Text = $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    $Json = $null
+    if (-not [string]::IsNullOrWhiteSpace($Text)) {
+      try { $Json = $Text | ConvertFrom-Json } catch { $Json = $null }
+    }
+    $Context.LastHttpResponse = [ordered]@{ Status = [int]$Response.StatusCode; Text = $Text; Json = $Json }
+  } finally {
+    $Client.Dispose()
+  }
+}
+
 function Read-ProjectJson { param($Context, [string] $PathValue) return Get-Content (Join-Path $Context.ProjectDir $PathValue) -Raw | ConvertFrom-Json }
 function Normalize-FilePath { param([string] $PathValue) return $PathValue.Replace("\", "/") }
 function Quote-ProcessArg { param([string] $Arg) if ($Arg -notmatch '[\s"]') { return $Arg }; return '"' + ($Arg -replace '\\(?=\\*")', '$0$0' -replace '"', '\"') + '"' }
 function Split-Command { param([string] $Command) $Matches = [regex]::Matches($Command, '"[^"]+"|''[^'']+''|\S+'); $Args = New-Object System.Collections.ArrayList; foreach ($Match in $Matches) { [void]$Args.Add($Match.Value.Trim("'""")) }; return $Args }
 function Assert-LastResult { param($Context) if ($null -eq $Context.LastResult) { throw "No command has been run in this scenario." } }
+function Assert-LastHttpResponse { param($Context) if ($null -eq $Context.LastHttpResponse) { throw "No HTTP response has been captured in this scenario." } }
 function Assert-Equal { param($Expected, $Actual, [string] $Message) if ($Expected -ne $Actual) { throw "$Message`nExpected: $Expected`nActual: $Actual" } }
 function Assert-Contains { param([string] $Actual, [string] $Expected, [string] $Message) if (!$Actual.Contains($Expected)) { throw "$Message`nExpected text: $Expected`nActual text:`n$Actual" } }
 function Format-Result { param($Result) return "status: $($Result.Status)`nstdout:`n$($Result.Stdout)`nstderr:`n$($Result.Stderr)" }
+
+function Get-ValueAtPath {
+  param($Value, [string] $PathExpression)
+  $Current = $Value
+  foreach ($Segment in $PathExpression.Split(".")) {
+    if ($null -eq $Current) { return $null }
+    if ($Segment -match "^\d+$") {
+      $Current = @($Current)[$([int]$Segment)]
+    } else {
+      $Current = $Current.$Segment
+    }
+  }
+  return $Current
+}
+
+function Convert-ExpectedValue {
+  param([string] $Value)
+  if ($Value -eq "true") { return $true }
+  if ($Value -eq "false") { return $false }
+  if ($Value -eq "null") { return $null }
+  if ($Value -match "^-?\d+(\.\d+)?$") { return [double]$Value }
+  return $Value
+}
 
 function Legacy-Config {
   return @"
@@ -251,16 +527,18 @@ function Legacy-Config {
 }
 
 $Failures = 0
-$Feature = Parse-Feature $FeatureFile
+foreach ($FeatureFile in Get-FeatureFiles) {
+  $Feature = Parse-Feature $FeatureFile
 
-foreach ($Scenario in $Feature.Scenarios) {
-  $ScenarioName = "$($Feature.Name): $($Scenario.Name)"
-  try {
-    Run-Scenario $Scenario
-    Write-Output "ok - $ScenarioName"
-  } catch {
-    $Failures += 1
-    Write-Error "not ok - $ScenarioName`n$($_.Exception.Message)" -ErrorAction Continue
+  foreach ($Scenario in $Feature.Scenarios) {
+    $ScenarioName = "$($Feature.Name): $($Scenario.Name)"
+    try {
+      Run-Scenario $FeatureFile $Scenario
+      Write-Output "ok - $ScenarioName"
+    } catch {
+      $Failures += 1
+      Write-Error "not ok - $ScenarioName`n$($_.Exception.Message)" -ErrorAction Continue
+    }
   }
 }
 

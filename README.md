@@ -426,17 +426,17 @@ Integration tests are BDD-style feature tests that launch the CLI as an external
 node ./test/integration/cli.mjs
 ```
 
-On Windows environments that block Node child-process spawning, run the PowerShell runner against the same feature files:
+Run the PowerShell integration parity suite separately on Windows:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\test\integration\cli.ps1
+npm run test:integration:ps
 ```
 
-Both runners execute the same Gherkin-style scenarios.
+The PowerShell command consumes the same split feature files and exits successfully with a skip message outside Windows. It is intentionally not part of `npm test`.
 
-The feature files live in `test/integration/`. They are intentionally black-box so they can be reused if the CLI implementation later moves from Node to Rust.
+The feature files live in `test/integration/features/`. They are intentionally black-box so they can be reused if the CLI implementation later moves from Node to Rust.
 
-All new user-facing functionality should include BDD coverage in `test/integration/cli.feature`. Unit tests can supplement those scenarios, but do not replace them.
+All new user-facing functionality should include BDD coverage in the relevant domain feature file under `test/integration/features/`. Unit tests can supplement those scenarios, but do not replace them.
 
 Run everything through the main test entrypoint:
 
