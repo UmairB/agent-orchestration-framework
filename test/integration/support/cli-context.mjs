@@ -1,0 +1,111 @@
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const integrationDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export const repoRoot = path.resolve(integrationDir, "..", "..");
+export const cliPath = path.join(repoRoot, "bin", "aof.mjs");
+export const useInProcessCli = process.env.AOF_IN_PROCESS_INTEGRATION === "1";
+
+export async function createCliContext() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "aof-bdd-"));
+  return {
+    root,
+    projectDir: path.join(root, "project"),
+    dataDir: path.join(root, "data"),
+    lastResult: null
+  };
+}
+
+export async function cleanupCliContext(context) {
+  await rm(context.root, { recursive: true, force: true });
+}
+
+export function runCli(context, command, input = "", options = {}) {
+  if (useInProcessCli) {
+    return runCliInProcess(context, command, input, options);
+  }
+
+  const args = splitCommand(command);
+  const result = spawnSync(process.execPath, ["--no-warnings", cliPath, ...args], {
+    cwd: context.projectDir,
+    env: {
+      ...process.env,
+      AOF_DATA_DIR: context.dataDir,
+      NODE_NO_WARNINGS: "1",
+      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
+    },
+    input,
+    encoding: "utf8"
+  });
+
+  return {
+    status: result.status,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    error: result.error
+  };
+}
+
+export async function runCliInProcess(context, command, input = "", options = {}) {
+  const { run } = await import("../../../src/cli.mjs");
+  const previousCwd = process.cwd();
+  const previousDataDir = process.env.AOF_DATA_DIR;
+  const previousNoWarnings = process.env.NODE_NO_WARNINGS;
+  const previousSelectionInput = process.env.AOF_TEST_SELECTION_INPUT;
+  const previousRuntimeInput = process.env.AOF_TEST_RUNTIMES_INPUT;
+  const previousConfirmInput = process.env.AOF_TEST_CONFIRM_INPUT;
+  const previousFrameworkStatus = process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS;
+  const previousExitCode = process.exitCode;
+  const previousLog = console.log;
+  const previousError = console.error;
+  const stdout = [];
+  const stderr = [];
+
+  console.log = (...args) => stdout.push(args.join(" "));
+  console.error = (...args) => stderr.push(args.join(" "));
+  process.env.AOF_DATA_DIR = context.dataDir;
+  process.env.NODE_NO_WARNINGS = "1";
+  process.exitCode = undefined;
+  if (input) {
+    const [selectionInput, runtimeInput, ...confirmations] = input.trim().split(/\r?\n/);
+    process.env.AOF_TEST_SELECTION_INPUT = selectionInput ?? "";
+    if (runtimeInput !== undefined) process.env.AOF_TEST_RUNTIMES_INPUT = runtimeInput;
+    if (confirmations.length > 0) process.env.AOF_TEST_CONFIRM_INPUT = confirmations.join(",");
+  }
+  if (options.frameworkStatuses) process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = options.frameworkStatuses;
+  process.chdir(context.projectDir);
+
+  try {
+    await run(splitCommand(command));
+    return { status: process.exitCode ?? 0, stdout: stdout.join("\n"), stderr: stderr.join("\n"), error: null };
+  } catch (error) {
+    stderr.push(error.message);
+    return { status: 1, stdout: stdout.join("\n"), stderr: stderr.join("\n"), error };
+  } finally {
+    process.chdir(previousCwd);
+    console.log = previousLog;
+    console.error = previousError;
+    restoreEnv("AOF_DATA_DIR", previousDataDir);
+    restoreEnv("NODE_NO_WARNINGS", previousNoWarnings);
+    restoreEnv("AOF_TEST_SELECTION_INPUT", previousSelectionInput);
+    restoreEnv("AOF_TEST_RUNTIMES_INPUT", previousRuntimeInput);
+    restoreEnv("AOF_TEST_CONFIRM_INPUT", previousConfirmInput);
+    restoreEnv("AOF_TEST_FRAMEWORK_INSTALL_STATUS", previousFrameworkStatus);
+    process.exitCode = previousExitCode;
+  }
+}
+
+export function splitCommand(command) {
+  return command.match(/"[^"]+"|'[^']+'|\S+/g)?.map((token) => token.replace(/^["']|["']$/g, "")) ?? [];
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
