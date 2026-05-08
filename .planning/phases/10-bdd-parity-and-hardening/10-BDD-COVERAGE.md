@@ -1,6 +1,6 @@
 # Phase 10 BDD Coverage Matrix
 
-**Status:** Wave 2 updated the CLI matrix to split domain feature files. Setup UI HTTP BDD and PowerShell parity remain tracked for later waves.
+**Status:** Wave 3 added setup UI HTTP API BDD. PowerShell parity remains tracked for the final wave.
 
 ## BDD-01: CLI Lifecycle Behavior
 
@@ -12,7 +12,7 @@
 
 | Status | Scenario Evidence | Gap To Close | Planned Wave |
 |--------|-------------------|--------------|--------------|
-| partial | `test/integration/features/dsl.feature`: `Apply the project config to Codex only`; `Apply file-backed .aof assets`; `Apply expanded DSL primitives`; `Preview expanded DSL primitives before applying`; `Apply runtime override for a file-backed asset`; `Reject runtime override identity changes`; `Render natural-language rule guidance per runtime`; `Merge multiple Codex rules into one AGENTS file`. | Node CLI DSL rendering is covered for resources, MCP, hooks, project docs, settings, runtime overrides, and rules. Setup UI API BDD remains to prove the same editable config surface over HTTP. | Wave 3 |
+| covered | `test/integration/features/dsl.feature`: `Apply the project config to Codex only`; `Apply file-backed .aof assets`; `Apply expanded DSL primitives`; `Preview expanded DSL primitives before applying`; `Apply runtime override for a file-backed asset`; `Reject runtime override identity changes`; `Render natural-language rule guidance per runtime`; `Merge multiple Codex rules into one AGENTS file`. `test/integration/features/setup-ui.feature`: `Save a command resource through the setup UI API`; `Save expanded config sections through the setup UI API`; `Reject invalid expanded setup UI sections`; `Reject malformed JSON and route payload mismatches`; `Serve adapter warning review payloads`. | None for Node CLI and setup UI API/editor behavior. This is HTTP API coverage, not browser E2E. PowerShell parity is tracked below. | Done |
 
 ## BDD-03: Framework Package Behavior
 
