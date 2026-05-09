@@ -39,6 +39,7 @@ export function runCli(context, command, input = "", options = {}) {
       AOF_GLOBAL_HOME: context.globalDir,
       NODE_NO_WARNINGS: "1",
       ...promptEnv,
+      ...(options.resourceInput ? { AOF_TEST_RESOURCE_INPUT: options.resourceInput } : {}),
       ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
     },
     input,
@@ -62,6 +63,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   const previousSelectionInput = process.env.AOF_TEST_SELECTION_INPUT;
   const previousRuntimeInput = process.env.AOF_TEST_RUNTIMES_INPUT;
   const previousConfirmInput = process.env.AOF_TEST_CONFIRM_INPUT;
+  const previousResourceInput = process.env.AOF_TEST_RESOURCE_INPUT;
   const previousFrameworkStatus = process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS;
   const previousExitCode = process.exitCode;
   const previousLog = console.log;
@@ -78,6 +80,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   for (const [name, value] of Object.entries(promptInputEnv(input))) {
     process.env[name] = value;
   }
+  if (options.resourceInput) process.env.AOF_TEST_RESOURCE_INPUT = options.resourceInput;
   if (options.frameworkStatuses) process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = options.frameworkStatuses;
   process.chdir(context.projectDir);
 
@@ -97,6 +100,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
     restoreEnv("AOF_TEST_SELECTION_INPUT", previousSelectionInput);
     restoreEnv("AOF_TEST_RUNTIMES_INPUT", previousRuntimeInput);
     restoreEnv("AOF_TEST_CONFIRM_INPUT", previousConfirmInput);
+    restoreEnv("AOF_TEST_RESOURCE_INPUT", previousResourceInput);
     restoreEnv("AOF_TEST_FRAMEWORK_INSTALL_STATUS", previousFrameworkStatus);
     process.exitCode = previousExitCode;
   }

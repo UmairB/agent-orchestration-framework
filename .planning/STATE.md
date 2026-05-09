@@ -26,9 +26,9 @@ Phase 17 is focused on replacing typed CLI prompts with a keyboard-driven intera
 ## Current Position
 
 Phase: 17 - Interactive CLI
-Plan: 17-01 complete; 17-02 pending
-Status: Ready for next Phase 17 execution slice
-Last activity: 2026-05-09 - Phase 17 Inquirer prompt foundation completed
+Plan: 17-01 complete; 17-02 complete
+Status: Ready for Phase 17 verification or next interactive CLI slice
+Last activity: 2026-05-09 - Phase 17 interactive project/global asset creation completed
 
 ## Resume
 
@@ -119,3 +119,4 @@ Last activity: 2026-05-09 - Phase 17 Inquirer prompt foundation completed
 - Phase 16 live test finding: `aof init --codex` still used an experimental SQLite catalog and built-in repo defaults (`project-context`, `prime`, `code-reviewer`, `gsd`). User decided to remove SQLite/default repo catalog behavior for now; project and global assets are the active source model.
 - Phase 17 proposed: replace typed readline prompts with a real interactive CLI using arrow-key navigation, checkbox toggles, and Enter confirmation without reintroducing repo defaults.
 - Phase 17 wave 1 added `@inquirer/prompts` and replaced the prompt wrapper with checkbox/confirm prompts while preserving env-driven BDD inputs.
+- Phase 17 wave 2 added no-argument `aof add` and `aof global add` interactive asset creation flows for project/global assets, with deterministic BDD prompt input and no SQLite/default catalog behavior.

@@ -1,4 +1,7 @@
-import { checkbox, confirm } from "@inquirer/prompts";
+import { checkbox, confirm, input, select } from "@inquirer/prompts";
+
+const PROJECT_RESOURCE_KINDS = ["skill", "command", "agent", "rule"];
+const GLOBAL_RESOURCE_KINDS = ["skill", "agent", "rule"];
 
 export async function selectItems(items) {
   if (items.length === 0) return [];
@@ -48,6 +51,46 @@ export async function confirmAction(question, defaultValue = false) {
 
   assertInteractiveTerminal("confirm action");
   return confirm({ message: question, default: defaultValue });
+}
+
+export async function promptResourceInput(options = {}) {
+  if (process.env.AOF_TEST_RESOURCE_INPUT !== undefined) {
+    return parseResourceInput(process.env.AOF_TEST_RESOURCE_INPUT, options);
+  }
+
+  assertInteractiveTerminal("create a resource interactively");
+  const allowedKinds = options.global ? GLOBAL_RESOURCE_KINDS : PROJECT_RESOURCE_KINDS;
+  const kind = options.kind ?? (await select({
+    message: options.global ? "Select global asset type" : "Select project asset type",
+    choices: allowedKinds.map((value) => ({ name: value, value }))
+  }));
+  if (!allowedKinds.includes(kind)) {
+    throw new Error(`Invalid ${options.global ? "global " : ""}resource kind "${kind}". Expected ${allowedKinds.join(", ")}.`);
+  }
+
+  const id = options.id ?? (await input({
+    message: "Asset id",
+    validate(value) {
+      return value.trim() !== "" || "Asset id is required.";
+    }
+  }));
+  const description = await input({
+    message: "Description",
+    default: options.description ?? ""
+  });
+  const runtimes = options.runtimes ?? (await selectRuntimes());
+  const body = await input({
+    message: "Initial body (optional)",
+    default: options.body ?? ""
+  });
+
+  return {
+    kind,
+    id: id.trim(),
+    description: description.trim(),
+    runtimes,
+    body
+  };
 }
 
 export function resolveConfirmation(answer, defaultValue = false) {
@@ -100,6 +143,36 @@ function printChoices(items) {
     const marker = item.defaultEnabled ? "*" : " ";
     console.log(`${index + 1}. [${marker}] ${item.id} (${item.kind}) - ${item.description}`);
   }
+}
+
+export function parseResourceInput(value, options = {}) {
+  const parsed = JSON.parse(value);
+  const allowedKinds = options.global ? GLOBAL_RESOURCE_KINDS : PROJECT_RESOURCE_KINDS;
+  const kind = parsed.kind ?? options.kind;
+  if (!allowedKinds.includes(kind)) {
+    throw new Error(`Invalid ${options.global ? "global " : ""}resource kind "${kind}". Expected ${allowedKinds.join(", ")}.`);
+  }
+  const id = parsed.id ?? options.id;
+  if (typeof id !== "string" || id.trim() === "") {
+    throw new Error("Asset id is required.");
+  }
+  return {
+    kind,
+    id: id.trim(),
+    description: typeof parsed.description === "string" ? parsed.description : "",
+    runtimes: parseResourceRuntimes(parsed.runtimes),
+    body: typeof parsed.body === "string" ? parsed.body : ""
+  };
+}
+
+function parseResourceRuntimes(value) {
+  const runtimes = Array.isArray(value) ? value : resolveRuntimeSelection(value ?? "all");
+  for (const runtime of runtimes) {
+    if (!["claude", "codex"].includes(runtime)) {
+      throw new Error(`Unsupported runtime "${runtime}". Expected claude, codex, or all.`);
+    }
+  }
+  return [...new Set(runtimes)];
 }
 
 function assertInteractiveTerminal(action) {

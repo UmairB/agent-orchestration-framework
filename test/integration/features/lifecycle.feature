@@ -7,7 +7,7 @@ Feature: AOF CLI lifecycle
     Then the command should succeed
     And stdout should contain `aof - Assistant Ops Framework`
     And stdout should contain `aof init [dir] [--claude] [--codex] [--force]`
-    And stdout should contain `aof add <kind> <id>`
+    And stdout should contain `aof add [kind id]`
     And stdout should contain `aof migrate`
     And text `aof validate [--json] [--strict]` should appear before `aof install [--no-serve]` in stdout
 
@@ -63,6 +63,15 @@ Feature: AOF CLI lifecycle
     And file `.aof/aof.config.json` should contain `"kind": "rule"`
     And file `.aof/aof.config.json` should contain `"codex"`
 
+  Scenario: Interactively add a project asset
+    Given an empty project
+    When I run `add` with resource input `{"kind":"skill","id":"interactive-skill","description":"Interactive skill","runtimes":["codex"],"body":"Interactive body"}`
+    Then the command should succeed
+    And stdout should contain `Created`
+    And file `.aof/assets/skills/interactive-skill/SKILL.md` should contain `Interactive body`
+    And file `.aof/aof.config.json` should contain `"id": "interactive-skill"`
+    And file `.aof/aof.config.json` should contain `"codex"`
+
   Scenario: Add and inspect global assets
     Given an empty project
     When I run `global add skill shared-review --codex --description "Shared reviewer"`
@@ -79,6 +88,15 @@ Feature: AOF CLI lifecycle
     Then the command should succeed
     And stdout should contain `resource: skill:shared-review`
     And stdout should contain `body: present`
+
+  Scenario: Interactively add a global asset
+    Given an empty project
+    When I run `global add` with resource input `{"kind":"rule","id":"interactive-rule","description":"Interactive rule","runtimes":["codex"],"body":"Interactive global body"}`
+    Then the command should succeed
+    And stdout should contain `Created`
+    And global file `assets/rules/interactive-rule/RULE.md` should contain `Interactive global body`
+    And global file `aof.config.json` should contain `"id": "interactive-rule"`
+    And global file `aof.config.json` should contain `"codex"`
 
   Scenario: Validate global assets
     Given an empty project

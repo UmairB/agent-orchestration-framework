@@ -7,7 +7,7 @@ import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
 import { readJson, writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
-import { selectRuntimes } from "./prompt.mjs";
+import { promptResourceInput, selectRuntimes } from "./prompt.mjs";
 import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
@@ -124,9 +124,17 @@ async function initCommand(args) {
 
 async function addCommand(args) {
   const options = parseOptions(args);
-  const [kind, id] = options._;
-  if (!kind || !id) {
-    throw new Error("Usage: aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]");
+  let [kind, id] = options._;
+  let interactiveInput = null;
+  if (!kind && !id) {
+    interactiveInput = await promptResourceInput({
+      description: options.description,
+      runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : undefined
+    });
+    kind = interactiveInput.kind;
+    id = interactiveInput.id;
+  } else if (!kind || !id) {
+    throw new Error("Usage: aof add [kind id] [--runtime claude,codex] [--description text] [--force]");
   }
 
   const targetDir = path.resolve(options.target ?? process.cwd());
@@ -135,8 +143,9 @@ async function addCommand(args) {
     kind,
     id,
     name: options.name,
-    description: options.description,
-    runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes(),
+    description: interactiveInput?.description ?? options.description,
+    body: interactiveInput?.body,
+    runtimes: interactiveInput?.runtimes ?? (hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes()),
     force: Boolean(options.force),
     dryRun: Boolean(options.dryRun)
   });
@@ -179,9 +188,18 @@ async function globalCommand(args) {
 
 async function globalAddCommand(args) {
   const options = parseOptions(args);
-  const [kind, id] = options._;
-  if (!kind || !id) {
-    throw new Error("Usage: aof global add <kind> <id> [--runtime claude,codex] [--description text] [--force]");
+  let [kind, id] = options._;
+  let interactiveInput = null;
+  if (!kind && !id) {
+    interactiveInput = await promptResourceInput({
+      global: true,
+      description: options.description,
+      runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : undefined
+    });
+    kind = interactiveInput.kind;
+    id = interactiveInput.id;
+  } else if (!kind || !id) {
+    throw new Error("Usage: aof global add [kind id] [--runtime claude,codex] [--description text] [--force]");
   }
 
   const { scaffoldGlobalResource } = await import("./scaffold.mjs");
@@ -189,8 +207,9 @@ async function globalAddCommand(args) {
     kind,
     id,
     name: options.name,
-    description: options.description,
-    runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes(),
+    description: interactiveInput?.description ?? options.description,
+    body: interactiveInput?.body,
+    runtimes: interactiveInput?.runtimes ?? (hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes()),
     force: Boolean(options.force),
     dryRun: Boolean(options.dryRun)
   });
@@ -833,7 +852,7 @@ function helpText() {
 
 Usage:
   aof init [dir] [--claude] [--codex] [--force]
-  aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]
+  aof add [kind id] [--runtime claude,codex] [--description text] [--force]
   aof migrate [dir] [--force] [--dry-run]
   aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force] [--strict]
   aof sync [--claude] [--codex] [--global] [--dry-run] [--force] [--strict] [--install]
@@ -842,7 +861,7 @@ Usage:
   aof clean [--dry-run] [--force]
 
 Supporting commands:
-  aof global add <kind> <id> [--runtime claude,codex] [--description text] [--force]
+  aof global add [kind id] [--runtime claude,codex] [--description text] [--force]
   aof global list|show|validate [--json]
   aof install [--no-serve] [--port 4177]
   aof config show [--json]

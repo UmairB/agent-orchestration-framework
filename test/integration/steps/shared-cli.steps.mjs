@@ -241,6 +241,12 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  match = step.match(/^I run `(.+)` with resource input `([\s\S]*)`$/);
+  if (match) {
+    context.lastResult = await runCli(context, match[1], "", { resourceInput: match[2] });
+    return;
+  }
+
   match = step.match(/^I run `(.+)` with framework statuses `([\s\S]*)`$/);
   if (match) {
     context.lastResult = await runCli(context, match[1], "", { frameworkStatuses: match[2] });

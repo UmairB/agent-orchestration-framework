@@ -374,6 +374,11 @@ function Run-Step {
     return
   }
 
+  if ($Step -match "^I run ``(.+)`` with resource input ``([\s\S]*)``$") {
+    $Context.LastResult = Run-Cli $Context $Matches[1] "" "" $Matches[2]
+    return
+  }
+
   if ($Step -match "^I run ``(.+)`` with framework statuses ``([\s\S]*)``$") {
     $Context.LastResult = Run-Cli $Context $Matches[1] "" $Matches[2]
     return
@@ -442,7 +447,7 @@ function Run-Step {
 }
 
 function Run-Cli {
-  param($Context, [string] $Command, [string] $InputText, [string] $FrameworkStatuses = "")
+  param($Context, [string] $Command, [string] $InputText, [string] $FrameworkStatuses = "", [string] $ResourceInput = "")
   [string[]]$CliArgs = @(Split-Command $Command)
   $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
   $StartInfo.FileName = "node"
@@ -462,6 +467,7 @@ function Run-Cli {
     if ($InputLines.Length -gt 1) { $StartInfo.Environment["AOF_TEST_RUNTIMES_INPUT"] = $InputLines[1] }
     if ($InputLines.Length -gt 2) { $StartInfo.Environment["AOF_TEST_CONFIRM_INPUT"] = ($InputLines[2..($InputLines.Length - 1)] -join ",") }
   }
+  if ($ResourceInput -ne "") { $StartInfo.Environment["AOF_TEST_RESOURCE_INPUT"] = $ResourceInput }
   if ($FrameworkStatuses -ne "") { $StartInfo.Environment["AOF_TEST_FRAMEWORK_INSTALL_STATUS"] = $FrameworkStatuses }
 
   $Process = New-Object System.Diagnostics.Process

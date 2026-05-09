@@ -92,7 +92,7 @@ async function scaffoldResourceInWorkspace(paths, input, options = {}) {
     };
   }
 
-  await writeText(absoluteAssetPath, skeletonFor(kind, { id, name: input.name, description: input.description }));
+  await writeText(absoluteAssetPath, skeletonFor(kind, { id, name: input.name, description: input.description, body: input.body }));
   await writeText(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
 
   return {
@@ -139,6 +139,10 @@ async function exists(filePath) {
 }
 
 function skeletonFor(kind, input) {
+  if (typeof input.body === "string" && input.body.trim() !== "") {
+    return input.body.endsWith("\n") ? input.body : `${input.body}\n`;
+  }
+
   const title = input.name ?? input.id;
   const description = input.description ? `\n\n${input.description}` : "";
   const bodies = {

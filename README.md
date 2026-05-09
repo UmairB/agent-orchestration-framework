@@ -14,6 +14,7 @@ The initial target is local CLI usage:
 npm link
 aof init
 aof add skill code-review
+aof add
 aof migrate
 aof sync --dry-run
 aof validate
@@ -23,6 +24,7 @@ aof config show
 aof config validate
 aof config doctor
 aof global add skill shared-review --codex
+aof global add
 aof global list
 aof install --no-serve
 ```
@@ -50,14 +52,16 @@ Scaffold a file-backed `.aof/` asset:
 aof add skill code-review --codex
 ```
 
-`aof add <kind> <id>` writes source files under `.aof/assets/` and updates
-`.aof/aof.config.json`. It refuses config or file collisions unless `--force`
-is supplied.
+`aof add [kind id]` writes source files under `.aof/assets/` and updates
+`.aof/aof.config.json`. Run `aof add` without `kind id` to choose the asset
+type, id, runtimes, description, and initial body interactively. It refuses
+config or file collisions unless `--force` is supplied.
 
 Create reusable global source assets:
 
 ```sh
 aof global add skill shared-review --codex
+aof global add
 aof global list
 aof global show skill shared-review
 aof global validate

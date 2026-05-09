@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { resolveConfirmation, resolveRuntimeSelection, resolveSelection } from "../src/prompt.mjs";
+import { parseResourceInput, resolveConfirmation, resolveRuntimeSelection, resolveSelection } from "../src/prompt.mjs";
 
 const items = [
   { id: "local-skill", defaultEnabled: true },
@@ -33,6 +33,33 @@ export const promptTests = [
       assert.equal(resolveConfirmation("yes"), true);
       assert.equal(resolveConfirmation("n"), false);
       assert.equal(resolveConfirmation("", true), true);
+    }
+  },
+  {
+    name: "resource input parses project asset details",
+    run() {
+      assert.deepEqual(parseResourceInput(JSON.stringify({
+        kind: "skill",
+        id: "interactive-skill",
+        description: "Interactive skill",
+        runtimes: ["codex"],
+        body: "Interactive body"
+      })), {
+        kind: "skill",
+        id: "interactive-skill",
+        description: "Interactive skill",
+        runtimes: ["codex"],
+        body: "Interactive body"
+      });
+    }
+  },
+  {
+    name: "resource input rejects project-only kinds for global assets",
+    run() {
+      assert.throws(
+        () => parseResourceInput(JSON.stringify({ kind: "command", id: "global-command" }), { global: true }),
+        /Invalid global resource kind/
+      );
     }
   }
 ];
