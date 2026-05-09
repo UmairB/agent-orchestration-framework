@@ -1,5 +1,4 @@
-import readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import { checkbox, confirm } from "@inquirer/prompts";
 
 export async function selectItems(items) {
   if (items.length === 0) return [];
@@ -10,14 +9,17 @@ export async function selectItems(items) {
     return resolveSelection(items, process.env.AOF_TEST_SELECTION_INPUT);
   }
 
-  const rl = readline.createInterface({ input, output });
-  try {
-    printChoices(items);
-    const answer = await rl.question("Install which items? Enter numbers, ids, 'all', or press Enter for preselected items: ");
-    return resolveSelection(items, answer);
-  } finally {
-    rl.close();
-  }
+  assertInteractiveTerminal("select project items");
+  const selectedIds = await checkbox({
+    message: "Select project items",
+    instructions: "Use arrows to move, space to toggle, enter to confirm.",
+    choices: items.map((item) => ({
+      name: `${item.id} (${item.kind}) - ${item.description ?? ""}`,
+      value: item.id,
+      checked: Boolean(item.defaultEnabled)
+    }))
+  });
+  return selectedIds.map((id) => items.find((item) => item.id === id)).filter(Boolean);
 }
 
 export async function selectRuntimes() {
@@ -25,13 +27,18 @@ export async function selectRuntimes() {
     return resolveRuntimeSelection(process.env.AOF_TEST_RUNTIMES_INPUT);
   }
 
-  const rl = readline.createInterface({ input, output });
-  try {
-    const answer = await rl.question("Initialize which coding assistants? Enter claude, codex, all, or press Enter for all: ");
-    return resolveRuntimeSelection(answer);
-  } finally {
-    rl.close();
-  }
+  assertInteractiveTerminal("select coding assistants");
+  return checkbox({
+    message: "Select coding assistants",
+    instructions: "Use arrows to move, space to toggle, enter to confirm.",
+    choices: [
+      { name: "Claude Code", value: "claude", checked: true },
+      { name: "Codex", value: "codex", checked: true }
+    ],
+    validate(selected) {
+      return selected.length > 0 || "Select at least one coding assistant.";
+    }
+  });
 }
 
 export async function confirmAction(question, defaultValue = false) {
@@ -39,14 +46,8 @@ export async function confirmAction(question, defaultValue = false) {
     return resolveConfirmation(nextTestConfirmation(), defaultValue);
   }
 
-  const rl = readline.createInterface({ input, output });
-  try {
-    const suffix = defaultValue ? " [Y/n]: " : " [y/N]: ";
-    const answer = await rl.question(`${question}${suffix}`);
-    return resolveConfirmation(answer, defaultValue);
-  } finally {
-    rl.close();
-  }
+  assertInteractiveTerminal("confirm action");
+  return confirm({ message: question, default: defaultValue });
 }
 
 export function resolveConfirmation(answer, defaultValue = false) {
@@ -98,6 +99,12 @@ function printChoices(items) {
   for (const [index, item] of items.entries()) {
     const marker = item.defaultEnabled ? "*" : " ";
     console.log(`${index + 1}. [${marker}] ${item.id} (${item.kind}) - ${item.description}`);
+  }
+}
+
+function assertInteractiveTerminal(action) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(`Cannot ${action} in a non-interactive terminal. Pass explicit CLI flags for automation.`);
   }
 }
 

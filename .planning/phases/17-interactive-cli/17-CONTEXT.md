@@ -1,7 +1,7 @@
 # Phase 17: Interactive CLI - Context
 
 **Gathered:** 2026-05-09
-**Status:** Proposed future phase
+**Status:** In progress
 
 <domain>
 ## Phase Boundary
@@ -43,7 +43,7 @@ The current prompt layer uses `readline` and asks users to type comma-separated 
 <candidate_implementation>
 ## Candidate Implementation
 
-Use a maintained prompt library such as `@inquirer/prompts` for checkbox, select, confirm, and input prompts.
+Use `@inquirer/prompts` for checkbox, select, confirm, and input prompts.
 
 Keep a small wrapper in `src/prompt.mjs` so:
 
@@ -58,9 +58,9 @@ Keep a small wrapper in `src/prompt.mjs` so:
 
 1. Add an interactive prompt dependency.
 2. Replace `selectRuntimes` with a checkbox prompt.
-3. Add interactive project/global asset creation flows only where they are already supported by CLI commands.
+3. Keep test-mode environment inputs for BDD and automation.
 4. Keep repo initialization empty by default unless the user explicitly creates project or global assets.
-5. Add unit tests for prompt resolution and integration coverage for non-interactive fallbacks.
+5. Defer richer project/global asset creation wizards until the current live-repo hardening pass identifies the right workflow.
 
 </initial_scope>
 

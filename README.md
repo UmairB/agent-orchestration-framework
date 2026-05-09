@@ -27,6 +27,11 @@ aof global list
 aof install --no-serve
 ```
 
+When a command needs interactive input, AOF uses keyboard-driven terminal
+prompts. Use arrow keys to move, space to toggle checkbox choices, and Enter to
+confirm. Automation should pass explicit flags such as `--codex` instead of
+depending on interactive prompts.
+
 Dry-run the generated files:
 
 ```sh
