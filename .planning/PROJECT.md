@@ -8,18 +8,13 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, Phase 13 added explicit associated files for skill helper code, and Phase 14 added setup UI support for creating, editing, labeling, and referencing global assets. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, Phase 13 added explicit associated files for skill helper code, Phase 14 added setup UI support for creating, editing, labeling, and referencing global assets, and Phase 15 completed cross-runner verification and milestone audit. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-## Current Milestone: v1.2 Global Asset Library
+## Current Milestone: None Selected
 
-**Goal:** Let users create reusable global AOF assets once in `~/.aof` and reference them from any project without copying them into project-local `.aof`.
+v1.2 is complete. The next milestone has not been selected.
 
-**Target features:**
-- Global asset storage under `~/.aof` for skills, agents, and rules.
-- Project `.aof` configs can reference global assets by ID; `aof apply` renders those assets into Claude Code and Codex project outputs.
-- Setup UI supports creating and editing global assets as well as project assets.
-- Global assets can include associated files/code, such as Python scripts used by skills or agents.
-- Project-local `.aof` remains local project configuration, not a copy of the global library.
+**Last shipped milestone:** v1.2 Global Asset Library
 
 ## Core Value
 
@@ -69,10 +64,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Setup UI can create and edit global skills, agents, and rules — Phase 14
 - ✓ Setup UI can add and remove project references to global assets without copying source files — Phase 14
 - ✓ Setup UI labels project-local assets, global assets, and referenced global assets clearly — Phase 14
+- ✓ v1.2 global asset behavior is covered by unit tests, Node BDD, Windows PowerShell BDD parity, setup UI API tests, and UI build checks — Phase 15
 
 ### Active
 
-- [ ] Final v1.2 verification hardens global asset behavior across unit tests, BDD, UI API, and UI build.
+No active milestone requirements.
 
 ### Out of Scope
 
@@ -143,6 +139,7 @@ The long-term product direction includes task management: kanban boards, task as
 | Phase 13 associated-file rendering is skill-only | Skills are the directory-shaped runtime asset needed for helper code now; other resource kinds remain single-file until a concrete runtime shape requires more | Implemented in Phase 13 |
 | Setup UI uses explicit Project / Global scope | Source ownership must stay visible so users do not accidentally edit global assets while intending project-local changes | Implemented in Phase 14 |
 | Setup UI references globals without copying | The selected v1.2 behavior is reference-first reuse; project configs own `globalRefs`, not global source snapshots | Implemented in Phase 14 |
+| v1.2 closeout requires cross-runner global asset verification | Global reuse touches path resolution, config loading, rendering, lock state, setup UI APIs, and Windows path handling | Implemented in Phase 15 |
 
 ## Next Milestone Goals
 
@@ -166,4 +163,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-09 after Phase 14 completion*
+*Last updated: 2026-05-09 after Phase 15 completion*

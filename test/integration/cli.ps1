@@ -51,7 +51,7 @@ function Parse-Feature {
 function Run-Scenario {
   param($FeatureFile, $Scenario)
   $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof-bdd-" + [System.Guid]::NewGuid().ToString("N"))
-  $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; LastResult = $null; LastHttpResponse = $null; SetupUiProcess = $null; SetupUiUrl = $null }
+  $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; GlobalDir = Join-Path $Root "global-aof"; LastResult = $null; LastHttpResponse = $null; SetupUiProcess = $null; SetupUiUrl = $null }
   try {
     foreach ($Step in $Scenario.Steps) { Run-FeatureStep $Context $Step $FeatureFile }
   } finally {
@@ -185,6 +185,51 @@ function Run-Step {
     return
   }
 
+  if ($Step -eq "a project with referenced global assets") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "shared-review"; description = "Shared reviewer"; body = "Global review body"; override = @{ body = "Codex global override body" } }
+    Write-GlobalAofResource $Context @{ kind = "rule"; id = "team-standards"; description = "Team standards"; body = "Follow team standards" } $true
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "shared-review" }, @{ kind = "rule"; id = "team-standards" })
+    return
+  }
+
+  if ($Step -eq "a project with referenced global skill helper files") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Use the helper script."; files = @(@{ path = "scripts/search.py"; body = "print('search')`n" }) }
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "research-helper" })
+    return
+  }
+
+  if ($Step -eq "a project with unsafe global skill helper files") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "unsafe-helper"; description = "Unsafe helper"; body = "Unsafe helper."; files = @(@{ path = "../escape.py"; body = "print('escape')`n" }) }
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "unsafe-helper" })
+    return
+  }
+
+  if ($Step -eq "a project with a missing global reference") {
+    Run-Step $Context "an empty project"
+    New-Item -ItemType Directory -Path $Context.GlobalDir -Force | Out-Null
+    $GlobalConfig = @{ '$schema' = "https://aof.local/schemas/aof.schema.json"; name = "aof-global"; resources = @() } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $Context.GlobalDir "aof.config.json") -Value $GlobalConfig
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "missing-shared" })
+    return
+  }
+
+  if ($Step -eq "a project with a local and global asset conflict") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "shared-review"; description = "Shared reviewer"; body = "Global review body" }
+    Write-AofProject $Context @(@{ kind = "skill"; id = "shared-review"; description = "Local reviewer"; path = "assets/skills/shared-review/SKILL.md"; bodyPath = "assets/skills/shared-review/SKILL.md"; body = "Local review body" }) @() @(@{ kind = "skill"; id = "shared-review" })
+    return
+  }
+
+  if ($Step -eq "a malformed global AOF config") {
+    Run-Step $Context "an empty project"
+    New-Item -ItemType Directory -Path $Context.GlobalDir -Force | Out-Null
+    Set-Content -Path (Join-Path $Context.GlobalDir "aof.config.json") -Value "{ bad`n" -NoNewline
+    return
+  }
+
   if ($Step -eq "the .aof config has no resources") {
     $Config = @{ '$schema' = "../schemas/aof.schema.json"; name = "empty"; resources = @() } | ConvertTo-Json -Depth 10
     Set-Content -Path (Join-Path $Context.ProjectDir ".aof\aof.config.json") -Value $Config
@@ -255,6 +300,75 @@ function Run-Step {
     return
   }
 
+  if ($Step -eq "I request setup UI project config") {
+    Invoke-SetupUiJson $Context "GET" "/api/config/project"
+    return
+  }
+
+  if ($Step -eq "I request setup UI global config") {
+    Invoke-SetupUiJson $Context "GET" "/api/config/global"
+    return
+  }
+
+  if ($Step -match "^I save global skill ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/global/resources/skill/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "skill"
+      description = "Global skill"
+      body = "Use the helper script."
+      runtimes = @("codex")
+      overrides = @{}
+    }
+    return
+  }
+
+  if ($Step -match "^I save global rule ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/global/resources/rule/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "rule"
+      description = "Global rule"
+      body = "Follow team standards."
+      runtimes = @("codex")
+      overrides = @{}
+    }
+    return
+  }
+
+  if ($Step -match "^I save global skill ``(.+)`` with helper file through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/global/resources/skill/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "skill"
+      description = "Global skill with helper"
+      body = "Use the helper script."
+      runtimes = @("codex")
+      files = @(@{ path = "scripts/search.py"; body = "print('search')`n" })
+      overrides = @{}
+    }
+    return
+  }
+
+  if ($Step -match "^I save global skill ``(.+)`` with unsafe helper file through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/global/resources/skill/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "skill"
+      body = "Unsafe helper."
+      runtimes = @("codex")
+      files = @(@{ path = "../escape.py"; body = "bad" })
+      overrides = @{}
+    }
+    return
+  }
+
+  if ($Step -match "^I add global skill ``(.+)`` to the project through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/project/global-refs/skill/$($Matches[1])"
+    return
+  }
+
+  if ($Step -match "^I remove global skill ``(.+)`` from the project through the setup UI API$") {
+    Invoke-SetupUiJson $Context "DELETE" "/api/config/project/global-refs/skill/$($Matches[1])"
+    return
+  }
+
   if ($Step -match "^I run ``(.+)`` with input ``([\s\S]*)``$") {
     $Context.LastResult = Run-Cli $Context $Matches[1] ($Matches[2].Replace("|", "`n") + "`n")
     return
@@ -297,11 +411,20 @@ function Run-Step {
     if (!($Diagnostics | Where-Object { $_.path -eq $ExpectedPath })) { throw "Expected diagnostics to include $ExpectedPath" }
     return
   }
+  if ($Step -match "^HTTP response diagnostics should include code ``(.+)``$") {
+    Assert-LastHttpResponse $Context
+    $Diagnostics = @($Context.LastHttpResponse.Json.diagnostics)
+    if ($Diagnostics.Length -eq 0 -and $null -ne $Context.LastHttpResponse.Json.config) { $Diagnostics = @($Context.LastHttpResponse.Json.config.diagnostics) }
+    $ExpectedCode = $Matches[1]
+    if (!($Diagnostics | Where-Object { $_.code -eq $ExpectedCode })) { throw "Expected diagnostics to include code $ExpectedCode" }
+    return
+  }
 
   if ($Step -match "^JSON file ``(.+)`` should contain item ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ItemId = $Matches[2]; if (!($Json.items | Where-Object { $_.id -eq $ItemId -or $_ -eq $ItemId })) { throw "Expected $($Matches[1]) to contain item $ItemId" }; return }
   if ($Step -match "^JSON file ``(.+)`` should not contain item ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ItemId = $Matches[2]; if ($Json.items | Where-Object { $_.id -eq $ItemId -or $_ -eq $ItemId }) { throw "Expected $($Matches[1]) not to contain item $ItemId" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain runtime ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; if (!($Json.runtimes | Where-Object { $_ -eq $Runtime })) { throw "Expected $($Matches[1]) to contain runtime $Runtime" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain generated file ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ExpectedPath = Normalize-FilePath $Matches[2]; if (!($Json.files | Where-Object { (Normalize-FilePath $_.path) -eq $ExpectedPath })) { throw "Expected $($Matches[1]) to contain generated file $($Matches[2])" }; return }
+  if ($Step -match "^JSON file ``(.+)`` should contain global resource ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ResourceId = $Matches[2]; if (!($Json.files | Where-Object { $_.resource.scope -eq "global" -and $_.resource.id -eq $ResourceId })) { throw "Expected $($Matches[1]) to contain global resource $ResourceId" }; return }
   if ($Step -match "^JSON file ``(.+)`` should not contain generated file ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $ExpectedPath = Normalize-FilePath $Matches[2]; if ($Json.files | Where-Object { (Normalize-FilePath $_.path) -eq $ExpectedPath }) { throw "Expected $($Matches[1]) not to contain generated file $($Matches[2])" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain framework ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Framework = $Matches[2]; if (!($Json.frameworks | Where-Object { $_.id -eq $Framework })) { throw "Expected $($Matches[1]) to contain framework $Framework" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain package ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Package = $Matches[2]; if (!($Json.packages | Where-Object { $_.id -eq $Package })) { throw "Expected $($Matches[1]) to contain package $Package" }; return }
@@ -311,6 +434,9 @@ function Run-Step {
   if ($Step -match "^JSON file ``(.+)`` should contain framework install attempt ``(.+)`` with status ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; $Status = $Matches[3]; if (!($Json.frameworkInstallAttempts | Where-Object { $_.runtime -eq $Runtime -and $_.status -eq $Status })) { throw "Expected $($Matches[1]) to contain framework install attempt $Runtime with status $Status" }; return }
   if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in file ``(.+)``$") { $Content = Get-Content (Join-Path $Context.ProjectDir $Matches[3]) -Raw; $First = $Content.IndexOf($Matches[1]); $Second = $Content.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in $($Matches[3])" }; return }
   if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in stdout$") { Assert-LastResult $Context; $First = $Context.LastResult.Stdout.IndexOf($Matches[1]); $Second = $Context.LastResult.Stdout.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in stdout" }; return }
+
+  if ($Step -match "^global file ``(.+)`` should exist$") { if (!(Test-Path -LiteralPath (Join-Path $Context.GlobalDir $Matches[1]) -PathType Leaf)) { throw "Expected global file to exist: $($Matches[1])" }; return }
+  if ($Step -match "^global file ``(.+)`` should contain ``([\s\S]+)``$") { Assert-Contains (Get-Content (Join-Path $Context.GlobalDir $Matches[1]) -Raw) $Matches[2] "Global file did not contain expected text."; return }
 
   throw "Unsupported BDD step: $Step"
 }
@@ -328,6 +454,7 @@ function Run-Cli {
   $StartInfo.RedirectStandardError = $true
   $StartInfo.UseShellExecute = $false
   $StartInfo.Environment["AOF_DATA_DIR"] = $Context.DataDir
+  $StartInfo.Environment["AOF_GLOBAL_HOME"] = $Context.GlobalDir
   $StartInfo.Environment["NODE_NO_WARNINGS"] = "1"
   if ($InputText -ne "") {
     $InputLines = @($InputText.TrimEnd() -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
@@ -350,7 +477,7 @@ function Run-Cli {
 }
 
 function Write-AofProject {
-  param($Context, [array] $ResourceInputs, [array] $Packages)
+  param($Context, [array] $ResourceInputs, [array] $Packages, [array] $GlobalRefs = @())
   $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
   New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
   $Resources = @()
@@ -368,8 +495,47 @@ function Write-AofProject {
     if ($Input.overridePath) { $Resource.overrides = @{ codex = $Input.overridePath } }
     $Resources += $Resource
   }
-  $Config = [ordered]@{ '$schema' = "../schemas/aof.schema.json"; name = "file-backed"; resources = $Resources; packages = $Packages } | ConvertTo-Json -Depth 10
+  $Config = [ordered]@{ '$schema' = "../schemas/aof.schema.json"; name = "file-backed"; resources = $Resources; globalRefs = $GlobalRefs; packages = $Packages } | ConvertTo-Json -Depth 10
   Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+}
+
+function Write-GlobalAofResource {
+  param($Context, $ResourceInput, [bool] $Append = $false)
+  $Plural = if ($ResourceInput.kind -eq "skill") { "skills" } elseif ($ResourceInput.kind -eq "agent") { "agents" } else { "rules" }
+  $BodyFile = if ($ResourceInput.kind -eq "skill") { "SKILL.md" } elseif ($ResourceInput.kind -eq "agent") { "AGENT.md" } else { "RULE.md" }
+  $ResourcePath = "assets/$Plural/$($ResourceInput.id)/$BodyFile"
+  $ResourceDir = Join-Path $Context.GlobalDir "assets\$Plural\$($ResourceInput.id)"
+  New-Item -ItemType Directory -Path $ResourceDir -Force | Out-Null
+  Set-Content -Path (Join-Path $ResourceDir $BodyFile) -Value ($ResourceInput.body + "`n") -NoNewline
+
+  $Resource = [ordered]@{ kind = $ResourceInput.kind; id = $ResourceInput.id; description = $ResourceInput.description; path = $ResourcePath; runtimes = @("claude", "codex") }
+  if ($ResourceInput.override) {
+    $OverridePath = "assets/$Plural/$($ResourceInput.id)/overrides/codex.json"
+    New-Item -ItemType Directory -Path (Join-Path $ResourceDir "overrides") -Force | Out-Null
+    Set-Content -Path (Join-Path $Context.GlobalDir $OverridePath) -Value ($ResourceInput.override | ConvertTo-Json -Depth 10)
+    $Resource.overrides = @{ codex = $OverridePath }
+  }
+  if ($ResourceInput.files) {
+    $FileRefs = @()
+    foreach ($File in $ResourceInput.files) {
+      $AssociatedPath = Join-Path $ResourceDir $File.path
+      New-Item -ItemType Directory -Path (Split-Path $AssociatedPath -Parent) -Force | Out-Null
+      $FileBody = if ($null -eq $File.body) { "" } else { $File.body }
+      Set-Content -Path $AssociatedPath -Value $FileBody -NoNewline
+      $FileRefs += $File.path
+    }
+    $Resource.files = $FileRefs
+  }
+
+  $Resources = @()
+  $ConfigPath = Join-Path $Context.GlobalDir "aof.config.json"
+  if ($Append -and (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
+    $Resources = @((Get-Content $ConfigPath -Raw | ConvertFrom-Json).resources)
+  }
+  $Resources += $Resource
+  New-Item -ItemType Directory -Path $Context.GlobalDir -Force | Out-Null
+  $Config = @{ '$schema' = "https://aof.local/schemas/aof.schema.json"; name = "aof-global"; resources = $Resources } | ConvertTo-Json -Depth 10
+  Set-Content -Path $ConfigPath -Value $Config
 }
 
 function Write-ExpandedAofProject {
@@ -413,9 +579,10 @@ function Start-SetupUiServer {
   $Script = @"
 import { serveSetupUi } from './src/setup-ui.mjs';
 const projectDir = process.argv[1];
+const globalDir = process.argv[2];
 const savedItems = [];
 const catalog = { listItems: () => savedItems, upsertItem: (item) => savedItems.push(item) };
-const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir });
+const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir, env: { AOF_GLOBAL_HOME: globalDir } });
 console.log(url);
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 process.on('SIGINT', () => server.close(() => process.exit(0)));
@@ -427,7 +594,8 @@ setInterval(() => {}, 1000);
   $StartInfo.RedirectStandardOutput = $true
   $StartInfo.RedirectStandardError = $true
   $StartInfo.UseShellExecute = $false
-  $StartInfo.Arguments = (@("--input-type=module", "-e", $Script, $Context.ProjectDir) | ForEach-Object { Quote-ProcessArg $_ }) -join " "
+  $StartInfo.Environment["AOF_GLOBAL_HOME"] = $Context.GlobalDir
+  $StartInfo.Arguments = (@("--input-type=module", "-e", $Script, $Context.ProjectDir, $Context.GlobalDir) | ForEach-Object { Quote-ProcessArg $_ }) -join " "
   $Process = New-Object System.Diagnostics.Process
   $Process.StartInfo = $StartInfo
   [void]$Process.Start()
@@ -497,6 +665,8 @@ function Get-ValueAtPath {
     if ($null -eq $Current) { return $null }
     if ($Segment -match "^\d+$") {
       $Current = @($Current)[$([int]$Segment)]
+    } elseif ($Segment -eq "length" -and $Current -is [array]) {
+      $Current = @($Current).Length
     } else {
       $Current = $Current.$Segment
     }

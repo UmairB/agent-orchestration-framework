@@ -1,0 +1,39 @@
+# Phase 15 Coverage Matrix: Global Asset Library
+
+**Date:** 2026-05-09
+**Status:** Complete
+
+## Purpose
+
+Phase 15 verifies the complete v1.2 global asset slice without adding new feature scope. The audit maps every v1.2 requirement to concrete unit, BDD, UI, build, or PowerShell evidence.
+
+## Requirement Coverage
+
+| Requirement | Unit Evidence | BDD / UI Evidence | Build / PowerShell Evidence | Status |
+|-------------|---------------|-------------------|------------------------------|--------|
+| GLIB-01: User can initialize or access a global AOF library at `~/.aof`. | `test/paths.test.mjs` covers default global workspace path, separate app-data path, and `AOF_GLOBAL_HOME` override. | `test/integration/features/lifecycle.feature` covers `Add and inspect global assets`. | Shared lifecycle feature is included by `test/integration/cli.ps1`. | Covered |
+| GLIB-02: User can create global skills, agents, and rules in `~/.aof`. | Global config normalization is covered through config inspection tests. | Lifecycle BDD covers global asset creation; setup UI BDD covers `Create global assets through the setup UI API`; `test/setup-ui.test.mjs` covers saving global resources. | Node and PowerShell integration runners consume the feature suite. | Covered |
+| GLIB-03: User can list and inspect global assets independently from project-local assets. | Global source inspection is covered through config inspection tests. | Lifecycle BDD covers global list/show behavior. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GLIB-04: User receives clear validation errors when a global asset is malformed or missing required files. | `test/config-inspect.test.mjs` covers global validation and project validation isolation from unrelated malformed global drafts. | Lifecycle BDD covers `Validate global assets` and `Report malformed global asset config`. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GREF-01: User can reference global assets by ID from a project `.aof` config without copying the asset into the project. | `test/config-inspect.test.mjs` covers referenced global resources. | Lifecycle BDD covers referenced global rendering; setup UI BDD covers adding/removing references through the API. | Shared lifecycle and setup UI features are included by Node integration; PowerShell covers shared feature scenarios. | Covered |
+| GREF-02: User receives clear validation errors when a project references a missing global asset. | `test/config-inspect.test.mjs` covers missing global references. | Lifecycle BDD covers `Report invalid global references`. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GREF-03: AOF detects local/global asset ID conflicts and requires explicit resolution. | `test/config-inspect.test.mjs` covers local/global conflict reporting. | Lifecycle BDD covers invalid global reference diagnostics. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GREF-04: Project diagnostics show whether each rendered asset came from project-local source or the global library. | Config inspection tests verify source metadata on referenced resources. | Lifecycle BDD asserts `source=global` / `globalRefs` diagnostics. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GRND-01: `aof apply` renders referenced global assets into Claude Code and Codex outputs alongside local project assets. | Render-plan tests cover global lock/source behavior. | Lifecycle BDD covers `Render referenced global assets`. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GRND-02: `aof sync` includes referenced global assets in validation, warning analysis, and render planning. | Render-plan and config-inspect coverage exercise shared validation and planning paths. | Lifecycle BDD covers `Sync referenced global assets`. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GRND-03: Lock state records global asset source scope for generated outputs. | `test/render-plan.test.mjs` covers lock metadata and ownership behavior. | Lifecycle BDD asserts lock entries for referenced global resources. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GRND-04: Runtime overrides on global assets are honored during rendering. | Render-plan coverage exercises runtime-specific rendered content. | Lifecycle BDD asserts rendered Codex global override body. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| CODE-01: Global assets can own associated files under their asset directory. | `test/config-inspect.test.mjs` validates associated files on referenced global skills. | Lifecycle BDD covers global skill helper files. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| CODE-02: Rendering preserves associated files for runtime asset shapes that require directories. | `test/render-plan.test.mjs` covers associated skill file rendering with lock ownership. | Lifecycle BDD covers rendering and previewing referenced global skill helper files. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| CODE-03: Validation rejects associated files that escape the asset directory or would overwrite unrelated generated output. | `test/config-inspect.test.mjs` covers unsafe associated file declarations; `test/render-plan.test.mjs` covers drift/output protection. | Lifecycle BDD covers unsafe global skill helper files. | Shared lifecycle feature is included by PowerShell runner. | Covered |
+| GUI-01: User can switch the setup UI between project asset editing and global asset editing. | `test/setup-ui.test.mjs` covers scoped setup UI behavior. | `test/integration/features/setup-ui.feature` covers loading project and global setup UI scopes. | `npm run ui:build` verifies the UI compiles. | Covered |
+| GUI-02: User can create and edit global skills, agents, and rules through the setup UI. | `test/setup-ui.test.mjs` covers saving global resources and associated files. | Setup UI BDD covers creating global assets and editing global skill associated files through the API. | `npm run ui:build` verifies the UI compiles. | Covered |
+| GUI-03: User can add a global asset reference to the current project through the setup UI without copying the global asset. | `test/setup-ui.test.mjs` covers project global reference management. | Setup UI BDD covers adding and removing project global references through the API. | `npm run ui:build` verifies the UI compiles. | Covered |
+| GUI-04: Setup UI clearly labels asset source scope so users do not confuse global edits with project-local edits. | Setup UI tests cover source/read-only payload behavior. | Setup UI BDD asserts referenced global payload source/read-only fields and project reference labels. | `npm run ui:build` verifies the UI compiles. | Covered |
+| TEST-01: Unit tests cover global library path resolution, reference resolution, conflict handling, associated files, and lock metadata. | `test/paths.test.mjs`, `test/config-inspect.test.mjs`, `test/render-plan.test.mjs`, and `test/setup-ui.test.mjs`. | Not applicable. | `npm run test:unit`. | Covered |
+| TEST-02: BDD integration tests cover CLI global asset creation, project reference rendering, missing-reference diagnostics, and UI API behavior. | Not applicable. | `test/integration/features/lifecycle.feature` and `test/integration/features/setup-ui.feature`. | `npm test` and `npm run test:integration:ps`. | Covered |
+| TEST-03: UI build passes after global asset management changes. | UI API unit coverage in `test/setup-ui.test.mjs`. | Setup UI BDD covers API behavior. | `npm run ui:build`. | Covered |
+
+## Audit Result
+
+All 22 v1.2 requirements have direct automated evidence. No implementation or test gap was found during the coverage audit, so Phase 15 requires documentation, verification execution, and milestone closeout only.

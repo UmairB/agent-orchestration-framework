@@ -73,3 +73,45 @@ Turn AOF's shipped Claude/Codex configuration foundation into a stricter aligned
 
 - Formal Nyquist validation artifacts were not generated for phases 6-10. Product requirements and cross-phase flows are complete; this is accepted process debt.
 - Browser E2E, additional runtimes, Rust/native core, UI execution, hosted registry, external package archive extraction, and task management remain future scope.
+
+## v1.2 — Global Asset Library
+
+**Status:** Shipped 2026-05-09
+**Started:** 2026-05-08
+**Completed:** 2026-05-09
+**Phases:** 11-15
+**Requirements:** 22/22 complete
+**Audit:** Passed
+
+### Goal
+
+Let users create reusable global AOF assets once in `~/.aof` and reference them from any project without copying them into project-local `.aof`.
+
+### Delivered
+
+1. Added `~/.aof` global source workspace resolution with `AOF_GLOBAL_HOME` test override support.
+2. Added `aof global add/list/show/validate` flows for global skills, agents, and rules.
+3. Added project `globalRefs` so local projects reference global assets without copying source files.
+4. Rendered referenced global assets through `apply` and `sync` with source scope recorded in lock state.
+5. Supported explicit associated files for code-bearing global skill assets, including validation and drift protection.
+6. Added setup UI Project/Global scope support, global asset editing, global skill helper-file editing, and project global-reference management.
+7. Completed unit, Node BDD, Windows PowerShell BDD, setup UI API, and UI build verification.
+
+### Audit
+
+- [v1.2-MILESTONE-AUDIT.md](milestones/v1.2-MILESTONE-AUDIT.md)
+
+### Archives
+
+- [v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
+- [v1.2-REQUIREMENTS.md](milestones/v1.2-REQUIREMENTS.md)
+- [v1.2-MILESTONE-AUDIT.md](milestones/v1.2-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- Hosted global asset discovery or publishing.
+- Cross-machine synchronization of `~/.aof`.
+- Vendoring global assets into project `.aof` snapshots.
+- Semantic version pinning and upgrade workflows for global references.
+- Runtime support beyond Claude Code and Codex.
+- UI-driven execution for init/apply/install.
