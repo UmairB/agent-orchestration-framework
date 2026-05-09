@@ -18,6 +18,14 @@ export const setupUiTests = [
     run: savesAndValidatesExpandedSections
   },
   {
+    name: "setup UI saves global resources and associated files",
+    run: savesGlobalResourcesAndAssociatedFiles
+  },
+  {
+    name: "setup UI manages project global references",
+    run: managesProjectGlobalReferences
+  },
+  {
     name: "setup UI serves adapter warning review payload",
     run: servesAdapterWarningPayload
   },
@@ -185,6 +193,112 @@ async function savesAndValidatesExpandedSections() {
   } finally {
     server.close();
     await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function savesGlobalResourcesAndAssociatedFiles() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir, env: { AOF_GLOBAL_HOME: globalDir } });
+  try {
+    const emptyGlobal = await fetchJson(`${url}api/config/global`);
+    assert.equal(emptyGlobal.scope, "global");
+    assert.equal(emptyGlobal.configPath, path.join(globalDir, "aof.config.json"));
+
+    const save = await fetchJson(`${url}api/config/global/resources/skill/research-helper`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "research-helper",
+        kind: "skill",
+        description: "Research helper",
+        body: "Use the helper script.",
+        runtimes: ["codex"],
+        files: [
+          { path: "scripts/search.py", body: "print('search')\n" }
+        ],
+        overrides: {}
+      })
+    });
+    assert.equal(save.ok, true);
+    assert.equal(save.config.scope, "global");
+
+    const config = JSON.parse(await readFile(path.join(globalDir, "aof.config.json"), "utf8"));
+    assert.equal(config.resources[0].kind, "skill");
+    assert.deepEqual(config.resources[0].files, ["scripts/search.py"]);
+    assert.match(await readFile(path.join(globalDir, "assets", "skills", "research-helper", "scripts", "search.py"), "utf8"), /print\('search'\)/);
+
+    const unsafeResponse = await fetch(`${url}api/config/global/resources/skill/unsafe`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "unsafe",
+        kind: "skill",
+        body: "Unsafe",
+        runtimes: ["codex"],
+        files: [
+          { path: "../escape.py", body: "bad" }
+        ]
+      })
+    });
+    const unsafe = await unsafeResponse.json();
+    assert.equal(unsafeResponse.status, 400);
+    assert.ok(unsafe.diagnostics.some((item) => item.code === "associated-file-escape"));
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
+async function managesProjectGlobalReferences() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir, env: { AOF_GLOBAL_HOME: globalDir } });
+  try {
+    await fetchJson(`${url}api/config/global/resources/skill/shared-review`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "shared-review",
+        kind: "skill",
+        description: "Shared review",
+        body: "Review shared guidance.",
+        runtimes: ["codex"],
+        overrides: {}
+      })
+    });
+
+    const add = await fetchJson(`${url}api/config/project/global-refs/skill/shared-review`, { method: "PUT" });
+    assert.equal(add.ok, true);
+    assert.deepEqual(add.globalRefs, [{ kind: "skill", id: "shared-review" }]);
+
+    const projectConfig = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.deepEqual(projectConfig.globalRefs, [{ kind: "skill", id: "shared-review" }]);
+    await assert.rejects(readFile(path.join(targetDir, ".aof", "assets", "skills", "shared-review", "SKILL.md"), "utf8"));
+
+    const projectPayload = await fetchJson(`${url}api/config/project`);
+    assert.equal(projectPayload.referencedResources[0].source, "global");
+    assert.equal(projectPayload.referencedResources[0].readOnly, true);
+
+    const globalPayload = await fetchJson(`${url}api/config/global`);
+    assert.equal(globalPayload.resources[0].referencedByProject, true);
+
+    const remove = await fetchJson(`${url}api/config/project/global-refs/skill/shared-review`, { method: "DELETE" });
+    assert.equal(remove.ok, true);
+    assert.deepEqual(remove.globalRefs, []);
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
   }
 }
 

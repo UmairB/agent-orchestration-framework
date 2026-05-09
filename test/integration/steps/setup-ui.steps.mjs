@@ -87,7 +87,86 @@ export async function runStep(context, step) {
     return;
   }
 
-  let match = step.match(/^HTTP response status should be (\d+)$/);
+  if (step === "I request setup UI project config") {
+    await requestSetupUi(context, "GET", "/api/config/project");
+    return;
+  }
+
+  if (step === "I request setup UI global config") {
+    await requestSetupUi(context, "GET", "/api/config/global");
+    return;
+  }
+
+  let match = step.match(/^I save global skill `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/global/resources/skill/${match[1]}`, {
+      id: match[1],
+      kind: "skill",
+      description: "Global skill",
+      body: "Use the helper script.",
+      runtimes: ["codex"],
+      overrides: {}
+    });
+    return;
+  }
+
+  match = step.match(/^I save global rule `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/global/resources/rule/${match[1]}`, {
+      id: match[1],
+      kind: "rule",
+      description: "Global rule",
+      body: "Follow team standards.",
+      runtimes: ["codex"],
+      overrides: {}
+    });
+    return;
+  }
+
+  match = step.match(/^I save global skill `(.+)` with helper file through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/global/resources/skill/${match[1]}`, {
+      id: match[1],
+      kind: "skill",
+      description: "Global skill with helper",
+      body: "Use the helper script.",
+      runtimes: ["codex"],
+      files: [
+        { path: "scripts/search.py", body: "print('search')\n" }
+      ],
+      overrides: {}
+    });
+    return;
+  }
+
+  match = step.match(/^I save global skill `(.+)` with unsafe helper file through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/global/resources/skill/${match[1]}`, {
+      id: match[1],
+      kind: "skill",
+      body: "Unsafe helper.",
+      runtimes: ["codex"],
+      files: [
+        { path: "../escape.py", body: "bad" }
+      ],
+      overrides: {}
+    });
+    return;
+  }
+
+  match = step.match(/^I add global skill `(.+)` to the project through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/project/global-refs/skill/${match[1]}`);
+    return;
+  }
+
+  match = step.match(/^I remove global skill `(.+)` from the project through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "DELETE", `/api/config/project/global-refs/skill/${match[1]}`);
+    return;
+  }
+
+  match = step.match(/^HTTP response status should be (\d+)$/);
   if (match) {
     assertLastHttpResponse(context);
     assert.equal(context.lastHttpResponse.status, Number(match[1]), context.lastHttpResponse.text);
@@ -109,6 +188,14 @@ export async function runStep(context, step) {
     return;
   }
 
+  match = step.match(/^HTTP response diagnostics should include code `(.+)`$/);
+  if (match) {
+    assertLastHttpResponse(context);
+    const diagnostics = context.lastHttpResponse.json?.diagnostics ?? context.lastHttpResponse.json?.config?.diagnostics ?? [];
+    assert.ok(diagnostics.some((diagnostic) => diagnostic.code === match[1]), `Expected diagnostics to include code ${match[1]}`);
+    return;
+  }
+
   await runSharedCliStep(context, step);
 }
 
@@ -119,6 +206,7 @@ function assertLastHttpResponse(context) {
 function valueAtPath(value, pathExpression) {
   return pathExpression.split(".").reduce((current, segment) => {
     if (current === undefined || current === null) return undefined;
+    if (segment === "length" && Array.isArray(current)) return current.length;
     if (/^\d+$/.test(segment)) return current[Number(segment)];
     return current[segment];
   }, value);

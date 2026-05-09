@@ -9,7 +9,11 @@ export async function startSetupUi(context) {
     listItems: () => savedItems,
     upsertItem: (item) => savedItems.push(item)
   };
-  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: context.projectDir });
+  const { server, url } = await serveSetupUi(catalog, {
+    port: 0,
+    projectDir: context.projectDir,
+    env: { AOF_GLOBAL_HOME: context.globalDir }
+  });
   context.setupUi = { server, url, savedItems };
   context.lastHttpResponse = null;
 }

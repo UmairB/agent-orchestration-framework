@@ -107,7 +107,7 @@ Associated file paths are relative to the asset directory containing `SKILL.md`
 and cannot escape that directory. For a referenced global skill, the example
 above renders to `.codex/skills/research-helper/scripts/search.py` and
 `.codex/skills/research-helper/templates/query.md` alongside the generated
-`SKILL.md`. Phase 13 supports associated files for skills; other resource kinds
+`SKILL.md`. AOF supports associated files for skills; other resource kinds
 remain single-file outputs.
 
 Synchronize generated outputs and managed package intent:
@@ -237,12 +237,24 @@ Start the local setup UI:
 aof install
 ```
 
-The setup UI is a `.aof/` configuration editor. It edits file-backed skills,
-commands, agents, and rules; runtime targets; and runtime-specific overrides.
-It also exposes compact JSON editors for MCP servers, hooks, project docs, and
-runtime settings. It shows runtime capability differences and adapter warnings
-before apply, including mapped behavior such as Codex rule guidance rendering
-through `AGENTS.md`.
+The setup UI is a source configuration editor with explicit Project and Global
+scopes. Project scope edits the current repository `.aof`; Global scope edits
+the reusable source library in `~/.aof`. Project assets are editable in Project
+scope. Referenced global assets are shown separately as read-only project
+references, with a remove-reference action.
+
+Global scope can create and edit skills, agents, and rules. Global assets can
+be added to the current project with “Use in this project”, which writes a
+`globalRefs` entry and does not copy source files into project `.aof`. Global
+skill helper files can also be edited as explicit text associated files; paths
+are relative to the skill asset directory and follow the same safety rules as
+the `files` manifest.
+
+Project scope also edits file-backed skills, commands, agents, and rules;
+runtime targets; runtime-specific overrides; and compact JSON editors for MCP
+servers, hooks, project docs, and runtime settings. It shows runtime capability
+differences and adapter warnings before apply, including mapped behavior such
+as Codex rule guidance rendering through `AGENTS.md`.
 
 The UI writes source-of-truth files under `.aof/` only. It does not run
 `aof init`, `aof apply`, dry-run, `aof install`, or shell commands. Use the

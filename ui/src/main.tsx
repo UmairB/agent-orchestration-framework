@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useMemo, useState } from "react";
 import type * as React from "react";
 import { createRoot } from "react-dom/client";
-import { Bot, CheckCircle2, Code2, FileText, Library, ListChecks, Plus, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
+import { Bot, CheckCircle2, Code2, FileText, Globe2, Library, Link2, ListChecks, Plus, Save, Settings2, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import "./index.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +47,15 @@ type RuntimeOverride = {
 type EditableResource = {
   id: string;
   kind: ResourceKind;
+  source?: "project" | "global";
+  readOnly?: boolean;
+  referenced?: boolean;
+  referencedByProject?: boolean;
   name: string;
   description: string;
   body: string;
   runtimes: RuntimeId[];
+  files?: Array<{ path: string; body: string }>;
   model?: string;
   tools?: string[];
   paths?: string[];
@@ -58,10 +63,13 @@ type EditableResource = {
 };
 
 type ConfigPayload = {
+  scope: "project" | "global";
   configPath: string;
   workspaceConfigExists: boolean;
   name: string;
   resources: EditableResource[];
+  referencedResources: EditableResource[];
+  globalRefs: Array<{ kind: ResourceKind; id: string }>;
   packages: Array<{ id: string; source: string; runtimes?: RuntimeId[] }>;
   mcpServers: unknown[];
   hooks: unknown[];
@@ -92,39 +100,61 @@ const sections: Array<{ id: SectionKind; label: string; icon: React.ReactNode }>
 ];
 
 function App() {
+  const [scope, setScope] = useState<"project" | "global">("project");
   const [payload, setPayload] = useState<ConfigPayload | null>(null);
+  const [projectPayload, setProjectPayload] = useState<ConfigPayload | null>(null);
   const [activeKind, setActiveKind] = useState<ResourceKind | SectionKind | "review">("skill");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<"project" | "global">("project");
   const [draft, setDraft] = useState<EditableResource | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    void refreshConfig();
+    void refreshConfig("project");
   }, []);
 
   const activeResources = useMemo(() => {
     if (!payload || !isResourceKind(activeKind)) return [];
-    return payload.resources.filter((resource) => resource.kind === activeKind);
+    const primary = payload.resources.filter((resource) => resource.kind === activeKind);
+    const referenced = scope === "project" ? payload.referencedResources.filter((resource) => resource.kind === activeKind) : [];
+    return [...primary, ...referenced];
   }, [activeKind, payload]);
 
   const selectedResource = useMemo(() => {
     if (!selectedId || !isResourceKind(activeKind)) return null;
-    return activeResources.find((resource) => resource.id === selectedId) ?? null;
-  }, [activeKind, activeResources, selectedId]);
+    return activeResources.find((resource) => resource.id === selectedId && (resource.source ?? scope) === selectedSource) ?? null;
+  }, [activeKind, activeResources, scope, selectedId, selectedSource]);
 
   useEffect(() => {
     setDraft(selectedResource ? cloneResource(selectedResource) : null);
   }, [selectedResource]);
 
-  async function refreshConfig() {
-    const response = await fetch("/api/config");
+  async function refreshConfig(nextScope = scope) {
+    const response = await fetch(`/api/config/${nextScope}`);
     const nextPayload = await response.json();
     setPayload(nextPayload);
+    if (nextScope === "project") {
+      setProjectPayload(nextPayload);
+    } else {
+      const projectResponse = await fetch("/api/config/project");
+      setProjectPayload(await projectResponse.json());
+    }
+  }
+
+  async function switchScope(nextScope: "project" | "global") {
+    setScope(nextScope);
+    setSelectedId(null);
+    setSelectedSource(nextScope);
+    setDraft(null);
+    setMessage("");
+    await refreshConfig(nextScope);
   }
 
   function createResource(kind: ResourceKind) {
     const next = blankResource(kind);
+    next.source = scope;
     setSelectedId(null);
+    setSelectedSource(scope);
     setDraft(next);
     setMessage("");
   }
@@ -139,7 +169,7 @@ function App() {
       return;
     }
 
-    const response = await fetch(`/api/config/resources/${encodeURIComponent(draft.kind)}/${encodeURIComponent(draft.id)}`, {
+    const response = await fetch(`/api/config/${scope}/resources/${encodeURIComponent(draft.kind)}/${encodeURIComponent(draft.id)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(draft)
@@ -152,7 +182,32 @@ function App() {
 
     setMessage(`Saved ${draft.kind}:${draft.id}`);
     setSelectedId(draft.id);
+    setSelectedSource(scope);
     await refreshConfig();
+  }
+
+  async function addReference(resource: EditableResource) {
+    const response = await fetch(`/api/config/project/global-refs/${encodeURIComponent(resource.kind)}/${encodeURIComponent(resource.id)}`, { method: "PUT" });
+    const result = await response.json();
+    if (!response.ok || result.ok === false) {
+      setMessage(result.error ?? result.diagnostics?.[0]?.message ?? "Reference failed");
+      return;
+    }
+    setMessage(`Referenced ${resource.kind}:${resource.id}`);
+    await refreshConfig(scope);
+  }
+
+  async function removeReference(resource: EditableResource) {
+    const response = await fetch(`/api/config/project/global-refs/${encodeURIComponent(resource.kind)}/${encodeURIComponent(resource.id)}`, { method: "DELETE" });
+    const result = await response.json();
+    if (!response.ok || result.ok === false) {
+      setMessage(result.error ?? result.diagnostics?.[0]?.message ?? "Remove failed");
+      return;
+    }
+    setMessage(`Removed reference ${resource.kind}:${resource.id}`);
+    setSelectedId(null);
+    setDraft(null);
+    await refreshConfig(scope);
   }
 
   if (!payload) {
@@ -179,6 +234,19 @@ function App() {
             </div>
           </div>
 
+          <div className="mb-5 grid grid-cols-2 rounded-md border border-border bg-background p-1">
+            {(["project", "global"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => void switchScope(item)}
+                className={`h-9 rounded px-3 text-sm capitalize transition ${scope === item ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+
           <nav className="space-y-1">
             {kinds.map((kind) => (
               <button
@@ -187,16 +255,17 @@ function App() {
                 onClick={() => {
                   setActiveKind(kind.id);
                   setSelectedId(null);
+                  setSelectedSource(scope);
                   setDraft(null);
                   setMessage("");
                 }}
                 className={`flex h-10 w-full items-center justify-between rounded-md px-3 text-left text-sm transition ${activeKind === kind.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >
                 <span className="flex items-center gap-2">{kind.icon}{kind.label}</span>
-                <span className="mono text-xs">{payload.resources.filter((resource) => resource.kind === kind.id).length}</span>
+                <span className="mono text-xs">{activeCount(payload, kind.id, scope)}</span>
               </button>
             ))}
-            <div className="pt-3">
+            {scope === "project" ? <div className="pt-3">
               <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
               {sections.map((section) => (
                 <button
@@ -205,6 +274,7 @@ function App() {
                   onClick={() => {
                     setActiveKind(section.id);
                     setSelectedId(null);
+                    setSelectedSource(scope);
                     setDraft(null);
                     setMessage("");
                   }}
@@ -214,12 +284,13 @@ function App() {
                   <span className="mono text-xs">{sectionCount(payload, section.id)}</span>
                 </button>
               ))}
-            </div>
+            </div> : null}
             <button
               type="button"
               onClick={() => {
                 setActiveKind("review");
                 setSelectedId(null);
+                setSelectedSource(scope);
                 setDraft(null);
                 setMessage("");
               }}
@@ -231,16 +302,18 @@ function App() {
           </nav>
 
           <div className="mt-6 rounded-md border border-border bg-background p-3">
-            <p className="mono text-xs text-muted-foreground">Config</p>
+            <p className="mono text-xs text-muted-foreground">{scope} config</p>
             <p className="mono mt-2 break-all text-xs">{payload.configPath}</p>
           </div>
         </aside>
 
+        {message ? <div className="fixed bottom-4 right-4 z-10 max-w-md rounded-md border border-border bg-card p-3 text-sm shadow-lg">{message}</div> : null}
+
         {activeKind === "review" ? (
           <ReviewPanel payload={payload} />
-        ) : isSectionKind(activeKind) ? (
+        ) : isSectionKind(activeKind) && scope === "project" ? (
           <SectionEditor activeSection={activeKind} payload={payload} refreshConfig={refreshConfig} />
-        ) : (
+        ) : isResourceKind(activeKind) ? (
           <section className="grid min-h-screen grid-cols-[320px_minmax(0,1fr)] max-[1050px]:grid-cols-1">
             <div className="border-r border-border p-5 max-[1050px]:border-b max-[1050px]:border-r-0">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -248,7 +321,7 @@ function App() {
                   <h2 className="text-lg font-semibold">{labelForKind(activeKind)}</h2>
                   <p className="text-sm text-muted-foreground">{activeResources.length} item{activeResources.length === 1 ? "" : "s"}</p>
                 </div>
-                <Button type="button" onClick={() => createResource(activeKind)} size="sm">
+                <Button type="button" onClick={() => createResource(activeKind)} size="sm" disabled={scope === "global" && activeKind === "command"}>
                   <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
                   New
                 </Button>
@@ -256,36 +329,57 @@ function App() {
               <AssetList
                 resources={activeResources}
                 selectedId={selectedId}
+                selectedSource={selectedSource}
+                scope={scope}
                 payload={payload}
-                onSelect={(id) => {
-                  setSelectedId(id);
+                projectPayload={projectPayload}
+                onSelect={(resource) => {
+                  setSelectedSource(resource.source ?? scope);
+                  setSelectedId(resource.id);
                   setMessage("");
                 }}
+                onAddReference={addReference}
+                onRemoveReference={removeReference}
               />
             </div>
 
             <div className="p-5">
-              {draft ? (
+              {draft && !draft.readOnly ? (
                 <AssetEditor
                   draft={draft}
                   setDraft={setDraft}
                   payload={payload}
+                  scope={scope}
                   diagnostics={draftDiagnostics}
                   message={message}
                   onSubmit={saveResource}
                 />
+              ) : draft && draft.readOnly ? (
+                <ReadOnlyResource resource={draft} onRemoveReference={removeReference} />
               ) : (
-                <KindOverview kind={activeKind} resources={activeResources} payload={payload} />
+                <KindOverview kind={activeKind} resources={activeResources} payload={payload} scope={scope} />
               )}
             </div>
           </section>
+        ) : (
+          <ReviewPanel payload={payload} />
         )}
       </div>
     </main>
   );
 }
 
-function AssetList({ resources, selectedId, payload, onSelect }: { resources: EditableResource[]; selectedId: string | null; payload: ConfigPayload; onSelect: (id: string) => void }) {
+function AssetList({ resources, selectedId, selectedSource, scope, payload, projectPayload, onSelect, onAddReference, onRemoveReference }: {
+  resources: EditableResource[];
+  selectedId: string | null;
+  selectedSource: "project" | "global";
+  scope: "project" | "global";
+  payload: ConfigPayload;
+  projectPayload: ConfigPayload | null;
+  onSelect: (resource: EditableResource) => void;
+  onAddReference: (resource: EditableResource) => void;
+  onRemoveReference: (resource: EditableResource) => void;
+}) {
   if (resources.length === 0) {
     return <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">No assets.</div>;
   }
@@ -296,21 +390,56 @@ function AssetList({ resources, selectedId, payload, onSelect }: { resources: Ed
         <button
           key={resource.id}
           type="button"
-          onClick={() => onSelect(resource.id)}
-          className={`w-full rounded-md border p-3 text-left transition ${selectedId === resource.id ? "border-primary bg-card" : "border-border bg-background hover:border-primary"}`}
+          onClick={() => onSelect(resource)}
+          className={`w-full rounded-md border p-3 text-left transition ${selectedId === resource.id && selectedSource === (resource.source ?? scope) ? "border-primary bg-card" : "border-border bg-background hover:border-primary"}`}
         >
           <div className="flex items-start justify-between gap-3">
             <strong className="mono text-sm">{resource.id}</strong>
-            <CapabilityPills resource={resource} payload={payload} />
+            <span className="flex flex-wrap justify-end gap-1">
+              <SourceBadge resource={resource} />
+              <CapabilityPills resource={resource} payload={payload} />
+            </span>
           </div>
           <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{resource.description || "No description."}</p>
+          {scope === "global" ? (
+            <div className="mt-3">
+              <Button
+                type="button"
+                size="sm"
+                variant={isReferenced(projectPayload, resource) ? "secondary" : "default"}
+                disabled={isReferenced(projectPayload, resource)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onAddReference(resource);
+                }}
+              >
+                <Link2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                {isReferenced(projectPayload, resource) ? "Referenced" : "Use in this project"}
+              </Button>
+            </div>
+          ) : resource.readOnly ? (
+            <div className="mt-3">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onRemoveReference(resource);
+                }}
+              >
+                <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                Remove reference
+              </Button>
+            </div>
+          ) : null}
         </button>
       ))}
     </div>
   );
 }
 
-function KindOverview({ kind, resources, payload }: { kind: ResourceKind; resources: EditableResource[]; payload: ConfigPayload }) {
+function KindOverview({ kind, resources, payload, scope }: { kind: ResourceKind; resources: EditableResource[]; payload: ConfigPayload; scope: "project" | "global" }) {
   const coverage = runtimeCoverage(resources);
   const warnings = resources.flatMap((resource) => validateDraft(resource, payload)).filter((item) => item.severity !== "info");
 
@@ -318,7 +447,7 @@ function KindOverview({ kind, resources, payload }: { kind: ResourceKind; resour
     <div className="grid gap-4 lg:grid-cols-3">
       <Card>
         <CardHeader>
-          <CardTitle>{labelForKind(kind)}</CardTitle>
+          <CardTitle>{scope === "global" ? `Global ${labelForKind(kind)}` : labelForKind(kind)}</CardTitle>
           <CardDescription>{resources.length} configured</CardDescription>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground">
@@ -352,10 +481,11 @@ function KindOverview({ kind, resources, payload }: { kind: ResourceKind; resour
   );
 }
 
-function AssetEditor({ draft, setDraft, payload, diagnostics, message, onSubmit }: {
+function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, onSubmit }: {
   draft: EditableResource;
   setDraft: (resource: EditableResource) => void;
   payload: ConfigPayload;
+  scope: "project" | "global";
   diagnostics: Diagnostic[];
   message: string;
   onSubmit: (event: React.FormEvent) => void;
@@ -367,7 +497,7 @@ function AssetEditor({ draft, setDraft, payload, diagnostics, message, onSubmit 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">{draft.id || `New ${draft.kind}`}</h2>
-          <p className="text-sm text-muted-foreground">{kindHint(draft.kind)}</p>
+          <p className="text-sm text-muted-foreground">{scopeLabel(scope)} {kindHint(draft.kind)}</p>
         </div>
         <Button type="submit" disabled={blocking}>
           <Save className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -408,6 +538,10 @@ function AssetEditor({ draft, setDraft, payload, diagnostics, message, onSubmit 
         </CardContent>
       </Card>
 
+      {scope === "global" && draft.kind === "skill" ? (
+        <AssociatedFilesEditor draft={draft} setDraft={setDraft} />
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Runtimes</CardTitle>
@@ -438,6 +572,74 @@ function AssetEditor({ draft, setDraft, payload, diagnostics, message, onSubmit 
 
       <ValidationPanel diagnostics={diagnostics} />
     </form>
+  );
+}
+
+function AssociatedFilesEditor({ draft, setDraft }: { draft: EditableResource; setDraft: (resource: EditableResource) => void }) {
+  const files = draft.files ?? [];
+  const updateFile = (index: number, next: { path: string; body: string }) => {
+    setDraft({ ...draft, files: files.map((file, itemIndex) => itemIndex === index ? next : file) });
+  };
+  const removeFile = (index: number) => {
+    setDraft({ ...draft, files: files.filter((_, itemIndex) => itemIndex !== index) });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Associated Files</CardTitle>
+        <CardDescription>Global skill helper files</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {files.length === 0 ? <p className="text-sm text-muted-foreground">No helper files.</p> : null}
+        {files.map((file, index) => (
+          <div key={`${file.path}-${index}`} className="rounded-md border border-border p-3">
+            <div className="mb-3 flex items-end gap-3">
+              <Field label="Path" hint="relative to skill directory" className="flex-1">
+                <Input value={file.path} onChange={(event) => updateFile(index, { ...file, path: event.target.value })} />
+              </Field>
+              <Button type="button" variant="secondary" onClick={() => removeFile(index)}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+            <Field label="Body" hint="text">
+              <Textarea className="mono min-h-40" value={file.body} onChange={(event) => updateFile(index, { ...file, body: event.target.value })} />
+            </Field>
+          </div>
+        ))}
+        <Button type="button" variant="secondary" onClick={() => setDraft({ ...draft, files: [...files, { path: "", body: "" }] })}>
+          <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+          Add file
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReadOnlyResource({ resource, onRemoveReference }: { resource: EditableResource; onRemoveReference: (resource: EditableResource) => void }) {
+  return (
+    <div className="mx-auto max-w-5xl space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold">{resource.id}</h2>
+          <p className="text-sm text-muted-foreground">Referenced global {resource.kind}</p>
+        </div>
+        <Button type="button" variant="secondary" onClick={() => void onRemoveReference(resource)}>
+          <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+          Remove reference
+        </Button>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Global Source</CardTitle>
+          <CardDescription>{resource.kind}:{resource.id}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{resource.description || "No description."}</p>
+          <Textarea className="mono min-h-80" value={resource.body} readOnly />
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -704,6 +906,16 @@ function CapabilityPills({ resource, payload }: { resource: EditableResource; pa
   );
 }
 
+function SourceBadge({ resource }: { resource: EditableResource }) {
+  const source = resource.source ?? "project";
+  return (
+    <Badge variant={source === "global" ? "secondary" : "default"}>
+      {source === "global" ? <Globe2 className="mr-1 h-3 w-3" aria-hidden="true" /> : null}
+      {resource.readOnly ? "global ref" : source}
+    </Badge>
+  );
+}
+
 function CapabilityBadge({ status, compact = false }: { status: string; compact?: boolean }) {
   const variant = status === "unsupported-fail" ? "destructive" : status === "native" ? "default" : "secondary";
   return <Badge variant={variant}>{compact ? shortStatus(status) : status}</Badge>;
@@ -748,6 +960,12 @@ function validateDraft(resource: EditableResource, payload: ConfigPayload | null
       }
     }
   }
+  if (payload?.scope === "global" && resource.kind === "command") {
+    diagnostics.push({ severity: "error", path: "kind", message: "Global setup UI supports skills, agents, and rules.", blocking: true });
+  }
+  if (payload?.scope === "project" && (resource.files ?? []).length > 0) {
+    diagnostics.push({ severity: "error", path: "files", message: "Associated-file editing is supported for global skills only.", blocking: true });
+  }
   return diagnostics;
 }
 
@@ -789,6 +1007,7 @@ function blankResource(kind: ResourceKind): EditableResource {
     name: "",
     description: "",
     body: "",
+    files: kind === "skill" ? [] : undefined,
     runtimes: ["claude", "codex"],
     overrides: {
       claude: { enabled: false },
@@ -815,6 +1034,20 @@ function isResourceKind(value: ResourceKind | SectionKind | "review"): value is 
 
 function isSectionKind(value: ResourceKind | SectionKind | "review"): value is SectionKind {
   return sections.some((section) => section.id === value);
+}
+
+function activeCount(payload: ConfigPayload, kind: ResourceKind, scope: "project" | "global") {
+  const local = payload.resources.filter((resource) => resource.kind === kind).length;
+  const refs = scope === "project" ? payload.referencedResources.filter((resource) => resource.kind === kind).length : 0;
+  return local + refs;
+}
+
+function isReferenced(projectPayload: ConfigPayload | null, resource: EditableResource) {
+  return Boolean(projectPayload?.globalRefs?.some((ref) => ref.kind === resource.kind && ref.id === resource.id));
+}
+
+function scopeLabel(scope: "project" | "global") {
+  return scope === "global" ? "Global source." : "Project-local source.";
 }
 
 function sectionLabel(section: SectionKind) {

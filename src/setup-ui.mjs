@@ -2,7 +2,7 @@ import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { capabilitiesPayload, loadEditableConfig, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
+import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -27,9 +27,19 @@ export async function serveSetupUi(catalog, options = {}) {
 
     if (request.method === "GET" && requestUrl.pathname === "/api/config") {
       try {
-        sendJson(response, 200, await loadEditableConfig(projectDir));
+        sendJson(response, 200, await loadEditableConfig(projectDir, editorOptions(options, "project")));
       } catch (error) {
         sendApiError(response, 400, error.message, "config-load-failed");
+      }
+      return;
+    }
+
+    const scopedConfigMatch = requestUrl.pathname.match(/^\/api\/config\/(project|global)$/);
+    if (request.method === "GET" && scopedConfigMatch) {
+      try {
+        sendJson(response, 200, await loadEditableConfig(projectDir, editorOptions(options, scopedConfigMatch[1])));
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "config-load-failed");
       }
       return;
     }
@@ -42,7 +52,7 @@ export async function serveSetupUi(catalog, options = {}) {
     if (request.method === "PUT" && requestUrl.pathname === "/api/config/sections") {
       try {
         const sections = await readJsonBody(request);
-        const result = await saveEditableSections(projectDir, sections);
+        const result = await saveEditableSections(projectDir, sections, editorOptions(options, "project"));
         sendJson(response, result.ok ? 200 : 400, result);
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
@@ -53,31 +63,30 @@ export async function serveSetupUi(catalog, options = {}) {
     const resourceMatch = requestUrl.pathname.match(/^\/api\/config\/resources\/([^/]+)\/([^/]+)$/);
     if (request.method === "PUT" && resourceMatch) {
       try {
-        const routeKind = decodeRoutePart(resourceMatch[1]);
-        const routeId = decodeRoutePart(resourceMatch[2]);
-        if (!VALID_CONFIG_KINDS.has(routeKind)) {
-          sendApiError(response, 400, `Unsupported resource kind "${routeKind}".`, "invalid-kind");
-          return;
-        }
-        if (!routeId) {
-          sendApiError(response, 400, "Resource id is required.", "invalid-id");
-          return;
-        }
+        await handleResourceSave(request, response, projectDir, options, "project", resourceMatch[1], resourceMatch[2]);
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
 
-        const item = await readJsonBody(request);
-        if (item.kind !== undefined && item.kind !== routeKind) {
-          sendApiError(response, 400, "Resource kind in payload does not match request path.", "route-payload-mismatch");
-          return;
-        }
-        if (item.id !== undefined && item.id !== routeId) {
-          sendApiError(response, 400, "Resource id in payload does not match request path.", "route-payload-mismatch");
-          return;
-        }
-        const result = await saveEditableResource(projectDir, {
-          ...item,
-          kind: routeKind,
-          id: routeId
-        });
+    const scopedResourceMatch = requestUrl.pathname.match(/^\/api\/config\/(project|global)\/resources\/([^/]+)\/([^/]+)$/);
+    if (request.method === "PUT" && scopedResourceMatch) {
+      try {
+        await handleResourceSave(request, response, projectDir, options, scopedResourceMatch[1], scopedResourceMatch[2], scopedResourceMatch[3]);
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const refMatch = requestUrl.pathname.match(/^\/api\/config\/project\/global-refs\/([^/]+)\/([^/]+)$/);
+    if ((request.method === "PUT" || request.method === "DELETE") && refMatch) {
+      try {
+        const routeKind = decodeRoutePart(refMatch[1]);
+        const routeId = decodeRoutePart(refMatch[2]);
+        const update = request.method === "PUT" ? addProjectGlobalRef : removeProjectGlobalRef;
+        const result = await update(projectDir, { kind: routeKind, id: routeId }, editorOptions(options, "project"));
         sendJson(response, result.ok ? 200 : 400, result);
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
@@ -127,6 +136,44 @@ export async function serveSetupUi(catalog, options = {}) {
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   const address = server.address();
   return { server, url: `http://127.0.0.1:${address.port}/` };
+}
+
+async function handleResourceSave(request, response, projectDir, serverOptions, scope, kindPart, idPart) {
+  const routeKind = decodeRoutePart(kindPart);
+  const routeId = decodeRoutePart(idPart);
+  if (!VALID_CONFIG_KINDS.has(routeKind)) {
+    sendApiError(response, 400, `Unsupported resource kind "${routeKind}".`, "invalid-kind");
+    return;
+  }
+  if (!routeId) {
+    sendApiError(response, 400, "Resource id is required.", "invalid-id");
+    return;
+  }
+
+  const item = await readJsonBody(request);
+  if (item.kind !== undefined && item.kind !== routeKind) {
+    sendApiError(response, 400, "Resource kind in payload does not match request path.", "route-payload-mismatch");
+    return;
+  }
+  if (item.id !== undefined && item.id !== routeId) {
+    sendApiError(response, 400, "Resource id in payload does not match request path.", "route-payload-mismatch");
+    return;
+  }
+  const result = await saveEditableResource(projectDir, {
+    ...item,
+    kind: routeKind,
+    id: routeId
+  }, editorOptions(serverOptions, scope));
+  sendJson(response, result.ok ? 200 : 400, result);
+}
+
+function editorOptions(serverOptions, scope) {
+  return {
+    scope,
+    ...(serverOptions.env ? { env: serverOptions.env } : {}),
+    ...(serverOptions.platform ? { platform: serverOptions.platform } : {}),
+    ...(serverOptions.homedir ? { homedir: serverOptions.homedir } : {})
+  };
 }
 
 function sendJson(response, status, payload) {

@@ -8,7 +8,7 @@ The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Cod
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, and Phase 13 added explicit associated files for skill helper code. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 is in progress; Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, Phase 13 added explicit associated files for skill helper code, and Phase 14 added setup UI support for creating, editing, labeling, and referencing global assets. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
 ## Current Milestone: v1.2 Global Asset Library
 
@@ -65,10 +65,14 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Global assets can own explicit associated files under their asset directory — Phase 13
 - ✓ Rendering preserves associated files for skill runtime directories such as Codex skill helper scripts — Phase 13
 - ✓ Validation rejects associated file escapes, missing files, directories, unsupported symlinks, primary-body duplication, and unsupported resource kinds — Phase 13
+- ✓ Setup UI can switch between project-local `.aof` editing and global `~/.aof` editing — Phase 14
+- ✓ Setup UI can create and edit global skills, agents, and rules — Phase 14
+- ✓ Setup UI can add and remove project references to global assets without copying source files — Phase 14
+- ✓ Setup UI labels project-local assets, global assets, and referenced global assets clearly — Phase 14
 
 ### Active
 
-- [ ] Setup UI can create and edit global assets alongside project assets.
+- [ ] Final v1.2 verification hardens global asset behavior across unit tests, BDD, UI API, and UI build.
 
 ### Out of Scope
 
@@ -137,6 +141,8 @@ The long-term product direction includes task management: kanban boards, task as
 | Global reference rendering preserves source scope in lock state | Users need to audit whether generated outputs came from project-local assets, global assets, or packages | Implemented in Phase 12 |
 | Associated asset files are explicit manifest entries | Helper code should be deliberate, reviewable, and constrained to the asset directory rather than discovered by scanning | Implemented in Phase 13 |
 | Phase 13 associated-file rendering is skill-only | Skills are the directory-shaped runtime asset needed for helper code now; other resource kinds remain single-file until a concrete runtime shape requires more | Implemented in Phase 13 |
+| Setup UI uses explicit Project / Global scope | Source ownership must stay visible so users do not accidentally edit global assets while intending project-local changes | Implemented in Phase 14 |
+| Setup UI references globals without copying | The selected v1.2 behavior is reference-first reuse; project configs own `globalRefs`, not global source snapshots | Implemented in Phase 14 |
 
 ## Next Milestone Goals
 
@@ -160,4 +166,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-08 after Phase 13 completion*
+*Last updated: 2026-05-09 after Phase 14 completion*

@@ -35,10 +35,10 @@
 
 ### Setup UI
 
-- [ ] **GUI-01**: User can switch the setup UI between project asset editing and global asset editing.
-- [ ] **GUI-02**: User can create and edit global skills, agents, and rules through the setup UI.
-- [ ] **GUI-03**: User can add a global asset reference to the current project through the setup UI without copying the global asset.
-- [ ] **GUI-04**: Setup UI clearly labels asset source scope so users do not confuse global edits with project-local edits.
+- [x] **GUI-01**: User can switch the setup UI between project asset editing and global asset editing.
+- [x] **GUI-02**: User can create and edit global skills, agents, and rules through the setup UI.
+- [x] **GUI-03**: User can add a global asset reference to the current project through the setup UI without copying the global asset.
+- [x] **GUI-04**: Setup UI clearly labels asset source scope so users do not confuse global edits with project-local edits.
 
 ### Verification
 
@@ -94,10 +94,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CODE-01 | Phase 13 | Complete |
 | CODE-02 | Phase 13 | Complete |
 | CODE-03 | Phase 13 | Complete |
-| GUI-01 | Phase 14 | Pending |
-| GUI-02 | Phase 14 | Pending |
-| GUI-03 | Phase 14 | Pending |
-| GUI-04 | Phase 14 | Pending |
+| GUI-01 | Phase 14 | Complete |
+| GUI-02 | Phase 14 | Complete |
+| GUI-03 | Phase 14 | Complete |
+| GUI-04 | Phase 14 | Complete |
 | TEST-01 | Phase 15 | Pending |
 | TEST-02 | Phase 15 | Pending |
 | TEST-03 | Phase 15 | Pending |
@@ -106,8 +106,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.2 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
-- Complete: 15
+- Complete: 19
 
 ---
 *Requirements defined: 2026-05-08*
-*Last updated: 2026-05-08 after Phase 13 completion*
+*Last updated: 2026-05-09 after Phase 14 completion*
