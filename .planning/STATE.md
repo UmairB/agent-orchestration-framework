@@ -1,9 +1,9 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** Live Repository Hardening
-**Current phase:** Phase 16 - Live Repository Hardening
-**Status:** Phase 16 discussion in progress
+**Current milestone:** Interactive CLI Hardening
+**Current phase:** Phase 17 - Interactive CLI
+**Status:** Phase 17 in progress
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 16 is focused on hardening AOF by testing it against a live repository.
+Phase 17 is focused on replacing typed CLI prompts with a keyboard-driven interactive CLI while preserving explicit project/global asset creation.
 
 ## Current Position
 
-Phase: 16 - Live Repository Hardening
-Plan: None
-Status: Waiting for live repository target and safety preference
-Last activity: 2026-05-09 - Phase 16 hardening direction captured
+Phase: 17 - Interactive CLI
+Plan: 17-01 complete; 17-02 pending
+Status: Ready for next Phase 17 execution slice
+Last activity: 2026-05-09 - Phase 17 Inquirer prompt foundation completed
 
 ## Resume
 
-**Stopped at:** Phase 16 discussion
-**Resume file:** `.planning/phases/16-live-repository-hardening/16-CONTEXT.md`
+**Stopped at:** Phase 17 in progress
+**Resume file:** `.planning/phases/17-interactive-cli/17-02-PLAN.md`
 
 ## Memory
 
