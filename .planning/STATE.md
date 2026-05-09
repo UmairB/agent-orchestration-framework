@@ -1,9 +1,9 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.2 Global Asset Library (complete)
-**Current phase:** None - milestone complete
-**Status:** v1.2 complete
+**Current milestone:** Live Repository Hardening
+**Current phase:** Phase 16 - Live Repository Hardening
+**Status:** Phase 16 discussion in progress
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.2 Global Asset Library is complete. The next milestone has not been selected.
+Phase 16 is focused on hardening AOF by testing it against a live repository.
 
 ## Current Position
 
-Phase: None
+Phase: 16 - Live Repository Hardening
 Plan: None
-Status: Ready for next milestone discussion
-Last activity: 2026-05-09 - Phase 15 completed and v1.2 archived
+Status: Waiting for live repository target and safety preference
+Last activity: 2026-05-09 - Phase 16 hardening direction captured
 
 ## Resume
 
-**Stopped at:** v1.2 milestone complete
-**Resume file:** `.planning/milestones/v1.2-MILESTONE-AUDIT.md`
+**Stopped at:** Phase 16 discussion
+**Resume file:** `.planning/phases/16-live-repository-hardening/16-CONTEXT.md`
 
 ## Memory
 
@@ -115,3 +115,4 @@ Last activity: 2026-05-09 - Phase 15 completed and v1.2 archived
 - Phase 15 discussion locked decisions: verify the full v1.2 global asset slice; require `npm run test:unit`, `npm run ui:build`, `npm test`, and Windows PowerShell integration; produce a requirement coverage matrix; add code only for concrete verification gaps; create v1.2 milestone audit and archive snapshots; keep hosted distribution, sync, versioning, vendoring, runtime expansion, and UI execution deferred.
 - Phase 15 planning produced 3 plans: 15-01 global asset coverage audit, 15-02 cross-runner verification and hardening, and 15-03 milestone audit and archive.
 - Phase 15 execution completed with full v1.2 coverage matrix, PowerShell BDD runner parity for global/setup UI scenarios, passing unit/UI build/Node BDD/PowerShell checks, and v1.2 archive/audit artifacts.
+- Phase 16 direction: harden AOF by testing against a live repository. Start with safe read-only/dry-run diagnostics, prefer disposable copy/worktree for write tests, and convert concrete findings into fixes and regression coverage.
