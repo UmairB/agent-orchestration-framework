@@ -115,3 +115,42 @@ Let users create reusable global AOF assets once in `~/.aof` and reference them 
 - Semantic version pinning and upgrade workflows for global references.
 - Runtime support beyond Claude Code and Codex.
 - UI-driven execution for init/apply/install.
+
+## v1.3 — Interactive CLI Hardening
+
+**Status:** Shipped 2026-05-09
+**Started:** 2026-05-09
+**Completed:** 2026-05-09
+**Phases:** 16-17
+**Requirements:** 12/12 complete
+**Audit:** Passed
+
+### Goal
+
+Harden AOF's live first-run behavior and replace rough typed prompts with keyboard-driven interactive CLI flows while keeping project/global asset creation explicit.
+
+### Delivered
+
+1. Removed active SQLite catalog initialization and eliminated first-run SQLite warnings.
+2. Disabled seeded repository defaults so new projects start with empty `.aof` state.
+3. Added explicit disabled-catalog guidance for catalog-backed commands.
+4. Added `@inquirer/prompts` for runtime selection, confirmations, and asset creation prompts.
+5. Added interactive `aof add` for project skills, commands, agents, and rules.
+6. Added interactive `aof global add` for global skills, agents, and rules.
+7. Preserved direct flag-based commands and deterministic BDD prompt inputs.
+
+### Audit
+
+- [v1.3-MILESTONE-AUDIT.md](milestones/v1.3-MILESTONE-AUDIT.md)
+
+### Archives
+
+- [v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
+- [v1.3-REQUIREMENTS.md](milestones/v1.3-REQUIREMENTS.md)
+- [v1.3-MILESTONE-AUDIT.md](milestones/v1.3-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- `aof install --interactive` redesign.
+- Hosted catalog or registry-backed asset discovery.
+- Additional live-repository hardening when new concrete findings appear.

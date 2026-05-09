@@ -1,13 +1,14 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-09 after Phase 15 completion
+**Last updated:** 2026-05-09 after v1.3 completion
 
 ## Milestones
 
 - ✅ **v1 Assistant Configuration Foundation** — Phases 1-5, shipped 2026-05-07. Archive: [v1-ROADMAP.md](milestones/v1-ROADMAP.md)
 - ✅ **v1.1 Aligned Core Hardening** — Phases 6-10, shipped 2026-05-08. Archive: [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - ✅ **v1.2 Global Asset Library** — Phases 11-15, shipped 2026-05-09. Archive: [v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
+- ✅ **v1.3 Interactive CLI Hardening** — Phases 16-17, shipped 2026-05-09. Archive: [v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
 
 ## Phases
 
@@ -69,6 +70,20 @@
 
 </details>
 
+<details>
+<summary>✅ v1.3 Interactive CLI Hardening (Phases 16-17) — SHIPPED 2026-05-09</summary>
+
+- [x] Phase 16: Live Repository Hardening — completed 2026-05-09. Removed active SQLite/default catalog behavior from first-run paths.
+  - Wave 1: empty repo init hardening completed.
+  - Cross-cutting constraints: project and global assets remain explicit; catalog storage stays disabled until a real product path exists.
+- [x] Phase 17: Interactive CLI — completed 2026-05-09. Added Inquirer prompt foundation and interactive project/global asset creation.
+  - Plans: 17-01 Inquirer Prompt Foundation; 17-02 Interactive Asset Creation Flow.
+  - Wave 1: 17-01 completed.
+  - Wave 2: 17-02 completed.
+  - Cross-cutting constraints: direct flag commands remain available for automation; deterministic BDD prompt inputs remain supported.
+
+</details>
+
 ## Progress
 
 | Milestone | Phases | Plans | Requirements | Status | Shipped |
@@ -76,6 +91,7 @@
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
 | v1.2 Global Asset Library | 11-15 | 15/15 | 22/22 | Complete | 2026-05-09 |
+| v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
 
 ## Phase Details
 
@@ -140,6 +156,29 @@
 3. `npm run ui:build` passes after UI changes.
 4. Standard `npm run test:unit` and `npm test` checks pass for the milestone behavior.
 
+### Phase 16: Live Repository Hardening
+
+**Goal:** Use live-repository first-run findings to harden AOF's current project/global asset model.
+
+**Requirements:** INIT-01, INIT-02, INIT-03
+
+**Success Criteria:**
+1. Empty project initialization does not seed built-in defaults.
+2. First-run CLI commands do not initialize SQLite or emit experimental SQLite warnings.
+3. Disabled catalog commands explain the current supported project/global asset paths.
+
+### Phase 17: Interactive CLI
+
+**Goal:** Replace typed prompt helpers with keyboard-driven prompts and provide explicit interactive asset creation flows.
+
+**Requirements:** ICLI-01 through ICLI-06, TEST-01 through TEST-03
+
+**Success Criteria:**
+1. Runtime prompts use checkbox-style keyboard navigation.
+2. `aof add` can create project assets interactively.
+3. `aof global add` can create global assets interactively.
+4. Direct flag-based usage and deterministic test inputs remain supported.
+
 ## Next
 
-v1.2 is complete. Select the next milestone before planning more work.
+v1.3 is complete. Select the next milestone before planning more work.

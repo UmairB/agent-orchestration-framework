@@ -1,9 +1,9 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** Interactive CLI Hardening
-**Current phase:** Phase 17 - Interactive CLI
-**Status:** Phase 17 in progress
+**Current milestone:** v1.3 Interactive CLI Hardening
+**Current phase:** Complete
+**Status:** Awaiting next milestone selection
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 17 is focused on replacing typed CLI prompts with a keyboard-driven interactive CLI while preserving explicit project/global asset creation.
+v1.3 is complete. Next work should start by selecting or defining the next milestone.
 
 ## Current Position
 
-Phase: 17 - Interactive CLI
-Plan: 17-01 complete; 17-02 complete
-Status: Ready for Phase 17 verification or next interactive CLI slice
-Last activity: 2026-05-09 - Phase 17 interactive project/global asset creation completed
+Phase: complete
+Plan: v1.3 milestone audit complete
+Status: Awaiting next milestone selection
+Last activity: 2026-05-09 - v1.3 Interactive CLI Hardening milestone archived
 
 ## Resume
 
-**Stopped at:** Phase 17 in progress
-**Resume file:** `.planning/phases/17-interactive-cli/17-02-PLAN.md`
+**Stopped at:** v1.3 complete
+**Resume file:** `.planning/milestones/v1.3-MILESTONE-AUDIT.md`
 
 ## Memory
 
@@ -120,3 +120,4 @@ Last activity: 2026-05-09 - Phase 17 interactive project/global asset creation c
 - Phase 17 proposed: replace typed readline prompts with a real interactive CLI using arrow-key navigation, checkbox toggles, and Enter confirmation without reintroducing repo defaults.
 - Phase 17 wave 1 added `@inquirer/prompts` and replaced the prompt wrapper with checkbox/confirm prompts while preserving env-driven BDD inputs.
 - Phase 17 wave 2 added no-argument `aof add` and `aof global add` interactive asset creation flows for project/global assets, with deterministic BDD prompt input and no SQLite/default catalog behavior.
+- v1.3 Interactive CLI Hardening shipped on 2026-05-09 with Phase 16 and Phase 17 complete. `aof install --interactive`, hosted catalog behavior, and further live-repo hardening are deferred to future milestones.
