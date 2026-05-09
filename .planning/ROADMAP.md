@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-09 after Phase 14 completion
+**Last updated:** 2026-05-09 after Phase 15 planning
 
 ## Milestones
 
@@ -60,7 +60,12 @@
   - Wave 2: 14-02 completed.
   - Wave 3: 14-03 completed.
   - Cross-cutting constraints: UI remains config-editing only; Project/Global scope must be explicit; references write `globalRefs` without copying; referenced globals are read-only in Project scope; associated-file editing is global-skill-only and explicit.
-- [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, and build coverage for global reuse.
+- [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, PowerShell parity, and build coverage for global reuse.
+  - Plans: 15-01 Global Asset Coverage Audit; 15-02 Cross-Runner Verification And Hardening; 15-03 Milestone Audit And Archive.
+  - Wave 1: 15-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 15-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 15-03.
+  - Cross-cutting constraints: no new feature scope; add code only for concrete verification gaps; require unit, UI build, Node BDD, and PowerShell integration evidence; archive v1.2 after audit.
 
 </details>
 
@@ -70,7 +75,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 12/12 | 19/22 | In Progress | - |
+| v1.2 Global Asset Library | 11-15 | 15/15 planned | 19/22 | In Progress | - |
 
 ## Phase Details
 
@@ -137,4 +142,4 @@
 
 ## Next
 
-Run `$gsd-discuss-phase 15` to start Global Asset Verification.
+Run `$gsd-execute-phase 15` to close out v1.2 verification.

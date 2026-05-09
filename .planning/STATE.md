@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
 **Current phase:** Phase 15 - Global Asset Verification
-**Status:** Phase 14 complete
+**Status:** Phase 15 planned
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 14 completed setup UI global asset support. Phase 15 is ready to discuss final verification and milestone hardening for the global asset library.
+Phase 15 has three executable plans for final global asset verification, coverage audit, PowerShell parity, and v1.2 milestone closeout.
 
 ## Current Position
 
 Phase: 15 - Global Asset Verification
-Plan: Not started
-Status: Ready for `$gsd-discuss-phase 15`
-Last activity: 2026-05-09 - Phase 14 completed
+Plan: 3 plans ready
+Status: Ready for `$gsd-execute-phase 15`
+Last activity: 2026-05-09 - Phase 15 planned
 
 ## Resume
 
-**Stopped at:** Phase 14 completed
-**Resume file:** `.planning/phases/14-global-asset-setup-ui/14-VERIFICATION.md`
+**Stopped at:** Phase 15 planned
+**Resume file:** `.planning/phases/15-global-asset-verification/15-01-PLAN.md`
 
 ## Memory
 
@@ -112,3 +112,5 @@ Last activity: 2026-05-09 - Phase 14 completed
 - Phase 14 discussion locked decisions: setup UI uses an explicit Project / Global toggle; global scope edits `~/.aof`; Phase 14 supports global skills, agents, and rules; Global view can add `globalRefs` to the current project without copying; Project view shows referenced globals read-only with remove-reference support; global skill associated files get basic explicit text editing; setup UI APIs must encode explicit scope and return structured diagnostics.
 - Phase 14 planning produced 3 plans: 14-01 scoped setup UI config API, 14-02 project global reference API and UI, and 14-03 setup UI BDD docs and phase hardening.
 - Phase 14 execution completed with scoped setup UI APIs, global resource saves, global skill associated-file editing, project `globalRefs` add/remove APIs, Project/Global UI switching, read-only referenced global display, README updates, BDD coverage, and verification in `.planning/phases/14-global-asset-setup-ui/14-VERIFICATION.md`; `npm run test:unit`, `npm run ui:build`, and `npm test` passed.
+- Phase 15 discussion locked decisions: verify the full v1.2 global asset slice; require `npm run test:unit`, `npm run ui:build`, `npm test`, and Windows PowerShell integration; produce a requirement coverage matrix; add code only for concrete verification gaps; create v1.2 milestone audit and archive snapshots; keep hosted distribution, sync, versioning, vendoring, runtime expansion, and UI execution deferred.
+- Phase 15 planning produced 3 plans: 15-01 global asset coverage audit, 15-02 cross-runner verification and hardening, and 15-03 milestone audit and archive.
