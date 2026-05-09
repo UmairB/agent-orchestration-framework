@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.2 Global Asset Library
 **Current phase:** Phase 14 - Global Asset Setup UI
-**Status:** Phase 13 complete
+**Status:** Phase 14 planned
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Phase 13 completed explicit associated files on code-bearing skill assets, validation, rendering, and lock traceability. Phase 14 is ready to discuss global asset creation and reference flows in the setup UI.
+Phase 14 has three executable plans for global setup UI support: scoped setup UI config APIs, project global reference UI/API behavior, and BDD/docs hardening.
 
 ## Current Position
 
 Phase: 14 - Global Asset Setup UI
-Plan: Not started
-Status: Ready for `$gsd-discuss-phase 14`
-Last activity: 2026-05-08 - Phase 13 completed
+Plan: 3 plans ready
+Status: Ready for `$gsd-execute-phase 14`
+Last activity: 2026-05-09 - Phase 14 planned
 
 ## Resume
 
-**Stopped at:** Phase 13 completed
-**Resume file:** `.planning/phases/13-code-bearing-asset-files/13-VERIFICATION.md`
+**Stopped at:** Phase 14 planned
+**Resume file:** `.planning/phases/14-global-asset-setup-ui/14-01-PLAN.md`
 
 ## Memory
 
@@ -109,3 +109,5 @@ Last activity: 2026-05-08 - Phase 13 completed
 - Phase 13 discussion locked decisions: associated files are explicit `files` entries relative to the asset directory; Phase 13 renders associated files for skill resources; unsafe paths, missing files, directories, symlink escapes, and primary-body duplication are validation errors; associated files must flow through render planning, drift protection, and lock source metadata.
 - Phase 13 planning produced 3 plans: 13-01 associated file model and validation, 13-02 associated file rendering and lock ownership, and 13-03 associated file BDD docs and phase hardening.
 - Phase 13 execution completed with resource `files` schema/model support, explicit associated-file validation, skill helper rendering, drift/lock ownership, README updates, BDD coverage, and verification in `.planning/phases/13-code-bearing-asset-files/13-VERIFICATION.md`; `npm run test:unit` and `npm test` passed.
+- Phase 14 discussion locked decisions: setup UI uses an explicit Project / Global toggle; global scope edits `~/.aof`; Phase 14 supports global skills, agents, and rules; Global view can add `globalRefs` to the current project without copying; Project view shows referenced globals read-only with remove-reference support; global skill associated files get basic explicit text editing; setup UI APIs must encode explicit scope and return structured diagnostics.
+- Phase 14 planning produced 3 plans: 14-01 scoped setup UI config API, 14-02 project global reference API and UI, and 14-03 setup UI BDD docs and phase hardening.

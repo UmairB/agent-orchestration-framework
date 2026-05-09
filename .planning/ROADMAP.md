@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-08 after Phase 13 completion
+**Last updated:** 2026-05-09 after Phase 14 planning
 
 ## Milestones
 
@@ -55,6 +55,11 @@
   - Wave 3: 13-03 completed.
   - Cross-cutting constraints: associated files use explicit `files` entries; paths are relative to the asset directory; Phase 13 renders skill helper files; unsafe paths and output conflicts fail before writes.
 - [ ] Phase 14: Global Asset Setup UI — create, edit, label, and reference global assets through the UI.
+  - Plans: 14-01 Scoped Setup UI Config API; 14-02 Project Global Reference API And UI; 14-03 Setup UI BDD Docs And Phase Hardening.
+  - Wave 1: 14-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 14-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 14-03.
+  - Cross-cutting constraints: UI remains config-editing only; Project/Global scope must be explicit; references write `globalRefs` without copying; referenced globals are read-only in Project scope; associated-file editing is global-skill-only and explicit.
 - [ ] Phase 15: Global Asset Verification — harden unit, BDD, UI API, and build coverage for global reuse.
 
 </details>
@@ -65,7 +70,7 @@
 |-----------|--------|-------|--------------|--------|---------|
 | v1 Assistant Configuration Foundation | 1-5 | 15/15 | 32/32 | Complete | 2026-05-07 |
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
-| v1.2 Global Asset Library | 11-15 | 9/9 | 15/22 | In Progress | - |
+| v1.2 Global Asset Library | 11-15 | 12/12 planned | 15/22 | In Progress | - |
 
 ## Phase Details
 
@@ -132,4 +137,4 @@
 
 ## Next
 
-Run `$gsd-discuss-phase 14` to start the Global Asset Setup UI phase.
+Run `$gsd-execute-phase 14` to implement Phase 14.
