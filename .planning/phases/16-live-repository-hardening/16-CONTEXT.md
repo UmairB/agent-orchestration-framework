@@ -18,6 +18,9 @@ This phase should prioritize evidence from a live repository over new feature ex
 - Revert the generic "next milestone selection" direction.
 - Do hardening work.
 - Test AOF against a live repository.
+- Remove SQLite for now because AOF is not currently using it for a real product path.
+- Remove repo defaults; project and global assets should be explicit, not seeded built-ins.
+- Create a separate phase for a more interactive CLI.
 
 </intent>
 

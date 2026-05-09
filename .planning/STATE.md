@@ -116,3 +116,5 @@ Last activity: 2026-05-09 - Phase 16 hardening direction captured
 - Phase 15 planning produced 3 plans: 15-01 global asset coverage audit, 15-02 cross-runner verification and hardening, and 15-03 milestone audit and archive.
 - Phase 15 execution completed with full v1.2 coverage matrix, PowerShell BDD runner parity for global/setup UI scenarios, passing unit/UI build/Node BDD/PowerShell checks, and v1.2 archive/audit artifacts.
 - Phase 16 direction: harden AOF by testing against a live repository. Start with safe read-only/dry-run diagnostics, prefer disposable copy/worktree for write tests, and convert concrete findings into fixes and regression coverage.
+- Phase 16 live test finding: `aof init --codex` still used an experimental SQLite catalog and built-in repo defaults (`project-context`, `prime`, `code-reviewer`, `gsd`). User decided to remove SQLite/default repo catalog behavior for now; project and global assets are the active source model.
+- Phase 17 proposed: replace typed readline prompts with a real interactive CLI using arrow-key navigation, checkbox toggles, and Enter confirmation without reintroducing repo defaults.

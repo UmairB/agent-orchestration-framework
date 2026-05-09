@@ -6,14 +6,14 @@ export async function selectItems(items) {
 
   if (process.env.AOF_TEST_SELECTION_INPUT !== undefined) {
     printChoices(items);
-    console.log("Install which items? Enter numbers, ids, 'all', or press Enter for defaults: ");
+    console.log("Install which items? Enter numbers, ids, 'all', or press Enter for preselected items: ");
     return resolveSelection(items, process.env.AOF_TEST_SELECTION_INPUT);
   }
 
   const rl = readline.createInterface({ input, output });
   try {
     printChoices(items);
-    const answer = await rl.question("Install which items? Enter numbers, ids, 'all', or press Enter for defaults: ");
+    const answer = await rl.question("Install which items? Enter numbers, ids, 'all', or press Enter for preselected items: ");
     return resolveSelection(items, answer);
   } finally {
     rl.close();

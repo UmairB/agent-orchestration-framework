@@ -5,7 +5,7 @@ AOF is a small CLI and DSL for defining assistant-facing project assets once, th
 The initial target is local CLI usage:
 
 - initialize a project with a portable `.aof/aof.config.json`
-- store shared skills, commands, and agents in the catalog, then render selected items into Claude Code and Codex layouts during install
+- store project assets under `.aof/` and reusable global assets under `~/.aof`
 - delegate framework-level installs such as GSD to the framework's own installer
 
 ## Usage
@@ -13,7 +13,7 @@ The initial target is local CLI usage:
 ```sh
 npm link
 aof init
-aof add skill project-context
+aof add skill code-review
 aof migrate
 aof sync --dry-run
 aof validate
@@ -24,8 +24,7 @@ aof config validate
 aof config doctor
 aof global add skill shared-review --codex
 aof global list
-aof catalog init
-aof install --select
+aof install --no-serve
 ```
 
 Dry-run the generated files:
@@ -43,7 +42,7 @@ warnings.
 Scaffold a file-backed `.aof/` asset:
 
 ```sh
-aof add skill project-context --codex
+aof add skill code-review --codex
 ```
 
 `aof add <kind> <id>` writes source files under `.aof/assets/` and updates
@@ -133,40 +132,10 @@ aof clean
 current content still matches the recorded hash. Drifted files are preserved and
 remain in the lock.
 
-Initialize and inspect the global catalog database:
-
-```sh
-aof catalog init
-aof catalog path
-aof catalog list
-```
-
-By default the database is created in the user's app data directory:
-
-```txt
-Windows: %APPDATA%\aof\aof.sqlite
-macOS:   ~/Library/Application Support/aof/aof.sqlite
-Linux:   ~/.local/share/aof/aof.sqlite
-```
-
-Override it when needed:
-
-```sh
-aof catalog list --db ./tmp/aof.sqlite
-```
-
 Install only Codex assets:
 
 ```sh
 aof apply --codex
-```
-
-Install selected catalog items into the current project:
-
-```sh
-aof install --select
-aof install --items project-context,prime --codex
-aof install --dry-run
 ```
 
 Ask GSD's installer to install its current Codex and Claude integrations:
@@ -263,8 +232,8 @@ CLI commands to run in a terminal.
 
 The setup UI binds to `127.0.0.1` and is intended for local repository editing.
 Its API still treats request bodies and static paths as untrusted input:
-malformed JSON, invalid asset routes, oversized bodies, unsupported catalog
-items, and static path traversal attempts are rejected with structured JSON
+malformed JSON, invalid asset routes, oversized bodies, and static path
+traversal attempts are rejected with structured JSON
 errors.
 
 ## DSL
@@ -272,7 +241,7 @@ errors.
 The project keeps reproducibility metadata locally:
 
 ```txt
-.aof/aof.config.json  # desired project defaults and asset metadata
+.aof/aof.config.json  # project asset metadata and global references
 .aof/aof.lock.json    # generated output manifest and install intent
 .aof/assets/          # source asset bodies and runtime overrides
 ```
@@ -288,7 +257,7 @@ Editor saves also write `.aof/aof.config.json`; they do not silently mutate a
 legacy root config. `aof config doctor` reports a warning when both files exist
 so stale root config is visible.
 
-Catalog items currently support four portable resource kinds:
+Project and global resources currently support four portable resource kinds:
 
 - `skill`: rendered to `<runtime>/skills/<id>/SKILL.md`
 - `command`: rendered to `<runtime>/commands/<id>.md`
@@ -309,7 +278,7 @@ Resources can target all runtimes or a subset:
 ```json
 {
   "kind": "command",
-  "id": "prime",
+  "id": "repo-prime",
   "runtimes": ["claude", "codex"],
   "description": "Prime the assistant with repository context.",
   "prompt": "Inspect the repository before making changes."
@@ -321,18 +290,18 @@ Inline content can be moved into separate files by replacing `body`, `prompt`, o
 ```json
 {
   "kind": "skill",
-  "id": "project-context",
+  "id": "code-review",
   "runtimes": ["claude", "codex"],
-  "description": "Shared project context.",
-  "path": "assets/skills/project-context/SKILL.md"
+  "description": "Review code changes.",
+  "path": "assets/skills/code-review/SKILL.md"
 }
 ```
 
 Runtime-specific overrides live beside the asset:
 
 ```txt
-.aof/assets/skills/project-context/overrides/claude.json
-.aof/assets/skills/project-context/overrides/codex.json
+.aof/assets/skills/code-review/overrides/claude.json
+.aof/assets/skills/code-review/overrides/codex.json
 ```
 
 Overrides shallow-merge with shared metadata and can change runtime-specific fields such as `description`, `body`, `model`, `tools`, or `paths`. They cannot change identity fields such as `id` or `kind`.

@@ -25,7 +25,7 @@ export async function runSharedCliStep(context, step) {
 
   if (step === "a project initialized with AOF config") {
     await runSharedCliStep(context, "an empty project");
-    const result = await runCli(context, "init --items project-context,prime --codex");
+    const result = await runCli(context, "init --codex");
     assert.equal(result.status, 0, formatResult(result));
     context.lastResult = result;
     return;

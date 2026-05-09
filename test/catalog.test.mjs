@@ -1,23 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { openCatalog, itemsToConfig } from "../src/catalog.mjs";
 
 export const catalogTests = [
   {
-    name: "seeds builtin catalog items into sqlite",
+    name: "catalog starts empty while repo defaults are disabled",
     async run() {
-      const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-db-"));
-      const catalog = await openCatalog({ db: path.join(targetDir, "aof.sqlite") });
+      const catalog = await openCatalog();
       try {
         catalog.seedBuiltins();
         const items = catalog.listItems();
-        assert.ok(items.some((item) => item.id === "project-context" && item.kind === "skill"));
-        assert.ok(items.some((item) => item.id === "gsd" && item.kind === "framework"));
+        assert.deepEqual(items, []);
+        assert.equal(catalog.path, null);
       } finally {
         catalog.close();
-        await rm(targetDir, { recursive: true, force: true });
       }
     }
   },

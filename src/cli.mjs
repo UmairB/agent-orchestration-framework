@@ -2,52 +2,15 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
 import { applyConfig, supportedRuntimes } from "./adapters.mjs";
-import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, installFrameworkItems, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
+import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
 import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
 import { readJson, writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
-import { defaultDbPath } from "./paths.mjs";
-import { confirmAction, selectItems, selectRuntimes } from "./prompt.mjs";
+import { selectRuntimes } from "./prompt.mjs";
 import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
-
-const DEFAULT_CONFIG = `{
-  "$schema": "./schemas/aof.schema.json",
-  "name": "assistant-project",
-  "resources": [
-    {
-      "kind": "skill",
-      "id": "project-context",
-      "name": "project-context",
-      "description": "Shared project context for assistant coding sessions.",
-      "body": "Read the repository before changing code. Prefer existing project patterns, keep edits scoped, and verify behavior with the narrowest meaningful checks."
-    },
-    {
-      "kind": "command",
-      "id": "prime",
-      "description": "Prime the assistant with repository context.",
-      "prompt": "Inspect the repository structure, identify the stack, summarize the main modules, and call out anything risky before making changes."
-    },
-    {
-      "kind": "agent",
-      "id": "code-reviewer",
-      "name": "code-reviewer",
-      "description": "Reviews changes for bugs, regressions, and missing verification.",
-      "instructions": "Review the diff from a senior engineering perspective. Lead with concrete findings using file and line references, then summarize residual risk."
-    }
-  ],
-  "packages": [
-    {
-      "id": "gsd",
-      "namespace": "gsd",
-      "source": "npm:get-shit-done-cc@latest",
-      "runtimes": ["claude", "codex"]
-    }
-  ]
-}
-`;
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -133,51 +96,30 @@ async function initCommand(args) {
     throw new Error(`Legacy config already exists at ${legacyConfigPath(targetDir)}. Run aof migrate to create .aof/ explicitly.`);
   }
 
-  const { itemsToConfig, openCatalog } = await import("./catalog.mjs");
-  const catalog = await openCatalog({ db: options.db });
-  try {
-    catalog.seedBuiltins();
-    const items = await resolveProjectInitItems(catalog, options);
-    const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : await selectRuntimes();
-    const config = itemsToConfig(items);
-    if (options.dryRun) {
-      console.log(`write: ${paths.configPath}`);
-    } else {
-      await writeWorkspaceConfig(targetDir, {
-        ...config,
-        $schema: "../schemas/aof.schema.json",
-        name: path.basename(targetDir),
-        items: items.map((item) => item.id),
-        runtimes
-      });
-      console.log(`Created ${paths.configPath}`);
-    }
-
-    const writes = await applyConfig(config, {
-      targetDir,
-      runtimes,
-      global: Boolean(options.global),
-      dryRun: Boolean(options.dryRun)
-    });
-    const frameworkCommands = installFrameworkItems(items.filter((item) => item.kind === "framework"), {
-      runtimes,
-      global: Boolean(options.global),
-      dryRun: Boolean(options.dryRun)
-    });
-
-    if (!options.dryRun) {
-      await writeInstallLock(targetDir, items, runtimes, catalog.path);
-    }
-
-    for (const write of writes) {
-      console.log(`${write.action}: ${write.path}`);
-    }
-    for (const command of frameworkCommands) {
-      console.log(command);
-    }
-  } finally {
-    catalog.close();
+  if (options.items || options.defaults || options.select) {
+    throw new Error("Catalog-backed init items are not available yet. Use `aof add ...` for project assets or `aof global add ...` for reusable global assets.");
   }
+
+  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : await selectRuntimes();
+  const config = {
+    name: path.basename(targetDir),
+    resources: [],
+    globalRefs: [],
+    packages: []
+  };
+
+  if (options.dryRun) {
+    console.log(`write: ${paths.configPath}`);
+    return;
+  }
+
+  await writeWorkspaceConfig(targetDir, {
+    ...config,
+    $schema: "../schemas/aof.schema.json",
+    runtimes
+  });
+  await writeInstallLock(targetDir, [], runtimes, null);
+  console.log(`Created ${paths.configPath}`);
 }
 
 async function addCommand(args) {
@@ -572,12 +514,10 @@ async function installCommand(args) {
     return;
   }
 
-  const { openCatalog } = await import("./catalog.mjs");
   const { serveSetupUi } = await import("./setup-ui.mjs");
-  const catalog = await openCatalog({ db: options.db });
+  const { openCatalog } = await import("./catalog.mjs");
+  const catalog = await openCatalog();
   try {
-    catalog.seedBuiltins();
-    console.log(`AOF catalog ready at ${catalog.path}`);
     if (options.noServe || options.dryRun) {
       console.log("Setup UI not started.");
       return;
@@ -787,74 +727,7 @@ async function installFromLockCommand(options) {
 }
 
 async function interactiveInstallCommand(options) {
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const { itemsToConfig, openCatalog } = await import("./catalog.mjs");
-  const catalog = await openCatalog({ db: options.db });
-  try {
-    catalog.seedBuiltins();
-    const selectedItems = await resolveInstallItems(catalog, { ...options, select: true });
-    const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : await selectRuntimes();
-    const selectedConfig = {
-      ...itemsToConfig(selectedItems),
-      $schema: "../schemas/aof.schema.json",
-      name: path.basename(targetDir),
-      items: selectedItems.map((item) => item.id),
-      runtimes
-    };
-    const existingInspection = await inspectConfig(targetDir).catch(() => null);
-    const configExists = existingInspection?.workspaceConfigExists;
-    const config = configExists ? mergeInteractiveConfig(await loadConfig(existingInspection.configPath), selectedConfig, runtimes) : selectedConfig;
-    const frameworkItems = selectedItems.filter((item) => item.kind === "framework");
-    const desiredOutputs = await createRenderPlan(await import("./dsl.mjs").then(({ resolveConfig }) => resolveConfig(config, targetDir)), {
-      targetDir,
-      runtimes,
-      global: Boolean(options.global)
-    });
-    const previousLock = await readLock(workspacePaths(targetDir).lockPath);
-    const renderActions = await planApplyActions(desiredOutputs, previousLock, { targetDir, force: Boolean(options.force) });
-    const frameworkPlan = frameworkItems.flatMap((item) => planFrameworkInstall(item.id, {
-      package: item,
-      source: item.source,
-      runtimes: runtimes.filter((runtime) => item.runtimes.includes(runtime)),
-      global: Boolean(options.global),
-      previousLock,
-      force: Boolean(options.force)
-    }));
-
-    console.log(configExists ? "interactive: existing .aof config found; proposed changes follow" : "interactive: proposed .aof config follows");
-    console.log(`resources: ${config.resources.length}`);
-    console.log(`packages: ${config.packages.length}`);
-    for (const action of renderActions) console.log(formatApplyAction(action));
-    for (const item of frameworkPlan) console.log(`framework: ${item.command}`);
-
-    if (await confirmAction("Write .aof config?", false)) {
-      await writeWorkspaceConfig(targetDir, config);
-      console.log(`config: ${workspacePaths(targetDir).configPath}`);
-    } else {
-      console.log("skip: .aof config not written");
-    }
-
-    if (await confirmAction("Write runtime files?", false)) {
-      await executeApplyActions(renderActions);
-      const manifest = createLockManifest({ actions: renderActions, desiredOutputs, previousLock, config, runtimes, global: Boolean(options.global) });
-      await writeLock(workspacePaths(targetDir).lockPath, manifest);
-      console.log(`lock: ${workspacePaths(targetDir).lockPath}`);
-    } else {
-      console.log("skip: runtime files not written");
-    }
-
-    if (frameworkPlan.length > 0 && await confirmAction("Run GSD installer commands?", false)) {
-      const latestLock = await readLock(workspacePaths(targetDir).lockPath);
-      const attempts = executeFrameworkInstallPlan(frameworkPlan);
-      await writeLock(workspacePaths(targetDir).lockPath, mergeFrameworkInstallAttempts(latestLock, attempts));
-      const failed = attempts.filter((attempt) => attempt.status === "failed");
-      if (failed.length > 0) throw new Error(`Framework install failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
-    } else if (frameworkPlan.length > 0) {
-      console.log("skip: GSD installer not run");
-    }
-  } finally {
-    catalog.close();
-  }
+  throw new Error("Interactive project setup is being redesigned. Use `aof init`, `aof add ...`, and `aof global ...` for now.");
 }
 
 async function catalogCommand(args) {
@@ -862,58 +735,15 @@ async function catalogCommand(args) {
   const options = parseOptions(rest);
 
   if (subcommand === "path") {
-    console.log(defaultDbPath({ db: options.db }));
+    throw new Error("Catalog storage is currently disabled. Use project `.aof` assets and `aof global ...` assets.");
     return;
   }
 
-  const { openCatalog } = await import("./catalog.mjs");
-  const catalog = await openCatalog({ db: options.db });
-  try {
-    if (!subcommand || subcommand === "init") {
-      catalog.seedBuiltins();
-      console.log(`Initialized catalog at ${catalog.path}`);
-      return;
-    }
-
-    if (subcommand === "list") {
-      for (const item of catalog.listItems()) {
-        const marker = item.defaultEnabled ? "*" : " ";
-        console.log(`[${marker}] ${item.id}\t${item.kind}\t${item.runtimes.join(",")}\t${item.description}`);
-      }
-      return;
-    }
-
-    throw new Error(`Unknown catalog command "${subcommand}".`);
-  } finally {
-    catalog.close();
-  }
-}
-
-async function resolveInstallItems(catalog, options) {
-  const allItems = catalog.listItems();
-  if (options.select || options.interactive) {
-    return selectItems(allItems);
+  if (!subcommand || subcommand === "init" || subcommand === "list") {
+    throw new Error("Catalog storage is currently disabled. Use project `.aof` assets and `aof global ...` assets.");
   }
 
-  if (options.items) {
-    const ids = String(options.items).split(",").map((id) => id.trim()).filter(Boolean);
-    return catalog.getItems(ids);
-  }
-
-  return catalog.defaultItems();
-}
-
-async function resolveProjectInitItems(catalog, options) {
-  if (options.items) {
-    const ids = String(options.items).split(",").map((id) => id.trim()).filter(Boolean);
-    return catalog.getItems(ids);
-  }
-
-  if (options.defaults) {
-    return catalog.defaultItems();
-  }
-
-  return selectItems(catalog.listItems());
+  throw new Error(`Unknown catalog command "${subcommand}".`);
 }
 
 async function writeInstallLock(targetDir, items, runtimes, dbPath) {
@@ -956,31 +786,6 @@ function parseOptions(args) {
   }
 
   return options;
-}
-
-function mergeInteractiveConfig(existingConfig, selectedConfig, runtimes) {
-  const resources = [...existingConfig.resources];
-  for (const resource of selectedConfig.resources) {
-    if (!resources.some((item) => item.kind === resource.kind && item.id === resource.id)) {
-      resources.push({ ...resource, runtimes });
-    }
-  }
-
-  const packages = [...(existingConfig.packages ?? [])];
-  for (const pkg of selectedConfig.packages ?? []) {
-    if (!packages.some((item) => item.id === pkg.id)) {
-      packages.push({ ...pkg, runtimes: pkg.runtimes.filter((runtime) => runtimes.includes(runtime)) });
-    }
-  }
-
-  return {
-    $schema: "../schemas/aof.schema.json",
-    name: existingConfig.name ?? selectedConfig.name,
-    resources,
-    packages,
-    items: selectedConfig.items,
-    runtimes
-  };
 }
 
 function printJson(value) {
@@ -1027,7 +832,7 @@ function helpText() {
   return `aof - Assistant Ops Framework
 
 Usage:
-  aof init [dir] [--items id,id] [--defaults] [--claude] [--codex] [--force] [--db path]
+  aof init [dir] [--claude] [--codex] [--force]
   aof add <kind> <id> [--runtime claude,codex] [--description text] [--force]
   aof migrate [dir] [--force] [--dry-run]
   aof apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--global] [--dry-run] [--force] [--strict]
@@ -1039,16 +844,15 @@ Usage:
 Supporting commands:
   aof global add <kind> <id> [--runtime claude,codex] [--description text] [--force]
   aof global list|show|validate [--json]
-  aof install [--no-serve] [--db path] [--port 4177]
+  aof install [--no-serve] [--port 4177]
   aof config show [--json]
-  aof catalog init|list|path [--db path]
   aof install gsd [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
   aof install --interactive
   aof install --from-lock [--dry-run]
 
 Defaults:
-  install initializes the AOF catalog at ${defaultDbPath()} and starts the setup UI.
-  init selects catalog items and coding assistants for the current repository.
+  init creates an empty project .aof workspace for the selected coding assistants.
+  install starts the setup UI.
   install gsd runs: npx get-shit-done-cc@latest with the selected runtime flags.
   --strict promotes adapter warnings to command failures for CI.
 `;

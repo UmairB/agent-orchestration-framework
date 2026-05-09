@@ -6,38 +6,30 @@ Feature: AOF CLI lifecycle
     When I run `--help`
     Then the command should succeed
     And stdout should contain `aof - Assistant Ops Framework`
-    And stdout should contain `aof init [dir] [--items id,id] [--defaults]`
+    And stdout should contain `aof init [dir] [--claude] [--codex] [--force]`
     And stdout should contain `aof add <kind> <id>`
     And stdout should contain `aof migrate`
     And text `aof validate [--json] [--strict]` should appear before `aof install [--no-serve]` in stdout
 
-  Scenario: Install AOF and create the catalog database
+  Scenario: Install AOF without starting the setup UI
     Given an empty project
     When I run `install --no-serve`
     Then the command should succeed
-    And stdout should contain `AOF catalog ready at`
     And stdout should contain `Setup UI not started.`
-    And data file `aof.sqlite` should exist
 
-  Scenario: Initialize a repository from selected catalog items
+  Scenario: Initialize an empty AOF project
     Given an empty project
-    When I run `init --items project-context,prime --codex`
+    When I run `init --codex`
     Then the command should succeed
     And file `.aof/aof.config.json` should exist
-    And file `.aof/aof.config.json` should contain `"items"`
-    And file `.aof/aof.config.json` should contain `"project-context"`
-    And file `.aof/assets/skills/project-context/SKILL.md` should exist
-    And file `.aof/assets/commands/prime/COMMAND.md` should exist
-    And file `.codex/skills/project-context/SKILL.md` should exist
-    And file `.codex/commands/prime.md` should exist
-    And file `.claude/commands/prime.md` should not exist
-    And JSON file `.aof/aof.lock.json` should contain item `project-context`
-    And JSON file `.aof/aof.lock.json` should contain item `prime`
+    And file `.aof/aof.config.json` should contain `"resources": []`
+    And file `.codex/skills/project-context/SKILL.md` should not exist
+    And file `.codex/commands/prime.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain runtime `codex`
 
   Scenario: Refuse to overwrite an existing project config
     Given a project initialized with AOF config
-    When I run `init --items project-context --codex`
+    When I run `init --codex`
     Then the command should fail
     And stderr should contain `Config already exists`
 
@@ -168,7 +160,7 @@ Feature: AOF CLI lifecycle
 
   Scenario: Refuse to silently migrate a legacy root config during init
     Given a project initialized with legacy AOF config
-    When I run `init --items project-context --codex`
+    When I run `init --codex`
     Then the command should fail
     And stderr should contain `aof migrate`
 
@@ -284,65 +276,20 @@ Feature: AOF CLI lifecycle
     And file `.codex/skills/file-backed/SKILL.md` should contain `Manual edit`
     And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/file-backed/SKILL.md`
 
-  Scenario: List the catalog database
+  Scenario: Catalog storage is disabled
     Given an empty project
-    When I run `catalog init`
-    Then the command should succeed
-    And stdout should contain `Initialized catalog at`
-    And data file `aof.sqlite` should exist
     When I run `catalog list`
-    Then the command should succeed
-    And stdout should contain `project-context`
-    And stdout should contain `prime`
-    And stdout should contain `gsd`
+    Then the command should fail
+    And stderr should contain `Catalog storage is currently disabled`
 
-  Scenario: Initialize default catalog items
-    Given an empty project
-    When I run `init --defaults --codex`
-    Then the command should succeed
-    And data file `aof.sqlite` should exist
-    And file `.codex/skills/project-context/SKILL.md` should exist
-    And file `.codex/commands/prime.md` should exist
-    And file `.codex/agents/code-reviewer.md` should not exist
-    And JSON file `.aof/aof.lock.json` should contain item `project-context`
-    And JSON file `.aof/aof.lock.json` should contain item `prime`
-    And JSON file `.aof/aof.lock.json` should not contain item `code-reviewer`
-    And JSON file `.aof/aof.lock.json` should contain runtime `codex`
-
-  Scenario: Initialize selected catalog items into Codex
+  Scenario: Reject catalog-backed init items
     Given an empty project
     When I run `init --items project-context,prime --codex`
-    Then the command should succeed
-    And file `.codex/skills/project-context/SKILL.md` should exist
-    And file `.codex/commands/prime.md` should exist
-    And file `.claude/commands/prime.md` should not exist
-    And JSON file `.aof/aof.lock.json` should contain item `project-context`
-    And JSON file `.aof/aof.lock.json` should contain item `prime`
+    Then the command should fail
+    And stderr should contain `Catalog-backed init items are not available yet`
 
-  Scenario: Preview selected catalog installs without writing files
-    Given an empty project
-    When I run `init --items project-context,prime --codex --dry-run`
-    Then the command should succeed
-    And stdout should contain `.codex`
-    And file `.aof/aof.config.json` should not exist
-    And file `.codex/skills/project-context/SKILL.md` should not exist
-    And file `.codex/commands/prime.md` should not exist
-    And file `.aof/aof.lock.json` should not exist
-
-  Scenario: Interactively select catalog items
-    Given an empty project
-    When I run `init --select --codex` with input `project-context, code-reviewer`
-    Then the command should succeed
-    And stdout should contain `Install which items?`
-    And file `.codex/skills/project-context/SKILL.md` should exist
-    And file `.codex/agents/code-reviewer.md` should exist
-    And file `.codex/commands/prime.md` should not exist
-
-  Scenario: Guided interactive install asks before side effects
+  Scenario: Interactive install is pending redesign
     Given an empty project
     When I run `install --interactive` with input `project-context,gsd|codex|yes|no|no`
-    Then the command should succeed
-    And stdout should contain `interactive: proposed .aof config follows`
-    And file `.aof/aof.config.json` should exist
-    And file `.codex/skills/project-context/SKILL.md` should not exist
-    And file `.aof/aof.lock.json` should not exist
+    Then the command should fail
+    And stderr should contain `Interactive project setup is being redesigned`

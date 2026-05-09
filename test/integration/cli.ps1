@@ -91,7 +91,7 @@ function Run-Step {
 
   if ($Step -eq "a project initialized with AOF config") {
     Run-Step $Context "an empty project"
-    $Result = Run-Cli $Context "init --items project-context,prime --codex" ""
+    $Result = Run-Cli $Context "init --codex" ""
     Assert-Equal 0 $Result.Status (Format-Result $Result)
     $Context.LastResult = $Result
     return
