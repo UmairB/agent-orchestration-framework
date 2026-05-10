@@ -2,6 +2,18 @@ import { checkbox, confirm, input, select } from "@inquirer/prompts";
 
 const PROJECT_RESOURCE_KINDS = ["skill", "command", "agent", "rule"];
 const GLOBAL_RESOURCE_KINDS = ["skill", "agent", "rule"];
+const RESOURCE_KIND_HELP = {
+  skill: "Reusable guidance or workflow instructions, for example code-review or api-research.",
+  command: "A named command/prompt you can run from the assistant, for example prime or release-notes.",
+  agent: "A specialist assistant role with focused behavior, for example code-reviewer or research-agent.",
+  rule: "Project or team guidance that should be included as assistant instructions, for example team-standards."
+};
+const RESOURCE_ID_EXAMPLES = {
+  skill: "code-review",
+  command: "prime",
+  agent: "code-reviewer",
+  rule: "team-standards"
+};
 
 export async function selectItems(items) {
   if (items.length === 0) return [];
@@ -61,26 +73,28 @@ export async function promptResourceInput(options = {}) {
   assertInteractiveTerminal("create a resource interactively");
   const allowedKinds = options.global ? GLOBAL_RESOURCE_KINDS : PROJECT_RESOURCE_KINDS;
   const kind = options.kind ?? (await select({
-    message: options.global ? "Select global asset type" : "Select project asset type",
-    choices: allowedKinds.map((value) => ({ name: value, value }))
+    message: options.global ? "What kind of reusable global asset do you want to create?" : "What kind of project asset do you want to create?",
+    choices: allowedKinds.map((value) => ({ name: `${value} - ${RESOURCE_KIND_HELP[value]}`, value }))
   }));
   if (!allowedKinds.includes(kind)) {
     throw new Error(`Invalid ${options.global ? "global " : ""}resource kind "${kind}". Expected ${allowedKinds.join(", ")}.`);
   }
 
+  console.log(`Asset id: a stable short name used in config and filenames, for example "${RESOURCE_ID_EXAMPLES[kind]}".`);
+  console.log("Use letters, numbers, dots, underscores, or hyphens. Spaces are not allowed.");
   const id = options.id ?? (await input({
-    message: "Asset id",
+    message: `Asset id (${RESOURCE_ID_EXAMPLES[kind]})`,
     validate(value) {
-      return value.trim() !== "" || "Asset id is required.";
+      return validateResourceId(value);
     }
   }));
   const description = await input({
-    message: "Description",
+    message: "Short description shown in lists (optional)",
     default: options.description ?? ""
   });
   const runtimes = options.runtimes ?? (await selectRuntimes());
   const body = await input({
-    message: "Initial body (optional)",
+    message: bodyPromptForKind(kind),
     default: options.body ?? ""
   });
 
@@ -156,6 +170,10 @@ export function parseResourceInput(value, options = {}) {
   if (typeof id !== "string" || id.trim() === "") {
     throw new Error("Asset id is required.");
   }
+  const idValidation = validateResourceId(id);
+  if (idValidation !== true) {
+    throw new Error(idValidation);
+  }
   return {
     kind,
     id: id.trim(),
@@ -163,6 +181,25 @@ export function parseResourceInput(value, options = {}) {
     runtimes: parseResourceRuntimes(parsed.runtimes),
     body: typeof parsed.body === "string" ? parsed.body : ""
   };
+}
+
+function validateResourceId(value) {
+  const id = value.trim();
+  if (id === "") return "Asset id is required. Use a short stable name such as code-review.";
+  if (!/^[a-z0-9][a-z0-9-_.]*$/i.test(id)) {
+    return "Use letters, numbers, dots, underscores, or hyphens, starting with a letter or number. Example: code-review.";
+  }
+  return true;
+}
+
+function bodyPromptForKind(kind) {
+  const prompts = {
+    skill: "Initial skill instructions (optional)",
+    command: "Initial command prompt (optional)",
+    agent: "Initial agent instructions (optional)",
+    rule: "Initial rule text (optional)"
+  };
+  return prompts[kind] ?? "Initial body (optional)";
 }
 
 function parseResourceRuntimes(value) {

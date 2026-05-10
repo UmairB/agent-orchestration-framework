@@ -61,5 +61,14 @@ export const promptTests = [
         /Invalid global resource kind/
       );
     }
+  },
+  {
+    name: "resource input explains invalid asset ids",
+    run() {
+      assert.throws(
+        () => parseResourceInput(JSON.stringify({ kind: "skill", id: "bad id" })),
+        /Use letters, numbers, dots, underscores, or hyphens/
+      );
+    }
   }
 ];
