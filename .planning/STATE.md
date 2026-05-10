@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.4 Namespaced CLI Contract
 **Current phase:** Phase 19: Assets Namespace Rewrite
-**Status:** Ready for phase discussion
+**Status:** Ready for phase planning
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 18 locked the command contract; next work starts the assets namespace implementation.
+v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 18 locked the command contract. Phase 19 context confirms a full assets namespace migration with no legacy aliases.
 
 ## Current Position
 
 Phase: 19 - Assets Namespace Rewrite
 Plan: —
-Status: Ready for discussion
-Last activity: 2026-05-10 - Phase 18 command contract audit completed
+Status: Ready for planning
+Last activity: 2026-05-10 - Phase 19 context gathered
 
 ## Resume
 
-**Stopped at:** Phase 18 complete
-**Resume file:** `.planning/phases/18-command-contract-audit/18-VERIFICATION.md`
+**Stopped at:** Phase 19 context gathered
+**Resume file:** `.planning/phases/19-assets-namespace-rewrite/19-CONTEXT.md`
 
 ## Memory
 
@@ -127,3 +127,4 @@ Last activity: 2026-05-10 - Phase 18 command contract audit completed
 - Phase 18 discussion accepted the full command-contract draft: use `aof project ...` for project diagnostics/migration, `--global` as an assets scope flag, remove `sync`, remove all legacy aliases, and allow helpful failures for removed commands without executing them.
 - Phase 18 planning produced three waves: 18-01 current command inventory, 18-02 replacement CLI contract, and 18-03 help/errors/BDD contract. Research was skipped because the command contract was already locked in discussion.
 - Phase 18 execution completed contract artifacts only: current command inventory, replacement CLI contract, BDD contract, wave summaries, and verification. No CLI implementation changed in Phase 18.
+- Phase 19 discussion confirmed full assets namespace migration in one pass: implement all `aof assets ...` commands, remove old asset-related top-level execution paths, preserve rendering/lock/drift/global-ref behavior, and do not ship legacy aliases.
