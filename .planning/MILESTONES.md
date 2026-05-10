@@ -160,7 +160,7 @@ Harden AOF's live first-run behavior and replace rough typed prompts with keyboa
 **Status:** Active
 **Started:** 2026-05-10
 **Phases:** 18-22
-**Requirements:** 0/22 complete
+**Requirements:** 4/22 complete
 
 ### Goal
 
@@ -177,7 +177,7 @@ Redesign AOF's CLI around durable product-area namespaces, review every command 
 
 ### Progress
 
-- Phase 18: Command Contract Audit — pending discussion.
+- Phase 18: Command Contract Audit — complete 2026-05-10.
 - Phase 19: Assets Namespace Rewrite — pending.
 - Phase 20: Packages Namespace Rewrite — pending.
 - Phase 21: Project And Diagnostics Commands — pending.

@@ -2,8 +2,8 @@
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.4 Namespaced CLI Contract
-**Current phase:** Phase 18: Command Contract Audit
-**Status:** Ready to execute Phase 18
+**Current phase:** Phase 19: Assets Namespace Rewrite
+**Status:** Ready for phase discussion
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.4 is focused on a full CLI rewrite around durable namespaces. Start by reviewing every current command and subcommand before implementation.
+v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 18 locked the command contract; next work starts the assets namespace implementation.
 
 ## Current Position
 
-Phase: 18 - Command Contract Audit
+Phase: 19 - Assets Namespace Rewrite
 Plan: —
-Status: Planned; ready to execute
-Last activity: 2026-05-10 - Phase 18 command contract plans created
+Status: Ready for discussion
+Last activity: 2026-05-10 - Phase 18 command contract audit completed
 
 ## Resume
 
-**Stopped at:** Phase 18 planned
-**Resume file:** `.planning/phases/18-command-contract-audit/18-01-PLAN.md`
+**Stopped at:** Phase 18 complete
+**Resume file:** `.planning/phases/18-command-contract-audit/18-VERIFICATION.md`
 
 ## Memory
 
@@ -126,3 +126,4 @@ Last activity: 2026-05-10 - Phase 18 command contract plans created
 - Phase 18 starts with command-by-command contract review before any implementation.
 - Phase 18 discussion accepted the full command-contract draft: use `aof project ...` for project diagnostics/migration, `--global` as an assets scope flag, remove `sync`, remove all legacy aliases, and allow helpful failures for removed commands without executing them.
 - Phase 18 planning produced three waves: 18-01 current command inventory, 18-02 replacement CLI contract, and 18-03 help/errors/BDD contract. Research was skipped because the command contract was already locked in discussion.
+- Phase 18 execution completed contract artifacts only: current command inventory, replacement CLI contract, BDD contract, wave summaries, and verification. No CLI implementation changed in Phase 18.

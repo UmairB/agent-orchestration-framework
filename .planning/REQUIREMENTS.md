@@ -74,10 +74,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLI-01 | Phase 18 | Pending |
-| CLI-02 | Phase 18 | Pending |
-| CLI-03 | Phase 18 | Pending |
-| CLI-04 | Phase 18 | Pending |
+| CLI-01 | Phase 18 | Complete |
+| CLI-02 | Phase 18 | Complete |
+| CLI-03 | Phase 18 | Complete |
+| CLI-04 | Phase 18 | Complete |
 | ASSET-01 | Phase 19 | Pending |
 | ASSET-02 | Phase 19 | Pending |
 | ASSET-03 | Phase 19 | Pending |
@@ -101,8 +101,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 - v1.4 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
-- Complete: 0
+- Complete: 4
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-10 after milestone initialization*
+*Last updated: 2026-05-10 after Phase 18 completion*
