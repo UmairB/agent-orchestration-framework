@@ -16,6 +16,7 @@ Feature: AOF CLI lifecycle
     When I run `install --no-serve`
     Then the command should succeed
     And stdout should contain `Setup UI not started.`
+    And stdout should contain `local configuration UI`
 
   Scenario: Initialize an empty AOF project
     Given an empty project

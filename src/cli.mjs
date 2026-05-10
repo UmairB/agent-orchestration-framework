@@ -1,5 +1,7 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
 import { applyConfig, supportedRuntimes } from "./adapters.mjs";
 import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
@@ -570,20 +572,67 @@ async function installCommand(args) {
     return;
   }
 
-  const { serveSetupUi } = await import("./setup-ui.mjs");
+  await setupUiCommand(options);
+}
+
+async function setupUiCommand(options) {
   const { openCatalog } = await import("./catalog.mjs");
   const catalog = await openCatalog();
-  try {
-    if (options.noServe || options.dryRun) {
-      console.log("Setup UI not started.");
-      return;
-    }
-    const { url } = await serveSetupUi(catalog, { port: options.port });
-    console.log(`AOF setup UI: ${url}`);
-    await new Promise(() => {});
-  } finally {
-    if (options.noServe || options.dryRun) catalog.close();
+  if (options.noServe || options.dryRun) {
+    console.log("Setup UI not started.");
+    console.log("Run `aof install` without `--no-serve` to open the local configuration UI.");
+    catalog.close();
+    return;
   }
+
+  const uiPort = Number.parseInt(options.port ?? "4177", 10);
+  const apiPort = 4178;
+  const { serveSetupUi } = await import("./setup-ui.mjs");
+  const { server } = await serveSetupUi(catalog, { port: apiPort });
+  const frontend = startSetupUiFrontend(uiPort);
+  const uiUrl = `http://127.0.0.1:${uiPort}/`;
+
+  console.log("AOF setup UI is running locally.");
+  console.log(`Open this URL in your browser: ${uiUrl}`);
+  console.log(`Project: ${process.cwd()}`);
+  console.log("Use the UI to create and edit project/global assets. Keep this terminal open while you use it.");
+  console.log("Press Ctrl+C to stop the setup UI.");
+
+  await new Promise((resolve, reject) => {
+    const shutdown = () => {
+      frontend.kill();
+      server.close(() => {
+        catalog.close();
+        resolve();
+      });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+    frontend.once("exit", (code) => {
+      server.close(() => {
+        catalog.close();
+        if (code === 0 || code === null) {
+          resolve();
+        } else {
+          reject(new Error(`Setup UI frontend exited with code ${code}.`));
+        }
+      });
+    });
+  });
+}
+
+function startSetupUiFrontend(port) {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const uiDir = path.join(repoRoot, "ui");
+  const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
+  return spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
+    cwd: uiDir,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      BROWSER: "none"
+    }
+  });
 }
 
 async function configCommand(args) {
