@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.4 Namespaced CLI Contract
 **Current phase:** Phase 19: Assets Namespace Rewrite
-**Status:** Ready for phase planning
+**Status:** Ready to execute phase
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 18 locked the command contract. Phase 19 context confirms a full assets namespace migration with no legacy aliases.
+v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 19 is planned for a full assets namespace migration with no legacy aliases.
 
 ## Current Position
 
 Phase: 19 - Assets Namespace Rewrite
-Plan: —
-Status: Ready for planning
-Last activity: 2026-05-10 - Phase 19 context gathered
+Plan: 3 plans
+Status: Ready to execute
+Last activity: 2026-05-10 - Phase 19 planned
 
 ## Resume
 
-**Stopped at:** Phase 19 context gathered
-**Resume file:** `.planning/phases/19-assets-namespace-rewrite/19-CONTEXT.md`
+**Stopped at:** Phase 19 planned
+**Resume file:** `.planning/phases/19-assets-namespace-rewrite/19-03-PLAN.md`
 
 ## Memory
 
@@ -128,3 +128,4 @@ Last activity: 2026-05-10 - Phase 19 context gathered
 - Phase 18 planning produced three waves: 18-01 current command inventory, 18-02 replacement CLI contract, and 18-03 help/errors/BDD contract. Research was skipped because the command contract was already locked in discussion.
 - Phase 18 execution completed contract artifacts only: current command inventory, replacement CLI contract, BDD contract, wave summaries, and verification. No CLI implementation changed in Phase 18.
 - Phase 19 discussion confirmed full assets namespace migration in one pass: implement all `aof assets ...` commands, remove old asset-related top-level execution paths, preserve rendering/lock/drift/global-ref behavior, and do not ship legacy aliases.
+- Phase 19 planning produced three waves: 19-01 assets source command namespace, 19-02 assets apply/validate/clean/UI migration, and 19-03 help/docs/parity hardening. Research was skipped because Phase 18 already locked the command contract and Phase 19 is codebase-local implementation planning.

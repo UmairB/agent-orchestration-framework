@@ -178,7 +178,7 @@ Redesign AOF's CLI around durable product-area namespaces, review every command 
 ### Progress
 
 - Phase 18: Command Contract Audit — complete 2026-05-10.
-- Phase 19: Assets Namespace Rewrite — pending.
+- Phase 19: Assets Namespace Rewrite — planned 2026-05-10.
 - Phase 20: Packages Namespace Rewrite — pending.
 - Phase 21: Project And Diagnostics Commands — pending.
 - Phase 22: Live Repository Verification — pending.

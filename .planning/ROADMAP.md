@@ -64,6 +64,11 @@
   - Wave 3: 18-03 completed.
   - Cross-cutting constraints: contract artifacts only; no CLI implementation in Phase 18; no legacy aliases; removed commands must not execute.
 - [ ] Phase 19: Assets Namespace Rewrite — implement `aof assets ...` for asset CRUD, global scope, apply, validate, clean, and UI.
+  - Plans: 19-01 Assets Source Command Namespace; 19-02 Assets Apply Validate Clean And UI; 19-03 Assets Namespace Help Docs And Parity Hardening.
+  - Wave 1: 19-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 19-02.
+  - Wave 3 *(blocked on Waves 1-2 completion)*: 19-03.
+  - Cross-cutting constraints: full migration; no legacy aliases; removed commands must fail without side effects; preserve existing render/lock/drift/global-ref behavior.
 - [ ] Phase 20: Packages Namespace Rewrite — implement `aof packages ...` for GSD package declaration, inspection, validation, install, and lock replay.
 - [ ] Phase 21: Project And Diagnostics Commands — settle top-level/project/config/migrate/doctor behavior and remove catalog ambiguity.
 - [ ] Phase 22: Live Repository Verification — run the rewritten CLI through new/existing repo workflows, docs, and cross-runner BDD.
@@ -78,7 +83,7 @@
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
 | v1.2 Global Asset Library | 11-15 | 15/15 | 22/22 | Complete | 2026-05-09 |
 | v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
-| v1.4 Namespaced CLI Contract | 18-22 | 3/3 | 4/22 | Active | — |
+| v1.4 Namespaced CLI Contract | 18-22 | 6/6 | 4/22 | Active | — |
 
 ## Phase Details
 
@@ -99,6 +104,11 @@
 **Goal:** Move asset source, global asset scope, rendering, validation, cleanup, and editor launch into the `aof assets ...` namespace.
 
 **Requirements:** ASSET-01, ASSET-02, ASSET-03, ASSET-04, ASSET-05, ASSET-06
+
+**Plans:**
+1. 19-01 Assets Source Command Namespace — implement `assets add/list/show/remove/use/unuse`, global scope, and source command removals.
+2. 19-02 Assets Apply Validate Clean And UI — implement `assets apply/validate/clean/ui`, configured-runtime defaults, and old render/UI command removals.
+3. 19-03 Assets Namespace Help Docs And Parity Hardening — align help, README, BDD, PowerShell parity, and phase completion artifacts.
 
 **Success Criteria:**
 1. `aof assets add skill|command|rule|agent` supports full and partial interactive asset creation.
@@ -145,4 +155,4 @@
 
 ## Next
 
-Start Phase 18 with `$gsd-discuss-phase 18`.
+Execute Phase 19 with `$gsd-execute-phase 19`.
