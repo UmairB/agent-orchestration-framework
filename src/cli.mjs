@@ -7,7 +7,7 @@ import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
 import { readJson, writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
-import { promptResourceInput, selectRuntimes } from "./prompt.mjs";
+import { confirmAction, promptResourceInput, selectRuntimes } from "./prompt.mjs";
 import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
@@ -115,11 +115,62 @@ async function initCommand(args) {
 
   await writeWorkspaceConfig(targetDir, {
     ...config,
-    $schema: "../schemas/aof.schema.json",
+    $schema: "https://aof.local/schemas/aof.schema.json",
     runtimes
   });
   await writeInstallLock(targetDir, [], runtimes, null);
   console.log(`Created ${paths.configPath}`);
+  await guideAfterInit(targetDir, runtimes, options);
+}
+
+async function guideAfterInit(targetDir, runtimes, options) {
+  console.log("Next steps:");
+  console.log("- Add project assets with `aof add`.");
+  console.log("- Add reusable global assets with `aof global add`.");
+  console.log("- Render outputs with `aof sync --dry-run` then `aof sync`.");
+
+  if (!shouldPromptForInitGuide(options)) return;
+
+  if (await confirmAction("Create a project asset now?", true)) {
+    await createGuidedProjectAssets(targetDir, runtimes);
+  }
+
+  if (await confirmAction("Create a reusable global asset now?", false)) {
+    await createGuidedGlobalAssets(runtimes);
+  }
+}
+
+async function createGuidedProjectAssets(targetDir, runtimes) {
+  const { scaffoldResource } = await import("./scaffold.mjs");
+  let createAnother = true;
+  while (createAnother) {
+    const input = await promptResourceInput({ runtimes });
+    const result = await scaffoldResource(targetDir, input);
+    console.log(`Created ${result.assetPath}`);
+    console.log(`Updated ${result.configPath}`);
+    createAnother = await confirmAction("Create another project asset?", false);
+  }
+}
+
+async function createGuidedGlobalAssets(runtimes) {
+  const { scaffoldGlobalResource } = await import("./scaffold.mjs");
+  let createAnother = true;
+  while (createAnother) {
+    const input = await promptResourceInput({ global: true, runtimes });
+    const result = await scaffoldGlobalResource(input);
+    console.log(`Created ${result.assetPath}`);
+    console.log(`Updated ${result.configPath}`);
+    createAnother = await confirmAction("Create another global asset?", false);
+  }
+}
+
+function shouldPromptForInitGuide(options) {
+  if (options.noGuide) return false;
+  return Boolean(
+    (process.stdin.isTTY && process.stdout.isTTY) ||
+    process.env.AOF_TEST_CONFIRM_INPUT !== undefined ||
+    process.env.AOF_TEST_RESOURCE_INPUT !== undefined
+  );
 }
 
 async function addCommand(args) {
@@ -494,7 +545,7 @@ async function migrateCommand(args) {
 
   await writeWorkspaceConfig(targetDir, {
     ...resolved,
-    $schema: "../schemas/aof.schema.json",
+    $schema: "https://aof.local/schemas/aof.schema.json",
     name: legacyConfig.name ?? resolved.name
   });
   await writeText(paths.lockPath, `${JSON.stringify({
@@ -796,7 +847,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noServe", "defaults", "json", "fromLock", "strict", "install"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install"].includes(key)) {
       options[key] = true;
       continue;
     }

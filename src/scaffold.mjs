@@ -13,7 +13,7 @@ export async function scaffoldResource(projectDir = process.cwd(), input = {}) {
   const paths = workspacePaths(targetDir);
   return scaffoldResourceInWorkspace(paths, input, {
     workspaceName: path.basename(targetDir),
-    schema: "../schemas/aof.schema.json",
+    schema: "https://aof.local/schemas/aof.schema.json",
     beforeRead: async () => {
       if (await isLegacyConfigOnlyProject(targetDir)) {
         throw new Error(`Legacy config exists at ${legacyConfigPath(targetDir)}. Run aof migrate before adding .aof assets.`);
@@ -77,7 +77,7 @@ async function scaffoldResourceInWorkspace(paths, input, options = {}) {
 
   const config = {
     ...existing,
-    $schema: existing.$schema ?? options.schema ?? "../schemas/aof.schema.json",
+    $schema: existing.$schema ?? options.schema ?? "https://aof.local/schemas/aof.schema.json",
     name: existing.name ?? options.workspaceName ?? path.basename(paths.workspaceDir),
     resources,
     packages: existing.packages ?? []
@@ -119,7 +119,7 @@ function assetPath(kind, id) {
   return path.join("assets", definition.plural, id, defaultBodyFile(kind)).replaceAll(path.sep, "/");
 }
 
-async function readExistingConfig(configPath, workspaceName, schema = "../schemas/aof.schema.json") {
+async function readExistingConfig(configPath, workspaceName, schema = "https://aof.local/schemas/aof.schema.json") {
   if (await exists(configPath)) return readJson(configPath);
   return {
     $schema: schema,

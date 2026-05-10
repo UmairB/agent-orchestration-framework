@@ -234,7 +234,14 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
-  let match = step.match(/^I run `(.+)` with input `([\s\S]*)`$/);
+  let match = step.match(/^I run `(.+)` with input `([\s\S]*)` and resource input `([\s\S]*)`$/);
+  if (match) {
+    const input = match[2].includes("|") ? match[2].split("|").join("\n") : match[2];
+    context.lastResult = await runCli(context, match[1], `${input}\n`, { resourceInput: match[3] });
+    return;
+  }
+
+  match = step.match(/^I run `(.+)` with input `([\s\S]*)`$/);
   if (match) {
     const input = match[2].includes("|") ? match[2].split("|").join("\n") : match[2];
     context.lastResult = await runCli(context, match[1], `${input}\n`);

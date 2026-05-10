@@ -327,7 +327,7 @@ function defaultConfigName(projectDir, scope) {
 
 function baseConfig(existing, projectDir, scope, overrides = {}) {
   return {
-    $schema: existing.$schema ?? "../schemas/aof.schema.json",
+    $schema: existing.$schema ?? "https://aof.local/schemas/aof.schema.json",
     name: existing.name ?? defaultConfigName(projectDir, scope),
     resources: overrides.resources ?? existing.resources ?? [],
     packages: existing.packages ?? [],
@@ -434,7 +434,7 @@ async function readExistingConfig(configPath, defaultName) {
   }
 
   return {
-    $schema: "../schemas/aof.schema.json",
+    $schema: "https://aof.local/schemas/aof.schema.json",
     name: defaultName,
     resources: [],
     packages: []

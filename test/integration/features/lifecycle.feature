@@ -22,10 +22,21 @@ Feature: AOF CLI lifecycle
     When I run `init --codex`
     Then the command should succeed
     And file `.aof/aof.config.json` should exist
+    And file `.aof/aof.config.json` should contain `"https://aof.local/schemas/aof.schema.json"`
     And file `.aof/aof.config.json` should contain `"resources": []`
     And file `.codex/skills/project-context/SKILL.md` should not exist
     And file `.codex/commands/prime.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain runtime `codex`
+
+  Scenario: Guided init can create an explicit project asset
+    Given an empty project
+    When I run `init --codex` with input `unused|unused|yes|no|no` and resource input `{"kind":"agent","id":"research-agent","description":"Research agent","runtimes":["codex"],"body":"Research the repository."}`
+    Then the command should succeed
+    And stdout should contain `Next steps:`
+    And stdout should contain `Created`
+    And file `.aof/assets/agents/research-agent/AGENT.md` should contain `Research the repository.`
+    And file `.aof/aof.config.json` should contain `"id": "research-agent"`
+    And file `.aof/aof.config.json` should contain `"kind": "agent"`
 
   Scenario: Refuse to overwrite an existing project config
     Given a project initialized with AOF config

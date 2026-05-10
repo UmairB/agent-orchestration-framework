@@ -21,7 +21,7 @@ export async function writeWorkspaceConfig(targetDir, config) {
   }
 
   await writeText(paths.configPath, `${JSON.stringify({
-    $schema: config.$schema ?? "../schemas/aof.schema.json",
+    $schema: config.$schema ?? "https://aof.local/schemas/aof.schema.json",
     name: config.name ?? "assistant-project",
     resources,
     packages: config.packages ?? [],

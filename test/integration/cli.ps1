@@ -369,6 +369,11 @@ function Run-Step {
     return
   }
 
+  if ($Step -match "^I run ``(.+)`` with input ``([\s\S]*)`` and resource input ``([\s\S]*)``$") {
+    $Context.LastResult = Run-Cli $Context $Matches[1] ($Matches[2].Replace("|", "`n") + "`n") "" $Matches[3]
+    return
+  }
+
   if ($Step -match "^I run ``(.+)`` with input ``([\s\S]*)``$") {
     $Context.LastResult = Run-Cli $Context $Matches[1] ($Matches[2].Replace("|", "`n") + "`n")
     return
