@@ -4,17 +4,24 @@
 
 AOF is a repo-local abstraction layer for coding assistant setup. It lets users define assistant-facing assets once, in an `.aof/` workspace, then initialize and synchronize concrete assistant runtimes such as Claude Code and Codex.
 
-The current codebase provides a Node.js CLI, a SQLite-backed catalog, Claude/Codex render adapters, a setup UI configuration editor, and GSD installer delegation. `.aof/` is the durable source of truth for configuration, assets, runtime overrides, and install state, while generated `.claude/` and `.codex/` folders are treated as output.
+The current codebase provides a Node.js CLI, Claude/Codex render adapters, a setup UI configuration editor, and GSD installer delegation. `.aof/` is the durable source of truth for configuration, assets, runtime overrides, and install state, while generated `.claude/` and `.codex/` folders are treated as output.
 
 ## Current State
 
 v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, Phase 13 added explicit associated files for skill helper code, Phase 14 added setup UI support for creating, editing, labeling, and referencing global assets, and Phase 15 completed cross-runner verification and milestone audit. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-## Current Milestone: None Selected
+## Current Milestone: v1.4 Namespaced CLI Contract
 
-v1.2 is complete. The next milestone has not been selected.
+**Goal:** Redesign AOF's CLI around durable product-area namespaces, review every command contract explicitly, remove legacy command ambiguity, and harden the rewritten CLI against live repository workflows.
 
-**Last shipped milestone:** v1.2 Global Asset Library
+**Target features:**
+- Review every current command and subcommand before implementation: purpose, name, arguments, missing-argument behavior, interactive prompts, dry-run behavior, output, errors, docs, and BDD coverage.
+- Establish a namespaced command model for future growth, starting with `aof assets ...` for asset source/rendering/UI workflows and `aof packages ...` for managed package workflows such as GSD.
+- Keep `aof init` top-level for project workspace creation only.
+- Remove legacy top-level asset/package commands rather than preserving aliases.
+- Validate the rewritten command contract against live new-repo and existing-repo workflows.
+
+**Last shipped milestone:** v1.3 Interactive CLI Hardening
 
 ## Core Value
 
@@ -68,7 +75,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 
 ### Active
 
-No active milestone requirements.
+- [ ] Define a complete command contract for every current and replacement CLI command before implementing the rewrite.
+- [ ] Introduce a namespaced asset workflow for project/global skills, commands, rules, agents, rendering, validation, cleanup, and the editor UI.
+- [ ] Introduce a namespaced package workflow for declaring and installing managed packages such as GSD.
+- [ ] Re-home or remove ambiguous lifecycle/config/catalog commands so no command name implies the wrong side effect.
+- [ ] Verify the final CLI against live repository workflows and BDD coverage.
 
 ### Out of Scope
 
@@ -85,7 +96,7 @@ AOF currently exists as a compact Node.js 20+ ESM CLI. The root package exposes 
 The existing architecture is modular:
 
 - `src/cli.mjs` orchestrates commands and option parsing.
-- `src/catalog.mjs` persists catalog items in SQLite.
+- `src/catalog.mjs` is currently disabled pending a coherent catalog product path.
 - `src/adapters.mjs` renders portable resources into Claude and Codex layouts.
 - `src/dsl.mjs` loads and normalizes AOF config.
 - `src/frameworks.mjs` delegates framework installs, currently including GSD.
@@ -102,6 +113,8 @@ The codebase map in `.planning/codebase/` identifies several important design pr
 - The reviewed architecture document at `C:\Users\Umair\Downloads\architecture-design-vendor-neutral-coding-assistant-dsl.html` informed v1.1: CLI lifecycle commands, MCP/hooks/project-doc/settings primitives, framework package dependencies and conflict detection, graceful degradation policy, and shared BDD scenarios.
 
 The long-term product direction includes task management: kanban boards, task assignment to agents, progress visibility, and orchestration. That future should inform the data model enough to avoid painting the project into a corner, but v1 should prioritize assistant asset configuration and runtime synchronization.
+
+v1.4 responds to live first-run and command review findings from v1.3. The existing top-level CLI has become overloaded: `install` can mean opening an editor or installing a framework, `add` only applies to assets, `global` is a scope rather than a product area, and catalog/SQLite terminology remains visible despite not being an active product path. The rewrite should treat command names as a public contract, not a thin wrapper over current implementation structure.
 
 ## Constraints
 
@@ -140,10 +153,14 @@ The long-term product direction includes task management: kanban boards, task as
 | Setup UI uses explicit Project / Global scope | Source ownership must stay visible so users do not accidentally edit global assets while intending project-local changes | Implemented in Phase 14 |
 | Setup UI references globals without copying | The selected v1.2 behavior is reference-first reuse; project configs own `globalRefs`, not global source snapshots | Implemented in Phase 14 |
 | v1.2 closeout requires cross-runner global asset verification | Global reuse touches path resolution, config loading, rendering, lock state, setup UI APIs, and Windows path handling | Implemented in Phase 15 |
+| v1.4 is a full CLI rewrite with no legacy aliases | The command surface is still early enough to fix directly; preserving confusing aliases would lock in the wrong contract | — Pending |
+| CLI commands are grouped by product area | AOF will grow beyond assets, so commands need namespaces such as `assets` and `packages` instead of overloaded top-level verbs | — Pending |
+| `aof init` remains top-level | Project initialization creates the AOF workspace itself and is not an asset or package operation | — Pending |
+| GSD is managed under `aof packages` | GSD is a managed package/tooling integration, not an assistant asset | — Pending |
 
 ## Next Milestone Goals
 
-After global asset reuse, broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
+After the namespaced CLI contract is stable, broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
 
 ## Evolution
 
@@ -163,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-09 after Phase 15 completion*
+*Last updated: 2026-05-10 after starting v1.4 Namespaced CLI Contract*

@@ -1,77 +1,72 @@
 # Requirements: AOF
 
-**Defined:** 2026-05-08
-**Milestone:** v1.2 Global Asset Library
+**Defined:** 2026-05-10
+**Milestone:** v1.4 Namespaced CLI Contract
 **Core Value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
-## v1.2 Requirements
+## v1.4 Requirements
 
-### Global Library
+### Command Contract
 
-- [x] **GLIB-01**: User can initialize or access a global AOF library at `~/.aof`.
-- [x] **GLIB-02**: User can create global skills, agents, and rules in `~/.aof`.
-- [x] **GLIB-03**: User can list and inspect global assets independently from project-local assets.
-- [x] **GLIB-04**: User receives clear validation errors when a global asset is malformed or missing required files.
+- [ ] **CLI-01**: User can see a complete, documented command contract for every current and replacement AOF CLI command before the rewrite is implemented.
+- [ ] **CLI-02**: User can rely on command names matching their side effects; editor launch, asset rendering, package installation, validation, cleanup, and diagnostics are not overloaded under misleading verbs.
+- [ ] **CLI-03**: User can run the rewritten CLI without legacy aliases for removed top-level commands.
+- [ ] **CLI-04**: User receives clear help output that groups commands by product area and shows common examples for each namespace.
 
-### Project References
+### Asset Namespace
 
-- [x] **GREF-01**: User can reference global assets by ID from a project `.aof` config without copying the asset into the project.
-- [x] **GREF-02**: User receives clear validation errors when a project references a missing global asset.
-- [x] **GREF-03**: AOF detects local/global asset ID conflicts and requires an explicit resolution rather than silently choosing one.
-- [x] **GREF-04**: Project diagnostics show whether each rendered asset came from project-local source or the global library.
+- [ ] **ASSET-01**: User can create project assets through `aof assets add skill|command|rule|agent`, including partial interactive forms such as `aof assets add skill`.
+- [ ] **ASSET-02**: User can create, inspect, validate, and reference global assets through the assets namespace without a separate top-level `global` command.
+- [ ] **ASSET-03**: User can render configured assets to all configured runtimes with `aof assets apply`, while runtime flags narrow a single run.
+- [ ] **ASSET-04**: User can validate asset configuration and referenced global assets through `aof assets validate`.
+- [ ] **ASSET-05**: User can open the source asset editor through `aof assets ui`; no install command launches the editor.
+- [ ] **ASSET-06**: User can clean lock-owned generated asset outputs through the assets namespace with drift protection preserved.
 
-### Rendering And Lock State
+### Package Namespace
 
-- [x] **GRND-01**: `aof apply` renders referenced global assets into Claude Code and Codex outputs alongside local project assets.
-- [x] **GRND-02**: `aof sync` includes referenced global assets in validation, warning analysis, and render planning.
-- [x] **GRND-03**: Lock state records global asset source scope for generated outputs.
-- [x] **GRND-04**: Runtime overrides on global assets are honored during rendering.
+- [ ] **PKG-01**: User can declare GSD package intent through `aof packages add gsd` without running networked installer code.
+- [ ] **PKG-02**: User can install declared GSD package intent through `aof packages install gsd`, with explicit network/package-code boundary output.
+- [ ] **PKG-03**: User can inspect and validate managed package intent through the packages namespace.
+- [ ] **PKG-04**: User can replay package install intent from lock state through the packages namespace without using legacy `aof install --from-lock`.
 
-### Code-Bearing Assets
+### Project And Diagnostics
 
-- [x] **CODE-01**: Global assets can own associated files under their asset directory.
-- [x] **CODE-02**: Rendering preserves associated files for runtime asset shapes that require directories, such as skills with helper scripts.
-- [x] **CODE-03**: Validation rejects associated files that escape the asset directory or would overwrite unrelated generated output.
+- [ ] **PROJ-01**: User can initialize a project workspace with top-level `aof init` and no default assets, package installs, rendering, UI launch, or catalog initialization.
+- [ ] **PROJ-02**: User can inspect, validate, and diagnose project-level AOF configuration through commands whose namespace and wording make their scope clear.
+- [ ] **PROJ-03**: User can migrate legacy root config intentionally through the rewritten command surface with clear before/after output.
+- [ ] **PROJ-04**: User does not see active SQLite/catalog behavior unless a coherent catalog product path is intentionally reintroduced.
 
-### Setup UI
+### Live Hardening And Coverage
 
-- [x] **GUI-01**: User can switch the setup UI between project asset editing and global asset editing.
-- [x] **GUI-02**: User can create and edit global skills, agents, and rules through the setup UI.
-- [x] **GUI-03**: User can add a global asset reference to the current project through the setup UI without copying the global asset.
-- [x] **GUI-04**: Setup UI clearly labels asset source scope so users do not confuse global edits with project-local edits.
-
-### Verification
-
-- [x] **TEST-01**: Unit tests cover global library path resolution, reference resolution, conflict handling, associated files, and lock metadata.
-- [x] **TEST-02**: BDD integration tests cover CLI global asset creation, project reference rendering, missing-reference diagnostics, and UI API behavior.
-- [x] **TEST-03**: UI build passes after global asset management changes.
+- [ ] **HARD-01**: New-repository live testing covers init, project asset creation, global asset creation/reference, UI launch, apply, validate, clean, package add, and package install dry-run.
+- [ ] **HARD-02**: Existing-repository live testing covers migration, validation, apply, cleanup, global references, and package intent without corrupting user files.
+- [ ] **HARD-03**: BDD scenarios cover each accepted command contract, including missing-argument interactive behavior and rejected legacy commands.
+- [ ] **HARD-04**: README and CLI help examples match the final command surface exactly.
 
 ## Future Requirements
 
-### Distribution
+### Catalog And Distribution
 
-- **DIST-01**: User can publish or discover hosted global asset packages.
-- **DIST-02**: User can synchronize global assets across machines.
-- **DIST-03**: User can vendor a global asset into project `.aof` as an explicit snapshot workflow.
-
-### Versioning
-
-- **VERS-01**: User can pin global asset references to semantic versions.
-- **VERS-02**: User can upgrade project references from one global asset version to another.
+- **CAT-01**: User can discover or install assets from a hosted or local catalog after the catalog product path is redesigned.
+- **DIST-01**: User can publish, synchronize, or vendor global assets across machines.
 
 ### Runtime Expansion
 
-- **RTME-01**: Global assets can target additional assistant runtimes beyond Claude Code and Codex.
+- **RTME-01**: User can target additional assistant runtimes beyond Claude Code and Codex.
+
+### UI Execution
+
+- **UIX-01**: User can execute init/apply/package operations from the UI after local execution safety and confirmation semantics are designed.
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Hosted package discovery or publishing | Requires registry semantics beyond local global reuse. |
-| Cross-machine synchronization of `~/.aof` | Requires account, sync, or external storage decisions not needed for local reuse. |
-| Vendoring/copying global assets into project `.aof` as the default workflow | User selected reference-first behavior; copies create source-of-truth confusion. |
-| Full semantic versioning for global assets | Useful later, but v1.2 only needs enough source metadata for auditability. |
-| Runtime support beyond Claude Code and Codex | Current v1 runtime boundary remains intact. |
+| Legacy command aliases | User explicitly selected a full rewrite with no legacy support. |
+| Reintroducing SQLite-backed catalog behavior | Catalog behavior was removed from active first-run paths and needs a separate product design before returning. |
+| Hosted registry/discovery | This milestone fixes local CLI contracts; distribution remains future scope. |
+| UI-driven apply/install execution | UI remains a source editor; command execution remains in CLI for this milestone. |
+| Runtime support beyond Claude Code and Codex | The CLI rewrite should not expand runtime scope at the same time. |
 
 ## Traceability
 
@@ -79,35 +74,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GLIB-01 | Phase 11 | Complete |
-| GLIB-02 | Phase 11 | Complete |
-| GLIB-03 | Phase 11 | Complete |
-| GLIB-04 | Phase 11 | Complete |
-| GREF-01 | Phase 12 | Complete |
-| GREF-02 | Phase 12 | Complete |
-| GREF-03 | Phase 12 | Complete |
-| GREF-04 | Phase 12 | Complete |
-| GRND-01 | Phase 12 | Complete |
-| GRND-02 | Phase 12 | Complete |
-| GRND-03 | Phase 12 | Complete |
-| GRND-04 | Phase 12 | Complete |
-| CODE-01 | Phase 13 | Complete |
-| CODE-02 | Phase 13 | Complete |
-| CODE-03 | Phase 13 | Complete |
-| GUI-01 | Phase 14 | Complete |
-| GUI-02 | Phase 14 | Complete |
-| GUI-03 | Phase 14 | Complete |
-| GUI-04 | Phase 14 | Complete |
-| TEST-01 | Phase 15 | Complete |
-| TEST-02 | Phase 15 | Complete |
-| TEST-03 | Phase 15 | Complete |
+| CLI-01 | Phase 18 | Pending |
+| CLI-02 | Phase 18 | Pending |
+| CLI-03 | Phase 18 | Pending |
+| CLI-04 | Phase 18 | Pending |
+| ASSET-01 | Phase 19 | Pending |
+| ASSET-02 | Phase 19 | Pending |
+| ASSET-03 | Phase 19 | Pending |
+| ASSET-04 | Phase 19 | Pending |
+| ASSET-05 | Phase 19 | Pending |
+| ASSET-06 | Phase 19 | Pending |
+| PKG-01 | Phase 20 | Pending |
+| PKG-02 | Phase 20 | Pending |
+| PKG-03 | Phase 20 | Pending |
+| PKG-04 | Phase 20 | Pending |
+| PROJ-01 | Phase 21 | Pending |
+| PROJ-02 | Phase 21 | Pending |
+| PROJ-03 | Phase 21 | Pending |
+| PROJ-04 | Phase 21 | Pending |
+| HARD-01 | Phase 22 | Pending |
+| HARD-02 | Phase 22 | Pending |
+| HARD-03 | Phase 22 | Pending |
+| HARD-04 | Phase 22 | Pending |
 
 **Coverage:**
-- v1.2 requirements: 22 total
+- v1.4 requirements: 22 total
 - Mapped to phases: 22
 - Unmapped: 0
-- Complete: 22
+- Complete: 0
 
 ---
-*Requirements defined: 2026-05-08*
-*Last updated: 2026-05-09 after Phase 15 completion*
+*Requirements defined: 2026-05-10*
+*Last updated: 2026-05-10 after milestone initialization*

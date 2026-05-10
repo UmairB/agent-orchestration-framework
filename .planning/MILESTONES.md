@@ -154,3 +154,31 @@ Harden AOF's live first-run behavior and replace rough typed prompts with keyboa
 - `aof install --interactive` redesign.
 - Hosted catalog or registry-backed asset discovery.
 - Additional live-repository hardening when new concrete findings appear.
+
+## v1.4 — Namespaced CLI Contract
+
+**Status:** Active
+**Started:** 2026-05-10
+**Phases:** 18-22
+**Requirements:** 0/22 complete
+
+### Goal
+
+Redesign AOF's CLI around durable product-area namespaces, review every command contract explicitly, remove legacy command ambiguity, and harden the rewritten CLI against live repository workflows.
+
+### Planned Scope
+
+1. Review every current command and subcommand before implementation.
+2. Replace overloaded top-level asset commands with `aof assets ...`.
+3. Replace GSD install flows with `aof packages ...`.
+4. Keep `aof init` top-level and limited to project workspace initialization.
+5. Remove legacy aliases instead of preserving deprecated command paths.
+6. Validate the final command surface through live repository workflows and BDD coverage.
+
+### Progress
+
+- Phase 18: Command Contract Audit — pending discussion.
+- Phase 19: Assets Namespace Rewrite — pending.
+- Phase 20: Packages Namespace Rewrite — pending.
+- Phase 21: Project And Diagnostics Commands — pending.
+- Phase 22: Live Repository Verification — pending.

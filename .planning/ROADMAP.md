@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-09 after v1.3 completion
+**Last updated:** 2026-05-10 after v1.4 initialization
 
 ## Milestones
 
@@ -9,6 +9,7 @@
 - ✅ **v1.1 Aligned Core Hardening** — Phases 6-10, shipped 2026-05-08. Archive: [v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - ✅ **v1.2 Global Asset Library** — Phases 11-15, shipped 2026-05-09. Archive: [v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 - ✅ **v1.3 Interactive CLI Hardening** — Phases 16-17, shipped 2026-05-09. Archive: [v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
+- 🔵 **v1.4 Namespaced CLI Contract** — Phases 18-22, active.
 
 ## Phases
 
@@ -37,50 +38,30 @@
 <details>
 <summary>✅ v1.2 Global Asset Library (Phases 11-15) — SHIPPED 2026-05-09</summary>
 
-- [x] Phase 11: Global Library Workspace — completed 2026-05-08. Defined `~/.aof` source storage and global asset CRUD.
-  - Plans: 11-01 Global Workspace Path And Manifest Foundation; 11-02 Global CLI Asset Operations; 11-03 Global Validation And Phase Hardening.
-  - Wave 1: 11-01 completed.
-  - Wave 2: 11-02 completed.
-  - Wave 3: 11-03 completed.
-  - Cross-cutting constraints: `~/.aof` mirrors project workspace shape; use explicit `aof global ...` commands; `~/.aof/aof.config.json` is canonical; project validation only fails for referenced malformed global assets.
-- [x] Phase 12: Project Reference Rendering — completed 2026-05-08. Resolved global references from project configs and rendered them with lock traceability.
-  - Plans: 12-01 Global Reference Model And Validation; 12-02 Apply And Sync Global Reference Rendering; 12-03 Global Reference Diagnostics And Lock Traceability.
-  - Wave 1: 12-01 completed.
-  - Wave 2: 12-02 completed.
-  - Wave 3: 12-03 completed.
-  - Cross-cutting constraints: project configs use top-level `globalRefs`; references do not copy source assets; only referenced global assets affect project validation; lock entries must preserve global source scope.
-- [x] Phase 13: Code-Bearing Asset Files — completed 2026-05-08. Preserved explicit associated files for skill assets with validation, rendering, lock ownership, and BDD coverage.
-  - Plans: 13-01 Associated File Model And Validation; 13-02 Associated File Rendering And Lock Ownership; 13-03 Associated File BDD Docs And Phase Hardening.
-  - Wave 1: 13-01 completed.
-  - Wave 2: 13-02 completed.
-  - Wave 3: 13-03 completed.
-  - Cross-cutting constraints: associated files use explicit `files` entries; paths are relative to the asset directory; Phase 13 renders skill helper files; unsafe paths and output conflicts fail before writes.
-- [x] Phase 14: Global Asset Setup UI — completed 2026-05-09. Added scoped Project/Global setup UI APIs, global asset editing, project reference management, source labels, and global skill helper-file editing.
-  - Plans: 14-01 Scoped Setup UI Config API; 14-02 Project Global Reference API And UI; 14-03 Setup UI BDD Docs And Phase Hardening.
-  - Wave 1: 14-01 completed.
-  - Wave 2: 14-02 completed.
-  - Wave 3: 14-03 completed.
-  - Cross-cutting constraints: UI remains config-editing only; Project/Global scope must be explicit; references write `globalRefs` without copying; referenced globals are read-only in Project scope; associated-file editing is global-skill-only and explicit.
-- [x] Phase 15: Global Asset Verification — completed 2026-05-09. Hardened unit, BDD, UI API, PowerShell parity, and build coverage for global reuse.
-  - Plans: 15-01 Global Asset Coverage Audit; 15-02 Cross-Runner Verification And Hardening; 15-03 Milestone Audit And Archive.
-  - Wave 1: 15-01 completed.
-  - Wave 2: 15-02 completed.
-  - Wave 3: 15-03 completed.
-  - Cross-cutting constraints: no new feature scope; add code only for concrete verification gaps; require unit, UI build, Node BDD, and PowerShell integration evidence; archive v1.2 after audit.
+- [x] Phase 11: Global Library Workspace — completed 2026-05-08
+- [x] Phase 12: Project Reference Rendering — completed 2026-05-08
+- [x] Phase 13: Code-Bearing Asset Files — completed 2026-05-08
+- [x] Phase 14: Global Asset Setup UI — completed 2026-05-09
+- [x] Phase 15: Global Asset Verification — completed 2026-05-09
 
 </details>
 
 <details>
 <summary>✅ v1.3 Interactive CLI Hardening (Phases 16-17) — SHIPPED 2026-05-09</summary>
 
-- [x] Phase 16: Live Repository Hardening — completed 2026-05-09. Removed active SQLite/default catalog behavior from first-run paths.
-  - Wave 1: empty repo init hardening completed.
-  - Cross-cutting constraints: project and global assets remain explicit; catalog storage stays disabled until a real product path exists.
-- [x] Phase 17: Interactive CLI — completed 2026-05-09. Added Inquirer prompt foundation and interactive project/global asset creation.
-  - Plans: 17-01 Inquirer Prompt Foundation; 17-02 Interactive Asset Creation Flow.
-  - Wave 1: 17-01 completed.
-  - Wave 2: 17-02 completed.
-  - Cross-cutting constraints: direct flag commands remain available for automation; deterministic BDD prompt inputs remain supported.
+- [x] Phase 16: Live Repository Hardening — completed 2026-05-09
+- [x] Phase 17: Interactive CLI — completed 2026-05-09
+
+</details>
+
+<details open>
+<summary>🔵 v1.4 Namespaced CLI Contract (Phases 18-22) — ACTIVE</summary>
+
+- [ ] Phase 18: Command Contract Audit — review every current command and lock the replacement taxonomy before code changes.
+- [ ] Phase 19: Assets Namespace Rewrite — implement `aof assets ...` for asset CRUD, global scope, apply, validate, clean, and UI.
+- [ ] Phase 20: Packages Namespace Rewrite — implement `aof packages ...` for GSD package declaration, inspection, validation, install, and lock replay.
+- [ ] Phase 21: Project And Diagnostics Commands — settle top-level/project/config/migrate/doctor behavior and remove catalog ambiguity.
+- [ ] Phase 22: Live Repository Verification — run the rewritten CLI through new/existing repo workflows, docs, and cross-runner BDD.
 
 </details>
 
@@ -92,93 +73,71 @@
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
 | v1.2 Global Asset Library | 11-15 | 15/15 | 22/22 | Complete | 2026-05-09 |
 | v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
+| v1.4 Namespaced CLI Contract | 18-22 | 0/0 | 0/22 | Active | — |
 
 ## Phase Details
 
-### Phase 11: Global Library Workspace
+### Phase 18: Command Contract Audit
 
-**Goal:** Establish `~/.aof` as the user-global source workspace and support global asset creation, listing, inspection, and validation.
+**Goal:** Review every CLI command and subcommand from the user's point of view, then lock the replacement namespaced contract before implementation.
 
-**Requirements:** GLIB-01, GLIB-02, GLIB-03, GLIB-04
-
-**Success Criteria:**
-1. CLI can initialize or locate the global AOF library at `~/.aof`.
-2. CLI can create global skills, agents, and rules with the same file-backed conventions as project assets.
-3. CLI can list and inspect global assets separately from project-local assets.
-4. Validation reports malformed global assets and missing required files clearly.
-
-### Phase 12: Project Reference Rendering
-
-**Goal:** Let project `.aof` configs reference global assets by ID and include them in validation, diagnostics, rendering, and lock state.
-
-**Requirements:** GREF-01, GREF-02, GREF-03, GREF-04, GRND-01, GRND-02, GRND-03, GRND-04
+**Requirements:** CLI-01, CLI-02, CLI-03, CLI-04
 
 **Success Criteria:**
-1. Project config can declare global asset references without copying global files into project `.aof`.
-2. Missing global references and local/global ID conflicts produce actionable validation errors.
-3. `aof apply` and `aof sync` render referenced global assets into Claude Code and Codex outputs.
-4. Runtime overrides on global assets are honored.
-5. Lock and diagnostic output identify whether generated assets came from local or global source.
+1. Every current command is classified as keep, replace, move, or remove.
+2. Replacement commands have explicit purpose, arguments, missing-argument behavior, prompt behavior, dry-run behavior, output, errors, and BDD expectations.
+3. The accepted taxonomy includes no legacy aliases.
+4. Help structure and examples are drafted from the accepted command contract.
 
-### Phase 13: Code-Bearing Asset Files
+### Phase 19: Assets Namespace Rewrite
 
-**Goal:** Support asset-owned helper files for global assets while preventing path escapes and unrelated output overwrites.
+**Goal:** Move asset source, global asset scope, rendering, validation, cleanup, and editor launch into the `aof assets ...` namespace.
 
-**Requirements:** CODE-01, CODE-02, CODE-03
-
-**Success Criteria:**
-1. Global asset directories can include associated files such as Python scripts, templates, or examples.
-2. Rendering preserves associated files for directory-shaped runtime assets such as skills.
-3. Validation rejects associated files that escape the asset directory.
-4. Render planning prevents associated files from overwriting unrelated generated output.
-
-### Phase 14: Global Asset Setup UI
-
-**Goal:** Extend the setup UI so users can create, edit, distinguish, and reference global assets.
-
-**Requirements:** GUI-01, GUI-02, GUI-03, GUI-04
+**Requirements:** ASSET-01, ASSET-02, ASSET-03, ASSET-04, ASSET-05, ASSET-06
 
 **Success Criteria:**
-1. UI can switch between project asset editing and global asset editing.
-2. UI can create and edit global skills, agents, and rules.
-3. UI can add a global asset reference to the current project without copying the asset source.
-4. UI clearly labels project-local versus global asset scope.
+1. `aof assets add skill|command|rule|agent` supports full and partial interactive asset creation.
+2. Global asset creation, inspection, validation, and project reference operations are available under `aof assets`.
+3. `aof assets apply` renders all configured project runtimes by default and supports runtime narrowing flags.
+4. `aof assets ui` starts the editor; no install command starts the editor.
+5. Asset validation and cleanup preserve existing diagnostics, lock, and drift-protection behavior.
 
-### Phase 15: Global Asset Verification
+### Phase 20: Packages Namespace Rewrite
 
-**Goal:** Prove global asset behavior across unit tests, integration scenarios, UI API behavior, and UI build.
+**Goal:** Move managed package intent and installer execution into `aof packages ...`, with GSD as the concrete v1.4 package.
 
-**Requirements:** TEST-01, TEST-02, TEST-03
-
-**Success Criteria:**
-1. Unit tests cover path resolution, reference resolution, conflicts, associated files, and lock metadata.
-2. BDD integration tests cover global asset creation, reference rendering, missing-reference diagnostics, and UI API behavior.
-3. `npm run ui:build` passes after UI changes.
-4. Standard `npm run test:unit` and `npm test` checks pass for the milestone behavior.
-
-### Phase 16: Live Repository Hardening
-
-**Goal:** Use live-repository first-run findings to harden AOF's current project/global asset model.
-
-**Requirements:** INIT-01, INIT-02, INIT-03
+**Requirements:** PKG-01, PKG-02, PKG-03, PKG-04
 
 **Success Criteria:**
-1. Empty project initialization does not seed built-in defaults.
-2. First-run CLI commands do not initialize SQLite or emit experimental SQLite warnings.
-3. Disabled catalog commands explain the current supported project/global asset paths.
+1. `aof packages add gsd` records package intent without running networked installer code.
+2. `aof packages install gsd` runs the installer with explicit network/package-code boundary output.
+3. Package inspection and validation are available through the packages namespace.
+4. Lock replay no longer depends on `aof install --from-lock`.
 
-### Phase 17: Interactive CLI
+### Phase 21: Project And Diagnostics Commands
 
-**Goal:** Replace typed prompt helpers with keyboard-driven prompts and provide explicit interactive asset creation flows.
+**Goal:** Settle the commands that are not asset or package operations: project initialization, project config inspection, migration, diagnostics, and disabled catalog behavior.
 
-**Requirements:** ICLI-01 through ICLI-06, TEST-01 through TEST-03
+**Requirements:** PROJ-01, PROJ-02, PROJ-03, PROJ-04
 
 **Success Criteria:**
-1. Runtime prompts use checkbox-style keyboard navigation.
-2. `aof add` can create project assets interactively.
-3. `aof global add` can create global assets interactively.
-4. Direct flag-based usage and deterministic test inputs remain supported.
+1. `aof init` creates only the project workspace/config/lock and never creates default assets, launches UI, renders outputs, installs packages, or initializes catalog storage.
+2. Project-level inspection, validation, and diagnostics have clear names and scopes.
+3. Migration output explains exactly what changes and what remains untouched.
+4. Catalog commands are removed or report a deliberate unsupported-product-path message with no SQLite side effects.
+
+### Phase 22: Live Repository Verification
+
+**Goal:** Prove the final CLI contract against real new-repo and existing-repo workflows, then align docs and BDD coverage with the shipped behavior.
+
+**Requirements:** HARD-01, HARD-02, HARD-03, HARD-04
+
+**Success Criteria:**
+1. Live new-repository testing covers init, assets, globals, UI, apply, validate, clean, and package dry-runs.
+2. Live existing-repository testing covers migration, validation, rendering, cleanup, global references, and package intent without corrupting user files.
+3. Node and PowerShell BDD scenarios cover accepted commands and rejected legacy commands.
+4. README and CLI help examples match the final command surface exactly.
 
 ## Next
 
-v1.3 is complete. Select the next milestone before planning more work.
+Start Phase 18 with `$gsd-discuss-phase 18`.

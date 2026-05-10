@@ -1,13 +1,13 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.3 Interactive CLI Hardening
-**Current phase:** Complete
-**Status:** Awaiting next milestone selection
+**Current milestone:** v1.4 Namespaced CLI Contract
+**Current phase:** Phase 18: Command Contract Audit
+**Status:** Ready for phase discussion
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-09 after Phase 15 completion)
+See: `.planning/PROJECT.md` (updated 2026-05-10 after v1.4 start)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.3 is complete. Next work should start by selecting or defining the next milestone.
+v1.4 is focused on a full CLI rewrite around durable namespaces. Start by reviewing every current command and subcommand before implementation.
 
 ## Current Position
 
-Phase: complete
-Plan: v1.3 milestone audit complete
-Status: Awaiting next milestone selection
-Last activity: 2026-05-09 - v1.3 Interactive CLI Hardening milestone archived
+Phase: 18 - Command Contract Audit
+Plan: —
+Status: Ready for discussion
+Last activity: 2026-05-10 - v1.4 Namespaced CLI Contract milestone initialized
 
 ## Resume
 
-**Stopped at:** v1.3 complete
-**Resume file:** `.planning/milestones/v1.3-MILESTONE-AUDIT.md`
+**Stopped at:** Phase 18 discussion
+**Resume file:** `.planning/ROADMAP.md`
 
 ## Memory
 
@@ -121,3 +121,6 @@ Last activity: 2026-05-09 - v1.3 Interactive CLI Hardening milestone archived
 - Phase 17 wave 1 added `@inquirer/prompts` and replaced the prompt wrapper with checkbox/confirm prompts while preserving env-driven BDD inputs.
 - Phase 17 wave 2 added no-argument `aof add` and `aof global add` interactive asset creation flows for project/global assets, with deterministic BDD prompt input and no SQLite/default catalog behavior.
 - v1.3 Interactive CLI Hardening shipped on 2026-05-09 with Phase 16 and Phase 17 complete. `aof install --interactive`, hosted catalog behavior, and further live-repo hardening are deferred to future milestones.
+- Milestone v1.4 started on 2026-05-10 as Namespaced CLI Contract.
+- v1.4 user decisions: review every CLI command and subcommand; perform a full rewrite with no legacy aliases; use product-area namespaces so AOF can grow beyond assets; keep `aof init` top-level; use `aof assets ...` for skills, commands, rules, agents, apply, validate, clean, global asset scope, and UI; use `aof packages add gsd` for managed package intent and `aof packages install gsd` for installer execution.
+- Phase 18 starts with command-by-command contract review before any implementation.
