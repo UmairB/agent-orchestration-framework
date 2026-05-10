@@ -30,9 +30,10 @@ Feature: AOF CLI lifecycle
 
   Scenario: Guided init can create an explicit project asset
     Given an empty project
-    When I run `init --codex` with input `unused|unused|yes|no|no` and resource input `{"kind":"agent","id":"research-agent","description":"Research agent","runtimes":["codex"],"body":"Research the repository."}`
+    When I run `init --codex` with input `unused|unused|yes|no` and resource input `{"kind":"agent","id":"research-agent","description":"Research agent","runtimes":["codex"],"body":"Research the repository."}`
     Then the command should succeed
     And stdout should contain `Next steps:`
+    And stdout should not contain `Create a reusable global asset now?`
     And stdout should contain `Created`
     And file `.aof/assets/agents/research-agent/AGENT.md` should contain `Research the repository.`
     And file `.aof/aof.config.json` should contain `"id": "research-agent"`

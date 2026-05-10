@@ -134,10 +134,6 @@ async function guideAfterInit(targetDir, runtimes, options) {
   if (await confirmAction("Create a project asset now?", true)) {
     await createGuidedProjectAssets(targetDir, runtimes);
   }
-
-  if (await confirmAction("Create a reusable global asset now?", false)) {
-    await createGuidedGlobalAssets(runtimes);
-  }
 }
 
 async function createGuidedProjectAssets(targetDir, runtimes) {
@@ -149,18 +145,6 @@ async function createGuidedProjectAssets(targetDir, runtimes) {
     console.log(`Created ${result.assetPath}`);
     console.log(`Updated ${result.configPath}`);
     createAnother = await confirmAction("Create another project asset?", false);
-  }
-}
-
-async function createGuidedGlobalAssets(runtimes) {
-  const { scaffoldGlobalResource } = await import("./scaffold.mjs");
-  let createAnother = true;
-  while (createAnother) {
-    const input = await promptResourceInput({ global: true, runtimes });
-    const result = await scaffoldGlobalResource(input);
-    console.log(`Created ${result.assetPath}`);
-    console.log(`Updated ${result.configPath}`);
-    createAnother = await confirmAction("Create another global asset?", false);
   }
 }
 
