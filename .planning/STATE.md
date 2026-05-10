@@ -3,7 +3,7 @@
 **Initialized:** 2026-05-06
 **Current milestone:** v1.4 Namespaced CLI Contract
 **Current phase:** Phase 18: Command Contract Audit
-**Status:** Ready for phase planning
+**Status:** Ready to execute Phase 18
 
 ## Project Reference
 
@@ -27,13 +27,13 @@ v1.4 is focused on a full CLI rewrite around durable namespaces. Start by review
 
 Phase: 18 - Command Contract Audit
 Plan: —
-Status: Context gathered; ready for planning
-Last activity: 2026-05-10 - Phase 18 command contract context captured
+Status: Planned; ready to execute
+Last activity: 2026-05-10 - Phase 18 command contract plans created
 
 ## Resume
 
-**Stopped at:** Phase 18 context gathered
-**Resume file:** `.planning/phases/18-command-contract-audit/18-CONTEXT.md`
+**Stopped at:** Phase 18 planned
+**Resume file:** `.planning/phases/18-command-contract-audit/18-01-PLAN.md`
 
 ## Memory
 
@@ -125,3 +125,4 @@ Last activity: 2026-05-10 - Phase 18 command contract context captured
 - v1.4 user decisions: review every CLI command and subcommand; perform a full rewrite with no legacy aliases; use product-area namespaces so AOF can grow beyond assets; keep `aof init` top-level; use `aof assets ...` for skills, commands, rules, agents, apply, validate, clean, global asset scope, and UI; use `aof packages add gsd` for managed package intent and `aof packages install gsd` for installer execution.
 - Phase 18 starts with command-by-command contract review before any implementation.
 - Phase 18 discussion accepted the full command-contract draft: use `aof project ...` for project diagnostics/migration, `--global` as an assets scope flag, remove `sync`, remove all legacy aliases, and allow helpful failures for removed commands without executing them.
+- Phase 18 planning produced three waves: 18-01 current command inventory, 18-02 replacement CLI contract, and 18-03 help/errors/BDD contract. Research was skipped because the command contract was already locked in discussion.

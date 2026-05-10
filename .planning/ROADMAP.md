@@ -58,6 +58,11 @@
 <summary>🔵 v1.4 Namespaced CLI Contract (Phases 18-22) — ACTIVE</summary>
 
 - [ ] Phase 18: Command Contract Audit — review every current command and lock the replacement taxonomy before code changes.
+  - Plans: 18-01 Current Command Inventory; 18-02 Replacement CLI Contract; 18-03 Help, Errors, And BDD Contract.
+  - Wave 1: 18-01.
+  - Wave 2 *(blocked on Wave 1 completion)*: 18-02.
+  - Wave 3 *(blocked on Wave 2 completion)*: 18-03.
+  - Cross-cutting constraints: contract artifacts only; no CLI implementation in Phase 18; no legacy aliases; removed commands must not execute.
 - [ ] Phase 19: Assets Namespace Rewrite — implement `aof assets ...` for asset CRUD, global scope, apply, validate, clean, and UI.
 - [ ] Phase 20: Packages Namespace Rewrite — implement `aof packages ...` for GSD package declaration, inspection, validation, install, and lock replay.
 - [ ] Phase 21: Project And Diagnostics Commands — settle top-level/project/config/migrate/doctor behavior and remove catalog ambiguity.
@@ -73,7 +78,7 @@
 | v1.1 Aligned Core Hardening | 6-10 | 16/16 | 22/22 | Complete | 2026-05-08 |
 | v1.2 Global Asset Library | 11-15 | 15/15 | 22/22 | Complete | 2026-05-09 |
 | v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
-| v1.4 Namespaced CLI Contract | 18-22 | 0/0 | 0/22 | Active | — |
+| v1.4 Namespaced CLI Contract | 18-22 | 0/3 | 0/22 | Active | — |
 
 ## Phase Details
 
