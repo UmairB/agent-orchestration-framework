@@ -70,5 +70,14 @@ export const promptTests = [
         /Use letters, numbers, dots, underscores, or hyphens/
       );
     }
+  },
+  {
+    name: "resource input can skip starter content",
+    run() {
+      assert.equal(
+        parseResourceInput(JSON.stringify({ kind: "agent", id: "research-agent", body: "Do not prompt in init" }), { skipBody: true }).body,
+        ""
+      );
+    }
   }
 ];

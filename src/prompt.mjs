@@ -93,10 +93,12 @@ export async function promptResourceInput(options = {}) {
     default: options.description ?? ""
   });
   const runtimes = options.runtimes ?? (await selectRuntimes());
-  const body = await input({
-    message: bodyPromptForKind(kind),
-    default: options.body ?? ""
-  });
+  const body = options.skipBody
+    ? ""
+    : await input({
+      message: bodyPromptForKind(kind),
+      default: options.body ?? ""
+    });
 
   return {
     kind,
@@ -179,7 +181,7 @@ export function parseResourceInput(value, options = {}) {
     id: id.trim(),
     description: typeof parsed.description === "string" ? parsed.description : "",
     runtimes: parseResourceRuntimes(parsed.runtimes),
-    body: typeof parsed.body === "string" ? parsed.body : ""
+    body: options.skipBody ? "" : typeof parsed.body === "string" ? parsed.body : ""
   };
 }
 
@@ -194,12 +196,12 @@ function validateResourceId(value) {
 
 function bodyPromptForKind(kind) {
   const prompts = {
-    skill: "Initial skill instructions (optional)",
-    command: "Initial command prompt (optional)",
-    agent: "Initial agent instructions (optional)",
-    rule: "Initial rule text (optional)"
+    skill: "Starter skill instructions (optional; press Enter to create a template and edit it later)",
+    command: "Starter command prompt (optional; press Enter to create a template and edit it later)",
+    agent: "Starter agent instructions (optional; press Enter to create a template and edit it later)",
+    rule: "Starter rule text (optional; press Enter to create a template and edit it later)"
   };
-  return prompts[kind] ?? "Initial body (optional)";
+  return prompts[kind] ?? "Starter content (optional; press Enter to create a template and edit it later)";
 }
 
 function parseResourceRuntimes(value) {

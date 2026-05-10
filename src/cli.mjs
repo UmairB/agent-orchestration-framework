@@ -126,6 +126,7 @@ async function initCommand(args) {
 async function guideAfterInit(targetDir, runtimes, options) {
   console.log("Next steps:");
   console.log("- Add project assets with `aof add`.");
+  console.log("- Edit assets in the setup UI with `aof install`.");
   console.log("- Add reusable global assets with `aof global add`.");
   console.log("- Render outputs with `aof sync --dry-run` then `aof sync`.");
 
@@ -140,10 +141,11 @@ async function createGuidedProjectAssets(targetDir, runtimes) {
   const { scaffoldResource } = await import("./scaffold.mjs");
   let createAnother = true;
   while (createAnother) {
-    const input = await promptResourceInput({ runtimes });
+    const input = await promptResourceInput({ runtimes, skipBody: true });
     const result = await scaffoldResource(targetDir, input);
     console.log(`Created ${result.assetPath}`);
     console.log(`Updated ${result.configPath}`);
+    console.log(`Edit this asset in the setup UI with \`aof install\`, or edit ${result.assetPath}.`);
     createAnother = await confirmAction("Create another project asset?", false);
   }
 }
