@@ -49,7 +49,28 @@ export function renderConfigOutputs(config, options = {}) {
   }
 
   outputs.push(...renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, { global: options.global }));
+  outputs.push(...renderRuntimeGitignoreOutputs(targetDir, requestedRuntimes, outputs, { global: options.global }));
   return outputs;
+}
+
+function renderRuntimeGitignoreOutputs(targetDir, requestedRuntimes, outputs, options = {}) {
+  if (options.global) return [];
+  const gitignoreContent = "*\n!.gitignore\n";
+  return requestedRuntimes.flatMap((runtime) => {
+    const adapter = RUNTIMES[runtime];
+    if (!adapter?.localRoot) return [];
+    const localRoot = adapter.localRoot.replaceAll("\\", "/");
+    const hasRuntimeFolderOutput = outputs.some((output) => String(output.path).replaceAll("\\", "/").startsWith(`${localRoot}/`));
+    if (!hasRuntimeFolderOutput) return [];
+    return [renderedRuntimeConfig(
+      targetDir,
+      path.join(adapter.localRoot, ".gitignore"),
+      runtime,
+      "gitignore",
+      `${runtime}-runtime-gitignore`,
+      gitignoreContent
+    )];
+  });
 }
 
 function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, options = {}) {
@@ -153,21 +174,31 @@ function renderedResource(targetDir, root, runtime, adapter, resource) {
 
 function renderedResourceOutputs(targetDir, root, runtime, adapter, resource) {
   const main = renderedResource(targetDir, root, runtime, adapter, resource);
-  if (resource.kind !== "skill" || !Array.isArray(resource.associatedFiles) || resource.associatedFiles.length === 0) {
+  if (!supportsAssociatedFiles(resource.kind) || !Array.isArray(resource.associatedFiles) || resource.associatedFiles.length === 0) {
     return [main];
   }
 
-  const skillDir = path.dirname(main.absolutePath);
+  const assetDir = associatedFileOutputDir(main.absolutePath, resource);
   return [
     main,
-    ...resource.associatedFiles.map((file) => renderedAssociatedFile(targetDir, skillDir, runtime, resource, file))
+    ...resource.associatedFiles.map((file) => renderedAssociatedFile(targetDir, assetDir, runtime, resource, file))
   ];
 }
 
-function renderedAssociatedFile(targetDir, skillDir, runtime, resource, file) {
-  const filePath = path.join(skillDir, file.path);
-  if (!isInside(skillDir, filePath)) {
-    throw new Error(`Associated file output escapes skill directory: ${file.path}`);
+function supportsAssociatedFiles(kind) {
+  return kind === "skill" || kind === "command";
+}
+
+function associatedFileOutputDir(mainPath, resource) {
+  if (resource.kind === "skill") return path.dirname(mainPath);
+  return path.join(path.dirname(path.dirname(mainPath)), "scripts", resource.id);
+}
+
+function renderedAssociatedFile(targetDir, assetDir, runtime, resource, file) {
+  const outputPath = associatedFileOutputPath(resource, file.path);
+  const filePath = path.join(assetDir, outputPath);
+  if (!isInside(assetDir, filePath)) {
+    throw new Error(`Associated file output escapes ${resource.kind} asset directory: ${file.path}`);
   }
   const projectRelative = path.relative(targetDir, filePath);
   const content = file.content;
@@ -178,13 +209,59 @@ function renderedAssociatedFile(targetDir, skillDir, runtime, resource, file) {
     resource: {
       ...resourceMetadata(resource),
       artifact: "associated-file",
-      file: file.path
+      file: outputPath,
+      sourceFile: file.path
     },
     source: resource,
     body: content,
     content,
     hash: hashContent(content)
   };
+}
+
+function associatedFileOutputPath(resource, filePath) {
+  const normalized = String(filePath).replaceAll("\\", "/");
+  if (resource.kind === "command" && normalized.startsWith("files/")) {
+    return normalized.slice("files/".length);
+  }
+  return normalized;
+}
+
+function expandFilePlaceholders(content, resource, runtime) {
+  if (!supportsAssociatedFiles(resource.kind) || typeof content !== "string" || !content.includes("{{files.")) return content;
+  const replacements = filePlaceholderReplacements(resource, runtime);
+  return content.replace(/\{\{\s*files\.([^}]+?)\s*\}\}/g, (match, rawPath) => {
+    const key = placeholderFilePath(rawPath);
+    if (!replacements.has(key)) {
+      throw new Error(`Unknown associated file placeholder for ${resource.kind}:${resource.id}: ${match}`);
+    }
+    return replacements.get(key);
+  });
+}
+
+function filePlaceholderReplacements(resource, runtime) {
+  const adapter = RUNTIMES[runtime];
+  const root = adapter?.localRoot?.replaceAll("\\", "/");
+  const replacements = new Map();
+  if (!root || !Array.isArray(resource.associatedFiles)) return replacements;
+
+  for (const file of resource.associatedFiles) {
+    const sourcePath = String(file.path).replaceAll("\\", "/");
+    const placeholderPath = sourcePath.startsWith("files/") ? sourcePath.slice("files/".length) : sourcePath;
+    const runtimePath = resource.kind === "command"
+      ? `${root}/scripts/${resource.id}/${associatedFileOutputPath(resource, sourcePath).replaceAll("\\", "/")}`
+      : `${root}/skills/${resource.id}/${sourcePath}`;
+    replacements.set(placeholderPath, runtimePath);
+  }
+  return replacements;
+}
+
+function placeholderFilePath(rawPath) {
+  const normalized = String(rawPath).trim().replaceAll("\\", "/");
+  if (normalized.includes("/")) {
+    throw new Error(`Associated file placeholder must name one file, not a nested path: {{files.${normalized}}}`);
+  }
+  return normalized;
 }
 
 function isInside(root, filePath) {
@@ -244,7 +321,7 @@ function renderResource(runtime, adapter, resource) {
       `aof-runtime: ${runtime}`,
       "---",
       "",
-      contentFor(resource).trim(),
+      contentFor(resource, runtime).trim(),
       ""
     ].join("\n");
   }
@@ -258,7 +335,7 @@ function renderResource(runtime, adapter, resource) {
       `aof-runtime: ${runtime}`,
       "---",
       "",
-      contentFor(resource).trim(),
+      contentFor(resource, runtime).trim(),
       ""
     ].join("\n");
   }
@@ -277,7 +354,7 @@ function renderResource(runtime, adapter, resource) {
     `aof-runtime: ${runtime}`,
     "---",
     "",
-    contentFor(resource).trim(),
+    contentFor(resource, runtime).trim(),
     ""
   ].filter(Boolean).join("\n");
 }
@@ -294,7 +371,7 @@ function renderRule(runtime, resource) {
       resource.description ? `> ${resource.description}` : null,
       Array.isArray(resource.paths) && resource.paths.length > 0 ? `Applies to: ${resource.paths.join(", ")}` : null,
       "",
-      contentFor(resource).trim(),
+      contentFor(resource, runtime).trim(),
       ""
     ].filter((line) => line !== null).join("\n");
   }
@@ -305,12 +382,13 @@ function renderRule(runtime, resource) {
   if (Array.isArray(resource.paths) && resource.paths.length > 0) {
     lines.push(`paths: ${resource.paths.join(", ")}`);
   }
-  lines.push(`aof-runtime: ${runtime}`, "---", "", contentFor(resource).trim(), "");
+  lines.push(`aof-runtime: ${runtime}`, "---", "", contentFor(resource, runtime).trim(), "");
   return lines.join("\n");
 }
 
-function contentFor(resource) {
-  return resource.body ?? resource.prompt ?? resource.instructions ?? "";
+function contentFor(resource, runtime = null) {
+  const content = resource.body ?? resource.prompt ?? resource.instructions ?? "";
+  return runtime ? expandFilePlaceholders(content, resource, runtime) : content;
 }
 
 function codexRulePath(resource) {

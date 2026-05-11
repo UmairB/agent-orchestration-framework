@@ -94,12 +94,12 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === "/api/items") {
+    if (request.method === "GET" && requestUrl.pathname === "/api/items" && catalog) {
       sendJson(response, 200, catalog.listItems());
       return;
     }
 
-    if (request.method === "POST" && requestUrl.pathname === "/api/items") {
+    if (request.method === "POST" && requestUrl.pathname === "/api/items" && catalog) {
       try {
         const item = await readJsonBody(request);
         const diagnostics = validateCatalogItem(item);

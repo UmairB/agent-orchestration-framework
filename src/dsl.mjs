@@ -335,7 +335,7 @@ async function resolveOverrides(resource, baseDir) {
 
 async function resolveAssociatedFiles(resource, baseDir) {
   if (!Array.isArray(resource.files) || resource.files.length === 0) return [];
-  if (resource.kind !== "skill") return [];
+  if (!supportsAssociatedFiles(resource.kind)) return [];
   if (!resource.path) return [];
 
   const assetDir = path.dirname(path.resolve(baseDir, resource.path));
@@ -348,7 +348,7 @@ async function resolveAssociatedFiles(resource, baseDir) {
     if (path.isAbsolute(filePath)) {
       throw new Error(`Associated file path must be relative to the asset directory: ${filePath}`);
     }
-    const absolutePath = path.resolve(assetDir, normalizedPath);
+    const absolutePath = path.resolve(assetDir, "files", normalizedPath);
     if (!isInside(assetDir, absolutePath)) {
       throw new Error(`Associated file path escapes the asset directory: ${filePath}`);
     }
@@ -356,7 +356,7 @@ async function resolveAssociatedFiles(resource, baseDir) {
       throw new Error(`Associated file path cannot target the primary body file: ${filePath}`);
     }
     return {
-      path: normalizedPath,
+      path: `files/${normalizedPath}`,
       absolutePath,
       content: await readFile(absolutePath, "utf8")
     };
@@ -364,7 +364,12 @@ async function resolveAssociatedFiles(resource, baseDir) {
 }
 
 function normalizeAssociatedPath(filePath) {
-  return String(filePath).replaceAll("\\", "/");
+  const normalized = String(filePath).replaceAll("\\", "/");
+  return normalized.startsWith("files/") ? normalized.slice("files/".length) : normalized;
+}
+
+function supportsAssociatedFiles(kind) {
+  return kind === "skill" || kind === "command";
 }
 
 function isInside(root, filePath) {

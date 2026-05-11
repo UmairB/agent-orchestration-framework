@@ -317,6 +317,12 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  match = step.match(/^data file `(.+)` should not exist$/);
+  if (match) {
+    assert.equal(await fileExists(path.join(context.dataDir, match[1])), false, `Expected data file not to exist: ${match[1]}`);
+    return;
+  }
+
   if (step === "a project with referenced global assets") {
     await runSharedCliStep(context, "an empty project");
     await writeGlobalAofResource(context, {
@@ -349,7 +355,7 @@ export async function runSharedCliStep(context, step) {
       description: "Research helper",
       body: "Use the helper script.",
       files: [
-        { path: "scripts/search.py", body: "print('search')\n" }
+        { path: "search.py", body: "print('search')\n" }
       ]
     });
     await writeAofProject(context, [], {
@@ -448,6 +454,13 @@ export async function runSharedCliStep(context, step) {
   if (match) {
     const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
     assert.match(content, escapeRegex(match[2]));
+    return;
+  }
+
+  match = step.match(/^file `(.+)` should not contain `([\s\S]+)`$/);
+  if (match) {
+    const content = await readFile(path.join(context.projectDir, match[1]), "utf8");
+    assert.doesNotMatch(content, escapeRegex(match[2]));
     return;
   }
 
@@ -573,6 +586,17 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  match = step.match(/^JSON file `(.+)` should not contain framework install attempt `(.+)`$/);
+  if (match) {
+    const json = JSON.parse(await readFile(path.join(context.projectDir, match[1]), "utf8"));
+    assert.equal(
+      Array.isArray(json.frameworkInstallAttempts) && json.frameworkInstallAttempts.some((item) => item.runtime === match[2]),
+      false,
+      `Expected ${match[1]} not to contain framework install attempt ${match[2]}`
+    );
+    return;
+  }
+
   match = step.match(/^text `(.+)` should appear before `(.+)` in file `(.+)`$/);
   if (match) {
     const content = await readFile(path.join(context.projectDir, match[3]), "utf8");
@@ -668,7 +692,7 @@ async function writeGlobalAofResource(context, input, options = {}) {
     resource.overrides = { codex: overridePath };
   }
   for (const file of input.files ?? []) {
-    const associatedPath = path.join(resourceDir, file.path);
+    const associatedPath = path.join(resourceDir, "files", file.path);
     await mkdir(path.dirname(associatedPath), { recursive: true });
     await writeFile(associatedPath, file.body ?? "", "utf8");
   }

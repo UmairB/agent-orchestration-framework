@@ -19,6 +19,10 @@ export const configEditorTests = [
     run: loadsEditableConfig
   },
   {
+    name: "saves command files under asset files folder",
+    run: savesCommandFilesUnderAssetFilesFolder
+  },
+  {
     name: "loads and saves expanded editable sections",
     run: loadsAndSavesExpandedSections
   },
@@ -93,7 +97,30 @@ async function loadsEditableConfig() {
     const payload = await loadEditableConfig(targetDir);
     assert.equal(payload.resources[0].body, "Prime body\n");
     assert.deepEqual(payload.adapterWarnings, []);
-    assert.deepEqual(payload.nextCommands, ["aof apply --dry-run", "aof install gsd --dry-run"]);
+    assert.deepEqual(payload.nextCommands, ["aof assets apply --dry-run", "aof packages install gsd --dry-run"]);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function savesCommandFilesUnderAssetFilesFolder() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const result = await saveEditableResource(targetDir, {
+      kind: "command",
+      id: "prime",
+      body: "Run the helper.",
+      runtimes: ["codex"],
+      files: [
+        { name: "helper.py", body: "print('prime')\n" }
+      ],
+      overrides: {}
+    });
+
+    assert.equal(result.ok, true);
+    const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.deepEqual(config.resources[0].files, ["helper.py"]);
+    assert.equal(await readFile(path.join(targetDir, ".aof", "assets", "commands", "prime", "files", "helper.py"), "utf8"), "print('prime')\n");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

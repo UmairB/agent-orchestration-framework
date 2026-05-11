@@ -2,8 +2,8 @@
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.4 Namespaced CLI Contract
-**Current phase:** Phase 19: Assets Namespace Rewrite
-**Status:** Ready to execute phase
+**Current phase:** None
+**Status:** v1.4 complete; ready for next milestone
 
 ## Project Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.4 is focused on a full CLI rewrite around durable namespaces. Phase 19 is planned for a full assets namespace migration with no legacy aliases.
+v1.4 is complete. The namespaced CLI contract shipped asset, package, and project namespaces; removed legacy aliases; and hardened the final surface through live repository UAT.
 
 ## Current Position
 
-Phase: 19 - Assets Namespace Rewrite
-Plan: 3 plans
-Status: Ready to execute
-Last activity: 2026-05-10 - Phase 19 planned
+Phase: none
+Plan: none
+Status: Ready for next milestone
+Last activity: 2026-05-11 - v1.4 completed and verified
 
 ## Resume
 
-**Stopped at:** Phase 19 planned
-**Resume file:** `.planning/phases/19-assets-namespace-rewrite/19-03-PLAN.md`
+**Stopped at:** v1.4 milestone complete
+**Resume file:** `.planning/milestones/v1.4-MILESTONE-AUDIT.md`
 
 ## Memory
 
@@ -129,3 +129,13 @@ Last activity: 2026-05-10 - Phase 19 planned
 - Phase 18 execution completed contract artifacts only: current command inventory, replacement CLI contract, BDD contract, wave summaries, and verification. No CLI implementation changed in Phase 18.
 - Phase 19 discussion confirmed full assets namespace migration in one pass: implement all `aof assets ...` commands, remove old asset-related top-level execution paths, preserve rendering/lock/drift/global-ref behavior, and do not ship legacy aliases.
 - Phase 19 planning produced three waves: 19-01 assets source command namespace, 19-02 assets apply/validate/clean/UI migration, and 19-03 help/docs/parity hardening. Research was skipped because Phase 18 already locked the command contract and Phase 19 is codebase-local implementation planning.
+- Phase 19 execution completed with `aof assets add/list/show/remove/use/unuse/apply/validate/clean/ui`, removed old asset/global/apply/sync/clean/install execution paths, setup UI launch without catalog/SQLite side effects, README/help/BDD updates, and verification in `.planning/phases/19-assets-namespace-rewrite/19-VERIFICATION.md`.
+- Phase 20 discussion completed with full packages namespace migration decisions: implement `aof packages add/list/show/remove/validate/install`, keep GSD as managed package intent, preserve explicit network/package-code boundaries, keep old install paths removed, and leave catalog/discovery/project namespace cleanup deferred.
+- Phase 20 planning produced three waves: 20-01 package intent command namespace, 20-02 package install and lock replay, and 20-03 package namespace help/docs/parity hardening. Research was skipped because Phase 18 already locked the package command contract and Phase 20 is codebase-local implementation planning.
+- Phase 20 execution completed with `aof packages add/list/show/remove/validate/install`, GSD intent-only package declaration, GSD installer dry-run/execution/lock replay, old install paths kept removed, README/help/BDD updates, and verification in `.planning/phases/20-packages-namespace-rewrite/20-VERIFICATION.md`.
+- Phase 21 discussion completed with project namespace decisions: keep only `aof init` top-level; move show/validate/doctor/migrate to `aof project ...`; remove `aof config`, top-level diagnostics/migration, and catalog execution paths with helpful no-side-effect failures.
+- Phase 21 planning produced three waves: 21-01 project command namespace, 21-02 removed project/config/catalog paths, and 21-03 project namespace help/docs/parity hardening. Research was skipped because Phase 18 already locked the project command contract and Phase 21 is codebase-local implementation planning.
+- Phase 21 execution completed with `aof project show/validate/doctor/migrate`, source-only `aof init` guidance, removed `validate/doctor/migrate/config/catalog` execution paths, README/help/BDD updates, and verification in `.planning/phases/21-project-and-diagnostics-commands/21-VERIFICATION.md`.
+- Phase 22 discussion completed with live verification decisions: use disposable new/existing repo shapes, keep global/data state temporary, avoid real networked package installs, verify UI launch/API, fix concrete findings with BDD, and close out v1.4. UAT findings captured in `.planning/phases/22-live-repository-verification/22-UAT-LOG.md`: UAT-01 interactive `aof assets add skill` must not prompt users to type markdown/body content in the console; UAT-02 setup UI must not show runtime overrides as peer runtime checkboxes with noisy `native` badges.
+- Phase 22 execution completed with live UAT fixes for body prompts, setup UI runtime/card clarity, friendly apply output, generated runtime `.gitignore`, skill/command additional files, runtime-specific file placeholders, flat associated-file validation, and command support-file rendering under runtime script folders.
+- v1.4 completed on 2026-05-11 with `npm run test:unit`, `npm run test:integration`, `npm run test:integration:ps`, and `npm run check` passing.

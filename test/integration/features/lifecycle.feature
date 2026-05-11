@@ -6,17 +6,23 @@ Feature: AOF CLI lifecycle
     When I run `--help`
     Then the command should succeed
     And stdout should contain `aof - Assistant Ops Framework`
-    And stdout should contain `aof init [dir] [--claude] [--codex] [--force]`
-    And stdout should contain `aof add [kind id]`
-    And stdout should contain `aof migrate`
-    And text `aof validate [--json] [--strict]` should appear before `aof install [--no-serve]` in stdout
+    And stdout should contain `aof init [dir] [--claude] [--codex] [--runtime claude,codex]`
+    And stdout should contain `aof project show`
+    And stdout should contain `aof project validate`
+    And stdout should contain `aof assets add skill|command|rule|agent [id]`
+    And stdout should contain `aof assets apply`
+    And stdout should contain `aof project migrate`
+    And stdout should not contain `aof add [kind id]`
+    And stdout should not contain `aof migrate [dir]`
+    And stdout should not contain `aof config show`
+    And stdout should not contain `aof install [--no-serve]`
 
-  Scenario: Install AOF without starting the setup UI
+  Scenario: Removed install command does not start the setup UI
     Given an empty project
     When I run `install --no-serve`
-    Then the command should succeed
-    And stdout should contain `Setup UI not started.`
-    And stdout should contain `local configuration UI`
+    Then the command should fail
+    And stderr should contain `Removed command "install"`
+    And stderr should contain `aof assets ui`
 
   Scenario: Initialize an empty AOF project
     Given an empty project
@@ -29,19 +35,19 @@ Feature: AOF CLI lifecycle
     And file `.codex/commands/prime.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain runtime `codex`
 
-  Scenario: Guided init can create an explicit project asset
+  Scenario: Init only creates project workspace and guidance
     Given an empty project
     When I run `init --codex` with input `unused|unused|yes|no` and resource input `{"kind":"agent","id":"research-agent","description":"Research agent","runtimes":["codex"],"body":"Research the repository."}`
     Then the command should succeed
     And stdout should contain `Next steps:`
-    And stdout should contain `aof install`
+    And stdout should contain `aof project validate`
+    And stdout should contain `aof packages add gsd`
+    And stdout should contain `aof assets ui`
+    And stdout should not contain `Create a project asset now?`
     And stdout should not contain `Create a reusable global asset now?`
     And stdout should not contain `Starter agent instructions`
-    And stdout should contain `Created`
-    And stdout should contain `Edit this asset in the setup UI`
-    And file `.aof/assets/agents/research-agent/AGENT.md` should contain `Describe this agent's role`
-    And file `.aof/aof.config.json` should contain `"id": "research-agent"`
-    And file `.aof/aof.config.json` should contain `"kind": "agent"`
+    And file `.aof/aof.config.json` should contain `"resources": []`
+    And file `.aof/assets/agents/research-agent/AGENT.md` should not exist
 
   Scenario: Refuse to overwrite an existing project config
     Given a project initialized with AOF config
@@ -51,7 +57,7 @@ Feature: AOF CLI lifecycle
 
   Scenario: Add a file-backed skill from the CLI
     Given an empty project
-    When I run `add skill code-review --codex --description "Review code changes"`
+    When I run `assets add skill code-review --codex --description "Review code changes"`
     Then the command should succeed
     And stdout should contain `Created`
     And file `.aof/aof.config.json` should exist
@@ -62,18 +68,18 @@ Feature: AOF CLI lifecycle
 
   Scenario: Add refuses scaffold collisions unless forced
     Given an empty project
-    When I run `add skill code-review --codex`
+    When I run `assets add skill code-review --codex`
     Then the command should succeed
-    When I run `add skill code-review --codex`
+    When I run `assets add skill code-review --codex`
     Then the command should fail
     And stderr should contain `Resource already exists`
-    When I run `add skill code-review --codex --force --description "Forced replacement"`
+    When I run `assets add skill code-review --codex --force --description "Forced replacement"`
     Then the command should succeed
     And file `.aof/assets/skills/code-review/SKILL.md` should contain `Forced replacement`
 
   Scenario: Add scaffolds non-skill kinds
     Given an empty project
-    When I run `add rule infra-files --runtime codex --description "Infrastructure guidance"`
+    When I run `assets add rule infra-files --runtime codex --description "Infrastructure guidance"`
     Then the command should succeed
     And file `.aof/assets/rules/infra-files/RULE.md` should exist
     And file `.aof/aof.config.json` should contain `"kind": "rule"`
@@ -81,60 +87,91 @@ Feature: AOF CLI lifecycle
 
   Scenario: Interactively add a project asset
     Given an empty project
-    When I run `add` with resource input `{"kind":"skill","id":"interactive-skill","description":"Interactive skill","runtimes":["codex"],"body":"Interactive body"}`
+    When I run `assets add` with resource input `{"kind":"skill","id":"interactive-skill","description":"Interactive skill","runtimes":["codex"],"body":"Interactive body"}`
     Then the command should succeed
     And stdout should contain `Created`
-    And file `.aof/assets/skills/interactive-skill/SKILL.md` should contain `Interactive body`
+    And stdout should not contain `Starter skill instructions`
+    And file `.aof/assets/skills/interactive-skill/SKILL.md` should contain `Describe the reusable workflow`
     And file `.aof/aof.config.json` should contain `"id": "interactive-skill"`
     And file `.aof/aof.config.json` should contain `"codex"`
 
   Scenario: Add and inspect global assets
     Given an empty project
-    When I run `global add skill shared-review --codex --description "Shared reviewer"`
+    When I run `assets add --global skill shared-review --codex --description "Shared reviewer"`
     Then the command should succeed
     And stdout should contain `Created`
     And global file `aof.config.json` should contain `"id": "shared-review"`
     And global file `assets/skills/shared-review/SKILL.md` should exist
     And global file `assets/skills/shared-review/SKILL.md` should contain `Shared reviewer`
     And file `.aof/aof.config.json` should not exist
-    When I run `global list`
+    When I run `assets list --global`
     Then the command should succeed
     And stdout should contain `skill:shared-review`
-    When I run `global show skill shared-review`
+    When I run `assets show --global skill shared-review`
     Then the command should succeed
     And stdout should contain `resource: skill:shared-review`
     And stdout should contain `body: present`
 
+  Scenario: List and remove project assets
+    Given an empty project
+    When I run `assets add skill remove-me --codex --description "Remove me"`
+    Then the command should succeed
+    When I run `assets list`
+    Then the command should succeed
+    And stdout should contain `skill:remove-me`
+    When I run `assets remove skill remove-me --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run`
+    And file `.aof/assets/skills/remove-me/SKILL.md` should exist
+    When I run `assets remove skill remove-me`
+    Then the command should succeed
+    And file `.aof/assets/skills/remove-me/SKILL.md` should not exist
+
+  Scenario: Use and unuse global asset references
+    Given an empty project
+    When I run `init --codex`
+    Then the command should succeed
+    When I run `assets add --global skill shared-use --codex --description "Shared use"`
+    Then the command should succeed
+    When I run `assets use --global skill shared-use`
+    Then the command should succeed
+    And file `.aof/aof.config.json` should contain `"globalRefs"`
+    And file `.aof/aof.config.json` should contain `"shared-use"`
+    When I run `assets unuse --global skill shared-use`
+    Then the command should succeed
+    And file `.aof/aof.config.json` should contain `"globalRefs": []`
+
   Scenario: Interactively add a global asset
     Given an empty project
-    When I run `global add` with resource input `{"kind":"rule","id":"interactive-rule","description":"Interactive rule","runtimes":["codex"],"body":"Interactive global body"}`
+    When I run `assets add --global` with resource input `{"kind":"rule","id":"interactive-rule","description":"Interactive rule","runtimes":["codex"],"body":"Interactive global body"}`
     Then the command should succeed
     And stdout should contain `Created`
-    And global file `assets/rules/interactive-rule/RULE.md` should contain `Interactive global body`
+    And stdout should not contain `Starter rule text`
+    And global file `assets/rules/interactive-rule/RULE.md` should contain `Add project guidance here`
     And global file `aof.config.json` should contain `"id": "interactive-rule"`
     And global file `aof.config.json` should contain `"codex"`
 
   Scenario: Validate global assets
     Given an empty project
-    When I run `global add rule shared-rule --codex --description "Shared rule"`
+    When I run `assets add --global rule shared-rule --codex --description "Shared rule"`
     Then the command should succeed
-    When I run `global validate`
+    When I run `assets validate --global`
     Then the command should succeed
     And stdout should contain `valid: global config passed validation`
 
   Scenario: Report malformed global asset config
     Given a malformed global AOF config
-    When I run `global validate`
+    When I run `assets validate --global`
     Then the command should fail
     And stdout should contain `invalid:`
     And stdout should contain `Invalid JSON`
-    When I run `validate`
+    When I run `project validate`
     Then the command should fail
     And stdout should contain `Cannot read config`
 
   Scenario: Render referenced global assets
     Given a project with referenced global assets
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
     And file `.codex/skills/shared-review/SKILL.md` should exist
     And file `.codex/skills/shared-review/SKILL.md` should contain `Codex global override body`
@@ -142,53 +179,60 @@ Feature: AOF CLI lifecycle
     And file `.codex/AGENTS.md` should contain `Follow team standards`
     And file `.aof/assets/skills/shared-review/SKILL.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain global resource `shared-review`
-    When I run `config show`
+    When I run `project show`
     Then the command should succeed
     And stdout should contain `globalRefs: 2`
     And stdout should contain `source=global`
 
+  Scenario: Assets apply rejects global runtime output scope
+    Given a project with referenced global assets
+    When I run `assets apply --codex --global`
+    Then the command should fail
+    And stderr should contain `aof assets apply does not support global runtime output`
+    And stderr should contain `aof assets use --global`
+
   Scenario: Sync referenced global assets
     Given a project with referenced global assets
-    When I run `sync --codex --dry-run`
+    When I run `assets apply --codex --dry-run`
     Then the command should succeed
-    And stdout should contain `create:`
+    And stdout should contain `Would create`
     And file `.codex/skills/shared-review/SKILL.md` should not exist
-    When I run `sync --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
     And file `.codex/skills/shared-review/SKILL.md` should exist
     And JSON file `.aof/aof.lock.json` should contain global resource `shared-review`
 
   Scenario: Render referenced global skill helper files
     Given a project with referenced global skill helper files
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
-    And file `.codex/skills/research-helper/scripts/search.py` should exist
-    And file `.codex/skills/research-helper/scripts/search.py` should contain `print('search')`
-    And file `.aof/assets/skills/research-helper/scripts/search.py` should not exist
-    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/research-helper/scripts/search.py`
+    And file `.codex/skills/research-helper/files/search.py` should exist
+    And file `.codex/skills/research-helper/files/search.py` should contain `print('search')`
+    And file `.aof/assets/skills/research-helper/search.py` should not exist
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/research-helper/files/search.py`
     And JSON file `.aof/aof.lock.json` should contain global resource `research-helper`
 
   Scenario: Preview referenced global skill helper files
     Given a project with referenced global skill helper files
-    When I run `sync --codex --dry-run`
+    When I run `assets apply --codex --dry-run`
     Then the command should succeed
     And stdout should contain `.codex`
-    And stdout should contain `scripts`
-    And file `.codex/skills/research-helper/scripts/search.py` should not exist
+    And stdout should contain `files/search.py`
+    And file `.codex/skills/research-helper/files/search.py` should not exist
 
   Scenario: Report unsafe global skill helper files
     Given a project with unsafe global skill helper files
-    When I run `validate`
+    When I run `project validate`
     Then the command should fail
     And stdout should contain `Associated file path must stay inside the asset directory`
 
   Scenario: Report invalid global references
     Given a project with a missing global reference
-    When I run `validate`
+    When I run `project validate`
     Then the command should fail
     And stdout should contain `Missing global resource: skill:missing-shared`
     Given a project with a local and global asset conflict
-    When I run `validate`
+    When I run `project validate`
     Then the command should fail
     And stdout should contain `Global reference conflicts with local resource skill:shared-review`
 
@@ -196,11 +240,11 @@ Feature: AOF CLI lifecycle
     Given a project initialized with legacy AOF config
     When I run `init --codex`
     Then the command should fail
-    And stderr should contain `aof migrate`
+    And stderr should contain `aof project migrate`
 
   Scenario: Explicitly migrate a legacy root config into .aof
     Given a project initialized with legacy AOF config
-    When I run `migrate`
+    When I run `project migrate`
     Then the command should succeed
     And stdout should contain `.aof`
     And stdout should contain `is now authoritative`
@@ -213,87 +257,90 @@ Feature: AOF CLI lifecycle
 
   Scenario: Preview apply without writing runtime files or lock state
     Given a project with .aof file-backed config
-    When I run `apply --codex --dry-run`
+    When I run `assets apply --codex --dry-run`
     Then the command should succeed
-    And stdout should contain `create:`
-    And stdout should contain `lock-preview:`
+    And stdout should contain `Would create`
+    And stdout should contain `Would update .aof/aof.lock.json`
     And file `.codex/skills/file-backed/SKILL.md` should not exist
     And file `.aof/aof.lock.json` should not exist
 
   Scenario: Protect drifted generated files unless forced
     Given a project with .aof file-backed config
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
     When I replace file `.codex/skills/file-backed/SKILL.md` with `Manual edit`
-    And I run `apply --codex`
+    And I run `assets apply --codex`
     Then the command should succeed
     And stdout should contain `drift-warning`
     And file `.codex/skills/file-backed/SKILL.md` should contain `Manual edit`
-    When I run `apply --codex --force`
+    When I run `assets apply --codex --force`
     Then the command should succeed
     And file `.codex/skills/file-backed/SKILL.md` should contain `File-backed body`
 
   Scenario: Prune stale owned generated files
     Given a project with .aof file-backed config
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
     When the .aof config has no resources
-    And I run `apply --codex`
+    And I run `assets apply --codex`
     Then the command should succeed
-    And stdout should contain `delete:`
+    And stdout should contain `Removed`
     And file `.codex/skills/file-backed/SKILL.md` should not exist
 
-  Scenario: Show config inspection in human and JSON formats
+  Scenario: Show project inspection in human and JSON formats
     Given a project with .aof package config
-    When I run `config show`
+    When I run `project show`
     Then the command should succeed
     And stdout should contain `config:`
     And stdout should contain `skill:file-backed`
     And stdout should contain `packages: 1`
-    When I run `config show --json`
+    When I run `project show --json`
     Then the command should succeed
     And stdout should contain `"packages"`
     And stdout should contain `"gsd"`
 
   Scenario: Validate invalid config for automation
     Given a project with invalid .aof config
-    When I run `validate`
+    When I run `project validate`
     Then the command should fail
     And stdout should contain `invalid:`
-    When I run `config validate --json`
+    When I run `project validate --json`
     Then the command should fail
     And stdout should contain `"valid": false`
     And stdout should contain `Unsupported runtime`
-    When I run `validate --json`
+    When I run `project validate --json`
     Then the command should fail
     And stdout should contain `"valid": false`
     And stdout should contain `"errors"`
 
   Scenario: Doctor reports package intent and stale legacy config
     Given a project with .aof package config and stale legacy config
-    When I run `doctor`
+    When I run `project doctor`
     Then the command should succeed
     And stdout should contain `package-intent`
     And stdout should contain `legacy-config`
-    When I run `config doctor`
+    When I run `project doctor`
     Then the command should succeed
     And stdout should contain `package-intent`
     And stdout should contain `legacy-config`
-    And stdout should contain `aof install gsd --dry-run`
-    When I run `doctor --strict`
+    And stdout should contain `aof packages install gsd --dry-run`
+    When I run `project doctor --strict`
     Then the command should fail
     And stdout should contain `warning: legacy-config`
 
   Scenario: Clean previews and removes matching lock-owned outputs
     Given a project with .aof file-backed config
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
-    When I run `clean --dry-run`
+    And stdout should contain `Created .codex/skills/file-backed/SKILL.md`
+    And stdout should not contain `reason=file does not exist`
+    And file `.codex/.gitignore` should contain `!.gitignore`
+    When I run `assets clean --dry-run`
     Then the command should succeed
     And stdout should contain `dry-run: no generated files`
     And stdout should contain `delete:`
     And file `.codex/skills/file-backed/SKILL.md` should exist
-    When I run `clean`
+    When I run `assets clean`
     Then the command should succeed
     And stdout should contain `delete:`
     And file `.codex/skills/file-backed/SKILL.md` should not exist
@@ -301,10 +348,10 @@ Feature: AOF CLI lifecycle
 
   Scenario: Clean preserves drifted lock-owned outputs
     Given a project with .aof file-backed config
-    When I run `apply --codex`
+    When I run `assets apply --codex`
     Then the command should succeed
     When I replace file `.codex/skills/file-backed/SKILL.md` with `Manual edit`
-    And I run `clean`
+    And I run `assets clean`
     Then the command should succeed
     And stdout should contain `drift-warning`
     And file `.codex/skills/file-backed/SKILL.md` should contain `Manual edit`
@@ -314,7 +361,9 @@ Feature: AOF CLI lifecycle
     Given an empty project
     When I run `catalog list`
     Then the command should fail
-    And stderr should contain `Catalog storage is currently disabled`
+    And stderr should contain `Removed command "catalog"`
+    And stderr should contain `Catalog is not currently supported`
+    And data file `aof.sqlite` should not exist
 
   Scenario: Reject catalog-backed init items
     Given an empty project
@@ -322,8 +371,37 @@ Feature: AOF CLI lifecycle
     Then the command should fail
     And stderr should contain `Catalog-backed init items are not available yet`
 
-  Scenario: Interactive install is pending redesign
+  Scenario: Removed legacy asset commands fail without executing
     Given an empty project
-    When I run `install --interactive` with input `project-context,gsd|codex|yes|no|no`
+    When I run `add`
     Then the command should fail
-    And stderr should contain `Interactive project setup is being redesigned`
+    And stderr should contain `Removed command "add"`
+    And file `.aof/aof.config.json` should not exist
+    When I run `global list`
+    Then the command should fail
+    And stderr should contain `Removed command "global"`
+    When I run `apply --dry-run`
+    Then the command should fail
+    And stderr should contain `Removed command "apply"`
+    When I run `sync --dry-run`
+    Then the command should fail
+    And stderr should contain `Removed command "sync"`
+    When I run `clean --dry-run`
+    Then the command should fail
+    And stderr should contain `Removed command "clean"`
+    When I run `validate`
+    Then the command should fail
+    And stderr should contain `Removed command "validate"`
+    And stderr should contain `aof project validate`
+    When I run `doctor`
+    Then the command should fail
+    And stderr should contain `Removed command "doctor"`
+    And stderr should contain `aof project doctor`
+    When I run `migrate`
+    Then the command should fail
+    And stderr should contain `Removed command "migrate"`
+    And stderr should contain `aof project migrate`
+    When I run `config show`
+    Then the command should fail
+    And stderr should contain `Removed command "config"`
+    And stderr should contain `aof project show`

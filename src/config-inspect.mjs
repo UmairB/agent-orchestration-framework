@@ -7,6 +7,7 @@ import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { normalizePackage } from "./packages.mjs";
 import {
+  RUNTIMES,
   supportedHookEvents,
   supportedHookTypes,
   supportedMcpTransports,
@@ -352,6 +353,7 @@ async function validateResource(resource, index, baseDir, diagnostics, locationO
   }
 
   await validateAssociatedFiles(resource, baseDir, location, diagnostics);
+  await validateAssociatedFileReferences(resource, baseDir, location, diagnostics);
 
   const overrides = resource.overrides ?? {};
   if (overrides && typeof overrides !== "object") {
@@ -561,8 +563,8 @@ async function validateAssociatedFiles(resource, baseDir, location, diagnostics)
     diagnostics.push(diagnostic("error", `${location}.files`, "files must be an array when provided."));
     return;
   }
-  if (resource.kind !== "skill") {
-    diagnostics.push(diagnostic("error", `${location}.files`, "Associated files are supported for skill resources only.", "unsupported-associated-files"));
+  if (!supportsAssociatedFiles(resource.kind)) {
+    diagnostics.push(diagnostic("error", `${location}.files`, "Associated files are supported for skill and command resources only.", "unsupported-associated-files"));
     return;
   }
   if (!resource.path) {
@@ -585,13 +587,23 @@ async function validateAssociatedFiles(resource, baseDir, location, diagnostics)
       continue;
     }
 
-    const normalizedEntry = entry.replaceAll("\\", "/");
-    const resolved = path.resolve(assetDir, normalizedEntry);
+    if (pathEscapesByTraversal(entry)) {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path must stay inside the asset directory.", "associated-file-escape"));
+      continue;
+    }
+
+    const normalizedEntry = normalizeAssociatedFileName(entry);
+    if (!isFlatAssociatedFilePath(entry)) {
+      diagnostics.push(diagnostic("error", entryLocation, "Associated file path must be a filename, not a nested path.", "invalid-associated-file"));
+      continue;
+    }
+
+    const resolved = path.resolve(assetDir, "files", normalizedEntry);
     if (!isInside(assetDir, resolved)) {
       diagnostics.push(diagnostic("error", entryLocation, "Associated file path must stay inside the asset directory.", "associated-file-escape"));
       continue;
     }
-    if (normalizePath(path.relative(assetDir, resolved)) === normalizePath(bodyFileName)) {
+    if (normalizedEntry === bodyFileName) {
       diagnostics.push(diagnostic("error", entryLocation, "Associated file path cannot target the primary body file.", "associated-file-body"));
       continue;
     }
@@ -618,6 +630,173 @@ async function validateAssociatedFiles(resource, baseDir, location, diagnostics)
       }
     }
   }
+}
+
+async function validateAssociatedFileReferences(resource, baseDir, location, diagnostics) {
+  if (!supportsAssociatedFiles(resource.kind)) return;
+
+  let id;
+  try {
+    id = normalizeId(resource.id);
+  } catch {
+    return;
+  }
+
+  const allowed = generatedAssociatedReferencePaths({ ...resource, id });
+  const declared = declaredAssociatedFilePlaceholders(resource);
+
+  for (const { pathName, text } of await resourceReferenceTexts(resource, baseDir, location)) {
+    for (const placeholder of extractFilePlaceholders(text)) {
+      if (!isFlatAssociatedFilePath(placeholder)) {
+        diagnostics.push(diagnostic(
+          "error",
+          pathName,
+          `Associated file placeholder must name one file, not a nested path: {{files.${placeholder}}}`,
+          "invalid-associated-file-reference"
+        ));
+        continue;
+      }
+      if (!declared.has(placeholder)) {
+        diagnostics.push(diagnostic(
+          "error",
+          pathName,
+          `Referenced associated file placeholder is not declared for ${resource.kind}:${id}: {{files.${placeholder}}}`,
+          "invalid-associated-file-reference"
+        ));
+      }
+    }
+
+    for (const reference of extractRuntimePathReferences(text)) {
+      if (!isRelevantAssociatedReference(resource.kind, id, reference)) continue;
+      if (allowed.has(reference)) continue;
+      diagnostics.push(diagnostic(
+        "error",
+        pathName,
+        `Referenced generated support file is not declared for ${resource.kind}:${id}: ${reference}`,
+        "invalid-associated-file-reference"
+      ));
+    }
+  }
+}
+
+function declaredAssociatedFilePlaceholders(resource) {
+  const result = new Set();
+  for (const filePath of Array.isArray(resource.files) ? resource.files : []) {
+    if (typeof filePath !== "string") continue;
+    const normalized = normalizeAssociatedFileName(filePath);
+    result.add(normalized);
+  }
+  return result;
+}
+
+function generatedAssociatedReferencePaths(resource) {
+  const result = new Set();
+  const runtimes = Array.isArray(resource.runtimes) && resource.runtimes.length > 0 ? resource.runtimes : supportedRuntimes();
+  for (const runtime of runtimes) {
+    const adapter = RUNTIMES[runtime];
+    if (!adapter?.localRoot) continue;
+    const root = normalizePath(adapter.localRoot);
+    if (resource.kind === "skill") {
+      result.add(`${root}/skills/${resource.id}/SKILL.md`);
+      for (const filePath of resource.files ?? []) {
+        result.add(`${root}/skills/${resource.id}/files/${normalizeAssociatedFileName(filePath)}`);
+      }
+    }
+    if (resource.kind === "command") {
+      result.add(`${root}/commands/${resource.id}.md`);
+      for (const filePath of resource.files ?? []) {
+        result.add(`${root}/scripts/${resource.id}/${commandAssociatedOutputPath(filePath)}`);
+      }
+    }
+  }
+  return result;
+}
+
+function commandAssociatedOutputPath(filePath) {
+  return normalizeAssociatedFileName(filePath);
+}
+
+async function resourceReferenceTexts(resource, baseDir, location) {
+  const result = [];
+  const inlineText = resource.body ?? resource.prompt ?? resource.instructions;
+  if (typeof inlineText === "string") {
+    result.push({ pathName: `${location}.${resource.body !== undefined ? "body" : resource.prompt !== undefined ? "prompt" : "instructions"}`, text: inlineText });
+  }
+  if (resource.path) {
+    try {
+      result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, resource.path), "utf8") });
+    } catch {
+      // Missing/unreadable primary files are reported by requireFile.
+    }
+  }
+
+  for (const [runtime, override] of Object.entries(resource.overrides ?? {})) {
+    let value = override;
+    if (typeof override === "string") {
+      try {
+        value = JSON.parse(await readFile(path.resolve(baseDir, override), "utf8"));
+      } catch {
+        continue;
+      }
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const overrideText = value.body ?? value.prompt ?? value.instructions;
+    if (typeof overrideText === "string") {
+      result.push({ pathName: `${location}.overrides.${runtime}`, text: overrideText });
+    }
+  }
+
+  return result;
+}
+
+function extractRuntimePathReferences(text) {
+  const references = new Set();
+  const pattern = /(?:^|[\s`"'(])((?:\.claude|\.codex)[\\/][^\s`"')\]}>,;]+)/g;
+  for (const match of String(text ?? "").matchAll(pattern)) {
+    references.add(normalizePath(match[1]).replace(/[.:]+$/, ""));
+  }
+  return references;
+}
+
+function extractFilePlaceholders(text) {
+  const references = new Set();
+  const pattern = /\{\{\s*files\.([^}]+?)\s*\}\}/g;
+  for (const match of String(text ?? "").matchAll(pattern)) {
+    references.add(normalizePath(match[1].trim()));
+  }
+  return references;
+}
+
+function normalizeAssociatedFileName(filePath) {
+  const normalized = normalizePath(filePath);
+  return normalized.startsWith("files/") ? normalized.slice("files/".length) : normalized;
+}
+
+function isFlatAssociatedFilePath(filePath) {
+  if (typeof filePath !== "string") return false;
+  const normalized = normalizeAssociatedFileName(filePath);
+  return normalized !== "" && !normalized.includes("/");
+}
+
+function pathEscapesByTraversal(filePath) {
+  const normalized = normalizePath(filePath);
+  return normalized === ".." || normalized.startsWith("../") || normalized.includes("/../");
+}
+
+function isRelevantAssociatedReference(kind, id, reference) {
+  for (const runtime of supportedRuntimes()) {
+    const adapter = RUNTIMES[runtime];
+    if (!adapter?.localRoot) continue;
+    const root = normalizePath(adapter.localRoot);
+    if (kind === "skill" && reference.startsWith(`${root}/skills/${id}/`)) return true;
+    if (kind === "command" && reference.startsWith(`${root}/scripts/${id}/`)) return true;
+    if (kind === "command" && reference.startsWith(`${root}/commands/${id}.assets/`)) return true;
+  }
+  return false;
+}
+
+function supportsAssociatedFiles(kind) {
+  return kind === "skill" || kind === "command";
 }
 
 function validateRuntimeExtensionObjects(item, location, diagnostics) {
@@ -669,15 +848,15 @@ function summarizeActions(actions) {
 function suggestionsFor(inspection, checks) {
   const suggestions = [];
   if (inspection.diagnostics.some((item) => item.severity === "error")) {
-    suggestions.push("Fix config validation errors, then run aof config validate.");
+    suggestions.push("Fix config validation errors, then run aof project validate.");
   } else {
-    suggestions.push("Run aof apply --dry-run to preview runtime file changes.");
+    suggestions.push("Run aof assets apply --dry-run to preview runtime file changes.");
   }
   if (inspection.packages.some((pkg) => pkg.id === "gsd")) {
-    suggestions.push("Run aof install gsd --dry-run to preview GSD setup commands.");
+    suggestions.push("Run aof packages install gsd --dry-run to preview GSD setup commands.");
   }
   if (checks.some((check) => check.id === "generated-output-drift" && check.severity === "warning")) {
-    suggestions.push("Review drift warnings or rerun aof apply --force when overwriting generated output is intended.");
+    suggestions.push("Review drift warnings or rerun aof assets apply --force when overwriting generated output is intended.");
   }
   if (inspection.adapterWarnings.length > 0) {
     suggestions.push("Review adapter warnings or rerun with --strict in CI to fail on portability degradation.");

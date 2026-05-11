@@ -55,6 +55,10 @@ export const configInspectTests = [
     run: validatesAssociatedFilesOnReferencedGlobalSkills
   },
   {
+    name: "validates associated file runtime references",
+    run: validatesAssociatedFileRuntimeReferences
+  },
+  {
     name: "reports unsafe associated file declarations",
     run: reportsUnsafeAssociatedFileDeclarations
   }
@@ -305,7 +309,7 @@ async function validatesAssociatedFilesOnReferencedGlobalSkills() {
       kind: "skill",
       id: "shared",
       body: "Global body",
-      files: [{ path: "scripts/search.py", body: "print('search')\n" }]
+      files: [{ path: "search.py", body: "print('search')\n" }]
     });
     await writeProjectWithGlobalRefs(targetDir, [{ kind: "skill", id: "shared" }]);
 
@@ -315,6 +319,64 @@ async function validatesAssociatedFilesOnReferencedGlobalSkills() {
     restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
     await rm(targetDir, { recursive: true, force: true });
     await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesAssociatedFileRuntimeReferences() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const commandDir = path.join(targetDir, ".aof", "assets", "commands", "convert-files");
+    const skillDir = path.join(targetDir, ".aof", "assets", "skills", "research");
+    await mkdir(path.join(commandDir, "files"), { recursive: true });
+    await mkdir(path.join(skillDir, "files"), { recursive: true });
+    await writeFile(path.join(commandDir, "files", "run.ps1"), "Write-Output convert\n", "utf8");
+    await writeFile(path.join(commandDir, "files", "run.sh"), "echo convert\n", "utf8");
+    await writeFile(path.join(skillDir, "files", "search.py"), "print('search')\n", "utf8");
+    await writeFile(path.join(commandDir, "COMMAND.md"), [
+      "On Windows:",
+      "pwsh -File .claude/scripts/convert-files/run.ps1 $ARGUMENTS",
+      "On Unix:",
+      ".codex/scripts/convert-files/run.sh $ARGUMENTS",
+      ""
+    ].join("\n"), "utf8");
+    await writeFile(path.join(skillDir, "SKILL.md"), [
+      "Use `.codex/skills/research/files/search.py` for local searches.",
+      ""
+    ].join("\n"), "utf8");
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        {
+          kind: "command",
+          id: "convert-files",
+          path: "assets/commands/convert-files/COMMAND.md",
+          files: ["run.ps1", "run.sh"],
+          runtimes: ["claude", "codex"]
+        },
+        {
+          kind: "skill",
+          id: "research",
+          path: "assets/skills/research/SKILL.md",
+          files: ["search.py"],
+          runtimes: ["codex"]
+        }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    assert.deepEqual(await validateConfig(targetDir), []);
+
+    await writeFile(path.join(commandDir, "COMMAND.md"), "Run {{files.scripts/run.py}}\n", "utf8");
+    let diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "invalid-associated-file-reference" && item.message.includes("not a nested path")));
+
+    await writeFile(path.join(commandDir, "COMMAND.md"), "pwsh -File .claude/scripts/convert-files/missing.ps1 $ARGUMENTS\n", "utf8");
+    await writeFile(path.join(skillDir, "SKILL.md"), "Use `.codex/skills/research/files/missing.py`.\n", "utf8");
+    diagnostics = await validateConfig(targetDir);
+    assert.equal(diagnostics.filter((item) => item.code === "invalid-associated-file-reference").length, 2);
+    assert.ok(diagnostics.some((item) => item.message.includes(".claude/scripts/convert-files/missing.ps1")));
+    assert.ok(diagnostics.some((item) => item.message.includes(".codex/skills/research/files/missing.py")));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
   }
 }
 
@@ -344,13 +406,20 @@ async function reportsUnsafeAssociatedFileDeclarations() {
     assert.ok(diagnostics.some((item) => item.code === "associated-file-body"));
 
     await writeGlobalResource(globalDir, {
+      kind: "command",
+      id: "command-helper",
+      body: "Command body",
+      files: [{ path: "helper.py", body: "print('command')\n" }]
+    });
+    assert.deepEqual(await validateGlobalConfig(), []);
+
+    await writeGlobalResource(globalDir, {
       kind: "agent",
       id: "agent-helper",
       body: "Agent body",
       files: [{ path: "helper.py", body: "print('agent')\n" }]
     });
-    await writeProjectWithGlobalRefs(targetDir, [{ kind: "agent", id: "agent-helper" }]);
-    const kindDiagnostics = await validateConfig(targetDir);
+    const kindDiagnostics = await validateGlobalConfig();
     assert.ok(kindDiagnostics.some((item) => item.code === "unsupported-associated-files"));
 
   } finally {
@@ -398,13 +467,13 @@ async function writeProjectWithGlobalRefs(targetDir, globalRefs, options = {}) {
 }
 
 async function writeGlobalResource(globalDir, input) {
-  const plural = input.kind === "skill" ? "skills" : input.kind === "agent" ? "agents" : "rules";
-  const bodyFile = input.kind === "skill" ? "SKILL.md" : input.kind === "agent" ? "AGENT.md" : "RULE.md";
+  const plural = input.kind === "skill" ? "skills" : input.kind === "command" ? "commands" : input.kind === "agent" ? "agents" : "rules";
+  const bodyFile = input.kind === "skill" ? "SKILL.md" : input.kind === "command" ? "COMMAND.md" : input.kind === "agent" ? "AGENT.md" : "RULE.md";
   const resourceDir = path.join(globalDir, "assets", plural, input.id);
   await mkdir(resourceDir, { recursive: true });
   await writeFile(path.join(resourceDir, bodyFile), `${input.body}\n`, "utf8");
   for (const file of input.files ?? []) {
-    const filePath = path.join(resourceDir, file.path);
+    const filePath = path.join(resourceDir, "files", file.path);
     await mkdir(path.dirname(filePath), { recursive: true });
     if (file.directory) {
       await mkdir(filePath, { recursive: true });

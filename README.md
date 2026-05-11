@@ -13,20 +13,20 @@ The initial target is local CLI usage:
 ```sh
 npm link
 aof init
-aof add skill code-review
-aof add
-aof migrate
-aof sync --dry-run
-aof validate
-aof doctor
-aof clean --dry-run
-aof config show
-aof config validate
-aof config doctor
-aof global add skill shared-review --codex
-aof global add
-aof global list
-aof install --no-serve
+aof assets add skill code-review
+aof assets add
+aof project migrate
+aof assets apply --dry-run
+aof project validate
+aof project doctor
+aof assets clean --dry-run
+aof project show
+aof assets add --global skill shared-review --codex
+aof assets add --global
+aof assets list --global
+aof packages add gsd --codex
+aof packages install gsd --dry-run
+aof assets ui
 ```
 
 When a command needs interactive input, AOF uses keyboard-driven terminal
@@ -37,42 +37,41 @@ depending on interactive prompts.
 Dry-run the generated files:
 
 ```sh
-aof apply --dry-run
+aof assets apply --dry-run
 ```
 
-`aof apply --dry-run` prints the same action plan that a real apply would use
-without writing runtime files, deleting stale files, or updating
-`.aof/aof.lock.json`. Each action includes the runtime, source asset, and reason
-so automation can distinguish creates, updates, deletes, skips, and drift
-warnings.
+`aof assets apply --dry-run` prints the same action plan that a real apply
+would use without writing runtime files, deleting stale files, or updating
+`.aof/aof.lock.json`. Each action includes the runtime, source asset, and
+reason so automation can distinguish creates, updates, deletes, skips, and
+drift warnings.
 
 Scaffold a file-backed `.aof/` asset:
 
 ```sh
-aof add skill code-review --codex
+aof assets add skill code-review --codex
 ```
 
-`aof add [kind id]` writes source files under `.aof/assets/` and updates
-`.aof/aof.config.json`. Run `aof add` without `kind id` to choose the asset
-type, id, runtimes, description, and initial body interactively. It refuses
-config or file collisions unless `--force` is supplied.
+`aof assets add [kind id]` writes source files under `.aof/assets/` and
+updates `.aof/aof.config.json`. Run `aof assets add` without `kind id` to
+choose the asset type, id, runtimes, description, and initial body
+interactively. It refuses config or file collisions unless `--force` is
+supplied.
 
 Create reusable global source assets:
 
 ```sh
-aof global add skill shared-review --codex
-aof global add
-aof global list
-aof global show skill shared-review
-aof global validate
+aof assets add --global skill shared-review --codex
+aof assets add --global
+aof assets list --global
+aof assets show --global skill shared-review
+aof assets validate --global
 ```
 
-`aof global ...` manages source assets in the user-global AOF workspace at
-`~/.aof`. The global workspace mirrors project layout with
-`~/.aof/aof.config.json` and `~/.aof/assets/<kind>/<id>/...`. Global commands
-currently create and inspect skills, agents, and rules. This is separate from
-the existing `--global` flag on runtime commands such as `aof apply --global`
-or `aof install gsd --global`, which targets assistant runtime home folders.
+`aof assets ... --global` manages source assets in the user-global AOF
+workspace at `~/.aof`. The global workspace mirrors project layout with
+`~/.aof/aof.config.json` and `~/.aof/assets/<kind>/<id>/...`. Global source
+asset commands currently create and inspect skills, agents, and rules.
 
 Reference global assets from a project without copying their source files into
 project `.aof`:
@@ -90,7 +89,7 @@ project `.aof`:
 Then render normally:
 
 ```sh
-aof apply --codex
+aof assets apply --codex
 ```
 
 Referenced global skills, agents, and rules render alongside project-local
@@ -118,101 +117,99 @@ above renders to `.codex/skills/research-helper/scripts/search.py` and
 `SKILL.md`. AOF supports associated files for skills; other resource kinds
 remain single-file outputs.
 
-Synchronize generated outputs and managed package intent:
+Render generated outputs and managed package intent:
 
 ```sh
-aof sync --codex --dry-run
-aof sync --codex
-aof sync --codex --install
+aof assets apply --codex --dry-run
+aof assets apply --codex
 ```
 
-`aof sync` applies generated runtime outputs and writes lock state while keeping
-networked package installers disabled by default. It still prints the installer
-commands so automation can decide whether to run `aof sync --install`.
+`aof assets apply` applies generated runtime outputs and writes lock state.
+Package installers are not run from the assets namespace; package execution
+belongs under `aof packages ...`.
 
 Remove lock-owned generated outputs:
 
 ```sh
-aof clean --dry-run
-aof clean
+aof assets clean --dry-run
+aof assets clean
 ```
 
-`aof clean` deletes only generated files recorded in `.aof/aof.lock.json` whose
-current content still matches the recorded hash. Drifted files are preserved and
-remain in the lock.
+`aof assets clean` deletes only generated files recorded in
+`.aof/aof.lock.json` whose current content still matches the recorded hash.
+Drifted files are preserved and remain in the lock.
 
 Install only Codex assets:
 
 ```sh
-aof apply --codex
+aof assets apply --codex
 ```
 
-Ask GSD's installer to install its current Codex and Claude integrations:
+Declare GSD package intent without running installer code:
 
 ```sh
-aof install gsd
+aof packages add gsd --codex
+aof packages list
+aof packages show gsd
+aof packages validate
 ```
+
+`aof packages add gsd` writes package intent to `.aof/aof.config.json`. It does
+not run `npm`, `npx`, or installer code. Runtime flags such as `--codex`,
+`--claude`, and `--runtime codex,claude` record the runtimes the package should
+target.
 
 Preview the GSD installer commands without running networked installs:
 
 ```sh
-aof install gsd --dry-run
+aof packages install gsd --dry-run
 ```
 
-When `.aof/aof.config.json` declares a managed `gsd` package, `aof install
-gsd` uses that package source and runtime list by default. Runtime and scope
-flags such as `--claude`, `--codex`, and `--global` override that intent for
-one run. Dry-run output prints the exact `npx get-shit-done-cc@...` commands
-and does not write lock state or run npm.
-
-Real GSD installs print a network boundary before each runtime command. The
-boundary includes the command, package source, runtime, scope, and a warning
-that npm package code may run. Each runtime attempt is recorded in
-`.aof/aof.lock.json`, including successes and failures. Successful matching
-attempts are skipped on later runs unless `--force` is supplied.
-
-Replay managed framework intent from lock state:
+Run the configured GSD installer:
 
 ```sh
-aof install --from-lock --dry-run
-aof install --from-lock
+aof packages install gsd
 ```
+
+Non-dry-run package installs print a network/package-code boundary before each
+runtime command. The boundary includes the exact command, package source,
+runtime, scope, and a warning that npm package code may run. Each runtime
+attempt is recorded in `.aof/aof.lock.json`, including successes, failures, and
+skips. Successful matching attempts are skipped on later runs unless `--force`
+is supplied.
+
+Replay managed install intent from lock state:
+
+```sh
+aof packages install --from-lock --dry-run
+aof packages install --from-lock
+```
+
+Removed top-level `aof install ...` commands fail with guidance instead of
+executing.
 
 Inspect `.aof/` configuration for automation:
 
 ```sh
-aof validate
-aof validate --json
-aof doctor
-aof doctor --json
-aof config show
-aof config show --json
-aof config validate
-aof config validate --json
-aof config doctor
-aof config doctor --json
+aof project show
+aof project show --json
+aof project validate
+aof project validate --json
+aof project doctor
+aof project doctor --json
 ```
 
-`aof validate` checks JSON shape, resource kinds, runtimes, file-backed
+`project` means the current repository's AOF workspace and health.
+`aof project validate` checks JSON shape, resource kinds, runtimes, file-backed
 asset paths, runtime override identity, package ids, package sources, and
-package runtime support. `aof doctor` adds project health checks such as
+package runtime support. `aof project doctor` adds project health checks such as
 stale root config detection, generated-output drift summary, missing assets,
 managed package intent, and suggested next commands.
-
-Use the guided terminal install flow:
-
-```sh
-aof install --interactive
-```
-
-The guided flow asks for catalog items and runtimes, shows proposed config,
-render, and framework plans, then asks separately before writing `.aof/`,
-writing runtime files, or running GSD installer commands.
 
 Start the local setup UI:
 
 ```sh
-aof install
+aof assets ui
 ```
 
 The setup UI is a source configuration editor with explicit Project and Global
@@ -235,9 +232,9 @@ differences and adapter warnings before apply, including mapped behavior such
 as Codex rule guidance rendering through `AGENTS.md`.
 
 The UI writes source-of-truth files under `.aof/` only. It does not run
-`aof init`, `aof apply`, dry-run, `aof install`, or shell commands. Use the
-Review tab for validation, capability summaries, package intent, and the next
-CLI commands to run in a terminal.
+`aof init`, `aof assets apply`, dry-run, package installers, or shell commands.
+Use the Review tab for validation, capability summaries, package intent, and
+the next CLI commands to run in a terminal.
 
 The setup UI binds to `127.0.0.1` and is intended for local repository editing.
 Its API still treats request bodies and static paths as untrusted input:
@@ -258,12 +255,12 @@ The project keeps reproducibility metadata locally:
 Root `aof.config.json` is treated as legacy input. When both root `aof.config.json` and `.aof/aof.config.json` exist, `.aof/aof.config.json` is authoritative. Run an explicit migration when adopting the workspace model:
 
 ```sh
-aof migrate
+aof project migrate
 ```
 
 Migration leaves the root `aof.config.json` untouched and writes the new workspace files under `.aof/`.
 Editor saves also write `.aof/aof.config.json`; they do not silently mutate a
-legacy root config. `aof config doctor` reports a warning when both files exist
+legacy root config. `aof project doctor` reports a warning when both files exist
 so stale root config is visible.
 
 Project and global resources currently support four portable resource kinds:
@@ -322,7 +319,7 @@ Rules render differently per runtime:
 - Codex `.codex/rules/*.rules` files are execution-policy rules, not natural-language guidance. AOF treats them as a separate future asset type.
 
 Expanded project primitives live beside `resources[]` in `.aof/aof.config.json`.
-They are rendered by `aof apply` and `aof sync` like other generated outputs:
+They are rendered by `aof assets apply` like other generated outputs:
 
 ```json
 {
@@ -397,9 +394,9 @@ Includes are rejected when they are missing, recursive, absolute, or escape the
 
 Generated assistant folders such as `.claude/` and `.codex/` are output, not source of truth for this project. AOF writes small generated markers into Markdown output where the format allows it, but `.aof/aof.lock.json` is authoritative for ownership. The lock manifest records generated file paths, target runtimes, source asset ids and kinds, content hashes, managed framework intent, and framework install attempts.
 
-When `aof apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. This includes root `AGENTS.md`, root `CLAUDE.md`, root `.mcp.json`, `.claude/settings.json`, and `.codex/config.toml` when they are generated from expanded primitives. Re-run with `aof apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
+When `aof assets apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. This includes root `AGENTS.md`, root `CLAUDE.md`, root `.mcp.json`, `.claude/settings.json`, and `.codex/config.toml` when they are generated from expanded primitives. Re-run with `aof assets apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
 
-Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof apply`. `aof apply` does not run framework installers; use commands such as `aof install gsd` for installer execution.
+Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof assets apply`. `aof assets apply` does not run framework installers; use `aof packages install gsd` for installer execution.
 
 ## Adapter Warnings
 
@@ -410,17 +407,17 @@ computed at command time and are not written to `.aof/aof.lock.json`.
 Commands that surface adapter warnings:
 
 ```sh
-aof validate
-aof validate --json
-aof doctor
-aof doctor --json
-aof apply --dry-run
-aof apply --dry-run --json
-aof sync --dry-run
-aof sync --dry-run --json
+aof project validate
+aof project validate --json
+aof project doctor
+aof project doctor --json
+aof assets validate
+aof assets validate --json
+aof assets apply --dry-run
+aof assets apply --dry-run --json
 ```
 
-Human output uses a compact block before apply/sync actions:
+Human output uses a compact block before apply actions:
 
 ```txt
 adapter-warnings:
@@ -453,16 +450,15 @@ JSON output exposes a top-level `adapterWarnings` array:
 Use `--strict` to turn adapter warnings into failures for CI:
 
 ```sh
-aof validate --strict
-aof doctor --strict
-aof apply --strict
-aof sync --strict
+aof project validate --strict
+aof project doctor --strict
+aof assets validate --strict
+aof assets apply --strict
 ```
 
-For `apply --strict` and `sync --strict`, AOF stops before generated files,
-stale deletes, lock updates, or package installers run. `--force` only affects
-generated-output drift; it does not bypass adapter warning failures under
-`--strict`.
+For `aof assets apply --strict`, AOF stops before generated files, stale
+deletes, or lock updates run. `--force` only affects generated-output drift; it
+does not bypass adapter warning failures under `--strict`.
 
 ## Tests
 

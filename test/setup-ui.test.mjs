@@ -219,7 +219,7 @@ async function savesGlobalResourcesAndAssociatedFiles() {
         body: "Use the helper script.",
         runtimes: ["codex"],
         files: [
-          { path: "scripts/search.py", body: "print('search')\n" }
+          { path: "search.py", body: "print('search')\n" }
         ],
         overrides: {}
       })
@@ -229,8 +229,8 @@ async function savesGlobalResourcesAndAssociatedFiles() {
 
     const config = JSON.parse(await readFile(path.join(globalDir, "aof.config.json"), "utf8"));
     assert.equal(config.resources[0].kind, "skill");
-    assert.deepEqual(config.resources[0].files, ["scripts/search.py"]);
-    assert.match(await readFile(path.join(globalDir, "assets", "skills", "research-helper", "scripts", "search.py"), "utf8"), /print\('search'\)/);
+    assert.deepEqual(config.resources[0].files, ["search.py"]);
+    assert.match(await readFile(path.join(globalDir, "assets", "skills", "research-helper", "files", "search.py"), "utf8"), /print\('search'\)/);
 
     const unsafeResponse = await fetch(`${url}api/config/global/resources/skill/unsafe`, {
       method: "PUT",
@@ -248,6 +248,25 @@ async function savesGlobalResourcesAndAssociatedFiles() {
     const unsafe = await unsafeResponse.json();
     assert.equal(unsafeResponse.status, 400);
     assert.ok(unsafe.diagnostics.some((item) => item.code === "associated-file-escape"));
+
+    const commandSave = await fetchJson(`${url}api/config/project/resources/command/prime`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "prime",
+        kind: "command",
+        body: "Run the helper.",
+        runtimes: ["codex"],
+        files: [
+          { name: "helper.py", body: "print('prime')\n" }
+        ],
+        overrides: {}
+      })
+    });
+    assert.equal(commandSave.ok, true);
+    const projectConfig = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.deepEqual(projectConfig.resources[0].files, ["helper.py"]);
+    assert.match(await readFile(path.join(targetDir, ".aof", "assets", "commands", "prime", "files", "helper.py"), "utf8"), /print\('prime'\)/);
   } finally {
     server.close();
     await rm(targetDir, { recursive: true, force: true });

@@ -16,7 +16,7 @@ export async function scaffoldResource(projectDir = process.cwd(), input = {}) {
     schema: "https://aof.local/schemas/aof.schema.json",
     beforeRead: async () => {
       if (await isLegacyConfigOnlyProject(targetDir)) {
-        throw new Error(`Legacy config exists at ${legacyConfigPath(targetDir)}. Run aof migrate before adding .aof assets.`);
+        throw new Error(`Legacy config exists at ${legacyConfigPath(targetDir)}. Run aof project migrate before adding .aof assets.`);
       }
     }
   });

@@ -52,6 +52,10 @@ export const renderPlanTests = [
     run: rendersAssociatedSkillFiles
   },
   {
+    name: "renders associated command files in runtime script folders",
+    run: rendersAssociatedCommandFiles
+  },
+  {
     name: "protects drifted associated skill files",
     run: protectsDriftedAssociatedSkillFiles
   }
@@ -134,9 +138,10 @@ async function mergesCodexRulesDeterministically() {
     });
 
     const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
-    assert.equal(desired.length, 1);
-    assert.equal(path.relative(targetDir, desired[0].absolutePath), path.join(".codex", "AGENTS.md"));
-    assert.ok(desired[0].content.indexOf("## alpha") < desired[0].content.indexOf("## zeta"));
+    const codexAgents = desired.find((item) => item.path === path.join(".codex", "AGENTS.md"));
+    assert.equal(desired.length, 2);
+    assert.ok(codexAgents);
+    assert.ok(codexAgents.content.indexOf("## alpha") < codexAgents.content.indexOf("## zeta"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -155,8 +160,9 @@ async function createsLockManifest() {
     const manifest = createLockManifest({ actions, desiredOutputs: desired, config, runtimes: ["codex"] });
 
     assert.equal(manifest.version, 2);
-    assert.equal(manifest.files.length, 1);
-    assert.equal(manifest.files[0].resource.id, "context");
+    assert.equal(manifest.files.length, 2);
+    assert.ok(manifest.files.some((file) => file.resource.id === "context"));
+    assert.ok(manifest.files.some((file) => file.path === path.join(".codex", ".gitignore")));
     assert.equal(manifest.packages[0].id, "gsd");
     assert.equal(manifest.packages[0].namespace, "gsd");
     assert.equal(manifest.packages[0].sourceDescriptor.type, "npm");
@@ -184,8 +190,10 @@ async function preservesDriftedLockEntries() {
     actions = await planApplyActions(desired, prior, { targetDir });
     const manifest = createLockManifest({ actions, desiredOutputs: desired, previousLock: prior, config, runtimes: ["codex"] });
     assert.equal(actions[0].action, "drift-warning");
-    assert.equal(manifest.files.length, 1);
-    assert.equal(manifest.files[0].hash, prior.files[0].hash);
+    assert.equal(manifest.files.length, 2);
+    const contextFile = manifest.files.find((file) => file.resource.id === "context");
+    const priorContextFile = prior.files.find((file) => file.resource.id === "context");
+    assert.equal(contextFile.hash, priorContextFile.hash);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -288,11 +296,12 @@ async function rendersPackageResourcesWithNamespace() {
     });
 
     const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
-    assert.equal(desired.length, 1);
-    assert.equal(desired[0].path, path.join(".codex", "skills", "vendor-context", "SKILL.md"));
-    assert.equal(desired[0].resource.package.id, "assistant-pack");
-    assert.equal(desired[0].resource.package.namespace, "vendor");
-    assert.equal(desired[0].resource.originalId, "context");
+    const packageSkill = desired.find((item) => item.path === path.join(".codex", "skills", "vendor-context", "SKILL.md"));
+    assert.equal(desired.length, 2);
+    assert.ok(packageSkill);
+    assert.equal(packageSkill.resource.package.id, "assistant-pack");
+    assert.equal(packageSkill.resource.package.namespace, "vendor");
+    assert.equal(packageSkill.resource.originalId, "context");
 
     const manifest = createLockManifest({
       actions: await planApplyActions(desired, null, { targetDir }),
@@ -300,7 +309,7 @@ async function rendersPackageResourcesWithNamespace() {
       config,
       runtimes: ["codex"]
     });
-    assert.equal(manifest.files[0].resource.package.namespace, "vendor");
+    assert.ok(manifest.files.some((file) => file.resource.package?.namespace === "vendor"));
     assert.equal(manifest.packages[0].sourceDescriptor.type, "file");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
@@ -341,9 +350,9 @@ async function rendersAssociatedSkillFiles() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
   try {
     const assetDir = path.join(targetDir, ".aof", "assets", "skills", "context");
-    await mkdir(path.join(assetDir, "scripts"), { recursive: true });
+    await mkdir(path.join(assetDir, "files"), { recursive: true });
     await writeFile(path.join(assetDir, "SKILL.md"), "Skill body.\n", "utf8");
-    await writeFile(path.join(assetDir, "scripts", "helper.py"), "print('helper')\n", "utf8");
+    await writeFile(path.join(assetDir, "files", "helper.py"), "print('helper')\n", "utf8");
 
     const config = await resolveConfig({
       name: "demo",
@@ -352,18 +361,18 @@ async function rendersAssociatedSkillFiles() {
           kind: "skill",
           id: "context",
           path: path.join(".aof", "assets", "skills", "context", "SKILL.md"),
-          files: ["scripts/helper.py"],
+          files: ["helper.py"],
           runtimes: ["codex"]
         }
       ]
     }, targetDir);
 
     const desired = await createRenderPlan(config, { targetDir, runtimes: ["codex"] });
-    const helper = desired.find((item) => item.path === path.join(".codex", "skills", "context", "scripts", "helper.py"));
+    const helper = desired.find((item) => item.path === path.join(".codex", "skills", "context", "files", "helper.py"));
     assert.ok(helper);
     assert.equal(helper.content, "print('helper')\n");
     assert.equal(helper.resource.artifact, "associated-file");
-    assert.equal(helper.resource.file, "scripts/helper.py");
+    assert.equal(helper.resource.file, "files/helper.py");
 
     const actions = await planApplyActions(desired, null, { targetDir });
     assert.ok(actions.some((item) => item.path === helper.path && item.action === "create"));
@@ -378,9 +387,9 @@ async function protectsDriftedAssociatedSkillFiles() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
   try {
     const assetDir = path.join(targetDir, ".aof", "assets", "skills", "context");
-    await mkdir(path.join(assetDir, "scripts"), { recursive: true });
+    await mkdir(path.join(assetDir, "files"), { recursive: true });
     await writeFile(path.join(assetDir, "SKILL.md"), "Skill body.\n", "utf8");
-    await writeFile(path.join(assetDir, "scripts", "helper.py"), "print('helper')\n", "utf8");
+    await writeFile(path.join(assetDir, "files", "helper.py"), "print('helper')\n", "utf8");
 
     const config = await resolveConfig({
       name: "demo",
@@ -389,7 +398,7 @@ async function protectsDriftedAssociatedSkillFiles() {
           kind: "skill",
           id: "context",
           path: path.join(".aof", "assets", "skills", "context", "SKILL.md"),
-          files: ["scripts/helper.py"],
+          files: ["helper.py"],
           runtimes: ["codex"]
         }
       ]
@@ -403,6 +412,53 @@ async function protectsDriftedAssociatedSkillFiles() {
 
     const nextActions = await planApplyActions(desired, prior, { targetDir });
     assert.ok(nextActions.some((item) => item.path === helper.path && item.action === "drift-warning"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function rendersAssociatedCommandFiles() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const assetDir = path.join(targetDir, ".aof", "assets", "commands", "prime");
+    await mkdir(path.join(assetDir, "files"), { recursive: true });
+    await writeFile(path.join(assetDir, "COMMAND.md"), [
+      "Run `{{files.helper.py}}` on any runtime.",
+      "Codex path: {{ files.helper.py }}",
+      ""
+    ].join("\n"), "utf8");
+    await writeFile(path.join(assetDir, "files", "helper.py"), "print('prime')\n", "utf8");
+
+    const config = await resolveConfig({
+      name: "demo",
+      resources: [
+        {
+          kind: "command",
+          id: "prime",
+          path: path.join(".aof", "assets", "commands", "prime", "COMMAND.md"),
+          files: ["helper.py"],
+          runtimes: ["claude", "codex"]
+        }
+      ]
+    }, targetDir);
+
+    const desired = await createRenderPlan(config, { targetDir, runtimes: ["claude", "codex"] });
+    const codexHelper = desired.find((item) => item.path === path.join(".codex", "scripts", "prime", "helper.py"));
+    const claudeHelper = desired.find((item) => item.path === path.join(".claude", "scripts", "prime", "helper.py"));
+    const codexCommand = desired.find((item) => item.path === path.join(".codex", "commands", "prime.md"));
+    const claudeCommand = desired.find((item) => item.path === path.join(".claude", "commands", "prime.md"));
+    assert.ok(codexHelper);
+    assert.ok(claudeHelper);
+    assert.ok(codexCommand);
+    assert.ok(claudeCommand);
+    assert.equal(codexHelper.content, "print('prime')\n");
+    assert.match(codexCommand.content, /\.codex\/scripts\/prime\/helper\.py/);
+    assert.match(claudeCommand.content, /\.claude\/scripts\/prime\/helper\.py/);
+    assert.doesNotMatch(codexCommand.content, /\{\{files\.helper\.py\}\}/);
+    assert.equal(codexHelper.resource.kind, "command");
+    assert.equal(codexHelper.resource.artifact, "associated-file");
+    assert.equal(codexHelper.resource.file, "helper.py");
+    assert.equal(codexHelper.resource.sourceFile, "files/helper.py");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

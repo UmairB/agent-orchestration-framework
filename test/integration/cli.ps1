@@ -195,7 +195,7 @@ function Run-Step {
 
   if ($Step -eq "a project with referenced global skill helper files") {
     Run-Step $Context "an empty project"
-    Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Use the helper script."; files = @(@{ path = "scripts/search.py"; body = "print('search')`n" }) }
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Use the helper script."; files = @(@{ path = "search.py"; body = "print('search')`n" }) }
     Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "research-helper" })
     return
   }
@@ -341,7 +341,7 @@ function Run-Step {
       description = "Global skill with helper"
       body = "Use the helper script."
       runtimes = @("codex")
-      files = @(@{ path = "scripts/search.py"; body = "print('search')`n" })
+      files = @(@{ path = "search.py"; body = "print('search')`n" })
       overrides = @{}
     }
     return
@@ -408,8 +408,10 @@ function Run-Step {
 
   if ($Step -match "^file ``(.+)`` should exist$") { if (!(Test-Path -LiteralPath (Join-Path $Context.ProjectDir $Matches[1]) -PathType Leaf)) { throw "Expected file to exist: $($Matches[1])" }; return }
   if ($Step -match "^data file ``(.+)`` should exist$") { if (!(Test-Path -LiteralPath (Join-Path $Context.DataDir $Matches[1]) -PathType Leaf)) { throw "Expected data file to exist: $($Matches[1])" }; return }
+  if ($Step -match "^data file ``(.+)`` should not exist$") { if (Test-Path -LiteralPath (Join-Path $Context.DataDir $Matches[1]) -PathType Leaf) { throw "Expected data file not to exist: $($Matches[1])" }; return }
   if ($Step -match "^file ``(.+)`` should not exist$") { if (Test-Path -LiteralPath (Join-Path $Context.ProjectDir $Matches[1]) -PathType Leaf) { throw "Expected file not to exist: $($Matches[1])" }; return }
   if ($Step -match "^file ``(.+)`` should contain ``([\s\S]+)``$") { Assert-Contains (Get-Content (Join-Path $Context.ProjectDir $Matches[1]) -Raw) $Matches[2] "File did not contain expected text."; return }
+  if ($Step -match "^file ``(.+)`` should not contain ``([\s\S]+)``$") { $Text = Get-Content (Join-Path $Context.ProjectDir $Matches[1]) -Raw; if ($Text.Contains($Matches[2])) { throw "Expected file $($Matches[1]) not to contain $($Matches[2])" }; return }
 
   if ($Step -match "^HTTP response status should be (\d+)$") { Assert-LastHttpResponse $Context; Assert-Equal ([int]$Matches[1]) $Context.LastHttpResponse.Status $Context.LastHttpResponse.Text; return }
   if ($Step -match "^HTTP response field ``(.+)`` should equal ``(.+)``$") { Assert-LastHttpResponse $Context; $Actual = Get-ValueAtPath $Context.LastHttpResponse.Json $Matches[1]; $Expected = Convert-ExpectedValue $Matches[2]; Assert-Equal $Expected $Actual $Context.LastHttpResponse.Text; return }
@@ -442,6 +444,7 @@ function Run-Step {
   if ($Step -match "^JSON file ``(.+)`` package ``(.+)`` should have resolution status ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Package = $Matches[2]; $Status = $Matches[3]; $Pkg = $Json.packages | Where-Object { $_.id -eq $Package } | Select-Object -First 1; if ($null -eq $Pkg) { throw "Expected $($Matches[1]) to contain package $Package" }; Assert-Equal $Status $Pkg.resolution.status "Expected package $Package resolution status $Status"; return }
   if ($Step -match "^JSON file ``(.+)`` should not contain adapter warning ``(.+)``$") { $Text = Get-Content (Join-Path $Context.ProjectDir $Matches[1]) -Raw; if ($Text.Contains($Matches[2])) { throw "Expected $($Matches[1]) not to contain adapter warning $($Matches[2])" }; return }
   if ($Step -match "^JSON file ``(.+)`` should contain framework install attempt ``(.+)`` with status ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; $Status = $Matches[3]; if (!($Json.frameworkInstallAttempts | Where-Object { $_.runtime -eq $Runtime -and $_.status -eq $Status })) { throw "Expected $($Matches[1]) to contain framework install attempt $Runtime with status $Status" }; return }
+  if ($Step -match "^JSON file ``(.+)`` should not contain framework install attempt ``(.+)``$") { $Json = Read-ProjectJson $Context $Matches[1]; $Runtime = $Matches[2]; if ($Json.frameworkInstallAttempts | Where-Object { $_.runtime -eq $Runtime }) { throw "Expected $($Matches[1]) not to contain framework install attempt $Runtime" }; return }
   if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in file ``(.+)``$") { $Content = Get-Content (Join-Path $Context.ProjectDir $Matches[3]) -Raw; $First = $Content.IndexOf($Matches[1]); $Second = $Content.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in $($Matches[3])" }; return }
   if ($Step -match "^text ``(.+)`` should appear before ``(.+)`` in stdout$") { Assert-LastResult $Context; $First = $Context.LastResult.Stdout.IndexOf($Matches[1]); $Second = $Context.LastResult.Stdout.IndexOf($Matches[2]); if ($First -lt 0 -or $Second -lt 0 -or $First -ge $Second) { throw "Expected $($Matches[1]) to appear before $($Matches[2]) in stdout" }; return }
 
@@ -512,8 +515,8 @@ function Write-AofProject {
 
 function Write-GlobalAofResource {
   param($Context, $ResourceInput, [bool] $Append = $false)
-  $Plural = if ($ResourceInput.kind -eq "skill") { "skills" } elseif ($ResourceInput.kind -eq "agent") { "agents" } else { "rules" }
-  $BodyFile = if ($ResourceInput.kind -eq "skill") { "SKILL.md" } elseif ($ResourceInput.kind -eq "agent") { "AGENT.md" } else { "RULE.md" }
+  $Plural = if ($ResourceInput.kind -eq "skill") { "skills" } elseif ($ResourceInput.kind -eq "command") { "commands" } elseif ($ResourceInput.kind -eq "agent") { "agents" } else { "rules" }
+  $BodyFile = if ($ResourceInput.kind -eq "skill") { "SKILL.md" } elseif ($ResourceInput.kind -eq "command") { "COMMAND.md" } elseif ($ResourceInput.kind -eq "agent") { "AGENT.md" } else { "RULE.md" }
   $ResourcePath = "assets/$Plural/$($ResourceInput.id)/$BodyFile"
   $ResourceDir = Join-Path $Context.GlobalDir "assets\$Plural\$($ResourceInput.id)"
   New-Item -ItemType Directory -Path $ResourceDir -Force | Out-Null
@@ -529,7 +532,7 @@ function Write-GlobalAofResource {
   if ($ResourceInput.files) {
     $FileRefs = @()
     foreach ($File in $ResourceInput.files) {
-      $AssociatedPath = Join-Path $ResourceDir $File.path
+      $AssociatedPath = Join-Path (Join-Path $ResourceDir "files") $File.path
       New-Item -ItemType Directory -Path (Split-Path $AssociatedPath -Parent) -Force | Out-Null
       $FileBody = if ($null -eq $File.body) { "" } else { $File.body }
       Set-Content -Path $AssociatedPath -Value $FileBody -NoNewline

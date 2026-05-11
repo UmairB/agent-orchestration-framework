@@ -55,7 +55,7 @@ type EditableResource = {
   description: string;
   body: string;
   runtimes: RuntimeId[];
-  files?: Array<{ path: string; body: string }>;
+  files?: Array<{ path?: string; name?: string; body: string }>;
   model?: string;
   tools?: string[];
   paths?: string[];
@@ -393,11 +393,13 @@ function AssetList({ resources, selectedId, selectedSource, scope, payload, proj
           onClick={() => onSelect(resource)}
           className={`w-full rounded-md border p-3 text-left transition ${selectedId === resource.id && selectedSource === (resource.source ?? scope) ? "border-primary bg-card" : "border-border bg-background hover:border-primary"}`}
         >
-          <div className="flex items-start justify-between gap-3">
-            <strong className="mono text-sm">{resource.id}</strong>
-            <span className="flex flex-wrap justify-end gap-1">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <span className="min-w-0">
+              <strong className="mono block truncate text-sm">{resource.id}</strong>
+              <span className="mt-1 block text-xs text-muted-foreground">{runtimeSummary(resource)}</span>
+            </span>
+            <span className="flex shrink-0 flex-wrap justify-end gap-1">
               <SourceBadge resource={resource} />
-              <CapabilityPills resource={resource} payload={payload} />
             </span>
           </div>
           <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{resource.description || "No description."}</p>
@@ -538,35 +540,40 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
         </CardContent>
       </Card>
 
-      {scope === "global" && draft.kind === "skill" ? (
+      {draft.kind === "skill" || draft.kind === "command" ? (
         <AssociatedFilesEditor draft={draft} setDraft={setDraft} />
       ) : null}
 
       <Card>
         <CardHeader>
           <CardTitle>Runtimes</CardTitle>
-          <CardDescription>Targets and runtime-specific overrides</CardDescription>
+          <CardDescription>Target assistants for this asset</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             {runtimes.map((runtime) => (
-              <label key={runtime} className="flex items-center justify-between gap-3 rounded-md border border-border bg-background p-3">
+              <label key={runtime} className="flex items-center gap-3 rounded-md border border-border bg-background p-3">
+                <input
+                  type="checkbox"
+                  checked={draft.runtimes.includes(runtime)}
+                  onChange={(event) => setDraft(toggleRuntime(draft, runtime, event.target.checked))}
+                />
                 <span className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={draft.runtimes.includes(runtime)}
-                    onChange={(event) => setDraft(toggleRuntime(draft, runtime, event.target.checked))}
-                  />
                   <span>{runtimeName(runtime)}</span>
                 </span>
-                <CapabilityBadge status={capabilityStatus(payload, draft, runtime)} />
               </label>
             ))}
           </div>
 
-          {runtimes.map((runtime) => (
-            <OverrideSection key={runtime} runtime={runtime} draft={draft} setDraft={setDraft} payload={payload} />
-          ))}
+          <div className="space-y-3 border-t border-border pt-4">
+            <div>
+              <h3 className="text-sm font-medium">Runtime overrides</h3>
+              <p className="text-sm text-muted-foreground">Optional per-runtime content. Shared body is used unless an override is enabled.</p>
+            </div>
+            {runtimes.map((runtime) => (
+              <OverrideSection key={runtime} runtime={runtime} draft={draft} setDraft={setDraft} targeted={draft.runtimes.includes(runtime)} />
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -577,7 +584,7 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
 
 function AssociatedFilesEditor({ draft, setDraft }: { draft: EditableResource; setDraft: (resource: EditableResource) => void }) {
   const files = draft.files ?? [];
-  const updateFile = (index: number, next: { path: string; body: string }) => {
+  const updateFile = (index: number, next: { path?: string; name?: string; body: string }) => {
     setDraft({ ...draft, files: files.map((file, itemIndex) => itemIndex === index ? next : file) });
   };
   const removeFile = (index: number) => {
@@ -587,16 +594,16 @@ function AssociatedFilesEditor({ draft, setDraft }: { draft: EditableResource; s
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Associated Files</CardTitle>
-        <CardDescription>Global skill helper files</CardDescription>
+        <CardTitle>Additional files</CardTitle>
+        <CardDescription>Stored under this asset's files folder and rendered with the generated artifact.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {files.length === 0 ? <p className="text-sm text-muted-foreground">No helper files.</p> : null}
         {files.map((file, index) => (
           <div key={`${file.path}-${index}`} className="rounded-md border border-border p-3">
             <div className="mb-3 flex items-end gap-3">
-              <Field label="Path" hint="relative to skill directory" className="flex-1">
-                <Input value={file.path} onChange={(event) => updateFile(index, { ...file, path: event.target.value })} />
+              <Field label="Filename" hint="stored in files/" className="flex-1">
+                <Input value={associatedFileName(file)} onChange={(event) => updateFile(index, { ...file, path: undefined, name: event.target.value })} />
               </Field>
               <Button type="button" variant="secondary" onClick={() => removeFile(index)}>
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -607,7 +614,7 @@ function AssociatedFilesEditor({ draft, setDraft }: { draft: EditableResource; s
             </Field>
           </div>
         ))}
-        <Button type="button" variant="secondary" onClick={() => setDraft({ ...draft, files: [...files, { path: "", body: "" }] })}>
+        <Button type="button" variant="secondary" onClick={() => setDraft({ ...draft, files: [...files, { name: "", body: "" }] })}>
           <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
           Add file
         </Button>
@@ -643,18 +650,21 @@ function ReadOnlyResource({ resource, onRemoveReference }: { resource: EditableR
   );
 }
 
-function OverrideSection({ runtime, draft, setDraft, payload }: { runtime: RuntimeId; draft: EditableResource; setDraft: (resource: EditableResource) => void; payload: ConfigPayload }) {
+function OverrideSection({ runtime, draft, setDraft, targeted }: { runtime: RuntimeId; draft: EditableResource; setDraft: (resource: EditableResource) => void; targeted: boolean }) {
   const override = draft.overrides[runtime] ?? { enabled: false };
   const setOverride = (next: RuntimeOverride) => setDraft({ ...draft, overrides: { ...draft.overrides, [runtime]: next } });
 
   return (
-    <div className="rounded-md border border-border">
-      <label className="flex items-center justify-between gap-3 p-3">
-        <span className="flex items-center gap-3">
-          <input type="checkbox" checked={override.enabled} onChange={(event) => setOverride({ ...override, enabled: event.target.checked })} />
-          <span>{runtimeName(runtime)} override</span>
-        </span>
-        <CapabilityBadge status={capabilityStatus(payload, draft, runtime)} />
+    <div className={`rounded-md border border-border ${targeted ? "bg-background" : "bg-muted/30"}`}>
+      <label className="flex items-center gap-3 p-3">
+        <input
+          type="checkbox"
+          checked={override.enabled}
+          disabled={!targeted}
+          onChange={(event) => setOverride({ ...override, enabled: event.target.checked })}
+        />
+        <span>{runtimeName(runtime)} override</span>
+        {!targeted ? <span className="text-xs text-muted-foreground">Select {runtimeName(runtime)} first</span> : null}
       </label>
       {override.enabled ? (
         <div className="grid gap-4 border-t border-border p-3 md:grid-cols-2">
@@ -963,8 +973,8 @@ function validateDraft(resource: EditableResource, payload: ConfigPayload | null
   if (payload?.scope === "global" && resource.kind === "command") {
     diagnostics.push({ severity: "error", path: "kind", message: "Global setup UI supports skills, agents, and rules.", blocking: true });
   }
-  if (payload?.scope === "project" && (resource.files ?? []).length > 0) {
-    diagnostics.push({ severity: "error", path: "files", message: "Associated-file editing is supported for global skills only.", blocking: true });
+  if ((resource.files ?? []).length > 0 && resource.kind !== "skill" && resource.kind !== "command") {
+    diagnostics.push({ severity: "error", path: "files", message: "Additional files are supported for skills and commands.", blocking: true });
   }
   return diagnostics;
 }
@@ -1078,6 +1088,19 @@ function sectionSchemaHint(section: SectionKind) {
 
 function runtimeName(runtime: RuntimeId) {
   return runtime === "claude" ? "Claude Code" : "Codex";
+}
+
+function runtimeSummary(resource: EditableResource) {
+  if (resource.runtimes.length === 0) return "No runtime targets";
+  return resource.runtimes.map(runtimeName).join(", ");
+}
+
+function associatedFileName(file: { path?: string; name?: string }) {
+  if (file.name !== undefined) return file.name;
+  const pathName = file.path ?? "";
+  return pathName.startsWith("files/") && !pathName.slice("files/".length).includes("/")
+    ? pathName.slice("files/".length)
+    : pathName;
 }
 
 function shortStatus(status: string) {

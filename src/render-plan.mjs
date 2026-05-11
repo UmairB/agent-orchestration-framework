@@ -25,6 +25,11 @@ export async function planApplyActions(desiredOutputs, previousLock, options = {
       continue;
     }
 
+    if (output.resource?.kind === "gitignore" && !prior && currentHash !== output.hash) {
+      actions.push(action("drift-warning", output, "existing .gitignore was not created by AOF; not overwriting"));
+      continue;
+    }
+
     if (currentHash === output.hash) {
       actions.push(action("skip", output, "content already matches desired output"));
       continue;

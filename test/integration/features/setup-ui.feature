@@ -75,7 +75,7 @@ Feature: AOF setup UI API
     When I save global skill `research-helper` with helper file through the setup UI API
     Then HTTP response status should be 200
     And HTTP response field `ok` should equal `true`
-    And global file `assets/skills/research-helper/scripts/search.py` should contain `print('search')`
+    And global file `assets/skills/research-helper/files/search.py` should contain `print('search')`
     And global file `aof.config.json` should contain `"files"`
     When I save global skill `unsafe-helper` with unsafe helper file through the setup UI API
     Then HTTP response status should be 400

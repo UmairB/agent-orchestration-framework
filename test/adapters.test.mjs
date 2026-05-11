@@ -45,14 +45,16 @@ async function rendersPortableResources() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 6);
+    assert.equal(writes.length, 8);
 
     const claudeCommand = await readFile(path.join(targetDir, ".claude", "commands", "prime.md"), "utf8");
     const codexCommand = await readFile(path.join(targetDir, ".codex", "commands", "prime.md"), "utf8");
+    const codexGitignore = await readFile(path.join(targetDir, ".codex", ".gitignore"), "utf8");
 
     assert.match(claudeCommand, /aof-generated: true/);
     assert.match(claudeCommand, /aof-invocation: \/prime/);
     assert.match(codexCommand, /aof-invocation: \$prime/);
+    assert.match(codexGitignore, /!\.gitignore/);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -69,7 +71,7 @@ async function rendersRuleGuidance() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 2);
+    assert.equal(writes.length, 4);
 
     const claudeRule = await readFile(path.join(targetDir, ".claude", "rules", "project-rules.md"), "utf8");
     const codexAgents = await readFile(path.join(targetDir, ".codex", "src", "AGENTS.md"), "utf8");
@@ -164,8 +166,9 @@ async function respectsResourceRuntimeFilters() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 1);
+    assert.equal(writes.length, 2);
     assert.equal(path.relative(targetDir, writes[0].path), path.join(".codex", "skills", "codex-only", "SKILL.md"));
+    assert.equal(path.relative(targetDir, writes[1].path), path.join(".codex", ".gitignore"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -206,7 +209,7 @@ async function rendersExpandedDslRuntimeOutputs() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 5);
+    assert.equal(writes.length, 7);
 
     const claudeMcp = await readFile(path.join(targetDir, ".mcp.json"), "utf8");
     const claudeSettings = await readFile(path.join(targetDir, ".claude", "settings.json"), "utf8");

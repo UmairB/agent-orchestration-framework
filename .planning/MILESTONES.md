@@ -157,10 +157,10 @@ Harden AOF's live first-run behavior and replace rough typed prompts with keyboa
 
 ## v1.4 — Namespaced CLI Contract
 
-**Status:** Active
+**Status:** Complete
 **Started:** 2026-05-10
 **Phases:** 18-22
-**Requirements:** 4/22 complete
+**Requirements:** 22/22 complete
 
 ### Goal
 
@@ -178,7 +178,21 @@ Redesign AOF's CLI around durable product-area namespaces, review every command 
 ### Progress
 
 - Phase 18: Command Contract Audit — complete 2026-05-10.
-- Phase 19: Assets Namespace Rewrite — planned 2026-05-10.
-- Phase 20: Packages Namespace Rewrite — pending.
-- Phase 21: Project And Diagnostics Commands — pending.
-- Phase 22: Live Repository Verification — pending.
+- Phase 19: Assets Namespace Rewrite — complete 2026-05-10.
+- Phase 20: Packages Namespace Rewrite — complete 2026-05-10.
+- Phase 21: Project And Diagnostics Commands — complete 2026-05-11.
+- Phase 22: Live Repository Verification — complete 2026-05-11.
+
+### Delivered So Far
+
+1. Completed a command-by-command audit and accepted the namespaced command contract.
+2. Replaced asset source commands with `aof assets add/list/show/remove/use/unuse`.
+3. Replaced asset rendering, validation, cleanup, and editor launch with `aof assets apply/validate/clean/ui`.
+4. Removed old `add`, `global`, `apply`, `sync`, `clean`, and `install` execution paths with replacement guidance and no side effects.
+5. Updated BDD, README, help output, and planning artifacts for the assets namespace.
+6. Replaced GSD install flows with `aof packages add/list/show/remove/validate/install`.
+7. Preserved explicit network/package-code boundaries for package installer execution and moved lock replay to `aof packages install --from-lock`.
+8. Moved project inspection, validation, diagnostics, and migration to `aof project show/validate/doctor/migrate`.
+9. Kept `aof init` as the only top-level product command and removed init-time guided/default asset creation.
+10. Removed old `validate`, `doctor`, `migrate`, `config`, and `catalog` execution paths with no-side-effect guidance.
+11. Hardened live repo workflows with friendlier CLI output, source-only init guidance, generated-output `.gitignore` files, setup UI cleanup, command/skill additional files, runtime path placeholders, and associated-file validation.

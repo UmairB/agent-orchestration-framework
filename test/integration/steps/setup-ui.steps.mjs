@@ -132,7 +132,7 @@ export async function runStep(context, step) {
       body: "Use the helper script.",
       runtimes: ["codex"],
       files: [
-        { path: "scripts/search.py", body: "print('search')\n" }
+        { path: "search.py", body: "print('search')\n" }
       ],
       overrides: {}
     });

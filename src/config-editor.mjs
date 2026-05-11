@@ -17,6 +17,7 @@ import { findProjectConfig, globalWorkspacePaths, workspacePaths } from "./works
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_GLOBAL_UI_KINDS = new Set(["skill", "agent", "rule"]);
+const ASSOCIATED_FILE_KINDS = new Set(["skill", "command"]);
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const OVERRIDE_FIELDS = ["name", "description", "body", "prompt", "instructions", "model", "tools", "paths"];
 
@@ -343,14 +344,14 @@ function baseConfig(existing, projectDir, scope, overrides = {}) {
 
 async function writeAssociatedFiles(workspaceDir, resource, resourcePath) {
   if (!Array.isArray(resource.files) || resource.files.length === 0) return [];
-  if (resource.kind !== "skill") return [];
+  if (!ASSOCIATED_FILE_KINDS.has(resource.kind)) return [];
 
   const bodyPath = path.join(workspaceDir, resourcePath);
   const assetDir = path.dirname(bodyPath);
   const result = [];
   for (const file of resource.files) {
-    const relativePath = file.path.replaceAll("\\", "/");
-    const filePath = path.resolve(assetDir, relativePath);
+    const relativePath = normalizeAssociatedFilePath(file.path);
+    const filePath = path.resolve(assetDir, "files", relativePath);
     await writeText(filePath, ensureTrailingNewline(file.body ?? ""));
     result.push(relativePath);
   }
@@ -365,12 +366,8 @@ function validateAssociatedFileInputs(resource, options = {}) {
     return diagnostics;
   }
   if (resource.files.length === 0) return diagnostics;
-  if (resource.kind !== "skill") {
-    diagnostics.push(diagnostic("error", "files", "Associated files are supported for skill resources only.", true, "unsupported-associated-files"));
-    return diagnostics;
-  }
-  if (options.scope !== "global") {
-    diagnostics.push(diagnostic("error", "files", "Setup UI associated-file editing is supported for global skills only.", true, "unsupported-associated-files"));
+  if (!ASSOCIATED_FILE_KINDS.has(resource.kind)) {
+    diagnostics.push(diagnostic("error", "files", "Associated files are supported for skill and command resources only.", true, "unsupported-associated-files"));
     return diagnostics;
   }
 
@@ -391,17 +388,26 @@ function validateAssociatedFileInputs(resource, options = {}) {
       diagnostics.push(diagnostic("error", `${location}.body`, "Associated file body must be text.", true, "invalid-associated-file"));
     }
     const normalizedPath = file.path.replaceAll("\\", "/");
+    const flatPath = normalizeAssociatedFilePath(normalizedPath);
     if (path.isAbsolute(file.path)) {
       diagnostics.push(diagnostic("error", `${location}.path`, "Associated file path must be relative to the asset directory.", true, "associated-file-escape"));
       continue;
     }
-    const resolved = path.resolve(assetDir, normalizedPath);
+    if (pathEscapesByTraversal(normalizedPath)) {
+      diagnostics.push(diagnostic("error", `${location}.path`, "Associated file path must stay inside the asset directory.", true, "associated-file-escape"));
+      continue;
+    }
+    if (!isFlatAssociatedFilePath(normalizedPath)) {
+      diagnostics.push(diagnostic("error", `${location}.path`, "Associated file path must be a filename, not a nested path.", true, "invalid-associated-file"));
+      continue;
+    }
+    const resolved = path.resolve(assetDir, "files", flatPath);
     const relative = path.relative(assetDir, resolved);
     if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
       diagnostics.push(diagnostic("error", `${location}.path`, "Associated file path must stay inside the asset directory.", true, "associated-file-escape"));
       continue;
     }
-    if (path.relative(assetDir, resolved).replaceAll("\\", "/") === bodyFile) {
+    if (flatPath === bodyFile) {
       diagnostics.push(diagnostic("error", `${location}.path`, "Associated file path cannot target the primary body file.", true, "associated-file-body"));
     }
   }
@@ -469,11 +475,32 @@ function normalizeAssociatedFiles(files) {
   if (!Array.isArray(files)) return files;
   return files.map((file) => {
     if (!file || typeof file !== "object" || Array.isArray(file)) return file;
+    const rawPath = typeof file.path === "string" && file.path.trim() !== ""
+      ? file.path
+      : file.name;
     return {
-      path: typeof file.path === "string" ? file.path.trim().replaceAll("\\", "/") : file.path,
+      path: normalizeAssociatedFilePath(rawPath),
       body: file.body ?? ""
     };
   });
+}
+
+function normalizeAssociatedFilePath(filePath) {
+  if (typeof filePath !== "string") return filePath;
+  const normalized = filePath.trim().replaceAll("\\", "/");
+  return normalized.startsWith("files/") ? normalized.slice("files/".length) : normalized;
+}
+
+function isFlatAssociatedFilePath(filePath) {
+  if (typeof filePath !== "string") return false;
+  const normalized = filePath.trim().replaceAll("\\", "/");
+  const flat = normalized.startsWith("files/") ? normalized.slice("files/".length) : normalized;
+  return flat !== "" && !flat.includes("/");
+}
+
+function pathEscapesByTraversal(filePath) {
+  const normalized = String(filePath ?? "").replaceAll("\\", "/");
+  return normalized === ".." || normalized.startsWith("../") || normalized.includes("/../");
 }
 
 function normalizeRuntimes(runtimes) {
@@ -520,8 +547,8 @@ async function editableAssociatedFiles(resource, baseDir) {
   if (!Array.isArray(resource.files) || !resource.path || !baseDir) return [];
   const assetDir = path.dirname(path.resolve(baseDir, resource.path));
   return Promise.all(resource.files.map(async (filePath) => {
-    const normalizedPath = String(filePath).replaceAll("\\", "/");
-    const absolutePath = path.resolve(assetDir, normalizedPath);
+    const normalizedPath = normalizeAssociatedFilePath(String(filePath).replaceAll("\\", "/"));
+    const absolutePath = path.resolve(assetDir, "files", normalizedPath);
     let body = "";
     try {
       body = await readFile(absolutePath, "utf8");
@@ -636,9 +663,9 @@ function diagnostic(severity, pathName, message, blocking = severity === "error"
 }
 
 function nextCommands(packages) {
-  const commands = ["aof apply --dry-run"];
+  const commands = ["aof assets apply --dry-run"];
   if ((packages ?? []).some((pkg) => pkg.id === "gsd")) {
-    commands.push("aof install gsd --dry-run");
+    commands.push("aof packages install gsd --dry-run");
   }
   return commands;
 }
