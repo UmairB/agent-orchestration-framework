@@ -10,6 +10,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/resource" }
     },
+    "workflows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/workflow" }
+    },
     "globalRefs": {
       "type": "array",
       "items": { "$ref": "#/$defs/globalRef" }
@@ -84,8 +88,39 @@
       "type": "object",
       "required": ["kind", "id"],
       "properties": {
-        "kind": { "enum": ["skill", "agent", "rule"] },
+        "kind": { "enum": ["skill", "agent", "rule", "workflow"] },
         "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" }
+      },
+      "additionalProperties": true
+    },
+    "argument": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "runtimes": {
+          "type": "array",
+          "items": { "enum": ["claude", "codex"] }
+        },
+        "body": { "type": "string" },
+        "path": { "type": "string" },
+        "argumentHint": { "type": "string" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/argument" }
+        }
       },
       "additionalProperties": true
     },
@@ -113,6 +148,24 @@
         "paths": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "workflow": { "type": "string" },
+        "argumentHint": { "type": "string" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/argument" }
+        },
+        "argumentOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "string" },
+              "required": { "type": "boolean" },
+              "hint": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
         },
         "files": {
           "type": "array",

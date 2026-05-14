@@ -459,8 +459,14 @@ async function assetsApplyCommand(args) {
   const targetDir = path.resolve(options.target ?? process.cwd());
   const configPath = await findProjectConfig(targetDir, options.config);
   const paths = workspacePaths(targetDir);
-  const config = await loadProjectConfig(configPath);
   const runtimes = await runtimesForApply(configPath, options);
+  const validationDiagnostics = await validateConfig(targetDir, options);
+  const validationErrors = validationDiagnostics.filter((item) => item.severity === "error");
+  if (validationErrors.length > 0) {
+    await printValidationResult(validationDiagnostics, options, "config passed validation");
+    return;
+  }
+  const config = await loadProjectConfig(configPath);
   const adapterWarnings = collectAdapterWarnings(config, {
     targetDir,
     runtimes,
@@ -1186,7 +1192,7 @@ async function exists(filePath) {
 }
 
 function helpText() {
-  return `aof - Assistant Ops Framework
+  return `aof - Agent Orchestration Framework
 
 Usage:
   aof init [dir] [--claude] [--codex] [--runtime claude,codex] [--force] [--dry-run]

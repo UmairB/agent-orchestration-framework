@@ -27,6 +27,10 @@ export const configEditorTests = [
     run: loadsAndSavesExpandedSections
   },
   {
+    name: "saves workflow backed editable resources",
+    run: savesWorkflowBackedEditableResources
+  },
+  {
     name: "editable config includes adapter warnings",
     run: includesAdapterWarnings
   },
@@ -40,6 +44,7 @@ function exposesCapabilities() {
   const payload = capabilitiesPayload();
   assert.equal(payload.runtimes.claude.name, "Claude Code");
   assert.equal(payload.resourceKinds.rule.defaultBodyFile, "RULE.md");
+  assert.equal(payload.capabilities.command.codex, "unsupported-fail");
   assert.equal(payload.capabilities.rule.codex, "mapped");
 }
 
@@ -88,7 +93,7 @@ async function loadsEditableConfig() {
       writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
         name: "demo",
         resources: [
-          { kind: "command", id: "prime", path: "assets/commands/prime/COMMAND.md", runtimes: ["codex"] }
+          { kind: "command", id: "prime", path: "assets/commands/prime/COMMAND.md", runtimes: ["claude"] }
         ],
         packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["codex"] }]
       }, null, 2)}\n`, "utf8")
@@ -110,7 +115,7 @@ async function savesCommandFilesUnderAssetFilesFolder() {
       kind: "command",
       id: "prime",
       body: "Run the helper.",
-      runtimes: ["codex"],
+      runtimes: ["claude"],
       files: [
         { name: "helper.py", body: "print('prime')\n" }
       ],
@@ -154,6 +159,21 @@ async function rejectsInvalidSave() {
   });
   assert.ok(diagnostics.some((item) => item.blocking && item.path === "runtimes"));
 
+  const commandDiagnostics = validateEditableResource({
+    kind: "command",
+    id: "bad-command",
+    runtimes: ["codex"]
+  });
+  assert.ok(commandDiagnostics.some((item) => item.blocking && item.path === "capabilities.command.codex"));
+
+  const argsDiagnostics = validateEditableResource({
+    kind: "skill",
+    id: "arg-skill",
+    runtimes: ["codex"],
+    body: "Use {{GSD_ARGS}} here."
+  });
+  assert.ok(argsDiagnostics.some((item) => item.blocking && item.code === "simple-asset-arguments"));
+
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
   try {
     const result = await saveEditableResource(targetDir, { kind: "skill", id: "bad", runtimes: [] });
@@ -177,6 +197,9 @@ async function loadsAndSavesExpandedSections() {
       projectDocs: [
         { id: "root", body: "Guidance", targets: ["AGENTS.md"], runtimes: ["codex"] }
       ],
+      workflows: [
+        { id: "audit", body: "Audit workflow", runtimes: ["codex"] }
+      ],
       settings: {
         codex: { approval_policy: "on-request" }
       }
@@ -187,6 +210,7 @@ async function loadsAndSavesExpandedSections() {
     assert.equal(payload.mcpServers[0].id, "docs");
     assert.equal(payload.hooks[0].id, "test-after-write");
     assert.equal(payload.projectDocs[0].body, "Guidance");
+    assert.equal(payload.workflows[0].id, "audit");
     assert.equal(payload.settings.codex.approval_policy, "on-request");
 
     const resourceSave = await saveEditableResource(targetDir, {
@@ -198,6 +222,7 @@ async function loadsAndSavesExpandedSections() {
     assert.equal(resourceSave.ok, true);
     const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
     assert.equal(config.mcpServers[0].id, "docs");
+    assert.equal(config.workflows[0].id, "audit");
 
     const invalid = await saveEditableSections(targetDir, {
       hooks: [
@@ -206,6 +231,43 @@ async function loadsAndSavesExpandedSections() {
     });
     assert.equal(invalid.ok, false);
     assert.ok(invalid.diagnostics.some((item) => item.path === "hooks[0].event"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function savesWorkflowBackedEditableResources() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const sections = await saveEditableSections(targetDir, {
+      workflows: [
+        { id: "audit", body: "Audit workflow", runtimes: ["codex"], arguments: [{ name: "milestone" }] }
+      ]
+    });
+    assert.equal(sections.ok, true);
+
+    const save = await saveEditableResource(targetDir, {
+      kind: "skill",
+      id: "audit",
+      description: "Audit wrapper",
+      body: "",
+      workflow: "audit",
+      argumentHint: "<milestone>",
+      arguments: [{ name: "milestone", description: "Milestone number", required: true }],
+      runtimes: ["codex"],
+      overrides: {}
+    });
+    assert.equal(save.ok, true);
+
+    const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.equal(config.resources[0].workflow, "audit");
+    assert.equal(config.resources[0].argumentHint, "<milestone>");
+    assert.equal(config.resources[0].path, undefined);
+    assert.equal(config.resources[0].arguments[0].name, "milestone");
+
+    const payload = await loadEditableConfig(targetDir);
+    assert.equal(payload.resources[0].workflow, "audit");
+    assert.equal(payload.resources[0].arguments[0].required, true);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

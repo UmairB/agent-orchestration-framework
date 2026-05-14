@@ -1,13 +1,23 @@
 import path from "node:path";
 import { access, lstat, readFile, realpath } from "node:fs/promises";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
+import {
+  createAssetReferenceIndex,
+  effectiveRuntimes,
+  extractAssetReferencePlaceholders,
+  extractInvalidAssetReferencePlaceholders,
+  getAssetReference
+} from "./asset-references.mjs";
 import { normalizeId } from "./fs.mjs";
 import { readLock } from "./lock.mjs";
 import { createRenderPlan, planApplyActions } from "./render-plan.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { normalizePackage } from "./packages.mjs";
 import {
+  CAPABILITIES,
+  CAPABILITY_STATUS,
   RUNTIMES,
+  supportedGlobalRefKinds,
   supportedHookEvents,
   supportedHookTypes,
   supportedMcpTransports,
@@ -20,7 +30,7 @@ import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace
 import { globalWorkspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
-const VALID_GLOBAL_REF_KINDS = new Set(["skill", "agent", "rule"]);
+const VALID_GLOBAL_REF_KINDS = new Set(supportedGlobalRefKinds());
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
 const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
@@ -60,6 +70,11 @@ export async function inspectConfig(projectDir = process.cwd(), options = {}) {
       runtimes: resource.runtimes,
       source: resource._aofSource?.scope ?? "local"
     })) ?? [],
+    workflows: config?.workflows?.map((workflow) => ({
+      id: workflow.id,
+      runtimes: workflow.runtimes,
+      source: workflow._aofSource?.scope ?? "local"
+    })) ?? [],
     globalRefs: config?.globalRefs ?? [],
     packages: config?.packages ?? [],
     mcpServers: config?.mcpServers?.map((server) => ({ id: server.id, transport: server.transport, runtimes: server.runtimes })) ?? [],
@@ -92,6 +107,13 @@ export async function inspectGlobalConfig(options = {}) {
       description: resource.description,
       path: resource.path,
       runtimes: resource.runtimes
+    })) ?? [],
+    workflows: config?.workflows?.map((workflow) => ({
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description,
+      path: workflow.path,
+      runtimes: workflow.runtimes
     })) ?? [],
     diagnostics
   };
@@ -138,6 +160,9 @@ async function validateConfigFile(configPath, options = {}) {
   if (raw.resources !== undefined && !Array.isArray(raw.resources)) {
     diagnostics.push(diagnostic("error", "resources", "resources must be an array when provided."));
   }
+  if (raw.workflows !== undefined && !Array.isArray(raw.workflows)) {
+    diagnostics.push(diagnostic("error", "workflows", "workflows must be an array when provided."));
+  }
 
   if (raw.packages !== undefined && !Array.isArray(raw.packages)) {
     diagnostics.push(diagnostic("error", "packages", "packages must be an array when provided."));
@@ -159,19 +184,40 @@ async function validateConfigFile(configPath, options = {}) {
   }
 
   const baseDir = path.dirname(configPath);
-  for (const [index, resource] of (Array.isArray(raw.resources) ? raw.resources : []).entries()) {
-    await validateResource(resource, index, baseDir, diagnostics);
+  const localWorkflows = Array.isArray(raw.workflows) ? raw.workflows : [];
+  for (const [index, workflow] of localWorkflows.entries()) {
+    await validateWorkflow(workflow, index, baseDir, diagnostics);
   }
 
   const globalRefs = validateGlobalRefs(raw, diagnostics);
+  const referencedResources = [];
+  const referencedWorkflows = [];
   if (options.validateGlobalRefs) {
-    await validateReferencedGlobals(raw, globalRefs, diagnostics, options.globalOptions ?? {});
+    await validateReferencedGlobals(raw, globalRefs, diagnostics, options.globalOptions ?? {}, referencedWorkflows, referencedResources);
   }
+
+  const workflowIndex = workflowIndexFor(localWorkflows, referencedWorkflows);
+  const localResources = Array.isArray(raw.resources) ? raw.resources : [];
+  for (const [index, resource] of localResources.entries()) {
+    await validateResource(resource, index, baseDir, diagnostics, null, workflowIndex);
+  }
+  await validateAssetReferencePlaceholders([
+    ...localResources.map((resource, index) => ({ type: "resource", item: resource, baseDir, location: `resources[${index}]` })),
+    ...localWorkflows.map((workflow, index) => ({ type: "workflow", item: workflow, baseDir, location: `workflows[${index}]` })),
+    ...referencedResources.map((entry) => ({ type: "resource", item: entry.item, baseDir: entry.baseDir, location: entry.location })),
+    ...referencedWorkflows.map((workflow) => ({
+      type: "workflow",
+      item: workflow,
+      baseDir: workflow._aofSource?.baseDir ?? baseDir,
+      location: workflow._aofSource?.location ?? "globalRefs.workflow"
+    }))
+  ], createAssetReferenceIndex([...localResources, ...referencedResources.map((entry) => entry.item)], [...localWorkflows, ...referencedWorkflows]), diagnostics);
 
   for (const [index, pkg] of (Array.isArray(raw.packages) ? raw.packages : []).entries()) {
     validatePackage(pkg, index, diagnostics);
   }
   validateDuplicates(raw.resources, "resources", (item) => item && `${item.kind}:${item.id}`, diagnostics);
+  validateDuplicates(raw.workflows, "workflows", (item) => item?.id, diagnostics);
   await validateMcpServers(Array.isArray(raw.mcpServers) ? raw.mcpServers : [], baseDir, diagnostics);
   validateHooks(Array.isArray(raw.hooks) ? raw.hooks : [], diagnostics);
   await validateProjectDocs(Array.isArray(raw.projectDocs) ? raw.projectDocs : [], baseDir, diagnostics);
@@ -281,11 +327,11 @@ function validateGlobalRefs(raw, diagnostics) {
   }
 
   validateDuplicates(refs, "globalRefs", (ref) => `${ref.kind}:${ref.id}`, diagnostics, (ref) => ref.index);
-  validateLocalGlobalConflicts(raw.resources, refs, diagnostics);
+  validateLocalGlobalConflicts(raw, refs, diagnostics);
   return refs;
 }
 
-async function validateReferencedGlobals(raw, refs, diagnostics, options = {}) {
+async function validateReferencedGlobals(raw, refs, diagnostics, options = {}, referencedWorkflows = [], referencedResources = []) {
   if (refs.length === 0) return;
   const paths = globalWorkspacePaths(options);
   let globalRaw;
@@ -302,20 +348,47 @@ async function validateReferencedGlobals(raw, refs, diagnostics, options = {}) {
   }
 
   const globalResources = Array.isArray(globalRaw.resources) ? globalRaw.resources : [];
+  const globalWorkflows = Array.isArray(globalRaw.workflows) ? globalRaw.workflows : [];
   const globalBaseDir = path.dirname(paths.configPath);
-  for (const ref of refs) {
+  for (const ref of refs.filter((item) => item.kind === "workflow")) {
+    const workflow = globalWorkflows.find((item) => typeof item?.id === "string" && normalizeId(item.id) === ref.id);
+    if (!workflow) {
+      diagnostics.push(diagnostic("error", `globalRefs[${ref.index}]`, `Missing global workflow: ${ref.id}`, "missing-global-workflow"));
+      continue;
+    }
+    await validateWorkflow(workflow, ref.index, globalBaseDir, diagnostics, `globalRefs[${ref.index}].workflow`);
+    referencedWorkflows.push({
+      ...workflow,
+      id: ref.id,
+      _aofSource: {
+        scope: "global",
+        id: ref.id,
+        kind: "workflow",
+        baseDir: globalBaseDir,
+        location: `globalRefs[${ref.index}].workflow`
+      }
+    });
+  }
+
+  const referencedWorkflowIndex = workflowIndexFor([], referencedWorkflows);
+  for (const ref of refs.filter((item) => item.kind !== "workflow")) {
     const resource = globalResources.find((item) => item?.kind === ref.kind && typeof item.id === "string" && normalizeId(item.id) === ref.id);
     if (!resource) {
       diagnostics.push(diagnostic("error", `globalRefs[${ref.index}]`, `Missing global resource: ${ref.kind}:${ref.id}`, "missing-global-resource"));
       continue;
     }
-    await validateResource(resource, ref.index, globalBaseDir, diagnostics, `globalRefs[${ref.index}].resource`);
+    await validateResource(resource, ref.index, globalBaseDir, diagnostics, `globalRefs[${ref.index}].resource`, referencedWorkflowIndex);
+    referencedResources.push({
+      item: { ...resource, id: ref.id, kind: ref.kind, _aofSource: { scope: "global", id: ref.id, kind: ref.kind, baseDir: globalBaseDir } },
+      baseDir: globalBaseDir,
+      location: `globalRefs[${ref.index}].resource`
+    });
   }
 }
 
-function validateLocalGlobalConflicts(resources, refs, diagnostics) {
-  if (!Array.isArray(resources) || refs.length === 0) return;
-  const localKeys = new Set(resources.flatMap((resource) => {
+function validateLocalGlobalConflicts(raw, refs, diagnostics) {
+  if (refs.length === 0) return;
+  const localResourceKeys = new Set((Array.isArray(raw.resources) ? raw.resources : []).flatMap((resource) => {
     if (!resource?.kind || typeof resource.id !== "string") return [];
     try {
       return [`${resource.kind}:${normalizeId(resource.id)}`];
@@ -323,15 +396,23 @@ function validateLocalGlobalConflicts(resources, refs, diagnostics) {
       return [];
     }
   }));
+  const localWorkflowKeys = new Set((Array.isArray(raw.workflows) ? raw.workflows : []).flatMap((workflow) => {
+    if (typeof workflow?.id !== "string") return [];
+    try {
+      return [`workflow:${normalizeId(workflow.id)}`];
+    } catch {
+      return [];
+    }
+  }));
   for (const ref of refs) {
     const key = `${ref.kind}:${ref.id}`;
-    if (localKeys.has(key)) {
+    if (localResourceKeys.has(key) || localWorkflowKeys.has(key)) {
       diagnostics.push(diagnostic("error", `globalRefs[${ref.index}]`, `Global reference conflicts with local resource ${key}.`, "local-global-conflict"));
     }
   }
 }
 
-async function validateResource(resource, index, baseDir, diagnostics, locationOverride = null) {
+async function validateResource(resource, index, baseDir, diagnostics, locationOverride = null, workflowIndex = new Map()) {
   const location = locationOverride ?? `resources[${index}]`;
   if (!resource || typeof resource !== "object" || Array.isArray(resource)) {
     diagnostics.push(diagnostic("error", location, "Each resource must be an object."));
@@ -347,11 +428,14 @@ async function validateResource(resource, index, baseDir, diagnostics, locationO
   }
 
   validateRuntimes(resource.runtimes, `${location}.runtimes`, diagnostics);
+  validateResourceCapabilities(resource, location, diagnostics);
 
   if (resource.path) {
     await requireFile(path.resolve(baseDir, resource.path), `${location}.path`, diagnostics);
   }
 
+  await validateWorkflowBackedResource(resource, location, diagnostics, workflowIndex);
+  await validateSimpleAssetArguments(resource, baseDir, location, diagnostics);
   await validateAssociatedFiles(resource, baseDir, location, diagnostics);
   await validateAssociatedFileReferences(resource, baseDir, location, diagnostics);
 
@@ -415,6 +499,245 @@ async function validateMcpServers(servers, baseDir, diagnostics) {
     }
     validateRuntimes(server.runtimes, `${location}.runtimes`, diagnostics);
     validateRuntimeExtensionObjects(server, location, diagnostics);
+  }
+}
+
+function validateResourceCapabilities(resource, location, diagnostics) {
+  if (!VALID_KINDS.has(resource.kind)) return;
+  const runtimes = Array.isArray(resource.runtimes) && resource.runtimes.length > 0
+    ? resource.runtimes
+    : supportedRuntimes();
+
+  for (const runtime of runtimes) {
+    if (!VALID_RUNTIMES.has(runtime)) continue;
+    const status = CAPABILITIES[resource.kind]?.[runtime];
+    if (status !== CAPABILITY_STATUS.unsupportedFail) continue;
+    diagnostics.push(diagnostic(
+      "error",
+      `${location}.runtimes`,
+      unsupportedCapabilityMessage(resource.kind, runtime),
+      "unsupported-runtime-capability"
+    ));
+  }
+}
+
+async function validateWorkflow(workflow, index, baseDir, diagnostics, locationOverride = null) {
+  const location = locationOverride ?? `workflows[${index}]`;
+  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) {
+    diagnostics.push(diagnostic("error", location, "Each workflow must be an object.", "invalid-workflow"));
+    return;
+  }
+
+  validateId(workflow.id, `${location}.id`, "Workflow id is required.", diagnostics);
+  validateRuntimes(workflow.runtimes, `${location}.runtimes`, diagnostics);
+
+  if (workflow.path) {
+    const workflowPath = path.resolve(baseDir, workflow.path);
+    if (!isInside(baseDir, workflowPath)) {
+      diagnostics.push(diagnostic("error", `${location}.path`, "Workflow path must stay inside the .aof workspace.", "workflow-file-escape"));
+    } else {
+      await requireFile(workflowPath, `${location}.path`, diagnostics, "missing-workflow-file");
+    }
+  } else if (typeof workflow.body !== "string") {
+    diagnostics.push(diagnostic("error", location, "Workflow requires either path or body.", "missing-workflow-body"));
+  }
+
+  if (workflow.argumentHint !== undefined && typeof workflow.argumentHint !== "string") {
+    diagnostics.push(diagnostic("error", `${location}.argumentHint`, "Workflow argumentHint must be a string when provided.", "invalid-workflow-argument"));
+  }
+
+  validateArguments(workflow.arguments, `${location}.arguments`, diagnostics);
+}
+
+function validateArguments(args, location, diagnostics) {
+  if (args === undefined) return;
+  if (!Array.isArray(args)) {
+    diagnostics.push(diagnostic("error", location, "arguments must be an array when provided.", "invalid-workflow-argument"));
+    return;
+  }
+
+  const seen = new Set();
+  for (const [index, arg] of args.entries()) {
+    const argLocation = `${location}[${index}]`;
+    if (!arg || typeof arg !== "object" || Array.isArray(arg)) {
+      diagnostics.push(diagnostic("error", argLocation, "Each argument must be an object.", "invalid-workflow-argument"));
+      continue;
+    }
+    if (typeof arg.name !== "string" || arg.name.trim() === "") {
+      diagnostics.push(diagnostic("error", `${argLocation}.name`, "Argument name is required.", "invalid-workflow-argument"));
+      continue;
+    }
+    let name;
+    try {
+      name = normalizeId(arg.name);
+    } catch (error) {
+      diagnostics.push(diagnostic("error", `${argLocation}.name`, error.message, "invalid-workflow-argument"));
+      continue;
+    }
+    if (seen.has(name)) {
+      diagnostics.push(diagnostic("error", `${argLocation}.name`, `Duplicate argument name "${name}".`, "duplicate-workflow-argument"));
+    }
+    seen.add(name);
+    if (arg.description !== undefined && typeof arg.description !== "string") {
+      diagnostics.push(diagnostic("error", `${argLocation}.description`, "Argument description must be a string when provided.", "invalid-workflow-argument"));
+    }
+    if (arg.required !== undefined && typeof arg.required !== "boolean") {
+      diagnostics.push(diagnostic("error", `${argLocation}.required`, "Argument required must be a boolean when provided.", "invalid-workflow-argument"));
+    }
+  }
+}
+
+function workflowIndexFor(localWorkflows, referencedWorkflows) {
+  const result = new Map();
+  for (const workflow of [...localWorkflows, ...referencedWorkflows]) {
+    if (typeof workflow?.id !== "string") continue;
+    try {
+      result.set(normalizeId(workflow.id), {
+        ...workflow,
+        id: normalizeId(workflow.id),
+        runtimes: Array.isArray(workflow.runtimes) && workflow.runtimes.length > 0 ? workflow.runtimes : supportedRuntimes()
+      });
+    } catch {
+      // Invalid ids are reported by validateWorkflow.
+    }
+  }
+  return result;
+}
+
+function workflowArgumentNames(workflow) {
+  const result = new Set();
+  for (const arg of workflow?.arguments ?? []) {
+    if (typeof arg?.name !== "string") continue;
+    try {
+      result.add(normalizeId(arg.name));
+    } catch {
+      // Invalid argument names are reported by validateArguments.
+    }
+  }
+  return result;
+}
+
+function validateWorkflowBackedResource(resource, location, diagnostics, workflowIndex) {
+  if (!resource || typeof resource !== "object" || Array.isArray(resource)) return;
+
+  if (resource.workflow === undefined) {
+    if (resource.argumentOverrides !== undefined) {
+      diagnostics.push(diagnostic("error", `${location}.argumentOverrides`, "argumentOverrides require a workflow-backed asset.", "invalid-workflow-argument"));
+    }
+    return;
+  }
+
+  if (typeof resource.workflow !== "string" || resource.workflow.trim() === "") {
+    diagnostics.push(diagnostic("error", `${location}.workflow`, "workflow must reference a workflow id.", "missing-workflow"));
+    return;
+  }
+
+  let workflowId;
+  try {
+    workflowId = normalizeId(resource.workflow);
+  } catch (error) {
+    diagnostics.push(diagnostic("error", `${location}.workflow`, error.message, "missing-workflow"));
+    return;
+  }
+
+  const workflow = workflowIndex.get(workflowId);
+  if (!workflow) {
+    diagnostics.push(diagnostic("error", `${location}.workflow`, `Missing workflow: ${workflowId}`, "missing-workflow"));
+    return;
+  }
+
+  const workflowRuntimes = new Set(effectiveRuntimes(workflow));
+  for (const runtime of effectiveRuntimes(resource)) {
+    if (!VALID_RUNTIMES.has(runtime)) continue;
+    if (!workflowRuntimes.has(runtime)) {
+      diagnostics.push(diagnostic(
+        "error",
+        `${location}.workflow`,
+        `Workflow "${workflowId}" does not target runtime "${runtime}".`,
+        "workflow-runtime-mismatch"
+      ));
+    }
+  }
+
+  validateWrapperArgumentMetadata(resource, workflow, location, diagnostics);
+}
+
+function validateWrapperArgumentMetadata(resource, workflow, location, diagnostics) {
+  if (resource.argumentHint !== undefined && typeof resource.argumentHint !== "string") {
+    diagnostics.push(diagnostic("error", `${location}.argumentHint`, "argumentHint must be a string when provided.", "invalid-workflow-argument"));
+  }
+  validateArguments(resource.arguments, `${location}.arguments`, diagnostics);
+
+  if (resource.argumentOverrides === undefined) return;
+  if (!resource.argumentOverrides || typeof resource.argumentOverrides !== "object" || Array.isArray(resource.argumentOverrides)) {
+    diagnostics.push(diagnostic("error", `${location}.argumentOverrides`, "argumentOverrides must be an object when provided.", "invalid-workflow-argument"));
+    return;
+  }
+
+  const declared = workflowArgumentNames(workflow);
+  for (const [name, override] of Object.entries(resource.argumentOverrides)) {
+    const overrideLocation = `${location}.argumentOverrides.${name}`;
+    let normalizedName;
+    try {
+      normalizedName = normalizeId(name);
+    } catch (error) {
+      diagnostics.push(diagnostic("error", overrideLocation, error.message, "invalid-workflow-argument"));
+      continue;
+    }
+    if (!declared.has(normalizedName)) {
+      diagnostics.push(diagnostic(
+        "error",
+        overrideLocation,
+        `Argument override references undeclared workflow argument "${normalizedName}".`,
+        "invalid-workflow-argument"
+      ));
+    }
+    if (!override || typeof override !== "object" || Array.isArray(override)) {
+      diagnostics.push(diagnostic("error", overrideLocation, "Argument override must be an object.", "invalid-workflow-argument"));
+      continue;
+    }
+    if (override.description !== undefined && typeof override.description !== "string") {
+      diagnostics.push(diagnostic("error", `${overrideLocation}.description`, "Argument override description must be a string when provided.", "invalid-workflow-argument"));
+    }
+    if (override.required !== undefined && typeof override.required !== "boolean") {
+      diagnostics.push(diagnostic("error", `${overrideLocation}.required`, "Argument override required must be a boolean when provided.", "invalid-workflow-argument"));
+    }
+    if (override.hint !== undefined && typeof override.hint !== "string") {
+      diagnostics.push(diagnostic("error", `${overrideLocation}.hint`, "Argument override hint must be a string when provided.", "invalid-workflow-argument"));
+    }
+  }
+}
+
+function unsupportedCapabilityMessage(kind, runtime) {
+  if (kind === "command" && runtime === "codex") {
+    return "Command assets are not supported for Codex. Target Claude commands with runtimes [\"claude\"], or create a Codex skill explicitly.";
+  }
+  return `${kind} assets are not supported for ${runtime}.`;
+}
+
+async function validateSimpleAssetArguments(resource, baseDir, location, diagnostics) {
+  if (!VALID_KINDS.has(resource.kind)) return;
+  if (resource.workflow !== undefined) return;
+
+  for (const field of ["arguments", "args", "argumentHint", "argument-hint"]) {
+    if (Object.hasOwn(resource, field)) {
+      diagnostics.push(diagnostic(
+        "error",
+        `${location}.${field}`,
+        "Simple assets do not support arguments. Use workflow-backed assets for argument handling.",
+        "simple-asset-arguments"
+      ));
+    }
+  }
+
+  for (const { pathName, text } of await resourceReferenceTexts(resource, baseDir, location)) {
+    if (!hasArgumentMarker(text)) continue;
+    diagnostics.push(diagnostic(
+      "error",
+      pathName,
+      "Simple asset content appears to depend on arguments. Use workflow-backed assets for argument handling.",
+      "simple-asset-arguments"
+    ));
   }
 }
 
@@ -679,6 +1002,39 @@ async function validateAssociatedFileReferences(resource, baseDir, location, dia
   }
 }
 
+async function validateAssetReferencePlaceholders(entries, referenceIndex, diagnostics) {
+  for (const entry of entries) {
+    const texts = entry.type === "workflow"
+      ? await workflowReferenceTexts(entry.item, entry.baseDir, entry.location)
+      : await resourceReferenceTexts(entry.item, entry.baseDir, entry.location);
+
+    for (const { pathName, text, runtimes } of texts) {
+      for (const invalid of extractInvalidAssetReferencePlaceholders(text)) {
+        diagnostics.push(diagnostic("error", pathName, invalid.message, invalid.code));
+      }
+
+      for (const reference of extractAssetReferencePlaceholders(text)) {
+        const target = getAssetReference(referenceIndex, reference);
+        if (!target) {
+          diagnostics.push(diagnostic("error", pathName, `Missing asset reference: ${reference.raw}`, "missing-asset-reference"));
+          continue;
+        }
+
+        const targetRuntimes = new Set(target.runtimes);
+        for (const runtime of runtimes ?? supportedRuntimes()) {
+          if (!VALID_RUNTIMES.has(runtime) || targetRuntimes.has(runtime)) continue;
+          diagnostics.push(diagnostic(
+            "error",
+            pathName,
+            `Asset reference ${reference.raw} does not target runtime "${runtime}".`,
+            "asset-reference-runtime-mismatch"
+          ));
+        }
+      }
+    }
+  }
+}
+
 function declaredAssociatedFilePlaceholders(resource) {
   const result = new Set();
   for (const filePath of Array.isArray(resource.files) ? resource.files : []) {
@@ -699,13 +1055,13 @@ function generatedAssociatedReferencePaths(resource) {
     if (resource.kind === "skill") {
       result.add(`${root}/skills/${resource.id}/SKILL.md`);
       for (const filePath of resource.files ?? []) {
-        result.add(`${root}/skills/${resource.id}/files/${normalizeAssociatedFileName(filePath)}`);
+        result.add(`${root}/skills/${resource.id}/${normalizeAssociatedFileName(filePath)}`);
       }
     }
     if (resource.kind === "command") {
       result.add(`${root}/commands/${resource.id}.md`);
       for (const filePath of resource.files ?? []) {
-        result.add(`${root}/scripts/${resource.id}/${commandAssociatedOutputPath(filePath)}`);
+        result.add(`${root}/commands/${commandAssociatedOutputPath(filePath)}`);
       }
     }
   }
@@ -718,13 +1074,18 @@ function commandAssociatedOutputPath(filePath) {
 
 async function resourceReferenceTexts(resource, baseDir, location) {
   const result = [];
+  const resourceRuntimes = effectiveRuntimes(resource);
   const inlineText = resource.body ?? resource.prompt ?? resource.instructions;
   if (typeof inlineText === "string") {
-    result.push({ pathName: `${location}.${resource.body !== undefined ? "body" : resource.prompt !== undefined ? "prompt" : "instructions"}`, text: inlineText });
+    result.push({
+      pathName: `${location}.${resource.body !== undefined ? "body" : resource.prompt !== undefined ? "prompt" : "instructions"}`,
+      text: inlineText,
+      runtimes: resourceRuntimes
+    });
   }
   if (resource.path) {
     try {
-      result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, resource.path), "utf8") });
+      result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, resource.path), "utf8"), runtimes: resourceRuntimes });
     } catch {
       // Missing/unreadable primary files are reported by requireFile.
     }
@@ -742,10 +1103,26 @@ async function resourceReferenceTexts(resource, baseDir, location) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const overrideText = value.body ?? value.prompt ?? value.instructions;
     if (typeof overrideText === "string") {
-      result.push({ pathName: `${location}.overrides.${runtime}`, text: overrideText });
+      result.push({ pathName: `${location}.overrides.${runtime}`, text: overrideText, runtimes: [runtime] });
     }
   }
 
+  return result;
+}
+
+async function workflowReferenceTexts(workflow, baseDir, location) {
+  const result = [];
+  const runtimes = effectiveRuntimes(workflow);
+  if (typeof workflow.body === "string") {
+    result.push({ pathName: `${location}.body`, text: workflow.body, runtimes });
+  }
+  if (workflow.path) {
+    try {
+      result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, workflow.path), "utf8"), runtimes });
+    } catch {
+      // Missing/unreadable workflow files are reported by requireFile.
+    }
+  }
   return result;
 }
 
@@ -765,6 +1142,14 @@ function extractFilePlaceholders(text) {
     references.add(normalizePath(match[1].trim()));
   }
   return references;
+}
+
+function hasArgumentMarker(text) {
+  const value = String(text ?? "");
+  return value.includes("$ARGUMENTS")
+    || value.includes("{{GSD_ARGS}}")
+    || /\bargument-hint\b/.test(value)
+    || /\{\{\s*args(?:\.|\s*\})/.test(value);
 }
 
 function normalizeAssociatedFileName(filePath) {
@@ -789,8 +1174,7 @@ function isRelevantAssociatedReference(kind, id, reference) {
     if (!adapter?.localRoot) continue;
     const root = normalizePath(adapter.localRoot);
     if (kind === "skill" && reference.startsWith(`${root}/skills/${id}/`)) return true;
-    if (kind === "command" && reference.startsWith(`${root}/scripts/${id}/`)) return true;
-    if (kind === "command" && reference.startsWith(`${root}/commands/${id}.assets/`)) return true;
+    if (kind === "command" && reference.startsWith(`${root}/commands/`)) return true;
   }
   return false;
 }
@@ -826,11 +1210,11 @@ async function readOverride(filePath, location, diagnostics) {
   }
 }
 
-async function requireFile(filePath, location, diagnostics) {
+async function requireFile(filePath, location, diagnostics, code = "missing-file") {
   try {
     await access(filePath);
   } catch {
-    diagnostics.push(diagnostic("error", location, `Missing file: ${filePath}`, "missing-file"));
+    diagnostics.push(diagnostic("error", location, `Missing file: ${filePath}`, code));
   }
 }
 

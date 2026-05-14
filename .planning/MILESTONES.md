@@ -196,3 +196,53 @@ Redesign AOF's CLI around durable product-area namespaces, review every command 
 9. Kept `aof init` as the only top-level product command and removed init-time guided/default asset creation.
 10. Removed old `validate`, `doctor`, `migrate`, `config`, and `catalog` execution paths with no-side-effect guidance.
 11. Hardened live repo workflows with friendlier CLI output, source-only init guidance, generated-output `.gitignore` files, setup UI cleanup, command/skill additional files, runtime path placeholders, and associated-file validation.
+
+## v1.5 — Runtime Semantics And Workflow Assets
+
+**Status:** Shipped 2026-05-14
+**Started:** 2026-05-11
+**Completed:** 2026-05-14
+**Phases:** 23-27
+**Requirements:** 24/24 complete
+**Audit:** Passed
+
+### Goal
+
+Align AOF's Claude/Codex adapter semantics with real runtime capabilities and introduce optional workflow-backed assets for shared process logic with runtime-specific wrappers.
+
+### Planned Scope
+
+1. Make Claude the only runtime that renders command assets; reject Codex command targets with clear diagnostics.
+2. Preserve simple direct asset authoring while disallowing argument handling in simple mode.
+3. Add optional workflow assets that render shared process files per runtime.
+4. Add runtime-aware `{{skills.<id>}}` and `{{workflows.<id>}}` placeholders with validation.
+5. Update setup UI authoring so users choose Simple or Workflow-backed mode and only workflow-backed assets expose arguments.
+6. Verify with BDD and live GSD-style examples where Claude commands and Codex skills share workflow files.
+
+### Delivered
+
+1. Reconciled command semantics with real runtimes: Claude commands render to `.claude/commands/*`; Codex command targets are rejected.
+2. Preserved simple direct assets while blocking argument metadata and argument-looking content outside workflow-backed mode.
+3. Added first-class workflow assets rendered under `.claude/aof/workflows/` and `.codex/aof/workflows/`.
+4. Added workflow-backed Claude command and Codex skill wrappers with runtime-appropriate argument guidance.
+5. Added validated `{{skills.*}}` and `{{workflows.*}}` runtime path placeholders across resources, overrides, workflows, and referenced globals.
+6. Updated setup UI authoring with Simple / Workflow-backed modes, argument controls, unsupported runtime disabling, and reference insertion.
+7. Verified the milestone through Node BDD, PowerShell BDD parity, UI build checks, repo check, and live GSD-style UAT.
+
+### Progress
+
+- Phase 23: Runtime Capability Contract — complete 2026-05-12.
+- Phase 24: Workflow Asset Model — complete 2026-05-14.
+- Phase 25: Asset Reference Placeholders — complete 2026-05-14.
+- Phase 26: Workflow-Backed Setup UI — complete 2026-05-14.
+- Phase 27: Workflow Runtime Verification — complete 2026-05-14.
+
+### Audit
+
+- [v1.5-MILESTONE-AUDIT.md](milestones/v1.5-MILESTONE-AUDIT.md)
+
+### Archives
+
+- [v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
+- [v1.5-REQUIREMENTS.md](milestones/v1.5-REQUIREMENTS.md)
+- [v1.5-MILESTONE-AUDIT.md](milestones/v1.5-MILESTONE-AUDIT.md)

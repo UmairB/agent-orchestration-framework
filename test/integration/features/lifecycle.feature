@@ -5,7 +5,7 @@ Feature: AOF CLI lifecycle
     Given an empty project
     When I run `--help`
     Then the command should succeed
-    And stdout should contain `aof - Assistant Ops Framework`
+    And stdout should contain `aof - Agent Orchestration Framework`
     And stdout should contain `aof init [dir] [--claude] [--codex] [--runtime claude,codex]`
     And stdout should contain `aof project show`
     And stdout should contain `aof project validate`
@@ -206,10 +206,10 @@ Feature: AOF CLI lifecycle
     Given a project with referenced global skill helper files
     When I run `assets apply --codex`
     Then the command should succeed
-    And file `.codex/skills/research-helper/files/search.py` should exist
-    And file `.codex/skills/research-helper/files/search.py` should contain `print('search')`
+    And file `.codex/skills/research-helper/search.py` should exist
+    And file `.codex/skills/research-helper/search.py` should contain `print('search')`
     And file `.aof/assets/skills/research-helper/search.py` should not exist
-    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/research-helper/files/search.py`
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/skills/research-helper/search.py`
     And JSON file `.aof/aof.lock.json` should contain global resource `research-helper`
 
   Scenario: Preview referenced global skill helper files
@@ -217,8 +217,114 @@ Feature: AOF CLI lifecycle
     When I run `assets apply --codex --dry-run`
     Then the command should succeed
     And stdout should contain `.codex`
-    And stdout should contain `files/search.py`
-    And file `.codex/skills/research-helper/files/search.py` should not exist
+    And stdout should contain `search.py`
+    And file `.codex/skills/research-helper/search.py` should not exist
+
+  Scenario: Render referenced global skill helper file placeholders
+    Given a project with referenced global skill helper file placeholders
+    When I run `assets apply`
+    Then the command should succeed
+    And file `.codex/skills/research-helper/SKILL.md` should contain `Codex helper .codex/skills/research-helper/search.py`
+    And file `.claude/skills/research-helper/SKILL.md` should contain `Base helper .claude/skills/research-helper/search.py`
+    And file `.codex/skills/research-helper/SKILL.md` should not contain `{{`
+    And file `.claude/skills/research-helper/SKILL.md` should not contain `{{`
+    And file `.codex/skills/research-helper/search.py` should exist
+    And file `.claude/skills/research-helper/search.py` should exist
+    And JSON file `.aof/aof.lock.json` should contain global resource `research-helper`
+
+  Scenario: Preview referenced global skill helper file placeholders
+    Given a project with referenced global skill helper file placeholders
+    When I run `assets apply --codex --dry-run`
+    Then the command should succeed
+    And stdout should contain `.codex/skills/research-helper/SKILL.md`
+    And stdout should contain `.codex/skills/research-helper/search.py`
+    And file `.codex/skills/research-helper/SKILL.md` should not exist
+    And file `.codex/skills/research-helper/search.py` should not exist
+
+  Scenario: Render command helper files beside command markdown
+    Given a project with command helper file placeholders
+    When I run `assets apply --claude`
+    Then the command should succeed
+    And file `.claude/commands/prime.md` should contain `.claude/commands/helper.py`
+    And file `.claude/commands/prime.md` should not contain `{{`
+    And file `.claude/commands/helper.py` should exist
+    And file `.claude/commands/helper.py` should contain `print('prime')`
+    And file `.claude/scripts/prime/helper.py` should not exist
+    And JSON file `.aof/aof.lock.json` should contain generated file `.claude/commands/helper.py`
+
+  Scenario: Reject Codex command assets during validation
+    Given a project with a codex command asset
+    When I run `project validate`
+    Then the command should fail
+    And stdout should contain `Command assets are not supported for Codex`
+    And stdout should contain `create a Codex skill explicitly`
+
+  Scenario: Reject Codex command assets before apply writes
+    Given a project with a codex command asset
+    When I run `assets apply --codex`
+    Then the command should fail
+    And stdout should contain `Command assets are not supported for Codex`
+    And file `.codex/commands/ci.md` should not exist
+    And file `.aof/aof.lock.json` should not exist
+
+  Scenario: Render Claude command assets without Codex command output
+    Given a project with a claude command asset
+    When I run `assets apply --claude`
+    Then the command should succeed
+    And file `.claude/commands/ci.md` should exist
+    And file `.claude/commands/ci.md` should contain `Run CI`
+    And file `.codex/commands/ci.md` should not exist
+
+  Scenario: Reject argument markers in simple assets
+    Given a project with a simple argument asset
+    When I run `project validate`
+    Then the command should fail
+    And stdout should contain `Simple asset content appears to depend on arguments`
+    And stdout should contain `workflow-backed assets`
+
+  Scenario: Render workflow-backed Claude commands and Codex skills
+    Given a project with workflow-backed assets
+    When I run `assets apply`
+    Then the command should succeed
+    And file `.claude/aof/workflows/audit.md` should contain `Audit the milestone`
+    And file `.codex/aof/workflows/audit.md` should contain `Audit the milestone`
+    And file `.claude/commands/audit.md` should contain `.claude/aof/workflows/audit.md`
+    And file `.claude/commands/audit.md` should contain `Argument hint`
+    And file `.codex/skills/audit/SKILL.md` should contain `.codex/aof/workflows/audit.md`
+    And JSON file `.aof/aof.lock.json` should contain generated file `.codex/aof/workflows/audit.md`
+
+  Scenario: Render asset reference placeholders
+    Given a project with asset reference placeholders
+    When I run `assets apply`
+    Then the command should succeed
+    And file `.codex/aof/workflows/audit.md` should contain `.codex/skills/ci/SKILL.md`
+    And file `.claude/commands/review.md` should contain `.claude/skills/ci/SKILL.md`
+    And file `.claude/commands/review.md` should contain `.claude/aof/workflows/audit.md`
+    And file `.codex/skills/review/SKILL.md` should contain `.codex/skills/ci/SKILL.md`
+    And file `.codex/skills/review/SKILL.md` should contain `.codex/aof/workflows/audit.md`
+    And file `.codex/skills/shared-ref/SKILL.md` should contain `.codex/skills/ci/SKILL.md`
+    And file `.codex/skills/review/SKILL.md` should not contain `{{`
+
+  Scenario: Reject invalid workflow references and argument overrides
+    Given a project with invalid workflow-backed assets
+    When I run `project validate`
+    Then the command should fail
+    And stdout should contain `Missing workflow: missing`
+    And stdout should contain `Argument override references undeclared workflow argument "phase"`
+
+  Scenario: Reject invalid asset reference placeholders
+    Given a project with invalid asset reference placeholders
+    When I run `project validate`
+    Then the command should fail
+    And stdout should contain `Unsupported asset reference namespace "commands"`
+    And stdout should contain `Missing asset reference: {{skills.missing}}`
+    And stdout should contain `does not target runtime "codex"`
+
+  Scenario: Report invalid global skill helper file placeholders
+    Given a project with invalid global skill helper file placeholders
+    When I run `project validate`
+    Then the command should fail
+    And stdout should contain `Referenced associated file placeholder is not declared for skill:research-helper: {{files.missing.py}}`
 
   Scenario: Report unsafe global skill helper files
     Given a project with unsafe global skill helper files

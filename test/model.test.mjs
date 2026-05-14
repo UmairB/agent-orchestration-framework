@@ -8,6 +8,8 @@ import {
   PROJECT_DOC_TARGETS,
   RESOURCE_KINDS,
   TRUST_MODES,
+  WORKFLOW_KIND,
+  defaultWorkflowBodyFile,
   mergeRuntimeOverride
 } from "../src/model.mjs";
 
@@ -19,6 +21,15 @@ export const modelTests = [
       assert.equal(RESOURCE_KINDS.command.defaultBodyFile, "COMMAND.md");
       assert.equal(RESOURCE_KINDS.agent.defaultBodyFile, "AGENT.md");
       assert.equal(RESOURCE_KINDS.rule.defaultBodyFile, "RULE.md");
+    }
+  },
+  {
+    name: "model includes workflow metadata",
+    run() {
+      assert.equal(WORKFLOW_KIND.id, "workflow");
+      assert.equal(WORKFLOW_KIND.plural, "workflows");
+      assert.equal(WORKFLOW_KIND.defaultBodyFile, "WORKFLOW.md");
+      assert.equal(defaultWorkflowBodyFile(), "WORKFLOW.md");
     }
   },
   {
@@ -34,6 +45,8 @@ export const modelTests = [
   {
     name: "capabilities distinguish codex guidance from execution policy rules",
     run() {
+      assert.equal(CAPABILITIES.command.claude, CAPABILITY_STATUS.native);
+      assert.equal(CAPABILITIES.command.codex, CAPABILITY_STATUS.unsupportedFail);
       assert.equal(CAPABILITIES.rule.codex, CAPABILITY_STATUS.mapped);
       assert.equal(CAPABILITIES.codexExecutionPolicyRule.codex, CAPABILITY_STATUS.future);
       assert.equal(CAPABILITIES.codexExecutionPolicyRule.claude, CAPABILITY_STATUS.unsupportedFail);

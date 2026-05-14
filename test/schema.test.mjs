@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   RESOURCE_KINDS,
+  WORKFLOW_KIND,
+  supportedGlobalRefKinds,
   supportedHookEvents,
   supportedHookTypes,
   supportedMcpTransports,
@@ -44,11 +46,13 @@ async function schemaEnumsAlignWithModel() {
 async function schemaFieldsAlign() {
   const schema = await loadSchema();
   const resource = schema.$defs.resource;
-  for (const field of ["resources", "globalRefs", "packages", "mcpServers", "hooks", "projectDocs", "settings", "items", "runtimes"]) {
+  for (const field of ["resources", "workflows", "globalRefs", "packages", "mcpServers", "hooks", "projectDocs", "settings", "items", "runtimes"]) {
     assert.ok(schema.properties[field], `Missing config field ${field}`);
   }
-  assert.deepEqual(schema.$defs.globalRef.properties.kind.enum.sort(), ["agent", "rule", "skill"]);
-  for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "files", "overrides"]) {
+  assert.deepEqual(schema.$defs.globalRef.properties.kind.enum.sort(), supportedGlobalRefKinds().sort());
+  assert.equal(schema.$defs.workflow.properties.path.type, "string");
+  assert.equal(WORKFLOW_KIND.defaultBodyFile, "WORKFLOW.md");
+  for (const field of ["kind", "id", "name", "description", "body", "prompt", "instructions", "path", "model", "tools", "paths", "workflow", "argumentHint", "arguments", "argumentOverrides", "files", "overrides"]) {
     assert.ok(resource.properties[field], `Missing resource field ${field}`);
   }
   for (const kind of supportedResourceKinds()) {

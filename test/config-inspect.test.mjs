@@ -15,6 +15,26 @@ export const configInspectTests = [
     run: validatesSemanticErrors
   },
   {
+    name: "validates runtime capability contract for commands",
+    run: validatesRuntimeCapabilityContractForCommands
+  },
+  {
+    name: "validates simple asset argument markers",
+    run: validatesSimpleAssetArgumentMarkers
+  },
+  {
+    name: "validates workflow declarations",
+    run: validatesWorkflowDeclarations
+  },
+  {
+    name: "validates workflow backed resources",
+    run: validatesWorkflowBackedResources
+  },
+  {
+    name: "validates asset reference placeholders",
+    run: validatesAssetReferencePlaceholders
+  },
+  {
     name: "doctor reports stale legacy config and package intent",
     run: doctorReportsHealth
   },
@@ -45,6 +65,10 @@ export const configInspectTests = [
   {
     name: "validates referenced global resources",
     run: validatesReferencedGlobalResources
+  },
+  {
+    name: "validates referenced global workflows",
+    run: validatesReferencedGlobalWorkflows
   },
   {
     name: "reports missing and conflicting global references",
@@ -97,6 +121,238 @@ async function validatesSemanticErrors() {
     assert.ok(diagnostics.some((item) => item.path === "packages[0].namespace"));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesRuntimeCapabilityContractForCommands() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    await mkdir(path.join(targetDir, ".aof", "assets", "commands", "ci"), { recursive: true });
+    await mkdir(path.join(targetDir, ".aof", "assets", "skills", "ci"), { recursive: true });
+    await writeFile(path.join(targetDir, ".aof", "assets", "commands", "ci", "COMMAND.md"), "Run CI\n", "utf8");
+    await writeFile(path.join(targetDir, ".aof", "assets", "skills", "ci", "SKILL.md"), "Run CI\n", "utf8");
+
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "command", id: "ci", path: "assets/commands/ci/COMMAND.md", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    let diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "unsupported-runtime-capability" && item.message.includes("Command assets are not supported for Codex")));
+
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "command", id: "ci", path: "assets/commands/ci/COMMAND.md" }
+      ]
+    }, null, 2)}\n`, "utf8");
+    diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "unsupported-runtime-capability"));
+
+    await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "command", id: "ci", path: "assets/commands/ci/COMMAND.md", runtimes: ["claude"] },
+        { kind: "skill", id: "ci", path: "assets/skills/ci/SKILL.md", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    assert.deepEqual(await validateConfig(targetDir), []);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesSimpleAssetArgumentMarkers() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "skills", "args", "overrides"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "skills", "args", "SKILL.md"), "Use $ARGUMENTS here.\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "skills", "args", "overrides", "codex.json"), `${JSON.stringify({ body: "Use {{args.phase}} here." })}\n`, "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        {
+          kind: "skill",
+          id: "args",
+          path: "assets/skills/args/SKILL.md",
+          runtimes: ["codex"],
+          arguments: [{ name: "phase" }],
+          overrides: { codex: "assets/skills/args/overrides/codex.json" }
+        },
+        {
+          kind: "agent",
+          id: "inline",
+          body: "Use {{GSD_ARGS}} here.",
+          runtimes: ["codex"]
+        }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.path === "resources[0].arguments" && item.code === "simple-asset-arguments"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[0].path" && item.code === "simple-asset-arguments"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[0].overrides.codex" && item.code === "simple-asset-arguments"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[1].body" && item.code === "simple-asset-arguments"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesWorkflowDeclarations() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "workflows", "audit"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "workflows", "audit", "WORKFLOW.md"), "Workflow body\n", "utf8");
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      workflows: [
+        {
+          id: "audit",
+          path: "assets/workflows/audit/WORKFLOW.md",
+          argumentHint: "<milestone>",
+          arguments: [{ name: "milestone", description: "Milestone number", required: true }]
+        }
+      ],
+      resources: [
+        { kind: "skill", id: "audit", workflow: "audit", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    assert.deepEqual(await validateConfig(targetDir), []);
+    const inspection = await inspectConfig(targetDir, { runtimes: ["codex"] });
+    assert.equal(inspection.workflows[0].id, "audit");
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      workflows: [
+        { id: "audit", path: "assets/workflows/audit/missing.md" },
+        { id: "audit", body: "Duplicate", arguments: [{ name: "bad name" }] }
+      ],
+      resources: []
+    }, null, 2)}\n`, "utf8");
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "missing-workflow-file"));
+    assert.ok(diagnostics.some((item) => item.path === "workflows[1].arguments[0].name" && item.code === "invalid-workflow-argument"));
+    assert.ok(diagnostics.some((item) => item.path === "workflows[1].id" && item.message.includes("Duplicate workflows id")));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesWorkflowBackedResources() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  try {
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      workflows: [
+        {
+          id: "audit",
+          body: "Workflow body",
+          runtimes: ["codex"],
+          arguments: [{ name: "milestone" }]
+        }
+      ],
+      resources: [
+        { kind: "skill", id: "good", workflow: "audit", runtimes: ["codex"], argumentOverrides: { milestone: { description: "Milestone id" } } },
+        { kind: "skill", id: "missing", workflow: "missing", runtimes: ["codex"] },
+        { kind: "command", id: "wrong-runtime", workflow: "audit", runtimes: ["claude"] },
+        { kind: "skill", id: "bad-arg", workflow: "audit", runtimes: ["codex"], argumentOverrides: { phase: { description: "Phase" } } },
+        { kind: "skill", id: "simple-override", body: "Body", runtimes: ["codex"], argumentOverrides: { phase: {} } }
+      ]
+    }, null, 2)}\n`, "utf8");
+
+    const diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.path === "resources[1].workflow" && item.code === "missing-workflow"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[2].workflow" && item.code === "workflow-runtime-mismatch"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[3].argumentOverrides.phase" && item.code === "invalid-workflow-argument"));
+    assert.ok(diagnostics.some((item) => item.path === "resources[4].argumentOverrides" && item.code === "invalid-workflow-argument"));
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function validatesAssetReferencePlaceholders() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    const workspaceDir = path.join(targetDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      workflows: [
+        { id: "audit", body: "Audit with {{skills.ci}}.", runtimes: ["codex"] }
+      ],
+      resources: [
+        { kind: "skill", id: "ci", body: "Run CI.", runtimes: ["codex"] },
+        { kind: "skill", id: "review", body: "Use {{skills.ci}} and {{ workflows.audit }}.", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    assert.deepEqual(await validateConfig(targetDir), []);
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "skill", id: "review", body: "Use {{commands.ci}}, {{skill.ci}}, and {{skills.missing}}.", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    let diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "invalid-asset-reference" && item.message.includes("commands")));
+    assert.ok(diagnostics.some((item) => item.code === "invalid-asset-reference" && item.message.includes("skill")));
+    assert.ok(diagnostics.some((item) => item.code === "missing-asset-reference" && item.message.includes("{{skills.missing}}")));
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "skill", id: "ci", body: "Run CI.", runtimes: ["claude"] },
+        { kind: "skill", id: "review", body: "Use {{skills.ci}}.", runtimes: ["codex"] }
+      ]
+    }, null, 2)}\n`, "utf8");
+    diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "asset-reference-runtime-mismatch" && item.message.includes("codex")));
+
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      name: "demo",
+      resources: [
+        { kind: "skill", id: "ci", body: "Run CI.", runtimes: ["codex"] },
+        {
+          kind: "skill",
+          id: "review",
+          body: "Shared body.",
+          runtimes: ["claude", "codex"],
+          overrides: { codex: { body: "Use {{skills.ci}}." } }
+        }
+      ]
+    }, null, 2)}\n`, "utf8");
+    assert.deepEqual(await validateConfig(targetDir), []);
+
+    await writeGlobalResource(globalDir, {
+      kind: "skill",
+      id: "shared",
+      body: "Global uses {{skills.local-ci}} and {{workflows.local-audit}}.",
+      runtimes: ["codex"]
+    });
+    await writeProjectWithGlobalRefs(targetDir, [{ kind: "skill", id: "shared" }], {
+      resources: [
+        { kind: "skill", id: "local-ci", path: "assets/skills/local-ci/SKILL.md", body: "Local CI" }
+      ],
+      workflows: [
+        { id: "local-audit", body: "Local audit", runtimes: ["codex"] }
+      ]
+    });
+    assert.deepEqual(await validateConfig(targetDir), []);
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
   }
 }
 
@@ -271,6 +527,40 @@ async function validatesReferencedGlobalResources() {
   }
 }
 
+async function validatesReferencedGlobalWorkflows() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
+  const previousGlobalHome = process.env.AOF_GLOBAL_HOME;
+  try {
+    process.env.AOF_GLOBAL_HOME = globalDir;
+    await writeGlobalWorkflow(globalDir, { id: "audit", body: "Global workflow", runtimes: ["codex"] });
+    await writeProjectWithGlobalRefs(targetDir, [{ kind: "workflow", id: "audit" }], {
+      resources: [
+        { kind: "skill", id: "audit", path: "assets/skills/audit/SKILL.md", body: "Local body" }
+      ]
+    });
+    let diagnostics = await validateConfig(targetDir);
+    assert.deepEqual(diagnostics, []);
+
+    const inspection = await inspectConfig(targetDir, { runtimes: ["codex"] });
+    assert.ok(inspection.workflows.some((workflow) => workflow.id === "audit" && workflow.source === "global"));
+
+    await writeProjectWithGlobalRefs(targetDir, [{ kind: "workflow", id: "missing" }]);
+    diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "missing-global-workflow"));
+
+    await writeProjectWithGlobalRefs(targetDir, [{ kind: "workflow", id: "audit" }], {
+      workflows: [{ id: "audit", body: "Local workflow" }]
+    });
+    diagnostics = await validateConfig(targetDir);
+    assert.ok(diagnostics.some((item) => item.code === "local-global-conflict"));
+  } finally {
+    restoreEnv("AOF_GLOBAL_HOME", previousGlobalHome);
+    await rm(targetDir, { recursive: true, force: true });
+    await rm(globalDir, { recursive: true, force: true });
+  }
+}
+
 async function reportsMissingAndConflictingGlobalReferences() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
   const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
@@ -334,13 +624,11 @@ async function validatesAssociatedFileRuntimeReferences() {
     await writeFile(path.join(skillDir, "files", "search.py"), "print('search')\n", "utf8");
     await writeFile(path.join(commandDir, "COMMAND.md"), [
       "On Windows:",
-      "pwsh -File .claude/scripts/convert-files/run.ps1 $ARGUMENTS",
-      "On Unix:",
-      ".codex/scripts/convert-files/run.sh $ARGUMENTS",
+      "pwsh -File .claude/commands/run.ps1",
       ""
     ].join("\n"), "utf8");
     await writeFile(path.join(skillDir, "SKILL.md"), [
-      "Use `.codex/skills/research/files/search.py` for local searches.",
+      "Use `.codex/skills/research/search.py` for local searches.",
       ""
     ].join("\n"), "utf8");
     await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
@@ -351,7 +639,7 @@ async function validatesAssociatedFileRuntimeReferences() {
           id: "convert-files",
           path: "assets/commands/convert-files/COMMAND.md",
           files: ["run.ps1", "run.sh"],
-          runtimes: ["claude", "codex"]
+          runtimes: ["claude"]
         },
         {
           kind: "skill",
@@ -369,12 +657,12 @@ async function validatesAssociatedFileRuntimeReferences() {
     let diagnostics = await validateConfig(targetDir);
     assert.ok(diagnostics.some((item) => item.code === "invalid-associated-file-reference" && item.message.includes("not a nested path")));
 
-    await writeFile(path.join(commandDir, "COMMAND.md"), "pwsh -File .claude/scripts/convert-files/missing.ps1 $ARGUMENTS\n", "utf8");
-    await writeFile(path.join(skillDir, "SKILL.md"), "Use `.codex/skills/research/files/missing.py`.\n", "utf8");
+    await writeFile(path.join(commandDir, "COMMAND.md"), "pwsh -File .claude/commands/missing.ps1\n", "utf8");
+    await writeFile(path.join(skillDir, "SKILL.md"), "Use `.codex/skills/research/missing.py`.\n", "utf8");
     diagnostics = await validateConfig(targetDir);
     assert.equal(diagnostics.filter((item) => item.code === "invalid-associated-file-reference").length, 2);
-    assert.ok(diagnostics.some((item) => item.message.includes(".claude/scripts/convert-files/missing.ps1")));
-    assert.ok(diagnostics.some((item) => item.message.includes(".codex/skills/research/files/missing.py")));
+    assert.ok(diagnostics.some((item) => item.message.includes(".claude/commands/missing.ps1")));
+    assert.ok(diagnostics.some((item) => item.message.includes(".codex/skills/research/missing.py")));
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -409,7 +697,8 @@ async function reportsUnsafeAssociatedFileDeclarations() {
       kind: "command",
       id: "command-helper",
       body: "Command body",
-      files: [{ path: "helper.py", body: "print('command')\n" }]
+      files: [{ path: "helper.py", body: "print('command')\n" }],
+      runtimes: ["claude"]
     });
     assert.deepEqual(await validateGlobalConfig(), []);
 
@@ -448,6 +737,7 @@ async function writeProjectWithGlobalRefs(targetDir, globalRefs, options = {}) {
   const workspaceDir = path.join(targetDir, ".aof");
   await mkdir(workspaceDir, { recursive: true });
   const resources = [];
+  const workflows = [];
   for (const resource of options.resources ?? []) {
     const resourcePath = path.join(workspaceDir, resource.path);
     await mkdir(path.dirname(resourcePath), { recursive: true });
@@ -459,9 +749,17 @@ async function writeProjectWithGlobalRefs(targetDir, globalRefs, options = {}) {
       runtimes: ["codex"]
     });
   }
+  for (const workflow of options.workflows ?? []) {
+    workflows.push({
+      id: workflow.id,
+      body: workflow.body,
+      runtimes: workflow.runtimes ?? ["codex"]
+    });
+  }
   await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
     name: "demo",
     resources,
+    workflows,
     globalRefs
   }, null, 2)}\n`, "utf8");
 }
@@ -489,9 +787,26 @@ async function writeGlobalResource(globalDir, input) {
         id: input.id,
         path: `assets/${plural}/${input.id}/${bodyFile}`,
         files: (input.files ?? []).map((file) => file.path),
-        runtimes: ["codex"]
+        runtimes: input.runtimes ?? ["codex"]
       }
     ]
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writeGlobalWorkflow(globalDir, input) {
+  const workflowDir = path.join(globalDir, "assets", "workflows", input.id);
+  await mkdir(workflowDir, { recursive: true });
+  await writeFile(path.join(workflowDir, "WORKFLOW.md"), `${input.body}\n`, "utf8");
+  await writeFile(path.join(globalDir, "aof.config.json"), `${JSON.stringify({
+    name: "aof-global",
+    workflows: [
+      {
+        id: input.id,
+        path: `assets/workflows/${input.id}/WORKFLOW.md`,
+        runtimes: input.runtimes ?? ["codex"]
+      }
+    ],
+    resources: []
   }, null, 2)}\n`, "utf8");
 }
 

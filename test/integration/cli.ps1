@@ -200,6 +200,158 @@ function Run-Step {
     return
   }
 
+  if ($Step -eq "a project with referenced global skill helper file placeholders") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Base helper {{files.search.py}}"; override = @{ body = "Codex helper {{ files.search.py }}" }; files = @(@{ path = "search.py"; body = "print('search')`n" }) }
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "research-helper" })
+    return
+  }
+
+  if ($Step -eq "a project with invalid global skill helper file placeholders") {
+    Run-Step $Context "an empty project"
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Missing helper {{files.missing.py}}"; files = @(@{ path = "search.py"; body = "print('search')`n" }) }
+    Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "research-helper" })
+    return
+  }
+
+  if ($Step -eq "a project with command helper file placeholders") {
+    Run-Step $Context "an empty project"
+    $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+    $CommandDir = Join-Path $WorkspaceDir "assets\commands\prime"
+    New-Item -ItemType Directory -Path (Join-Path $CommandDir "files") -Force | Out-Null
+    Set-Content -Path (Join-Path $CommandDir "COMMAND.md") -Value "Run {{files.helper.py}}`n" -NoNewline
+    Set-Content -Path (Join-Path $CommandDir "files\helper.py") -Value "print('prime')`n" -NoNewline
+    $Config = @{
+      '$schema' = "../schemas/aof.schema.json"
+      name = "command-helper"
+      resources = @(@{
+        kind = "command"
+        id = "prime"
+        description = "Prime command"
+        path = "assets/commands/prime/COMMAND.md"
+        files = @("helper.py")
+        runtimes = @("claude")
+      })
+      globalRefs = @()
+      packages = @()
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+    return
+  }
+
+  if ($Step -eq "a project with a codex command asset") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @(@{ kind = "command"; id = "ci"; description = "CI command"; path = "assets/commands/ci/COMMAND.md"; bodyPath = "assets/commands/ci/COMMAND.md"; body = "Run CI"; runtimes = @("codex") }) @()
+    return
+  }
+
+  if ($Step -eq "a project with a claude command asset") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @(@{ kind = "command"; id = "ci"; description = "CI command"; path = "assets/commands/ci/COMMAND.md"; bodyPath = "assets/commands/ci/COMMAND.md"; body = "Run CI"; runtimes = @("claude") }) @()
+    return
+  }
+
+  if ($Step -eq "a project with a simple argument asset") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @(@{ kind = "skill"; id = "arg-skill"; description = "Argument skill"; path = "assets/skills/arg-skill/SKILL.md"; bodyPath = "assets/skills/arg-skill/SKILL.md"; body = "Use `$ARGUMENTS to decide what to do."; runtimes = @("codex") }) @()
+    return
+  }
+
+  if ($Step -eq "a project with workflow-backed assets") {
+    Run-Step $Context "an empty project"
+    $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+    $WorkflowDir = Join-Path $WorkspaceDir "assets\workflows\audit"
+    New-Item -ItemType Directory -Path $WorkflowDir -Force | Out-Null
+    Set-Content -Path (Join-Path $WorkflowDir "WORKFLOW.md") -Value "Audit the milestone using the shared procedure."
+    $Config = @{
+      '$schema' = "../schemas/aof.schema.json"
+      name = "workflow-backed"
+      workflows = @(@{
+        id = "audit"
+        path = "assets/workflows/audit/WORKFLOW.md"
+        argumentHint = "<milestone>"
+        arguments = @(@{ name = "milestone"; description = "Milestone number"; required = $true })
+      })
+      resources = @(
+        @{ kind = "command"; id = "audit"; description = "Audit milestone"; workflow = "audit"; runtimes = @("claude") },
+        @{ kind = "skill"; id = "audit"; description = "Audit milestone"; workflow = "audit"; runtimes = @("codex") }
+      )
+      globalRefs = @()
+      packages = @()
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+    return
+  }
+
+  if ($Step -eq "a project with asset reference placeholders") {
+    Run-Step $Context "an empty project"
+    $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+    New-Item -ItemType Directory -Path (Join-Path $WorkspaceDir "assets\skills\ci") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $WorkspaceDir "assets\skills\review") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $WorkspaceDir "assets\commands\review") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $WorkspaceDir "assets\workflows\audit") -Force | Out-Null
+    Set-Content -Path (Join-Path $WorkspaceDir "assets\skills\ci\SKILL.md") -Value "Run CI.`n" -NoNewline
+    Set-Content -Path (Join-Path $WorkspaceDir "assets\skills\review\SKILL.md") -Value "Use {{skills.ci}} and {{workflows.audit}}.`n" -NoNewline
+    Set-Content -Path (Join-Path $WorkspaceDir "assets\commands\review\COMMAND.md") -Value "Review with {{skills.ci}} and {{workflows.audit}}.`n" -NoNewline
+    Set-Content -Path (Join-Path $WorkspaceDir "assets\workflows\audit\WORKFLOW.md") -Value "Audit by calling {{skills.ci}}.`n" -NoNewline
+    Write-GlobalAofResource $Context @{ kind = "skill"; id = "shared-ref"; description = "Shared reference"; body = "Shared uses {{skills.ci}} and {{workflows.audit}}." }
+    $Config = @{
+      '$schema' = "../schemas/aof.schema.json"
+      name = "asset-references"
+      workflows = @(@{ id = "audit"; path = "assets/workflows/audit/WORKFLOW.md"; runtimes = @("claude", "codex") })
+      resources = @(
+        @{ kind = "skill"; id = "ci"; path = "assets/skills/ci/SKILL.md"; runtimes = @("claude", "codex") },
+        @{ kind = "skill"; id = "review"; path = "assets/skills/review/SKILL.md"; runtimes = @("codex") },
+        @{ kind = "command"; id = "review"; path = "assets/commands/review/COMMAND.md"; runtimes = @("claude") }
+      )
+      globalRefs = @(@{ kind = "skill"; id = "shared-ref" })
+      packages = @()
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+    return
+  }
+
+  if ($Step -eq "a project with invalid workflow-backed assets") {
+    Run-Step $Context "an empty project"
+    $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+    New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
+    $Config = @{
+      '$schema' = "../schemas/aof.schema.json"
+      name = "invalid-workflow-backed"
+      workflows = @(@{
+        id = "audit"
+        body = "Audit the milestone."
+        arguments = @(@{ name = "milestone" })
+      })
+      resources = @(
+        @{ kind = "skill"; id = "missing-workflow"; workflow = "missing"; runtimes = @("codex") },
+        @{ kind = "skill"; id = "bad-argument"; workflow = "audit"; runtimes = @("codex"); argumentOverrides = @{ phase = @{ description = "Phase" } } }
+      )
+      globalRefs = @()
+      packages = @()
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+    return
+  }
+
+  if ($Step -eq "a project with invalid asset reference placeholders") {
+    Run-Step $Context "an empty project"
+    $WorkspaceDir = Join-Path $Context.ProjectDir ".aof"
+    New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
+    $Config = @{
+      '$schema' = "../schemas/aof.schema.json"
+      name = "invalid-asset-references"
+      resources = @(
+        @{ kind = "skill"; id = "claude-only"; body = "Claude only."; runtimes = @("claude") },
+        @{ kind = "skill"; id = "review"; body = "Use {{commands.ci}}, {{skills.missing}}, and {{skills.claude-only}}."; runtimes = @("codex") }
+      )
+      globalRefs = @()
+      packages = @()
+    } | ConvertTo-Json -Depth 10
+    Set-Content -Path (Join-Path $WorkspaceDir "aof.config.json") -Value $Config
+    return
+  }
+
   if ($Step -eq "a project with unsafe global skill helper files") {
     Run-Step $Context "an empty project"
     Write-GlobalAofResource $Context @{ kind = "skill"; id = "unsafe-helper"; description = "Unsafe helper"; body = "Unsafe helper."; files = @(@{ path = "../escape.py"; body = "print('escape')`n" }) }
@@ -252,7 +404,7 @@ function Run-Step {
       kind = "command"
       description = "Prime repository context"
       body = "Inspect the repository."
-      runtimes = @("codex")
+      runtimes = @("claude")
       overrides = @{}
     }
     return
@@ -264,6 +416,24 @@ function Run-Step {
       hooks = @(@{ id = "test-after-write"; event = "PostToolUse"; command = "npm test"; runtimes = @("codex") })
       projectDocs = @(@{ id = "root"; body = "Guidance"; targets = @("AGENTS.md"); runtimes = @("codex") })
       settings = @{ codex = @{ approval_policy = "on-request" } }
+    }
+    return
+  }
+
+  if ($Step -eq "I save workflow-backed setup UI resource") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/sections" @{
+      workflows = @(@{ id = "audit"; body = "Audit workflow"; runtimes = @("codex"); arguments = @(@{ name = "milestone" }) })
+    }
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/skill/audit" @{
+      id = "audit"
+      kind = "skill"
+      description = "Audit wrapper"
+      body = ""
+      workflow = "audit"
+      argumentHint = "<milestone>"
+      arguments = @(@{ name = "milestone"; description = "Milestone number"; required = $true })
+      runtimes = @("codex")
+      overrides = @{}
     }
     return
   }
@@ -504,7 +674,9 @@ function Write-AofProject {
       New-Item -ItemType Directory -Path (Split-Path $OverridePath -Parent) -Force | Out-Null
       Set-Content -Path $OverridePath -Value ($Input.override | ConvertTo-Json -Depth 10)
     }
-    $Resource = [ordered]@{ kind = $Input.kind; id = $Input.id; description = $Input.description; path = $Input.path; runtimes = if ($Input.runtimes) { $Input.runtimes } else { @("claude", "codex") } }
+    $SelectedRuntimes = if ($Input.runtimes) { @($Input.runtimes) } else { @("claude", "codex") }
+    $Resource = [ordered]@{ kind = $Input.kind; id = $Input.id; description = $Input.description; path = $Input.path }
+    $Resource.runtimes = [string[]]$SelectedRuntimes
     if ($Input.paths) { $Resource.paths = $Input.paths }
     if ($Input.overridePath) { $Resource.overrides = @{ codex = $Input.overridePath } }
     $Resources += $Resource
@@ -522,7 +694,9 @@ function Write-GlobalAofResource {
   New-Item -ItemType Directory -Path $ResourceDir -Force | Out-Null
   Set-Content -Path (Join-Path $ResourceDir $BodyFile) -Value ($ResourceInput.body + "`n") -NoNewline
 
-  $Resource = [ordered]@{ kind = $ResourceInput.kind; id = $ResourceInput.id; description = $ResourceInput.description; path = $ResourcePath; runtimes = @("claude", "codex") }
+  $SelectedRuntimes = if ($ResourceInput.runtimes) { @($ResourceInput.runtimes) } else { @("claude", "codex") }
+  $Resource = [ordered]@{ kind = $ResourceInput.kind; id = $ResourceInput.id; description = $ResourceInput.description; path = $ResourcePath }
+  $Resource.runtimes = [string[]]$SelectedRuntimes
   if ($ResourceInput.override) {
     $OverridePath = "assets/$Plural/$($ResourceInput.id)/overrides/codex.json"
     New-Item -ItemType Directory -Path (Join-Path $ResourceDir "overrides") -Force | Out-Null
@@ -703,7 +877,7 @@ function Legacy-Config {
   "name": "legacy",
   "resources": [
     { "kind": "skill", "id": "project-context", "description": "Context", "body": "Use project context." },
-    { "kind": "command", "id": "prime", "description": "Prime", "body": "Map repository." },
+    { "kind": "command", "id": "prime", "description": "Prime", "body": "Map repository.", "runtimes": ["claude"] },
     { "kind": "agent", "id": "code-reviewer", "description": "Review", "body": "Review diff." }
   ]
 }

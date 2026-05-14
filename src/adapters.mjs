@@ -2,6 +2,7 @@ import path from "node:path";
 import { writeText } from "./fs.mjs";
 import { hashContent } from "./lock.mjs";
 import { hasUnsupportedCommonHookFields } from "./adapter-warnings.mjs";
+import { createAssetReferenceIndex, expandAssetReferences } from "./asset-references.mjs";
 import { RUNTIMES, mergeRuntimeOverride } from "./model.mjs";
 import {
   claudeMcpJson,
@@ -31,6 +32,8 @@ export function renderConfigOutputs(config, options = {}) {
   const targetDir = path.resolve(options.targetDir ?? process.cwd());
   const requestedRuntimes = options.runtimes ?? supportedRuntimes();
   const outputs = [];
+  const workflowIndex = workflowIndexFor(config.workflows ?? []);
+  const assetReferenceIndex = createAssetReferenceIndex(config.resources ?? [], config.workflows ?? []);
 
   for (const runtime of requestedRuntimes) {
     const adapter = RUNTIMES[runtime];
@@ -39,12 +42,18 @@ export function renderConfigOutputs(config, options = {}) {
     }
 
     const root = options.global ? adapter.globalRoot : path.join(targetDir, adapter.localRoot);
+    for (const workflow of config.workflows ?? []) {
+      if (!workflow.runtimes.includes(runtime)) continue;
+      outputs.push(renderedWorkflow(targetDir, root, runtime, workflow, assetReferenceIndex));
+    }
     for (const resource of config.resources) {
       if (!resource.runtimes.includes(runtime)) continue;
-      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
+      assertRenderableResource(runtime, resource);
+      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime), workflowIndex, assetReferenceIndex));
     }
     for (const resource of packageResourcesForRuntime(config.packages ?? [], runtime)) {
-      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime)));
+      assertRenderableResource(runtime, resource);
+      outputs.push(...renderedResourceOutputs(targetDir, root, runtime, adapter, mergeRuntimeOverride(resource, runtime), workflowIndex, assetReferenceIndex));
     }
   }
 
@@ -150,15 +159,32 @@ function renderedRuntimeConfig(targetDir, relativePath, runtime, kind, id, conte
   };
 }
 
+function renderedWorkflow(targetDir, root, runtime, workflow, assetReferenceIndex = createAssetReferenceIndex()) {
+  const relativePath = workflowOutputPath(workflow.id);
+  const filePath = path.join(root, relativePath);
+  const content = renderWorkflow(runtime, workflow, assetReferenceIndex);
+  const projectRelative = path.relative(targetDir, filePath);
+  return {
+    absolutePath: filePath,
+    path: projectRelative.startsWith("..") ? filePath : projectRelative,
+    runtime,
+    resource: workflowMetadata(workflow),
+    source: workflow,
+    body: workflow.body ?? "",
+    content,
+    hash: hashContent(content)
+  };
+}
+
 function hasRuntimeSettings(settings, runtime) {
   const runtimeSettings = settings?.[runtime];
   return Boolean(runtimeSettings && typeof runtimeSettings === "object" && !Array.isArray(runtimeSettings) && Object.keys(runtimeSettings).length > 0);
 }
 
-function renderedResource(targetDir, root, runtime, adapter, resource) {
+function renderedResource(targetDir, root, runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   const relativePath = resourcePath(runtime, resource);
   const filePath = path.join(root, relativePath);
-  const content = renderResource(runtime, adapter, resource);
+  const content = renderResource(runtime, adapter, resource, workflowIndex, assetReferenceIndex);
   const projectRelative = path.relative(targetDir, filePath);
   return {
     absolutePath: filePath,
@@ -166,14 +192,14 @@ function renderedResource(targetDir, root, runtime, adapter, resource) {
     runtime,
     resource: resourceMetadata(resource),
     source: resource,
-    body: contentFor(resource),
+    body: contentFor(resource, null, workflowIndex),
     content,
     hash: hashContent(content)
   };
 }
 
-function renderedResourceOutputs(targetDir, root, runtime, adapter, resource) {
-  const main = renderedResource(targetDir, root, runtime, adapter, resource);
+function renderedResourceOutputs(targetDir, root, runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
+  const main = renderedResource(targetDir, root, runtime, adapter, resource, workflowIndex, assetReferenceIndex);
   if (!supportsAssociatedFiles(resource.kind) || !Array.isArray(resource.associatedFiles) || resource.associatedFiles.length === 0) {
     return [main];
   }
@@ -190,8 +216,17 @@ function supportsAssociatedFiles(kind) {
 }
 
 function associatedFileOutputDir(mainPath, resource) {
-  if (resource.kind === "skill") return path.dirname(mainPath);
-  return path.join(path.dirname(path.dirname(mainPath)), "scripts", resource.id);
+  return path.dirname(mainPath);
+}
+
+function assertRenderableResource(runtime, resource) {
+  if (runtime === "codex" && resource.kind === "command") {
+    throw new Error("Command assets are not supported for Codex. Target Claude commands or create a Codex skill explicitly.");
+  }
+}
+
+function workflowIndexFor(workflows) {
+  return new Map((workflows ?? []).map((workflow) => [workflow.id, workflow]));
 }
 
 function renderedAssociatedFile(targetDir, assetDir, runtime, resource, file) {
@@ -221,14 +256,11 @@ function renderedAssociatedFile(targetDir, assetDir, runtime, resource, file) {
 
 function associatedFileOutputPath(resource, filePath) {
   const normalized = String(filePath).replaceAll("\\", "/");
-  if (resource.kind === "command" && normalized.startsWith("files/")) {
-    return normalized.slice("files/".length);
-  }
-  return normalized;
+  return normalized.startsWith("files/") ? normalized.slice("files/".length) : normalized;
 }
 
 function expandFilePlaceholders(content, resource, runtime) {
-  if (!supportsAssociatedFiles(resource.kind) || typeof content !== "string" || !content.includes("{{files.")) return content;
+  if (!supportsAssociatedFiles(resource.kind) || typeof content !== "string" || !/\{\{\s*files\./.test(content)) return content;
   const replacements = filePlaceholderReplacements(resource, runtime);
   return content.replace(/\{\{\s*files\.([^}]+?)\s*\}\}/g, (match, rawPath) => {
     const key = placeholderFilePath(rawPath);
@@ -248,9 +280,10 @@ function filePlaceholderReplacements(resource, runtime) {
   for (const file of resource.associatedFiles) {
     const sourcePath = String(file.path).replaceAll("\\", "/");
     const placeholderPath = sourcePath.startsWith("files/") ? sourcePath.slice("files/".length) : sourcePath;
+    const outputPath = associatedFileOutputPath(resource, sourcePath).replaceAll("\\", "/");
     const runtimePath = resource.kind === "command"
-      ? `${root}/scripts/${resource.id}/${associatedFileOutputPath(resource, sourcePath).replaceAll("\\", "/")}`
-      : `${root}/skills/${resource.id}/${sourcePath}`;
+      ? `${root}/commands/${outputPath}`
+      : `${root}/skills/${resource.id}/${outputPath}`;
     replacements.set(placeholderPath, runtimePath);
   }
   return replacements;
@@ -302,6 +335,30 @@ function resourceMetadata(resource) {
   return metadata;
 }
 
+function workflowMetadata(workflow) {
+  const metadata = { id: workflow.id, kind: "workflow" };
+  if (workflow._aofSource?.scope) {
+    metadata.scope = workflow._aofSource.scope;
+    if (workflow._aofSource.scope === "global") {
+      metadata.global = {
+        id: workflow._aofSource.id ?? workflow.id,
+        kind: "workflow",
+        configPath: workflow._aofSource.configPath
+      };
+    }
+  }
+  return metadata;
+}
+
+function workflowOutputPath(id) {
+  return path.join("aof", "workflows", `${id}.md`);
+}
+
+function workflowRuntimePath(runtime, id) {
+  const root = RUNTIMES[runtime]?.localRoot ?? `.${runtime}`;
+  return path.join(root, workflowOutputPath(id)).replaceAll("\\", "/");
+}
+
 function resourcePath(runtime, resource) {
   if (resource.kind === "skill") return path.join("skills", resource.id, "SKILL.md");
   if (resource.kind === "command") return path.join("commands", `${resource.id}.md`);
@@ -311,7 +368,7 @@ function resourcePath(runtime, resource) {
   throw new Error(`Cannot render resource kind "${resource.kind}".`);
 }
 
-function renderResource(runtime, adapter, resource) {
+function renderResource(runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   if (resource.kind === "skill") {
     return [
       "---",
@@ -321,7 +378,7 @@ function renderResource(runtime, adapter, resource) {
       `aof-runtime: ${runtime}`,
       "---",
       "",
-      contentFor(resource, runtime).trim(),
+      contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
       ""
     ].join("\n");
   }
@@ -335,13 +392,13 @@ function renderResource(runtime, adapter, resource) {
       `aof-runtime: ${runtime}`,
       "---",
       "",
-      contentFor(resource, runtime).trim(),
+      contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
       ""
     ].join("\n");
   }
 
   if (resource.kind === "rule") {
-    return renderRule(runtime, resource);
+    return renderRule(runtime, resource, workflowIndex, assetReferenceIndex);
   }
 
   return [
@@ -354,12 +411,22 @@ function renderResource(runtime, adapter, resource) {
     `aof-runtime: ${runtime}`,
     "---",
     "",
-    contentFor(resource, runtime).trim(),
+    contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
     ""
   ].filter(Boolean).join("\n");
 }
 
-function renderRule(runtime, resource) {
+function renderWorkflow(runtime, workflow, assetReferenceIndex = createAssetReferenceIndex()) {
+  const body = expandAssetReferences(workflow.body?.trim() ?? "", runtime, assetReferenceIndex);
+  return [
+    "<!-- Generated by AOF. Do not edit directly; update .aof/ instead. -->",
+    "",
+    body,
+    ""
+  ].join("\n");
+}
+
+function renderRule(runtime, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   if (runtime === "codex") {
     return [
       "# AOF Generated Guidance",
@@ -371,7 +438,7 @@ function renderRule(runtime, resource) {
       resource.description ? `> ${resource.description}` : null,
       Array.isArray(resource.paths) && resource.paths.length > 0 ? `Applies to: ${resource.paths.join(", ")}` : null,
       "",
-      contentFor(resource, runtime).trim(),
+      contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
       ""
     ].filter((line) => line !== null).join("\n");
   }
@@ -382,13 +449,64 @@ function renderRule(runtime, resource) {
   if (Array.isArray(resource.paths) && resource.paths.length > 0) {
     lines.push(`paths: ${resource.paths.join(", ")}`);
   }
-  lines.push(`aof-runtime: ${runtime}`, "---", "", contentFor(resource, runtime).trim(), "");
+  lines.push(`aof-runtime: ${runtime}`, "---", "", contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(), "");
   return lines.join("\n");
 }
 
-function contentFor(resource, runtime = null) {
+function contentFor(resource, runtime = null, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   const content = resource.body ?? resource.prompt ?? resource.instructions ?? "";
-  return runtime ? expandFilePlaceholders(content, resource, runtime) : content;
+  if (runtime && resource.workflow && !hasExplicitContent(resource)) {
+    const workflow = workflowIndex.get(resource.workflow);
+    if (!workflow) {
+      throw new Error(`Resource ${resource.kind}:${resource.id} references missing workflow "${resource.workflow}".`);
+    }
+    return defaultWorkflowWrapperBody(resource, runtime, workflow);
+  }
+  if (!runtime) return content;
+  return expandAssetReferences(expandFilePlaceholders(content, resource, runtime), runtime, assetReferenceIndex);
+}
+
+function hasExplicitContent(resource) {
+  return Boolean(resource._aofHasExplicitBody || resource.body || resource.prompt || resource.instructions);
+}
+
+function defaultWorkflowWrapperBody(resource, runtime, workflow) {
+  const workflowPath = workflowRuntimePath(runtime, workflow.id);
+  const lines = [
+    `Follow the shared AOF workflow at \`${workflowPath}\`.`,
+    "",
+    "Use that workflow file as the source of truth for this asset's procedure."
+  ];
+  const argumentHint = resource.argumentHint ?? workflow.argumentHint;
+  const args = mergedWorkflowArguments(workflow, resource);
+  if (argumentHint || args.length > 0) {
+    lines.push("", "## Arguments");
+    if (argumentHint) {
+      lines.push("", `Argument hint: \`${argumentHint}\``);
+    }
+    if (args.length > 0) {
+      lines.push("");
+      for (const argument of args) {
+        const required = argument.required ? " (required)" : "";
+        const description = argument.description ? `: ${argument.description}` : "";
+        const hint = argument.hint ? ` Hint: ${argument.hint}` : "";
+        lines.push(`- \`${argument.name}\`${required}${description}${hint}`);
+      }
+    }
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function mergedWorkflowArguments(workflow, resource) {
+  const overrides = resource.argumentOverrides ?? {};
+  const resourceArguments = Array.isArray(resource.arguments) && resource.arguments.length > 0
+    ? resource.arguments
+    : workflow.arguments;
+  return (resourceArguments ?? []).map((argument) => ({
+    ...argument,
+    ...(overrides[argument.name] ?? {})
+  }));
 }
 
 function codexRulePath(resource) {

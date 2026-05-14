@@ -6,7 +6,7 @@ Feature: AOF DSL rendering
     When I run `assets apply --codex`
     Then the command should succeed
     And file `.codex/skills/project-context/SKILL.md` should exist
-    And file `.codex/commands/prime.md` should exist
+    And file `.codex/commands/prime.md` should not exist
     And file `.codex/agents/code-reviewer.md` should exist
     And file `.claude/commands/prime.md` should not exist
 
@@ -54,7 +54,7 @@ Feature: AOF DSL rendering
     Given a project with .aof invalid identity override config
     When I run `assets apply --codex`
     Then the command should fail
-    And stderr should contain `cannot change identity field`
+    And stdout should contain `Runtime override cannot change resource id`
 
   Scenario: Render natural-language rule guidance per runtime
     Given a project with .aof rule config

@@ -41,6 +41,12 @@ export const RESOURCE_KINDS = {
   }
 };
 
+export const WORKFLOW_KIND = {
+  id: "workflow",
+  plural: "workflows",
+  defaultBodyFile: "WORKFLOW.md"
+};
+
 export const CAPABILITY_STATUS = {
   native: "native",
   mapped: "mapped",
@@ -56,7 +62,7 @@ export const CAPABILITIES = {
   },
   command: {
     claude: CAPABILITY_STATUS.native,
-    codex: CAPABILITY_STATUS.native
+    codex: CAPABILITY_STATUS.unsupportedFail
   },
   agent: {
     claude: CAPABILITY_STATUS.native,
@@ -119,6 +125,10 @@ export function supportedResourceKinds() {
   return Object.keys(RESOURCE_KINDS);
 }
 
+export function supportedGlobalRefKinds() {
+  return [...supportedResourceKinds().filter((kind) => kind !== "command"), WORKFLOW_KIND.id];
+}
+
 export function supportedMcpTransports() {
   return Object.values(MCP_TRANSPORTS);
 }
@@ -145,6 +155,10 @@ export function defaultBodyFile(kind) {
     throw new Error(`Invalid resource kind "${kind}". Expected ${supportedResourceKinds().join(", ")}.`);
   }
   return definition.defaultBodyFile;
+}
+
+export function defaultWorkflowBodyFile() {
+  return WORKFLOW_KIND.defaultBodyFile;
 }
 
 export function mergeRuntimeOverride(resource, runtime) {

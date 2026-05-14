@@ -1,15 +1,15 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.4 Namespaced CLI Contract
-**Current phase:** None
-**Status:** v1.4 complete; ready for next milestone
+**Current milestone:** v1.5 Runtime Semantics And Workflow Assets
+**Current phase:** v1.5 complete
+**Status:** v1.5 complete and archived
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-10 after v1.4 start)
+See: `.planning/PROJECT.md` (updated 2026-05-11 after v1.5 start)
 
-**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
+**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
 ## Roadmap Reference
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.4 is complete. The namespaced CLI contract shipped asset, package, and project namespaces; removed legacy aliases; and hardened the final surface through live repository UAT.
+v1.5 is active. The milestone aligns real Claude/Codex runtime semantics, rejects Codex command assets, introduces optional workflow-backed assets, adds validated skill/workflow references, and separates simple vs workflow-backed UI authoring.
 
 ## Current Position
 
-Phase: none
-Plan: none
-Status: Ready for next milestone
-Last activity: 2026-05-11 - v1.4 completed and verified
+Phase: v1.5 milestone
+Plan: complete
+Status: All v1.5 phases complete, verified, audited, and archived
+Last activity: 2026-05-14 - Phase 27 live UAT and verification passed
 
 ## Resume
 
-**Stopped at:** v1.4 milestone complete
-**Resume file:** `.planning/milestones/v1.4-MILESTONE-AUDIT.md`
+**Stopped at:** v1.5 milestone complete
+**Resume file:** `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`
 
 ## Memory
 
@@ -139,3 +139,14 @@ Last activity: 2026-05-11 - v1.4 completed and verified
 - Phase 22 discussion completed with live verification decisions: use disposable new/existing repo shapes, keep global/data state temporary, avoid real networked package installs, verify UI launch/API, fix concrete findings with BDD, and close out v1.4. UAT findings captured in `.planning/phases/22-live-repository-verification/22-UAT-LOG.md`: UAT-01 interactive `aof assets add skill` must not prompt users to type markdown/body content in the console; UAT-02 setup UI must not show runtime overrides as peer runtime checkboxes with noisy `native` badges.
 - Phase 22 execution completed with live UAT fixes for body prompts, setup UI runtime/card clarity, friendly apply output, generated runtime `.gitignore`, skill/command additional files, runtime-specific file placeholders, flat associated-file validation, and command support-file rendering under runtime script folders.
 - v1.4 completed on 2026-05-11 with `npm run test:unit`, `npm run test:integration`, `npm run test:integration:ps`, and `npm run check` passing.
+- Phase 23 discussion locked decisions: Codex command assets are validation errors, AOF must not map commands into Codex skills, simple assets remain workflow-free, simple assets cannot support arguments, argument-looking simple content gets validation guidance, stale `.codex/commands/*` cleanup occurs only after source config is valid, and broader setup UI workflow authoring remains Phase 26.
+- Phase 23 planning produced 2 plans: 23-01 shared capability and validation contract, and 23-02 apply/render hard gate and BDD coverage. Research is captured in `.planning/phases/23-runtime-capability-contract/23-RESEARCH.md`.
+- Phase 23 execution completed on 2026-05-12 with Codex command rejection, Claude-only command rendering, simple argument marker validation, apply preflight hard gates, render defensive guards, README updates, Node BDD coverage, and PowerShell BDD parity. Verification is captured in `.planning/phases/23-runtime-capability-contract/23-VERIFICATION.md`.
+- Phase 24 discussion completed on 2026-05-12. Locked decisions: top-level `workflows` section, workflow source at `.aof/assets/workflows/<id>/WORKFLOW.md`, generated runtime workflows under `.claude/aof/workflows/` and `.codex/aof/workflows/`, wrappers bind via `workflow: "<id>"`, hybrid generated/explicit wrapper bodies, workflow-owned arguments with wrapper presentation overrides, strict workflow/runtime/argument validation, and project plus global workflow support. Context is captured in `.planning/phases/24-workflow-asset-model/24-CONTEXT.md`.
+- Phase 24 planning completed on 2026-05-12 with 3 waves: workflow model/validation foundation, workflow rendering/wrapper defaults, and API/BDD/docs hardening. Research is captured in `.planning/phases/24-workflow-asset-model/24-RESEARCH.md`.
+- Phase 24 execution completed on 2026-05-14 with top-level workflow config/schema/DSL support, local and global workflow validation, runtime workflow rendering, generated workflow-backed Claude command and Codex skill wrappers, workflow argument metadata rendering, setup API preservation, README updates, Node BDD coverage, and PowerShell BDD parity. Verification is captured in `.planning/phases/24-workflow-asset-model/24-VERIFICATION.md`.
+- Phase 25 discussion completed on 2026-05-14. Locked decisions: strict `{{skills.<id>}}` and `{{workflows.<id>}}` placeholder syntax, generated runtime file path expansion, no `{{commands.*}}` namespace, validation per effective runtime before apply writes, project plus referenced global skills/workflows in one reference index, support in resource bodies/overrides and workflow bodies, and project-doc placeholders deferred unless explicitly tested. Context is captured in `.planning/phases/25-asset-reference-placeholders/25-CONTEXT.md`.
+- Phase 25 planning and execution completed on 2026-05-14 with shared asset reference parsing/indexing, runtime-aware render expansion for resources/overrides/workflows, validation for missing/invalid/runtime-mismatched references, referenced global participation, README updates, Node BDD coverage, and PowerShell BDD parity. Verification is captured in `.planning/phases/25-asset-reference-placeholders/25-VERIFICATION.md`.
+- Phase 26 discussion, planning, and execution completed on 2026-05-14 with setup UI Simple/Workflow-backed mode controls, workflow-backed resource save semantics, wrapper argument editing, disabled unsupported runtime toggles, skill/workflow reference insertion, README updates, setup UI BDD coverage, UI build verification, and PowerShell BDD parity. Verification is captured in `.planning/phases/26-workflow-backed-setup-ui/26-VERIFICATION.md`.
+- Phase 27 verification completed on 2026-05-14 with coverage audit, live disposable GSD-style UAT, `npm run test:unit`, `npm test`, `npm run ui:build`, `npm run test:integration:ps`, and `npm run check` passing. Verification is captured in `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`.
+- Milestone v1.5 was audited and archived on 2026-05-14 in `.planning/milestones/v1.5-ROADMAP.md`, `.planning/milestones/v1.5-REQUIREMENTS.md`, and `.planning/milestones/v1.5-MILESTONE-AUDIT.md`.

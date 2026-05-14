@@ -103,8 +103,8 @@ skill directories can be listed explicitly with `files`:
   "id": "research-helper",
   "path": "assets/skills/research-helper/SKILL.md",
   "files": [
-    "scripts/search.py",
-    "templates/query.md"
+    "search.py",
+    "query.md"
   ],
   "runtimes": ["codex"]
 }
@@ -112,10 +112,9 @@ skill directories can be listed explicitly with `files`:
 
 Associated file paths are relative to the asset directory containing `SKILL.md`
 and cannot escape that directory. For a referenced global skill, the example
-above renders to `.codex/skills/research-helper/scripts/search.py` and
-`.codex/skills/research-helper/templates/query.md` alongside the generated
-`SKILL.md`. AOF supports associated files for skills; other resource kinds
-remain single-file outputs.
+above renders to `.codex/skills/research-helper/search.py` and
+`.codex/skills/research-helper/query.md` alongside the generated `SKILL.md`.
+AOF supports associated files for skills and Claude command assets.
 
 Render generated outputs and managed package intent:
 
@@ -226,10 +225,14 @@ are relative to the skill asset directory and follow the same safety rules as
 the `files` manifest.
 
 Project scope also edits file-backed skills, commands, agents, and rules;
-runtime targets; runtime-specific overrides; and compact JSON editors for MCP
-servers, hooks, project docs, and runtime settings. It shows runtime capability
-differences and adapter warnings before apply, including mapped behavior such
-as Codex rule guidance rendering through `AGENTS.md`.
+Simple vs Workflow-backed mode, runtime targets, runtime-specific overrides,
+and compact JSON editors for workflows, MCP servers, hooks, project docs, and
+runtime settings. Simple assets hide argument fields and reject argument-like
+content. Workflow-backed assets can select a workflow and configure wrapper
+argument metadata. The editor can insert known `{{skills.*}}` and
+`{{workflows.*}}` references into asset bodies. It shows runtime capability
+differences and adapter warnings before apply, including command assets being
+Claude-only and Codex rule guidance rendering through `AGENTS.md`.
 
 The UI writes source-of-truth files under `.aof/` only. It does not run
 `aof init`, `aof assets apply`, dry-run, package installers, or shell commands.
@@ -266,9 +269,13 @@ so stale root config is visible.
 Project and global resources currently support four portable resource kinds:
 
 - `skill`: rendered to `<runtime>/skills/<id>/SKILL.md`
-- `command`: rendered to `<runtime>/commands/<id>.md`
+- `command`: Claude-only, rendered to `.claude/commands/<id>.md`
 - `agent`: rendered to `<runtime>/agents/<id>.md`
 - `rule`: natural-language assistant guidance
+
+Codex does not have a command primitive. AOF rejects command assets that target
+Codex instead of mapping them into Codex skills. If you want Codex behavior,
+author a `skill` explicitly.
 
 Generated source assets use kind-specific body files:
 
@@ -285,11 +292,59 @@ Resources can target all runtimes or a subset:
 {
   "kind": "command",
   "id": "repo-prime",
-  "runtimes": ["claude", "codex"],
+  "runtimes": ["claude"],
   "description": "Prime the assistant with repository context.",
   "prompt": "Inspect the repository before making changes."
 }
 ```
+
+Simple assets render their body directly and do not support arguments. Content
+such as `$ARGUMENTS`, `{{GSD_ARGS}}`, `argument-hint`, or `{{args.phase}}`
+belongs in workflow-backed assets.
+
+Workflow-backed assets split shared procedure from runtime-specific invocation
+wrappers. Define shared process instructions in top-level `workflows[]`, usually
+from `.aof/assets/workflows/<id>/WORKFLOW.md`:
+
+```json
+{
+  "workflows": [
+    {
+      "id": "audit",
+      "path": "assets/workflows/audit/WORKFLOW.md",
+      "argumentHint": "<milestone>",
+      "arguments": [
+        { "name": "milestone", "description": "Milestone number", "required": true }
+      ]
+    }
+  ],
+  "resources": [
+    { "kind": "command", "id": "audit", "workflow": "audit", "runtimes": ["claude"] },
+    { "kind": "skill", "id": "audit", "workflow": "audit", "runtimes": ["codex"] }
+  ]
+}
+```
+
+Applying that config renders the workflow to `.claude/aof/workflows/audit.md`
+and `.codex/aof/workflows/audit.md`. The Claude command and Codex skill wrappers
+reference the runtime-specific workflow path. If a wrapper has its own
+`body`/`prompt`/`instructions`, that explicit wrapper body wins; otherwise AOF
+generates a small default wrapper body with the workflow path and argument
+metadata. Argument metadata is rendering guidance only.
+
+Resource and workflow bodies can reference generated runtime paths with strict
+asset reference placeholders:
+
+```md
+Use {{skills.ci}} and follow {{workflows.audit}}.
+```
+
+`{{skills.<id>}}` expands to `.claude/skills/<id>/SKILL.md` or
+`.codex/skills/<id>/SKILL.md`. `{{workflows.<id>}}` expands to
+`.claude/aof/workflows/<id>.md` or `.codex/aof/workflows/<id>.md`.
+References are validated before apply writes. AOF rejects missing references,
+references to assets that do not target the runtime being rendered, and
+unsupported namespaces such as `{{commands.ci}}`.
 
 Inline content can be moved into separate files by replacing `body`, `prompt`, or `instructions` with `path`. New `.aof/` workspaces prefer file-backed assets:
 

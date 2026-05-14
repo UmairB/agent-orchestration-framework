@@ -17,7 +17,7 @@ try {
 
   const help = run(["--help"]);
   assert.equal(help.status, 0, format(help));
-  assert.match(help.stdout, /aof - Assistant Ops Framework/);
+  assert.match(help.stdout, /aof - Agent Orchestration Framework/);
 
   const init = run(["init", "--codex"]);
   assert.equal(init.status, 0, format(init));

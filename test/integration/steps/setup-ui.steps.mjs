@@ -19,7 +19,7 @@ export async function runStep(context, step) {
       kind: "command",
       description: "Prime repository context",
       body: "Inspect the repository.",
-      runtimes: ["codex"],
+      runtimes: ["claude"],
       overrides: {}
     });
     return;
@@ -39,6 +39,26 @@ export async function runStep(context, step) {
       settings: {
         codex: { approval_policy: "on-request" }
       }
+    });
+    return;
+  }
+
+  if (step === "I save workflow-backed setup UI resource") {
+    await requestSetupUi(context, "PUT", "/api/config/sections", {
+      workflows: [
+        { id: "audit", body: "Audit workflow", runtimes: ["codex"], arguments: [{ name: "milestone" }] }
+      ]
+    });
+    await requestSetupUi(context, "PUT", "/api/config/resources/skill/audit", {
+      id: "audit",
+      kind: "skill",
+      description: "Audit wrapper",
+      body: "",
+      workflow: "audit",
+      argumentHint: "<milestone>",
+      arguments: [{ name: "milestone", description: "Milestone number", required: true }],
+      runtimes: ["codex"],
+      overrides: {}
     });
     return;
   }

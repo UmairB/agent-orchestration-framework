@@ -6,7 +6,7 @@ Feature: AOF CLI
     Given an empty project
     When I run `--help`
     Then the command should succeed
-    And stdout should contain `aof - Assistant Ops Framework`
+    And stdout should contain `aof - Agent Orchestration Framework`
     And stdout should contain `aof init [dir] [--items id,id] [--defaults]`
     And stdout should contain `aof add <kind> <id>`
     And stdout should contain `aof migrate`

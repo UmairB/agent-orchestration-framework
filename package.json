@@ -1,7 +1,7 @@
 {
   "name": "aof",
   "version": "0.1.0",
-  "description": "Portable assistant ops framework for installing skills, commands, agents, and framework packs across coding assistants.",
+  "description": "Portable agent orchestration framework for installing skills, commands, agents, and framework packs across coding assistants.",
   "type": "module",
   "bin": {
     "aof": "./bin/aof.mjs"

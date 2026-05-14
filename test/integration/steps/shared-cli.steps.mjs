@@ -366,6 +366,221 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  if (step === "a project with referenced global skill helper file placeholders") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "research-helper",
+      description: "Research helper",
+      body: "Base helper {{files.search.py}}",
+      override: { body: "Codex helper {{ files.search.py }}" },
+      files: [
+        { path: "search.py", body: "print('search')\n" }
+      ]
+    });
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "research-helper" }
+      ]
+    });
+    return;
+  }
+
+  if (step === "a project with invalid global skill helper file placeholders") {
+    await runSharedCliStep(context, "an empty project");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "research-helper",
+      description: "Research helper",
+      body: "Missing helper {{files.missing.py}}",
+      files: [
+        { path: "search.py", body: "print('search')\n" }
+      ]
+    });
+    await writeAofProject(context, [], {
+      globalRefs: [
+        { kind: "skill", id: "research-helper" }
+      ]
+    });
+    return;
+  }
+
+  if (step === "a project with command helper file placeholders") {
+    await runSharedCliStep(context, "an empty project");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    const commandDir = path.join(workspaceDir, "assets", "commands", "prime");
+    await mkdir(path.join(commandDir, "files"), { recursive: true });
+    await writeFile(path.join(commandDir, "COMMAND.md"), "Run {{files.helper.py}}\n", "utf8");
+    await writeFile(path.join(commandDir, "files", "helper.py"), "print('prime')\n", "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "command-helper",
+      resources: [
+        {
+          kind: "command",
+          id: "prime",
+          description: "Prime command",
+          path: "assets/commands/prime/COMMAND.md",
+          files: ["helper.py"],
+          runtimes: ["claude"]
+        }
+      ],
+      globalRefs: [],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
+  if (step === "a project with a codex command asset") {
+    await runSharedCliStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "command",
+      id: "ci",
+      description: "CI command",
+      path: "assets/commands/ci/COMMAND.md",
+      bodyPath: "assets/commands/ci/COMMAND.md",
+      body: "Run CI",
+      runtimes: ["codex"]
+    }]);
+    return;
+  }
+
+  if (step === "a project with a claude command asset") {
+    await runSharedCliStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "command",
+      id: "ci",
+      description: "CI command",
+      path: "assets/commands/ci/COMMAND.md",
+      bodyPath: "assets/commands/ci/COMMAND.md",
+      body: "Run CI",
+      runtimes: ["claude"]
+    }]);
+    return;
+  }
+
+  if (step === "a project with a simple argument asset") {
+    await runSharedCliStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "skill",
+      id: "arg-skill",
+      description: "Argument skill",
+      path: "assets/skills/arg-skill/SKILL.md",
+      bodyPath: "assets/skills/arg-skill/SKILL.md",
+      body: "Use $ARGUMENTS to decide what to do.",
+      runtimes: ["codex"]
+    }]);
+    return;
+  }
+
+  if (step === "a project with workflow-backed assets") {
+    await runSharedCliStep(context, "an empty project");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    const workflowDir = path.join(workspaceDir, "assets", "workflows", "audit");
+    await mkdir(workflowDir, { recursive: true });
+    await writeFile(path.join(workflowDir, "WORKFLOW.md"), "Audit the milestone using the shared procedure.\n", "utf8");
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "workflow-backed",
+      workflows: [
+        {
+          id: "audit",
+          path: "assets/workflows/audit/WORKFLOW.md",
+          argumentHint: "<milestone>",
+          arguments: [{ name: "milestone", description: "Milestone number", required: true }]
+        }
+      ],
+      resources: [
+        { kind: "command", id: "audit", description: "Audit milestone", workflow: "audit", runtimes: ["claude"] },
+        { kind: "skill", id: "audit", description: "Audit milestone", workflow: "audit", runtimes: ["codex"] }
+      ],
+      globalRefs: [],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
+  if (step === "a project with asset reference placeholders") {
+    await runSharedCliStep(context, "an empty project");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    await mkdir(path.join(workspaceDir, "assets", "skills", "ci"), { recursive: true });
+    await mkdir(path.join(workspaceDir, "assets", "skills", "review"), { recursive: true });
+    await mkdir(path.join(workspaceDir, "assets", "commands", "review"), { recursive: true });
+    await mkdir(path.join(workspaceDir, "assets", "workflows", "audit"), { recursive: true });
+    await writeFile(path.join(workspaceDir, "assets", "skills", "ci", "SKILL.md"), "Run CI.\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "skills", "review", "SKILL.md"), "Use {{skills.ci}} and {{workflows.audit}}.\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "commands", "review", "COMMAND.md"), "Review with {{skills.ci}} and {{workflows.audit}}.\n", "utf8");
+    await writeFile(path.join(workspaceDir, "assets", "workflows", "audit", "WORKFLOW.md"), "Audit by calling {{skills.ci}}.\n", "utf8");
+    await writeGlobalAofResource(context, {
+      kind: "skill",
+      id: "shared-ref",
+      description: "Shared reference",
+      body: "Shared uses {{skills.ci}} and {{workflows.audit}}.",
+      runtimes: ["codex"]
+    });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "asset-references",
+      workflows: [
+        { id: "audit", path: "assets/workflows/audit/WORKFLOW.md", runtimes: ["claude", "codex"] }
+      ],
+      resources: [
+        { kind: "skill", id: "ci", path: "assets/skills/ci/SKILL.md", runtimes: ["claude", "codex"] },
+        { kind: "skill", id: "review", path: "assets/skills/review/SKILL.md", runtimes: ["codex"] },
+        { kind: "command", id: "review", path: "assets/commands/review/COMMAND.md", runtimes: ["claude"] }
+      ],
+      globalRefs: [{ kind: "skill", id: "shared-ref" }],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
+  if (step === "a project with invalid workflow-backed assets") {
+    await runSharedCliStep(context, "an empty project");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "invalid-workflow-backed",
+      workflows: [
+        {
+          id: "audit",
+          body: "Audit the milestone.",
+          arguments: [{ name: "milestone" }]
+        }
+      ],
+      resources: [
+        { kind: "skill", id: "missing-workflow", workflow: "missing", runtimes: ["codex"] },
+        { kind: "skill", id: "bad-argument", workflow: "audit", runtimes: ["codex"], argumentOverrides: { phase: { description: "Phase" } } }
+      ],
+      globalRefs: [],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
+  if (step === "a project with invalid asset reference placeholders") {
+    await runSharedCliStep(context, "an empty project");
+    const workspaceDir = path.join(context.projectDir, ".aof");
+    await mkdir(workspaceDir, { recursive: true });
+    await writeFile(path.join(workspaceDir, "aof.config.json"), `${JSON.stringify({
+      $schema: "../schemas/aof.schema.json",
+      name: "invalid-asset-references",
+      resources: [
+        { kind: "skill", id: "claude-only", body: "Claude only.", runtimes: ["claude"] },
+        {
+          kind: "skill",
+          id: "review",
+          body: "Use {{commands.ci}}, {{skills.missing}}, and {{skills.claude-only}}.",
+          runtimes: ["codex"]
+        }
+      ],
+      globalRefs: [],
+      packages: []
+    }, null, 2)}\n`, "utf8");
+    return;
+  }
+
   if (step === "a project with unsafe global skill helper files") {
     await runSharedCliStep(context, "an empty project");
     await writeGlobalAofResource(context, {
@@ -627,7 +842,7 @@ function legacyConfig() {
     name: "legacy",
     resources: [
       { kind: "skill", id: "project-context", description: "Context", body: "Use project context." },
-      { kind: "command", id: "prime", description: "Prime", body: "Map repository." },
+      { kind: "command", id: "prime", description: "Prime", body: "Map repository.", runtimes: ["claude"] },
       { kind: "agent", id: "code-reviewer", description: "Review", body: "Review diff." }
     ]
   }, null, 2)}\n`;
@@ -657,6 +872,7 @@ async function writeAofProject(context, resourceInputs, options = {}) {
       runtimes: input.runtimes ?? ["claude", "codex"]
     };
     if (input.paths) resource.paths = input.paths;
+    if (input.overridePath) resource.overrides = { codex: input.overridePath };
     resources.push(resource);
   }
 

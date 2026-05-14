@@ -5,6 +5,7 @@ Feature: AOF setup UI API
     Given a running setup UI server
     When I request setup UI capabilities
     Then HTTP response status should be 200
+    And HTTP response field `capabilities.command.codex` should equal `unsupported-fail`
     And HTTP response field `capabilities.rule.codex` should equal `mapped`
     When I save command resource `prime` through the setup UI API
     Then HTTP response status should be 200
@@ -19,6 +20,15 @@ Feature: AOF setup UI API
     And HTTP response field `ok` should equal `true`
     And file `.aof/aof.config.json` should contain `"mcpServers"`
     And file `.aof/aof.config.json` should contain `"approval_policy": "on-request"`
+
+  Scenario: Save workflow-backed resource through the setup UI API
+    Given a running setup UI server
+    When I save workflow-backed setup UI resource
+    Then HTTP response status should be 200
+    And HTTP response field `ok` should equal `true`
+    And file `.aof/aof.config.json` should contain `"workflow": "audit"`
+    And file `.aof/aof.config.json` should contain `"argumentHint": "<milestone>"`
+    And file `.aof/aof.config.json` should not contain `"path": "assets/skills/audit/SKILL.md"`
 
   Scenario: Reject invalid expanded setup UI sections
     Given a running setup UI server

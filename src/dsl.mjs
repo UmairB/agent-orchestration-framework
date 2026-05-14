@@ -6,6 +6,7 @@ import { globalWorkspacePaths } from "./workspace.mjs";
 import {
   supportedHookEvents,
   supportedHookTypes,
+  supportedGlobalRefKinds,
   supportedMcpTransports,
   supportedProjectDocTargets,
   supportedResourceKinds,
@@ -14,7 +15,7 @@ import {
 } from "./model.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
-const VALID_GLOBAL_REF_KINDS = new Set(["skill", "agent", "rule"]);
+const VALID_GLOBAL_REF_KINDS = new Set(supportedGlobalRefKinds());
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_MCP_TRANSPORTS = new Set(supportedMcpTransports());
 const VALID_HOOK_EVENTS = new Set(supportedHookEvents());
@@ -37,6 +38,7 @@ export async function loadProjectConfig(configPath, options = {}) {
     return {
       ...resolved,
       resources: resolved.resources.map((resource) => withSource(resource, { scope: "local", configPath })),
+      workflows: resolved.workflows.map((workflow) => withSource(workflow, { scope: "local", configPath })),
       globalRefs
     };
   }
@@ -45,19 +47,34 @@ export async function loadProjectConfig(configPath, options = {}) {
   const globalConfig = await readJson(paths.configPath);
   const globalBaseDir = path.dirname(paths.configPath);
   const globalResources = [];
+  const globalWorkflows = [];
 
   for (const ref of globalRefs) {
-    const resource = (globalConfig.resources ?? []).find((item) => item.kind === ref.kind && typeof item.id === "string" && normalizeId(item.id) === ref.id);
-    if (!resource) {
-      throw new Error(`Global resource not found: ${ref.kind}:${ref.id}`);
+    if (ref.kind === "workflow") {
+      const workflow = (globalConfig.workflows ?? []).find((item) => typeof item.id === "string" && normalizeId(item.id) === ref.id);
+      if (!workflow) {
+        throw new Error(`Global workflow not found: ${ref.id}`);
+      }
+      globalWorkflows.push(withSource(await resolveWorkflow(workflow, globalBaseDir), {
+        scope: "global",
+        kind: ref.kind,
+        id: ref.id,
+        configPath: paths.configPath,
+        workspaceDir: paths.workspaceDir
+      }));
+    } else {
+      const resource = (globalConfig.resources ?? []).find((item) => item.kind === ref.kind && typeof item.id === "string" && normalizeId(item.id) === ref.id);
+      if (!resource) {
+        throw new Error(`Global resource not found: ${ref.kind}:${ref.id}`);
+      }
+      globalResources.push(withSource(await resolveResource(resource, globalBaseDir), {
+        scope: "global",
+        kind: ref.kind,
+        id: ref.id,
+        configPath: paths.configPath,
+        workspaceDir: paths.workspaceDir
+      }));
     }
-    globalResources.push(withSource(await resolveResource(resource, globalBaseDir), {
-      scope: "global",
-      kind: ref.kind,
-      id: ref.id,
-      configPath: paths.configPath,
-      workspaceDir: paths.workspaceDir
-    }));
   }
 
   return {
@@ -65,6 +82,10 @@ export async function loadProjectConfig(configPath, options = {}) {
     resources: [
       ...resolved.resources.map((resource) => withSource(resource, { scope: "local", configPath })),
       ...globalResources
+    ],
+    workflows: [
+      ...resolved.workflows.map((workflow) => withSource(workflow, { scope: "local", configPath })),
+      ...globalWorkflows
     ],
     globalRefs
   };
@@ -76,10 +97,12 @@ export async function resolveConfig(config, baseDir = process.cwd()) {
   }
 
   const resources = await Promise.all((config.resources ?? []).map((resource) => resolveResource(resource, baseDir)));
+  const workflows = await Promise.all((config.workflows ?? []).map((workflow) => resolveWorkflow(workflow, baseDir)));
   const projectDocs = await Promise.all((config.projectDocs ?? []).map((doc) => resolveProjectDoc(doc, baseDir)));
   return {
     name: config.name ?? "assistant-project",
     resources,
+    workflows,
     globalRefs: normalizeGlobalRefs(config.globalRefs),
     packages: normalizePackages(config.packages ?? []),
     mcpServers: (config.mcpServers ?? []).map(resolveMcpServer),
@@ -99,7 +122,7 @@ function normalizeGlobalRefs(globalRefs) {
       throw new Error("Each global reference must be an object.");
     }
     if (!VALID_GLOBAL_REF_KINDS.has(ref.kind)) {
-      throw new Error(`Unsupported global reference kind "${ref.kind}". Expected skill, agent, or rule.`);
+      throw new Error(`Unsupported global reference kind "${ref.kind}". Expected ${supportedGlobalRefKinds().join(", ")}.`);
     }
     return {
       ...ref,
@@ -137,8 +160,35 @@ async function resolveResource(resource, baseDir) {
     body,
     overrides,
     associatedFiles,
+    _aofHasExplicitBody: hasExplicitBody(resource),
     _aofAssetDir: resource.path ? path.dirname(path.resolve(baseDir, resource.path)) : null
   };
+}
+
+async function resolveWorkflow(workflow, baseDir) {
+  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) {
+    throw new Error("Each workflow must be an object.");
+  }
+
+  const id = normalizeId(workflow.id);
+  const runtimes = normalizeRuntimes(workflow.runtimes);
+  const body = await resolveBody(workflow, baseDir);
+
+  return {
+    ...workflow,
+    id,
+    runtimes,
+    body,
+    _aofHasExplicitBody: hasExplicitBody(workflow),
+    _aofAssetDir: workflow.path ? path.dirname(path.resolve(baseDir, workflow.path)) : null
+  };
+}
+
+function hasExplicitBody(item) {
+  return Boolean(item.path
+    || Object.hasOwn(item, "body")
+    || Object.hasOwn(item, "prompt")
+    || Object.hasOwn(item, "instructions"));
 }
 
 function normalizeRuntimes(runtimes) {

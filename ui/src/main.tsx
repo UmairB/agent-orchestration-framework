@@ -55,6 +55,10 @@ type EditableResource = {
   description: string;
   body: string;
   runtimes: RuntimeId[];
+  workflow?: string;
+  argumentHint?: string;
+  arguments?: Array<{ name: string; description?: string; required?: boolean; hint?: string }>;
+  argumentOverrides?: Record<string, { description?: string; required?: boolean; hint?: string }>;
   files?: Array<{ path?: string; name?: string; body: string }>;
   model?: string;
   tools?: string[];
@@ -68,6 +72,7 @@ type ConfigPayload = {
   workspaceConfigExists: boolean;
   name: string;
   resources: EditableResource[];
+  workflows: Array<{ id: string; runtimes?: RuntimeId[]; name?: string; description?: string }>;
   referencedResources: EditableResource[];
   globalRefs: Array<{ kind: ResourceKind; id: string }>;
   packages: Array<{ id: string; source: string; runtimes?: RuntimeId[] }>;
@@ -493,6 +498,7 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
   onSubmit: (event: React.FormEvent) => void;
 }) {
   const blocking = diagnostics.some((item) => item.blocking);
+  const workflowBacked = Boolean(draft.workflow);
 
   return (
     <form className="mx-auto max-w-5xl space-y-5" onSubmit={onSubmit}>
@@ -534,7 +540,29 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
               <Input value={(draft.tools ?? []).join(", ")} onChange={(event) => setDraft({ ...draft, tools: splitList(event.target.value) })} />
             </Field>
           ) : null}
+          <div className="md:col-span-2">
+            <div className="grid grid-cols-2 rounded-md border border-border bg-background p-1">
+              <button
+                type="button"
+                onClick={() => setDraft(simpleDraft(draft))}
+                className={`h-9 rounded px-3 text-sm transition ${!workflowBacked ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              >
+                Simple
+              </button>
+              <button
+                type="button"
+                onClick={() => setDraft(workflowDraft(draft, payload))}
+                className={`h-9 rounded px-3 text-sm transition ${workflowBacked ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              >
+                Workflow-backed
+              </button>
+            </div>
+          </div>
+          {workflowBacked ? (
+            <WorkflowControls draft={draft} setDraft={setDraft} payload={payload} />
+          ) : null}
           <Field label={bodyLabel(draft.kind)} hint="markdown" className="md:col-span-2">
+            <ReferenceInsertButtons payload={payload} onInsert={(token) => setDraft({ ...draft, body: appendToken(draft.body, token) })} />
             <Textarea className="min-h-60 mono" value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
           </Field>
         </CardContent>
@@ -552,14 +580,16 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             {runtimes.map((runtime) => (
-              <label key={runtime} className="flex items-center gap-3 rounded-md border border-border bg-background p-3">
+              <label key={runtime} className={`flex items-center gap-3 rounded-md border border-border bg-background p-3 ${capabilityStatus(payload, draft, runtime) === "unsupported-fail" ? "opacity-60" : ""}`}>
                 <input
                   type="checkbox"
                   checked={draft.runtimes.includes(runtime)}
+                  disabled={capabilityStatus(payload, draft, runtime) === "unsupported-fail"}
                   onChange={(event) => setDraft(toggleRuntime(draft, runtime, event.target.checked))}
                 />
-                <span className="flex items-center gap-3">
+                <span className="flex flex-1 items-center justify-between gap-3">
                   <span>{runtimeName(runtime)}</span>
+                  <CapabilityBadge compact status={capabilityStatus(payload, draft, runtime)} />
                 </span>
               </label>
             ))}
@@ -579,6 +609,73 @@ function AssetEditor({ draft, setDraft, payload, scope, diagnostics, message, on
 
       <ValidationPanel diagnostics={diagnostics} />
     </form>
+  );
+}
+
+function WorkflowControls({ draft, setDraft, payload }: { draft: EditableResource; setDraft: (resource: EditableResource) => void; payload: ConfigPayload }) {
+  const args = draft.arguments ?? [];
+  const updateArgument = (index: number, next: { name: string; description?: string; required?: boolean; hint?: string }) => {
+    setDraft({ ...draft, arguments: args.map((arg, itemIndex) => itemIndex === index ? next : arg) });
+  };
+  return (
+    <div className="md:col-span-2 space-y-4 rounded-md border border-border bg-background p-4">
+      <Field label="Workflow" hint="shared workflow id">
+        <select
+          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+          value={draft.workflow ?? ""}
+          onChange={(event) => setDraft({ ...draft, workflow: event.target.value || undefined })}
+        >
+          <option value="">Select workflow</option>
+          {payload.workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.id}</option>)}
+        </select>
+      </Field>
+      <Field label="Argument hint" hint="shown in wrapper metadata">
+        <Input value={draft.argumentHint ?? ""} onChange={(event) => setDraft({ ...draft, argumentHint: event.target.value || undefined })} />
+      </Field>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium">Arguments</h3>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setDraft({ ...draft, arguments: [...args, { name: "", description: "", required: false }] })}>
+            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+            Add argument
+          </Button>
+        </div>
+        {args.length === 0 ? <p className="text-sm text-muted-foreground">No wrapper arguments.</p> : null}
+        {args.map((arg, index) => (
+          <div key={`${arg.name}-${index}`} className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-[1fr_2fr_auto]">
+            <Field label="Name" hint="id">
+              <Input value={arg.name} onChange={(event) => updateArgument(index, { ...arg, name: event.target.value })} />
+            </Field>
+            <Field label="Description" hint="optional">
+              <Input value={arg.description ?? ""} onChange={(event) => updateArgument(index, { ...arg, description: event.target.value })} />
+            </Field>
+            <label className="flex items-center gap-2 self-end rounded-md border border-border px-3 py-2 text-sm">
+              <input type="checkbox" checked={Boolean(arg.required)} onChange={(event) => updateArgument(index, { ...arg, required: event.target.checked })} />
+              Required
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReferenceInsertButtons({ payload, onInsert }: { payload: ConfigPayload; onInsert: (token: string) => void }) {
+  const skills = [...payload.resources, ...payload.referencedResources].filter((resource) => resource.kind === "skill");
+  const items = [
+    ...skills.map((skill) => ({ label: `skill:${skill.id}`, token: `{{skills.${skill.id}}}` })),
+    ...payload.workflows.map((workflow) => ({ label: `workflow:${workflow.id}`, token: `{{workflows.${workflow.id}}}` }))
+  ];
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {items.slice(0, 8).map((item) => (
+        <Button key={item.token} type="button" size="sm" variant="secondary" onClick={() => onInsert(item.token)}>
+          <Link2 className="mr-2 h-4 w-4" aria-hidden="true" />
+          {item.label}
+        </Button>
+      ))}
+    </div>
   );
 }
 
@@ -976,6 +1073,12 @@ function validateDraft(resource: EditableResource, payload: ConfigPayload | null
   if ((resource.files ?? []).length > 0 && resource.kind !== "skill" && resource.kind !== "command") {
     diagnostics.push({ severity: "error", path: "files", message: "Additional files are supported for skills and commands.", blocking: true });
   }
+  if (!resource.workflow && ((resource.arguments ?? []).length > 0 || resource.argumentHint || resource.argumentOverrides)) {
+    diagnostics.push({ severity: "error", path: "arguments", message: "Simple assets do not support arguments.", blocking: true });
+  }
+  if (resource.workflow && !payload?.workflows.some((workflow) => workflow.id === resource.workflow)) {
+    diagnostics.push({ severity: "error", path: "workflow", message: "Select a known workflow.", blocking: true });
+  }
   return diagnostics;
 }
 
@@ -1010,6 +1113,23 @@ function toggleRuntime(resource: EditableResource, runtime: RuntimeId, checked: 
   return { ...resource, runtimes };
 }
 
+function simpleDraft(resource: EditableResource): EditableResource {
+  const next = { ...resource };
+  delete next.workflow;
+  delete next.argumentHint;
+  delete next.arguments;
+  delete next.argumentOverrides;
+  return next;
+}
+
+function workflowDraft(resource: EditableResource, payload: ConfigPayload): EditableResource {
+  return {
+    ...resource,
+    workflow: resource.workflow ?? payload.workflows[0]?.id ?? "",
+    arguments: resource.arguments ?? []
+  };
+}
+
 function blankResource(kind: ResourceKind): EditableResource {
   return {
     id: "",
@@ -1018,12 +1138,17 @@ function blankResource(kind: ResourceKind): EditableResource {
     description: "",
     body: "",
     files: kind === "skill" ? [] : undefined,
-    runtimes: ["claude", "codex"],
+    runtimes: kind === "command" ? ["claude"] : ["claude", "codex"],
     overrides: {
       claude: { enabled: false },
       codex: { enabled: false }
     }
   };
+}
+
+function appendToken(value: string, token: string) {
+  const prefix = value && !value.endsWith("\n") && !value.endsWith(" ") ? " " : "";
+  return `${value}${prefix}${token}`;
 }
 
 function cloneResource(resource: EditableResource): EditableResource {

@@ -16,7 +16,7 @@ import {
 import { findProjectConfig, globalWorkspacePaths, workspacePaths } from "./workspace.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
-const VALID_GLOBAL_UI_KINDS = new Set(["skill", "agent", "rule"]);
+const VALID_GLOBAL_UI_KINDS = new Set(["skill", "agent", "rule", "workflow"]);
 const ASSOCIATED_FILE_KINDS = new Set(["skill", "command"]);
 const VALID_RUNTIMES = new Set(supportedRuntimes());
 const OVERRIDE_FIELDS = ["name", "description", "body", "prompt", "instructions", "model", "tools", "paths"];
@@ -42,6 +42,7 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
       workspaceConfigExists: false,
       name: defaultConfigName(projectDir, scope),
       resources: [],
+      workflows: [],
       referencedResources: [],
       globalRefs: [],
       packages: [],
@@ -78,6 +79,7 @@ export async function loadEditableConfig(projectDir = process.cwd(), options = {
       baseDir: path.dirname(configPath),
       referencedByProject: scope === "global" && hasGlobalRef(projectRefs, resource)
     }))),
+    workflows: config.workflows ?? [],
     referencedResources,
     globalRefs: config.globalRefs ?? [],
     packages: config.packages ?? [],
@@ -104,13 +106,16 @@ export async function saveEditableResource(projectDir = process.cwd(), input = {
   const context = await editorContext(projectDir, { ...options, scope });
   const { paths, configPath } = context;
   const existing = await readExistingConfig(configPath, defaultConfigName(projectDir, scope));
+  const hasBodyPath = shouldWritePrimaryBody(resource);
   const resourcePath = assetBodyPath(resource);
   const metadata = resourceMetadata(resource, resourcePath);
-  const bodyPath = path.join(paths.workspaceDir, resourcePath);
 
-  await writeText(bodyPath, ensureTrailingNewline(resource.body));
+  if (hasBodyPath) {
+    metadata.path = resourcePath;
+    await writeText(path.join(paths.workspaceDir, resourcePath), ensureTrailingNewline(resource.body));
+  }
 
-  const associatedFiles = await writeAssociatedFiles(paths.workspaceDir, resource, resourcePath);
+  const associatedFiles = hasBodyPath ? await writeAssociatedFiles(paths.workspaceDir, resource, resourcePath) : [];
   if (associatedFiles.length > 0) {
     metadata.files = associatedFiles;
   }
@@ -206,6 +211,7 @@ export async function saveEditableSections(projectDir = process.cwd(), input = {
     ...(Object.hasOwn(input, "mcpServers") ? { mcpServers: input.mcpServers } : existing.mcpServers ? { mcpServers: existing.mcpServers } : {}),
     ...(Object.hasOwn(input, "hooks") ? { hooks: input.hooks } : existing.hooks ? { hooks: existing.hooks } : {}),
     ...(Object.hasOwn(input, "projectDocs") ? { projectDocs: input.projectDocs } : existing.projectDocs ? { projectDocs: existing.projectDocs } : {}),
+    ...(Object.hasOwn(input, "workflows") ? { workflows: input.workflows } : existing.workflows ? { workflows: existing.workflows } : {}),
     ...(Object.hasOwn(input, "settings") ? { settings: input.settings } : existing.settings ? { settings: existing.settings } : {})
   };
 
@@ -260,6 +266,8 @@ export function validateEditableResource(input = {}, options = {}) {
   }
 
   diagnostics.push(...validateAssociatedFileInputs(resource, options));
+  diagnostics.push(...validateSimpleArgumentInputs(resource));
+  diagnostics.push(...validateWorkflowArgumentInputs(resource));
 
   for (const item of capabilityDiagnostics(resource)) {
     diagnostics.push(item);
@@ -331,6 +339,7 @@ function baseConfig(existing, projectDir, scope, overrides = {}) {
     $schema: existing.$schema ?? "https://aof.local/schemas/aof.schema.json",
     name: existing.name ?? defaultConfigName(projectDir, scope),
     resources: overrides.resources ?? existing.resources ?? [],
+    ...(overrides.workflows !== undefined ? { workflows: overrides.workflows } : existing.workflows ? { workflows: existing.workflows } : {}),
     packages: existing.packages ?? [],
     ...(overrides.globalRefs !== undefined ? { globalRefs: overrides.globalRefs } : existing.globalRefs ? { globalRefs: existing.globalRefs } : {}),
     ...(existing.mcpServers ? { mcpServers: existing.mcpServers } : {}),
@@ -414,6 +423,52 @@ function validateAssociatedFileInputs(resource, options = {}) {
   return diagnostics;
 }
 
+function validateSimpleArgumentInputs(resource) {
+  const diagnostics = [];
+  if (resource.workflow) return diagnostics;
+  for (const field of ["arguments", "args", "argumentHint", "argument-hint"]) {
+    if (Object.hasOwn(resource, field)) {
+      diagnostics.push(diagnostic("error", field, "Simple assets do not support arguments. Use workflow-backed assets for argument handling.", true, "simple-asset-arguments"));
+    }
+  }
+
+  const texts = [
+    ["body", resource.body],
+    ["prompt", resource.prompt],
+    ["instructions", resource.instructions],
+    ...Object.entries(resource.overrides ?? {}).map(([runtime, override]) => [
+      `overrides.${runtime}`,
+      override?.body ?? override?.prompt ?? override?.instructions
+    ])
+  ];
+  for (const [pathName, text] of texts) {
+    if (!hasArgumentMarker(text)) continue;
+    diagnostics.push(diagnostic("error", pathName, "Simple asset content appears to depend on arguments. Use workflow-backed assets for argument handling.", true, "simple-asset-arguments"));
+  }
+  return diagnostics;
+}
+
+function validateWorkflowArgumentInputs(resource) {
+  const diagnostics = [];
+  if (!resource.workflow) return diagnostics;
+  if (resource.arguments !== undefined && !Array.isArray(resource.arguments)) {
+    diagnostics.push(diagnostic("error", "arguments", "Workflow-backed arguments must be an array.", true, "invalid-workflow-argument"));
+  }
+  for (const [index, argument] of (Array.isArray(resource.arguments) ? resource.arguments : []).entries()) {
+    if (!argument || typeof argument !== "object" || Array.isArray(argument)) {
+      diagnostics.push(diagnostic("error", `arguments.${index}`, "Each argument must be an object.", true, "invalid-workflow-argument"));
+      continue;
+    }
+    if (typeof argument.name !== "string" || argument.name.trim() === "") {
+      diagnostics.push(diagnostic("error", `arguments.${index}.name`, "Argument name is required.", true, "invalid-workflow-argument"));
+    }
+  }
+  if (resource.argumentOverrides !== undefined && (!resource.argumentOverrides || typeof resource.argumentOverrides !== "object" || Array.isArray(resource.argumentOverrides))) {
+    diagnostics.push(diagnostic("error", "argumentOverrides", "Argument overrides must be an object.", true, "invalid-workflow-argument"));
+  }
+  return diagnostics;
+}
+
 function normalizeGlobalRefInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw httpLikeError("Global reference must be an object.", "invalid-global-ref");
@@ -459,7 +514,7 @@ function normalizeEditableResource(input) {
   const kind = input.kind;
   const id = normalizeId(input.id);
   const runtimes = normalizeRuntimes(input.runtimes);
-  return {
+  const resource = {
     ...input,
     id,
     kind,
@@ -468,6 +523,48 @@ function normalizeEditableResource(input) {
     files: normalizeAssociatedFiles(input.files),
     overrides: normalizeOverrides(input.overrides ?? {})
   };
+  const workflow = normalizeOptionalId(input.workflow);
+  const argumentHint = normalizeOptionalString(input.argumentHint);
+  const args = normalizeArguments(input.arguments);
+  const argumentOverrides = normalizeArgumentOverrides(input.argumentOverrides);
+  if (workflow !== undefined) resource.workflow = workflow;
+  if (argumentHint !== undefined) resource.argumentHint = argumentHint;
+  if (args !== undefined) resource.arguments = args;
+  if (argumentOverrides !== undefined) resource.argumentOverrides = argumentOverrides;
+  return resource;
+}
+
+function normalizeOptionalId(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  return normalizeId(value);
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  return String(value);
+}
+
+function normalizeArguments(args) {
+  if (args === undefined) return undefined;
+  if (!Array.isArray(args)) return args;
+  return args.map((arg) => ({
+    name: typeof arg?.name === "string" ? normalizeId(arg.name) : arg?.name,
+    ...(arg?.description ? { description: String(arg.description) } : {}),
+    ...(arg?.required !== undefined ? { required: Boolean(arg.required) } : {}),
+    ...(arg?.hint ? { hint: String(arg.hint) } : {})
+  }));
+}
+
+function normalizeArgumentOverrides(overrides) {
+  if (overrides === undefined) return undefined;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return overrides;
+  const result = {};
+  for (const [name, value] of Object.entries(overrides)) {
+    result[normalizeId(name)] = {
+      ...(value && typeof value === "object" && !Array.isArray(value) ? value : {})
+    };
+  }
+  return result;
 }
 
 function normalizeAssociatedFiles(files) {
@@ -503,6 +600,14 @@ function pathEscapesByTraversal(filePath) {
   return normalized === ".." || normalized.startsWith("../") || normalized.includes("/../");
 }
 
+function hasArgumentMarker(text) {
+  const value = String(text ?? "");
+  return value.includes("$ARGUMENTS")
+    || value.includes("{{GSD_ARGS}}")
+    || /\bargument-hint\b/.test(value)
+    || /\{\{\s*args(?:\.|\s*\})/.test(value);
+}
+
 function normalizeRuntimes(runtimes) {
   if (!runtimes) return ["claude", "codex"];
   if (!Array.isArray(runtimes)) return [];
@@ -535,6 +640,10 @@ async function editableResource(resource, options = {}) {
     body: resource.body ?? resource.prompt ?? resource.instructions ?? "",
     runtimes: resource.runtimes ?? ["claude", "codex"],
     ...(resource.path ? { path: resource.path } : {}),
+    ...(resource.workflow ? { workflow: resource.workflow } : {}),
+    ...(resource.argumentHint ? { argumentHint: resource.argumentHint } : {}),
+    ...(resource.arguments ? { arguments: resource.arguments } : {}),
+    ...(resource.argumentOverrides ? { argumentOverrides: resource.argumentOverrides } : {}),
     ...(resource.files ? { files: await editableAssociatedFiles(resource, options.baseDir) } : {}),
     ...(resource.model ? { model: resource.model } : {}),
     ...(resource.tools ? { tools: resource.tools } : {}),
@@ -599,15 +708,18 @@ function resourceMetadata(resource, resourcePath) {
   const metadata = {
     kind: resource.kind,
     id: resource.id,
-    path: resourcePath,
     runtimes: resource.runtimes
   };
 
-  for (const field of ["name", "description", "model", "tools", "paths"]) {
+  for (const field of ["name", "description", "model", "tools", "paths", "workflow", "argumentHint", "arguments", "argumentOverrides"]) {
     if (hasValue(resource[field])) metadata[field] = resource[field];
   }
 
   return metadata;
+}
+
+function shouldWritePrimaryBody(resource) {
+  return !resource.workflow || hasValue(resource.body);
 }
 
 async function writeEnabledOverrides(workspaceDir, resource, resourcePath) {
@@ -647,7 +759,10 @@ function capabilityDiagnostic(capability, runtime, status) {
   if (!status) return null;
   const pathName = `capabilities.${capability}.${runtime}`;
   if (status === CAPABILITY_STATUS.unsupportedFail) {
-    return diagnostic("error", pathName, `${capability} is not supported for ${runtime}.`, true, status);
+    const message = capability === "command" && runtime === "codex"
+      ? "Command assets are not supported for Codex. Target Claude commands or create a Codex skill explicitly."
+      : `${capability} is not supported for ${runtime}.`;
+    return diagnostic("error", pathName, message, true, status);
   }
   if (status === CAPABILITY_STATUS.mapped) {
     return diagnostic("warning", pathName, `${capability} is supported for ${runtime} through mapped output.`, false, status);

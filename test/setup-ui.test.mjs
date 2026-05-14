@@ -18,6 +18,10 @@ export const setupUiTests = [
     run: savesAndValidatesExpandedSections
   },
   {
+    name: "setup UI saves workflow backed resources",
+    run: savesWorkflowBackedResources
+  },
+  {
     name: "setup UI saves global resources and associated files",
     run: savesGlobalResourcesAndAssociatedFiles
   },
@@ -52,6 +56,7 @@ async function savesConfigResourceThroughApi() {
   const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
   try {
     const capabilities = await fetchJson(`${url}api/capabilities`);
+    assert.equal(capabilities.capabilities.command.codex, "unsupported-fail");
     assert.equal(capabilities.capabilities.rule.codex, "mapped");
 
     const save = await fetchJson(`${url}api/config/resources/command/prime`, {
@@ -62,7 +67,7 @@ async function savesConfigResourceThroughApi() {
         kind: "command",
         description: "Prime repository context",
         body: "Inspect the repository.",
-        runtimes: ["codex"],
+        runtimes: ["claude"],
         overrides: {}
       })
     });
@@ -196,6 +201,53 @@ async function savesAndValidatesExpandedSections() {
   }
 }
 
+async function savesWorkflowBackedResources() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
+  try {
+    let save = await fetchJson(`${url}api/config/sections`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workflows: [
+          { id: "audit", body: "Audit workflow", runtimes: ["codex"], arguments: [{ name: "milestone" }] }
+        ]
+      })
+    });
+    assert.equal(save.ok, true);
+
+    save = await fetchJson(`${url}api/config/resources/skill/audit`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "audit",
+        kind: "skill",
+        description: "Audit wrapper",
+        body: "",
+        workflow: "audit",
+        argumentHint: "<milestone>",
+        arguments: [{ name: "milestone", description: "Milestone number", required: true }],
+        runtimes: ["codex"],
+        overrides: {}
+      })
+    });
+    assert.equal(save.ok, true);
+    assert.equal(save.resource.workflow, "audit");
+
+    const config = JSON.parse(await readFile(path.join(targetDir, ".aof", "aof.config.json"), "utf8"));
+    assert.equal(config.resources[0].workflow, "audit");
+    assert.equal(config.resources[0].path, undefined);
+    assert.equal(config.resources[0].arguments[0].required, true);
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
 async function savesGlobalResourcesAndAssociatedFiles() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
   const globalDir = await mkdtemp(path.join(os.tmpdir(), "aof-global-"));
@@ -256,7 +308,7 @@ async function savesGlobalResourcesAndAssociatedFiles() {
         id: "prime",
         kind: "command",
         body: "Run the helper.",
-        runtimes: ["codex"],
+        runtimes: ["claude"],
         files: [
           { name: "helper.py", body: "print('prime')\n" }
         ],
