@@ -29,29 +29,37 @@ This phase builds on Phase 28 board/task files and Phase 29 objective breakdown 
 - **D-07:** For an assigned task, AOF should route through `discuss-phase`, `plan-phase`, and `execute-phase` as needed.
 - **D-08:** If `discuss-phase` requires user input, that is acceptable. The execution record should surface that it is waiting for user input.
 - **D-09:** The goal is to let GSD update `.planning/` artifacts correctly instead of bypassing GSD lifecycle state.
+- **D-10:** Abstract the execution framework behind a provider/interface boundary. GSD is the v1.6 implementation, but task state management should not be tightly coupled to GSD-specific code.
+- **D-11:** Keep board/task/execution state framework-neutral enough that a future execution framework could replace GSD while preserving `.aof/boards` state.
 
 ### Task-To-Phase Mapping
-- **D-10:** Executable board tasks have a one-to-one correspondence with GSD phases.
-- **D-11:** A task must include a phase reference before it can be assigned/executed.
-- **D-12:** Tasks without a phase reference may exist, but assignment/execution should fail or block with a clear diagnostic until the task is linked to a phase.
+- **D-12:** Executable board tasks have a one-to-one correspondence with GSD phases for the GSD provider.
+- **D-13:** A task must include a phase reference before it can be assigned/executed by the GSD provider.
+- **D-14:** Tasks without a phase reference may exist, but assignment/execution should fail or block with a clear diagnostic until the task is linked to a phase.
 
 ### Execution State Model
-- **D-13:** Keep board lifecycle status separate from execution state.
-- **D-14:** Board status remains one of `backlog`, `ready`, `in_progress`, `blocked`, or `done`.
-- **D-15:** Add a task execution sub-state with at least `queued`, `running`, `waiting_for_user`, `blocked`, `failed`, and `complete`.
-- **D-16:** When GSD needs user input, set execution status to `waiting_for_user` and keep the board status `in_progress`.
-- **D-17:** On failed or blocked execution, preserve context and set board status to `blocked`.
+- **D-15:** Keep board lifecycle status separate from execution state.
+- **D-16:** Board status remains one of `backlog`, `ready`, `in_progress`, `blocked`, or `done`.
+- **D-17:** Add a task execution sub-state with at least `queued`, `running`, `waiting_for_user`, `blocked`, `failed`, and `complete`.
+- **D-18:** When GSD needs user input, set execution status to `waiting_for_user` and keep the board status `in_progress`.
+- **D-19:** On failed or blocked execution, preserve context and set board status to `blocked`.
 
 ### Execution Records
-- **D-18:** Detailed execution records live beside tasks under `.aof/boards/<board-id>/executions/<task-id>.json`.
-- **D-19:** Task files should mirror a compact assignment/execution summary so lists and UI APIs do not need to read full execution logs for every task.
-- **D-20:** Execution files should record detailed GSD lifecycle state, logs, attempts, resume pointers, and handoff context.
+- **D-20:** Detailed execution records live beside tasks under `.aof/boards/<board-id>/executions/<task-id>.json`.
+- **D-21:** Task files should mirror a compact assignment/execution summary so lists and UI APIs do not need to read full execution logs for every task.
+- **D-22:** Execution files should record detailed lifecycle state, logs, attempts, resume pointers, provider name, provider-specific refs, and handoff context.
+
+### UI Console And User Input
+- **D-23:** If execution requires user input, Phase 30 should record enough structured state for the setup UI to show a console/log view and prompt for input later.
+- **D-24:** Streaming execution output to the UI is technically possible through the local setup server using SSE, WebSocket, or polling an append-only execution log. Phase 30 should avoid blocking this; Phase 31 should decide and implement the visible UI transport.
+- **D-25:** Phase 30 should expose execution log/read APIs or file state that Phase 31 can consume without coupling the UI directly to GSD internals.
 
 ### the agent's Discretion
 - Choose exact CLI subcommands and JSON field names consistent with the existing `aof boards ...` namespace.
 - Choose exact failure diagnostic codes and execution attempt shape.
 - Choose how to invoke or represent GSD ceremony execution in tests as long as no real network or destructive external process is required.
 - Choose whether Phase 30 implements a dry-run/preview flag, but assignment must have a testable non-network path.
+- Choose the provider abstraction shape, but do not over-generalize beyond a clean GSD provider boundary.
 
 </decisions>
 
@@ -134,6 +142,22 @@ execute-phase
 
 The implementation should preserve the fact that `discuss-phase` may require user input.
 
+### Provider Abstraction
+
+GSD should be treated as the first execution provider, not baked into the board/task state model. Provider-specific fields should be nested or clearly labeled so a future provider can reuse the same task/execution records.
+
+### UI Console Feasibility
+
+Streaming user-visible console output is feasible for the local setup UI. The likely implementation options are:
+
+```text
+SSE from setup server
+WebSocket from setup server
+polling .aof/boards/<board>/executions/<task>.json or an append-only log
+```
+
+Phase 30 should create the durable execution/log state and APIs. Phase 31 should turn that into visible console output and user input controls.
+
 ### Execution State Split
 
 Task file:
@@ -156,6 +180,7 @@ Task should store a compact summary; execution file should store attempts, logs,
 ## Deferred Ideas
 
 - Visual kanban display of assignment and progress belongs to Phase 31.
+- Visible console streaming and user input controls belong to Phase 31, though Phase 30 should provide the state/API foundation.
 - Full live UAT across breakdown, assignment, execution, and UI belongs to Phase 32.
 - A separate global or board-local agent registry is deferred unless a future phase scopes it.
 - Automatically executing tasks without GSD phase refs is deferred; Phase 30 requires one task per GSD phase.

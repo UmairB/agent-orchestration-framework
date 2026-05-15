@@ -5,7 +5,7 @@
 
 **Date:** 2026-05-15
 **Phase:** 30-Agent Assignment And Execution
-**Areas discussed:** Execution path, available agents, task refs, execution state, logs and resume context, waiting/failure behavior
+**Areas discussed:** Execution path, available agents, task refs, execution state, logs and resume context, waiting/failure behavior, provider abstraction, UI console feasibility
 
 ---
 
@@ -46,6 +46,19 @@
 
 **User's choice:** Route through GSD ceremonies.
 **Notes:** User specifically wants to rely on GSD and its `discuss-phase`, `plan-phase`, and `execute-phase` ceremonies so planning artifacts are updated correctly. `discuss-phase` may require user input, which is acceptable.
+
+---
+
+## Provider Abstraction
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Hard-code GSD | Treat GSD-specific commands and state as the task execution model. | |
+| Provider boundary | Use GSD as the first provider behind an execution framework abstraction. | ✓ |
+| Fully generic plugin system | Build a broad execution provider plugin architecture now. | |
+
+**User's choice:** Abstract the execution framework as much as possible while keeping GSD as the current provider.
+**Notes:** Task state management should survive swapping GSD for another execution framework later.
 
 ---
 
@@ -110,14 +123,30 @@
 
 ---
 
+## UI Console Feasibility
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Phase 30 only records logs | UI can poll/read persisted execution state later. | |
+| Phase 30 enables streamable logs, Phase 31 renders UI | Persist logs and expose enough state/API for SSE/WebSocket/polling UI. | ✓ |
+| Build full console UI in Phase 30 | Implement visible streaming console now. | |
+
+**User's choice:** Investigate/enable console output in the UI when user input is required.
+**Notes:** This is feasible with the local setup server, likely via SSE, WebSocket, or polling execution logs. Visible UI belongs to Phase 31; Phase 30 should not block it.
+
+---
+
 ## the agent's Discretion
 
 - Exact command names under `aof boards`.
 - Exact execution JSON shape and diagnostic code names.
 - Exact test harness strategy for simulating GSD ceremony execution.
+- Provider interface shape.
+- UI log transport details, as long as Phase 30 leaves a clean foundation.
 
 ## Deferred Ideas
 
 - Separate agent registry beyond `.aof/aof.config.json`.
 - Visual progress UI.
+- Visible console streaming and user input controls.
 - Executing tasks without one-to-one GSD phase refs.
