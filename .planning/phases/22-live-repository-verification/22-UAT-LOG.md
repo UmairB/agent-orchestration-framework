@@ -1,7 +1,14 @@
+---
+status: complete
+closed: 2026-05-15
+result: all_pass
+---
+
 # Phase 22 UAT Log: Live Repository Verification
 
 **Started:** 2026-05-11
-**Status:** Active
+**Status:** Complete
+**Closed:** 2026-05-15
 
 ## Scope
 
@@ -242,7 +249,7 @@ Skill/command markdown can use `{{files.<name>}}` placeholders. AOF replaces tho
 
 ### UAT-07: Command frontmatter needs first-class runtime metadata
 
-**Status:** Open
+**Status:** Fixed
 **Severity:** High command fidelity
 **Source:** Live review of a real Claude command with `argument-hint` and `allowed-tools`
 
@@ -268,6 +275,10 @@ AOF command assets should model command metadata explicitly and render it correc
 **Planned fix:**
 
 Design and implement a command metadata model before declaring command authoring complete. Include BDD/unit coverage for Claude command metadata such as `argument-hint` and `allowed-tools`.
+
+**Resolution:**
+
+Command argument concerns were resolved through the runtime capability contract and workflow asset model work. Simple assets now reject argument-like fields, workflow-backed resources own argument metadata, and workflow wrappers render runtime-specific guidance. Claude-only command rendering and Codex skill-only behavior are covered by the v1.6 workflow/runtime verification path.
 
 ## Notes
 

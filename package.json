@@ -16,6 +16,7 @@
     "test:integration:ps": "powershell -ExecutionPolicy Bypass -File ./test/integration/cli.ps1",
     "test:smoke:cli": "node ./test/integration/cli-child-process.test.mjs",
     "test:all": "node ./scripts/test.mjs",
+    "security:supply-chain": "node ./scripts/supply-chain-audit.mjs",
     "ui:dev": "npm --workspace @aof/ui run dev",
     "ui:build": "node ./scripts/ui-build.mjs",
     "check": "node ./scripts/check.mjs"

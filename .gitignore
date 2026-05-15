@@ -1,5 +1,7 @@
 node_modules/
 coverage/
+ui/dist/
+.tmp-npm-cache/
 .claude/
 .codex/
 .aof-test/

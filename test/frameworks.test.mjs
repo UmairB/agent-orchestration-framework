@@ -23,6 +23,10 @@ export const frameworkTests = [
     run: plansDryRunAndFiltering
   },
   {
+    name: "plans framework installs with npm supply-chain safety env",
+    run: plansInstallSafetyEnvironment
+  },
+  {
     name: "plans generic package commands from descriptors",
     run: plansGenericPackageCommands
   },
@@ -99,6 +103,14 @@ function plansDryRunAndFiltering() {
   assert.equal(plan[0].runtime, "codex");
   assert.equal(plan[0].scope, "local");
   assert.equal(plan[0].command, "npx get-shit-done-cc@latest --codex --local");
+}
+
+function plansInstallSafetyEnvironment() {
+  const plan = planFrameworkInstall("gsd", { runtimes: ["codex"] });
+  assert.equal(plan[0].installEnvironment.npm_config_ignore_scripts, "true");
+  assert.equal(plan[0].installEnvironment.npm_config_minimum_release_age, "7");
+  assert.equal(plan[0].installEnvironment.npm_config_audit_level, "high");
+  assert.equal(plan[0].installEnvironment.npm_config_save_exact, "true");
 }
 
 function forceRerunsPriorAttempts() {

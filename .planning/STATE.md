@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Task Management
 current_phase: 32
-status: Milestone implementation complete
+status: completed
 stopped_at: v1.6 Task Management implementation and verification complete; ready for milestone audit/completion
-last_updated: "2026-05-15T13:10:00.000Z"
-last_activity: 2026-05-15 -- Phase 32 completed
+last_updated: "2026-05-15T20:43:38.636Z"
+last_activity: 2026-05-15 — Milestone v1.6 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
@@ -20,7 +20,7 @@ progress:
 **Initialized:** 2026-05-06
 **Current milestone:** v1.6 Task Management
 **Current phase:** 32
-**Status:** Milestone implementation complete
+**Status:** v1.6 milestone complete
 
 ## Project Reference
 
@@ -38,14 +38,14 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.6 Task Management is active. The milestone adds project-local kanban boards for deliverable-scoped tasks, canonical file-backed task state with a generated UI index/cache, GSD objective breakdown, automatic agent execution on assignment, and UI progress visibility.
+v1.6 Task Management is complete. The repository is ready for the next milestone selection.
 
 ## Current Position
 
-Phase: 32 — Task Management Verification
-Plan: 32-01, 32-02, 32-03
-Status: Complete
-Last activity: 2026-05-15 -- Phase 32 completed
+Phase: Milestone v1.6 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-15 — Milestone v1.6 completed and archived
 
 ## Resume
 
@@ -168,6 +168,7 @@ Last activity: 2026-05-15 -- Phase 32 completed
 - Phase 27 verification completed on 2026-05-14 with coverage audit, live disposable GSD-style UAT, `npm run test:unit`, `npm test`, `npm run ui:build`, `npm run test:integration:ps`, and `npm run check` passing. Verification is captured in `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`.
 - Milestone v1.5 was audited and archived on 2026-05-14 in `.planning/milestones/v1.5-ROADMAP.md`, `.planning/milestones/v1.5-REQUIREMENTS.md`, and `.planning/milestones/v1.5-MILESTONE-AUDIT.md`.
 - Milestone v1.6 started on 2026-05-15 as Task Management. Locked initial decisions: start with project-local boards, use hybrid file-canonical plus generated index/cache task state, and automatically start GSD agent execution when a task is assigned to an agent.
+- Milestone v1.6 completed on 2026-05-15 with GSD-backed board state, objective breakdown, agent assignment/execution records, dedicated boards UI, repair/sync/remove CLI support, mandatory board objectives, and supply-chain safety hardening.
 
 ## Deferred Items
 
@@ -175,4 +176,8 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 
 | Category | Item | Status |
 |----------|------|--------|
-| uat_gap | Phase 22 `22-UAT-LOG.md` reported by audit-open with 0 pending scenarios | historical-unknown |
+| validation_debt | Per-phase Nyquist `VALIDATION.md` artifacts for v1.6 were not generated because user chose milestone-level validation for closeout. | accepted |
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

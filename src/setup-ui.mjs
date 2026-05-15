@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
-import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
-import { assignTaskToAgent, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -146,7 +146,13 @@ export async function serveSetupUi(catalog, options = {}) {
             sendApiError(response, 400, "Board id in payload does not match request path.", "route-payload-mismatch");
             return;
           }
-          const result = await createBoard(projectDir, { ...item, id: routeId }, { force: Boolean(item.force) });
+          const gsdConfigured = await isGsdExecutionConfigured(projectDir, options);
+          const result = await createBoard(projectDir, {
+            ...item,
+            id: routeId,
+            executionProvider: gsdConfigured ? "gsd" : item.executionProvider,
+            defaultExecutionRuntime: item.defaultExecutionRuntime ?? "codex"
+          }, { force: Boolean(item.force) });
           sendJson(response, 200, { ok: true, board: result.board });
         } catch (error) {
           sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
@@ -170,6 +176,31 @@ export async function serveSetupUi(catalog, options = {}) {
     if (request.method === "PUT" && boardArchiveMatch) {
       try {
         sendJson(response, 200, { ok: true, board: await archiveBoard(projectDir, decodeRoutePart(boardArchiveMatch[1])) });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const boardSyncMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/sync$/);
+    if (request.method === "PUT" && boardSyncMatch) {
+      try {
+        const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]));
+        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const boardRepairMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/repair$/);
+    if (request.method === "PUT" && boardRepairMatch) {
+      try {
+        const item = await readOptionalJsonBody(request);
+        const result = await repairBoard(projectDir, decodeRoutePart(boardRepairMatch[1]), {
+          defaultExecutionRuntime: item.defaultExecutionRuntime
+        });
+        sendJson(response, 200, { ok: true, ...result });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
       }
@@ -399,6 +430,15 @@ function readJsonBody(request) {
     });
     request.on("error", reject);
   });
+}
+
+async function readOptionalJsonBody(request) {
+  try {
+    return await readJsonBody(request);
+  } catch (error) {
+    if (error.code === "empty-json") return {};
+    throw error;
+  }
 }
 
 function contentType(filePath) {

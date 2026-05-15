@@ -11,6 +11,7 @@ Feature: AOF CLI lifecycle
     And stdout should contain `aof project validate`
     And stdout should contain `aof assets add skill|command|rule|agent [id]`
     And stdout should contain `aof assets apply`
+    And stdout should contain `aof boards ui [--port 4187]`
     And stdout should contain `aof project migrate`
     And stdout should not contain `aof add [kind id]`
     And stdout should not contain `aof migrate [dir]`
@@ -23,6 +24,14 @@ Feature: AOF CLI lifecycle
     Then the command should fail
     And stderr should contain `Removed command "install"`
     And stderr should contain `aof assets ui`
+
+  Scenario: Board UI has a dedicated launcher
+    Given an empty project
+    When I run `boards ui --no-serve`
+    Then the command should succeed
+    And stdout should contain `aof boards ui`
+    And stdout should contain `board/task management UI`
+    And stdout should not contain `aof assets ui`
 
   Scenario: Initialize an empty AOF project
     Given an empty project

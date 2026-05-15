@@ -18,7 +18,7 @@ Feature: Board and task state
 
   Scenario: Validate warns when the generated board index is stale
     Given an empty project
-    When I run `boards create delivery --title Delivery`
+    When I run `boards create delivery --title Delivery --objective "Validate stale index"`
     Then the command should succeed
     When I run `boards index`
     Then the command should succeed
@@ -30,16 +30,30 @@ Feature: Board and task state
 
   Scenario: Validate fails malformed canonical board state
     Given an empty project
-    When I run `boards create delivery --title Delivery`
+    When I run `boards create delivery --title Delivery --objective "Validate malformed state"`
     Then the command should succeed
     When I replace file `.aof/boards/delivery/BOARD.json` with `{`
     And I run `boards validate`
     Then the command should fail
     And stdout should contain `BOARD_MALFORMED_JSON`
 
+  Scenario: Remove a board from disk
+    Given an empty project
+    When I run `boards create cleanup --title Cleanup --objective "Clean up board files"`
+    Then the command should succeed
+    And file `.aof/boards/cleanup/BOARD.json` should exist
+    When I run `boards remove cleanup --dry-run`
+    Then the command should succeed
+    And stdout should contain `Would remove board cleanup`
+    And file `.aof/boards/cleanup/BOARD.json` should exist
+    When I run `boards remove cleanup`
+    Then the command should succeed
+    And stdout should contain `Removed board cleanup`
+    And file `.aof/boards/cleanup/BOARD.json` should not exist
+
   Scenario: Review an objective breakdown before applying tasks to a board
     Given an empty project
-    When I run `boards create delivery --title Delivery`
+    When I run `boards create delivery --title Delivery --objective "Review objective breakdown"`
     Then the command should succeed
     When I run `boards breakdown delivery --objective "Board API" --id api-proposal`
     Then the command should succeed
@@ -53,9 +67,35 @@ Feature: Board and task state
     When I run `boards show delivery`
     Then stdout should contain `board-api-implementation status=backlog`
 
+  Scenario: GSD-backed boards sync tasks from roadmap phases
+    Given a project with GSD board execution
+    When I run `boards create delivery --title Delivery --objective "Ship board state" --runtime claude`
+    Then the command should succeed
+    And stdout should contain `execution: gsd runtime=claude`
+    And stdout should contain `next: $gsd-new-milestone`
+    And file `.aof/boards/delivery/BOARD.json` should contain `"defaultExecutionRuntime": "claude"`
+    When I run `boards task add delivery manual --title "Manual"`
+    Then the command should fail
+    And stderr should contain `cannot accept tasks until its milestone roadmap is synced`
+    When I run `boards sync delivery`
+    Then the command should fail
+    And stderr should contain `not bound to a GSD milestone`
+    When I run `boards repair delivery`
+    Then the command should succeed
+    And stdout should contain `next: $gsd-new-milestone`
+    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
+    And I run `boards sync delivery`
+    Then the command should succeed
+    And stdout should contain `Synced board delivery with GSD roadmap`
+    And stdout should contain `created: 2`
+    And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"phase": "30"`
+    When I run `boards task add delivery manual --title "Manual"`
+    Then the command should fail
+    And stderr should contain `Add tasks with $gsd-phase add`
+
   Scenario: Refreshed breakdowns do not silently overwrite existing tasks
     Given an empty project
-    When I run `boards create delivery --title Delivery`
+    When I run `boards create delivery --title Delivery --objective "Refresh objective breakdown"`
     Then the command should succeed
     When I run `boards breakdown delivery --objective "Board API" --id api-proposal`
     Then the command should succeed
@@ -68,11 +108,12 @@ Feature: Board and task state
     Then the command should fail
     And stderr should contain `conflicts with existing tasks`
 
-  Scenario: Assign a phase-linked task to a configured agent and start GSD execution
-    Given a project with a board execution agent
-    When I run `boards create delivery --title Delivery`
+  Scenario: Assign a synced phase task to a configured agent and start GSD execution
+    Given a project with GSD board execution
+    When I run `boards create delivery --title Delivery --objective "Assign synced phase tasks"`
     Then the command should succeed
-    When I run `boards task add delivery phase-30 --title "Phase 30" --refs '{"phase":"30"}'`
+    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
+    And I run `boards sync delivery`
     Then the command should succeed
     When I run `boards agents`
     Then stdout should contain `builder`
@@ -87,16 +128,22 @@ Feature: Board and task state
     And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"waiting_for_user"`
 
   Scenario: Reject assignments for unknown agents or tasks without GSD phase refs
-    Given a project with a board execution agent
-    When I run `boards create delivery --title Delivery`
+    Given a project with GSD board execution
+    When I run `boards create delivery --title Delivery --objective "Reject unknown agents"`
     Then the command should succeed
-    When I run `boards task add delivery phase-30 --title "Phase 30" --refs '{"phase":"30"}'`
+    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
+    And I run `boards sync delivery`
     Then the command should succeed
     When I run `boards task assign delivery phase-30 missing-agent`
     Then the command should fail
     And stderr should contain `Unknown agent "missing-agent"`
-    When I run `boards task add delivery missing-phase --title "Missing Phase"`
+
+  Scenario: Reject assignments for tasks without GSD phase refs
+    Given a project with a board execution agent
+    When I run `boards create manual --title Manual --objective "Reject missing phase refs"`
     Then the command should succeed
-    When I run `boards task assign delivery missing-phase builder`
+    When I run `boards task add manual missing-phase --title "Missing Phase"`
+    Then the command should succeed
+    When I run `boards task assign manual missing-phase builder`
     Then the command should fail
     And stderr should contain `without refs.phase`

@@ -27,7 +27,7 @@ export const boardBreakdownTests = [
 async function createsReviewableProposal() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-breakdown-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Break down API work" });
     const { proposal } = await createBreakdownProposal(targetDir, "delivery", {
       id: "api-proposal",
       objective: "Board API"
@@ -50,7 +50,7 @@ async function createsReviewableProposal() {
 async function appliesProposal() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-breakdown-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Apply API proposal" });
     await createBreakdownProposal(targetDir, "delivery", { id: "api-proposal", objective: "Board API" });
     const result = await applyBreakdownProposal(targetDir, "delivery", "api-proposal");
 
@@ -71,7 +71,7 @@ async function appliesProposal() {
 async function protectsExistingTasks() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-breakdown-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Protect existing tasks" });
     await createBreakdownProposal(targetDir, "delivery", { id: "api-proposal", objective: "Board API" });
     await applyBreakdownProposal(targetDir, "delivery", "api-proposal");
     await createBreakdownProposal(targetDir, "delivery", { id: "api-proposal-refresh", objective: "Board API" });
@@ -89,7 +89,7 @@ async function protectsExistingTasks() {
 async function refreshesProposal() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-breakdown-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Refresh board proposal" });
     await createBreakdownProposal(targetDir, "delivery", { id: "api-proposal", objective: "Board API" });
     const { proposal } = await refreshBreakdownProposal(targetDir, "delivery", "api-proposal", {
       id: "api-proposal-2"

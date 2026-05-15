@@ -39,7 +39,7 @@ async function assignsTaskAndStartsExecution() {
   const targetDir = await mkProject();
   try {
     await writeAgentConfig(targetDir);
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Assign board tasks" });
     await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
 
     const result = await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder");
@@ -63,7 +63,7 @@ async function rejectsInvalidAssignments() {
   const targetDir = await mkProject();
   try {
     await writeAgentConfig(targetDir);
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Update execution state" });
     await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
     await addTask(targetDir, "delivery", { id: "missing-phase", title: "Missing Phase" });
 
@@ -84,7 +84,7 @@ async function updatesExecutionStatus() {
   const targetDir = await mkProject();
   try {
     await writeAgentConfig(targetDir);
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Reject invalid assignments" });
     await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
     await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder");
 

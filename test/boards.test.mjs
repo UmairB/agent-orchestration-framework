@@ -11,6 +11,9 @@ import {
   getBoard,
   listBoards,
   moveTask,
+  removeBoard,
+  repairBoard,
+  syncBoardFromGsdRoadmap,
   validateBoards,
   writeBoardIndex
 } from "../src/boards.mjs";
@@ -23,6 +26,14 @@ export const boardTests = [
   {
     name: "adds and moves tasks with history",
     run: addsAndMovesTasks
+  },
+  {
+    name: "syncs GSD-backed boards from roadmap phases",
+    run: syncsGsdBackedBoards
+  },
+  {
+    name: "removes board directories",
+    run: removesBoardDirectories
   },
   {
     name: "builds rebuildable board index and reports stale cache",
@@ -39,6 +50,7 @@ async function createsBoardsAndArchives() {
   try {
     await createBoard(targetDir, { id: "release", title: "Release", objective: "Ship v1" });
     await createBoard(targetDir, { id: "docs", title: "Docs", objective: "Document v1" });
+    await assert.rejects(() => createBoard(targetDir, { id: "missing", title: "Missing" }), /Board objective is required/);
 
     const boards = await listBoards(targetDir, { useIndex: false });
     assert.deepEqual(boards.map((board) => board.id), ["docs", "release"]);
@@ -56,7 +68,7 @@ async function createsBoardsAndArchives() {
 async function addsAndMovesTasks() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Deliver board API" });
     await addTask(targetDir, "delivery", {
       id: "wire-api",
       title: "Wire API",
@@ -87,10 +99,93 @@ async function addsAndMovesTasks() {
   }
 }
 
+async function syncsGsdBackedBoards() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    await mkdir(path.join(targetDir, ".planning"), { recursive: true });
+    await writeFile(path.join(targetDir, ".planning", "ROADMAP.md"), [
+      "## Phase Details",
+      "",
+      "### Phase 40: Runtime Intake",
+      "",
+      "**Goal:** Capture the requested execution runtime.",
+      "",
+      "### Phase 41: Roadmap Sync",
+      "",
+      "**Goal:** Keep board tasks aligned to roadmap phases."
+    ].join("\n"), "utf8");
+    await createBoard(targetDir, {
+      id: "delivery",
+      title: "Delivery",
+      objective: "Create phase tasks from a GSD milestone",
+      executionProvider: "gsd",
+      defaultExecutionRuntime: "claude"
+    });
+
+    await assert.rejects(
+      () => addTask(targetDir, "delivery", { id: "manual", title: "Manual" }),
+      /cannot accept tasks until its milestone roadmap is synced/
+    );
+    await assert.rejects(
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery"),
+      /not bound to a GSD milestone/
+    );
+
+    const repair = await repairBoard(targetDir, "delivery");
+    assert.equal(repair.repaired, true);
+    assert.equal(repair.command, "$gsd-new-milestone");
+    await assert.rejects(
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery"),
+      /not bound to a GSD milestone/
+    );
+
+    const boardPath = path.join(targetDir, ".aof", "boards", "delivery", "BOARD.json");
+    const repairedBoard = JSON.parse(await readFile(boardPath, "utf8"));
+    repairedBoard.gsd.milestone.roadmapPath = ".planning/ROADMAP.md";
+    await writeFile(boardPath, `${JSON.stringify(repairedBoard, null, 2)}\n`, "utf8");
+
+    const result = await syncBoardFromGsdRoadmap(targetDir, "delivery");
+    assert.equal(result.created.length, 2);
+    assert.equal(result.board.defaultExecutionRuntime, "claude");
+    assert.equal(result.board.gsd.milestone.status, "synced");
+
+    await assert.rejects(
+      () => addTask(targetDir, "delivery", { id: "manual", title: "Manual" }),
+      /Add tasks with \$gsd-phase add/
+    );
+
+    const board = await getBoard(targetDir, "delivery");
+    assert.deepEqual(board.tasks.map((task) => task.id), ["phase-40", "phase-41"]);
+    assert.equal(board.tasks[0].refs.phase, "40");
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function removesBoardDirectories() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    await createBoard(targetDir, { id: "cleanup", title: "Cleanup", objective: "Clean up boards" });
+    await addTask(targetDir, "cleanup", { id: "one", title: "One" });
+    const boardDir = path.join(targetDir, ".aof", "boards", "cleanup");
+
+    const dryRun = await removeBoard(targetDir, "cleanup", { dryRun: true });
+    assert.equal(dryRun.dryRun, true);
+    assert.equal(await exists(path.join(boardDir, "BOARD.json")), true);
+
+    const removed = await removeBoard(targetDir, "cleanup");
+    assert.equal(removed.id, "cleanup");
+    assert.equal(await exists(path.join(boardDir, "BOARD.json")), false);
+    await assert.rejects(() => removeBoard(targetDir, "cleanup"), /Board not found: cleanup/);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
 async function buildsIndexAndReportsStaleCache() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
   try {
-    await createBoard(targetDir, { id: "delivery", title: "Delivery" });
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Index board tasks" });
     await addTask(targetDir, "delivery", { id: "one", title: "One", status: "ready" });
 
     const { index, indexPath } = await writeBoardIndex(targetDir);

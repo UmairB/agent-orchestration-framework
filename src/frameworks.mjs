@@ -14,6 +14,15 @@ const DEFAULT_RUNTIME_FLAGS = {
   claude: "--claude",
   codex: "--codex"
 };
+const SAFE_NPM_EXEC_ENV = {
+  npm_config_audit_level: "high",
+  npm_config_engine_strict: "true",
+  npm_config_fund: "false",
+  npm_config_ignore_scripts: "true",
+  npm_config_minimum_release_age: "7",
+  npm_config_save_exact: "true",
+  npm_config_yes: "true"
+};
 
 export function knownFrameworks() {
   return Object.keys(FRAMEWORKS);
@@ -75,6 +84,7 @@ export function planFrameworkInstall(name, options = {}) {
       dependencies: options.package?.dependencies ?? [],
       argv,
       command,
+      installEnvironment: SAFE_NPM_EXEC_ENV,
       skipped: Boolean(alreadySucceeded && !options.force),
       skipReason: alreadySucceeded && !options.force ? "successful matching install attempt exists in lock; use --force to rerun" : null
     };
@@ -91,7 +101,14 @@ export function executeFrameworkInstallPlan(plan, options = {}) {
 
     const status = simulatedStatus(item.runtime);
     const result = status === null
-      ? spawnSync(item.argv[0], item.argv.slice(1), { stdio: "inherit", shell: process.platform === "win32" })
+      ? spawnSync(item.argv[0], item.argv.slice(1), {
+        stdio: "inherit",
+        shell: process.platform === "win32",
+        env: {
+          ...process.env,
+          ...(item.installEnvironment ?? SAFE_NPM_EXEC_ENV)
+        }
+      })
       : { status };
     attempts.push(attemptFromPlan(item, result.status === 0 ? "success" : "failed", result.status ?? 1, options.generatedAt));
   }

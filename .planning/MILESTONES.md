@@ -1,5 +1,49 @@
 # Milestones: AOF
 
+## v1.6 — Task Management
+
+**Status:** Shipped 2026-05-15
+**Started:** 2026-05-15
+**Completed:** 2026-05-15
+**Phases:** 28-32
+**Requirements:** 30/30 complete
+**Audit:** Passed with accepted process debt
+
+### Goal
+
+Add project-local kanban boards for deliverable-scoped task management, with GSD-backed milestone/phase synchronization, agent assignment, execution state, and a dedicated board UI.
+
+### Delivered
+
+1. Added file-backed `.aof/boards/<id>/BOARD.json` board state, task files, validation, and generated board index/cache.
+2. Added objective breakdown and proposal application for board tasks using GSD planning semantics.
+3. Added phase-linked task assignment and execution records with GSD ceremony command tracking.
+4. Added a separate `aof boards ui` surface with kanban columns, board navigation, progress visibility, and GSD sync/repair actions.
+5. Hardened GSD-backed board lifecycle: board objectives are mandatory, manual task creation is blocked until GSD sync rules are satisfied, and sync no longer imports the active roadmap implicitly.
+6. Added CLI-only board cleanup through `aof boards remove <id>` with `--dry-run`.
+7. Added supply-chain safety defaults and lockfile audit checks for the new UI dependency surface.
+
+### Progress
+
+- Phase 28: Board And Task State Foundation — complete 2026-05-15.
+- Phase 29: GSD Objective Breakdown — complete 2026-05-15.
+- Phase 30: Agent Assignment And Execution — complete 2026-05-15.
+- Phase 31: Kanban Setup UI — complete 2026-05-15.
+- Phase 32: Task Management Verification — complete 2026-05-15.
+
+### Archives
+
+- [v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
+- [v1.6-REQUIREMENTS.md](milestones/v1.6-REQUIREMENTS.md)
+- [v1.6-MILESTONE-AUDIT.md](milestones/v1.6-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- Per-phase Nyquist `VALIDATION.md` artifacts are accepted process debt for this milestone because milestone-level UAT was selected for closeout.
+- Global task hub, configurable execution policy, human collaboration, external tracker sync, and SQLite canonical storage remain future/out-of-scope items.
+
+---
+
 ## v1 — Assistant Configuration Foundation
 
 **Status:** Shipped 2026-05-07

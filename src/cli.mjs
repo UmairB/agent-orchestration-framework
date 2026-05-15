@@ -15,9 +15,9 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
-import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
-import { assignTaskToAgent, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -62,6 +62,11 @@ export async function run(argv) {
 async function boardsCommand(args) {
   const [subcommand, ...rest] = args;
 
+  if (subcommand === "ui") {
+    await boardsUiCommand(rest);
+    return;
+  }
+
   if (subcommand === "list") {
     await boardsListCommand(rest);
     return;
@@ -82,6 +87,11 @@ async function boardsCommand(args) {
     return;
   }
 
+  if (subcommand === "remove") {
+    await boardsRemoveCommand(rest);
+    return;
+  }
+
   if (subcommand === "validate") {
     await boardsValidateCommand(rest);
     return;
@@ -89,6 +99,16 @@ async function boardsCommand(args) {
 
   if (subcommand === "index") {
     await boardsIndexCommand(rest);
+    return;
+  }
+
+  if (subcommand === "sync") {
+    await boardsSyncCommand(rest);
+    return;
+  }
+
+  if (subcommand === "repair") {
+    await boardsRepairCommand(rest);
     return;
   }
 
@@ -112,7 +132,7 @@ async function boardsCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown boards command "${subcommand ?? ""}".\n\nExamples:\n  aof boards create release --title "Release" --objective "Ship v1"\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
+  throw new Error(`Unknown boards command "${subcommand ?? ""}".\n\nExamples:\n  aof boards create release --title "Release" --objective "Ship v1"\n  aof boards sync release\n  aof boards task move release phase-30 in_progress`);
 }
 
 async function boardsListCommand(args) {
@@ -136,18 +156,28 @@ async function boardsListCommand(args) {
 async function boardsCreateCommand(args) {
   const options = parseOptions(args);
   const [id] = options._;
-  if (!id) throw new Error("Usage: aof boards create <id> --title <title> [--objective text] [--json]");
+  if (!id || !options.objective) throw new Error("Usage: aof boards create <id> --title <title> --objective <text> [--runtime claude|codex] [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
+  const gsdConfigured = await isGsdExecutionConfigured(targetDir, options);
+  const runtime = hasRuntimeOptions(options) ? (parseRuntimes(options)[0] ?? "codex") : "codex";
   const result = await createBoard(targetDir, {
     id,
     title: options.title,
-    objective: options.objective ?? options.deliverable
+    objective: options.objective ?? options.deliverable,
+    executionProvider: gsdConfigured ? "gsd" : undefined,
+    defaultExecutionRuntime: runtime
   }, { force: Boolean(options.force), dryRun: Boolean(options.dryRun) });
   if (options.json) {
     printJson(result);
     return;
   }
   console.log(`${result.dryRun ? "Would create" : "Created"} board ${result.board.id}`);
+  if (result.board.executionProvider === "gsd") {
+    console.log(`execution: gsd runtime=${result.board.defaultExecutionRuntime}`);
+    console.log(`next: ${result.board.gsd.milestone.command}`);
+    console.log(`objective: ${result.board.gsd.milestone.objective}`);
+    console.log(`sync: ${result.board.gsd.taskCreation.syncCommand}`);
+  }
 }
 
 async function boardsShowCommand(args) {
@@ -164,6 +194,12 @@ async function boardsShowCommand(args) {
   console.log(`title: ${board.title}`);
   console.log(`objective: ${board.objective ?? ""}`);
   console.log(`status: ${board.status}`);
+  if (board.executionProvider) {
+    console.log(`execution: ${board.executionProvider} runtime=${board.defaultExecutionRuntime}`);
+    console.log(`milestone: ${board.gsd?.milestone?.status ?? "unknown"}`);
+    if (board.gsd?.milestone?.command) console.log(`next: ${board.gsd.milestone.command}`);
+    if (board.gsd?.taskCreation?.syncCommand) console.log(`sync: ${board.gsd.taskCreation.syncCommand}`);
+  }
   console.log(`tasks: ${board.tasks.length}`);
   for (const task of board.tasks) {
     console.log(`- ${task.id} status=${task.status} priority=${task.priority} title=${task.title}`);
@@ -183,6 +219,20 @@ async function boardsArchiveCommand(args) {
   console.log(`Archived board ${board.id}`);
 }
 
+async function boardsRemoveCommand(args) {
+  const options = parseOptions(args);
+  const [id] = options._;
+  if (!id) throw new Error("Usage: aof boards remove <id> [--dry-run] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await removeBoard(targetDir, id, { dryRun: Boolean(options.dryRun) });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`${result.dryRun ? "Would remove" : "Removed"} board ${result.id}`);
+  console.log(`path: ${relativeDisplayPath(result.boardDir, targetDir)}`);
+}
+
 async function boardsValidateCommand(args) {
   const options = parseOptions(args);
   const targetDir = path.resolve(options.target ?? process.cwd());
@@ -200,6 +250,42 @@ async function boardsIndexCommand(args) {
   }
   console.log(`Updated ${relativeDisplayPath(result.indexPath, targetDir)}`);
   console.log(`boards: ${result.index.boards.length}`);
+}
+
+async function boardsSyncCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  if (!boardId) throw new Error("Usage: aof boards sync <board-id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await syncBoardFromGsdRoadmap(targetDir, boardId, { dryRun: Boolean(options.dryRun) });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`${result.dryRun ? "Would sync" : "Synced"} board ${result.board.id} with GSD roadmap`);
+  console.log(`phases: ${result.phases.length}`);
+  console.log(`created: ${result.created.length}`);
+  for (const task of result.created) console.log(`- ${task.id} phase=${task.refs.phase} title=${task.title}`);
+  console.log(`add phase: ${result.board.gsd.taskCreation.addPhaseCommand}`);
+}
+
+async function boardsRepairCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  if (!boardId) throw new Error("Usage: aof boards repair <board-id> [--runtime claude|codex] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const runtime = hasRuntimeOptions(options) ? (parseRuntimes(options)[0] ?? "codex") : undefined;
+  const result = await repairBoard(targetDir, boardId, {
+    defaultExecutionRuntime: runtime,
+    dryRun: Boolean(options.dryRun)
+  });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(result.message);
+  if (result.command) console.log(`next: ${result.command}`);
+  if (result.board.gsd?.milestone?.objective) console.log(`objective: ${result.board.gsd.milestone.objective}`);
 }
 
 async function boardsTaskCommand(args) {
@@ -918,7 +1004,12 @@ async function assetsCleanCommand(args) {
 
 async function assetsUiCommand(args) {
   const options = parseOptions(args);
-  await setupUiCommand(options);
+  await setupUiCommand({ ...options, uiMode: "assets" });
+}
+
+async function boardsUiCommand(args) {
+  const options = parseOptions(args);
+  await setupUiCommand({ ...options, uiMode: "boards" });
 }
 
 async function packagesAddCommand(args) {
@@ -1148,27 +1239,32 @@ async function installCommand(args) {
     return;
   }
 
-  await setupUiCommand(options);
+  await setupUiCommand({ ...options, uiMode: "assets" });
 }
 
 async function setupUiCommand(options) {
+  const uiMode = options.uiMode === "boards" ? "boards" : "assets";
+  const command = uiMode === "boards" ? "aof boards ui" : "aof assets ui";
+  const description = uiMode === "boards" ? "board/task management UI" : "project/global asset editor";
+
   if (options.noServe || options.dryRun) {
     console.log("Setup UI not started.");
-    console.log("Run `aof assets ui` to open the local source asset editor.");
+    console.log(`Run \`${command}\` to open the local ${description}.`);
     return;
   }
 
-  const uiPort = Number.parseInt(options.port ?? "4177", 10);
-  const apiPort = 4178;
+  const defaultUiPort = uiMode === "boards" ? "4187" : "4177";
+  const uiPort = Number.parseInt(options.port ?? defaultUiPort, 10);
+  const apiPort = Number.parseInt(options.apiPort ?? String(uiPort + 1), 10);
   const { serveSetupUi } = await import("./setup-ui.mjs");
   const { server } = await serveSetupUi(null, { port: apiPort });
-  const frontend = startSetupUiFrontend(uiPort);
-  const uiUrl = `http://127.0.0.1:${uiPort}/`;
+  const frontend = startSetupUiFrontend(uiPort, uiMode, `http://127.0.0.1:${apiPort}`);
+  const uiUrl = `http://127.0.0.1:${uiPort}/?mode=${uiMode}`;
 
-  console.log("AOF setup UI is running locally.");
+  console.log(`AOF ${uiMode} UI is running locally.`);
   console.log(`Open this URL in your browser: ${uiUrl}`);
   console.log(`Project: ${process.cwd()}`);
-  console.log("Use the UI to create and edit project/global assets. Keep this terminal open while you use it.");
+  console.log(`Use the UI for ${description}. Keep this terminal open while you use it.`);
   console.log("Press Ctrl+C to stop the setup UI.");
 
   await new Promise((resolve, reject) => {
@@ -1192,7 +1288,7 @@ async function setupUiCommand(options) {
   });
 }
 
-function startSetupUiFrontend(port) {
+function startSetupUiFrontend(port, uiMode = "assets", apiUrl = "http://127.0.0.1:4178") {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const uiDir = path.join(repoRoot, "ui");
   const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
@@ -1201,6 +1297,8 @@ function startSetupUiFrontend(port) {
     stdio: "inherit",
     env: {
       ...process.env,
+      VITE_AOF_UI_MODE: uiMode,
+      VITE_AOF_API_URL: apiUrl,
       BROWSER: "none"
     }
   });
@@ -1626,7 +1724,7 @@ Assets:
   aof assets apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--dry-run] [--force] [--strict]
   aof assets validate [--global] [--json] [--strict]
   aof assets clean [--dry-run] [--force]
-  aof assets ui [--port 4177]
+  aof assets ui [--port 4177] [--api-port 4178]
 
 Packages:
   aof packages add gsd [--claude] [--codex] [--runtime claude,codex] [--source source]
@@ -1638,12 +1736,16 @@ Packages:
   aof packages install --from-lock [--dry-run] [--json]
 
 Boards:
+  aof boards ui [--port 4187] [--api-port 4188]
   aof boards list [--archived] [--json]
-  aof boards create id --title text [--objective text] [--json]
+  aof boards create id --title text --objective text [--runtime claude|codex] [--json]
   aof boards show id [--json]
   aof boards archive id [--json]
+  aof boards remove id [--dry-run] [--json]
   aof boards validate [--json] [--strict]
   aof boards index [--json]
+  aof boards sync id [--json]
+  aof boards repair id [--runtime claude|codex] [--json]
   aof boards agents [--json]
   aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]
   aof boards task move board-id task-id status [--json]
@@ -1662,7 +1764,9 @@ Defaults:
   packages add records package intent only and never runs installer code.
   packages install prints a network/package-code boundary before executing installers.
   boards stores canonical task state in .aof/boards and generated indexes in .aof/cache/boards.
+  GSD-backed boards start with $gsd-new-milestone and sync tasks from GSD roadmap phases.
   assets ui opens the project/global asset editor.
+  boards ui opens the board/task management UI.
   --strict promotes adapter warnings to command failures for CI.
 `;
 }

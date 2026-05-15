@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { KanbanBoard, KanbanCard, KanbanCards, KanbanHeader, KanbanProvider } from "@/components/ui/kanban";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -96,6 +97,12 @@ type BoardSummary = {
   title: string;
   objective: string;
   status: string;
+  executionProvider?: string | null;
+  defaultExecutionRuntime?: RuntimeId | null;
+  gsd?: {
+    milestone?: { status?: string; command?: string; syncCommand?: string; syncedAt?: string | null; roadmapPath?: string };
+    taskCreation?: { mode?: string; addPhaseCommand?: string; syncCommand?: string };
+  } | null;
   taskCount: number;
   counts: Record<BoardStatus, number>;
   tasks: BoardTask[];
@@ -127,6 +134,13 @@ type BoardAgent = {
   source: string;
 };
 
+type BoardKanbanItem = {
+  id: string;
+  name: string;
+  column: BoardStatus;
+  task: BoardTask;
+};
+
 const kinds: Array<{ id: ResourceKind; label: string; icon: React.ReactNode }> = [
   { id: "skill", label: "Skills", icon: <Library className="h-4 w-4" aria-hidden="true" /> },
   { id: "command", label: "Commands", icon: <Code2 className="h-4 w-4" aria-hidden="true" /> },
@@ -143,6 +157,7 @@ const sections: Array<{ id: SectionKind; label: string; icon: React.ReactNode }>
 ];
 
 function App() {
+  const uiMode = getUiMode();
   const [scope, setScope] = useState<"project" | "global">("project");
   const [payload, setPayload] = useState<ConfigPayload | null>(null);
   const [projectPayload, setProjectPayload] = useState<ConfigPayload | null>(null);
@@ -153,8 +168,12 @@ function App() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    void refreshConfig("project");
-  }, []);
+    if (uiMode === "assets") void refreshConfig("project");
+  }, [uiMode]);
+
+  if (uiMode === "boards") {
+    return <BoardsApp />;
+  }
 
   const activeResources = useMemo(() => {
     if (!payload || !isResourceKind(activeKind)) return [];
@@ -309,21 +328,7 @@ function App() {
               </button>
             ))}
             {scope === "project" ? <div className="pt-3">
-              <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Project Work</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveKind("boards");
-                  setSelectedId(null);
-                  setSelectedSource(scope);
-                  setDraft(null);
-                  setMessage("");
-                }}
-                className={`flex h-10 w-full items-center justify-between rounded-md px-3 text-left text-sm transition ${activeKind === "boards" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-              >
-                <span className="flex items-center gap-2"><Columns3 className="h-4 w-4" aria-hidden="true" />Boards</span>
-              </button>
-              <p className="mb-2 mt-3 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
+              <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
               {sections.map((section) => (
                 <button
                   key={section.id}
@@ -366,9 +371,7 @@ function App() {
 
         {message ? <div className="fixed bottom-4 right-4 z-10 max-w-md rounded-md border border-border bg-card p-3 text-sm shadow-lg">{message}</div> : null}
 
-        {activeKind === "boards" && scope === "project" ? (
-          <BoardsPanel />
-        ) : activeKind === "review" ? (
+        {activeKind === "review" ? (
           <ReviewPanel payload={payload} />
         ) : isSectionKind(activeKind) && scope === "project" ? (
           <SectionEditor activeSection={activeKind} payload={payload} refreshConfig={refreshConfig} />
@@ -428,6 +431,38 @@ function App() {
   );
 }
 
+function BoardsApp() {
+  return (
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="grid min-h-screen grid-cols-[280px_minmax(0,1fr)] max-[860px]:grid-cols-1">
+        <aside className="border-r border-border bg-sidebar p-5 max-[860px]:border-b max-[860px]:border-r-0">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <Columns3 className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold tracking-normal">AOF Boards</h1>
+              <p className="mono text-xs text-muted-foreground">Project task management</p>
+            </div>
+          </div>
+          <nav className="space-y-1">
+            <button
+              type="button"
+              className="flex h-10 w-full items-center justify-between rounded-md bg-primary px-3 text-left text-sm text-primary-foreground"
+            >
+              <span className="flex items-center gap-2"><Columns3 className="h-4 w-4" aria-hidden="true" />Boards</span>
+            </button>
+          </nav>
+          <div className="mt-6 rounded-md border border-border bg-background p-3">
+            <p className="text-sm text-muted-foreground">Manage board tasks, assignments, and execution state.</p>
+          </div>
+        </aside>
+        <BoardsPanel />
+      </div>
+    </main>
+  );
+}
+
 function BoardsPanel() {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
@@ -435,8 +470,8 @@ function BoardsPanel() {
   const [agents, setAgents] = useState<BoardAgent[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [message, setMessage] = useState("");
-  const [boardDraft, setBoardDraft] = useState({ id: "", title: "", objective: "" });
-  const [taskDraft, setTaskDraft] = useState({ id: "", title: "", description: "", priority: "normal", deliverable: "", phase: "" });
+  const [showBoardForm, setShowBoardForm] = useState(false);
+  const [boardDraft, setBoardDraft] = useState<{ id: string; title: string; objective: string; defaultExecutionRuntime: RuntimeId }>({ id: "", title: "", objective: "", defaultExecutionRuntime: "codex" });
 
   useEffect(() => {
     void refreshBoards();
@@ -477,50 +512,56 @@ function BoardsPanel() {
 
   async function createBoardFromDraft(event: React.FormEvent) {
     event.preventDefault();
-    if (!boardDraft.id || !boardDraft.title) {
-      setMessage("Board id and title are required.");
+    if (!boardDraft.id || !boardDraft.title || !boardDraft.objective) {
+      setMessage("Board id, title, and objective are required.");
       return;
     }
     const response = await fetch(`/api/boards/${encodeURIComponent(boardDraft.id)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: boardDraft.title, objective: boardDraft.objective })
+      body: JSON.stringify({ title: boardDraft.title, objective: boardDraft.objective, defaultExecutionRuntime: boardDraft.defaultExecutionRuntime })
     });
     const payload = await response.json();
     if (!response.ok || payload.ok === false) {
       setMessage(payload.error ?? "Board create failed");
       return;
     }
-    setMessage(`Created board ${payload.board.id}`);
-    setBoardDraft({ id: "", title: "", objective: "" });
+    const nextAction = payload.board.gsd?.milestone?.command ? ` Next: ${payload.board.gsd.milestone.command}` : "";
+    setMessage(`Created board ${payload.board.id}.${nextAction}`);
+    setBoardDraft({ id: "", title: "", objective: "", defaultExecutionRuntime: "codex" });
+    setShowBoardForm(false);
     await refreshBoards(payload.board.id);
   }
 
-  async function createTaskFromDraft(event: React.FormEvent) {
-    event.preventDefault();
-    if (!board || !taskDraft.id || !taskDraft.title) {
-      setMessage("Task id and title are required.");
-      return;
-    }
-    const refs = taskDraft.phase ? { phase: taskDraft.phase } : {};
-    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(taskDraft.id)}`, {
+  async function syncBoardFromRoadmap() {
+    if (!board) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/sync`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        title: taskDraft.title,
-        description: taskDraft.description,
-        priority: taskDraft.priority,
-        deliverable: taskDraft.deliverable,
-        refs
-      })
+      body: JSON.stringify({})
     });
     const payload = await response.json();
     if (!response.ok || payload.ok === false) {
-      setMessage(payload.error ?? "Task create failed");
+      setMessage(payload.error ?? "Roadmap sync failed");
       return;
     }
-    setMessage(`Created task ${payload.task.id}`);
-    setTaskDraft({ id: "", title: "", description: "", priority: "normal", deliverable: "", phase: "" });
+    setMessage(`Synced ${payload.created.length} task${payload.created.length === 1 ? "" : "s"} from ${payload.phases.length} GSD phase${payload.phases.length === 1 ? "" : "s"}.`);
+    await refreshBoards(board.id);
+  }
+
+  async function repairBoardMilestone() {
+    if (!board) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/repair`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultExecutionRuntime: board.defaultExecutionRuntime ?? "codex" })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Board repair failed");
+      return;
+    }
+    setMessage(payload.message ?? `Repaired ${board.id}`);
     await refreshBoards(board.id);
   }
 
@@ -556,7 +597,7 @@ function BoardsPanel() {
     await refreshBoards(board.id);
   }
 
-  async function saveTask(task: BoardTask, input: { title: string; priority: string; deliverable: string; phase: string }) {
+  async function saveTask(task: BoardTask, input: { title: string; priority: string; deliverable: string }) {
     if (!board) return;
     const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(task.id)}`, {
       method: "PATCH",
@@ -564,8 +605,7 @@ function BoardsPanel() {
       body: JSON.stringify({
         title: input.title,
         priority: input.priority,
-        deliverable: input.deliverable,
-        refs: input.phase ? { ...(task.refs ?? {}), phase: input.phase } : { ...(task.refs ?? {}) }
+        deliverable: input.deliverable
       })
     });
     const payload = await response.json();
@@ -589,36 +629,58 @@ function BoardsPanel() {
     await refreshBoards(null);
   }
 
+  function handleKanbanDataChange(items: BoardKanbanItem[]) {
+    if (!board) return;
+    const changed = items.find((item) => item.task.status !== item.column);
+    if (changed) void moveTask(changed.task, changed.column);
+  }
+
   const visibleDiagnostics = diagnostics.filter((item) => item.severity !== "info");
   const columns: BoardStatus[] = board?.columns ?? ["backlog", "ready", "in_progress", "blocked", "done"];
+  const kanbanColumns = columns.map((status) => ({ id: status, name: statusLabel(status) }));
+  const kanbanTasks: BoardKanbanItem[] = board?.tasks.map((task) => ({
+    id: task.id,
+    name: task.title,
+    column: task.status,
+    task
+  })) ?? [];
 
   return (
-    <section className="min-h-screen p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold">Boards</h2>
-          <p className="text-sm text-muted-foreground">{boards.length} project board{boards.length === 1 ? "" : "s"}</p>
-        </div>
-        <Button type="button" variant="secondary" onClick={() => void refreshBoards()}>
-          <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-          Refresh
-        </Button>
-      </div>
-
+    <section className="min-h-screen min-w-0 bg-background">
       {message ? <p className="mb-4 rounded-md border border-border bg-card p-3 text-sm">{message}</p> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="space-y-4">
-          <form className="space-y-3 rounded-md border border-border bg-card p-3" onSubmit={createBoardFromDraft}>
-            <h3 className="text-sm font-semibold">New board</h3>
-            <Input placeholder="id" value={boardDraft.id} onChange={(event) => setBoardDraft({ ...boardDraft, id: event.target.value })} />
-            <Input placeholder="title" value={boardDraft.title} onChange={(event) => setBoardDraft({ ...boardDraft, title: event.target.value })} />
-            <Textarea placeholder="objective" value={boardDraft.objective} onChange={(event) => setBoardDraft({ ...boardDraft, objective: event.target.value })} />
-            <Button type="submit" className="w-full">
-              <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-              Create
+      <div className="grid min-h-screen min-w-0 grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-1">
+        <aside className="border-r border-border bg-sidebar p-4 max-[980px]:border-b max-[980px]:border-r-0">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Boards</h2>
+              <p className="text-sm text-muted-foreground">{boards.length} project board{boards.length === 1 ? "" : "s"}</p>
+            </div>
+            <Button type="button" size="sm" onClick={() => setShowBoardForm((value) => !value)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
             </Button>
-          </form>
+          </div>
+
+          {showBoardForm ? (
+            <form className="mb-4 space-y-3 rounded-md border border-border bg-card p-3" onSubmit={createBoardFromDraft}>
+              <h3 className="text-sm font-semibold">New board</h3>
+              <Input placeholder="id" value={boardDraft.id} onChange={(event) => setBoardDraft({ ...boardDraft, id: event.target.value })} />
+              <Input placeholder="title" value={boardDraft.title} onChange={(event) => setBoardDraft({ ...boardDraft, title: event.target.value })} />
+              <Textarea placeholder="objective" value={boardDraft.objective} onChange={(event) => setBoardDraft({ ...boardDraft, objective: event.target.value })} />
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                value={boardDraft.defaultExecutionRuntime}
+                onChange={(event) => setBoardDraft({ ...boardDraft, defaultExecutionRuntime: event.target.value as RuntimeId })}
+              >
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" onClick={() => setShowBoardForm(false)}>Cancel</Button>
+                <Button type="submit">Create</Button>
+              </div>
+            </form>
+          ) : null}
 
           <div className="space-y-2">
             {boards.length === 0 ? <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">No boards.</div> : boards.map((item) => (
@@ -635,7 +697,7 @@ function BoardsPanel() {
             ))}
           </div>
 
-          <div className="rounded-md border border-border bg-background p-3">
+          <div className="mt-4 rounded-md border border-border bg-background p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <p className="text-sm font-semibold">Diagnostics</p>
               <Badge variant={visibleDiagnostics.some((item) => item.severity === "error") ? "destructive" : "secondary"}>{visibleDiagnostics.length}</Badge>
@@ -644,9 +706,14 @@ function BoardsPanel() {
               <StatusLine key={`${item.code}-${item.path}-${item.message}`} ok={item.severity !== "error"} text={`${item.code}: ${item.message}`} />
             ))}
           </div>
+
+          <Button type="button" variant="secondary" className="mt-4 w-full" onClick={() => void refreshBoards()}>
+            <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+            Refresh
+          </Button>
         </aside>
 
-        <div className="min-w-0">
+        <div className="min-w-0 p-5">
           {!board ? (
             <div className="rounded-md border border-dashed border-border p-8 text-sm text-muted-foreground">Select or create a board.</div>
           ) : (
@@ -656,6 +723,13 @@ function BoardsPanel() {
                   <p className="mono text-xs text-muted-foreground">{board.id}</p>
                   <h3 className="text-xl font-semibold">{board.title}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">{board.objective || "No objective."}</p>
+                  {board.executionProvider ? (
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      <Badge variant="secondary">{board.executionProvider}</Badge>
+                      {board.defaultExecutionRuntime ? <Badge variant="secondary">{board.defaultExecutionRuntime}</Badge> : null}
+                      <Badge variant="secondary">milestone {board.gsd?.milestone?.status ?? "unknown"}</Badge>
+                    </div>
+                  ) : null}
                 </div>
                 <Button type="button" variant="secondary" onClick={() => void archiveBoard()}>
                   <Archive className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -663,43 +737,57 @@ function BoardsPanel() {
                 </Button>
               </div>
 
-              <form className="grid gap-3 rounded-md border border-border bg-card p-4 lg:grid-cols-[160px_minmax(180px,1fr)_minmax(180px,1fr)_120px_140px_auto]" onSubmit={createTaskFromDraft}>
-                <Input placeholder="task id" value={taskDraft.id} onChange={(event) => setTaskDraft({ ...taskDraft, id: event.target.value })} />
-                <Input placeholder="title" value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} />
-                <Input placeholder="deliverable" value={taskDraft.deliverable} onChange={(event) => setTaskDraft({ ...taskDraft, deliverable: event.target.value })} />
-                <Input placeholder="phase" value={taskDraft.phase} onChange={(event) => setTaskDraft({ ...taskDraft, phase: event.target.value })} />
-                <Input placeholder="priority" value={taskDraft.priority} onChange={(event) => setTaskDraft({ ...taskDraft, priority: event.target.value })} />
-                <Button type="submit">
-                  <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-                  Task
-                </Button>
-              </form>
+              {board.executionProvider === "gsd" ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
+                  <div>
+                    <p className="text-sm font-semibold">{board.gsd?.milestone?.status === "synced" ? "GSD milestone synced" : "GSD milestone setup required"}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {board.gsd?.milestone?.status === "synced"
+                        ? `Add new tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then sync the board.`
+                        : `Run ${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} to create the backing roadmap before tasks are available.`}
+                    </p>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={() => void syncBoardFromRoadmap()}>
+                    <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+                    Sync Phases
+                  </Button>
+                  {board.gsd?.milestone?.roadmapPath ? null : (
+                    <Button type="button" variant="secondary" onClick={() => void repairBoardMilestone()}>
+                      <ShieldAlert className="mr-2 h-4 w-4" aria-hidden="true" />
+                      Repair
+                    </Button>
+                  )}
+                </div>
+              ) : null}
 
-              <div className="grid gap-3 min-[1180px]:grid-cols-5">
-                {columns.map((status) => {
-                  const tasks = board.tasks.filter((task) => task.status === status);
-                  return (
-                    <section key={status} className="min-w-0 rounded-md border border-border bg-background">
-                      <div className="flex items-center justify-between gap-3 border-b border-border p-3">
-                        <h4 className="text-sm font-semibold">{statusLabel(status)}</h4>
-                        <Badge variant="secondary">{tasks.length}</Badge>
-                      </div>
-                      <div className="space-y-2 p-2">
-                        {tasks.length === 0 ? <p className="p-2 text-sm text-muted-foreground">Empty</p> : tasks.map((task) => (
-                          <TaskBoardCard
-                            key={task.id}
-                            task={task}
-                            agents={agents}
-                            columns={columns}
-                            onMove={moveTask}
-                            onAssign={assignTask}
-                            onSave={saveTask}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
+              <div className="min-h-[520px] min-w-0">
+                <KanbanProvider columns={kanbanColumns} data={kanbanTasks} onDataChange={handleKanbanDataChange} className="h-full">
+                  {(column) => {
+                    const count = kanbanTasks.filter((task) => task.column === column.id).length;
+                    return (
+                      <KanbanBoard id={column.id} key={column.id} className="h-full">
+                        <KanbanHeader className="flex items-center justify-between gap-3">
+                          <span>{column.name}</span>
+                          <Badge variant="secondary">{count}</Badge>
+                        </KanbanHeader>
+                        <KanbanCards<BoardKanbanItem> id={column.id}>
+                          {(item) => (
+                            <KanbanCard key={item.id} {...item}>
+                              <TaskBoardCard
+                                task={item.task}
+                                agents={agents}
+                                columns={columns}
+                                onMove={moveTask}
+                                onAssign={assignTask}
+                                onSave={saveTask}
+                              />
+                            </KanbanCard>
+                          )}
+                        </KanbanCards>
+                      </KanbanBoard>
+                    );
+                  }}
+                </KanbanProvider>
               </div>
             </div>
           )}
@@ -715,15 +803,15 @@ function TaskBoardCard({ task, agents, columns, onMove, onAssign, onSave }: {
   columns: BoardStatus[];
   onMove: (task: BoardTask, status: BoardStatus) => Promise<void>;
   onAssign: (task: BoardTask, agentId: string) => Promise<void>;
-  onSave: (task: BoardTask, input: { title: string; priority: string; deliverable: string; phase: string }) => Promise<void>;
+  onSave: (task: BoardTask, input: { title: string; priority: string; deliverable: string }) => Promise<void>;
 }) {
   const [agentId, setAgentId] = useState(task.assignedAgent?.id ?? agents[0]?.id ?? "");
   const [title, setTitle] = useState(task.title);
   const [priority, setPriority] = useState(task.priority ?? "normal");
   const [deliverable, setDeliverable] = useState(task.deliverable ?? "");
-  const [phase, setPhase] = useState(typeof task.refs?.phase === "string" ? task.refs.phase : "");
+  const phase = typeof task.refs?.phase === "string" ? task.refs.phase : "";
   return (
-    <article className="rounded-md border border-border bg-card p-3 text-sm">
+    <article className="text-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="mono truncate text-xs text-muted-foreground">{task.id}</p>
@@ -738,10 +826,7 @@ function TaskBoardCard({ task, agents, columns, onMove, onAssign, onSave }: {
         {task.assignedAgent ? <Badge>{task.assignedAgent.id}</Badge> : null}
       </div>
       <div className="mt-3 grid gap-2">
-        <div className="grid grid-cols-2 gap-2">
-          <Input className="h-8" placeholder="priority" value={priority} onChange={(event) => setPriority(event.target.value)} />
-          <Input className="h-8" placeholder="phase" value={phase} onChange={(event) => setPhase(event.target.value)} />
-        </div>
+        <Input className="h-8" placeholder="priority" value={priority} onChange={(event) => setPriority(event.target.value)} />
         <select
           className="h-9 rounded-md border border-input bg-background px-2 text-sm"
           value={task.status}
@@ -761,7 +846,7 @@ function TaskBoardCard({ task, agents, columns, onMove, onAssign, onSave }: {
             <PlayCircle className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => void onSave(task, { title, priority, deliverable, phase })}>
+        <Button type="button" size="sm" variant="secondary" onClick={() => void onSave(task, { title, priority, deliverable })}>
           <Save className="mr-2 h-4 w-4" aria-hidden="true" />
           Save
         </Button>
@@ -1657,6 +1742,14 @@ function executionVariant(status: ExecutionStatus) {
   if (status === "failed" || status === "blocked") return "destructive" as const;
   if (status === "complete") return "default" as const;
   return "secondary" as const;
+}
+
+function getUiMode() {
+  const mode = new URLSearchParams(window.location.search).get("mode");
+  if (mode === "boards" || mode === "assets") return mode;
+
+  const envMode = (import.meta as ImportMeta & { env?: { VITE_AOF_UI_MODE?: string } }).env?.VITE_AOF_UI_MODE;
+  return envMode === "boards" ? "boards" : "assets";
 }
 
 function kindHint(kind: ResourceKind) {

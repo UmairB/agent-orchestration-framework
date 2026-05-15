@@ -12,7 +12,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:4178"
+      "/api": process.env.VITE_AOF_API_URL ?? "http://127.0.0.1:4178"
     }
   }
 });

@@ -2,6 +2,7 @@ import path from "node:path";
 import { access, readFile } from "node:fs/promises";
 import { loadProjectConfig } from "./dsl.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
+import { gsdPackageFromConfig } from "./frameworks.mjs";
 import { boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
 import { findProjectConfig } from "./workspace.mjs";
 
@@ -22,6 +23,13 @@ export async function listBoardAgents(projectDir, options = {}) {
       source: agent._aofSource?.scope ?? "local"
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export async function isGsdExecutionConfigured(projectDir, options = {}) {
+  const configPath = await findProjectConfig(projectDir, options.config);
+  if (!await exists(configPath)) return false;
+  const config = await loadProjectConfig(configPath, options);
+  return Boolean(gsdPackageFromConfig(config));
 }
 
 export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, options = {}) {
