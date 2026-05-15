@@ -1,13 +1,13 @@
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.5 Runtime Semantics And Workflow Assets
-**Current phase:** v1.5 complete
-**Status:** v1.5 complete and archived
+**Current milestone:** v1.6 Task Management
+**Current phase:** Not started
+**Status:** Defining requirements and roadmap
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-15 after v1.5 closeout)
+See: `.planning/PROJECT.md` (updated 2026-05-15 after v1.6 start)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -21,19 +21,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-Planning next milestone. v1.5 is complete, audited, archived, and ready for successor scope selection.
+v1.6 Task Management is active. The milestone adds project-local kanban boards for deliverable-scoped tasks, canonical file-backed task state with a generated UI index/cache, GSD objective breakdown, automatic agent execution on assignment, and UI progress visibility.
 
 ## Current Position
 
-Phase: next milestone selection
-Plan: complete
-Status: All v1.5 phases complete, verified, audited, and archived
-Last activity: 2026-05-15 - v1.5 milestone closeout finalized
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-15 - Milestone v1.6 Task Management started
 
 ## Resume
 
-**Stopped at:** v1.5 milestone complete
-**Resume file:** `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`
+**Stopped at:** v1.6 milestone initialization
+**Resume file:** `.planning/REQUIREMENTS.md`
 
 ## Memory
 
@@ -150,6 +150,7 @@ Last activity: 2026-05-15 - v1.5 milestone closeout finalized
 - Phase 26 discussion, planning, and execution completed on 2026-05-14 with setup UI Simple/Workflow-backed mode controls, workflow-backed resource save semantics, wrapper argument editing, disabled unsupported runtime toggles, skill/workflow reference insertion, README updates, setup UI BDD coverage, UI build verification, and PowerShell BDD parity. Verification is captured in `.planning/phases/26-workflow-backed-setup-ui/26-VERIFICATION.md`.
 - Phase 27 verification completed on 2026-05-14 with coverage audit, live disposable GSD-style UAT, `npm run test:unit`, `npm test`, `npm run ui:build`, `npm run test:integration:ps`, and `npm run check` passing. Verification is captured in `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`.
 - Milestone v1.5 was audited and archived on 2026-05-14 in `.planning/milestones/v1.5-ROADMAP.md`, `.planning/milestones/v1.5-REQUIREMENTS.md`, and `.planning/milestones/v1.5-MILESTONE-AUDIT.md`.
+- Milestone v1.6 started on 2026-05-15 as Task Management. Locked initial decisions: start with project-local boards, use hybrid file-canonical plus generated index/cache task state, and automatically start GSD agent execution when a task is assigned to an agent.
 
 ## Deferred Items
 

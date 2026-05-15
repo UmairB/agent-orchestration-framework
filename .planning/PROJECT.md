@@ -24,6 +24,18 @@ The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, 
 - `{{skills.*}}` and `{{workflows.*}}` placeholders validate and expand per runtime.
 - Setup UI supports Simple / Workflow-backed modes, argument controls, unsupported runtime disabling, and reference insertion.
 
+## Current Milestone: v1.6 Task Management
+
+**Goal:** Add project-local kanban boards for deliverable-scoped tasks, backed by GSD planning/task files, with UI-visible progress and automatic GSD agent execution when tasks are assigned.
+
+**Target features:**
+- Multiple kanban boards per project, each tied to a deliverable or objective.
+- Task records with status, assignment, progress, execution metadata, and links back to GSD planning artifacts.
+- Hybrid task state: project files are canonical, with a generated index/cache for fast setup UI reads.
+- GSD-powered objective breakdown into roadmap/task structures.
+- Agent assignment starts execution automatically and reflects progress/failure state in the UI.
+- Global `.aof` task sync remains deferred, with IDs and storage boundaries designed so a future global hub is not blocked.
+
 ## Core Value
 
 Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
@@ -83,7 +95,11 @@ Users can configure assistant skills, commands, agents, rules/instructions, work
 
 ### Active
 
-No active milestone requirements. Define the next milestone with `$gsd-new-milestone`.
+- [ ] Add project-local kanban boards for deliverable-scoped tasks.
+- [ ] Store board/task state in canonical project files with a generated cache/index for UI queries.
+- [ ] Use GSD to break an objective into roadmap/task structures.
+- [ ] Support assigning tasks to agents and automatically starting execution.
+- [ ] Show task and execution progress in the setup UI.
 
 ### Out of Scope
 
@@ -92,6 +108,7 @@ No active milestone requirements. Define the next milestone with `$gsd-new-miles
 - Assigning tasks to agents or tracking agent execution progress — deferred until the core `.aof/` model and runtime adapters are stable.
 - Runtime support beyond Claude Code and Codex — design should not block future assistants, but v1 ships concrete support for these two.
 - Treating generated `.claude/` and `.codex/` folders as source of truth — they are synchronized output from `.aof/`.
+- Cross-project/global task hub synchronization — v1.6 starts with project-local boards and a forward-compatible state boundary.
 
 ## Context
 
@@ -166,10 +183,13 @@ v1.4 responds to live first-run and command review findings from v1.3. The exist
 | Simple assets do not support arguments | Argument handling differs by runtime and belongs in workflow-backed wrappers, not simple direct assets | Implemented in v1.5 |
 | Generated workflow files live under runtime `.aof/workflows/` folders | Workflow files are generated AOF-owned support files, separate from user-facing command/skill wrappers | Implemented in v1.5 |
 | Runtime path placeholders use `{{skills.*}}` and `{{workflows.*}}` only | Explicit namespaces keep references unambiguous and avoid unsupported command references | Implemented in v1.5 |
+| v1.6 task boards are project-local first | The immediate user workflow is managing tasks for one project deliverable; global aggregation can build on stable project semantics later | Planned for v1.6 |
+| Task files remain canonical and indexes are generated | This preserves GSD/AOF's file-backed workflow while allowing fast setup UI queries | Planned for v1.6 |
+| Assigning an agent starts execution automatically | The selected workflow should reduce manual steps once task ownership is explicit | Planned for v1.6 |
 
 ## Next Milestone Goals
 
-Broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
+After project-local task management is stable, global task synchronization, broader runtime support, UI-driven asset/package execution, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
 
 ## Evolution
 
@@ -189,4 +209,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-15 after completing v1.5 Runtime Semantics And Workflow Assets*
+*Last updated: 2026-05-15 after starting v1.6 Task Management*
