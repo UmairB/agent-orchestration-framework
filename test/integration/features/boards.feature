@@ -67,3 +67,36 @@ Feature: Board and task state
     When I run `boards breakdown apply delivery api-proposal-2`
     Then the command should fail
     And stderr should contain `conflicts with existing tasks`
+
+  Scenario: Assign a phase-linked task to a configured agent and start GSD execution
+    Given a project with a board execution agent
+    When I run `boards create delivery --title Delivery`
+    Then the command should succeed
+    When I run `boards task add delivery phase-30 --title "Phase 30" --refs '{"phase":"30"}'`
+    Then the command should succeed
+    When I run `boards agents`
+    Then stdout should contain `builder`
+    When I run `boards task assign delivery phase-30 builder`
+    Then the command should succeed
+    And stdout should contain `Started gsd execution status=running phase=30`
+    And stdout should contain `$gsd-discuss-phase 30`
+    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "running"`
+    When I run `boards execution update delivery phase-30 --status waiting_for_user --message "Need input"`
+    Then the command should succeed
+    And stdout should contain `Task status: in_progress`
+    And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"waiting_for_user"`
+
+  Scenario: Reject assignments for unknown agents or tasks without GSD phase refs
+    Given a project with a board execution agent
+    When I run `boards create delivery --title Delivery`
+    Then the command should succeed
+    When I run `boards task add delivery phase-30 --title "Phase 30" --refs '{"phase":"30"}'`
+    Then the command should succeed
+    When I run `boards task assign delivery phase-30 missing-agent`
+    Then the command should fail
+    And stderr should contain `Unknown agent "missing-agent"`
+    When I run `boards task add delivery missing-phase --title "Missing Phase"`
+    Then the command should succeed
+    When I run `boards task assign delivery missing-phase builder`
+    Then the command should fail
+    And stderr should contain `without refs.phase`

@@ -94,9 +94,11 @@ Previous milestone details are archived under `.planning/milestones/`.
 4. Execution logs and handoff context are inspectable and resumable.
 
 **Plans:**
-- Wave 1: Agent registry and assignment model
-- Wave 2: Auto-run execution lifecycle integration
-- Wave 3: Failure/resume state, logs, and BDD coverage
+- ✅ [Wave 1: Agent registry and assignment model](phases/30-agent-assignment-and-execution/30-01-PLAN.md)
+- ✅ [Wave 2: Auto-run execution lifecycle integration](phases/30-agent-assignment-and-execution/30-02-PLAN.md)
+- ✅ [Wave 3: Failure/resume state, logs, and BDD coverage](phases/30-agent-assignment-and-execution/30-03-PLAN.md)
+
+**Verification:** [30-VERIFICATION.md](phases/30-agent-assignment-and-execution/30-VERIFICATION.md)
 
 ### Phase 31: Kanban Setup UI
 

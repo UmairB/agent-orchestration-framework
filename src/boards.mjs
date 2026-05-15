@@ -132,6 +132,20 @@ export async function moveTask(projectDir, boardId, taskId, status) {
   return next;
 }
 
+export async function updateTask(projectDir, boardId, taskId, updater) {
+  const paths = boardWorkspacePaths(projectDir);
+  const normalizedBoardId = normalizeId(boardId);
+  const normalizedTaskId = normalizeId(taskId);
+  const taskPath = taskFilePath(paths, normalizedBoardId, normalizedTaskId);
+  const task = await readJsonFile(taskPath);
+  if (task.boardId !== normalizedBoardId || task.id !== normalizedTaskId) {
+    throw new Error(`Task identity mismatch for ${normalizedBoardId}/${normalizedTaskId}.`);
+  }
+  const next = await updater(task);
+  await writeText(taskPath, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
+
 export async function buildBoardIndex(projectDir) {
   const paths = boardWorkspacePaths(projectDir);
   const boards = [];
@@ -238,6 +252,8 @@ function taskSummary(task) {
     priority: task.priority,
     deliverable: task.deliverable ?? "",
     refs: task.refs ?? {},
+    assignedAgent: task.assignedAgent ?? null,
+    execution: task.execution ?? null,
     updatedAt: task.updatedAt
   };
 }
@@ -281,7 +297,19 @@ function validateTaskShape(task, board, diagnostics, pathName) {
   if (task.refs !== undefined && (typeof task.refs !== "object" || task.refs === null || Array.isArray(task.refs))) {
     diagnostics.push(error("TASK_INVALID_REFS", pathName, "Task refs must be an object when provided."));
   }
+  if (task.execution !== undefined) validateExecutionSummary(task.execution, diagnostics, pathName);
   if (!Array.isArray(task.history)) diagnostics.push(error("TASK_INVALID_HISTORY", pathName, "Task history must be an array."));
+}
+
+function validateExecutionSummary(execution, diagnostics, pathName) {
+  if (!execution || typeof execution !== "object" || Array.isArray(execution)) {
+    diagnostics.push(error("TASK_INVALID_EXECUTION", pathName, "Task execution must be an object when provided."));
+    return;
+  }
+  const validStatuses = new Set(["queued", "running", "waiting_for_user", "blocked", "failed", "complete"]);
+  if (!validStatuses.has(execution.status)) {
+    diagnostics.push(error("TASK_INVALID_EXECUTION_STATUS", pathName, "Task execution status must be queued, running, waiting_for_user, blocked, failed, or complete."));
+  }
 }
 
 async function tryReadIndex(paths, diagnostics) {

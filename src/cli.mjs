@@ -17,6 +17,7 @@ import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalCon
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
 import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
+import { assignTaskToAgent, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -93,6 +94,16 @@ async function boardsCommand(args) {
 
   if (subcommand === "task") {
     await boardsTaskCommand(rest);
+    return;
+  }
+
+  if (subcommand === "agents") {
+    await boardsAgentsCommand(rest);
+    return;
+  }
+
+  if (subcommand === "execution") {
+    await boardsExecutionCommand(rest);
     return;
   }
 
@@ -201,7 +212,36 @@ async function boardsTaskCommand(args) {
     await boardsTaskMoveCommand(rest);
     return;
   }
+  if (subcommand === "assign") {
+    await boardsTaskAssignCommand(rest);
+    return;
+  }
   throw new Error(`Unknown boards task command "${subcommand ?? ""}".\n\nExamples:\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
+}
+
+async function boardsAgentsCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const agents = await listBoardAgents(targetDir, options);
+  if (options.json) {
+    printJson({ agents });
+    return;
+  }
+  console.log(`agents: ${agents.length}`);
+  for (const agent of agents) console.log(`- ${agent.id} source=${agent.source} runtimes=${agent.runtimes.join(",")}`);
+}
+
+async function boardsExecutionCommand(args) {
+  const [subcommand, ...rest] = args;
+  if (subcommand === "show") {
+    await boardsExecutionShowCommand(rest);
+    return;
+  }
+  if (subcommand === "update") {
+    await boardsExecutionUpdateCommand(rest);
+    return;
+  }
+  throw new Error(`Unknown boards execution command "${subcommand ?? ""}".\n\nExamples:\n  aof boards execution show release wire-api\n  aof boards execution update release wire-api --status waiting_for_user --message "Need input"`);
 }
 
 async function boardsBreakdownCommand(args) {
@@ -322,6 +362,57 @@ async function boardsTaskMoveCommand(args) {
     return;
   }
   console.log(`Moved task ${task.boardId}/${task.id} to ${task.status}`);
+}
+
+async function boardsTaskAssignCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, taskId, agentId] = options._;
+  if (!boardId || !taskId || !agentId) throw new Error("Usage: aof boards task assign <board-id> <task-id> <agent-id> [--provider gsd] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await assignTaskToAgent(targetDir, boardId, taskId, agentId, options);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`Assigned task ${result.task.boardId}/${result.task.id} to ${result.execution.assignedAgent.id}`);
+  console.log(`Started ${result.execution.provider} execution status=${result.execution.status} phase=${result.execution.phase}`);
+  for (const command of result.execution.commands) console.log(`- ${command}`);
+}
+
+async function boardsExecutionShowCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, taskId] = options._;
+  if (!boardId || !taskId) throw new Error("Usage: aof boards execution show <board-id> <task-id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await readTaskExecution(targetDir, boardId, taskId);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`execution: ${result.execution.boardId}/${result.execution.taskId}`);
+  console.log(`provider: ${result.execution.provider}`);
+  console.log(`status: ${result.execution.status}`);
+  console.log(`agent: ${result.execution.assignedAgent.id}`);
+  console.log(`phase: ${result.execution.phase}`);
+  for (const log of result.execution.logs ?? []) console.log(`- ${log.at} ${log.message}`);
+}
+
+async function boardsExecutionUpdateCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, taskId] = options._;
+  if (!boardId || !taskId || !options.status) throw new Error("Usage: aof boards execution update <board-id> <task-id> --status <status> [--message text] [--handoff text] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await updateTaskExecution(targetDir, boardId, taskId, {
+    status: options.status,
+    message: options.message,
+    handoff: options.handoff
+  });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`Updated execution ${result.execution.boardId}/${result.execution.taskId} to ${result.execution.status}`);
+  console.log(`Task status: ${result.task.status}`);
 }
 
 async function assetsCommand(args) {
@@ -1553,8 +1644,12 @@ Boards:
   aof boards archive id [--json]
   aof boards validate [--json] [--strict]
   aof boards index [--json]
+  aof boards agents [--json]
   aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]
   aof boards task move board-id task-id status [--json]
+  aof boards task assign board-id task-id agent-id [--provider gsd] [--json]
+  aof boards execution show board-id task-id [--json]
+  aof boards execution update board-id task-id --status status [--message text] [--handoff text] [--json]
   aof boards breakdown board-id --objective text [--id proposal-id] [--json]
   aof boards breakdown show board-id proposal-id [--json]
   aof boards breakdown apply board-id proposal-id [--json]

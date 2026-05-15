@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { serveSetupUi } from "../src/setup-ui.mjs";
@@ -461,6 +461,16 @@ async function keepsStaticPathsInsideUiRoot() {
 
 async function managesBoardApis() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  await mkdir(path.join(targetDir, ".aof"), { recursive: true });
+  await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
+    $schema: "../schemas/aof.schema.json",
+    name: "setup-board-api",
+    resources: [
+      { kind: "agent", id: "builder", description: "Builder", body: "Build the task." }
+    ],
+    globalRefs: [],
+    packages: []
+  }, null, 2)}\n`, "utf8");
   const catalog = {
     listItems: () => [],
     upsertItem: () => {}
@@ -489,8 +499,28 @@ async function managesBoardApis() {
     });
     assert.equal(move.task.status, "in_progress");
 
+    const agents = await fetchJson(`${url}api/boards/agents`);
+    assert.equal(agents.agents[0].id, "builder");
+
+    const assignment = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/assignment`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId: "builder" })
+    });
+    assert.equal(assignment.execution.status, "running");
+
+    const execution = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`);
+    assert.equal(execution.execution.commands[0], "$gsd-discuss-phase 28");
+
+    const waiting = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "waiting_for_user", message: "Need input." })
+    });
+    assert.equal(waiting.task.status, "in_progress");
+
     const show = await fetchJson(`${url}api/boards/delivery`);
-    assert.equal(show.board.tasks[0].history.length, 2);
+    assert.equal(show.board.tasks[0].execution.status, "waiting_for_user");
 
     const index = await fetchJson(`${url}api/boards/index`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
     assert.equal(index.index.boards[0].taskCount, 1);

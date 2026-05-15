@@ -366,6 +366,19 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  if (step === "a project with a board execution agent") {
+    await runSharedCliStep(context, "an empty project");
+    await writeAofProject(context, [{
+      kind: "agent",
+      id: "builder",
+      description: "Builder agent",
+      path: "assets/agents/builder/AGENT.md",
+      bodyPath: "assets/agents/builder/AGENT.md",
+      body: "Build assigned board tasks."
+    }]);
+    return;
+  }
+
   if (step === "a project with referenced global skill helper file placeholders") {
     await runSharedCliStep(context, "an empty project");
     await writeGlobalAofResource(context, {

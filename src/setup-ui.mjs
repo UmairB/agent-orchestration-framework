@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { assignTaskToAgent, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -126,6 +127,15 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
+    if (request.method === "GET" && requestUrl.pathname === "/api/boards/agents") {
+      try {
+        sendJson(response, 200, { ok: true, agents: await listBoardAgents(projectDir, options) });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
     if (request.method === "PUT") {
       const boardCreateMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)$/);
       if (boardCreateMatch) {
@@ -194,6 +204,50 @@ export async function serveSetupUi(catalog, options = {}) {
         }
         const task = await moveTask(projectDir, decodeRoutePart(taskStatusMatch[1]), decodeRoutePart(taskStatusMatch[2]), item.status);
         sendJson(response, 200, { ok: true, task });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskAssignmentMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/assignment$/);
+    if (request.method === "PUT" && taskAssignmentMatch) {
+      try {
+        const item = await readJsonBody(request);
+        if (!item.agentId) {
+          sendApiError(response, 400, "Agent id is required.", "validation-failed");
+          return;
+        }
+        const result = await assignTaskToAgent(projectDir, decodeRoutePart(taskAssignmentMatch[1]), decodeRoutePart(taskAssignmentMatch[2]), item.agentId, {
+          ...options,
+          provider: item.provider
+        });
+        sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskExecutionMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/execution$/);
+    if (request.method === "GET" && taskExecutionMatch) {
+      try {
+        const result = await readTaskExecution(projectDir, decodeRoutePart(taskExecutionMatch[1]), decodeRoutePart(taskExecutionMatch[2]));
+        sendJson(response, 200, { ok: true, execution: result.execution, executionPath: result.executionPath });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+    if (request.method === "PUT" && taskExecutionMatch) {
+      try {
+        const item = await readJsonBody(request);
+        if (!item.status) {
+          sendApiError(response, 400, "Execution status is required.", "validation-failed");
+          return;
+        }
+        const result = await updateTaskExecution(projectDir, decodeRoutePart(taskExecutionMatch[1]), decodeRoutePart(taskExecutionMatch[2]), item);
+        sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
       }

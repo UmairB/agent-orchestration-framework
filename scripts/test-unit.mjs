@@ -16,8 +16,10 @@ import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
 import { packageTests } from "../test/packages.test.mjs";
 import { boardTests } from "../test/boards.test.mjs";
 import { boardBreakdownTests } from "../test/board-breakdown.test.mjs";
+import { boardExecutionTests } from "../test/board-execution.test.mjs";
 
 const tests = [
+  ...boardExecutionTests,
   ...boardBreakdownTests,
   ...boardTests,
   ...adapterWarningTests,

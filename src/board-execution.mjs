@@ -1,0 +1,232 @@
+import path from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { loadProjectConfig } from "./dsl.mjs";
+import { normalizeId, writeText } from "./fs.mjs";
+import { boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
+import { findProjectConfig } from "./workspace.mjs";
+
+export const EXECUTION_STATUSES = Object.freeze(["queued", "running", "waiting_for_user", "blocked", "failed", "complete"]);
+const EXECUTION_STATUS_SET = new Set(EXECUTION_STATUSES);
+const DEFAULT_PROVIDER = "gsd";
+
+export async function listBoardAgents(projectDir, options = {}) {
+  const configPath = await findProjectConfig(projectDir, options.config);
+  if (!await exists(configPath)) return [];
+  const config = await loadProjectConfig(configPath, options);
+  return config.resources
+    .filter((resource) => resource.kind === "agent")
+    .map((agent) => ({
+      id: agent.id,
+      description: agent.description ?? "",
+      runtimes: agent.runtimes ?? ["claude", "codex"],
+      source: agent._aofSource?.scope ?? "local"
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, options = {}) {
+  const provider = options.provider ?? DEFAULT_PROVIDER;
+  if (provider !== DEFAULT_PROVIDER) throw new Error(`Unsupported execution provider "${provider}". Expected gsd.`);
+
+  const normalizedAgentId = normalizeId(agentId);
+  const agents = await listBoardAgents(projectDir, options);
+  const agent = agents.find((item) => item.id === normalizedAgentId);
+  if (!agent) throw new Error(`Unknown agent "${normalizedAgentId}". Configure it in .aof/aof.config.json before assignment.`);
+
+  const board = await getBoard(projectDir, boardId);
+  const task = board.tasks.find((item) => item.id === normalizeId(taskId));
+  if (!task) throw new Error(`Task not found: ${normalizeId(boardId)}/${normalizeId(taskId)}`);
+
+  const phase = phaseRef(task);
+  if (!phase) throw new Error(`Task ${board.id}/${task.id} cannot use provider gsd without refs.phase.`);
+
+  const now = nowIso();
+  const existing = await tryReadExecution(projectDir, board.id, task.id);
+  const attemptNumber = (existing?.attempts?.length ?? 0) + 1;
+  const attemptId = `attempt-${attemptNumber}`;
+  const commands = gsdCommands(phase);
+  const execution = {
+    version: 1,
+    boardId: board.id,
+    taskId: task.id,
+    provider,
+    status: "running",
+    assignedAgent: agent,
+    phase,
+    commands,
+    attempts: [
+      ...(existing?.attempts ?? []),
+      {
+        id: attemptId,
+        status: "running",
+        startedAt: now,
+        commands
+      }
+    ],
+    logs: [
+      ...(existing?.logs ?? []),
+      {
+        at: now,
+        level: "info",
+        message: `Assigned to agent ${agent.id}; started GSD execution for phase ${phase}.`
+      }
+    ],
+    resume: {
+      provider,
+      phase,
+      nextCommand: commands[0],
+      commands
+    },
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
+  };
+
+  const executionPath = executionFilePath(projectDir, board.id, task.id);
+  await writeText(executionPath, `${JSON.stringify(execution, null, 2)}\n`);
+  const updatedTask = await updateTaskExecutionSummary(projectDir, board.id, task.id, execution, executionPath, {
+    type: "assigned",
+    agentId: agent.id,
+    provider,
+    executionStatus: "running"
+  });
+
+  return { task: updatedTask, execution, executionPath };
+}
+
+export async function readTaskExecution(projectDir, boardId, taskId) {
+  const execution = await readExecution(projectDir, boardId, taskId);
+  return { execution, executionPath: executionFilePath(projectDir, execution.boardId, execution.taskId) };
+}
+
+export async function updateTaskExecution(projectDir, boardId, taskId, input = {}) {
+  const status = input.status;
+  assertExecutionStatus(status);
+  const execution = await readExecution(projectDir, boardId, taskId);
+  const now = nowIso();
+  const currentAttemptIndex = execution.attempts?.length ? execution.attempts.length - 1 : -1;
+  const attempts = [...(execution.attempts ?? [])];
+  if (currentAttemptIndex >= 0) {
+    attempts[currentAttemptIndex] = {
+      ...attempts[currentAttemptIndex],
+      status,
+      endedAt: ["blocked", "failed", "complete"].includes(status) ? now : attempts[currentAttemptIndex].endedAt
+    };
+  }
+  const logs = [
+    ...(execution.logs ?? []),
+    {
+      at: now,
+      level: input.level ?? "info",
+      message: input.message ?? `Execution status changed to ${status}.`
+    }
+  ];
+  const next = {
+    ...execution,
+    status,
+    attempts,
+    logs,
+    resume: {
+      ...(execution.resume ?? {}),
+      handoff: input.handoff ?? execution.resume?.handoff,
+      lastMessage: input.message ?? execution.resume?.lastMessage
+    },
+    updatedAt: now
+  };
+  const filePath = executionFilePath(projectDir, next.boardId, next.taskId);
+  await writeText(filePath, `${JSON.stringify(next, null, 2)}\n`);
+  const task = await updateTaskExecutionSummary(projectDir, next.boardId, next.taskId, next, filePath, {
+    type: "execution_status_changed",
+    executionStatus: status,
+    message: input.message
+  });
+  return { task, execution: next, executionPath: filePath };
+}
+
+function updateTaskExecutionSummary(projectDir, boardId, taskId, execution, executionPath, event) {
+  return updateTask(projectDir, boardId, taskId, (task) => {
+    const now = nowIso();
+    const boardStatus = boardStatusForExecution(execution.status);
+    return {
+      ...task,
+      status: boardStatus,
+      assignedAgent: {
+        id: execution.assignedAgent.id,
+        description: execution.assignedAgent.description ?? "",
+        assignedAt: task.assignedAgent?.assignedAt ?? execution.createdAt ?? now
+      },
+      execution: {
+        provider: execution.provider,
+        status: execution.status,
+        phase: execution.phase,
+        executionPath: relativeProjectPath(projectDir, executionPath),
+        updatedAt: execution.updatedAt
+      },
+      history: [
+        ...(Array.isArray(task.history) ? task.history : []),
+        {
+          at: now,
+          ...event,
+          boardStatus
+        }
+      ],
+      updatedAt: now
+    };
+  });
+}
+
+function boardStatusForExecution(status) {
+  if (status === "complete") return "done";
+  if (status === "blocked" || status === "failed") return "blocked";
+  return "in_progress";
+}
+
+function phaseRef(task) {
+  const refs = task.refs ?? {};
+  return refs.phase ?? refs.gsd?.phase ?? refs.phaseNumber ?? refs.roadmapPhase ?? null;
+}
+
+function gsdCommands(phase) {
+  return [
+    `$gsd-discuss-phase ${phase}`,
+    `$gsd-plan-phase ${phase}`,
+    `$gsd-execute-phase ${phase}`
+  ];
+}
+
+async function readExecution(projectDir, boardId, taskId) {
+  return JSON.parse(await readFile(executionFilePath(projectDir, normalizeId(boardId), normalizeId(taskId)), "utf8"));
+}
+
+async function tryReadExecution(projectDir, boardId, taskId) {
+  const filePath = executionFilePath(projectDir, boardId, taskId);
+  if (!await exists(filePath)) return null;
+  return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+function executionFilePath(projectDir, boardId, taskId) {
+  const paths = boardWorkspacePaths(projectDir);
+  return path.join(paths.boardsDir, normalizeId(boardId), "executions", `${normalizeId(taskId)}.json`);
+}
+
+function relativeProjectPath(projectDir, filePath) {
+  return path.relative(path.resolve(projectDir), filePath).split(path.sep).join("/");
+}
+
+function assertExecutionStatus(status) {
+  if (!EXECUTION_STATUS_SET.has(status)) {
+    throw new Error(`Invalid execution status "${status}". Use one of ${EXECUTION_STATUSES.join(", ")}.`);
+  }
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+async function exists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
