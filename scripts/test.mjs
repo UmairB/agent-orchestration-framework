@@ -13,9 +13,17 @@ import { dslPrimitiveTests } from "../test/dsl-primitives.test.mjs";
 import { setupUiTests } from "../test/setup-ui.test.mjs";
 import { schemaTests } from "../test/schema.test.mjs";
 import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
+import { packageTests } from "../test/packages.test.mjs";
+import { boardTests } from "../test/boards.test.mjs";
+import { boardBreakdownTests } from "../test/board-breakdown.test.mjs";
+import { boardExecutionTests } from "../test/board-execution.test.mjs";
 
 const tests = [
+  ...boardExecutionTests,
+  ...boardBreakdownTests,
+  ...boardTests,
   ...adapterWarningTests,
+  ...packageTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

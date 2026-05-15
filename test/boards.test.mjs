@@ -7,6 +7,7 @@ import {
   archiveBoard,
   buildBoardIndex,
   createBoard,
+  editTask,
   getBoard,
   listBoards,
   moveTask,
@@ -65,13 +66,22 @@ async function addsAndMovesTasks() {
       refs: { phase: "28", plan: "28-03-PLAN.md" }
     });
     await moveTask(targetDir, "delivery", "wire-api", "in_progress");
+    await editTask(targetDir, "delivery", "wire-api", {
+      title: "Wire board API",
+      priority: "urgent",
+      deliverable: "UI board foundation",
+      refs: { phase: "31", plan: "31-02-PLAN.md" }
+    });
 
     const board = await getBoard(targetDir, "delivery");
     assert.equal(board.tasks.length, 1);
     assert.equal(board.tasks[0].status, "in_progress");
+    assert.equal(board.tasks[0].title, "Wire board API");
+    assert.equal(board.tasks[0].priority, "urgent");
     assert.equal(board.tasks[0].history[0].type, "created");
     assert.equal(board.tasks[0].history[1].type, "status_changed");
-    assert.deepEqual(board.tasks[0].refs, { phase: "28", plan: "28-03-PLAN.md" });
+    assert.equal(board.tasks[0].history[2].type, "edited");
+    assert.deepEqual(board.tasks[0].refs, { phase: "31", plan: "31-02-PLAN.md" });
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

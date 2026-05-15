@@ -113,9 +113,11 @@ Previous milestone details are archived under `.planning/milestones/`.
 4. Diagnostics distinguish canonical file state from generated index/cache state.
 
 **Plans:**
-- Wave 1: Board navigation and task column layout
-- Wave 2: Task editing, movement, and assignment controls
-- Wave 3: Progress/diagnostics rendering, UI build, and setup UI tests
+- ✅ [Wave 1: Board navigation and task column layout](phases/31-kanban-setup-ui/31-01-PLAN.md)
+- ✅ [Wave 2: Task editing, movement, and assignment controls](phases/31-kanban-setup-ui/31-02-PLAN.md)
+- ✅ [Wave 3: Progress/diagnostics rendering, UI build, and setup UI tests](phases/31-kanban-setup-ui/31-03-PLAN.md)
+
+**Verification:** [31-VERIFICATION.md](phases/31-kanban-setup-ui/31-VERIFICATION.md)
 
 ### Phase 32: Task Management Verification
 

@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
-import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { assignTaskToAgent, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -188,6 +188,23 @@ export async function serveSetupUi(catalog, options = {}) {
         }
         const result = await addTask(projectDir, boardId, { ...item, id: taskId }, { force: Boolean(item.force) });
         sendJson(response, 200, { ok: true, task: result.task });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    if (request.method === "PATCH" && taskMatch) {
+      try {
+        const boardId = decodeRoutePart(taskMatch[1]);
+        const taskId = decodeRoutePart(taskMatch[2]);
+        const item = await readJsonBody(request);
+        if (item.id !== undefined && item.id !== taskId) {
+          sendApiError(response, 400, "Task id in payload does not match request path.", "route-payload-mismatch");
+          return;
+        }
+        const task = await editTask(projectDir, boardId, taskId, item);
+        sendJson(response, 200, { ok: true, task });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
       }

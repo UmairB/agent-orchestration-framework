@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useMemo, useState } from "react";
 import type * as React from "react";
 import { createRoot } from "react-dom/client";
-import { Bot, CheckCircle2, Code2, FileText, Globe2, Library, Link2, ListChecks, Plus, Save, Settings2, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
+import { Archive, Bot, CheckCircle2, Code2, Columns3, FileText, Globe2, Library, Link2, ListChecks, PlayCircle, Plus, RefreshCw, Save, Settings2, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import "./index.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 type RuntimeId = "claude" | "codex";
 type ResourceKind = "skill" | "command" | "agent" | "rule";
 type SectionKind = "mcpServers" | "hooks" | "projectDocs" | "settings";
+type BoardStatus = "backlog" | "ready" | "in_progress" | "blocked" | "done";
+type ExecutionStatus = "queued" | "running" | "waiting_for_user" | "blocked" | "failed" | "complete";
 
 type Diagnostic = {
   severity: "error" | "warning" | "info" | "ok";
@@ -89,6 +91,42 @@ type ConfigPayload = {
   nextCommands: string[];
 };
 
+type BoardSummary = {
+  id: string;
+  title: string;
+  objective: string;
+  status: string;
+  taskCount: number;
+  counts: Record<BoardStatus, number>;
+  tasks: BoardTask[];
+};
+
+type BoardDetail = BoardSummary & {
+  columns: BoardStatus[];
+  tasks: BoardTask[];
+};
+
+type BoardTask = {
+  id: string;
+  boardId: string;
+  title: string;
+  description?: string;
+  status: BoardStatus;
+  priority?: string;
+  deliverable?: string;
+  refs?: Record<string, unknown>;
+  assignedAgent?: { id: string; description?: string; assignedAt?: string } | null;
+  execution?: { provider: string; status: ExecutionStatus; phase?: string; updatedAt?: string } | null;
+  history?: Array<Record<string, unknown>>;
+};
+
+type BoardAgent = {
+  id: string;
+  description: string;
+  runtimes: RuntimeId[];
+  source: string;
+};
+
 const kinds: Array<{ id: ResourceKind; label: string; icon: React.ReactNode }> = [
   { id: "skill", label: "Skills", icon: <Library className="h-4 w-4" aria-hidden="true" /> },
   { id: "command", label: "Commands", icon: <Code2 className="h-4 w-4" aria-hidden="true" /> },
@@ -108,7 +146,7 @@ function App() {
   const [scope, setScope] = useState<"project" | "global">("project");
   const [payload, setPayload] = useState<ConfigPayload | null>(null);
   const [projectPayload, setProjectPayload] = useState<ConfigPayload | null>(null);
-  const [activeKind, setActiveKind] = useState<ResourceKind | SectionKind | "review">("skill");
+  const [activeKind, setActiveKind] = useState<ResourceKind | SectionKind | "boards" | "review">("skill");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<"project" | "global">("project");
   const [draft, setDraft] = useState<EditableResource | null>(null);
@@ -271,7 +309,21 @@ function App() {
               </button>
             ))}
             {scope === "project" ? <div className="pt-3">
-              <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
+              <p className="mb-2 px-3 text-xs font-medium text-muted-foreground">Project Work</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveKind("boards");
+                  setSelectedId(null);
+                  setSelectedSource(scope);
+                  setDraft(null);
+                  setMessage("");
+                }}
+                className={`flex h-10 w-full items-center justify-between rounded-md px-3 text-left text-sm transition ${activeKind === "boards" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              >
+                <span className="flex items-center gap-2"><Columns3 className="h-4 w-4" aria-hidden="true" />Boards</span>
+              </button>
+              <p className="mb-2 mt-3 px-3 text-xs font-medium text-muted-foreground">Expanded DSL</p>
               {sections.map((section) => (
                 <button
                   key={section.id}
@@ -314,7 +366,9 @@ function App() {
 
         {message ? <div className="fixed bottom-4 right-4 z-10 max-w-md rounded-md border border-border bg-card p-3 text-sm shadow-lg">{message}</div> : null}
 
-        {activeKind === "review" ? (
+        {activeKind === "boards" && scope === "project" ? (
+          <BoardsPanel />
+        ) : activeKind === "review" ? (
           <ReviewPanel payload={payload} />
         ) : isSectionKind(activeKind) && scope === "project" ? (
           <SectionEditor activeSection={activeKind} payload={payload} refreshConfig={refreshConfig} />
@@ -371,6 +425,348 @@ function App() {
         )}
       </div>
     </main>
+  );
+}
+
+function BoardsPanel() {
+  const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [selectedBoardId, setSelectedBoardId] = useState<string | null>(null);
+  const [board, setBoard] = useState<BoardDetail | null>(null);
+  const [agents, setAgents] = useState<BoardAgent[]>([]);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [message, setMessage] = useState("");
+  const [boardDraft, setBoardDraft] = useState({ id: "", title: "", objective: "" });
+  const [taskDraft, setTaskDraft] = useState({ id: "", title: "", description: "", priority: "normal", deliverable: "", phase: "" });
+
+  useEffect(() => {
+    void refreshBoards();
+  }, []);
+
+  useEffect(() => {
+    if (selectedBoardId) void loadBoard(selectedBoardId);
+  }, [selectedBoardId]);
+
+  async function refreshBoards(nextSelectedId = selectedBoardId) {
+    const [boardsResponse, agentsResponse, validateResponse] = await Promise.all([
+      fetch("/api/boards"),
+      fetch("/api/boards/agents"),
+      fetch("/api/boards/validate")
+    ]);
+    const boardsPayload = await boardsResponse.json();
+    const agentsPayload = await agentsResponse.json();
+    const validatePayload = await validateResponse.json();
+    const nextBoards = boardsPayload.boards ?? [];
+    setBoards(nextBoards);
+    setAgents(agentsPayload.agents ?? []);
+    setDiagnostics(validatePayload.diagnostics ?? []);
+    const nextId = nextSelectedId ?? nextBoards[0]?.id ?? null;
+    setSelectedBoardId(nextId);
+    if (nextId) await loadBoard(nextId);
+    else setBoard(null);
+  }
+
+  async function loadBoard(boardId: string) {
+    const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}`);
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Board load failed");
+      return;
+    }
+    setBoard(payload.board);
+  }
+
+  async function createBoardFromDraft(event: React.FormEvent) {
+    event.preventDefault();
+    if (!boardDraft.id || !boardDraft.title) {
+      setMessage("Board id and title are required.");
+      return;
+    }
+    const response = await fetch(`/api/boards/${encodeURIComponent(boardDraft.id)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: boardDraft.title, objective: boardDraft.objective })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Board create failed");
+      return;
+    }
+    setMessage(`Created board ${payload.board.id}`);
+    setBoardDraft({ id: "", title: "", objective: "" });
+    await refreshBoards(payload.board.id);
+  }
+
+  async function createTaskFromDraft(event: React.FormEvent) {
+    event.preventDefault();
+    if (!board || !taskDraft.id || !taskDraft.title) {
+      setMessage("Task id and title are required.");
+      return;
+    }
+    const refs = taskDraft.phase ? { phase: taskDraft.phase } : {};
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(taskDraft.id)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: taskDraft.title,
+        description: taskDraft.description,
+        priority: taskDraft.priority,
+        deliverable: taskDraft.deliverable,
+        refs
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Task create failed");
+      return;
+    }
+    setMessage(`Created task ${payload.task.id}`);
+    setTaskDraft({ id: "", title: "", description: "", priority: "normal", deliverable: "", phase: "" });
+    await refreshBoards(board.id);
+  }
+
+  async function moveTask(task: BoardTask, status: BoardStatus) {
+    if (!board || task.status === status) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(task.id)}/status`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Move failed");
+      return;
+    }
+    setMessage(`Moved ${task.id} to ${statusLabel(status)}`);
+    await refreshBoards(board.id);
+  }
+
+  async function assignTask(task: BoardTask, agentId: string) {
+    if (!board || !agentId) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(task.id)}/assignment`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentId })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Assignment failed");
+      return;
+    }
+    setMessage(`Assigned ${task.id} to ${agentId}`);
+    await refreshBoards(board.id);
+  }
+
+  async function saveTask(task: BoardTask, input: { title: string; priority: string; deliverable: string; phase: string }) {
+    if (!board) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(task.id)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        priority: input.priority,
+        deliverable: input.deliverable,
+        refs: input.phase ? { ...(task.refs ?? {}), phase: input.phase } : { ...(task.refs ?? {}) }
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Task save failed");
+      return;
+    }
+    setMessage(`Saved ${task.id}`);
+    await refreshBoards(board.id);
+  }
+
+  async function archiveBoard() {
+    if (!board) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/archive`, { method: "PUT" });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Archive failed");
+      return;
+    }
+    setMessage(`Archived ${board.id}`);
+    await refreshBoards(null);
+  }
+
+  const visibleDiagnostics = diagnostics.filter((item) => item.severity !== "info");
+  const columns: BoardStatus[] = board?.columns ?? ["backlog", "ready", "in_progress", "blocked", "done"];
+
+  return (
+    <section className="min-h-screen p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold">Boards</h2>
+          <p className="text-sm text-muted-foreground">{boards.length} project board{boards.length === 1 ? "" : "s"}</p>
+        </div>
+        <Button type="button" variant="secondary" onClick={() => void refreshBoards()}>
+          <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+          Refresh
+        </Button>
+      </div>
+
+      {message ? <p className="mb-4 rounded-md border border-border bg-card p-3 text-sm">{message}</p> : null}
+
+      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="space-y-4">
+          <form className="space-y-3 rounded-md border border-border bg-card p-3" onSubmit={createBoardFromDraft}>
+            <h3 className="text-sm font-semibold">New board</h3>
+            <Input placeholder="id" value={boardDraft.id} onChange={(event) => setBoardDraft({ ...boardDraft, id: event.target.value })} />
+            <Input placeholder="title" value={boardDraft.title} onChange={(event) => setBoardDraft({ ...boardDraft, title: event.target.value })} />
+            <Textarea placeholder="objective" value={boardDraft.objective} onChange={(event) => setBoardDraft({ ...boardDraft, objective: event.target.value })} />
+            <Button type="submit" className="w-full">
+              <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+              Create
+            </Button>
+          </form>
+
+          <div className="space-y-2">
+            {boards.length === 0 ? <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">No boards.</div> : boards.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedBoardId(item.id)}
+                className={`w-full rounded-md border p-3 text-left transition ${selectedBoardId === item.id ? "border-primary bg-card" : "border-border bg-background hover:border-primary"}`}
+              >
+                <span className="mono block truncate text-sm font-semibold">{item.id}</span>
+                <span className="mt-1 block text-sm">{item.title}</span>
+                <span className="mt-2 block text-xs text-muted-foreground">{item.taskCount} tasks</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="rounded-md border border-border bg-background p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold">Diagnostics</p>
+              <Badge variant={visibleDiagnostics.some((item) => item.severity === "error") ? "destructive" : "secondary"}>{visibleDiagnostics.length}</Badge>
+            </div>
+            {visibleDiagnostics.length === 0 ? <StatusLine ok text="Board files valid." /> : visibleDiagnostics.slice(0, 5).map((item) => (
+              <StatusLine key={`${item.code}-${item.path}-${item.message}`} ok={item.severity !== "error"} text={`${item.code}: ${item.message}`} />
+            ))}
+          </div>
+        </aside>
+
+        <div className="min-w-0">
+          {!board ? (
+            <div className="rounded-md border border-dashed border-border p-8 text-sm text-muted-foreground">Select or create a board.</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-border bg-card p-4">
+                <div>
+                  <p className="mono text-xs text-muted-foreground">{board.id}</p>
+                  <h3 className="text-xl font-semibold">{board.title}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{board.objective || "No objective."}</p>
+                </div>
+                <Button type="button" variant="secondary" onClick={() => void archiveBoard()}>
+                  <Archive className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Archive
+                </Button>
+              </div>
+
+              <form className="grid gap-3 rounded-md border border-border bg-card p-4 lg:grid-cols-[160px_minmax(180px,1fr)_minmax(180px,1fr)_120px_140px_auto]" onSubmit={createTaskFromDraft}>
+                <Input placeholder="task id" value={taskDraft.id} onChange={(event) => setTaskDraft({ ...taskDraft, id: event.target.value })} />
+                <Input placeholder="title" value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} />
+                <Input placeholder="deliverable" value={taskDraft.deliverable} onChange={(event) => setTaskDraft({ ...taskDraft, deliverable: event.target.value })} />
+                <Input placeholder="phase" value={taskDraft.phase} onChange={(event) => setTaskDraft({ ...taskDraft, phase: event.target.value })} />
+                <Input placeholder="priority" value={taskDraft.priority} onChange={(event) => setTaskDraft({ ...taskDraft, priority: event.target.value })} />
+                <Button type="submit">
+                  <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Task
+                </Button>
+              </form>
+
+              <div className="grid gap-3 min-[1180px]:grid-cols-5">
+                {columns.map((status) => {
+                  const tasks = board.tasks.filter((task) => task.status === status);
+                  return (
+                    <section key={status} className="min-w-0 rounded-md border border-border bg-background">
+                      <div className="flex items-center justify-between gap-3 border-b border-border p-3">
+                        <h4 className="text-sm font-semibold">{statusLabel(status)}</h4>
+                        <Badge variant="secondary">{tasks.length}</Badge>
+                      </div>
+                      <div className="space-y-2 p-2">
+                        {tasks.length === 0 ? <p className="p-2 text-sm text-muted-foreground">Empty</p> : tasks.map((task) => (
+                          <TaskBoardCard
+                            key={task.id}
+                            task={task}
+                            agents={agents}
+                            columns={columns}
+                            onMove={moveTask}
+                            onAssign={assignTask}
+                            onSave={saveTask}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TaskBoardCard({ task, agents, columns, onMove, onAssign, onSave }: {
+  task: BoardTask;
+  agents: BoardAgent[];
+  columns: BoardStatus[];
+  onMove: (task: BoardTask, status: BoardStatus) => Promise<void>;
+  onAssign: (task: BoardTask, agentId: string) => Promise<void>;
+  onSave: (task: BoardTask, input: { title: string; priority: string; deliverable: string; phase: string }) => Promise<void>;
+}) {
+  const [agentId, setAgentId] = useState(task.assignedAgent?.id ?? agents[0]?.id ?? "");
+  const [title, setTitle] = useState(task.title);
+  const [priority, setPriority] = useState(task.priority ?? "normal");
+  const [deliverable, setDeliverable] = useState(task.deliverable ?? "");
+  const [phase, setPhase] = useState(typeof task.refs?.phase === "string" ? task.refs.phase : "");
+  return (
+    <article className="rounded-md border border-border bg-card p-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="mono truncate text-xs text-muted-foreground">{task.id}</p>
+          <Input className="mt-1 h-8" value={title} onChange={(event) => setTitle(event.target.value)} />
+        </div>
+        {task.execution ? <Badge variant={executionVariant(task.execution.status)}>{executionLabel(task.execution.status)}</Badge> : null}
+      </div>
+      <Input className="mt-2 h-8" placeholder="deliverable" value={deliverable} onChange={(event) => setDeliverable(event.target.value)} />
+      <div className="mt-3 flex flex-wrap gap-1">
+        <Badge variant="secondary">{priority || "normal"}</Badge>
+        {phase ? <Badge variant="secondary">phase {phase}</Badge> : null}
+        {task.assignedAgent ? <Badge>{task.assignedAgent.id}</Badge> : null}
+      </div>
+      <div className="mt-3 grid gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Input className="h-8" placeholder="priority" value={priority} onChange={(event) => setPriority(event.target.value)} />
+          <Input className="h-8" placeholder="phase" value={phase} onChange={(event) => setPhase(event.target.value)} />
+        </div>
+        <select
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+          value={task.status}
+          onChange={(event) => void onMove(task, event.target.value as BoardStatus)}
+        >
+          {columns.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
+        </select>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+          <select
+            className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-sm"
+            value={agentId}
+            onChange={(event) => setAgentId(event.target.value)}
+          >
+            {agents.length === 0 ? <option value="">No agents</option> : agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.id}</option>)}
+          </select>
+          <Button type="button" size="sm" disabled={!agentId} onClick={() => void onAssign(task, agentId)}>
+            <PlayCircle className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+        <Button type="button" size="sm" variant="secondary" onClick={() => void onSave(task, { title, priority, deliverable, phase })}>
+          <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+          Save
+        </Button>
+      </div>
+    </article>
   );
 }
 
@@ -1163,11 +1559,11 @@ function labelForKind(kind: ResourceKind) {
   return kinds.find((item) => item.id === kind)?.label ?? kind;
 }
 
-function isResourceKind(value: ResourceKind | SectionKind | "review"): value is ResourceKind {
+function isResourceKind(value: ResourceKind | SectionKind | "boards" | "review"): value is ResourceKind {
   return kinds.some((kind) => kind.id === value);
 }
 
-function isSectionKind(value: ResourceKind | SectionKind | "review"): value is SectionKind {
+function isSectionKind(value: ResourceKind | SectionKind | "boards" | "review"): value is SectionKind {
   return sections.some((section) => section.id === value);
 }
 
@@ -1232,6 +1628,35 @@ function shortStatus(status: string) {
   if (status === "unsupported-fail") return "fail";
   if (status === "unsupported-warning") return "warn";
   return status;
+}
+
+function statusLabel(status: BoardStatus) {
+  const labels: Record<BoardStatus, string> = {
+    backlog: "Backlog",
+    ready: "Ready",
+    in_progress: "In Progress",
+    blocked: "Blocked",
+    done: "Done"
+  };
+  return labels[status] ?? status;
+}
+
+function executionLabel(status: ExecutionStatus) {
+  const labels: Record<ExecutionStatus, string> = {
+    queued: "Queued",
+    running: "Running",
+    waiting_for_user: "Waiting",
+    blocked: "Blocked",
+    failed: "Failed",
+    complete: "Complete"
+  };
+  return labels[status] ?? status;
+}
+
+function executionVariant(status: ExecutionStatus) {
+  if (status === "failed" || status === "blocked") return "destructive" as const;
+  if (status === "complete") return "default" as const;
+  return "secondary" as const;
 }
 
 function kindHint(kind: ResourceKind) {

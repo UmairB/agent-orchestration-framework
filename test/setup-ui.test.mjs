@@ -499,6 +499,14 @@ async function managesBoardApis() {
     });
     assert.equal(move.task.status, "in_progress");
 
+    const edit = await fetchJson(`${url}api/boards/delivery/tasks/wire-api`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Wire board API", priority: "urgent", refs: { phase: "28" } })
+    });
+    assert.equal(edit.task.title, "Wire board API");
+    assert.equal(edit.task.priority, "urgent");
+
     const agents = await fetchJson(`${url}api/boards/agents`);
     assert.equal(agents.agents[0].id, "builder");
 

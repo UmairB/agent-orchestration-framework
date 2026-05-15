@@ -132,6 +132,30 @@ export async function moveTask(projectDir, boardId, taskId, status) {
   return next;
 }
 
+export async function editTask(projectDir, boardId, taskId, input = {}) {
+  return updateTask(projectDir, boardId, taskId, (task) => {
+    const now = nowIso();
+    const next = {
+      ...task,
+      title: input.title ?? task.title,
+      description: input.description ?? task.description ?? "",
+      priority: input.priority ?? task.priority ?? "normal",
+      deliverable: input.deliverable ?? task.deliverable ?? "",
+      refs: input.refs ?? task.refs ?? {},
+      history: [
+        ...(Array.isArray(task.history) ? task.history : []),
+        {
+          at: now,
+          type: "edited"
+        }
+      ],
+      updatedAt: now
+    };
+    if (typeof next.title !== "string" || next.title.trim() === "") throw new Error("Task title is required.");
+    return next;
+  });
+}
+
 export async function updateTask(projectDir, boardId, taskId, updater) {
   const paths = boardWorkspacePaths(projectDir);
   const normalizedBoardId = normalizeId(boardId);
