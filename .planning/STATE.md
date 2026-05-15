@@ -7,7 +7,7 @@
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-11 after v1.5 start)
+See: `.planning/PROJECT.md` (updated 2026-05-15 after v1.5 closeout)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -21,14 +21,14 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.5 is active. The milestone aligns real Claude/Codex runtime semantics, rejects Codex command assets, introduces optional workflow-backed assets, adds validated skill/workflow references, and separates simple vs workflow-backed UI authoring.
+Planning next milestone. v1.5 is complete, audited, archived, and ready for successor scope selection.
 
 ## Current Position
 
-Phase: v1.5 milestone
+Phase: next milestone selection
 Plan: complete
 Status: All v1.5 phases complete, verified, audited, and archived
-Last activity: 2026-05-14 - Phase 27 live UAT and verification passed
+Last activity: 2026-05-15 - v1.5 milestone closeout finalized
 
 ## Resume
 
@@ -150,3 +150,11 @@ Last activity: 2026-05-14 - Phase 27 live UAT and verification passed
 - Phase 26 discussion, planning, and execution completed on 2026-05-14 with setup UI Simple/Workflow-backed mode controls, workflow-backed resource save semantics, wrapper argument editing, disabled unsupported runtime toggles, skill/workflow reference insertion, README updates, setup UI BDD coverage, UI build verification, and PowerShell BDD parity. Verification is captured in `.planning/phases/26-workflow-backed-setup-ui/26-VERIFICATION.md`.
 - Phase 27 verification completed on 2026-05-14 with coverage audit, live disposable GSD-style UAT, `npm run test:unit`, `npm test`, `npm run ui:build`, `npm run test:integration:ps`, and `npm run check` passing. Verification is captured in `.planning/phases/27-workflow-runtime-verification/27-VERIFICATION.md`.
 - Milestone v1.5 was audited and archived on 2026-05-14 in `.planning/milestones/v1.5-ROADMAP.md`, `.planning/milestones/v1.5-REQUIREMENTS.md`, and `.planning/milestones/v1.5-MILESTONE-AUDIT.md`.
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-05-15:
+
+| Category | Item | Status |
+|----------|------|--------|
+| uat_gap | Phase 22 `22-UAT-LOG.md` reported by audit-open with 0 pending scenarios | historical-unknown |

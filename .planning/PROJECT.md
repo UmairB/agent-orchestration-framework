@@ -8,24 +8,25 @@ The current codebase provides a Node.js CLI, Claude/Codex render adapters, a set
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. Phase 11 established the global `~/.aof` source workspace and first `aof global ...` asset commands, Phase 12 added project references that render global assets with lock traceability, Phase 13 added explicit associated files for skill helper code, Phase 14 added setup UI support for creating, editing, labeling, and referencing global assets, and Phase 15 completed cross-runner verification and milestone audit. The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. v1.3 shipped on 2026-05-09 as interactive CLI hardening. v1.4 shipped on 2026-05-11 as the namespaced CLI contract. v1.5 shipped on 2026-05-14 as Runtime Semantics And Workflow Assets, aligning Claude/Codex asset semantics, adding optional workflow-backed assets, validating skill/workflow references, and updating setup UI authoring modes.
 
-## Current Milestone: v1.5 Runtime Semantics And Workflow Assets
+The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-**Goal:** Align AOF's Claude/Codex adapter semantics with real runtime capabilities and introduce optional workflow-backed assets for shared process logic with runtime-specific wrappers.
+## Last Shipped Milestone: v1.5 Runtime Semantics And Workflow Assets
 
-**Target features:**
-- Make runtime support explicit: Claude supports commands and skills; Codex supports skills but rejects command assets instead of rendering ambiguous command outputs.
-- Add optional workflow assets for shared core process files that can be referenced by Claude command wrappers and Codex skill wrappers.
-- Add validated asset-reference placeholders such as `{{skills.ci}}` and `{{workflows.audit-milestone}}`.
-- Split authoring into simple assets and workflow-backed assets: simple mode has no arguments; workflow mode supports argument metadata and runtime-specific wrapper behavior.
-- Update setup UI, docs, BDD, and live UAT coverage around GSD-style command/skill wrappers and shared workflow files.
+**Shipped:** 2026-05-14
 
-**Last shipped milestone:** v1.4 Namespaced CLI Contract
+**Delivered:**
+- Claude command assets render only to Claude command files; Codex command targets are rejected.
+- Simple assets remain direct and workflow-free, with argument handling restricted to workflow-backed assets.
+- First-class workflow assets render to `.claude/aof/workflows/` and `.codex/aof/workflows/`.
+- Workflow-backed Claude command and Codex skill wrappers can share one workflow while presenting runtime-specific argument guidance.
+- `{{skills.*}}` and `{{workflows.*}}` placeholders validate and expand per runtime.
+- Setup UI supports Simple / Workflow-backed modes, argument controls, unsupported runtime disabling, and reference insertion.
 
 ## Core Value
 
-Users can configure assistant skills, commands, agents, rules/instructions, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
+Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
 ## Requirements
 
@@ -72,14 +73,17 @@ Users can configure assistant skills, commands, agents, rules/instructions, and 
 - ✓ Setup UI can add and remove project references to global assets without copying source files — Phase 14
 - ✓ Setup UI labels project-local assets, global assets, and referenced global assets clearly — Phase 14
 - ✓ v1.2 global asset behavior is covered by unit tests, Node BDD, Windows PowerShell BDD parity, setup UI API tests, and UI build checks — Phase 15
+- ✓ Claude command assets render only to Claude command files, and Codex command targets are rejected with clear diagnostics — Phase 23
+- ✓ Simple assets remain workflow-free and cannot use argument metadata — Phase 23
+- ✓ Workflow assets can define shared process instructions and render to runtime-specific workflow locations — Phase 24
+- ✓ Workflow-backed Claude command and Codex skill wrappers can reference the same workflow with runtime-appropriate argument guidance — Phase 24
+- ✓ `{{skills.*}}` and `{{workflows.*}}` placeholders validate and expand to runtime-specific generated paths — Phase 25
+- ✓ Setup UI supports Simple / Workflow-backed authoring, workflow-backed arguments, unsupported command runtime disabling, and reference insertion — Phase 26
+- ✓ Runtime semantics and workflow-backed behavior are covered by Node BDD, PowerShell BDD, UI build, repo checks, and live GSD-style UAT — Phase 27
 
 ### Active
 
-- [ ] Align Claude and Codex runtime asset semantics, including rejecting Codex command assets.
-- [ ] Add optional workflow assets for shared process bodies used by runtime-specific wrappers.
-- [ ] Add validated `{{skills.*}}` and `{{workflows.*}}` placeholders.
-- [ ] Separate simple and workflow-backed asset authoring in the setup UI, with arguments only available for workflow-backed assets.
-- [ ] Verify workflow-backed command/skill behavior through BDD and live GSD-style examples.
+No active milestone requirements. Define the next milestone with `$gsd-new-milestone`.
 
 ### Out of Scope
 
@@ -157,13 +161,15 @@ v1.4 responds to live first-run and command review findings from v1.3. The exist
 | CLI commands are grouped by product area | AOF will grow beyond assets, so commands need namespaces such as `assets` and `packages` instead of overloaded top-level verbs | Implemented in v1.4 |
 | `aof init` remains top-level | Project initialization creates the AOF workspace itself and is not an asset or package operation | Implemented in v1.4 |
 | GSD is managed under `aof packages` | GSD is a managed package/tooling integration, not an assistant asset | Implemented in v1.4 |
-| Codex command assets are invalid | Codex does not support commands; mapping commands into skills makes authoring ambiguous | Planned for v1.5 |
-| Workflows are optional shared process assets | Simple skills/commands should stay lightweight, while complex runtime-specific wrappers need a shared core file | Planned for v1.5 |
-| Simple assets do not support arguments | Argument handling differs by runtime and belongs in workflow-backed wrappers, not simple direct assets | Planned for v1.5 |
+| Codex command assets are invalid | Codex does not support commands; mapping commands into skills makes authoring ambiguous | Implemented in v1.5 |
+| Workflows are optional shared process assets | Simple skills/commands should stay lightweight, while complex runtime-specific wrappers need a shared core file | Implemented in v1.5 |
+| Simple assets do not support arguments | Argument handling differs by runtime and belongs in workflow-backed wrappers, not simple direct assets | Implemented in v1.5 |
+| Generated workflow files live under runtime `.aof/workflows/` folders | Workflow files are generated AOF-owned support files, separate from user-facing command/skill wrappers | Implemented in v1.5 |
+| Runtime path placeholders use `{{skills.*}}` and `{{workflows.*}}` only | Explicit namespaces keep references unambiguous and avoid unsupported command references | Implemented in v1.5 |
 
 ## Next Milestone Goals
 
-After runtime semantics and workflow-backed assets are stable, broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
+Broader runtime support, UI-driven execution, task management, hosted package discovery, external package archive extraction, and Rust/native-core migration remain future directions.
 
 ## Evolution
 
@@ -183,4 +189,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-11 after starting v1.5 Runtime Semantics And Workflow Assets*
+*Last updated: 2026-05-15 after completing v1.5 Runtime Semantics And Workflow Assets*

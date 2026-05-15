@@ -246,3 +246,7 @@ Align AOF's Claude/Codex adapter semantics with real runtime capabilities and in
 - [v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
 - [v1.5-REQUIREMENTS.md](milestones/v1.5-REQUIREMENTS.md)
 - [v1.5-MILESTONE-AUDIT.md](milestones/v1.5-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- Closeout open-artifact audit reported historical Phase 22 `22-UAT-LOG.md` status as unknown with 0 pending scenarios. Recorded in STATE.md as non-blocking historical audit noise.

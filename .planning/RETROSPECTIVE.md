@@ -93,6 +93,53 @@
 
 ---
 
+## Milestone: v1.5 — Runtime Semantics And Workflow Assets
+
+**Shipped:** 2026-05-14
+**Phases:** 5 | **Plans:** 13
+
+### What Was Built
+
+- Runtime capability enforcement that renders command assets only for Claude and rejects Codex command targets.
+- Simple asset authoring rules that keep direct skills/commands workflow-free and block argument metadata outside workflow-backed mode.
+- First-class workflow assets rendered under `.claude/aof/workflows/` and `.codex/aof/workflows/`.
+- Workflow-backed Claude command and Codex skill wrappers that can share one workflow file.
+- Runtime-aware `{{skills.*}}` and `{{workflows.*}}` placeholders across resources, overrides, workflows, and referenced globals.
+- Setup UI controls for Simple / Workflow-backed mode, workflow-backed arguments, unsupported command runtime disabling, and reference insertion.
+
+### What Worked
+
+- Live UAT against GSD-style command/skill/workflow examples exposed the real runtime boundary clearly enough to avoid ambiguous Codex command behavior.
+- Keeping workflows optional preserved lightweight authoring while giving complex assets a shared process body.
+- Runtime-aware placeholder validation caught reference errors before apply wrote generated files.
+- BDD parity across Node and PowerShell kept the new runtime semantics anchored to user-facing behavior.
+
+### What Was Inefficient
+
+- Phases 25-27 were completed with verification artifacts but without per-plan summary files, so closeout had to rely on verification and milestone archives instead of summary extraction.
+- Nyquist validation artifacts were still not generated even though validation remains enabled in config.
+- Browser smoke for the setup UI could not be completed because Playwright was unavailable in the local node REPL; `npm run ui:build` covered production build correctness.
+
+### Patterns Established
+
+- Codex command assets are hard validation errors, not warnings and not mapped skills.
+- Workflow assets are generated AOF support files under runtime `.aof/workflows/` folders.
+- Workflow-backed wrappers own runtime presentation while shared workflow files own the main process instructions.
+- Path placeholders use explicit supported namespaces only: `skills` and `workflows`.
+
+### Key Lessons
+
+1. Runtime semantics should model actual assistant capabilities, even when a lossy mapping would be easy to generate.
+2. Optional workflow-backed mode is the right split: simple assets stay direct, complex assets get shared workflow bodies and argument metadata.
+3. Closeout workflows need to tolerate verification-backed phases when summary files are missing, but the missing summaries should still be visible process debt.
+
+### Cost Observations
+
+- Sessions: live UAT-driven phase sessions across phases 23-27.
+- Notable: Most implementation confidence came from BDD parity plus one concrete GSD-style UAT fixture.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -101,6 +148,7 @@
 |-----------|----------|--------|------------|
 | v1 | multiple | 5 | Established `.aof` source-of-truth model and closeout audit discipline |
 | v1.1 | multiple | 5 | Hardened lifecycle, DSL, adapter, package, and BDD parity before expanding runtime scope |
+| v1.5 | multiple | 5 | Aligned generated assets with real Claude/Codex runtime semantics and introduced optional workflow-backed authoring |
 
 ### Cumulative Quality
 
@@ -108,9 +156,11 @@
 |-----------|-------|----------|-------------------|
 | v1 | unit, BDD integration, child-process smoke, PowerShell smoke, UI build | v1 requirements 32/32 verified | Node ESM implementation with Vite/React UI |
 | v1.1 | unit, BDD integration, setup UI HTTP BDD, PowerShell BDD parity, UI build where UI changed | v1.1 requirements 22/22 verified | No new external runtime dependency |
+| v1.5 | unit, Node BDD, PowerShell BDD, UI build, repo check, live UAT | v1.5 requirements 24/24 verified | Workflow/reference semantics added within existing Node/React stack |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. Treat runtime folders as generated output and use lock state for reproducibility.
 2. Keep UI execution boundaries explicit until the CLI workflows are stable.
 3. Keep behavior-level BDD scenarios shared across runner implementations to support future rewrites safely.
+4. Model hard runtime capability gaps as validation failures instead of trying to infer equivalent assets.
