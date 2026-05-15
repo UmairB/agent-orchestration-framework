@@ -36,3 +36,34 @@ Feature: Board and task state
     And I run `boards validate`
     Then the command should fail
     And stdout should contain `BOARD_MALFORMED_JSON`
+
+  Scenario: Review an objective breakdown before applying tasks to a board
+    Given an empty project
+    When I run `boards create delivery --title Delivery`
+    Then the command should succeed
+    When I run `boards breakdown delivery --objective "Board API" --id api-proposal`
+    Then the command should succeed
+    And stdout should contain `proposal: api-proposal`
+    And file `.aof/boards/delivery/proposals/api-proposal.json` should contain `"status": "proposed"`
+    When I run `boards show delivery`
+    Then stdout should contain `tasks: 0`
+    When I run `boards breakdown apply delivery api-proposal`
+    Then the command should succeed
+    And stdout should contain `Applied proposal api-proposal`
+    When I run `boards show delivery`
+    Then stdout should contain `board-api-implementation status=backlog`
+
+  Scenario: Refreshed breakdowns do not silently overwrite existing tasks
+    Given an empty project
+    When I run `boards create delivery --title Delivery`
+    Then the command should succeed
+    When I run `boards breakdown delivery --objective "Board API" --id api-proposal`
+    Then the command should succeed
+    When I run `boards breakdown apply delivery api-proposal`
+    Then the command should succeed
+    When I run `boards breakdown refresh delivery api-proposal --id api-proposal-2`
+    Then the command should succeed
+    And stdout should contain `refreshOf: api-proposal`
+    When I run `boards breakdown apply delivery api-proposal-2`
+    Then the command should fail
+    And stderr should contain `conflicts with existing tasks`

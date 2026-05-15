@@ -39,7 +39,7 @@ Previous milestone details are archived under `.planning/milestones/`.
 | v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
-| v1.6 Task Management | 28-32 | 3/15 | 12/30 | In progress | - |
+| v1.6 Task Management | 28-32 | 6/15 | 16/30 | In progress | - |
 
 ## Phase Details
 
@@ -62,7 +62,7 @@ Previous milestone details are archived under `.planning/milestones/`.
 
 **Verification:** [28-VERIFICATION.md](phases/28-board-and-task-state-foundation/28-VERIFICATION.md)
 
-### Phase 29: GSD Objective Breakdown
+### Phase 29: GSD Objective Breakdown ✅
 
 **Goal:** Let users turn a deliverable objective into reviewable board tasks using GSD planning semantics.
 
@@ -75,9 +75,11 @@ Previous milestone details are archived under `.planning/milestones/`.
 4. Regeneration protects manually edited tasks from silent overwrite.
 
 **Plans:**
-- Wave 1: Objective intake and GSD breakdown adapter
-- Wave 2: Review/apply workflow for generated tasks
-- Wave 3: Refresh, conflict handling, and BDD coverage
+- ✅ [Wave 1: Objective intake and GSD breakdown adapter](phases/29-gsd-objective-breakdown/29-01-PLAN.md)
+- ✅ [Wave 2: Review/apply workflow for generated tasks](phases/29-gsd-objective-breakdown/29-02-PLAN.md)
+- ✅ [Wave 3: Refresh, conflict handling, and BDD coverage](phases/29-gsd-objective-breakdown/29-03-PLAN.md)
+
+**Verification:** [29-VERIFICATION.md](phases/29-gsd-objective-breakdown/29-VERIFICATION.md)
 
 ### Phase 30: Agent Assignment And Execution
 
@@ -133,4 +135,4 @@ Previous milestone details are archived under `.planning/milestones/`.
 
 ## Next
 
-Continue with Phase 29: GSD Objective Breakdown.
+Continue with Phase 30: Agent Assignment And Execution.

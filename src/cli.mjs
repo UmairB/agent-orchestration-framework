@@ -16,6 +16,7 @@ import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
 import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -92,6 +93,11 @@ async function boardsCommand(args) {
 
   if (subcommand === "task") {
     await boardsTaskCommand(rest);
+    return;
+  }
+
+  if (subcommand === "breakdown") {
+    await boardsBreakdownCommand(rest);
     return;
   }
 
@@ -196,6 +202,92 @@ async function boardsTaskCommand(args) {
     return;
   }
   throw new Error(`Unknown boards task command "${subcommand ?? ""}".\n\nExamples:\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
+}
+
+async function boardsBreakdownCommand(args) {
+  const [subcommandOrBoardId, ...rest] = args;
+
+  if (subcommandOrBoardId === "show") {
+    await boardsBreakdownShowCommand(rest);
+    return;
+  }
+
+  if (subcommandOrBoardId === "apply") {
+    await boardsBreakdownApplyCommand(rest);
+    return;
+  }
+
+  if (subcommandOrBoardId === "refresh") {
+    await boardsBreakdownRefreshCommand(rest);
+    return;
+  }
+
+  await boardsBreakdownCreateCommand(args);
+}
+
+async function boardsBreakdownCreateCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  if (!boardId || !options.objective) throw new Error("Usage: aof boards breakdown <board-id> --objective <text> [--id proposal-id] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await createBreakdownProposal(targetDir, boardId, {
+    id: options.id,
+    objective: options.objective,
+    force: Boolean(options.force)
+  });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  printBreakdownProposal(result.proposal, targetDir, result.proposalPath);
+}
+
+async function boardsBreakdownShowCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, proposalId] = options._;
+  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown show <board-id> <proposal-id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const proposal = await readBreakdownProposal(targetDir, boardId, proposalId);
+  if (options.json) {
+    printJson({ proposal });
+    return;
+  }
+  printBreakdownProposal(proposal, targetDir);
+}
+
+async function boardsBreakdownApplyCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, proposalId] = options._;
+  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown apply <board-id> <proposal-id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await applyBreakdownProposal(targetDir, boardId, proposalId);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  if (result.alreadyApplied) {
+    console.log(`Proposal ${result.proposal.id} was already applied`);
+    return;
+  }
+  console.log(`Applied proposal ${result.proposal.id}`);
+  for (const task of result.applied) console.log(`- ${task.id} status=${task.status} title=${task.title}`);
+}
+
+async function boardsBreakdownRefreshCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, proposalId] = options._;
+  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown refresh <board-id> <proposal-id> --id <new-proposal-id> [--objective text] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await refreshBreakdownProposal(targetDir, boardId, proposalId, {
+    id: options.id,
+    objective: options.objective,
+    force: Boolean(options.force)
+  });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  printBreakdownProposal(result.proposal, targetDir, result.proposalPath);
 }
 
 async function boardsTaskAddCommand(args) {
@@ -1307,6 +1399,19 @@ function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function printBreakdownProposal(proposal, targetDir, proposalPath) {
+  console.log(`proposal: ${proposal.id}`);
+  console.log(`board: ${proposal.boardId}`);
+  console.log(`status: ${proposal.status}`);
+  console.log(`objective: ${proposal.objective}`);
+  if (proposal.refreshOf) console.log(`refreshOf: ${proposal.refreshOf}`);
+  if (proposalPath) console.log(`path: ${relativeDisplayPath(proposalPath, targetDir)}`);
+  console.log(`tasks: ${proposal.tasks.length}`);
+  for (const task of proposal.tasks) {
+    console.log(`- ${task.id} status=${task.status} title=${task.title}`);
+  }
+}
+
 function parseJsonOption(value, name) {
   if (value === undefined) return undefined;
   try {
@@ -1450,6 +1555,10 @@ Boards:
   aof boards index [--json]
   aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]
   aof boards task move board-id task-id status [--json]
+  aof boards breakdown board-id --objective text [--id proposal-id] [--json]
+  aof boards breakdown show board-id proposal-id [--json]
+  aof boards breakdown apply board-id proposal-id [--json]
+  aof boards breakdown refresh board-id proposal-id --id new-proposal-id [--objective text] [--json]
 
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.
