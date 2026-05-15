@@ -4,6 +4,7 @@ import { discoverFeatureFiles, runFeatureFiles } from "./support/feature-runner.
 import { cleanupCliContext, createCliContext } from "./support/cli-context.mjs";
 import { cleanupSetupUiContext } from "./support/setup-ui-context.mjs";
 import { runStep as runAdapterPolicyStep } from "./steps/adapter-policy.steps.mjs";
+import { runStep as runBoardsStep } from "./steps/boards.steps.mjs";
 import { runStep as runDslStep } from "./steps/dsl.steps.mjs";
 import { runStep as runLifecycleStep } from "./steps/lifecycle.steps.mjs";
 import { runStep as runPackagesStep } from "./steps/packages.steps.mjs";
@@ -13,6 +14,7 @@ const integrationDir = path.dirname(fileURLToPath(import.meta.url));
 const featureFiles = await discoverFeatureFiles(integrationDir);
 const stepModules = new Map([
   ["adapter-policy.feature", runAdapterPolicyStep],
+  ["boards.feature", runBoardsStep],
   ["dsl.feature", runDslStep],
   ["lifecycle.feature", runLifecycleStep],
   ["packages.feature", runPackagesStep],

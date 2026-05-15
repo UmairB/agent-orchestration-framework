@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
+import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -88,6 +89,111 @@ export async function serveSetupUi(catalog, options = {}) {
         const update = request.method === "PUT" ? addProjectGlobalRef : removeProjectGlobalRef;
         const result = await update(projectDir, { kind: routeKind, id: routeId }, editorOptions(options, "project"));
         sendJson(response, result.ok ? 200 : 400, result);
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/boards") {
+      try {
+        sendJson(response, 200, { ok: true, boards: await listBoards(projectDir, { includeArchived: requestUrl.searchParams.get("archived") === "true" }) });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === "/api/boards/index") {
+      try {
+        const result = await writeBoardIndex(projectDir);
+        sendJson(response, 200, { ok: true, index: result.index, indexPath: result.indexPath });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/boards/validate") {
+      try {
+        const diagnostics = await validateBoards(projectDir);
+        const errors = diagnostics.filter((item) => item.severity === "error");
+        const warnings = diagnostics.filter((item) => item.severity === "warning");
+        sendJson(response, 200, { ok: true, valid: errors.length === 0, errors: errors.length, warnings: warnings.length, diagnostics });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    if (request.method === "PUT") {
+      const boardCreateMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)$/);
+      if (boardCreateMatch) {
+        try {
+          const routeId = decodeRoutePart(boardCreateMatch[1]);
+          const item = await readJsonBody(request);
+          if (item.id !== undefined && item.id !== routeId) {
+            sendApiError(response, 400, "Board id in payload does not match request path.", "route-payload-mismatch");
+            return;
+          }
+          const result = await createBoard(projectDir, { ...item, id: routeId }, { force: Boolean(item.force) });
+          sendJson(response, 200, { ok: true, board: result.board });
+        } catch (error) {
+          sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        }
+        return;
+      }
+    }
+
+    const boardShowMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)$/);
+    if (request.method === "GET" && boardShowMatch) {
+      try {
+        const routeId = decodeRoutePart(boardShowMatch[1]);
+        sendJson(response, 200, { ok: true, board: await getBoard(projectDir, routeId) });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const boardArchiveMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/archive$/);
+    if (request.method === "PUT" && boardArchiveMatch) {
+      try {
+        sendJson(response, 200, { ok: true, board: await archiveBoard(projectDir, decodeRoutePart(boardArchiveMatch[1])) });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)$/);
+    if (request.method === "PUT" && taskMatch) {
+      try {
+        const boardId = decodeRoutePart(taskMatch[1]);
+        const taskId = decodeRoutePart(taskMatch[2]);
+        const item = await readJsonBody(request);
+        if (item.id !== undefined && item.id !== taskId) {
+          sendApiError(response, 400, "Task id in payload does not match request path.", "route-payload-mismatch");
+          return;
+        }
+        const result = await addTask(projectDir, boardId, { ...item, id: taskId }, { force: Boolean(item.force) });
+        sendJson(response, 200, { ok: true, task: result.task });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskStatusMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/status$/);
+    if (request.method === "PUT" && taskStatusMatch) {
+      try {
+        const item = await readJsonBody(request);
+        if (!item.status) {
+          sendApiError(response, 400, "Task status is required.", "validation-failed");
+          return;
+        }
+        const task = await moveTask(projectDir, decodeRoutePart(taskStatusMatch[1]), decodeRoutePart(taskStatusMatch[2]), item.status);
+        sendJson(response, 200, { ok: true, task });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
       }

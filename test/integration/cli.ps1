@@ -16,6 +16,7 @@ if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Syst
 . (Join-Path $StepsDir "dsl.steps.ps1")
 . (Join-Path $StepsDir "packages.steps.ps1")
 . (Join-Path $StepsDir "adapter-policy.steps.ps1")
+. (Join-Path $StepsDir "boards.steps.ps1")
 . (Join-Path $StepsDir "setup-ui.steps.ps1")
 
 function Get-FeatureFiles {
@@ -65,6 +66,7 @@ function Run-FeatureStep {
   $FeatureName = Split-Path $FeatureFile -Leaf
   switch ($FeatureName) {
     "adapter-policy.feature" { Run-AdapterPolicyStep $Context $Step; return }
+    "boards.feature" { Run-BoardsStep $Context $Step; return }
     "dsl.feature" { Run-DslStep $Context $Step; return }
     "lifecycle.feature" { Run-LifecycleStep $Context $Step; return }
     "packages.feature" { Run-PackagesStep $Context $Step; return }

@@ -44,6 +44,10 @@ export const setupUiTests = [
   {
     name: "setup UI keeps static paths inside ui root",
     run: keepsStaticPathsInsideUiRoot
+  },
+  {
+    name: "setup UI manages board APIs",
+    run: managesBoardApis
   }
 ];
 
@@ -449,6 +453,53 @@ async function keepsStaticPathsInsideUiRoot() {
 
     response = await fetch(`${url}missing-file.js`);
     assert.equal(response.status, 404);
+  } finally {
+    server.close();
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function managesBoardApis() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
+  const catalog = {
+    listItems: () => [],
+    upsertItem: () => {}
+  };
+  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
+  try {
+    const boardSave = await fetchJson(`${url}api/boards/delivery`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Delivery", objective: "Ship board state" })
+    });
+    assert.equal(boardSave.ok, true);
+    assert.equal(boardSave.board.id, "delivery");
+
+    const taskSave = await fetchJson(`${url}api/boards/delivery/tasks/wire-api`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Wire API", status: "ready", refs: { phase: "28" } })
+    });
+    assert.equal(taskSave.task.status, "ready");
+
+    const move = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/status`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "in_progress" })
+    });
+    assert.equal(move.task.status, "in_progress");
+
+    const show = await fetchJson(`${url}api/boards/delivery`);
+    assert.equal(show.board.tasks[0].history.length, 2);
+
+    const index = await fetchJson(`${url}api/boards/index`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(index.index.boards[0].taskCount, 1);
+
+    const validate = await fetchJson(`${url}api/boards/validate`);
+    assert.equal(validate.valid, true);
+
+    const archived = await fetchJson(`${url}api/boards/delivery/archive`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
+    assert.equal(archived.board.status, "archived");
   } finally {
     server.close();
     await rm(targetDir, { recursive: true, force: true });

@@ -11,7 +11,7 @@
 - ✅ **v1.3 Interactive CLI Hardening** — Phases 16-17, shipped 2026-05-09. Archive: [v1.3-ROADMAP.md](milestones/v1.3-ROADMAP.md)
 - ✅ **v1.4 Namespaced CLI Contract** — Phases 18-22, shipped 2026-05-11. Archive: [v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
 - ✅ **v1.5 Runtime Semantics And Workflow Assets** — Phases 23-27, shipped 2026-05-14. Archive: [v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
-- 🚧 **v1.6 Task Management** — Phases 28-32, planned.
+- 🚧 **v1.6 Task Management** — Phases 28-32, in progress.
 
 ## Phases
 
@@ -39,11 +39,11 @@ Previous milestone details are archived under `.planning/milestones/`.
 | v1.3 Interactive CLI Hardening | 16-17 | 3/3 | 12/12 | Complete | 2026-05-09 |
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
-| v1.6 Task Management | 28-32 | 0/15 | 0/30 | Planned | - |
+| v1.6 Task Management | 28-32 | 3/15 | 12/30 | In progress | - |
 
 ## Phase Details
 
-### Phase 28: Board And Task State Foundation
+### Phase 28: Board And Task State Foundation ✅
 
 **Goal:** Define the canonical project-local board/task file model, validation rules, CLI/API access, and generated index/cache.
 
@@ -56,9 +56,11 @@ Previous milestone details are archived under `.planning/milestones/`.
 4. Validation catches malformed board/task files, duplicate IDs, missing links, and stale index state.
 
 **Plans:**
-- Wave 1: Board/task schema and canonical file layout
-- Wave 2: Task index/cache generation and validation
-- Wave 3: CLI and setup UI API foundation with BDD coverage
+- ✅ [Wave 1: Board/task schema and canonical file layout](phases/28-board-and-task-state-foundation/28-01-PLAN.md)
+- ✅ [Wave 2: Task index/cache generation and validation](phases/28-board-and-task-state-foundation/28-02-PLAN.md)
+- ✅ [Wave 3: CLI and setup UI API foundation with BDD coverage](phases/28-board-and-task-state-foundation/28-03-PLAN.md)
+
+**Verification:** [28-VERIFICATION.md](phases/28-board-and-task-state-foundation/28-VERIFICATION.md)
 
 ### Phase 29: GSD Objective Breakdown
 
@@ -131,4 +133,4 @@ Previous milestone details are archived under `.planning/milestones/`.
 
 ## Next
 
-Start with Phase 28: Board And Task State Foundation.
+Continue with Phase 29: GSD Objective Breakdown.

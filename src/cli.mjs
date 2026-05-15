@@ -15,6 +15,7 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
+import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, validateBoards, writeBoardIndex } from "./boards.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -44,11 +45,191 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "boards") {
+    await boardsCommand(rest);
+    return;
+  }
+
   if (["add", "apply", "sync", "clean", "global", "install", "migrate", "validate", "doctor", "config", "catalog"].includes(command)) {
     throw removedCommandError(command);
   }
 
   throw new Error(`Unknown command "${command}".\n\n${helpText()}`);
+}
+
+async function boardsCommand(args) {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "list") {
+    await boardsListCommand(rest);
+    return;
+  }
+
+  if (subcommand === "create") {
+    await boardsCreateCommand(rest);
+    return;
+  }
+
+  if (subcommand === "show") {
+    await boardsShowCommand(rest);
+    return;
+  }
+
+  if (subcommand === "archive") {
+    await boardsArchiveCommand(rest);
+    return;
+  }
+
+  if (subcommand === "validate") {
+    await boardsValidateCommand(rest);
+    return;
+  }
+
+  if (subcommand === "index") {
+    await boardsIndexCommand(rest);
+    return;
+  }
+
+  if (subcommand === "task") {
+    await boardsTaskCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown boards command "${subcommand ?? ""}".\n\nExamples:\n  aof boards create release --title "Release" --objective "Ship v1"\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
+}
+
+async function boardsListCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const boards = await listBoards(targetDir, { includeArchived: Boolean(options.archived) });
+  if (options.json) {
+    printJson({ boards });
+    return;
+  }
+  if (boards.length === 0) {
+    console.log("boards: 0");
+    return;
+  }
+  console.log(`boards: ${boards.length}`);
+  for (const board of boards) {
+    console.log(`- ${board.id} status=${board.status} tasks=${board.taskCount} title=${board.title}`);
+  }
+}
+
+async function boardsCreateCommand(args) {
+  const options = parseOptions(args);
+  const [id] = options._;
+  if (!id) throw new Error("Usage: aof boards create <id> --title <title> [--objective text] [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await createBoard(targetDir, {
+    id,
+    title: options.title,
+    objective: options.objective ?? options.deliverable
+  }, { force: Boolean(options.force), dryRun: Boolean(options.dryRun) });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`${result.dryRun ? "Would create" : "Created"} board ${result.board.id}`);
+}
+
+async function boardsShowCommand(args) {
+  const options = parseOptions(args);
+  const [id] = options._;
+  if (!id) throw new Error("Usage: aof boards show <id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const board = await getBoard(targetDir, id);
+  if (options.json) {
+    printJson({ board });
+    return;
+  }
+  console.log(`board: ${board.id}`);
+  console.log(`title: ${board.title}`);
+  console.log(`objective: ${board.objective ?? ""}`);
+  console.log(`status: ${board.status}`);
+  console.log(`tasks: ${board.tasks.length}`);
+  for (const task of board.tasks) {
+    console.log(`- ${task.id} status=${task.status} priority=${task.priority} title=${task.title}`);
+  }
+}
+
+async function boardsArchiveCommand(args) {
+  const options = parseOptions(args);
+  const [id] = options._;
+  if (!id) throw new Error("Usage: aof boards archive <id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const board = await archiveBoard(targetDir, id);
+  if (options.json) {
+    printJson({ board });
+    return;
+  }
+  console.log(`Archived board ${board.id}`);
+}
+
+async function boardsValidateCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const diagnostics = await validateBoards(targetDir);
+  await printBoardValidationResult(diagnostics, options);
+}
+
+async function boardsIndexCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await writeBoardIndex(targetDir);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`Updated ${relativeDisplayPath(result.indexPath, targetDir)}`);
+  console.log(`boards: ${result.index.boards.length}`);
+}
+
+async function boardsTaskCommand(args) {
+  const [subcommand, ...rest] = args;
+  if (subcommand === "add") {
+    await boardsTaskAddCommand(rest);
+    return;
+  }
+  if (subcommand === "move") {
+    await boardsTaskMoveCommand(rest);
+    return;
+  }
+  throw new Error(`Unknown boards task command "${subcommand ?? ""}".\n\nExamples:\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
+}
+
+async function boardsTaskAddCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, taskId] = options._;
+  if (!boardId || !taskId || !options.title) throw new Error("Usage: aof boards task add <board-id> <task-id> --title <title> [--status status] [--priority priority] [--deliverable text]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const result = await addTask(targetDir, boardId, {
+    id: taskId,
+    title: options.title,
+    description: options.description,
+    status: options.status,
+    priority: options.priority,
+    deliverable: options.deliverable,
+    refs: parseJsonOption(options.refs, "refs")
+  }, { force: Boolean(options.force), dryRun: Boolean(options.dryRun) });
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`${result.dryRun ? "Would create" : "Created"} task ${result.task.boardId}/${result.task.id}`);
+}
+
+async function boardsTaskMoveCommand(args) {
+  const options = parseOptions(args);
+  const [boardId, taskId, status] = options._;
+  if (!boardId || !taskId || !status) throw new Error("Usage: aof boards task move <board-id> <task-id> <status> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const task = await moveTask(targetDir, boardId, taskId, status);
+  if (options.json) {
+    printJson({ task });
+    return;
+  }
+  console.log(`Moved task ${task.boardId}/${task.id} to ${task.status}`);
 }
 
 async function assetsCommand(args) {
@@ -1111,7 +1292,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -1124,6 +1305,41 @@ function parseOptions(args) {
 
 function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function parseJsonOption(value, name) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(`Invalid JSON for --${name}: ${error.message}`);
+  }
+}
+
+async function printBoardValidationResult(diagnostics, options) {
+  const errors = diagnostics.filter((item) => item.severity === "error");
+  const warnings = diagnostics.filter((item) => item.severity === "warning");
+  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
+
+  if (options.json) {
+    printJson({
+      valid: !failed,
+      strict: Boolean(options.strict),
+      errors: errors.length,
+      warnings: warnings.length,
+      diagnostics
+    });
+  } else if (!failed) {
+    console.log("valid: boards passed validation");
+    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
+    for (const warning of warnings) console.log(`warning: ${warning.code} ${warning.path} ${warning.message}`);
+  } else {
+    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
+    console.log(`invalid: ${reason}`);
+    for (const item of diagnostics) console.log(`${item.severity}: ${item.code} ${item.path} ${item.message}`);
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 function parseRuntimes(options) {
@@ -1225,12 +1441,23 @@ Packages:
   aof packages install [gsd] [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
   aof packages install --from-lock [--dry-run] [--json]
 
+Boards:
+  aof boards list [--archived] [--json]
+  aof boards create id --title text [--objective text] [--json]
+  aof boards show id [--json]
+  aof boards archive id [--json]
+  aof boards validate [--json] [--strict]
+  aof boards index [--json]
+  aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]
+  aof boards task move board-id task-id status [--json]
+
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.
   project commands inspect, validate, diagnose, and migrate the current repository's AOF workspace.
   assets apply renders source assets into the runtimes selected in .aof/aof.config.json unless runtime flags narrow the run.
   packages add records package intent only and never runs installer code.
   packages install prints a network/package-code boundary before executing installers.
+  boards stores canonical task state in .aof/boards and generated indexes in .aof/cache/boards.
   assets ui opens the project/global asset editor.
   --strict promotes adapter warnings to command failures for CI.
 `;
