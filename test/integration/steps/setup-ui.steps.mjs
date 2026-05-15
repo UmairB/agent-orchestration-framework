@@ -3,6 +3,8 @@ import { requestSetupUi, startSetupUi } from "../support/setup-ui-context.mjs";
 import { runSharedCliStep } from "./shared-cli.steps.mjs";
 
 export async function runStep(context, step) {
+  let match;
+
   if (step === "a running setup UI server") {
     await startSetupUi(context);
     return;
@@ -39,6 +41,19 @@ export async function runStep(context, step) {
       settings: {
         codex: { approval_policy: "on-request" }
       }
+    });
+    return;
+  }
+
+  match = step.match(/^I save agent resource `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/config/resources/agent/${match[1]}`, {
+      id: match[1],
+      kind: "agent",
+      description: "Board execution agent",
+      body: "Execute assigned board tasks.",
+      runtimes: ["codex"],
+      overrides: {}
     });
     return;
   }
@@ -117,7 +132,61 @@ export async function runStep(context, step) {
     return;
   }
 
-  let match = step.match(/^I save global skill `(.+)` through the setup UI API$/);
+  match = step.match(/^I create board `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/boards/${match[1]}`, {
+      title: "Delivery",
+      objective: "Ship setup UI board management"
+    });
+    return;
+  }
+
+  match = step.match(/^I create task `(.+)` on board `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}`, {
+      title: "Phase 31",
+      status: "ready",
+      priority: "normal",
+      deliverable: "Kanban setup UI",
+      refs: { phase: "31" }
+    });
+    return;
+  }
+
+  match = step.match(/^I edit task `(.+)` on board `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PATCH", `/api/boards/${match[2]}/tasks/${match[1]}`, {
+      title: "Phase 31 UI",
+      priority: "high",
+      deliverable: "Kanban setup UI",
+      refs: { phase: "31" }
+    });
+    return;
+  }
+
+  match = step.match(/^I assign task `(.+)` on board `(.+)` to agent `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}/assignment`, {
+      agentId: match[3]
+    });
+    return;
+  }
+
+  match = step.match(/^I mark task `(.+)` on board `(.+)` execution `(.+)` through the setup UI API$/);
+  if (match) {
+    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}/execution`, {
+      status: match[3],
+      message: `Marked ${match[3]} from setup UI test.`
+    });
+    return;
+  }
+
+  if (step === "I request board validation through the setup UI API") {
+    await requestSetupUi(context, "GET", "/api/boards/validate");
+    return;
+  }
+
+  match = step.match(/^I save global skill `(.+)` through the setup UI API$/);
   if (match) {
     await requestSetupUi(context, "PUT", `/api/config/global/resources/skill/${match[1]}`, {
       id: match[1],

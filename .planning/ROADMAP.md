@@ -133,10 +133,12 @@ Previous milestone details are archived under `.planning/milestones/`.
 5. Live UAT verifies a deliverable can be broken down, assigned to agents, and tracked through the board.
 
 **Plans:**
-- Wave 1: Coverage audit and missing BDD scenarios
-- Wave 2: Setup UI and execution-progress verification
-- Wave 3: Live UAT, documentation, and milestone hardening
+- ✅ [Wave 1: Coverage audit and missing BDD scenarios](phases/32-task-management-verification/32-01-PLAN.md)
+- ✅ [Wave 2: Setup UI and execution-progress verification](phases/32-task-management-verification/32-02-PLAN.md)
+- ✅ [Wave 3: Live UAT, documentation, and milestone hardening](phases/32-task-management-verification/32-03-PLAN.md)
+
+**Verification:** [32-VERIFICATION.md](phases/32-task-management-verification/32-VERIFICATION.md)
 
 ## Next
 
-Continue with Phase 30: Agent Assignment And Execution.
+v1.6 Task Management implementation and verification are complete. Audit and complete the milestone before starting the next milestone.
