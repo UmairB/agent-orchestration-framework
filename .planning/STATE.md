@@ -1,3 +1,20 @@
+---
+gsd_state_version: 1.0
+milestone: v1.6
+milestone_name: Task Management
+current_phase: Not started
+status: Defining requirements and roadmap
+stopped_at: Phase 28 context gathered
+last_updated: "2026-05-15T11:18:48.406Z"
+last_activity: 2026-05-15 - Milestone v1.6 Task Management started
+progress:
+  total_phases: 5
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
+---
+
 # State: AOF
 
 **Initialized:** 2026-05-06
@@ -32,8 +49,8 @@ Last activity: 2026-05-15 - Milestone v1.6 Task Management started
 
 ## Resume
 
-**Stopped at:** v1.6 milestone initialization
-**Resume file:** `.planning/REQUIREMENTS.md`
+**Stopped at:** Phase 28 context gathered
+**Resume file:** .planning/phases/28-board-and-task-state-foundation/28-CONTEXT.md
 
 ## Memory
 
