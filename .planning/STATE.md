@@ -4,8 +4,8 @@ milestone: v1.7
 milestone_name: Typed GSD SDK Backend
 current_phase: "33"
 status: planning
-stopped_at: v1.7 roadmap (Phases 33-38) created; ready to plan Phase 33 SDK Adapter Foundation
-last_updated: "2026-05-16T13:45:00.000Z"
+stopped_at: Phase 33 context gathered; ready to plan SDK Adapter Foundation
+last_updated: "2026-05-16T14:30:00.000Z"
 last_activity: 2026-05-16
 progress:
   total_phases: 6
@@ -60,8 +60,8 @@ Last activity: 2026-05-16 — v1.7 roadmap created with Phases 33-38, REQUIREMEN
 
 ## Resume
 
-**Stopped at:** v1.7 roadmap (Phases 33-38) created and locked; REQUIREMENTS.md traceability finalized; ready to plan Phase 33 SDK Adapter Foundation.
-**Resume file:** `.planning/ROADMAP.md` — see Phase 33 details, then `/gsd:plan-phase 33`.
+**Stopped at:** Phase 33 SDK Adapter Foundation context gathered. Four gray areas resolved: lazy-on-first-call boot probe, lock-state-pinned `gsdToolsPath` (with researcher gap R-01), unbounded append-only dispatch log, happy-path v1.7-active seed fixture. Four researcher hand-offs noted (R-01..R-04). Ready to plan.
+**Resume file:** `.planning/phases/33-sdk-adapter-foundation/33-CONTEXT.md` — read CONTEXT.md, then `/gsd:plan-phase 33`.
 
 ## Memory
 
@@ -183,6 +183,7 @@ Last activity: 2026-05-16 — v1.7 roadmap created with Phases 33-38, REQUIREMEN
 - Milestone v1.7 started on 2026-05-16 as Typed GSD SDK Backend. v1.7 PROJECT.md and REQUIREMENTS.md drafted with 46 requirements across 8 categories (Adapter, Sync, Lifecycle, Backend, Diagnostics, Execution, Migration, Tests + Windows).
 - v1.7 research synthesized 2026-05-16: SUMMARY.md, ARCHITECTURE.md, PITFALLS.md, STACK.md, FEATURES.md. Headline pitfalls: SDK 0.x semver drift, bundled-vs-published SDK lineage divergence, v1.6 board migration breakage, BoardBackend over-abstraction. Headline architecture: single `src/gsd-sdk-adapter.mjs` module-of-functions + `src/backends/` directory with 4-method BoardBackend.
 - v1.7 roadmap created on 2026-05-16 with Phases 33-38: SDK Adapter Foundation, Board Lifecycle Migration And Typed Sync, BoardBackend Seam, Test Surface Migration And Windows Parity, Runtime Fallback Hardening And Collapse, Doctor + Observability + Closeout. 100% requirement coverage locked in REQUIREMENTS.md traceability.
+- Phase 33 context is captured in `.planning/phases/33-sdk-adapter-foundation/33-CONTEXT.md`. Locked decisions: lazy boot probe on first adapter call (D-07/08), lock-state-pinned `gsdToolsPath` with SDK-default fallback (D-10), unbounded append-only dispatch log at `.aof/cache/boards/dispatch.log.jsonl` (D-13..16), happy-path seed fixture under `test/fixtures/gsd-sdk/v17-active/` capturing real `roadmapAnalyze` + `stateLoad` stdout (D-17..19). Open researcher items: R-01 lock-state path-recording shape, R-02 `assertMilestone` SDK call sequence, R-03 hard-coded surface list from `.d.ts`, R-04 per-method timeout values.
 
 ## Deferred Items
 
