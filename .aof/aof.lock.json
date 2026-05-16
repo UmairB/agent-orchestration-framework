@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "generatedAt": "2026-05-16T12:27:59.277Z",
+  "runtimes": [
+    "claude",
+    "codex"
+  ],
+  "files": [],
+  "packages": [],
+  "frameworks": [],
+  "frameworkInstallAttempts": [
+    {
+      "framework": "gsd",
+      "command": "npx get-shit-done-cc@latest --claude --local",
+      "runtime": "claude",
+      "scope": "local",
+      "status": "success",
+      "exitStatus": 0,
+      "timestamp": "2026-05-16T12:28:30.220Z",
+      "namespace": "gsd",
+      "packageSource": "npm:get-shit-done-cc@latest",
+      "sourceDescriptor": {
+        "type": "npm",
+        "package": "get-shit-done-cc",
+        "version": "latest"
+      },
+      "skipped": false
+    },
+    {
+      "framework": "gsd",
+      "command": "npx get-shit-done-cc@latest --codex --local",
+      "runtime": "codex",
+      "scope": "local",
+      "status": "success",
+      "exitStatus": 0,
+      "timestamp": "2026-05-16T12:28:36.671Z",
+      "namespace": "gsd",
+      "packageSource": "npm:get-shit-done-cc@latest",
+      "sourceDescriptor": {
+        "type": "npm",
+        "package": "get-shit-done-cc",
+        "version": "latest"
+      },
+      "skipped": false
+    }
+  ]
+}

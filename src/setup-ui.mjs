@@ -4,8 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
-import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { continueGsdMilestone } from "./gsd-runtime.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -153,7 +154,13 @@ export async function serveSetupUi(catalog, options = {}) {
             executionProvider: gsdConfigured ? "gsd" : item.executionProvider,
             defaultExecutionRuntime: item.defaultExecutionRuntime ?? "codex"
           }, { force: Boolean(item.force) });
-          sendJson(response, 200, { ok: true, board: result.board });
+          let board = result.board;
+          let runtime = null;
+          if (board.executionProvider === "gsd" && board.defaultExecutionRuntime === "claude") {
+            runtime = await continueGsdMilestone(projectDir, board);
+            board = await updateBoardMilestone(projectDir, board.id, runtime);
+          }
+          sendJson(response, 200, { ok: true, board, runtime });
         } catch (error) {
           sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
         }
@@ -185,7 +192,10 @@ export async function serveSetupUi(catalog, options = {}) {
     const boardSyncMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/sync$/);
     if (request.method === "PUT" && boardSyncMatch) {
       try {
-        const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]));
+        const item = await readJsonBody(request);
+        const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]), {
+          milestoneId: item.milestone ?? item.milestoneId
+        });
         sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
@@ -201,6 +211,24 @@ export async function serveSetupUi(catalog, options = {}) {
           defaultExecutionRuntime: item.defaultExecutionRuntime
         });
         sendJson(response, 200, { ok: true, ...result });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const boardMilestoneAnswerMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/milestone\/answer$/);
+    if (request.method === "PUT" && boardMilestoneAnswerMatch) {
+      try {
+        const item = await readJsonBody(request);
+        const answer = typeof item.text === "string" ? item.text : item.answer;
+        if (typeof answer !== "string" || answer.trim() === "") {
+          throw new Error("Milestone answer text is required.");
+        }
+        const board = await getBoard(projectDir, decodeRoutePart(boardMilestoneAnswerMatch[1]));
+        const runtime = await continueGsdMilestone(projectDir, board, { answer: answer.trim() });
+        const updated = await updateBoardMilestone(projectDir, board.id, runtime, { answer: answer.trim() });
+        sendJson(response, 200, { ok: true, board: updated, runtime });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
       }

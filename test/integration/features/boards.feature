@@ -69,22 +69,34 @@ Feature: Board and task state
 
   Scenario: GSD-backed boards sync tasks from roadmap phases
     Given a project with GSD board execution
-    When I run `boards create delivery --title Delivery --objective "Ship board state" --runtime claude`
+    When I run `boards create delivery --title Delivery --objective "Ship board state" --execution-runtime claude` with GSD runtime status `waiting_for_user` and output `What do you want to build next?`
     Then the command should succeed
     And stdout should contain `execution: gsd runtime=claude`
-    And stdout should contain `next: $gsd-new-milestone`
+    And stdout should contain `continue: $gsd-new-milestone Ship board state`
+    And stdout should contain `milestone: waiting_for_user`
     And file `.aof/boards/delivery/BOARD.json` should contain `"defaultExecutionRuntime": "claude"`
+    And file `.aof/boards/delivery/BOARD.json` should contain `"status": "waiting_for_user"`
     When I run `boards task add delivery manual --title "Manual"`
     Then the command should fail
     And stderr should contain `cannot accept tasks until its milestone roadmap is synced`
     When I run `boards sync delivery`
     Then the command should fail
-    And stderr should contain `not bound to a GSD milestone`
+    And stderr should contain `--milestone <milestone-id>`
     When I run `boards repair delivery`
     Then the command should succeed
-    And stdout should contain `next: $gsd-new-milestone`
-    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
-    And I run `boards sync delivery`
+    And stdout should contain `already has a GSD milestone in progress`
+    When I run `boards milestone status delivery`
+    Then the command should succeed
+    And stdout should contain `milestone: waiting_for_user`
+    And stdout should contain `next: aof boards milestone answer delivery --text "<answer>"`
+    When I run `boards milestone answer delivery --text "1"` with GSD runtime status `waiting_for_user` and output `Confirm milestone?`
+    Then the command should succeed
+    And stdout should contain `milestone: waiting_for_user`
+    And stdout should contain `Confirm milestone?`
+    When I run `boards milestone attach delivery --milestone v1-7 --roadmap .planning/ROADMAP.md`
+    Then the command should succeed
+    And stdout should contain `Attached board delivery to milestone v1-7`
+    When I run `boards sync delivery --milestone v1-7`
     Then the command should succeed
     And stdout should contain `Synced board delivery with GSD roadmap`
     And stdout should contain `created: 2`
@@ -112,8 +124,8 @@ Feature: Board and task state
     Given a project with GSD board execution
     When I run `boards create delivery --title Delivery --objective "Assign synced phase tasks"`
     Then the command should succeed
-    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
-    And I run `boards sync delivery`
+    When I run `boards milestone attach delivery --milestone v1-7 --roadmap .planning/ROADMAP.md`
+    And I run `boards sync delivery --milestone v1-7`
     Then the command should succeed
     When I run `boards agents`
     Then stdout should contain `builder`
@@ -131,8 +143,8 @@ Feature: Board and task state
     Given a project with GSD board execution
     When I run `boards create delivery --title Delivery --objective "Reject unknown agents"`
     Then the command should succeed
-    When I attach roadmap `.planning/ROADMAP.md` to board `delivery`
-    And I run `boards sync delivery`
+    When I run `boards milestone attach delivery --milestone v1-7 --roadmap .planning/ROADMAP.md`
+    And I run `boards sync delivery --milestone v1-7`
     Then the command should succeed
     When I run `boards task assign delivery phase-30 missing-agent`
     Then the command should fail

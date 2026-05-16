@@ -40,7 +40,9 @@ export function runCli(context, command, input = "", options = {}) {
       NODE_NO_WARNINGS: "1",
       ...promptEnv,
       ...(options.resourceInput ? { AOF_TEST_RESOURCE_INPUT: options.resourceInput } : {}),
-      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
+      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {}),
+      ...(options.gsdRuntimeStatus ? { AOF_TEST_GSD_RUNTIME_STATUS: options.gsdRuntimeStatus } : {}),
+      ...(options.gsdRuntimeOutput ? { AOF_TEST_GSD_RUNTIME_STDOUT: options.gsdRuntimeOutput } : {})
     },
     input,
     encoding: "utf8"
@@ -65,6 +67,8 @@ export async function runCliInProcess(context, command, input = "", options = {}
   const previousConfirmInput = process.env.AOF_TEST_CONFIRM_INPUT;
   const previousResourceInput = process.env.AOF_TEST_RESOURCE_INPUT;
   const previousFrameworkStatus = process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS;
+  const previousGsdRuntimeStatus = process.env.AOF_TEST_GSD_RUNTIME_STATUS;
+  const previousGsdRuntimeStdout = process.env.AOF_TEST_GSD_RUNTIME_STDOUT;
   const previousExitCode = process.exitCode;
   const previousLog = console.log;
   const previousError = console.error;
@@ -82,6 +86,8 @@ export async function runCliInProcess(context, command, input = "", options = {}
   }
   if (options.resourceInput) process.env.AOF_TEST_RESOURCE_INPUT = options.resourceInput;
   if (options.frameworkStatuses) process.env.AOF_TEST_FRAMEWORK_INSTALL_STATUS = options.frameworkStatuses;
+  if (options.gsdRuntimeStatus) process.env.AOF_TEST_GSD_RUNTIME_STATUS = options.gsdRuntimeStatus;
+  if (options.gsdRuntimeOutput) process.env.AOF_TEST_GSD_RUNTIME_STDOUT = options.gsdRuntimeOutput;
   process.chdir(context.projectDir);
 
   try {
@@ -102,6 +108,8 @@ export async function runCliInProcess(context, command, input = "", options = {}
     restoreEnv("AOF_TEST_CONFIRM_INPUT", previousConfirmInput);
     restoreEnv("AOF_TEST_RESOURCE_INPUT", previousResourceInput);
     restoreEnv("AOF_TEST_FRAMEWORK_INSTALL_STATUS", previousFrameworkStatus);
+    restoreEnv("AOF_TEST_GSD_RUNTIME_STATUS", previousGsdRuntimeStatus);
+    restoreEnv("AOF_TEST_GSD_RUNTIME_STDOUT", previousGsdRuntimeStdout);
     process.exitCode = previousExitCode;
   }
 }

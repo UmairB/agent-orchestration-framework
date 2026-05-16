@@ -260,6 +260,15 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
+  match = step.match(/^I run `(.+)` with GSD runtime status `(.+)` and output `([\s\S]*)`$/);
+  if (match) {
+    context.lastResult = await runCli(context, match[1], "", {
+      gsdRuntimeStatus: match[2],
+      gsdRuntimeOutput: match[3]
+    });
+    return;
+  }
+
   match = step.match(/^I run `(.+)`$/);
   if (match) {
     context.lastResult = await runCli(context, match[1]);
@@ -279,6 +288,7 @@ export async function runSharedCliStep(context, step) {
     board.gsd = board.gsd ?? {};
     board.gsd.milestone = {
       ...(board.gsd.milestone ?? {}),
+      id: "test-milestone",
       status: "pending",
       command: board.gsd.milestone?.command ?? "$gsd-new-milestone",
       roadmapPath: match[1]

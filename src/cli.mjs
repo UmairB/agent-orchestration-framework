@@ -15,9 +15,10 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
-import { addTask, archiveBoard, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { continueGsdMilestone } from "./gsd-runtime.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -111,6 +112,10 @@ async function boardsCommand(args) {
     await boardsRepairCommand(rest);
     return;
   }
+  if (subcommand === "milestone") {
+    await boardsMilestoneCommand(rest);
+    return;
+  }
 
   if (subcommand === "task") {
     await boardsTaskCommand(rest);
@@ -156,10 +161,10 @@ async function boardsListCommand(args) {
 async function boardsCreateCommand(args) {
   const options = parseOptions(args);
   const [id] = options._;
-  if (!id || !options.objective) throw new Error("Usage: aof boards create <id> --title <title> --objective <text> [--runtime claude|codex] [--json]");
+  if (!id || !options.objective) throw new Error("Usage: aof boards create <id> --title <title> --objective <text> [--execution-runtime claude|codex] [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
   const gsdConfigured = await isGsdExecutionConfigured(targetDir, options);
-  const runtime = hasRuntimeOptions(options) ? (parseRuntimes(options)[0] ?? "codex") : "codex";
+  const runtime = parseExecutionRuntime(options);
   const result = await createBoard(targetDir, {
     id,
     title: options.title,
@@ -174,9 +179,17 @@ async function boardsCreateCommand(args) {
   console.log(`${result.dryRun ? "Would create" : "Created"} board ${result.board.id}`);
   if (result.board.executionProvider === "gsd") {
     console.log(`execution: gsd runtime=${result.board.defaultExecutionRuntime}`);
-    console.log(`next: ${result.board.gsd.milestone.command}`);
+    console.log(`${result.dryRun ? "would continue" : "continue"}: ${result.board.gsd.milestone.invocation ?? result.board.gsd.milestone.command}`);
+    console.log(`milestone: ${result.board.gsd.milestone.status}`);
     console.log(`objective: ${result.board.gsd.milestone.objective}`);
-    console.log(`sync: ${result.board.gsd.taskCreation.syncCommand}`);
+    console.log(`sync: blocked until GSD milestone completes`);
+    if (!result.dryRun && result.board.defaultExecutionRuntime === "claude") {
+      const runtimeResult = await continueGsdMilestone(targetDir, result.board);
+      const updated = await updateBoardMilestone(targetDir, result.board.id, runtimeResult);
+      console.log(`runtime: ${runtimeResult.runtime} status=${runtimeResult.status} exit=${runtimeResult.exitCode}`);
+      console.log(`milestone: ${updated.gsd.milestone.status}`);
+      if (updated.gsd.milestone.lastOutput) console.log(updated.gsd.milestone.lastOutput);
+    }
   }
 }
 
@@ -197,7 +210,7 @@ async function boardsShowCommand(args) {
   if (board.executionProvider) {
     console.log(`execution: ${board.executionProvider} runtime=${board.defaultExecutionRuntime}`);
     console.log(`milestone: ${board.gsd?.milestone?.status ?? "unknown"}`);
-    if (board.gsd?.milestone?.command) console.log(`next: ${board.gsd.milestone.command}`);
+    if (board.gsd?.milestone?.invocation) console.log(`started: ${board.gsd.milestone.invocation}`);
     if (board.gsd?.taskCreation?.syncCommand) console.log(`sync: ${board.gsd.taskCreation.syncCommand}`);
   }
   console.log(`tasks: ${board.tasks.length}`);
@@ -255,9 +268,13 @@ async function boardsIndexCommand(args) {
 async function boardsSyncCommand(args) {
   const options = parseOptions(args);
   const [boardId] = options._;
-  if (!boardId) throw new Error("Usage: aof boards sync <board-id> [--json]");
+  const milestoneId = options.milestone ?? options.milestoneId;
+  if (!boardId || !milestoneId) throw new Error("Usage: aof boards sync <board-id> --milestone <milestone-id> [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await syncBoardFromGsdRoadmap(targetDir, boardId, { dryRun: Boolean(options.dryRun) });
+  const result = await syncBoardFromGsdRoadmap(targetDir, boardId, {
+    milestoneId,
+    dryRun: Boolean(options.dryRun)
+  });
   if (options.json) {
     printJson(result);
     return;
@@ -272,9 +289,9 @@ async function boardsSyncCommand(args) {
 async function boardsRepairCommand(args) {
   const options = parseOptions(args);
   const [boardId] = options._;
-  if (!boardId) throw new Error("Usage: aof boards repair <board-id> [--runtime claude|codex] [--json]");
+  if (!boardId) throw new Error("Usage: aof boards repair <board-id> [--execution-runtime claude|codex] [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const runtime = hasRuntimeOptions(options) ? (parseRuntimes(options)[0] ?? "codex") : undefined;
+  const runtime = parseExecutionRuntime(options, { optional: true });
   const result = await repairBoard(targetDir, boardId, {
     defaultExecutionRuntime: runtime,
     dryRun: Boolean(options.dryRun)
@@ -284,8 +301,94 @@ async function boardsRepairCommand(args) {
     return;
   }
   console.log(result.message);
-  if (result.command) console.log(`next: ${result.command}`);
+  if (result.command) console.log(`continue: ${result.command}`);
   if (result.board.gsd?.milestone?.objective) console.log(`objective: ${result.board.gsd.milestone.objective}`);
+}
+
+async function boardsMilestoneCommand(args) {
+  const [subcommand, ...rest] = args;
+  if (subcommand === "status") {
+    await boardsMilestoneStatusCommand(rest);
+    return;
+  }
+  if (subcommand === "answer") {
+    await boardsMilestoneAnswerCommand(rest);
+    return;
+  }
+  if (subcommand === "attach") {
+    await boardsMilestoneAttachCommand(rest);
+    return;
+  }
+  throw new Error(`Unknown boards milestone command "${subcommand ?? ""}".\n\nExamples:\n  aof boards milestone status board-id\n  aof boards milestone answer board-id --text "1"\n  aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md`);
+}
+
+async function boardsMilestoneStatusCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  if (!boardId) throw new Error("Usage: aof boards milestone status <board-id> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const board = await getBoard(targetDir, boardId);
+  const milestone = board.gsd?.milestone;
+  if (options.json) {
+    printJson({ board: board.id, milestone });
+    return;
+  }
+  console.log(`board: ${board.id}`);
+  console.log(`milestone: ${milestone?.status ?? "none"}`);
+  if (milestone?.runtime) console.log(`runtime: ${milestone.runtime}`);
+  if (milestone?.invocation) console.log(`invocation: ${milestone.invocation}`);
+  if (milestone?.lastOutput) {
+    console.log("");
+    console.log("last output:");
+    console.log(milestone.lastOutput);
+  }
+  if (milestone?.status === "waiting_for_user") {
+    console.log("");
+    console.log(`next: aof boards milestone answer ${board.id} --text "<answer>"`);
+  }
+}
+
+async function boardsMilestoneAnswerCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  const answer = options.text ?? options.answer;
+  if (!boardId || !answer) throw new Error("Usage: aof boards milestone answer <board-id> --text <answer> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const board = await getBoard(targetDir, boardId);
+  if (board.executionProvider !== "gsd") throw new Error(`Board ${board.id} is not backed by GSD.`);
+  const runtimeResult = await continueGsdMilestone(targetDir, board, { answer });
+  const updated = await updateBoardMilestone(targetDir, board.id, runtimeResult, { answer });
+  if (options.json) {
+    printJson({ board: updated.id, milestone: updated.gsd.milestone, runtime: runtimeResult });
+    return;
+  }
+  console.log(`board: ${updated.id}`);
+  console.log(`runtime: ${runtimeResult.runtime} status=${runtimeResult.status} exit=${runtimeResult.exitCode}`);
+  console.log(`milestone: ${updated.gsd.milestone.status}`);
+  if (updated.gsd.milestone.lastOutput) {
+    console.log("");
+    console.log(updated.gsd.milestone.lastOutput);
+  }
+}
+
+async function boardsMilestoneAttachCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  const milestoneId = options.milestone ?? options.milestoneId;
+  const roadmapPath = options.roadmap ?? options.roadmapPath;
+  if (!boardId || !milestoneId || !roadmapPath) throw new Error("Usage: aof boards milestone attach <board-id> --milestone <milestone-id> --roadmap <path> [--json]");
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const board = await attachBoardMilestoneRoadmap(targetDir, boardId, {
+    milestoneId,
+    roadmapPath
+  }, { dryRun: Boolean(options.dryRun) });
+  if (options.json) {
+    printJson({ board: board.id, milestone: board.gsd.milestone });
+    return;
+  }
+  console.log(`Attached board ${board.id} to milestone ${board.gsd.milestone.id}`);
+  console.log(`roadmap: ${board.gsd.milestone.roadmapPath}`);
+  console.log(`sync: ${board.gsd.taskCreation.syncCommand}`);
 }
 
 async function boardsTaskCommand(args) {
@@ -1653,6 +1756,23 @@ function hasRuntimeOptions(options) {
   return Boolean(options.claude || options.codex || options.runtime);
 }
 
+function parseExecutionRuntime(options, settings = {}) {
+  const explicit = options.executionRuntime ?? options.runtime;
+  if (explicit !== undefined) {
+    const runtimes = String(explicit).split(",").map((runtime) => runtime.trim()).filter(Boolean);
+    if (runtimes.length !== 1 || !["claude", "codex"].includes(runtimes[0])) {
+      throw new Error("Invalid execution runtime. Use --execution-runtime claude or --execution-runtime codex.");
+    }
+    return runtimes[0];
+  }
+  if (options.claude && options.codex) {
+    throw new Error("Choose one execution runtime for boards: --execution-runtime claude or --execution-runtime codex.");
+  }
+  if (options.claude) return "claude";
+  if (options.codex) return "codex";
+  return settings.optional ? undefined : "codex";
+}
+
 async function runtimesForApply(configPath, options) {
   if (hasRuntimeOptions(options)) return parseRuntimes(options);
   const raw = await readJson(configPath);
@@ -1738,13 +1858,14 @@ Packages:
 Boards:
   aof boards ui [--port 4187] [--api-port 4188]
   aof boards list [--archived] [--json]
-  aof boards create id --title text --objective text [--runtime claude|codex] [--json]
+  aof boards create id --title text --objective text [--execution-runtime claude|codex] [--json]
   aof boards show id [--json]
   aof boards archive id [--json]
   aof boards remove id [--dry-run] [--json]
   aof boards validate [--json] [--strict]
   aof boards index [--json]
-  aof boards sync id [--json]
+  aof boards sync id --milestone milestone-id [--json]
+  aof boards milestone attach id --milestone milestone-id --roadmap path [--json]
   aof boards repair id [--runtime claude|codex] [--json]
   aof boards agents [--json]
   aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]

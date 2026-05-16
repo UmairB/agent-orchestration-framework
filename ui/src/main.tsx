@@ -100,7 +100,7 @@ type BoardSummary = {
   executionProvider?: string | null;
   defaultExecutionRuntime?: RuntimeId | null;
   gsd?: {
-    milestone?: { status?: string; command?: string; syncCommand?: string; syncedAt?: string | null; roadmapPath?: string };
+    milestone?: { id?: string; status?: string; command?: string; invocation?: string; syncCommand?: string; syncedAt?: string | null; roadmapPath?: string; lastOutput?: string };
     taskCreation?: { mode?: string; addPhaseCommand?: string; syncCommand?: string };
   } | null;
   taskCount: number;
@@ -472,6 +472,7 @@ function BoardsPanel() {
   const [message, setMessage] = useState("");
   const [showBoardForm, setShowBoardForm] = useState(false);
   const [boardDraft, setBoardDraft] = useState<{ id: string; title: string; objective: string; defaultExecutionRuntime: RuntimeId }>({ id: "", title: "", objective: "", defaultExecutionRuntime: "codex" });
+  const [milestoneAnswer, setMilestoneAnswer] = useState("");
 
   useEffect(() => {
     void refreshBoards();
@@ -526,8 +527,8 @@ function BoardsPanel() {
       setMessage(payload.error ?? "Board create failed");
       return;
     }
-    const nextAction = payload.board.gsd?.milestone?.command ? ` Next: ${payload.board.gsd.milestone.command}` : "";
-    setMessage(`Created board ${payload.board.id}.${nextAction}`);
+    const milestoneStatus = payload.board.gsd?.milestone?.status;
+    setMessage(`Created board ${payload.board.id}${milestoneStatus ? `; milestone ${milestoneStatus}` : ""}.`);
     setBoardDraft({ id: "", title: "", objective: "", defaultExecutionRuntime: "codex" });
     setShowBoardForm(false);
     await refreshBoards(payload.board.id);
@@ -538,7 +539,7 @@ function BoardsPanel() {
     const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/sync`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({})
+      body: JSON.stringify({ milestone: board.gsd?.milestone?.id })
     });
     const payload = await response.json();
     if (!response.ok || payload.ok === false) {
@@ -562,6 +563,24 @@ function BoardsPanel() {
       return;
     }
     setMessage(payload.message ?? `Repaired ${board.id}`);
+    await refreshBoards(board.id);
+  }
+
+  async function answerBoardMilestone(event: React.FormEvent) {
+    event.preventDefault();
+    if (!board || !milestoneAnswer.trim()) return;
+    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/milestone/answer`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: milestoneAnswer.trim() })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setMessage(payload.error ?? "Milestone answer failed");
+      return;
+    }
+    setMilestoneAnswer("");
+    setMessage(`Milestone ${payload.board.gsd?.milestone?.status ?? "updated"}.`);
     await refreshBoards(board.id);
   }
 
@@ -738,25 +757,46 @@ function BoardsPanel() {
               </div>
 
               {board.executionProvider === "gsd" ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-4">
-                  <div>
-                    <p className="text-sm font-semibold">{board.gsd?.milestone?.status === "synced" ? "GSD milestone synced" : "GSD milestone setup required"}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {board.gsd?.milestone?.status === "synced"
-                        ? `Add new tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then sync the board.`
-                        : `Run ${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} to create the backing roadmap before tasks are available.`}
-                    </p>
+                <div className="space-y-3 rounded-md border border-border bg-card p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">{board.gsd?.milestone?.status === "synced" ? "GSD milestone synced" : "GSD milestone in progress"}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {board.gsd?.milestone?.status === "synced"
+                          ? `Add new tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then sync the board.`
+                          : `${board.gsd?.milestone?.invocation ?? board.gsd?.milestone?.command ?? "$gsd-new-milestone"} has started. Complete the GSD milestone and attach the roadmap before tasks are available.`}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="secondary" onClick={() => void syncBoardFromRoadmap()}>
+                        <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+                        Sync Phases
+                      </Button>
+                      {board.gsd?.milestone?.roadmapPath ? null : (
+                        <Button type="button" variant="secondary" onClick={() => void repairBoardMilestone()}>
+                          <ShieldAlert className="mr-2 h-4 w-4" aria-hidden="true" />
+                          Repair
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                  <Button type="button" variant="secondary" onClick={() => void syncBoardFromRoadmap()}>
-                    <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-                    Sync Phases
-                  </Button>
-                  {board.gsd?.milestone?.roadmapPath ? null : (
-                    <Button type="button" variant="secondary" onClick={() => void repairBoardMilestone()}>
-                      <ShieldAlert className="mr-2 h-4 w-4" aria-hidden="true" />
-                      Repair
-                    </Button>
-                  )}
+                  {board.gsd?.milestone?.lastOutput ? (
+                    <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">{board.gsd.milestone.lastOutput}</pre>
+                  ) : null}
+                  {board.gsd?.milestone?.status === "waiting_for_user" ? (
+                    <form className="flex flex-col gap-2 sm:flex-row" onSubmit={answerBoardMilestone}>
+                      <Input
+                        aria-label="Milestone answer"
+                        placeholder="answer"
+                        value={milestoneAnswer}
+                        onChange={(event) => setMilestoneAnswer(event.target.value)}
+                      />
+                      <Button type="submit" disabled={!milestoneAnswer.trim()}>
+                        <PlayCircle className="mr-2 h-4 w-4" aria-hidden="true" />
+                        Send
+                      </Button>
+                    </form>
+                  ) : null}
                 </div>
               ) : null}
 

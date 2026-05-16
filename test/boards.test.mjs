@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   addTask,
   archiveBoard,
+  attachBoardMilestoneRoadmap,
   buildBoardIndex,
   createBoard,
   editTask,
@@ -14,9 +15,11 @@ import {
   removeBoard,
   repairBoard,
   syncBoardFromGsdRoadmap,
+  updateBoardMilestone,
   validateBoards,
   writeBoardIndex
 } from "../src/boards.mjs";
+import { claudeGsdMilestoneCommand, claudeGsdMilestonePrompt, classifyGsdMilestoneStatus, codexGsdMilestoneCommand, codexGsdMilestonePrompt, expandClaudeCommandPrompt, gsdMilestonePrompt, runtimeOutputHasCommandFailure, runtimeOutputNeedsUser } from "../src/gsd-runtime.mjs";
 
 export const boardTests = [
   {
@@ -30,6 +33,18 @@ export const boardTests = [
   {
     name: "syncs GSD-backed boards from roadmap phases",
     run: syncsGsdBackedBoards
+  },
+  {
+    name: "starts GSD milestone provisioning when creating backed boards",
+    run: startsGsdMilestoneProvisioning
+  },
+  {
+    name: "records GSD milestone runtime sessions",
+    run: recordsGsdMilestoneRuntimeSessions
+  },
+  {
+    name: "builds GSD runtime prompts and detects command failures",
+    run: buildsGsdRuntimePromptsAndDetectsCommandFailures
   },
   {
     name: "removes board directories",
@@ -128,23 +143,34 @@ async function syncsGsdBackedBoards() {
     );
     await assert.rejects(
       () => syncBoardFromGsdRoadmap(targetDir, "delivery"),
-      /not bound to a GSD milestone/
+      /--milestone <milestone-id>/
+    );
+    await assert.rejects(
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7" }),
+      /not bound to a GSD milestone id/
     );
 
     const repair = await repairBoard(targetDir, "delivery");
-    assert.equal(repair.repaired, true);
-    assert.equal(repair.command, "$gsd-new-milestone");
+    assert.equal(repair.repaired, false);
+    assert.equal(repair.command, "$gsd-new-milestone Create phase tasks from a GSD milestone");
     await assert.rejects(
-      () => syncBoardFromGsdRoadmap(targetDir, "delivery"),
-      /not bound to a GSD milestone/
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7" }),
+      /not bound to a GSD milestone id/
     );
 
-    const boardPath = path.join(targetDir, ".aof", "boards", "delivery", "BOARD.json");
-    const repairedBoard = JSON.parse(await readFile(boardPath, "utf8"));
-    repairedBoard.gsd.milestone.roadmapPath = ".planning/ROADMAP.md";
-    await writeFile(boardPath, `${JSON.stringify(repairedBoard, null, 2)}\n`, "utf8");
+    const attached = await attachBoardMilestoneRoadmap(targetDir, "delivery", {
+      milestoneId: "v1-7",
+      roadmapPath: ".planning/ROADMAP.md"
+    });
+    assert.equal(attached.gsd.milestone.id, "v1-7");
+    assert.equal(attached.gsd.taskCreation.syncCommand, "aof boards sync delivery --milestone v1-7");
 
-    const result = await syncBoardFromGsdRoadmap(targetDir, "delivery");
+    await assert.rejects(
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-8" }),
+      /bound to milestone v1-7, not v1-8/
+    );
+
+    const result = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7" });
     assert.equal(result.created.length, 2);
     assert.equal(result.board.defaultExecutionRuntime, "claude");
     assert.equal(result.board.gsd.milestone.status, "synced");
@@ -157,9 +183,129 @@ async function syncsGsdBackedBoards() {
     const board = await getBoard(targetDir, "delivery");
     assert.deepEqual(board.tasks.map((task) => task.id), ["phase-40", "phase-41"]);
     assert.equal(board.tasks[0].refs.phase, "40");
+
+    const legacyBoardPath = path.join(targetDir, ".aof", "boards", "legacy", "BOARD.json");
+    await mkdir(path.dirname(legacyBoardPath), { recursive: true });
+    await writeFile(legacyBoardPath, `${JSON.stringify({
+      version: 1,
+      id: "legacy",
+      title: "Legacy",
+      objective: "Repair legacy pending board",
+      status: "active",
+      columns: ["backlog", "ready", "in_progress", "blocked", "done"],
+      executionProvider: "gsd",
+      defaultExecutionRuntime: "codex",
+      gsd: {
+        milestone: {
+          status: "pending",
+          command: "$gsd-new-milestone",
+          objective: "Repair legacy pending board",
+          createdAt: new Date(0).toISOString(),
+          syncedAt: null
+        },
+        taskCreation: {
+          mode: "gsd-phase",
+          addPhaseCommand: "$gsd-phase add",
+          syncCommand: "aof boards sync legacy"
+        }
+      }
+    }, null, 2)}\n`, "utf8");
+    const legacyRepair = await repairBoard(targetDir, "legacy");
+    assert.equal(legacyRepair.repaired, true);
+    assert.equal(legacyRepair.board.gsd.milestone.status, "waiting_for_user");
+    assert.equal(legacyRepair.board.gsd.milestone.invocation, "$gsd-new-milestone Repair legacy pending board");
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
+}
+
+async function startsGsdMilestoneProvisioning() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    const result = await createBoard(targetDir, {
+      id: "uat",
+      title: "UAT",
+      objective: "Run board UAT",
+      executionProvider: "gsd",
+      defaultExecutionRuntime: "codex"
+    });
+
+    assert.equal(result.board.executionProvider, "gsd");
+    assert.equal(result.board.gsd.milestone.status, "waiting_for_user");
+    assert.equal(result.board.gsd.milestone.startedAt, result.board.gsd.milestone.createdAt);
+    assert.equal(result.board.gsd.milestone.command, "$gsd-new-milestone");
+    assert.equal(result.board.gsd.milestone.invocation, "$gsd-new-milestone Run board UAT");
+    assert.equal(result.board.gsd.milestone.roadmapPath, null);
+    assert.equal(result.board.gsd.milestone.completedAt, null);
+    assert.equal(result.board.gsd.taskCreation.syncBlockedReason, "milestone-incomplete");
+
+    await assert.rejects(
+      () => syncBoardFromGsdRoadmap(targetDir, "uat"),
+      /--milestone <milestone-id>/
+    );
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function recordsGsdMilestoneRuntimeSessions() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    await createBoard(targetDir, {
+      id: "uat",
+      title: "UAT",
+      objective: "Run board UAT",
+      executionProvider: "gsd",
+      defaultExecutionRuntime: "claude"
+    });
+    const waiting = await updateBoardMilestone(targetDir, "uat", {
+      runtime: "claude",
+      executable: "claude",
+      argv: ["-p", "/gsd-new-milestone Run board UAT --text"],
+      status: "waiting_for_user",
+      exitCode: 0,
+      stdout: "What do you want to build next?",
+      stderr: "",
+      startedAt: new Date(0).toISOString(),
+      endedAt: new Date(1).toISOString()
+    });
+
+    assert.equal(waiting.gsd.milestone.status, "waiting_for_user");
+    assert.equal(waiting.gsd.milestone.runtime, "claude");
+    assert.match(waiting.gsd.milestone.lastOutput, /What do you want/);
+    assert.equal(waiting.gsd.milestone.session.turns[0].role, "runtime");
+
+    const answered = await updateBoardMilestone(targetDir, "uat", {
+      runtime: "claude",
+      executable: "claude",
+      argv: ["-p", "--continue", "1"],
+      status: "waiting_for_user",
+      exitCode: 0,
+      stdout: "Confirm milestone?",
+      stderr: "",
+      startedAt: new Date(2).toISOString(),
+      endedAt: new Date(3).toISOString()
+    }, { answer: "1" });
+
+    assert.deepEqual(answered.gsd.milestone.session.turns.map((turn) => turn.role), ["runtime", "user", "runtime"]);
+    assert.equal(answered.gsd.milestone.session.turns[1].text, "1");
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function buildsGsdRuntimePromptsAndDetectsCommandFailures() {
+  assert.equal(gsdMilestonePrompt("Run board UAT"), "$gsd-new-milestone Run board UAT --text");
+  assert.equal(codexGsdMilestonePrompt("Run board UAT"), "$gsd-new-milestone Run board UAT --text");
+  assert.equal(claudeGsdMilestonePrompt("Run board UAT"), "/gsd:new-milestone Run board UAT --text");
+  assert.deepEqual(claudeGsdMilestoneCommand("Run board UAT").argv.slice(-2), ["--", "/gsd:new-milestone Run board UAT --text"]);
+  assert.deepEqual(codexGsdMilestoneCommand("Run board UAT").argv.slice(-2), ["--", "$gsd-new-milestone Run board UAT --text"]);
+  assert.equal(expandClaudeCommandPrompt("Milestone name: $ARGUMENTS", "Run board UAT"), "Milestone name: Run board UAT --text");
+  assert.equal(runtimeOutputHasCommandFailure("Unknown command: /gsd-new-milestone"), true);
+  assert.equal(runtimeOutputNeedsUser("The user dismissed the question. I'll wait for their direction."), true);
+  assert.equal(runtimeOutputHasCommandFailure("What do you want to build next?"), false);
+  assert.equal(classifyGsdMilestoneStatus({ exitCode: 0, output: "The user dismissed the question. I'll wait for their direction.", roadmapPath: ".planning/ROADMAP.md" }), "waiting_for_user");
+  assert.equal(classifyGsdMilestoneStatus({ exitCode: 0, output: "", roadmapPath: ".planning/ROADMAP.md" }), "completed");
 }
 
 async function removesBoardDirectories() {

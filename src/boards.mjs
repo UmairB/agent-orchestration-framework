@@ -32,6 +32,8 @@ export async function createBoard(projectDir, input = {}, options = {}) {
   const now = nowIso();
   const executionProvider = input.executionProvider === "gsd" ? "gsd" : null;
   const defaultExecutionRuntime = normalizeRuntime(input.defaultExecutionRuntime ?? input.runtime ?? "codex");
+  const milestoneCommand = "$gsd-new-milestone";
+  const milestoneInvocation = `${milestoneCommand} ${objective}`;
   const board = {
     version: 1,
     id,
@@ -44,16 +46,21 @@ export async function createBoard(projectDir, input = {}, options = {}) {
       defaultExecutionRuntime,
       gsd: {
         milestone: {
-          status: "pending",
-          command: "$gsd-new-milestone",
+          status: "waiting_for_user",
+          command: milestoneCommand,
+          invocation: milestoneInvocation,
           objective,
           createdAt: now,
+          startedAt: now,
+          completedAt: null,
+          roadmapPath: null,
           syncedAt: null
         },
         taskCreation: {
           mode: "gsd-phase",
           addPhaseCommand: "$gsd-phase add",
-          syncCommand: `aof boards sync ${id}`
+          syncCommand: `aof boards sync ${id}`,
+          syncBlockedReason: "milestone-incomplete"
         }
       }
     } : {}),
@@ -126,7 +133,18 @@ export async function repairBoard(projectDir, boardId, options = {}) {
       message: `Board ${id} already has a backing GSD milestone roadmap.`
     };
   }
+  if (board.executionProvider === "gsd" && board.gsd?.milestone?.status && board.gsd.milestone.status !== "synced" && (board.gsd.milestone.invocation || board.gsd.milestone.startedAt)) {
+    return {
+      board,
+      repaired: false,
+      action: "none",
+      command: board.gsd.milestone.invocation ?? `${board.gsd.milestone.command ?? "$gsd-new-milestone"} ${objective}`,
+      message: `Board ${id} already has a GSD milestone in progress. Complete ${board.gsd.milestone.command ?? "$gsd-new-milestone"}, then sync after the milestone roadmap is attached.`
+    };
+  }
 
+  const milestoneCommand = "$gsd-new-milestone";
+  const milestoneInvocation = `${milestoneCommand} ${objective}`;
   const next = {
     ...board,
     executionProvider: "gsd",
@@ -135,17 +153,22 @@ export async function repairBoard(projectDir, boardId, options = {}) {
       ...(board.gsd ?? {}),
       milestone: {
         ...(board.gsd?.milestone ?? {}),
-        status: "pending",
-        command: "$gsd-new-milestone",
+        status: "waiting_for_user",
+        command: milestoneCommand,
+        invocation: milestoneInvocation,
         objective,
         createdAt: board.gsd?.milestone?.createdAt ?? now,
+        startedAt: board.gsd?.milestone?.startedAt ?? now,
+        completedAt: board.gsd?.milestone?.completedAt ?? null,
+        roadmapPath: board.gsd?.milestone?.roadmapPath ?? null,
         syncedAt: null
       },
       taskCreation: {
         mode: "gsd-phase",
         addPhaseCommand: "$gsd-phase add",
         syncCommand: `aof boards sync ${id}`,
-        ...(board.gsd?.taskCreation ?? {})
+        ...(board.gsd?.taskCreation ?? {}),
+        syncBlockedReason: "milestone-incomplete"
       }
     },
     updatedAt: now
@@ -155,9 +178,120 @@ export async function repairBoard(projectDir, boardId, options = {}) {
     board: next,
     repaired: true,
     action: "create-gsd-milestone",
-    command: next.gsd.milestone.command,
-    message: `Board ${id} has no backing GSD milestone. Run ${next.gsd.milestone.command}, then sync after the milestone is attached.`
+    command: next.gsd.milestone.invocation,
+    message: `Board ${id} started ${next.gsd.milestone.invocation}. Complete the GSD milestone, then sync after the milestone roadmap is attached.`
   };
+}
+
+export async function updateBoardMilestone(projectDir, boardId, runtimeResult, options = {}) {
+  const paths = boardWorkspacePaths(projectDir);
+  const id = normalizeId(boardId);
+  const boardPath = path.join(boardDirPath(paths, id), BOARD_FILE);
+  const board = await readJsonFile(boardPath);
+  if (board.executionProvider !== "gsd") {
+    throw new Error(`Board ${id} is not backed by GSD.`);
+  }
+
+  const now = nowIso();
+  const output = [runtimeResult.stdout, runtimeResult.stderr].filter(Boolean).join("\n").trim();
+  const previousTurns = Array.isArray(board.gsd?.milestone?.session?.turns) ? board.gsd.milestone.session.turns : [];
+  const turns = [
+    ...previousTurns,
+    ...(options.answer ? [{ at: runtimeResult.startedAt ?? now, role: "user", text: options.answer }] : []),
+    ...(output ? [{ at: runtimeResult.endedAt ?? now, role: "runtime", text: output }] : [])
+  ];
+  const status = runtimeResult.status === "completed"
+    ? "ready_to_sync"
+    : runtimeResult.status === "failed"
+      ? "failed"
+      : "waiting_for_user";
+  const roadmapPath = runtimeResult.status === "completed"
+    ? runtimeResult.roadmapPath ?? board.gsd?.milestone?.roadmapPath ?? null
+    : board.gsd?.milestone?.roadmapPath ?? null;
+
+  const next = {
+    ...board,
+    gsd: {
+      ...(board.gsd ?? {}),
+      milestone: {
+        ...(board.gsd?.milestone ?? {}),
+        status,
+        runtime: runtimeResult.runtime ?? board.defaultExecutionRuntime ?? "codex",
+        commandLine: [runtimeResult.executable, ...(runtimeResult.argv ?? [])].filter(Boolean).join(" "),
+        exitCode: runtimeResult.exitCode ?? null,
+        roadmapPath,
+        completedAt: runtimeResult.status === "completed" ? runtimeResult.endedAt ?? now : board.gsd?.milestone?.completedAt ?? null,
+        lastOutput: output,
+        lastError: runtimeResult.error ?? null,
+        session: {
+          ...(board.gsd?.milestone?.session ?? {}),
+          status,
+          runtime: runtimeResult.runtime ?? board.defaultExecutionRuntime ?? "codex",
+          executable: runtimeResult.executable,
+          argv: runtimeResult.argv ?? [],
+          exitCode: runtimeResult.exitCode ?? null,
+          startedAt: board.gsd?.milestone?.session?.startedAt ?? runtimeResult.startedAt ?? now,
+          updatedAt: runtimeResult.endedAt ?? now,
+          turns
+        }
+      },
+      taskCreation: {
+        mode: "gsd-phase",
+        addPhaseCommand: "$gsd-phase add",
+        syncCommand: `aof boards sync ${id}`,
+        ...(board.gsd?.taskCreation ?? {}),
+        syncBlockedReason: runtimeResult.status === "completed" ? null : "milestone-incomplete"
+      }
+    },
+    updatedAt: now
+  };
+  await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
+  return next;
+}
+
+export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {}, options = {}) {
+  const paths = boardWorkspacePaths(projectDir);
+  const id = normalizeId(boardId);
+  const milestoneId = normalizeId(input.milestoneId ?? input.milestone);
+  const roadmapPath = typeof input.roadmapPath === "string" ? input.roadmapPath.trim() : "";
+  if (!roadmapPath) throw new Error("Milestone roadmap path is required.");
+
+  const boardPath = path.join(boardDirPath(paths, id), BOARD_FILE);
+  const board = await readJsonFile(boardPath);
+  if (board.executionProvider !== "gsd") {
+    throw new Error(`Board ${id} is not backed by GSD.`);
+  }
+
+  const resolvedRoadmapPath = path.resolve(projectDir, roadmapPath);
+  if (!await exists(resolvedRoadmapPath)) {
+    throw new Error(`Milestone roadmap not found: ${roadmapPath}`);
+  }
+
+  const now = nowIso();
+  const next = {
+    ...board,
+    gsd: {
+      ...(board.gsd ?? {}),
+      milestone: {
+        ...(board.gsd?.milestone ?? {}),
+        id: milestoneId,
+        status: "ready_to_sync",
+        roadmapPath: relativeProjectPath(projectDir, resolvedRoadmapPath),
+        completedAt: board.gsd?.milestone?.completedAt ?? now,
+        syncedAt: null
+      },
+      taskCreation: {
+        mode: "gsd-phase",
+        addPhaseCommand: "$gsd-phase add",
+        ...(board.gsd?.taskCreation ?? {}),
+        syncCommand: `aof boards sync ${id} --milestone ${milestoneId}`,
+        syncBlockedReason: null
+      }
+    },
+    updatedAt: now
+  };
+  await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
+  return next;
 }
 
 export async function addTask(projectDir, boardId, input = {}, options = {}) {
@@ -212,8 +346,27 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
     throw new Error(`Board ${normalizedBoardId} is not backed by GSD.`);
   }
 
+  const requestedMilestoneId = options.milestoneId ? normalizeId(options.milestoneId) : null;
+  if (!requestedMilestoneId) {
+    throw new Error("Usage: aof boards sync <board-id> --milestone <milestone-id>");
+  }
+  const configuredMilestoneId = board.gsd?.milestone?.id ? normalizeId(board.gsd.milestone.id) : null;
+  if (!configuredMilestoneId) {
+    throw new Error(`Board ${normalizedBoardId} is not bound to a GSD milestone id. Run \`aof boards milestone attach ${normalizedBoardId} --milestone <milestone-id> --roadmap <path>\` before syncing.`);
+  }
+  if (configuredMilestoneId !== requestedMilestoneId) {
+    throw new Error(`Board ${normalizedBoardId} is bound to milestone ${configuredMilestoneId}, not ${requestedMilestoneId}.`);
+  }
+
   const configuredRoadmap = board.gsd?.milestone?.roadmapPath;
+  const milestoneStatus = board.gsd?.milestone?.status ?? "pending";
+  if (!["ready_to_sync", "completed", "synced"].includes(milestoneStatus)) {
+    throw new Error(`Board ${normalizedBoardId} GSD milestone ${configuredMilestoneId} has not completed. Attach a completed roadmap before syncing.`);
+  }
   if (!configuredRoadmap) {
+    if (["pending", "creating", "running", "waiting_for_user"].includes(milestoneStatus)) {
+      throw new Error(`Board ${normalizedBoardId} GSD milestone has not completed. Complete ${board.gsd?.milestone?.invocation ?? board.gsd?.milestone?.command ?? "$gsd-new-milestone"} and attach its roadmap before syncing.`);
+    }
     throw new Error(`Board ${normalizedBoardId} is not bound to a GSD milestone. Run \`aof boards repair ${normalizedBoardId}\` to create or attach one before syncing.`);
   }
   const roadmapPath = path.resolve(projectDir, configuredRoadmap);
@@ -249,16 +402,20 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
       milestone: {
         ...(board.gsd?.milestone ?? {}),
         status: "synced",
+        id: configuredMilestoneId,
         command: board.gsd?.milestone?.command ?? "$gsd-new-milestone",
+        invocation: board.gsd?.milestone?.invocation ?? `${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} ${board.objective ?? ""}`.trim(),
         roadmapPath: relativeProjectPath(projectDir, roadmapPath),
         phaseCount: phases.length,
+        completedAt: board.gsd?.milestone?.completedAt ?? now,
         syncedAt: now
       },
       taskCreation: {
         mode: "gsd-phase",
         addPhaseCommand: "$gsd-phase add",
-        syncCommand: `aof boards sync ${normalizedBoardId}`,
-        ...(board.gsd?.taskCreation ?? {})
+        ...(board.gsd?.taskCreation ?? {}),
+        syncCommand: `aof boards sync ${normalizedBoardId} --milestone ${configuredMilestoneId}`,
+        syncBlockedReason: null
       }
     },
     updatedAt: now
