@@ -1,18 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Task Management
-current_phase: 32
-status: completed
-stopped_at: v1.6 Task Management implementation and verification complete; ready for milestone audit/completion
-last_updated: "2026-05-15T20:43:38.636Z"
-last_activity: 2026-05-15 — Milestone v1.6 completed and archived
+milestone: v1.7
+milestone_name: Typed GSD SDK Backend
+status: planning
+last_updated: "2026-05-16T13:13:45.680Z"
+last_activity: 2026-05-16
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # State: AOF
@@ -42,10 +40,10 @@ v1.6 Task Management is complete. The repository is ready for the next milestone
 
 ## Current Position
 
-Phase: Milestone v1.6 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-15 — Milestone v1.6 completed and archived
+Status: Defining requirements
+Last activity: 2026-05-16 — Milestone v1.7 started
 
 ## Resume
 
