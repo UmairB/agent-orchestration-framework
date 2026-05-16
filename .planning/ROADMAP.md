@@ -45,7 +45,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 
 ### v1.7 Phases (in progress)
 
-- [ ] **Phase 33: SDK Adapter Foundation** — Pin `@gsd-build/sdk@0.1.0`, ship the typed adapter module, version-drift probe, error wrapping, dispatch log, and first captured fixture.
+- [x] **Phase 33: SDK Adapter Foundation** — Pin `@gsd-build/sdk@0.1.0`, ship the typed adapter module, version-drift probe, error wrapping, dispatch log, and first captured fixture. (completed 2026-05-16)
 - [ ] **Phase 34: Board Lifecycle Migration And Typed Sync** — Route `aof boards sync --milestone` through the adapter, drop implicit ROADMAP.md parsing, add `binding.*` fields and structured error codes, auto-migrate v1.6 boards via `repair`.
 - [ ] **Phase 35: BoardBackend Seam** — Extract a minimal 4-method `BoardBackend` interface from the working Phase 34 code, register GSD as the v1 backend, add a null backend for tests, keep GSD-isms under `backend.gsd.*`.
 - [ ] **Phase 36: Test Surface Migration And Windows Parity** — Captured-fixture two-tier doubles, SDK-path BDD siblings, `test:integration:ps` exercises the SDK adapter, v1.6 board regression fixture, `.gitattributes` for cross-OS fingerprint stability.
@@ -82,7 +82,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 4. System records every `GSDTools.exec` call to `.aof/cache/boards/dispatch.log.jsonl` as `{ts, command, args, latencyMs, ok}` so adapter behavior is debuggable post-hoc.
 5. System uses an injectable `gsdToolsPath` resolved via `src/frameworks.mjs`, so users without the default `~/.claude/get-shit-done/bin/gsd-tools.cjs` still work without code edits.
 
-**Plans:** TBD
+**Plans:** 3/3 plans complete
 
 **Notes:**
 - This is a pure addition — no existing AOF behavior changes yet.

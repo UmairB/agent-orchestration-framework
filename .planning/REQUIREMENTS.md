@@ -11,15 +11,15 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Adapter (SDK seam)
 
-- [ ] **SDK-01**: User can install AOF with `@gsd-build/sdk@0.1.0` as a pinned-exact direct dependency; supply-chain audit passes after the new transitive surface is allowlisted.
-- [ ] **SDK-02**: A single `src/gsd-sdk-adapter.mjs` module is the only place in AOF that imports `@gsd-build/sdk` or invokes `gsd-tools.cjs`.
-- [ ] **SDK-03**: User can call `loadGsdState(projectDir)` and receive a typed result containing the current GSD milestone id, plus whether state/roadmap/config are present.
-- [ ] **SDK-04**: User can call `analyzeGsdRoadmap(projectDir)` and receive the SDK's typed `RoadmapAnalysis`; AOF no longer parses `.planning/ROADMAP.md` markdown directly for sync.
-- [ ] **SDK-05**: User can call `assertMilestone(projectDir, milestoneId)` and receive a structured `{ok, expected, actual, code}` outcome rather than an anonymous thrown string.
-- [ ] **SDK-06**: User can call `listMilestonePhases(projectDir, milestoneId)` and receive a typed phase list scoped to one milestone.
-- [ ] **SDK-07**: Every adapter call wraps `GSDToolsError` into a typed `GsdSdkError` with `{code, message, expected?, actual?, next?}` and never leaks raw `gsd-tools.cjs` command strings to CLI users.
-- [ ] **SDK-08**: AOF accepts an injectable `gsdToolsPath` for the adapter (resolved via `src/frameworks.mjs`) so users without `~/.claude/get-shit-done/bin/gsd-tools.cjs` still work.
-- [ ] **SDK-09**: A boot-time contract test imports `@gsd-build/sdk` and fails fast if the surface AOF depends on (`GSDTools.roadmapAnalyze`, `stateLoad`, etc.) is missing or shape-changed.
+- [x] **SDK-01**: User can install AOF with `@gsd-build/sdk@0.1.0` as a pinned-exact direct dependency; supply-chain audit passes after the new transitive surface is allowlisted.
+- [x] **SDK-02**: A single `src/gsd-sdk-adapter.mjs` module is the only place in AOF that imports `@gsd-build/sdk` or invokes `gsd-tools.cjs`.
+- [x] **SDK-03**: User can call `loadGsdState(projectDir)` and receive a typed result containing the current GSD milestone id, plus whether state/roadmap/config are present.
+- [x] **SDK-04**: User can call `analyzeGsdRoadmap(projectDir)` and receive the SDK's typed `RoadmapAnalysis`; AOF no longer parses `.planning/ROADMAP.md` markdown directly for sync.
+- [x] **SDK-05**: User can call `assertMilestone(projectDir, milestoneId)` and receive a structured `{ok, expected, actual, code}` outcome rather than an anonymous thrown string.
+- [x] **SDK-06**: User can call `listMilestonePhases(projectDir, milestoneId)` and receive a typed phase list scoped to one milestone.
+- [x] **SDK-07**: Every adapter call wraps `GSDToolsError` into a typed `GsdSdkError` with `{code, message, expected?, actual?, next?}` and never leaks raw `gsd-tools.cjs` command strings to CLI users.
+- [x] **SDK-08**: AOF accepts an injectable `gsdToolsPath` for the adapter (resolved via `src/frameworks.mjs`) so users without `~/.claude/get-shit-done/bin/gsd-tools.cjs` still work.
+- [x] **SDK-09**: A boot-time contract test imports `@gsd-build/sdk` and fails fast if the surface AOF depends on (`GSDTools.roadmapAnalyze`, `stateLoad`, etc.) is missing or shape-changed.
 
 ### Sync (board ↔ GSD state, typed)
 
@@ -53,7 +53,7 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 - [ ] **DIAG-02**: `aof boards doctor` surfaces `SDK_VERSION_DRIFT` (warning) when the installed `@gsd-build/sdk` version differs from the resolved global `gsd-sdk` CLI version, and `GSD_TOOLS_MISSING` (error) when `gsd-tools.cjs` cannot be resolved.
 - [ ] **DIAG-03**: All `aof boards` subcommands support `--json` output that emits structured error objects (`{code, message, expected?, actual?, next?}`) for every typed failure mode.
 - [ ] **DIAG-04**: Every typed error includes a `next:` hint showing the exact remediation command (e.g. `aof boards milestone attach delivery --milestone v1-7`).
-- [ ] **DIAG-05**: Every `GSDTools.exec` call from the adapter is appended to `.aof/cache/boards/dispatch.log.jsonl` with `{ts, command, args, latencyMs, ok}` for post-hoc debugging.
+- [x] **DIAG-05**: Every `GSDTools.exec` call from the adapter is appended to `.aof/cache/boards/dispatch.log.jsonl` with `{ts, command, args, latencyMs, ok}` for post-hoc debugging.
 - [ ] **DIAG-06**: `.aof/lock/packages.json` (or equivalent lock surface) records both the bundled `@gsd-build/sdk` version and the resolved `gsd-tools.cjs` path + reported version after every adapter boot.
 
 ### Execution
@@ -130,16 +130,16 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SDK-01 | Phase 33 | Pending |
-| SDK-02 | Phase 33 | Pending |
-| SDK-03 | Phase 33 | Pending |
-| SDK-04 | Phase 33 | Pending |
-| SDK-05 | Phase 33 | Pending |
-| SDK-06 | Phase 33 | Pending |
-| SDK-07 | Phase 33 | Pending |
-| SDK-08 | Phase 33 | Pending |
-| SDK-09 | Phase 33 | Pending |
-| DIAG-05 | Phase 33 | Pending |
+| SDK-01 | Phase 33 | Complete |
+| SDK-02 | Phase 33 | Complete |
+| SDK-03 | Phase 33 | Complete |
+| SDK-04 | Phase 33 | Complete |
+| SDK-05 | Phase 33 | Complete |
+| SDK-06 | Phase 33 | Complete |
+| SDK-07 | Phase 33 | Complete |
+| SDK-08 | Phase 33 | Complete |
+| SDK-09 | Phase 33 | Complete |
+| DIAG-05 | Phase 33 | Complete |
 | SYNC-01 | Phase 34 | Pending |
 | SYNC-02 | Phase 34 | Pending |
 | SYNC-03 | Phase 34 | Pending |
