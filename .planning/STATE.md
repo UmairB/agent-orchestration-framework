@@ -2,11 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
+current_phase: "33"
 status: planning
-last_updated: "2026-05-16T13:13:45.680Z"
+stopped_at: v1.7 roadmap (Phases 33-38) created; ready to plan Phase 33 SDK Adapter Foundation
+last_updated: "2026-05-16T13:45:00.000Z"
 last_activity: 2026-05-16
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -16,15 +18,15 @@ progress:
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.6 Task Management
-**Current phase:** 32
-**Status:** v1.6 milestone complete
+**Current milestone:** v1.7 Typed GSD SDK Backend
+**Current phase:** 33
+**Status:** Planning — roadmap locked, ready to plan Phase 33
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-15 after v1.6 start)
+See: `.planning/PROJECT.md` (updated 2026-05-16 after starting v1.7)
 
-**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
+**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders. v1.7 makes the GSD board↔milestone bridge typed, swappable, and free of slash-command output scraping.
 
 ## Roadmap Reference
 
@@ -36,19 +38,30 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.6 Task Management is complete. The repository is ready for the next milestone selection.
+v1.7 Typed GSD SDK Backend roadmap is locked. 46 requirements mapped across Phases 33–38, 100% coverage, no orphans. Next action is `/gsd:plan-phase 33` to plan the SDK Adapter Foundation — the load-bearing pure-addition phase every later phase depends on.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 33 — SDK Adapter Foundation (not yet planned)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-16 — Milestone v1.7 started
+Status: Roadmap created; awaiting Phase 33 planning
+Last activity: 2026-05-16 — v1.7 roadmap created with Phases 33-38, REQUIREMENTS.md traceability locked
+
+**Phase 33 scope at a glance:**
+- Pin `@gsd-build/sdk@0.1.0` exact; update supply-chain allowlist
+- Ship `src/gsd-sdk-adapter.mjs` as the only module importing the SDK or invoking `gsd-tools.cjs`
+- Typed adapter functions: `loadGsdState`, `analyzeGsdRoadmap`, `assertMilestone`, `listMilestonePhases`
+- `GsdSdkError` wrapping every `GSDToolsError`; injectable `gsdToolsPath`
+- Boot-time contract test against the SDK surface AOF depends on
+- Dispatch log (`DIAG-05`) to `.aof/cache/boards/dispatch.log.jsonl`
+- First captured fixture under `test/fixtures/gsd-sdk/` for Phase 36 to build on
+
+**Phase 33 covers:** SDK-01, SDK-02, SDK-03, SDK-04, SDK-05, SDK-06, SDK-07, SDK-08, SDK-09, DIAG-05 (10 requirements).
 
 ## Resume
 
-**Stopped at:** v1.6 Task Management implementation and verification complete; ready for milestone audit/completion
-**Resume file:** .planning/phases/32-task-management-verification/32-CONTEXT.md
+**Stopped at:** v1.7 roadmap (Phases 33-38) created and locked; REQUIREMENTS.md traceability finalized; ready to plan Phase 33 SDK Adapter Foundation.
+**Resume file:** `.planning/ROADMAP.md` — see Phase 33 details, then `/gsd:plan-phase 33`.
 
 ## Memory
 
@@ -167,6 +180,9 @@ Last activity: 2026-05-16 — Milestone v1.7 started
 - Milestone v1.5 was audited and archived on 2026-05-14 in `.planning/milestones/v1.5-ROADMAP.md`, `.planning/milestones/v1.5-REQUIREMENTS.md`, and `.planning/milestones/v1.5-MILESTONE-AUDIT.md`.
 - Milestone v1.6 started on 2026-05-15 as Task Management. Locked initial decisions: start with project-local boards, use hybrid file-canonical plus generated index/cache task state, and automatically start GSD agent execution when a task is assigned to an agent.
 - Milestone v1.6 completed on 2026-05-15 with GSD-backed board state, objective breakdown, agent assignment/execution records, dedicated boards UI, repair/sync/remove CLI support, mandatory board objectives, and supply-chain safety hardening.
+- Milestone v1.7 started on 2026-05-16 as Typed GSD SDK Backend. v1.7 PROJECT.md and REQUIREMENTS.md drafted with 46 requirements across 8 categories (Adapter, Sync, Lifecycle, Backend, Diagnostics, Execution, Migration, Tests + Windows).
+- v1.7 research synthesized 2026-05-16: SUMMARY.md, ARCHITECTURE.md, PITFALLS.md, STACK.md, FEATURES.md. Headline pitfalls: SDK 0.x semver drift, bundled-vs-published SDK lineage divergence, v1.6 board migration breakage, BoardBackend over-abstraction. Headline architecture: single `src/gsd-sdk-adapter.mjs` module-of-functions + `src/backends/` directory with 4-method BoardBackend.
+- v1.7 roadmap created on 2026-05-16 with Phases 33-38: SDK Adapter Foundation, Board Lifecycle Migration And Typed Sync, BoardBackend Seam, Test Surface Migration And Windows Parity, Runtime Fallback Hardening And Collapse, Doctor + Observability + Closeout. 100% requirement coverage locked in REQUIREMENTS.md traceability.
 
 ## Deferred Items
 
@@ -178,4 +194,4 @@ Items acknowledged and deferred at milestone close on 2026-05-15:
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 33 SDK Adapter Foundation with `/gsd:plan-phase 33`.

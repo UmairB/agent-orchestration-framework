@@ -126,7 +126,7 @@ Explicitly excluded from v1.7.
 
 ## Traceability
 
-Empty initially. Populated by the roadmapper.
+Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly one phase (Phase 33–38). 100% coverage, no orphans, no duplicates.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -139,6 +139,7 @@ Empty initially. Populated by the roadmapper.
 | SDK-07 | Phase 33 | Pending |
 | SDK-08 | Phase 33 | Pending |
 | SDK-09 | Phase 33 | Pending |
+| DIAG-05 | Phase 33 | Pending |
 | SYNC-01 | Phase 34 | Pending |
 | SYNC-02 | Phase 34 | Pending |
 | SYNC-03 | Phase 34 | Pending |
@@ -151,40 +152,46 @@ Empty initially. Populated by the roadmapper.
 | LIFE-03 | Phase 34 | Pending |
 | LIFE-04 | Phase 34 | Pending |
 | LIFE-05 | Phase 34 | Pending |
+| MIG-02 | Phase 34 | Pending |
+| MIG-04 | Phase 34 | Pending |
 | BACK-01 | Phase 35 | Pending |
 | BACK-02 | Phase 35 | Pending |
 | BACK-03 | Phase 35 | Pending |
 | BACK-04 | Phase 35 | Pending |
 | BACK-05 | Phase 35 | Pending |
-| DIAG-01 | Phase 38 | Pending |
-| DIAG-02 | Phase 38 | Pending |
-| DIAG-03 | Phase 38 | Pending |
-| DIAG-04 | Phase 38 | Pending |
-| DIAG-05 | Phase 33 | Pending |
-| DIAG-06 | Phase 38 | Pending |
-| EXEC-01 | Phase 37 | Pending |
-| EXEC-02 | Phase 37 | Pending |
-| EXEC-03 | Phase 37 | Pending |
-| EXEC-04 | Phase 37 | Pending |
-| MIG-01 | Phase 38 | Pending |
-| MIG-02 | Phase 34 | Pending |
 | MIG-03 | Phase 36 | Pending |
-| MIG-04 | Phase 34 | Pending |
 | TEST-01 | Phase 36 | Pending |
 | TEST-02 | Phase 36 | Pending |
 | TEST-03 | Phase 36 | Pending |
 | TEST-04 | Phase 36 | Pending |
 | TEST-05 | Phase 36 | Pending |
 | TEST-06 | Phase 36 | Pending |
+| EXEC-01 | Phase 37 | Pending |
+| EXEC-02 | Phase 37 | Pending |
+| EXEC-03 | Phase 37 | Pending |
+| EXEC-04 | Phase 37 | Pending |
+| DIAG-01 | Phase 38 | Pending |
+| DIAG-02 | Phase 38 | Pending |
+| DIAG-03 | Phase 38 | Pending |
+| DIAG-04 | Phase 38 | Pending |
+| DIAG-06 | Phase 38 | Pending |
+| MIG-01 | Phase 38 | Pending |
 
-**Coverage (pre-roadmap suggestion):**
+**Coverage:**
 - v1.7 requirements: 46 total
-- Mapped to phases (suggested): 46
+- Mapped to phases (locked): 46
 - Unmapped: 0
+- Duplicates: 0
 
-The mapping above is the research team's recommendation. The roadmapper will validate and finalize.
+**Per-phase counts:**
+- Phase 33 (SDK Adapter Foundation): 10 requirements
+- Phase 34 (Board Lifecycle Migration And Typed Sync): 14 requirements
+- Phase 35 (BoardBackend Seam): 5 requirements
+- Phase 36 (Test Surface Migration And Windows Parity): 7 requirements
+- Phase 37 (Runtime Fallback Hardening And Collapse): 4 requirements
+- Phase 38 (Doctor, Observability, And Milestone Closeout): 6 requirements
 
 ---
 
 *Requirements defined: 2026-05-16*
-*Last updated: 2026-05-16 after initial v1.7 definition*
+*Last updated: 2026-05-16 after roadmapper locked Phase 33–38 mapping*
