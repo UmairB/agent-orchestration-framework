@@ -2,12 +2,36 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { access, readdir, readFile, rm } from "node:fs/promises";
 import { normalizeId, writeText } from "./fs.mjs";
+import { GsdSdkError, analyzeGsdRoadmap, assertMilestone, gsdSdkVersion } from "./gsd-sdk-adapter.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
 export const BOARD_STATUSES = Object.freeze(["backlog", "ready", "in_progress", "blocked", "done"]);
 const BOARD_FILE = "BOARD.json";
 const INDEX_FILE = path.join("cache", "boards", "index.json");
 const STATUS_SET = new Set(BOARD_STATUSES);
+const BINDING_STATUSES = new Set(["pending-attachment", "attached", "synced", "drift", "error"]);
+
+export class BoardLifecycleError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = "BoardLifecycleError";
+    this.code = code;
+    this.expected = details.expected;
+    this.actual = details.actual;
+    this.next = details.next;
+    this.cause = details.cause;
+  }
+
+  toJSON() {
+    return {
+      code: this.code,
+      message: this.message,
+      ...(this.expected !== undefined ? { expected: this.expected } : {}),
+      ...(this.actual !== undefined ? { actual: this.actual } : {}),
+      ...(this.next !== undefined ? { next: this.next } : {})
+    };
+  }
+}
 
 export function boardWorkspacePaths(projectDir = process.cwd()) {
   const paths = workspacePaths(projectDir);
@@ -47,6 +71,7 @@ export async function createBoard(projectDir, input = {}, options = {}) {
       gsd: {
         milestone: {
           status: "waiting_for_user",
+          binding: bindingState("pending-attachment"),
           command: milestoneCommand,
           invocation: milestoneInvocation,
           objective,
@@ -125,13 +150,26 @@ export async function repairBoard(projectDir, boardId, options = {}) {
   const now = nowIso();
   const objective = typeof board.objective === "string" ? board.objective.trim() : "";
   if (!objective) throw new Error(`Board ${id} cannot be repaired without an objective.`);
-  if (board.executionProvider === "gsd" && board.gsd?.milestone?.roadmapPath) {
+  if (board.executionProvider === "gsd" && board.gsd?.milestone?.id && board.gsd?.milestone?.roadmapPath) {
+    const next = ensureBoundSyncCommand(board, id);
+    if (next !== board) {
+      await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
+      return {
+        board: next,
+        repaired: !options.dryRun,
+        action: "normalize-sync-command",
+        message: `Board ${id} sync command now includes --milestone ${next.gsd.milestone.id}.`
+      };
+    }
     return {
       board,
       repaired: false,
       action: "none",
       message: `Board ${id} already has a backing GSD milestone roadmap.`
     };
+  }
+  if (board.executionProvider === "gsd" && board.gsd?.milestone?.roadmapPath && !board.gsd?.milestone?.id) {
+    return repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options);
   }
   if (board.executionProvider === "gsd" && board.gsd?.milestone?.status && board.gsd.milestone.status !== "synced" && (board.gsd.milestone.invocation || board.gsd.milestone.startedAt)) {
     return {
@@ -154,6 +192,7 @@ export async function repairBoard(projectDir, boardId, options = {}) {
       milestone: {
         ...(board.gsd?.milestone ?? {}),
         status: "waiting_for_user",
+        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment"),
         command: milestoneCommand,
         invocation: milestoneInvocation,
         objective,
@@ -216,6 +255,7 @@ export async function updateBoardMilestone(projectDir, boardId, runtimeResult, o
       milestone: {
         ...(board.gsd?.milestone ?? {}),
         status,
+        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment"),
         runtime: runtimeResult.runtime ?? board.defaultExecutionRuntime ?? "codex",
         commandLine: [runtimeResult.executable, ...(runtimeResult.argv ?? [])].filter(Boolean).join(" "),
         exitCode: runtimeResult.exitCode ?? null,
@@ -252,7 +292,7 @@ export async function updateBoardMilestone(projectDir, boardId, runtimeResult, o
 export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {}, options = {}) {
   const paths = boardWorkspacePaths(projectDir);
   const id = normalizeId(boardId);
-  const milestoneId = normalizeId(input.milestoneId ?? input.milestone);
+  const milestoneId = normalizeMilestoneInput(input.milestoneId ?? input.milestone);
   const roadmapPath = typeof input.roadmapPath === "string" ? input.roadmapPath.trim() : "";
   if (!roadmapPath) throw new Error("Milestone roadmap path is required.");
 
@@ -261,6 +301,9 @@ export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {
   if (board.executionProvider !== "gsd") {
     throw new Error(`Board ${id} is not backed by GSD.`);
   }
+
+  const assertion = await assertBoardMilestone(projectDir, milestoneId, options);
+  if (!assertion.ok) throw milestoneAssertionError(id, milestoneId, assertion);
 
   const resolvedRoadmapPath = path.resolve(projectDir, roadmapPath);
   if (!await exists(resolvedRoadmapPath)) {
@@ -276,6 +319,7 @@ export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {
         ...(board.gsd?.milestone ?? {}),
         id: milestoneId,
         status: "ready_to_sync",
+        binding: bindingState("attached"),
         roadmapPath: relativeProjectPath(projectDir, resolvedRoadmapPath),
         completedAt: board.gsd?.milestone?.completedAt ?? now,
         syncedAt: null
@@ -299,8 +343,8 @@ export async function addTask(projectDir, boardId, input = {}, options = {}) {
   const normalizedBoardId = normalizeId(boardId);
   const board = await readCanonicalBoard(paths, normalizedBoardId);
   if (board.executionProvider === "gsd" && options.source !== "gsd-roadmap-sync") {
-    const milestoneStatus = board.gsd?.milestone?.status ?? "pending";
-    if (milestoneStatus !== "synced") {
+    const bindingStatus = currentBindingStatus(board);
+    if (bindingStatus !== "synced") {
       throw new Error(`Board ${normalizedBoardId} is backed by GSD and cannot accept tasks until its milestone roadmap is synced. Run ${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} first, then \`${board.gsd?.taskCreation?.syncCommand ?? `aof boards sync ${normalizedBoardId}`}\`.`);
     }
     throw new Error(`Board ${normalizedBoardId} is backed by GSD. Add tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then run \`${board.gsd?.taskCreation?.syncCommand ?? `aof boards sync ${normalizedBoardId}`}\`.`);
@@ -346,69 +390,112 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
     throw new Error(`Board ${normalizedBoardId} is not backed by GSD.`);
   }
 
-  const requestedMilestoneId = options.milestoneId ? normalizeId(options.milestoneId) : null;
+  const requestedMilestoneId = normalizeMilestoneInput(options.milestoneId);
   if (!requestedMilestoneId) {
-    throw new Error("Usage: aof boards sync <board-id> --milestone <milestone-id>");
+    throw new BoardLifecycleError(
+      "MILESTONE_MISSING_ARG",
+      "Usage: aof boards sync <board-id> --milestone <milestone-id>",
+      { next: `aof boards sync ${normalizedBoardId} --milestone <milestone-id>` }
+    );
   }
-  const configuredMilestoneId = board.gsd?.milestone?.id ? normalizeId(board.gsd.milestone.id) : null;
+  const configuredMilestoneId = normalizeMilestoneInput(board.gsd?.milestone?.id);
   if (!configuredMilestoneId) {
-    throw new Error(`Board ${normalizedBoardId} is not bound to a GSD milestone id. Run \`aof boards milestone attach ${normalizedBoardId} --milestone <milestone-id> --roadmap <path>\` before syncing.`);
+    throw new BoardLifecycleError(
+      "MILESTONE_NOT_BOUND",
+      `Board ${normalizedBoardId} is not bound to a GSD milestone id.`,
+      { next: `aof boards milestone attach ${normalizedBoardId} --milestone ${requestedMilestoneId} --roadmap <path>` }
+    );
   }
   if (configuredMilestoneId !== requestedMilestoneId) {
-    throw new Error(`Board ${normalizedBoardId} is bound to milestone ${configuredMilestoneId}, not ${requestedMilestoneId}.`);
+    throw new BoardLifecycleError(
+      "MILESTONE_ID_MISMATCH",
+      `Board ${normalizedBoardId} is bound to milestone ${configuredMilestoneId}, not ${requestedMilestoneId}.`,
+      { expected: configuredMilestoneId, actual: requestedMilestoneId, next: `aof boards sync ${normalizedBoardId} --milestone ${configuredMilestoneId}` }
+    );
   }
 
   const configuredRoadmap = board.gsd?.milestone?.roadmapPath;
-  const milestoneStatus = board.gsd?.milestone?.status ?? "pending";
-  if (!["ready_to_sync", "completed", "synced"].includes(milestoneStatus)) {
-    throw new Error(`Board ${normalizedBoardId} GSD milestone ${configuredMilestoneId} has not completed. Attach a completed roadmap before syncing.`);
-  }
   if (!configuredRoadmap) {
+    const milestoneStatus = board.gsd?.milestone?.status ?? "pending";
     if (["pending", "creating", "running", "waiting_for_user"].includes(milestoneStatus)) {
-      throw new Error(`Board ${normalizedBoardId} GSD milestone has not completed. Complete ${board.gsd?.milestone?.invocation ?? board.gsd?.milestone?.command ?? "$gsd-new-milestone"} and attach its roadmap before syncing.`);
+      throw new BoardLifecycleError(
+        "MILESTONE_INCOMPLETE",
+        `Board ${normalizedBoardId} GSD milestone has not completed. Complete ${board.gsd?.milestone?.invocation ?? board.gsd?.milestone?.command ?? "$gsd-new-milestone"} and attach its roadmap before syncing.`,
+        { next: `aof boards milestone attach ${normalizedBoardId} --milestone ${configuredMilestoneId} --roadmap <path>` }
+      );
     }
-    throw new Error(`Board ${normalizedBoardId} is not bound to a GSD milestone. Run \`aof boards repair ${normalizedBoardId}\` to create or attach one before syncing.`);
-  }
-  const roadmapPath = path.resolve(projectDir, configuredRoadmap);
-  const roadmap = await readFile(roadmapPath, "utf8");
-  const phases = parseRoadmapPhases(roadmap);
-  if (phases.length === 0) {
-    throw new Error(`No GSD phases found in ${relativeProjectPath(projectDir, roadmapPath)}.`);
+    throw new BoardLifecycleError(
+      "BOARD_MILESTONE_UNATTACHED",
+      `Board ${normalizedBoardId} is not bound to a GSD milestone roadmap.`,
+      { next: `aof boards repair ${normalizedBoardId}` }
+    );
   }
 
-  const existing = new Set((await readBoardTasks(paths, normalizedBoardId)).map((task) => task.id));
+  let phases;
+  try {
+    const assertion = await assertBoardMilestone(projectDir, configuredMilestoneId, options);
+    if (!assertion.ok) throw milestoneAssertionError(normalizedBoardId, configuredMilestoneId, assertion);
+    phases = normalizeRoadmapPhases(await readTypedRoadmap(projectDir, options));
+  } catch (error) {
+    const nextError = boardErrorFromSdk(error);
+    await persistBindingError(boardPath, board, configuredMilestoneId, nextError, options);
+    throw nextError;
+  }
+  if (phases.length === 0) {
+    throw new BoardLifecycleError(
+      "MILESTONE_INCOMPLETE",
+      `No GSD phases found for milestone ${configuredMilestoneId}.`,
+      { next: `aof boards milestone attach ${normalizedBoardId} --milestone ${configuredMilestoneId} --roadmap <path>` }
+    );
+  }
+  const fingerprint = phaseIdentityFingerprint(phases);
+
+  const existingTasks = await readBoardTasks(paths, normalizedBoardId);
+  const existing = new Set(existingTasks.map((task) => task.id));
+  const actions = syncActions(phases, existingTasks);
   const created = [];
-  for (const phase of phases) {
-    const taskId = `phase-${phase.number}`;
-    if (existing.has(taskId)) continue;
-    const result = await addTask(projectDir, normalizedBoardId, {
-      id: taskId,
-      title: `Phase ${phase.number}: ${phase.title}`,
-      description: phase.goal,
-      deliverable: board.title,
-      refs: {
-        phase: phase.number,
-        roadmap: relativeProjectPath(projectDir, roadmapPath)
-      }
-    }, { source: "gsd-roadmap-sync", dryRun: Boolean(options.dryRun) });
-    created.push(result.task);
+  try {
+    for (const phase of phases) {
+      const taskId = `phase-${phase.phaseId}`;
+      if (existing.has(taskId) || options.dryRun) continue;
+      const result = await addTask(projectDir, normalizedBoardId, {
+        id: taskId,
+        title: `Phase ${phase.phaseId}: ${phase.title}`,
+        description: phase.goal,
+        deliverable: board.title,
+        refs: {
+          phase: phase.phaseId,
+          roadmap: configuredRoadmap
+        }
+      }, { source: "gsd-roadmap-sync" });
+      created.push(result.task);
+    }
+  } catch (error) {
+    await persistBindingError(boardPath, board, configuredMilestoneId, error, options);
+    throw error;
   }
 
   const now = nowIso();
+  const hasDrift = actions.some((action) => action.action === "drift");
   const next = {
     ...board,
     gsd: {
       ...(board.gsd ?? {}),
       milestone: {
         ...(board.gsd?.milestone ?? {}),
-        status: "synced",
+        status: hasDrift ? "ready_to_sync" : "synced",
         id: configuredMilestoneId,
+        phases,
+        binding: bindingState(hasDrift ? "drift" : "synced", {
+          fingerprint,
+          driftReason: hasDrift ? "BOARD_MILESTONE_DRIFT" : undefined
+        }),
         command: board.gsd?.milestone?.command ?? "$gsd-new-milestone",
         invocation: board.gsd?.milestone?.invocation ?? `${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} ${board.objective ?? ""}`.trim(),
-        roadmapPath: relativeProjectPath(projectDir, roadmapPath),
+        roadmapPath: configuredRoadmap,
         phaseCount: phases.length,
         completedAt: board.gsd?.milestone?.completedAt ?? now,
-        syncedAt: now
+        syncedAt: hasDrift ? board.gsd?.milestone?.syncedAt ?? null : now
       },
       taskCreation: {
         mode: "gsd-phase",
@@ -420,8 +507,8 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
     },
     updatedAt: now
   };
-  await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
-  return { board: next, phases, created, dryRun: Boolean(options.dryRun) };
+  if (!options.dryRun) await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`);
+  return { board: options.dryRun ? board : next, phases, created, actions, dryRun: Boolean(options.dryRun) };
 }
 
 export async function moveTask(projectDir, boardId, taskId, status) {
@@ -627,36 +714,257 @@ function validateBoardShape(board, diagnostics, pathName) {
   if (board.status !== undefined && !["active", "archived"].includes(board.status)) diagnostics.push(error("BOARD_INVALID_STATUS", pathName, "Board status must be active or archived."));
   if (board.executionProvider !== undefined && board.executionProvider !== "gsd") diagnostics.push(error("BOARD_INVALID_EXECUTION_PROVIDER", pathName, "Board executionProvider must be gsd when provided."));
   if (board.defaultExecutionRuntime !== undefined && !["claude", "codex"].includes(board.defaultExecutionRuntime)) diagnostics.push(error("BOARD_INVALID_EXECUTION_RUNTIME", pathName, "Board defaultExecutionRuntime must be claude or codex."));
+  if (board.executionProvider === "gsd" && board.gsd?.milestone?.roadmapPath && !board.gsd?.milestone?.id) {
+    diagnostics.push(warning(
+      "BOARD_MILESTONE_ID_MISSING",
+      pathName,
+      `GSD board is missing gsd.milestone.id; run \`aof boards milestone attach ${board.id ?? "<board-id>"} --milestone <milestone-id> --roadmap ${board.gsd.milestone.roadmapPath}\`.`
+    ));
+  }
+  const bindingStatus = board.gsd?.milestone?.binding?.status;
+  if (bindingStatus !== undefined && !BINDING_STATUSES.has(bindingStatus)) diagnostics.push(error("BOARD_INVALID_BINDING_STATUS", pathName, "Board GSD binding status is invalid."));
   if (!Array.isArray(board.columns) || BOARD_STATUSES.some((status) => !board.columns.includes(status))) {
     diagnostics.push(error("BOARD_INVALID_COLUMNS", pathName, `Board columns must include ${BOARD_STATUSES.join(", ")}.`));
   }
 }
 
-function parseRoadmapPhases(markdown) {
-  const phases = [];
-  const lines = markdown.split(/\r?\n/);
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const match = line.match(/^#{2,4}\s+Phase\s+(\d+):\s+(.+?)(?:\s+[✅🚧].*)?$/u);
-    if (!match) continue;
-    const number = match[1];
-    const title = match[2].replace(/\s+[✅🚧].*$/u, "").trim();
-    phases.push({
-      number,
-      title,
-      goal: nextBoldValue(lines, index + 1, "Goal") ?? ""
-    });
+async function repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options) {
+  const roadmapPath = board.gsd.milestone.roadmapPath;
+  const roadmap = await readTypedRoadmap(projectDir, options);
+  const phases = normalizeRoadmapPhases(roadmap);
+  const candidates = Array.isArray(roadmap?.milestones) ? roadmap.milestones.map((item) => item.version).filter(Boolean) : [];
+  const existingFingerprint = existingBoardPhaseFingerprint(await readBoardTasks(paths, id));
+  const nextFingerprint = phaseIdentityFingerprint(phases);
+  const pathMatchesDefault = normalizeProjectPath(roadmapPath) === ".planning/ROADMAP.md";
+  const fingerprintMatches = existingFingerprint && existingFingerprint === nextFingerprint;
+
+  if (candidates.length !== 1 || (!pathMatchesDefault && !fingerprintMatches)) {
+    return {
+      board,
+      repaired: false,
+      action: "manual-attach-required",
+      command: `aof boards milestone attach ${id} --milestone <milestone-id> --roadmap ${roadmapPath}`,
+      message: `Board ${id} needs manual milestone attachment before sync.`
+    };
   }
-  return phases;
+
+  const milestoneId = normalizeMilestoneInput(candidates[0]);
+  const assertion = await assertBoardMilestone(projectDir, milestoneId, options);
+  if (!assertion.ok) throw milestoneAssertionError(id, milestoneId, assertion);
+
+  const now = nowIso();
+  const next = {
+    ...board,
+    gsd: {
+      ...(board.gsd ?? {}),
+      milestone: {
+        ...(board.gsd?.milestone ?? {}),
+        id: milestoneId,
+        status: "ready_to_sync",
+        binding: bindingState("attached", {
+          fingerprint: phases.length > 0 ? nextFingerprint : undefined
+        }),
+        completedAt: board.gsd?.milestone?.completedAt ?? now,
+        syncedAt: null
+      },
+      taskCreation: {
+        mode: "gsd-phase",
+        addPhaseCommand: "$gsd-phase add",
+        ...(board.gsd?.taskCreation ?? {}),
+        syncCommand: `aof boards sync ${id} --milestone ${milestoneId}`,
+        syncBlockedReason: null
+      }
+    },
+    updatedAt: now
+  };
+
+  await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
+  return {
+    board: next,
+    repaired: true,
+    action: "attach-milestone",
+    command: next.gsd.taskCreation.syncCommand,
+    message: `Board ${id} attached to milestone ${milestoneId}.`
+  };
 }
 
-function nextBoldValue(lines, start, label) {
-  for (let index = start; index < Math.min(lines.length, start + 12); index += 1) {
-    const match = lines[index].match(new RegExp(`^\\*\\*${label}:\\*\\*\\s*(.+)$`));
-    if (match) return match[1].trim();
-    if (/^#{2,4}\s+Phase\s+\d+:/u.test(lines[index])) return null;
+function ensureBoundSyncCommand(board, id) {
+  const milestoneId = normalizeMilestoneInput(board.gsd?.milestone?.id);
+  if (!milestoneId) return board;
+  const expected = `aof boards sync ${id} --milestone ${milestoneId}`;
+  if (board.gsd?.taskCreation?.syncCommand === expected && board.gsd?.milestone?.binding?.status) return board;
+  return {
+    ...board,
+    gsd: {
+      ...(board.gsd ?? {}),
+      milestone: {
+        ...(board.gsd?.milestone ?? {}),
+        id: milestoneId,
+        binding: board.gsd?.milestone?.binding ?? bindingState("attached")
+      },
+      taskCreation: {
+        mode: "gsd-phase",
+        addPhaseCommand: "$gsd-phase add",
+        ...(board.gsd?.taskCreation ?? {}),
+        syncCommand: expected,
+        syncBlockedReason: board.gsd?.taskCreation?.syncBlockedReason ?? null
+      }
+    },
+    updatedAt: nowIso()
+  };
+}
+
+async function readTypedRoadmap(projectDir, options) {
+  try {
+    return await analyzeGsdRoadmap(projectDir, adapterOptions(options));
+  } catch (error) {
+    throw boardErrorFromSdk(error);
   }
-  return null;
+}
+
+async function assertBoardMilestone(projectDir, milestoneId, options) {
+  const candidates = milestoneCandidates(milestoneId);
+  let lastResult = null;
+  for (const candidate of candidates) {
+    try {
+      const result = await assertMilestone(projectDir, candidate, adapterOptions(options));
+      if (result.ok) return { ...result, expected: milestoneId, actual: result.actual ?? candidate };
+      lastResult = result;
+    } catch (error) {
+      throw boardErrorFromSdk(error);
+    }
+  }
+  return lastResult ?? { ok: false, expected: milestoneId, actual: null, code: "MILESTONE_NOT_IN_STATE" };
+}
+
+function adapterOptions(options = {}) {
+  return {
+    ...(options.gsdToolsPath ? { gsdToolsPath: options.gsdToolsPath } : {}),
+    ...(options.tools ? { tools: options.tools } : {}),
+    ...(options.ToolsClass ? { ToolsClass: options.ToolsClass } : {}),
+    ...(options.skipSurfaceProbe ? { skipSurfaceProbe: options.skipSurfaceProbe } : {})
+  };
+}
+
+function milestoneAssertionError(boardId, milestoneId, assertion) {
+  const code = assertion.code === "MILESTONE_ID_MISMATCH" ? "MILESTONE_ID_MISMATCH" : "MILESTONE_NOT_IN_STATE";
+  return new BoardLifecycleError(
+    code,
+    `Milestone ${milestoneId} is not available in current GSD state.`,
+    {
+      expected: assertion.expected ?? milestoneId,
+      actual: assertion.actual ?? null,
+      next: `aof boards milestone attach ${boardId} --milestone <milestone-id> --roadmap <path>`
+    }
+  );
+}
+
+function boardErrorFromSdk(error) {
+  if (error instanceof BoardLifecycleError) return error;
+  if (error instanceof GsdSdkError) {
+    return new BoardLifecycleError(error.code, error.message, {
+      expected: error.expected,
+      actual: error.actual,
+      next: error.next,
+      cause: error
+    });
+  }
+  return error;
+}
+
+async function persistBindingError(boardPath, board, milestoneId, error, options = {}) {
+  if (options.dryRun) return;
+  const next = {
+    ...board,
+    gsd: {
+      ...(board.gsd ?? {}),
+      milestone: {
+        ...(board.gsd?.milestone ?? {}),
+        id: milestoneId,
+        binding: bindingState("error", {
+          driftReason: error?.code ?? "SYNC_FAILED"
+        })
+      }
+    },
+    updatedAt: nowIso()
+  };
+  await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+function normalizeRoadmapPhases(roadmap) {
+  return (Array.isArray(roadmap?.phases) ? roadmap.phases : [])
+    .map((phase) => {
+      const phaseId = String(phase.number ?? phase.phaseId ?? phase.id ?? "").trim();
+      if (!phaseId) return null;
+      const title = String(phase.name ?? phase.phase_name ?? phase.title ?? `Phase ${phaseId}`).trim();
+      const goal = String(phase.goal ?? phase.description ?? "").trim();
+      return { phaseId, title, goal };
+    })
+    .filter(Boolean);
+}
+
+function syncActions(phases, existingTasks) {
+  const phaseIds = new Set(phases.map((phase) => phase.phaseId));
+  const existingByPhase = new Set(existingTasks.map((task) => String(task.refs?.phase ?? "").trim()).filter(Boolean));
+  const actions = phases.map((phase) => ({
+    phaseId: phase.phaseId,
+    action: existingByPhase.has(phase.phaseId) ? "keep" : "create"
+  }));
+  for (const phaseId of existingByPhase) {
+    if (!phaseIds.has(phaseId)) actions.push({ phaseId, action: "drift" });
+  }
+  return actions;
+}
+
+function bindingState(status, details = {}) {
+  return {
+    status,
+    sdkVersion: gsdSdkVersion().installed,
+    ...(details.fingerprint ? { fingerprint: details.fingerprint } : {}),
+    ...(details.driftReason ? { driftReason: details.driftReason } : {})
+  };
+}
+
+function phaseIdentityFingerprint(phases) {
+  const hash = crypto.createHash("sha256");
+  hash.update(JSON.stringify(phases.map((phase) => ({
+    phaseId: phase.phaseId,
+    title: phase.title,
+    goal: phase.goal
+  }))));
+  return hash.digest("hex");
+}
+
+function existingBoardPhaseFingerprint(tasks) {
+  const phases = tasks
+    .filter((task) => task.refs?.phase)
+    .map((task) => ({
+      phaseId: String(task.refs.phase),
+      title: String(task.title ?? "").replace(/^Phase\s+[^:]+:\s*/u, ""),
+      goal: String(task.description ?? "")
+    }))
+    .sort((left, right) => left.phaseId.localeCompare(right.phaseId));
+  return phases.length > 0 ? phaseIdentityFingerprint(phases) : null;
+}
+
+function currentBindingStatus(board) {
+  return board.gsd?.milestone?.binding?.status ?? (board.gsd?.milestone?.id && board.gsd?.milestone?.status === "synced" ? "synced" : "pending-attachment");
+}
+
+function normalizeMilestoneInput(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return normalizeId(value);
+}
+
+function milestoneCandidates(value) {
+  const normalized = normalizeMilestoneInput(value);
+  if (!normalized) return [];
+  const dotted = normalized.replace(/^v(\d+)-(\d+)$/u, "v$1.$2");
+  return [...new Set([normalized, dotted, value.trim()].filter(Boolean))];
+}
+
+function normalizeProjectPath(value) {
+  return String(value ?? "").replaceAll("\\", "/");
 }
 
 function validateTaskShape(task, board, diagnostics, pathName) {

@@ -100,7 +100,17 @@ type BoardSummary = {
   executionProvider?: string | null;
   defaultExecutionRuntime?: RuntimeId | null;
   gsd?: {
-    milestone?: { id?: string; status?: string; command?: string; invocation?: string; syncCommand?: string; syncedAt?: string | null; roadmapPath?: string; lastOutput?: string };
+    milestone?: {
+      id?: string;
+      status?: string;
+      binding?: { status?: string; sdkVersion?: string; driftReason?: string; fingerprint?: string };
+      command?: string;
+      invocation?: string;
+      syncCommand?: string;
+      syncedAt?: string | null;
+      roadmapPath?: string;
+      lastOutput?: string;
+    };
     taskCreation?: { mode?: string; addPhaseCommand?: string; syncCommand?: string };
   } | null;
   taskCount: number;
@@ -746,7 +756,9 @@ function BoardsPanel() {
                     <div className="mt-3 flex flex-wrap gap-2 text-xs">
                       <Badge variant="secondary">{board.executionProvider}</Badge>
                       {board.defaultExecutionRuntime ? <Badge variant="secondary">{board.defaultExecutionRuntime}</Badge> : null}
-                      <Badge variant="secondary">milestone {board.gsd?.milestone?.status ?? "unknown"}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        milestone: {board.gsd?.milestone?.status ?? "unknown"} - binding: {board.gsd?.milestone?.binding?.status ?? "unknown"}
+                      </span>
                     </div>
                   ) : null}
                 </div>
@@ -760,9 +772,14 @@ function BoardsPanel() {
                 <div className="space-y-3 rounded-md border border-border bg-card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold">{board.gsd?.milestone?.status === "synced" ? "GSD milestone synced" : "GSD milestone in progress"}</p>
+                      <p className="text-sm font-semibold">
+                        {board.gsd?.milestone?.binding?.status === "synced" ? "GSD milestone synced" : "GSD milestone in progress"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        milestone: {board.gsd?.milestone?.status ?? "unknown"} - binding: {board.gsd?.milestone?.binding?.status ?? "unknown"}
+                      </p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {board.gsd?.milestone?.status === "synced"
+                        {board.gsd?.milestone?.binding?.status === "synced"
                           ? `Add new tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then sync the board.`
                           : `${board.gsd?.milestone?.invocation ?? board.gsd?.milestone?.command ?? "$gsd-new-milestone"} has started. Complete the GSD milestone and attach the roadmap before tasks are available.`}
                       </p>

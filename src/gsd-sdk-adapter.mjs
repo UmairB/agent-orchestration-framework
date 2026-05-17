@@ -140,13 +140,34 @@ async function createTools(projectDir, options = {}) {
   if (!options.skipSurfaceProbe) assertGsdSdkSurface(ToolsClass);
 
   const gsdToolsPath = options.gsdToolsPath ?? await resolveGsdToolsPath(projectRoot);
-  const tools = options.tools ?? new ToolsClass({
+  const tools = options.tools ?? testFixtureToolsFromEnv() ?? new ToolsClass({
     projectDir: projectRoot,
     ...(gsdToolsPath ? { gsdToolsPath } : {}),
     timeoutMs: options.timeoutMs ?? READ_TIMEOUT_MS
   });
 
   return { tools, projectRoot, gsdToolsPath };
+}
+
+function testFixtureToolsFromEnv() {
+  const raw = process.env.AOF_TEST_GSD_SDK_FIXTURE_JSON;
+  if (!raw) return null;
+  const fixture = JSON.parse(raw);
+  return {
+    async exec(command, args) {
+      if (command === "roadmap" && args[0] === "analyze") {
+        return {
+          milestones: fixture.milestones ?? [{ version: fixture.milestone ?? "v1.7" }],
+          phases: fixture.phases ?? []
+        };
+      }
+      throw new Error(`Unexpected test SDK exec ${command} ${args.join(" ")}`);
+    },
+    async execRaw(command, args) {
+      if (command === "state" && args[0] === "load") return `current_milestone=${fixture.milestone ?? "v1.7"}\n`;
+      throw new Error(`Unexpected test SDK execRaw ${command} ${args.join(" ")}`);
+    }
+  };
 }
 
 async function callTools(projectRoot, tools, command, args = [], options = {}) {

@@ -430,6 +430,13 @@ export async function runSharedCliStep(context, step) {
       "",
       "**Goal:** Verify progress is visible in the board UI."
     ].join("\n"), "utf8");
+    context.gsdSdkFixture = {
+      milestone: "v1.7",
+      phases: [
+        { number: "30", name: "Build Board Execution", goal: "Execute assigned board tasks through GSD." },
+        { number: "31", name: "Verify Board Progress", goal: "Verify progress is visible in the board UI." }
+      ]
+    };
     return;
   }
 

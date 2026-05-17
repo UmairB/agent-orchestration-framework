@@ -158,22 +158,35 @@ async function syncsGsdBackedBoards() {
       /not bound to a GSD milestone id/
     );
 
+    const sdkOptions = { tools: fixtureTools(), skipSurfaceProbe: true };
     const attached = await attachBoardMilestoneRoadmap(targetDir, "delivery", {
       milestoneId: "v1-7",
       roadmapPath: ".planning/ROADMAP.md"
-    });
+    }, sdkOptions);
     assert.equal(attached.gsd.milestone.id, "v1-7");
+    assert.equal(attached.gsd.milestone.binding.status, "attached");
     assert.equal(attached.gsd.taskCreation.syncCommand, "aof boards sync delivery --milestone v1-7");
 
     await assert.rejects(
-      () => syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-8" }),
+      () => syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-8", ...sdkOptions }),
       /bound to milestone v1-7, not v1-8/
     );
 
-    const result = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7" });
+    const dryRun = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7", dryRun: true, ...sdkOptions });
+    assert.deepEqual(dryRun.actions.map((item) => item.action), ["create", "create"]);
+    assert.equal((await getBoard(targetDir, "delivery")).tasks.length, 0);
+
+    const result = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7", ...sdkOptions });
     assert.equal(result.created.length, 2);
     assert.equal(result.board.defaultExecutionRuntime, "claude");
     assert.equal(result.board.gsd.milestone.status, "synced");
+    assert.equal(result.board.gsd.milestone.binding.status, "synced");
+    assert.equal(result.board.gsd.milestone.binding.sdkVersion, "0.1.0");
+    assert.equal(result.board.gsd.milestone.phases.length, 2);
+
+    const rerun = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7", ...sdkOptions });
+    assert.equal(rerun.created.length, 0);
+    assert.deepEqual(rerun.actions.map((item) => item.action), ["keep", "keep"]);
 
     await assert.rejects(
       () => addTask(targetDir, "delivery", { id: "manual", title: "Manual" }),
@@ -390,4 +403,25 @@ async function exists(filePath) {
   } catch {
     return false;
   }
+}
+
+function fixtureTools() {
+  return {
+    async exec(command, args) {
+      if (command === "roadmap" && args[0] === "analyze") {
+        return {
+          milestones: [{ version: "v1.7" }],
+          phases: [
+            { number: "40", name: "Runtime Intake", goal: "Capture the requested execution runtime." },
+            { number: "41", name: "Roadmap Sync", goal: "Keep board tasks aligned to roadmap phases." }
+          ]
+        };
+      }
+      throw new Error(`Unexpected exec ${command}`);
+    },
+    async execRaw(command, args) {
+      if (command === "state" && args[0] === "load") return "current_milestone=v1.7\n";
+      throw new Error(`Unexpected execRaw ${command}`);
+    }
+  };
 }

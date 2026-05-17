@@ -101,7 +101,7 @@ export async function serveSetupUi(catalog, options = {}) {
       try {
         sendJson(response, 200, { ok: true, boards: await listBoards(projectDir, { includeArchived: requestUrl.searchParams.get("archived") === "true" }) });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -111,7 +111,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const result = await writeBoardIndex(projectDir);
         sendJson(response, 200, { ok: true, index: result.index, indexPath: result.indexPath });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -123,7 +123,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const warnings = diagnostics.filter((item) => item.severity === "warning");
         sendJson(response, 200, { ok: true, valid: errors.length === 0, errors: errors.length, warnings: warnings.length, diagnostics });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -132,7 +132,7 @@ export async function serveSetupUi(catalog, options = {}) {
       try {
         sendJson(response, 200, { ok: true, agents: await listBoardAgents(projectDir, options) });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -156,13 +156,9 @@ export async function serveSetupUi(catalog, options = {}) {
           }, { force: Boolean(item.force) });
           let board = result.board;
           let runtime = null;
-          if (board.executionProvider === "gsd" && board.defaultExecutionRuntime === "claude") {
-            runtime = await continueGsdMilestone(projectDir, board);
-            board = await updateBoardMilestone(projectDir, board.id, runtime);
-          }
           sendJson(response, 200, { ok: true, board, runtime });
         } catch (error) {
-          sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+          sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
         }
         return;
       }
@@ -174,7 +170,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const routeId = decodeRoutePart(boardShowMatch[1]);
         sendJson(response, 200, { ok: true, board: await getBoard(projectDir, routeId) });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -184,7 +180,7 @@ export async function serveSetupUi(catalog, options = {}) {
       try {
         sendJson(response, 200, { ok: true, board: await archiveBoard(projectDir, decodeRoutePart(boardArchiveMatch[1])) });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -196,9 +192,9 @@ export async function serveSetupUi(catalog, options = {}) {
         const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]), {
           milestoneId: item.milestone ?? item.milestoneId
         });
-        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created });
+        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created, actions: result.actions });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -416,13 +412,24 @@ function sendJson(response, status, payload) {
   send(response, status, "application/json", JSON.stringify(payload));
 }
 
-function sendApiError(response, status, message, code, diagnostics) {
+function sendApiError(response, status, message, code, diagnostics, error) {
   sendJson(response, status, {
     ok: false,
     error: message,
     code,
+    ...structuredErrorDetails(error),
     ...(diagnostics ? { diagnostics } : {})
   });
+}
+
+function structuredErrorDetails(error) {
+  if (!error || typeof error.toJSON !== "function") return {};
+  const details = error.toJSON();
+  return {
+    ...(details.expected !== undefined ? { expected: details.expected } : {}),
+    ...(details.actual !== undefined ? { actual: details.actual } : {}),
+    ...(details.next !== undefined ? { next: details.next } : {})
+  };
 }
 
 function send(response, status, contentTypeValue, body) {
