@@ -49,12 +49,12 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Diagnostics
 
-- [ ] **DIAG-01**: User can run `aof boards doctor [<board-id>]` and see a per-check pass/fail ladder covering: GSD state present, milestone bound, identity matches GSD state, roadmap analyzable, tasks consistent with roadmap, SDK version drift.
-- [ ] **DIAG-02**: `aof boards doctor` surfaces `SDK_VERSION_DRIFT` (warning) when the installed `@gsd-build/sdk` version differs from the resolved global `gsd-sdk` CLI version, and `GSD_TOOLS_MISSING` (error) when `gsd-tools.cjs` cannot be resolved.
-- [ ] **DIAG-03**: All `aof boards` subcommands support `--json` output that emits structured error objects (`{code, message, expected?, actual?, next?}`) for every typed failure mode.
-- [ ] **DIAG-04**: Every typed error includes a `next:` hint showing the exact remediation command (e.g. `aof boards milestone attach delivery --milestone v1-7`).
+- [x] **DIAG-01**: User can run `aof boards doctor [<board-id>]` and see a per-check pass/fail ladder covering: GSD state present, milestone bound, identity matches GSD state, roadmap analyzable, tasks consistent with roadmap, SDK version drift.
+- [x] **DIAG-02**: `aof boards doctor` surfaces `SDK_VERSION_DRIFT` (warning) when the installed `@gsd-build/sdk` version differs from the resolved global `gsd-sdk` CLI version, and `GSD_TOOLS_MISSING` (error) when `gsd-tools.cjs` cannot be resolved.
+- [x] **DIAG-03**: All `aof boards` subcommands support `--json` output that emits structured error objects (`{code, message, expected?, actual?, next?}`) for every typed failure mode.
+- [x] **DIAG-04**: Every typed error includes a `next:` hint showing the exact remediation command (e.g. `aof boards milestone attach delivery --milestone v1-7`).
 - [x] **DIAG-05**: Every `GSDTools.exec` call from the adapter is appended to `.aof/cache/boards/dispatch.log.jsonl` with `{ts, command, args, latencyMs, ok}` for post-hoc debugging.
-- [ ] **DIAG-06**: `.aof/lock/packages.json` (or equivalent lock surface) records both the bundled `@gsd-build/sdk` version and the resolved `gsd-tools.cjs` path + reported version after every adapter boot.
+- [x] **DIAG-06**: `.aof/lock/packages.json` (or equivalent lock surface) records both the bundled `@gsd-build/sdk` version and the resolved `gsd-tools.cjs` path + reported version after every adapter boot.
 
 ### Execution
 
@@ -65,7 +65,7 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Migration (v1.6 boards → v1.7)
 
-- [ ] **MIG-01**: `aof boards doctor` detects v1.6-shaped boards (`gsd.milestone.roadmapPath` set, `gsd.milestone.id` missing) and emits `BOARD_MILESTONE_ID_MISSING` with the exact migration command pre-filled.
+- [x] **MIG-01**: `aof boards doctor` detects v1.6-shaped boards (`gsd.milestone.roadmapPath` set, `gsd.milestone.id` missing) and emits `BOARD_MILESTONE_ID_MISSING` with the exact migration command pre-filled.
 - [x] **MIG-02**: `aof boards repair` infers the missing `gsd.milestone.id` from the stored `roadmapPath` plus GSD state; when exactly one milestone matches, AOF auto-attaches; when ambiguous, AOF emits the fix-it command without modifying state — never silently auto-picks.
 - [x] **MIG-03**: A captured v1.6 board fixture (`test/fixtures/v1-6-board.json`) exercises the migration path end-to-end in BDD; regression for "v1.6 board breaks on first v1.7 sync" is permanent.
 - [x] **MIG-04**: `validateBoardShape` surfaces missing `gsd.milestone.id` as a warning (not error) during a deprecation window so users see the migration prompt before a hard fail.
@@ -170,12 +170,12 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 | EXEC-02 | Phase 37 | Complete |
 | EXEC-03 | Phase 37 | Complete |
 | EXEC-04 | Phase 37 | Complete |
-| DIAG-01 | Phase 38 | Pending |
-| DIAG-02 | Phase 38 | Pending |
-| DIAG-03 | Phase 38 | Pending |
-| DIAG-04 | Phase 38 | Pending |
-| DIAG-06 | Phase 38 | Pending |
-| MIG-01 | Phase 38 | Pending |
+| DIAG-01 | Phase 38 | Complete |
+| DIAG-02 | Phase 38 | Complete |
+| DIAG-03 | Phase 38 | Complete |
+| DIAG-04 | Phase 38 | Complete |
+| DIAG-06 | Phase 38 | Complete |
+| MIG-01 | Phase 38 | Complete |
 
 **Coverage:**
 - v1.7 requirements: 46 total
