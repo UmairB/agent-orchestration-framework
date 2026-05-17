@@ -46,7 +46,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 ### v1.7 Phases (in progress)
 
 - [x] **Phase 33: SDK Adapter Foundation** — Pin `@gsd-build/sdk@0.1.0`, ship the typed adapter module, version-drift probe, error wrapping, dispatch log, and first captured fixture. (completed 2026-05-16)
-- [ ] **Phase 34: Board Lifecycle Migration And Typed Sync** — Route `aof boards sync --milestone` through the adapter, drop implicit ROADMAP.md parsing, add `binding.*` fields and structured error codes, auto-migrate v1.6 boards via `repair`.
+- [x] **Phase 34: Board Lifecycle Migration And Typed Sync** — Route `aof boards sync --milestone` through the adapter, drop implicit ROADMAP.md parsing, add `binding.*` fields and structured error codes, auto-migrate v1.6 boards via `repair`. (completed 2026-05-17)
 - [ ] **Phase 35: BoardBackend Seam** — Extract a minimal 4-method `BoardBackend` interface from the working Phase 34 code, register GSD as the v1 backend, add a null backend for tests, keep GSD-isms under `backend.gsd.*`.
 - [ ] **Phase 36: Test Surface Migration And Windows Parity** — Captured-fixture two-tier doubles, SDK-path BDD siblings, `test:integration:ps` exercises the SDK adapter, v1.6 board regression fixture, `.gitattributes` for cross-OS fingerprint stability.
 - [ ] **Phase 37: Runtime Fallback Hardening And Collapse** — Rename `gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`, drop `completedRoadmapPath` mtime scraping, loud `[fallback]` stderr, parity unit test, milestone-creation handoff.
@@ -105,7 +105,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 4. User can run `aof boards milestone attach <board-id> --milestone <id>` and have AOF verify the milestone exists in GSD state via `assertMilestone` before any BOARD.json write — unknown milestones fail clean.
 5. User upgrading a v1.6 project sees `aof boards repair <id>` auto-bind a matching milestone when exactly one matches the stored `roadmapPath`; ambiguous matches print a fix-it command and never auto-pick; `validateBoardShape` surfaces missing `gsd.milestone.id` as a warning during the deprecation window so users see the migration prompt before any hard failure.
 
-**Plans:** TBD
+**Plans:** 4/4 plans complete
 **UI hint**: yes
 
 **Notes:**

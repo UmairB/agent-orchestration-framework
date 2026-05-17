@@ -23,21 +23,21 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Sync (board ↔ GSD state, typed)
 
-- [ ] **SYNC-01**: User can run `aof boards sync <board-id> --milestone <milestone-id>` and have task creation driven by the SDK's typed `RoadmapAnalysis`; the v1.6 markdown-regex sync path is removed.
-- [ ] **SYNC-02**: `aof boards sync` without `--milestone` fails with the structured code `MILESTONE_MISSING_ARG` and a `next:` hint showing the exact invocation; no implicit `.planning/ROADMAP.md` fallback exists.
-- [ ] **SYNC-03**: Sync fails with structured codes when the board's `gsd.milestone.id` is empty (`MILESTONE_NOT_BOUND`), differs from the supplied `--milestone` (`MILESTONE_ID_MISMATCH`), is not present in current GSD state (`MILESTONE_NOT_IN_STATE`), or the resolved milestone is incomplete (`MILESTONE_INCOMPLETE`).
-- [ ] **SYNC-04**: Sync writes a typed `gsd.milestone.phases[]` array and `gsd.milestone.binding.{status, sdkVersion, driftReason?, fingerprint}` into `BOARD.json` so the UI and validator can reason about phase identity without re-parsing markdown.
-- [ ] **SYNC-05**: User can run `aof boards sync <id> --milestone <id> --dry-run --json` to preview per-phase `{phaseId, action: "create"|"keep"|"drift"}` without writing.
-- [ ] **SYNC-06**: Re-sync detects drift: phases that exist on the board but are no longer in the typed roadmap surface as warnings rather than being silently kept.
-- [ ] **SYNC-07**: Sync is idempotent: re-running with the same milestone makes no task or BOARD.json changes; `binding.status` flips to `synced` only after all task writes succeed.
+- [x] **SYNC-01**: User can run `aof boards sync <board-id> --milestone <milestone-id>` and have task creation driven by the SDK's typed `RoadmapAnalysis`; the v1.6 markdown-regex sync path is removed.
+- [x] **SYNC-02**: `aof boards sync` without `--milestone` fails with the structured code `MILESTONE_MISSING_ARG` and a `next:` hint showing the exact invocation; no implicit `.planning/ROADMAP.md` fallback exists.
+- [x] **SYNC-03**: Sync fails with structured codes when the board's `gsd.milestone.id` is empty (`MILESTONE_NOT_BOUND`), differs from the supplied `--milestone` (`MILESTONE_ID_MISMATCH`), is not present in current GSD state (`MILESTONE_NOT_IN_STATE`), or the resolved milestone is incomplete (`MILESTONE_INCOMPLETE`).
+- [x] **SYNC-04**: Sync writes a typed `gsd.milestone.phases[]` array and `gsd.milestone.binding.{status, sdkVersion, driftReason?, fingerprint}` into `BOARD.json` so the UI and validator can reason about phase identity without re-parsing markdown.
+- [x] **SYNC-05**: User can run `aof boards sync <id> --milestone <id> --dry-run --json` to preview per-phase `{phaseId, action: "create"|"keep"|"drift"}` without writing.
+- [x] **SYNC-06**: Re-sync detects drift: phases that exist on the board but are no longer in the typed roadmap surface as warnings rather than being silently kept.
+- [x] **SYNC-07**: Sync is idempotent: re-running with the same milestone makes no task or BOARD.json changes; `binding.status` flips to `synced` only after all task writes succeed.
 
 ### Lifecycle (create / attach / repair)
 
-- [ ] **LIFE-01**: User can run `aof boards create` with a GSD provider and an objective; the board is recorded with `binding.status = "pending-attachment"` and no runtime CLI is spawned during creation.
-- [ ] **LIFE-02**: User can run `aof boards milestone attach <board-id> --milestone <id>` and the command verifies that `<id>` exists in GSD state via `assertMilestone()` before writing BOARD.json; an unknown milestone fails clearly without modifying state.
-- [ ] **LIFE-03**: User can run `aof boards repair <board-id>` and have AOF re-check GSD state via the SDK; when a matching milestone exists, AOF auto-binds it (read-only attach, no spawn).
-- [ ] **LIFE-04**: User can run `aof boards list` (and read the boards UI) and see boards without a bound GSD-confirmed milestone surfaced as `pending_milestone` rather than silently treated as ready.
-- [ ] **LIFE-05**: Manual task creation on a GSD-backed board remains blocked until the board reports `binding.status === "synced"` (the v1.6 gate continues to enforce identity).
+- [x] **LIFE-01**: User can run `aof boards create` with a GSD provider and an objective; the board is recorded with `binding.status = "pending-attachment"` and no runtime CLI is spawned during creation.
+- [x] **LIFE-02**: User can run `aof boards milestone attach <board-id> --milestone <id>` and the command verifies that `<id>` exists in GSD state via `assertMilestone()` before writing BOARD.json; an unknown milestone fails clearly without modifying state.
+- [x] **LIFE-03**: User can run `aof boards repair <board-id>` and have AOF re-check GSD state via the SDK; when a matching milestone exists, AOF auto-binds it (read-only attach, no spawn).
+- [x] **LIFE-04**: User can run `aof boards list` (and read the boards UI) and see boards without a bound GSD-confirmed milestone surfaced as `pending_milestone` rather than silently treated as ready.
+- [x] **LIFE-05**: Manual task creation on a GSD-backed board remains blocked until the board reports `binding.status === "synced"` (the v1.6 gate continues to enforce identity).
 
 ### Backend Interface (swap-in seam)
 
@@ -66,9 +66,9 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 ### Migration (v1.6 boards → v1.7)
 
 - [ ] **MIG-01**: `aof boards doctor` detects v1.6-shaped boards (`gsd.milestone.roadmapPath` set, `gsd.milestone.id` missing) and emits `BOARD_MILESTONE_ID_MISSING` with the exact migration command pre-filled.
-- [ ] **MIG-02**: `aof boards repair` infers the missing `gsd.milestone.id` from the stored `roadmapPath` plus GSD state; when exactly one milestone matches, AOF auto-attaches; when ambiguous, AOF emits the fix-it command without modifying state — never silently auto-picks.
+- [x] **MIG-02**: `aof boards repair` infers the missing `gsd.milestone.id` from the stored `roadmapPath` plus GSD state; when exactly one milestone matches, AOF auto-attaches; when ambiguous, AOF emits the fix-it command without modifying state — never silently auto-picks.
 - [ ] **MIG-03**: A captured v1.6 board fixture (`test/fixtures/v1-6-board.json`) exercises the migration path end-to-end in BDD; regression for "v1.6 board breaks on first v1.7 sync" is permanent.
-- [ ] **MIG-04**: `validateBoardShape` surfaces missing `gsd.milestone.id` as a warning (not error) during a deprecation window so users see the migration prompt before a hard fail.
+- [x] **MIG-04**: `validateBoardShape` surfaces missing `gsd.milestone.id` as a warning (not error) during a deprecation window so users see the migration prompt before a hard fail.
 
 ### Test surface + Windows parity
 
@@ -140,20 +140,20 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 | SDK-08 | Phase 33 | Complete |
 | SDK-09 | Phase 33 | Complete |
 | DIAG-05 | Phase 33 | Complete |
-| SYNC-01 | Phase 34 | Pending |
-| SYNC-02 | Phase 34 | Pending |
-| SYNC-03 | Phase 34 | Pending |
-| SYNC-04 | Phase 34 | Pending |
-| SYNC-05 | Phase 34 | Pending |
-| SYNC-06 | Phase 34 | Pending |
-| SYNC-07 | Phase 34 | Pending |
-| LIFE-01 | Phase 34 | Pending |
-| LIFE-02 | Phase 34 | Pending |
-| LIFE-03 | Phase 34 | Pending |
-| LIFE-04 | Phase 34 | Pending |
-| LIFE-05 | Phase 34 | Pending |
-| MIG-02 | Phase 34 | Pending |
-| MIG-04 | Phase 34 | Pending |
+| SYNC-01 | Phase 34 | Complete |
+| SYNC-02 | Phase 34 | Complete |
+| SYNC-03 | Phase 34 | Complete |
+| SYNC-04 | Phase 34 | Complete |
+| SYNC-05 | Phase 34 | Complete |
+| SYNC-06 | Phase 34 | Complete |
+| SYNC-07 | Phase 34 | Complete |
+| LIFE-01 | Phase 34 | Complete |
+| LIFE-02 | Phase 34 | Complete |
+| LIFE-03 | Phase 34 | Complete |
+| LIFE-04 | Phase 34 | Complete |
+| LIFE-05 | Phase 34 | Complete |
+| MIG-02 | Phase 34 | Complete |
+| MIG-04 | Phase 34 | Complete |
 | BACK-01 | Phase 35 | Pending |
 | BACK-02 | Phase 35 | Pending |
 | BACK-03 | Phase 35 | Pending |
