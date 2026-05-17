@@ -1088,6 +1088,7 @@ async function writeGsdBoardProject(context, options = {}) {
     totalDurationMs: 1,
     steps: []
   };
+  context.gsdToolsVersion = "1.42.2";
 }
 
 function gsdFixturePhases() {

@@ -125,10 +125,12 @@ Feature: Board and task state
     Then the command should succeed
     And stdout should contain `doctor: healthy`
     And stdout should contain `PASS BOARD_TASKS_MATCH_ROADMAP board=delivery`
+    And stdout should contain `WARN SDK_VERSION_DRIFT`
     When I run `boards doctor delivery --json`
     Then the command should succeed
     And stdout should contain `"ok": true`
     And stdout should contain `"code": "BOARD_TASKS_MATCH_ROADMAP"`
+    And stdout should contain `"code": "SDK_VERSION_DRIFT"`
 
   Scenario: SDK fixture v1.6 board repair auto-binds then syncs
     Given a project with v1.6 GSD board fixture using SDK fixture "v17-active"

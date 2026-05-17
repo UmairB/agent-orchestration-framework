@@ -9,6 +9,7 @@ import {
   assertGsdRunnerSurface,
   assertMilestone,
   gsdSdkVersion,
+  inspectGsdToolchain,
   listMilestonePhases,
   loadGsdState,
   resetGsdSdkSurfaceProbeForTests,
@@ -56,6 +57,14 @@ export const gsdSdkAdapterTests = [
   {
     name: "reports installed SDK version",
     run: reportsSdkVersion
+  },
+  {
+    name: "reports GSD toolchain version drift",
+    run: reportsToolchainVersionDrift
+  },
+  {
+    name: "reports missing GSD tools",
+    run: reportsMissingGsdTools
   }
 ];
 
@@ -195,6 +204,27 @@ function detectsRunnerSurfaceMismatch() {
 
 function reportsSdkVersion() {
   assert.equal(gsdSdkVersion().installed, "0.1.0");
+}
+
+async function reportsToolchainVersionDrift() {
+  const projectDir = await tempProject();
+  const report = await inspectGsdToolchain(projectDir, {
+    gsdToolsPath: "C:/tools/gsd-tools.cjs",
+    toolsVersion: "1.42.2"
+  });
+  assert.equal(report.sdkVersion, "0.1.0");
+  assert.equal(report.toolsVersion, "1.42.2");
+  assert.equal(report.toolsPath, "C:/tools/gsd-tools.cjs");
+  assert.equal(report.diagnostics.some((item) => item.code === "SDK_VERSION_DRIFT" && item.status === "warn"), true);
+}
+
+async function reportsMissingGsdTools() {
+  const projectDir = await tempProject();
+  const report = await inspectGsdToolchain(projectDir, {
+    toolsVersion: "",
+    requireToolsPath: true
+  });
+  assert.equal(report.diagnostics.some((item) => item.code === "GSD_TOOLS_MISSING" && item.status === "fail"), true);
 }
 
 async function tempProject() {

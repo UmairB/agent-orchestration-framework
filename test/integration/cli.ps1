@@ -748,6 +748,7 @@ function Run-Cli {
   if ($Context.Contains("GsdSdkFixtureName") -and $Context.GsdSdkFixtureName) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE"] = $Context.GsdSdkFixtureName }
   if ($Context.Contains("GsdSdkFixture") -and $Context.GsdSdkFixture) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE_JSON"] = ($Context.GsdSdkFixture | ConvertTo-Json -Depth 20 -Compress) }
   if ($Context.Contains("GsdPhaseResult") -and $Context.GsdPhaseResult) { $StartInfo.Environment["AOF_TEST_GSD_PHASE_RESULT_JSON"] = ($Context.GsdPhaseResult | ConvertTo-Json -Depth 20 -Compress) }
+  if ($Context.Contains("GsdToolsVersion") -and $Context.GsdToolsVersion) { $StartInfo.Environment["AOF_TEST_GSD_TOOLS_VERSION"] = $Context.GsdToolsVersion }
 
   $Process = New-Object System.Diagnostics.Process
   $Process.StartInfo = $StartInfo
@@ -851,6 +852,7 @@ function Write-GsdBoardProject {
   }
   $Context["GsdSdkFixture"] = $SdkFixture
   $Context["GsdPhaseResult"] = @{ phaseName = "Build Board Execution"; success = $true; totalCostUsd = 0; totalDurationMs = 1; steps = @() }
+  $Context["GsdToolsVersion"] = "1.42.2"
 }
 
 function Get-GsdFixturePhases {

@@ -1,10 +1,11 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GSD, GSDTools, GSDToolsError } from "@gsd-build/sdk";
 import { readJson } from "./fs.mjs";
-import { readLock } from "./lock.mjs";
+import { mergeGsdToolchainMetadata, readLock, writeLock } from "./lock.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
 const READ_TIMEOUT_MS = 10_000;
@@ -145,6 +146,38 @@ export function gsdSdkVersion() {
   };
 }
 
+export async function inspectGsdToolchain(projectDir, options = {}) {
+  const projectRoot = path.resolve(projectDir);
+  const sdkVersion = gsdSdkVersion().installed;
+  const toolsPath = options.gsdToolsPath ?? await resolveGsdToolsPath(projectRoot);
+  const toolsVersion = options.toolsVersion ?? process.env.AOF_TEST_GSD_TOOLS_VERSION ?? detectGsdSdkCliVersion();
+  const diagnostics = [];
+  if (options.requireToolsPath && !toolsPath && !toolsVersion) {
+    diagnostics.push({
+      status: "fail",
+      code: "GSD_TOOLS_MISSING",
+      message: "Unable to resolve GSD tools.",
+      next: "aof packages install gsd"
+    });
+  }
+  if (sdkVersion && toolsVersion && normalizeVersion(sdkVersion) !== normalizeVersion(toolsVersion)) {
+    diagnostics.push({
+      status: "warn",
+      code: "SDK_VERSION_DRIFT",
+      message: `Bundled @gsd-build/sdk ${sdkVersion} differs from resolved gsd-sdk ${toolsVersion}.`,
+      expected: sdkVersion,
+      actual: toolsVersion,
+      next: "Review the installed GSD package before relying on board sync/execution results."
+    });
+  }
+  return {
+    sdkVersion,
+    toolsVersion,
+    toolsPath,
+    diagnostics
+  };
+}
+
 export function assertGsdSdkSurface(ToolsClass = GSDTools) {
   if (surfaceProbeComplete) return;
   if (surfaceProbeError) throw surfaceProbeError;
@@ -191,6 +224,13 @@ async function createTools(projectDir, options = {}) {
   if (!options.skipSurfaceProbe) assertGsdSdkSurface(ToolsClass);
 
   const gsdToolsPath = options.gsdToolsPath ?? await resolveGsdToolsPath(projectRoot);
+  if (options.recordToolchainMetadata !== false) {
+    await recordGsdToolchainMetadata(projectRoot, {
+      sdkVersion: gsdSdkVersion().installed,
+      toolsVersion: options.toolsVersion ?? process.env.AOF_TEST_GSD_TOOLS_VERSION ?? detectGsdSdkCliVersion(),
+      toolsPath: gsdToolsPath
+    });
+  }
   const tools = options.tools ?? testFixtureToolsFromEnv() ?? new ToolsClass({
     projectDir: projectRoot,
     ...(gsdToolsPath ? { gsdToolsPath } : {}),
@@ -343,6 +383,37 @@ function firstPathCandidate(candidates) {
   return null;
 }
 
+async function recordGsdToolchainMetadata(projectRoot, metadata) {
+  const paths = workspacePaths(projectRoot);
+  try {
+    const previous = await readLock(paths.lockPath);
+    await writeLock(paths.lockPath, mergeGsdToolchainMetadata(previous, {
+      ...metadata,
+      checkedAt: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.warn(`warning: failed to write GSD toolchain metadata: ${error.message}`);
+  }
+}
+
+function detectGsdSdkCliVersion() {
+  const result = spawnSync("gsd-sdk", ["--version"], {
+    encoding: "utf8",
+    shell: process.platform === "win32"
+  });
+  if (result.error || result.status !== 0) return null;
+  return parseVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+}
+
+function parseVersion(value) {
+  const match = String(value ?? "").match(/v?(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
+function normalizeVersion(value) {
+  return String(value ?? "").trim().replace(/^v/u, "");
+}
+
 async function appendDispatchLog(projectRoot, entry) {
   const logPath = path.join(projectRoot, ".aof", "cache", "boards", "dispatch.log.jsonl");
   const line = `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`;
@@ -367,7 +438,7 @@ async function fileExists(filePath) {
 function parseMaybeJson(value) {
   if (typeof value !== "string") return value;
   try {
-    return JSON.parse(value);
+    return JSON.parse(value.replace(/^\uFEFF/u, ""));
   } catch {
     return null;
   }

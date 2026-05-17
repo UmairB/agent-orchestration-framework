@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { access, readdir, readFile, rm } from "node:fs/promises";
 import { backendSdkVersion, resolveBackend, supportedBackends } from "./backends/index.mjs";
+import { inspectGsdToolchain } from "./gsd-sdk-adapter.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
@@ -709,10 +711,62 @@ export async function doctorBoards(projectDir, options = {}) {
     }));
   }
 
+  await addToolchainDoctorChecks(projectDir, checks, options);
+  await addEnvironmentDoctorChecks(projectDir, checks);
+
   return {
     ok: checks.every((check) => check.status !== "fail"),
     checks
   };
+}
+
+async function addToolchainDoctorChecks(projectDir, checks, options = {}) {
+  try {
+    const toolchain = await inspectGsdToolchain(projectDir, options);
+    checks.push(doctorCheck("pass", "GSD_TOOLCHAIN_METADATA", `Bundled SDK ${toolchain.sdkVersion ?? "unknown"}; resolved tools ${toolchain.toolsVersion ?? "unknown"}.`, {
+      actual: {
+        sdkVersion: toolchain.sdkVersion,
+        toolsVersion: toolchain.toolsVersion,
+        toolsPath: toolchain.toolsPath
+      }
+    }));
+    for (const diagnostic of toolchain.diagnostics ?? []) {
+      checks.push(doctorCheck(diagnostic.status ?? "warn", diagnostic.code, diagnostic.message, {
+        expected: diagnostic.expected,
+        actual: diagnostic.actual,
+        next: diagnostic.next
+      }));
+    }
+  } catch (error) {
+    checks.push(errorCheck(error, "GSD_TOOLCHAIN_UNAVAILABLE"));
+  }
+}
+
+async function addEnvironmentDoctorChecks(projectDir, checks) {
+  const nodeResult = spawnSync("node", ["--version"], {
+    encoding: "utf8",
+    shell: process.platform === "win32"
+  });
+  checks.push(doctorCheck(nodeResult.status === 0 ? "pass" : "fail", "NODE_ON_PATH", nodeResult.status === 0 ? `node is available on PATH (${String(nodeResult.stdout ?? "").trim()}).` : "node is not available on PATH.", {
+    next: nodeResult.status === 0 ? undefined : "Install Node.js and ensure node is available on PATH."
+  }));
+
+  if (String(projectDir).startsWith("\\\\")) {
+    checks.push(doctorCheck("warn", "WINDOWS_UNC_PATH", "Project directory is a UNC path; some runtime tools may not handle it consistently.", {
+      next: "Mount the share as a drive letter before running board execution."
+    }));
+  }
+
+  for (const relativePath of [path.join(".planning", "STATE.md"), path.join(".planning", "ROADMAP.md")]) {
+    const filePath = path.join(projectDir, relativePath);
+    const content = await readFile(filePath, "utf8").catch(() => null);
+    if (content?.startsWith("\uFEFF")) {
+      checks.push(doctorCheck("warn", "PLANNING_FILE_BOM", `${relativePath} starts with a UTF-8 BOM.`, {
+        path: relativePath,
+        next: "Rewrite the file without a BOM before running GSD SDK operations."
+      }));
+    }
+  }
 }
 
 async function addGsdDoctorChecks(projectDir, paths, board, boardId, tasks, backend, checks, options = {}) {

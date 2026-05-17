@@ -3,13 +3,17 @@ import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { resolveConfig } from "../src/dsl.mjs";
-import { hashContent, readLock, writeLock } from "../src/lock.mjs";
+import { hashContent, mergeGsdToolchainMetadata, readLock, writeLock } from "../src/lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions } from "../src/render-plan.mjs";
 
 export const renderPlanTests = [
   {
     name: "hashes content and roundtrips lock manifests",
     run: hashesContentAndRoundtripsLock
+  },
+  {
+    name: "merges GSD toolchain metadata without dropping lock state",
+    run: mergesGsdToolchainMetadata
   },
   {
     name: "plans create update delete and drift actions",
@@ -96,6 +100,31 @@ async function hashesContentAndRoundtripsLock() {
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
+}
+
+function mergesGsdToolchainMetadata() {
+  const lock = mergeGsdToolchainMetadata({
+    version: 2,
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    runtimes: ["codex"],
+    files: [{ path: ".codex/AGENTS.md" }],
+    packages: [{ id: "gsd" }],
+    frameworks: [{ id: "gsd" }],
+    frameworkInstallAttempts: [{ framework: "gsd", status: "success" }],
+    gsd: { previous: true }
+  }, {
+    sdkVersion: "0.1.0",
+    toolsVersion: "1.42.2",
+    toolsPath: "C:/tools/gsd-tools.cjs",
+    checkedAt: "2026-05-17T00:00:00.000Z"
+  });
+
+  assert.equal(lock.files.length, 1);
+  assert.equal(lock.packages[0].id, "gsd");
+  assert.equal(lock.gsd.previous, true);
+  assert.equal(lock.gsd.sdkVersion, "0.1.0");
+  assert.equal(lock.gsd.toolsVersion, "1.42.2");
+  assert.equal(lock.gsd.toolsPath, "C:/tools/gsd-tools.cjs");
 }
 
 async function plansCreateUpdateDeleteAndDrift() {
