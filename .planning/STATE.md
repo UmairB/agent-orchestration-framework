@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
 current_phase: 38
-status: ready_for_milestone_audit
-stopped_at: Phase 38 completed
-last_updated: "2026-05-17T23:59:59.000Z"
-last_activity: 2026-05-17 -- Phase 38 completed and verified
+status: ready_for_milestone_completion
+stopped_at: v1.7 milestone audit passed
+last_updated: "2026-05-18T00:54:21.000+01:00"
+last_activity: 2026-05-17 -- v1.7 milestone audit passed
 progress:
   total_phases: 6
   completed_phases: 6
@@ -20,7 +20,7 @@ progress:
 **Initialized:** 2026-05-06
 **Current milestone:** v1.7 Typed GSD SDK Backend
 **Current phase:** 38
-**Status:** Ready for milestone audit
+**Status:** Ready for milestone completion
 
 ## Project Reference
 
@@ -38,14 +38,14 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.7 Typed GSD SDK Backend implementation is complete. Next action is `$gsd-audit-milestone` for v1.7 closeout.
+v1.7 Typed GSD SDK Backend audit passed. Next action is `$gsd-complete-milestone v1.7` for archive closeout.
 
 ## Current Position
 
 Phase: 38 — Doctor, Observability, And Milestone Closeout
 Plan: 3/3 plans complete
-Status: Ready for milestone audit
-Last activity: 2026-05-17 -- Phase 38 completed and verified
+Status: Ready for milestone completion
+Last activity: 2026-05-17 -- v1.7 milestone audit passed
 
 **Phase 38 scope at a glance:**
 
@@ -59,8 +59,8 @@ Last activity: 2026-05-17 -- Phase 38 completed and verified
 
 ## Resume
 
-**Stopped at:** Phase 38 completed
-**Resume file:** .planning/phases/38-doctor-observability-and-milestone-closeout/38-VERIFICATION.md
+**Stopped at:** v1.7 milestone audit passed
+**Resume file:** .planning/milestones/v1.7-MILESTONE-AUDIT.md
 
 ## Memory
 

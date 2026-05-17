@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-17 after Phase 38 completion
+**Last updated:** 2026-05-17 after v1.7 milestone audit
 
 ## Milestones
 
@@ -12,7 +12,7 @@
 - ✅ **v1.4 Namespaced CLI Contract** — Phases 18-22, shipped 2026-05-11. Archive: [v1.4-ROADMAP.md](milestones/v1.4-ROADMAP.md)
 - ✅ **v1.5 Runtime Semantics And Workflow Assets** — Phases 23-27, shipped 2026-05-14. Archive: [v1.5-ROADMAP.md](milestones/v1.5-ROADMAP.md)
 - ✅ **v1.6 Task Management** — Phases 28-32, shipped 2026-05-15. Archive: [v1.6-ROADMAP.md](milestones/v1.6-ROADMAP.md)
-- 🚧 **v1.7 Typed GSD SDK Backend** — Phases 33-38, implementation complete; audit/closeout pending.
+- 🚧 **v1.7 Typed GSD SDK Backend** — Phases 33-38, audit passed; closeout pending.
 
 ## Phases
 
@@ -63,7 +63,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
 | v1.6 Task Management | 28-32 | 15/15 | 30/30 | Complete | 2026-05-15 |
-| v1.7 Typed GSD SDK Backend | 33-38 | 19/19 | 46/46 | Audit pending | - |
+| v1.7 Typed GSD SDK Backend | 33-38 | 19/19 | 46/46 | Audit passed | - |
 
 ## Phase Details
 
@@ -210,4 +210,4 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 
 ## Next
 
-v1.7 Typed GSD SDK Backend implementation is complete. Next step: milestone audit and closeout.
+v1.7 Typed GSD SDK Backend audit passed. Next step: milestone closeout and archive.
