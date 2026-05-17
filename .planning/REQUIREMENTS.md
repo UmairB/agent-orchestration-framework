@@ -41,11 +41,11 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Backend Interface (swap-in seam)
 
-- [ ] **BACK-01**: A `BoardBackend` interface lives in `src/backends/index.mjs` with exactly four methods — `loadState`, `analyzeRoadmap`, `assertMilestone`, `syncBoardFromMilestone` — plus a `kind` discriminant and a `capabilities` set.
-- [ ] **BACK-02**: GSD is registered as the v1.7 backend implementation (`kind: "gsd"`); a `null` test backend implements the same interface for unit/integration tests; no second real backend ships.
-- [ ] **BACK-03**: `boards.mjs`, `board-execution.mjs`, `cli.mjs`, and `setup-ui.mjs` interact with backends exclusively through `resolveBackend(name)`; the `executionProvider` field becomes a registry lookup, with non-`gsd` real values rejected with `BACKEND_UNSUPPORTED`.
-- [ ] **BACK-04**: `board-execution.mjs::assignTaskToAgent` gates on `backend.capabilities.has("assignTask")` rather than a `provider !== "gsd"` literal check.
-- [ ] **BACK-05**: GSD-specific fields (`milestone.invocation`, `session.turns`, slash-command strings) live under `backend.gsd.*` sub-objects in BOARD.json — they are not promoted to the abstract `BoardBackend` interface.
+- [x] **BACK-01**: A `BoardBackend` interface lives in `src/backends/index.mjs` with exactly four methods — `loadState`, `analyzeRoadmap`, `assertMilestone`, `syncBoardFromMilestone` — plus a `kind` discriminant and a `capabilities` set.
+- [x] **BACK-02**: GSD is registered as the v1.7 backend implementation (`kind: "gsd"`); a `null` test backend implements the same interface for unit/integration tests; no second real backend ships.
+- [x] **BACK-03**: `boards.mjs`, `board-execution.mjs`, `cli.mjs`, and `setup-ui.mjs` interact with backends exclusively through `resolveBackend(name)`; the `executionProvider` field becomes a registry lookup, with non-`gsd` real values rejected with `BACKEND_UNSUPPORTED`.
+- [x] **BACK-04**: `board-execution.mjs::assignTaskToAgent` gates on `backend.capabilities.has("assignTask")` rather than a `provider !== "gsd"` literal check.
+- [x] **BACK-05**: GSD-specific fields (`milestone.invocation`, `session.turns`, slash-command strings) live under `backend.gsd.*` sub-objects in BOARD.json — they are not promoted to the abstract `BoardBackend` interface.
 
 ### Diagnostics
 
@@ -154,11 +154,11 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 | LIFE-05 | Phase 34 | Complete |
 | MIG-02 | Phase 34 | Complete |
 | MIG-04 | Phase 34 | Complete |
-| BACK-01 | Phase 35 | Pending |
-| BACK-02 | Phase 35 | Pending |
-| BACK-03 | Phase 35 | Pending |
-| BACK-04 | Phase 35 | Pending |
-| BACK-05 | Phase 35 | Pending |
+| BACK-01 | Phase 35 | Complete |
+| BACK-02 | Phase 35 | Complete |
+| BACK-03 | Phase 35 | Complete |
+| BACK-04 | Phase 35 | Complete |
+| BACK-05 | Phase 35 | Complete |
 | MIG-03 | Phase 36 | Pending |
 | TEST-01 | Phase 36 | Pending |
 | TEST-02 | Phase 36 | Pending |
