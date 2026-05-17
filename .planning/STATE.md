@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
-current_phase: 35
-status: ready_to_plan
-stopped_at: Phase 35 complete (3/3) — ready to discuss Phase 36
-last_updated: 2026-05-17T21:12:38.465Z
-last_activity: 2026-05-17 -- Phase 35 planning complete
+current_phase: 36
+status: planning
+stopped_at: Phase 36 context gathered
+last_updated: "2026-05-17T22:41:43.698Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 6
-  completed_phases: 7
-  total_plans: 86
-  completed_plans: 91
-  percent: 117
+  completed_phases: 3
+  total_plans: 10
+  completed_plans: 10
+  percent: 50
 ---
 
 # State: AOF
@@ -61,8 +61,8 @@ Last activity: 2026-05-17
 
 ## Resume
 
-**Stopped at:** Phase 35 context gathered
-**Resume file:** .planning/phases/35-boardbackend-seam/35-CONTEXT.md
+**Stopped at:** Phase 36 context gathered
+**Resume file:** .planning/phases/36-test-surface-migration-and-windows-parity/36-CONTEXT.md
 
 ## Memory
 
