@@ -48,7 +48,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 - [x] **Phase 33: SDK Adapter Foundation** — Pin `@gsd-build/sdk@0.1.0`, ship the typed adapter module, version-drift probe, error wrapping, dispatch log, and first captured fixture. (completed 2026-05-16)
 - [x] **Phase 34: Board Lifecycle Migration And Typed Sync** — Route `aof boards sync --milestone` through the adapter, drop implicit ROADMAP.md parsing, add `binding.*` fields and structured error codes, auto-migrate v1.6 boards via `repair`. (completed 2026-05-17)
 - [x] **Phase 35: BoardBackend Seam** — Extract a minimal 4-method `BoardBackend` interface from the working Phase 34 code, register GSD as the v1 backend, add a null backend for tests, keep GSD-isms under `backend.gsd.*`. (completed 2026-05-17)
-- [ ] **Phase 36: Test Surface Migration And Windows Parity** — Captured-fixture two-tier doubles, SDK-path BDD siblings, `test:integration:ps` exercises the SDK adapter, v1.6 board regression fixture, `.gitattributes` for cross-OS fingerprint stability.
+- [x] **Phase 36: Test Surface Migration And Windows Parity** — Captured-fixture two-tier doubles, SDK-path BDD siblings, `test:integration:ps` exercises the SDK adapter, v1.6 board regression fixture, `.gitattributes` for cross-OS fingerprint stability. (completed 2026-05-17)
 - [ ] **Phase 37: Runtime Fallback Hardening And Collapse** — Rename `gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`, drop `completedRoadmapPath` mtime scraping, loud `[fallback]` stderr, parity unit test, milestone-creation handoff.
 - [ ] **Phase 38: Doctor, Observability, And Milestone Closeout** — `aof boards doctor` end-to-end ladder, SDK/tools version drift diagnostic, lock state records both versions, Windows-specific checks, milestone audit and archive.
 
@@ -63,7 +63,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
 | v1.6 Task Management | 28-32 | 15/15 | 30/30 | Complete | 2026-05-15 |
-| v1.7 Typed GSD SDK Backend | 33-38 | 0/0 | 0/46 | In progress | - |
+| v1.7 Typed GSD SDK Backend | 33-38 | 13/13 | 36/46 | In progress | - |
 
 ## Phase Details
 
@@ -154,7 +154,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 4. User upgrading a v1.6 project sees the migration fixture `test/fixtures/v1-6-board.json` exercised end-to-end in BDD — "v1.6 board breaks on first v1.7 sync" cannot regress without a CI failure.
 5. System produces identical `gsd.milestone.binding.status` transitions whether the SDK path or the CLI-fallback path handles the same logical input — a parity unit test enforces it, and `.gitattributes` forces LF on `.aof/**/*.json` and `.planning/**/*.md` so `canonicalFingerprint` matches across Linux CI and Windows runs.
 
-**Plans:** TBD
+**Plans:** 3/3 plans complete
 
 **Notes:**
 - Two-tier doubles are non-negotiable: `MockGSDTools` (captured fixtures) for fast unit tests + a real-SDK contract suite for the JSON-over-process boundary. Mocking the entire `gsd-sdk-adapter` module skips the boundary that breaks in production.
@@ -210,4 +210,4 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 
 ## Next
 
-v1.7 Typed GSD SDK Backend is in progress. Start with `/gsd:plan-phase 33` to plan the SDK adapter foundation.
+v1.7 Typed GSD SDK Backend is in progress. Phase 37 is next: Runtime Fallback Hardening And Collapse.

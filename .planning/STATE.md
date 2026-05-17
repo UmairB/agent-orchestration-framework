@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
-current_phase: 36
-status: executing
-stopped_at: Phase 36 context gathered
-last_updated: "2026-05-17T22:56:35.973Z"
-last_activity: 2026-05-17 -- Phase 36 planning complete
+current_phase: 37
+status: ready_to_discuss
+stopped_at: Phase 36 completed
+last_updated: "2026-05-17T23:20:00.000Z"
+last_activity: 2026-05-17 -- Phase 36 completed
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 13
-  completed_plans: 10
-  percent: 50
+  completed_plans: 13
+  percent: 67
 ---
 
 # State: AOF
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.7 Typed GSD SDK Backend
-**Current phase:** 36
-**Status:** Ready to execute
+**Current phase:** 37
+**Status:** Ready to discuss
 
 ## Project Reference
 
@@ -38,31 +38,29 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.7 Typed GSD SDK Backend roadmap is locked. 46 requirements mapped across Phases 33–38, 100% coverage, no orphans. Next action is `/gsd:plan-phase 33` to plan the SDK Adapter Foundation — the load-bearing pure-addition phase every later phase depends on.
+v1.7 Typed GSD SDK Backend roadmap is locked. Phases 33-36 are complete. Next action is `$gsd-discuss-phase 37` for Runtime Fallback Hardening And Collapse.
 
 ## Current Position
 
-Phase: 33 — SDK Adapter Foundation (not yet planned)
+Phase: 37 — Runtime Fallback Hardening And Collapse
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 36 planning complete
+Status: Ready to discuss
+Last activity: 2026-05-17 -- Phase 36 completed
 
-**Phase 33 scope at a glance:**
+**Phase 37 scope at a glance:**
 
-- Pin `@gsd-build/sdk@0.1.0` exact; update supply-chain allowlist
-- Ship `src/gsd-sdk-adapter.mjs` as the only module importing the SDK or invoking `gsd-tools.cjs`
-- Typed adapter functions: `loadGsdState`, `analyzeGsdRoadmap`, `assertMilestone`, `listMilestonePhases`
-- `GsdSdkError` wrapping every `GSDToolsError`; injectable `gsdToolsPath`
-- Boot-time contract test against the SDK surface AOF depends on
-- Dispatch log (`DIAG-05`) to `.aof/cache/boards/dispatch.log.jsonl`
-- First captured fixture under `test/fixtures/gsd-sdk/` for Phase 36 to build on
+- Rename `src/gsd-runtime.mjs` to fallback-only naming and make fallback status loud.
+- Drop completed-roadmap mtime scraping and rely on typed SDK state.
+- Route phase execution through typed SDK paths where available while preserving UI task shape.
+- Keep Windows fallback safeguards explicitly documented.
+- Implement the milestone-creation handoff without an AOF-side composite.
 
-**Phase 33 covers:** SDK-01, SDK-02, SDK-03, SDK-04, SDK-05, SDK-06, SDK-07, SDK-08, SDK-09, DIAG-05 (10 requirements).
+**Phase 37 covers:** EXEC-01, EXEC-02, EXEC-03, EXEC-04 (4 requirements).
 
 ## Resume
 
-**Stopped at:** Phase 36 context gathered
-**Resume file:** .planning/phases/36-test-surface-migration-and-windows-parity/36-CONTEXT.md
+**Stopped at:** Phase 36 completed
+**Resume file:** .planning/phases/36-test-surface-migration-and-windows-parity/36-VERIFICATION.md
 
 ## Memory
 
