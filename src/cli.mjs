@@ -16,7 +16,7 @@ import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
 import { resolveBackend } from "./backends/index.mjs";
-import { BoardLifecycleError, addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
+import { BoardLifecycleError, addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, doctorBoards, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 import { continueGsdMilestone } from "./gsd-runtime-fallback.mjs";
@@ -96,6 +96,11 @@ async function boardsCommand(args) {
 
   if (subcommand === "validate") {
     await boardsValidateCommand(rest);
+    return;
+  }
+
+  if (subcommand === "doctor") {
+    await boardsDoctorCommand(rest);
     return;
   }
 
@@ -247,6 +252,24 @@ async function boardsValidateCommand(args) {
   const targetDir = path.resolve(options.target ?? process.cwd());
   const diagnostics = await validateBoards(targetDir);
   await printBoardValidationResult(diagnostics, options);
+}
+
+async function boardsDoctorCommand(args) {
+  const options = parseOptions(args);
+  const [boardId] = options._;
+  const targetDir = path.resolve(options.target ?? process.cwd());
+  const report = await doctorBoards(targetDir, { boardId });
+  if (options.json) {
+    printJson(report);
+    if (!report.ok) process.exitCode = 1;
+    return;
+  }
+  console.log(`doctor: ${report.ok ? "healthy" : "issues found"}`);
+  for (const check of report.checks) {
+    console.log(`${doctorStatusLabel(check.status)} ${check.code}${check.boardId ? ` board=${check.boardId}` : ""}: ${check.message}`);
+    if (check.next) console.log(`  next: ${check.next}`);
+  }
+  if (!report.ok) process.exitCode = 1;
 }
 
 async function boardsIndexCommand(args) {
@@ -1741,6 +1764,12 @@ function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function doctorStatusLabel(status) {
+  if (status === "pass") return "PASS";
+  if (status === "warn") return "WARN";
+  return "FAIL";
+}
+
 function isStructuredError(error) {
   return error instanceof BoardLifecycleError || typeof error?.toJSON === "function" && typeof error?.code === "string";
 }
@@ -1917,6 +1946,7 @@ Boards:
   aof boards archive id [--json]
   aof boards remove id [--dry-run] [--json]
   aof boards validate [--json] [--strict]
+  aof boards doctor [board-id] [--json]
   aof boards index [--json]
   aof boards sync id --milestone milestone-id [--json]
   aof boards milestone attach id --milestone milestone-id --roadmap path [--json]

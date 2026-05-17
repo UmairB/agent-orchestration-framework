@@ -121,6 +121,14 @@ Feature: Board and task state
     And stdout should contain `created: 2`
     And file `.aof/boards/delivery/BOARD.json` should contain `"status": "synced"`
     And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"phase": "30"`
+    When I run `boards doctor delivery`
+    Then the command should succeed
+    And stdout should contain `doctor: healthy`
+    And stdout should contain `PASS BOARD_TASKS_MATCH_ROADMAP board=delivery`
+    When I run `boards doctor delivery --json`
+    Then the command should succeed
+    And stdout should contain `"ok": true`
+    And stdout should contain `"code": "BOARD_TASKS_MATCH_ROADMAP"`
 
   Scenario: SDK fixture v1.6 board repair auto-binds then syncs
     Given a project with v1.6 GSD board fixture using SDK fixture "v17-active"
@@ -144,6 +152,17 @@ Feature: Board and task state
     And stdout should contain `Board legacy needs manual milestone attachment before sync.`
     And stdout should contain `continue: aof boards milestone attach legacy --milestone <milestone-id> --roadmap docs/v1-6-roadmap.md`
     And file `.aof/boards/legacy/BOARD.json` should not contain `"id": "v1-7"`
+
+  Scenario: SDK fixture board doctor reports v1.6 migration hints
+    Given a project with v1.6 GSD board fixture using SDK fixture "v17-active"
+    When I run `boards doctor legacy`
+    Then the command should succeed
+    And stdout should contain `WARN BOARD_MILESTONE_ID_MISSING board=legacy`
+    And stdout should contain `next: aof boards milestone attach legacy --milestone v1.7 --roadmap docs/v1-6-roadmap.md`
+    When I run `boards doctor legacy --json`
+    Then the command should succeed
+    And stdout should contain `"code": "BOARD_MILESTONE_ID_MISSING"`
+    And stdout should contain `"next": "aof boards milestone attach legacy --milestone v1.7 --roadmap docs/v1-6-roadmap.md"`
 
   Scenario: Refreshed breakdowns do not silently overwrite existing tasks
     Given an empty project

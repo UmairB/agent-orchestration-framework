@@ -8,6 +8,7 @@ import {
   attachBoardMilestoneRoadmap,
   buildBoardIndex,
   createBoard,
+  doctorBoards,
   editTask,
   getBoard,
   listBoards,
@@ -65,6 +66,10 @@ export const boardTests = [
   {
     name: "validates malformed board and task state",
     run: validatesMalformedState
+  },
+  {
+    name: "doctors healthy and v1.6-shaped GSD boards",
+    run: doctorsGsdBoards
   }
 ];
 
@@ -464,6 +469,58 @@ async function validatesMalformedState() {
     }), "utf8");
     const providerDiagnostics = await validateBoards(targetDir);
     assert.equal(providerDiagnostics.some((item) => item.code === "BOARD_INVALID_EXECUTION_PROVIDER"), true);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function doctorsGsdBoards() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    await mkdir(path.join(targetDir, ".planning"), { recursive: true });
+    await writeFile(path.join(targetDir, ".planning", "ROADMAP.md"), "# Roadmap\n", "utf8");
+    await createBoard(targetDir, {
+      id: "delivery",
+      title: "Delivery",
+      objective: "Ship typed boards",
+      executionProvider: "gsd"
+    });
+    await attachBoardMilestoneRoadmap(targetDir, "delivery", {
+      milestoneId: "v1.7",
+      roadmapPath: ".planning/ROADMAP.md"
+    }, { tools: fixtureTools() });
+    await syncBoardFromGsdRoadmap(targetDir, "delivery", {
+      milestoneId: "v1.7",
+      tools: fixtureTools()
+    });
+
+    const healthy = await doctorBoards(targetDir, { tools: fixtureTools(), boardId: "delivery" });
+    assert.equal(healthy.ok, true);
+    assert.ok(healthy.checks.some((check) => check.code === "BOARD_TASKS_MATCH_ROADMAP" && check.status === "pass"));
+
+    const legacyDir = path.join(targetDir, ".aof", "boards", "legacy");
+    await mkdir(path.join(legacyDir, "tasks"), { recursive: true });
+    await writeFile(path.join(legacyDir, "BOARD.json"), JSON.stringify({
+      version: 1,
+      id: "legacy",
+      title: "Legacy",
+      objective: "Upgrade board",
+      status: "active",
+      columns: ["backlog", "ready", "in_progress", "blocked", "done"],
+      executionProvider: "gsd",
+      gsd: {
+        milestone: {
+          status: "completed",
+          roadmapPath: ".planning/ROADMAP.md"
+        }
+      }
+    }, null, 2), "utf8");
+
+    const legacy = await doctorBoards(targetDir, { tools: fixtureTools(), boardId: "legacy" });
+    const migration = legacy.checks.find((check) => check.code === "BOARD_MILESTONE_ID_MISSING");
+    assert.equal(legacy.ok, true);
+    assert.equal(migration.status, "warn");
+    assert.match(migration.next, /aof boards milestone attach legacy --milestone v1\.7 --roadmap \.planning\/ROADMAP\.md/);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

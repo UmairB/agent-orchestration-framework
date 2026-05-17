@@ -662,6 +662,189 @@ export async function validateBoards(projectDir) {
   return diagnostics;
 }
 
+export async function doctorBoards(projectDir, options = {}) {
+  const paths = boardWorkspacePaths(projectDir);
+  const checks = [];
+  const targetBoardId = options.boardId ? normalizeId(options.boardId) : null;
+  const dirs = await boardDirs(paths);
+  const matchedBoards = [];
+
+  if (dirs.length === 0) {
+    checks.push(doctorCheck("warn", "BOARD_STATE_EMPTY", "No boards found in .aof/boards.", {
+      next: "aof boards create <id> --title <title> --objective <text>"
+    }));
+  }
+
+  for (const boardDir of dirs) {
+    const boardPath = path.join(boardDir, BOARD_FILE);
+    const relativeBoardPath = displayPath(paths, boardPath);
+    const diagnostics = [];
+    const board = await tryReadJson(boardPath, diagnostics, relativeBoardPath, "BOARD_MALFORMED_JSON");
+    if (!board) {
+      checks.push(...diagnostics.map(diagnosticCheck));
+      continue;
+    }
+    const boardId = typeof board.id === "string" ? board.id : path.basename(boardDir);
+    if (targetBoardId && boardId !== targetBoardId) continue;
+    matchedBoards.push(boardId);
+
+    validateBoardShape(board, diagnostics, relativeBoardPath);
+    const tasks = await readBoardTasks(paths, boardId).catch(() => []);
+    for (const task of tasks) validateTaskShape(task, board, diagnostics, `.aof/boards/${boardId}/tasks/${task.id ?? "<unknown>"}.json`);
+    checks.push(...diagnostics.filter((item) => item.code !== "BOARD_MILESTONE_ID_MISSING").map(diagnosticCheck));
+    if (!diagnostics.some((item) => item.severity === "error")) {
+      checks.push(doctorCheck("pass", "BOARD_STATE_VALID", `Board ${boardId} state is readable and structurally valid.`, { boardId }));
+    }
+
+    const backend = safeBackendForBoard(board, checks, boardId);
+    if (backend?.kind === "gsd") {
+      await addGsdDoctorChecks(projectDir, paths, board, boardId, tasks, backend, checks, options);
+    }
+  }
+
+  if (targetBoardId && matchedBoards.length === 0) {
+    checks.push(doctorCheck("fail", "BOARD_NOT_FOUND", `Board not found: ${targetBoardId}.`, {
+      boardId: targetBoardId,
+      next: "aof boards list"
+    }));
+  }
+
+  return {
+    ok: checks.every((check) => check.status !== "fail"),
+    checks
+  };
+}
+
+async function addGsdDoctorChecks(projectDir, paths, board, boardId, tasks, backend, checks, options = {}) {
+  let state = null;
+  let roadmap = null;
+  try {
+    state = await backend.loadState(projectDir, options);
+    checks.push(doctorCheck(state.statePresent ? "pass" : "warn", "GSD_STATE_PRESENT", state.statePresent ? "GSD state is present." : "GSD state is empty.", {
+      boardId,
+      next: state.statePresent ? undefined : "aof packages install gsd"
+    }));
+  } catch (error) {
+    checks.push(errorCheck(error, "GSD_STATE_UNAVAILABLE", boardId));
+  }
+
+  try {
+    roadmap = await backend.analyzeRoadmap(projectDir, options);
+    const phases = normalizeRoadmapPhases(roadmap);
+    checks.push(doctorCheck(phases.length > 0 ? "pass" : "warn", "GSD_ROADMAP_ANALYZABLE", phases.length > 0 ? `GSD roadmap has ${phases.length} phase(s).` : "GSD roadmap has no phases.", {
+      boardId,
+      next: phases.length > 0 ? undefined : "Complete the GSD milestone roadmap, then run aof boards sync."
+    }));
+  } catch (error) {
+    checks.push(errorCheck(error, "GSD_ROADMAP_UNAVAILABLE", boardId));
+  }
+
+  const milestoneId = normalizeMilestoneInput(board.gsd?.milestone?.id);
+  if (!milestoneId) {
+    checks.push(await missingMilestoneCheck(projectDir, paths, board, boardId, tasks, backend, roadmap, options));
+    return;
+  }
+
+  checks.push(doctorCheck("pass", "BOARD_MILESTONE_BOUND", `Board ${boardId} is bound to milestone ${milestoneId}.`, { boardId }));
+  try {
+    const assertion = await assertBoardMilestone(projectDir, milestoneId, options, backend);
+    if (assertion.ok) {
+      checks.push(doctorCheck("pass", "BOARD_MILESTONE_MATCHES_GSD", `Milestone ${milestoneId} matches GSD state.`, { boardId }));
+    } else {
+      checks.push(doctorCheck("fail", assertion.code ?? "BOARD_MILESTONE_MISMATCH", `Board ${boardId} milestone ${milestoneId} does not match GSD state.`, {
+        boardId,
+        expected: assertion.expected,
+        actual: assertion.actual,
+        next: milestoneAssertionNext(boardId, assertion)
+      }));
+    }
+  } catch (error) {
+    checks.push(errorCheck(error, "BOARD_MILESTONE_ASSERT_FAILED", boardId));
+  }
+
+  const cachedPhases = normalizeRoadmapPhases({ phases: board.gsd?.milestone?.phases ?? [] });
+  if (cachedPhases.length > 0) {
+    const taskPhases = new Set(tasks.map((task) => String(task.refs?.phase ?? "")).filter(Boolean));
+    const missing = cachedPhases.filter((phase) => !taskPhases.has(String(phase.phaseId)));
+    checks.push(doctorCheck(missing.length === 0 ? "pass" : "warn", missing.length === 0 ? "BOARD_TASKS_MATCH_ROADMAP" : "BOARD_TASKS_MISSING_PHASES", missing.length === 0 ? `Board ${boardId} tasks match cached roadmap phases.` : `Board ${boardId} is missing ${missing.length} synced phase task(s).`, {
+      boardId,
+      actual: missing.map((phase) => phase.phaseId),
+      next: missing.length === 0 ? undefined : `aof boards sync ${boardId} --milestone ${milestoneId}`
+    }));
+  } else {
+    checks.push(doctorCheck("warn", "BOARD_ROADMAP_PHASE_CACHE_MISSING", `Board ${boardId} has no cached GSD phase list.`, {
+      boardId,
+      next: `aof boards sync ${boardId} --milestone ${milestoneId}`
+    }));
+  }
+}
+
+async function missingMilestoneCheck(projectDir, paths, board, boardId, tasks, backend, existingRoadmap, options) {
+  const roadmapPath = board.gsd?.milestone?.roadmapPath;
+  const milestoneId = await inferDoctorMilestoneId(projectDir, paths, board, boardId, tasks, backend, existingRoadmap, options);
+  const next = `aof boards milestone attach ${boardId} --milestone ${milestoneId ?? "<milestone-id>"} --roadmap ${roadmapPath ?? "<path>"}`;
+  return doctorCheck("warn", "BOARD_MILESTONE_ID_MISSING", `Board ${boardId} is missing gsd.milestone.id.`, {
+    boardId,
+    expected: "gsd.milestone.id",
+    actual: null,
+    next
+  });
+}
+
+async function inferDoctorMilestoneId(projectDir, paths, board, boardId, tasks, backend, existingRoadmap, options) {
+  const roadmapPath = board.gsd?.milestone?.roadmapPath;
+  if (!roadmapPath) return null;
+  const roadmap = existingRoadmap ?? await backend.analyzeRoadmap(projectDir, options).catch(() => null);
+  const candidates = Array.isArray(roadmap?.milestones) ? roadmap.milestones.map((item) => item.version).filter(Boolean) : [];
+  if (candidates.length !== 1) return null;
+  const phases = normalizeRoadmapPhases(roadmap);
+  const existingFingerprint = existingBoardPhaseFingerprint(tasks);
+  const nextFingerprint = phaseIdentityFingerprint(phases);
+  const pathMatchesDefault = normalizeProjectPath(roadmapPath) === ".planning/ROADMAP.md";
+  const fingerprintMatches = existingFingerprint && existingFingerprint === nextFingerprint;
+  if (!pathMatchesDefault && !fingerprintMatches) return null;
+  const assertion = await backend.assertMilestone(projectDir, candidates[0], options).catch(() => null);
+  return assertion?.ok ? normalizeMilestoneInput(candidates[0]) : null;
+}
+
+function safeBackendForBoard(board, checks, boardId) {
+  try {
+    return backendForBoard(board);
+  } catch (error) {
+    checks.push(errorCheck(error, "BACKEND_UNSUPPORTED", boardId));
+    return null;
+  }
+}
+
+function diagnosticCheck(item) {
+  return doctorCheck(item.severity === "error" ? "fail" : "warn", item.code, item.message, {
+    path: item.path
+  });
+}
+
+function errorCheck(error, fallbackCode, boardId) {
+  const details = typeof error?.toJSON === "function" ? error.toJSON() : {};
+  return doctorCheck("fail", error?.code ?? details.code ?? fallbackCode, error?.message ?? details.message ?? String(error), {
+    boardId,
+    expected: details.expected ?? error?.expected,
+    actual: details.actual ?? error?.actual,
+    next: details.next ?? error?.next
+  });
+}
+
+function doctorCheck(status, code, message, details = {}) {
+  return {
+    status,
+    code,
+    message,
+    ...(details.boardId !== undefined ? { boardId: details.boardId } : {}),
+    ...(details.path !== undefined ? { path: details.path } : {}),
+    ...(details.expected !== undefined ? { expected: details.expected } : {}),
+    ...(details.actual !== undefined ? { actual: details.actual } : {}),
+    ...(details.next !== undefined ? { next: details.next } : {})
+  };
+}
+
 function boardSummary(board, tasks) {
   const counts = Object.fromEntries(BOARD_STATUSES.map((status) => [status, 0]));
   for (const task of tasks) {
@@ -863,6 +1046,11 @@ function milestoneAssertionError(boardId, milestoneId, assertion) {
       next: `aof boards milestone attach ${boardId} --milestone <milestone-id> --roadmap <path>`
     }
   );
+}
+
+function milestoneAssertionNext(boardId, assertion) {
+  if (assertion?.actual) return `aof boards milestone attach ${boardId} --milestone ${assertion.actual} --roadmap <path>`;
+  return `aof boards milestone attach ${boardId} --milestone <milestone-id> --roadmap <path>`;
 }
 
 function boardErrorFromSdk(error) {
