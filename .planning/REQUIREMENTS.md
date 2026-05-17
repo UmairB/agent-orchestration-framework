@@ -67,17 +67,17 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 - [ ] **MIG-01**: `aof boards doctor` detects v1.6-shaped boards (`gsd.milestone.roadmapPath` set, `gsd.milestone.id` missing) and emits `BOARD_MILESTONE_ID_MISSING` with the exact migration command pre-filled.
 - [x] **MIG-02**: `aof boards repair` infers the missing `gsd.milestone.id` from the stored `roadmapPath` plus GSD state; when exactly one milestone matches, AOF auto-attaches; when ambiguous, AOF emits the fix-it command without modifying state — never silently auto-picks.
-- [ ] **MIG-03**: A captured v1.6 board fixture (`test/fixtures/v1-6-board.json`) exercises the migration path end-to-end in BDD; regression for "v1.6 board breaks on first v1.7 sync" is permanent.
+- [x] **MIG-03**: A captured v1.6 board fixture (`test/fixtures/v1-6-board.json`) exercises the migration path end-to-end in BDD; regression for "v1.6 board breaks on first v1.7 sync" is permanent.
 - [x] **MIG-04**: `validateBoardShape` surfaces missing `gsd.milestone.id` as a warning (not error) during a deprecation window so users see the migration prompt before a hard fail.
 
 ### Test surface + Windows parity
 
-- [ ] **TEST-01**: A `MockGSDTools` test double under `test/support/` returns values captured from real `gsd-tools.cjs` output under `test/fixtures/gsd-sdk/<scenario>/`; AOF unit tests inject it at the adapter boundary, not the `boards.mjs` boundary.
-- [ ] **TEST-02**: A new integration suite `test:integration:sdk-contract` boots a real `GSDTools` against a controlled `.planning/` fixture and asserts JSON-over-process shapes.
-- [ ] **TEST-03**: BDD scenarios at `test/integration/features/boards.feature` gain SDK-path siblings to every fallback-path scenario; `AOF_TEST_GSD_SDK_FIXTURE=<name>` env scaffolds the SDK path the way `AOF_TEST_GSD_RUNTIME_STATUS` scaffolds the fallback path.
-- [ ] **TEST-04**: `test:integration:ps` (Windows PowerShell runner) exercises the SDK adapter path with a project rooted at a path containing a space; UNC and BOM scenarios surface as warnings via doctor.
-- [ ] **TEST-05**: A parity unit test asserts SDK-path and CLI-fallback-path produce identical `gsd.milestone.binding.status` transitions for the same logical input.
-- [ ] **TEST-06**: `.gitattributes` enforces LF line endings for `.aof/**/*.json` and `.planning/**/*.md` so `canonicalFingerprint` outputs match across Linux CI and Windows runs.
+- [x] **TEST-01**: A `MockGSDTools` test double under `test/support/` returns values captured from real `gsd-tools.cjs` output under `test/fixtures/gsd-sdk/<scenario>/`; AOF unit tests inject it at the adapter boundary, not the `boards.mjs` boundary.
+- [x] **TEST-02**: A new integration suite `test:integration:sdk-contract` boots a real `GSDTools` against a controlled `.planning/` fixture and asserts JSON-over-process shapes.
+- [x] **TEST-03**: BDD scenarios at `test/integration/features/boards.feature` gain SDK-path siblings to every fallback-path scenario; `AOF_TEST_GSD_SDK_FIXTURE=<name>` env scaffolds the SDK path the way `AOF_TEST_GSD_RUNTIME_STATUS` scaffolds the fallback path.
+- [x] **TEST-04**: `test:integration:ps` (Windows PowerShell runner) exercises the SDK adapter path with a project rooted at a path containing a space; UNC and BOM scenarios surface as warnings via doctor.
+- [x] **TEST-05**: A parity unit test asserts SDK-path and CLI-fallback-path produce identical `gsd.milestone.binding.status` transitions for the same logical input.
+- [x] **TEST-06**: `.gitattributes` enforces LF line endings for `.aof/**/*.json` and `.planning/**/*.md` so `canonicalFingerprint` outputs match across Linux CI and Windows runs.
 
 ---
 
@@ -159,13 +159,13 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 | BACK-03 | Phase 35 | Complete |
 | BACK-04 | Phase 35 | Complete |
 | BACK-05 | Phase 35 | Complete |
-| MIG-03 | Phase 36 | Pending |
-| TEST-01 | Phase 36 | Pending |
-| TEST-02 | Phase 36 | Pending |
-| TEST-03 | Phase 36 | Pending |
-| TEST-04 | Phase 36 | Pending |
-| TEST-05 | Phase 36 | Pending |
-| TEST-06 | Phase 36 | Pending |
+| MIG-03 | Phase 36 | Complete |
+| TEST-01 | Phase 36 | Complete |
+| TEST-02 | Phase 36 | Complete |
+| TEST-03 | Phase 36 | Complete |
+| TEST-04 | Phase 36 | Complete |
+| TEST-05 | Phase 36 | Complete |
+| TEST-06 | Phase 36 | Complete |
 | EXEC-01 | Phase 37 | Pending |
 | EXEC-02 | Phase 37 | Pending |
 | EXEC-03 | Phase 37 | Pending |
