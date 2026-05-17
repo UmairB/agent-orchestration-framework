@@ -150,24 +150,65 @@ async function createTools(projectDir, options = {}) {
 }
 
 function testFixtureToolsFromEnv() {
-  const raw = process.env.AOF_TEST_GSD_SDK_FIXTURE_JSON;
-  if (!raw) return null;
-  const fixture = JSON.parse(raw);
+  const fixtureName = process.env.AOF_TEST_GSD_SDK_FIXTURE;
+  const overrideRaw = process.env.AOF_TEST_GSD_SDK_FIXTURE_JSON;
+  if (!fixtureName && !overrideRaw) return null;
+  const fixture = loadTestFixture(fixtureName, overrideRaw);
   return {
     async exec(command, args) {
       if (command === "roadmap" && args[0] === "analyze") {
-        return {
-          milestones: fixture.milestones ?? [{ version: fixture.milestone ?? "v1.7" }],
-          phases: fixture.phases ?? []
-        };
+        return fixture.roadmap;
       }
       throw new Error(`Unexpected test SDK exec ${command} ${args.join(" ")}`);
     },
     async execRaw(command, args) {
-      if (command === "state" && args[0] === "load") return `current_milestone=${fixture.milestone ?? "v1.7"}\n`;
+      if (command === "state" && args[0] === "load") return fixture.raw;
       throw new Error(`Unexpected test SDK execRaw ${command} ${args.join(" ")}`);
     }
   };
+}
+
+function loadTestFixture(fixtureName, overrideRaw) {
+  const overrides = overrideRaw ? JSON.parse(overrideRaw) : {};
+  const base = fixtureName
+    ? readNamedTestFixture(fixtureName)
+    : {
+        roadmap: {
+          milestones: overrides.milestones ?? [{ version: overrides.milestone ?? "v1.7" }],
+          phases: overrides.phases ?? []
+        },
+        raw: `current_milestone=${overrides.milestone ?? "v1.7"}\n`
+      };
+  return {
+    roadmap: applyTestRoadmapOverrides(base.roadmap, overrides),
+    raw: overrides.stateRaw ?? base.raw
+  };
+}
+
+function readNamedTestFixture(fixtureName) {
+  const scenario = String(fixtureName ?? "").trim();
+  if (!scenario || scenario.includes("..") || /[\\/]/u.test(scenario)) {
+    throw new Error(`Invalid GSD SDK fixture scenario: ${fixtureName}`);
+  }
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const fixtureDir = path.join(repoRoot, "test", "fixtures", "gsd-sdk", scenario);
+  return {
+    roadmap: JSON.parse(readFileSync(path.join(fixtureDir, "roadmap-analyze.stdout.json"), "utf8")),
+    raw: readFileSync(path.join(fixtureDir, "state-load.stdout.txt"), "utf8")
+  };
+}
+
+function applyTestRoadmapOverrides(roadmap, overrides = {}) {
+  const next = structuredClone(roadmap);
+  if (overrides.milestones !== undefined) next.milestones = overrides.milestones;
+  if (overrides.milestone !== undefined && overrides.milestones === undefined) {
+    next.milestones = [{ version: overrides.milestone }];
+  }
+  if (overrides.phases !== undefined) {
+    next.phases = overrides.phases;
+    next.phase_count = overrides.phases.length;
+  }
+  return next;
 }
 
 async function callTools(projectRoot, tools, command, args = [], options = {}) {

@@ -1039,7 +1039,7 @@ async function canonicalFingerprint(paths) {
   for (const entry of entries) {
     hash.update(entry.path);
     hash.update("\0");
-    hash.update(entry.content);
+    hash.update(normalizeFingerprintContent(entry.content));
     hash.update("\0");
   }
   return hash.digest("hex");
@@ -1050,6 +1050,10 @@ async function fingerprintEntry(paths, filePath) {
     path: displayPath(paths, filePath),
     content: await readFile(filePath, "utf8")
   };
+}
+
+function normalizeFingerprintContent(content) {
+  return String(content).replace(/\r\n/g, "\n");
 }
 
 async function boardDirs(paths) {

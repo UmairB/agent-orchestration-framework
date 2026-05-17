@@ -51,7 +51,7 @@ function Parse-Feature {
 
 function Run-Scenario {
   param($FeatureFile, $Scenario)
-  $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof-bdd-" + [System.Guid]::NewGuid().ToString("N"))
+  $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof bdd " + [System.Guid]::NewGuid().ToString("N"))
   $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; GlobalDir = Join-Path $Root "global-aof"; LastResult = $null; LastHttpResponse = $null; SetupUiProcess = $null; SetupUiUrl = $null }
   try {
     foreach ($Step in $Scenario.Steps) { Run-FeatureStep $Context $Step $FeatureFile }
@@ -199,6 +199,34 @@ function Run-Step {
     Run-Step $Context "an empty project"
     Write-GlobalAofResource $Context @{ kind = "skill"; id = "research-helper"; description = "Research helper"; body = "Use the helper script."; files = @(@{ path = "search.py"; body = "print('search')`n" }) }
     Write-AofProject $Context @() @() @(@{ kind = "skill"; id = "research-helper" })
+    return
+  }
+
+  if ($Step -eq "a project with a board execution agent") {
+    Run-Step $Context "an empty project"
+    Write-AofProject $Context @(@{ kind = "agent"; id = "builder"; description = "Builder agent"; path = "assets/agents/builder/AGENT.md"; bodyPath = "assets/agents/builder/AGENT.md"; body = "Build assigned board tasks." }) @()
+    return
+  }
+
+  if ($Step -eq "a project with GSD board execution") {
+    Write-GsdBoardProject $Context
+    return
+  }
+
+  if ($Step -match "^a project with GSD board execution using SDK fixture ""([^""]+)""$") {
+    Write-GsdBoardProject $Context $Matches[1]
+    return
+  }
+
+  if ($Step -match "^a project with v1\.6 GSD board fixture using SDK fixture ""([^""]+)""$") {
+    Write-GsdBoardProject $Context $Matches[1]
+    Write-LegacyGsdBoardFixture $Context "legacy"
+    return
+  }
+
+  if ($Step -match "^a project with ambiguous v1\.6 GSD board fixture using SDK fixture ""([^""]+)""$") {
+    Write-GsdBoardProject $Context $Matches[1] @{ milestones = @(@{ version = "v1.7" }, @{ version = "v1.8" }); phases = @(Get-GsdFixturePhases) }
+    Write-LegacyGsdBoardFixture $Context "legacy"
     return
   }
 
@@ -422,6 +450,18 @@ function Run-Step {
     return
   }
 
+  if ($Step -match "^I save agent resource ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/agent/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "agent"
+      description = "Board execution agent"
+      body = "Execute assigned board tasks."
+      runtimes = @("codex")
+      overrides = @{}
+    }
+    return
+  }
+
   if ($Step -eq "I save workflow-backed setup UI resource") {
     Invoke-SetupUiJson $Context "PUT" "/api/config/sections" @{
       workflows = @(@{ id = "audit"; body = "Audit workflow"; runtimes = @("codex"); arguments = @(@{ name = "milestone" }) })
@@ -479,6 +519,55 @@ function Run-Step {
 
   if ($Step -eq "I request setup UI global config") {
     Invoke-SetupUiJson $Context "GET" "/api/config/global"
+    return
+  }
+
+  if ($Step -match "^I create board ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/boards/$($Matches[1])" @{
+      title = "Delivery"
+      objective = "Ship setup UI board management"
+    }
+    return
+  }
+
+  if ($Step -match "^I create task ``(.+)`` on board ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/boards/$($Matches[2])/tasks/$($Matches[1])" @{
+      title = "Phase 31"
+      status = "ready"
+      priority = "normal"
+      deliverable = "Kanban setup UI"
+      refs = @{ phase = "31" }
+    }
+    return
+  }
+
+  if ($Step -match "^I edit task ``(.+)`` on board ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PATCH" "/api/boards/$($Matches[2])/tasks/$($Matches[1])" @{
+      title = "Phase 31 UI"
+      priority = "high"
+      deliverable = "Kanban setup UI"
+      refs = @{ phase = "31" }
+    }
+    return
+  }
+
+  if ($Step -match "^I assign task ``(.+)`` on board ``(.+)`` to agent ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/boards/$($Matches[2])/tasks/$($Matches[1])/assignment" @{
+      agentId = $Matches[3]
+    }
+    return
+  }
+
+  if ($Step -match "^I mark task ``(.+)`` on board ``(.+)`` execution ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/boards/$($Matches[2])/tasks/$($Matches[1])/execution" @{
+      status = $Matches[3]
+      message = "Marked $($Matches[3]) from setup UI test."
+    }
+    return
+  }
+
+  if ($Step -eq "I request board validation through the setup UI API") {
+    Invoke-SetupUiJson $Context "GET" "/api/boards/validate"
     return
   }
 
@@ -561,6 +650,11 @@ function Run-Step {
     return
   }
 
+  if ($Step -match "^I run ``(.+)`` with GSD runtime status ``(.+)`` and output ``([\s\S]*)``$") {
+    $Context.LastResult = Run-Cli $Context $Matches[1] "" "" "" $Matches[2] $Matches[3]
+    return
+  }
+
   if ($Step -match "^I run ``(.+)``$") {
     $Context.LastResult = Run-Cli $Context $Matches[1] ""
     return
@@ -627,7 +721,7 @@ function Run-Step {
 }
 
 function Run-Cli {
-  param($Context, [string] $Command, [string] $InputText, [string] $FrameworkStatuses = "", [string] $ResourceInput = "")
+  param($Context, [string] $Command, [string] $InputText, [string] $FrameworkStatuses = "", [string] $ResourceInput = "", [string] $GsdRuntimeStatus = "", [string] $GsdRuntimeOutput = "")
   [string[]]$CliArgs = @(Split-Command $Command)
   $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
   $StartInfo.FileName = "node"
@@ -649,6 +743,10 @@ function Run-Cli {
   }
   if ($ResourceInput -ne "") { $StartInfo.Environment["AOF_TEST_RESOURCE_INPUT"] = $ResourceInput }
   if ($FrameworkStatuses -ne "") { $StartInfo.Environment["AOF_TEST_FRAMEWORK_INSTALL_STATUS"] = $FrameworkStatuses }
+  if ($GsdRuntimeStatus -ne "") { $StartInfo.Environment["AOF_TEST_GSD_RUNTIME_STATUS"] = $GsdRuntimeStatus }
+  if ($GsdRuntimeOutput -ne "") { $StartInfo.Environment["AOF_TEST_GSD_RUNTIME_STDOUT"] = $GsdRuntimeOutput }
+  if ($Context.Contains("GsdSdkFixtureName") -and $Context.GsdSdkFixtureName) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE"] = $Context.GsdSdkFixtureName }
+  if ($Context.Contains("GsdSdkFixture") -and $Context.GsdSdkFixture) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE_JSON"] = ($Context.GsdSdkFixture | ConvertTo-Json -Depth 20 -Compress) }
 
   $Process = New-Object System.Diagnostics.Process
   $Process.StartInfo = $StartInfo
@@ -726,6 +824,49 @@ function Write-GlobalAofResource {
   New-Item -ItemType Directory -Path $Context.GlobalDir -Force | Out-Null
   $Config = @{ '$schema' = "https://aof.local/schemas/aof.schema.json"; name = "aof-global"; resources = $Resources } | ConvertTo-Json -Depth 10
   Set-Content -Path $ConfigPath -Value $Config
+}
+
+function Write-GsdBoardProject {
+  param($Context, [string] $FixtureName = "", $SdkFixture = $null)
+  Run-Step $Context "an empty project"
+  Write-AofProject $Context @(@{ kind = "agent"; id = "builder"; description = "Builder agent"; path = "assets/agents/builder/AGENT.md"; bodyPath = "assets/agents/builder/AGENT.md"; body = "Build assigned board tasks." }) @(@{ id = "gsd"; namespace = "gsd"; source = "npm:get-shit-done-cc@latest"; runtimes = @("claude", "codex") })
+  New-Item -ItemType Directory -Path (Join-Path $Context.ProjectDir ".planning") -Force | Out-Null
+  Set-Content -Path (Join-Path $Context.ProjectDir ".planning\ROADMAP.md") -Value @"
+# Roadmap
+
+## Phase Details
+
+### Phase 30: Build Board Execution
+
+**Goal:** Execute assigned board tasks through GSD.
+
+### Phase 31: Verify Board Progress
+
+**Goal:** Verify progress is visible in the board UI.
+"@ -NoNewline
+  if ($FixtureName -ne "") { $Context["GsdSdkFixtureName"] = $FixtureName }
+  if ($null -eq $SdkFixture) {
+    $SdkFixture = @{ milestone = "v1.7"; phases = @(Get-GsdFixturePhases) }
+  }
+  $Context["GsdSdkFixture"] = $SdkFixture
+}
+
+function Get-GsdFixturePhases {
+  return @(
+    @{ number = "30"; name = "Build Board Execution"; goal = "Execute assigned board tasks through GSD." },
+    @{ number = "31"; name = "Verify Board Progress"; goal = "Verify progress is visible in the board UI." }
+  )
+}
+
+function Write-LegacyGsdBoardFixture {
+  param($Context, [string] $BoardId)
+  $FixtureRoot = Join-Path $RepoRoot "test\fixtures"
+  $BoardDir = Join-Path $Context.ProjectDir ".aof\boards\$BoardId"
+  $TaskDir = Join-Path $BoardDir "tasks"
+  New-Item -ItemType Directory -Path $TaskDir -Force | Out-Null
+  Set-Content -Path (Join-Path $BoardDir "BOARD.json") -Value (Get-Content (Join-Path $FixtureRoot "v1-6-board.json") -Raw) -NoNewline
+  Set-Content -Path (Join-Path $TaskDir "phase-30.json") -Value (Get-Content (Join-Path $FixtureRoot "v1-6-board-tasks\phase-30.json") -Raw) -NoNewline
+  Set-Content -Path (Join-Path $TaskDir "phase-31.json") -Value (Get-Content (Join-Path $FixtureRoot "v1-6-board-tasks\phase-31.json") -Raw) -NoNewline
 }
 
 function Write-ExpandedAofProject {

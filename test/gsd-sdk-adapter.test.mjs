@@ -12,6 +12,7 @@ import {
   loadGsdState,
   resetGsdSdkSurfaceProbeForTests
 } from "../src/gsd-sdk-adapter.mjs";
+import { MockGSDTools } from "./support/mock-gsd-tools.mjs";
 
 export const gsdSdkAdapterTests = [
   {
@@ -27,6 +28,14 @@ export const gsdSdkAdapterTests = [
     run: wrapsFailuresAndLogs
   },
   {
+    name: "loads named GSD SDK fixtures from env",
+    run: loadsNamedEnvFixture
+  },
+  {
+    name: "fails strictly on uncaptured mock SDK calls",
+    run: failsStrictlyOnUnknownMockCalls
+  },
+  {
     name: "detects SDK surface mismatch",
     run: detectsSurfaceMismatch
   },
@@ -38,7 +47,14 @@ export const gsdSdkAdapterTests = [
 
 async function loadsStateAndRoadmap() {
   const projectDir = await tempProject();
-  const tools = fixtureTools();
+  const tools = new MockGSDTools({
+    scenario: "v17-active",
+    overrides: {
+      milestone: "v1.7",
+      stateRaw: "current_milestone=v1.7\n",
+      phases: [{ number: "33", phase_name: "SDK Adapter Foundation", disk_status: "discussed", roadmap_complete: false }]
+    }
+  });
 
   const state = await loadGsdState(projectDir, { tools, skipSurfaceProbe: true });
   assert.equal(state.milestoneId, "v1.7");
@@ -54,7 +70,13 @@ async function loadsStateAndRoadmap() {
 
 async function returnsMilestoneAssertion() {
   const projectDir = await tempProject();
-  const tools = fixtureTools();
+  const tools = new MockGSDTools({
+    overrides: {
+      milestone: "v1.7",
+      stateRaw: "current_milestone=v1.7\n",
+      phases: [{ number: "33", phase_name: "SDK Adapter Foundation" }]
+    }
+  });
 
   assert.deepEqual(await assertMilestone(projectDir, "v1.7", { tools, skipSurfaceProbe: true }), {
     ok: true,
@@ -93,6 +115,33 @@ async function wrapsFailuresAndLogs() {
   assert.match(log, /"ok":false/);
 }
 
+async function loadsNamedEnvFixture() {
+  const projectDir = await tempProject();
+  await withEnv({
+    AOF_TEST_GSD_SDK_FIXTURE: "v17-active",
+    AOF_TEST_GSD_SDK_FIXTURE_JSON: JSON.stringify({
+      milestone: "v1.7",
+      stateRaw: "current_milestone=v1.7\n",
+      phases: [{ number: "40", name: "Named Fixture Phase", goal: "Prove named fixtures work." }]
+    })
+  }, async () => {
+    const state = await loadGsdState(projectDir, { skipSurfaceProbe: true });
+    assert.equal(state.milestoneId, "v1.7");
+
+    const roadmap = await analyzeGsdRoadmap(projectDir, { skipSurfaceProbe: true });
+    assert.equal(roadmap.phases[0].number, "40");
+    assert.equal(roadmap.phase_count, 1);
+  });
+}
+
+async function failsStrictlyOnUnknownMockCalls() {
+  const tools = new MockGSDTools();
+  await assert.rejects(
+    () => tools.exec("phase", ["list"]),
+    /Unexpected test SDK exec phase list/
+  );
+}
+
 function detectsSurfaceMismatch() {
   resetGsdSdkSurfaceProbeForTests();
   class BrokenTools {}
@@ -107,29 +156,27 @@ function reportsSdkVersion() {
   assert.equal(gsdSdkVersion().installed, "0.1.0");
 }
 
-function fixtureTools() {
-  return {
-    async exec(command, args) {
-      if (command === "roadmap" && args[0] === "analyze") {
-        return {
-          milestones: [{ version: "v1.7" }],
-          phases: [{ number: "33", phase_name: "SDK Adapter Foundation", disk_status: "discussed", roadmap_complete: false }]
-        };
-      }
-      throw new Error(`Unexpected exec ${command}`);
-    },
-    async execRaw(command, args) {
-      if (command === "state" && args[0] === "load") {
-        return "current_milestone=v1.7\nroadmap_exists=true\nstate_exists=true";
-      }
-      throw new Error(`Unexpected execRaw ${command}`);
-    }
-  };
-}
-
 async function tempProject() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "aof-gsd-sdk-"));
   await writeFile(path.join(dir, ".placeholder"), "", "utf8");
   return dir;
 }
 
+async function withEnv(values, callback) {
+  const previous = {};
+  for (const [name, value] of Object.entries(values)) {
+    previous[name] = process.env[name];
+    process.env[name] = value;
+  }
+  try {
+    await callback();
+  } finally {
+    for (const name of Object.keys(values)) {
+      if (previous[name] === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = previous[name];
+      }
+    }
+  }
+}

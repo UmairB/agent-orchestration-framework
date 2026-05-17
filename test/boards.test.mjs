@@ -55,6 +55,10 @@ export const boardTests = [
     run: buildsIndexAndReportsStaleCache
   },
   {
+    name: "board index fingerprint ignores CRLF and LF differences",
+    run: fingerprintIgnoresLineEndingDifferences
+  },
+  {
     name: "validates malformed board and task state",
     run: validatesMalformedState
   }
@@ -362,6 +366,28 @@ async function buildsIndexAndReportsStaleCache() {
 
     const rebuilt = await buildBoardIndex(targetDir);
     assert.equal(rebuilt.boards[0].taskCount, 2);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function fingerprintIgnoresLineEndingDifferences() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  try {
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Normalize fingerprints" });
+    await addTask(targetDir, "delivery", { id: "wire-api", title: "Wire API" });
+    const lf = await buildBoardIndex(targetDir);
+
+    for (const filePath of [
+      path.join(targetDir, ".aof", "boards", "delivery", "BOARD.json"),
+      path.join(targetDir, ".aof", "boards", "delivery", "tasks", "wire-api.json")
+    ]) {
+      const content = await readFile(filePath, "utf8");
+      await writeFile(filePath, content.replace(/\n/g, "\r\n"), "utf8");
+    }
+
+    const crlf = await buildBoardIndex(targetDir);
+    assert.equal(crlf.fingerprint, lf.fingerprint);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

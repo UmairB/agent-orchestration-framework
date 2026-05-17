@@ -105,6 +105,46 @@ Feature: Board and task state
     Then the command should fail
     And stderr should contain `Add tasks with $gsd-phase add`
 
+  Scenario: SDK fixture boards sync tasks from roadmap phases
+    Given a project with GSD board execution using SDK fixture "v17-active"
+    When I run `boards create delivery --title Delivery --objective "Ship board state" --execution-runtime claude` with GSD runtime status `waiting_for_user` and output `What do you want to build next?`
+    Then the command should succeed
+    And stdout should contain `execution: gsd runtime=claude`
+    When I run `boards milestone attach delivery --milestone v1-7 --roadmap .planning/ROADMAP.md`
+    Then the command should succeed
+    And stdout should contain `Attached board delivery to milestone v1-7`
+    And file `.aof/boards/delivery/BOARD.json` should contain `"status": "attached"`
+    And file `.aof/boards/delivery/BOARD.json` should contain `"sdkVersion": "0.1.0"`
+    When I run `boards sync delivery --milestone v1-7`
+    Then the command should succeed
+    And stdout should contain `Synced board delivery with GSD roadmap`
+    And stdout should contain `created: 2`
+    And file `.aof/boards/delivery/BOARD.json` should contain `"status": "synced"`
+    And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"phase": "30"`
+
+  Scenario: SDK fixture v1.6 board repair auto-binds then syncs
+    Given a project with v1.6 GSD board fixture using SDK fixture "v17-active"
+    When I run `boards repair legacy`
+    Then the command should succeed
+    And stdout should contain `Board legacy attached to milestone v1.7.`
+    And stdout should contain `binding: attached`
+    And file `.aof/boards/legacy/BOARD.json` should contain `"id": "v1.7"`
+    And file `.aof/boards/legacy/BOARD.json` should contain `"syncCommand": "aof boards sync legacy --milestone v1.7"`
+    When I run `boards sync legacy --milestone v1.7`
+    Then the command should succeed
+    And stdout should contain `Synced board legacy with GSD roadmap`
+    And stdout should contain `created: 0`
+    And file `.aof/boards/legacy/BOARD.json` should contain `"status": "synced"`
+    And file `.aof/boards/legacy/tasks/phase-30.json` should contain `"phase": "30"`
+
+  Scenario: SDK fixture v1.6 board repair refuses ambiguous milestones
+    Given a project with ambiguous v1.6 GSD board fixture using SDK fixture "v17-active"
+    When I run `boards repair legacy`
+    Then the command should succeed
+    And stdout should contain `Board legacy needs manual milestone attachment before sync.`
+    And stdout should contain `continue: aof boards milestone attach legacy --milestone <milestone-id> --roadmap docs/v1-6-roadmap.md`
+    And file `.aof/boards/legacy/BOARD.json` should not contain `"id": "v1-7"`
+
   Scenario: Refreshed breakdowns do not silently overwrite existing tasks
     Given an empty project
     When I run `boards create delivery --title Delivery --objective "Refresh objective breakdown"`
@@ -138,6 +178,18 @@ Feature: Board and task state
     Then the command should succeed
     And stdout should contain `Task status: in_progress`
     And file `.aof/boards/delivery/tasks/phase-30.json` should contain `"waiting_for_user"`
+
+  Scenario: SDK fixture assigns a synced phase task to a configured agent
+    Given a project with GSD board execution using SDK fixture "v17-active"
+    When I run `boards create delivery --title Delivery --objective "Assign synced phase tasks"`
+    Then the command should succeed
+    When I run `boards milestone attach delivery --milestone v1-7 --roadmap .planning/ROADMAP.md`
+    And I run `boards sync delivery --milestone v1-7`
+    Then the command should succeed
+    When I run `boards task assign delivery phase-30 builder`
+    Then the command should succeed
+    And stdout should contain `Started gsd execution status=running phase=30`
+    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "running"`
 
   Scenario: Reject assignments for unknown agents or tasks without GSD phase refs
     Given a project with GSD board execution
