@@ -17,11 +17,13 @@ import { packageTests } from "../test/packages.test.mjs";
 import { boardTests } from "../test/boards.test.mjs";
 import { boardBreakdownTests } from "../test/board-breakdown.test.mjs";
 import { boardExecutionTests } from "../test/board-execution.test.mjs";
+import { backendTests } from "../test/backends.test.mjs";
 import { gsdSdkAdapterTests } from "../test/gsd-sdk-adapter.test.mjs";
 
 const tests = [
   ...gsdSdkAdapterTests,
   ...boardExecutionTests,
+  ...backendTests,
   ...boardBreakdownTests,
   ...boardTests,
   ...adapterWarningTests,

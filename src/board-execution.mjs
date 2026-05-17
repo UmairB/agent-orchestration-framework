@@ -1,6 +1,7 @@
 import path from "node:path";
 import { access, readFile } from "node:fs/promises";
 import { loadProjectConfig } from "./dsl.mjs";
+import { BackendCapabilityError, resolveBackend } from "./backends/index.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
 import { gsdPackageFromConfig } from "./frameworks.mjs";
 import { boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
@@ -33,8 +34,9 @@ export async function isGsdExecutionConfigured(projectDir, options = {}) {
 }
 
 export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, options = {}) {
-  const provider = options.provider ?? DEFAULT_PROVIDER;
-  if (provider !== DEFAULT_PROVIDER) throw new Error(`Unsupported execution provider "${provider}". Expected gsd.`);
+  const backend = resolveBackend(options.provider ?? DEFAULT_PROVIDER);
+  if (!backend.capabilities.has("assignTask")) throw new BackendCapabilityError(backend, "assignTask");
+  const provider = backend.kind;
 
   const normalizedAgentId = normalizeId(agentId);
   const agents = await listBoardAgents(projectDir, options);
@@ -46,7 +48,7 @@ export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, op
   if (!task) throw new Error(`Task not found: ${normalizeId(boardId)}/${normalizeId(taskId)}`);
 
   const phase = phaseRef(task);
-  if (!phase) throw new Error(`Task ${board.id}/${task.id} cannot use provider gsd without refs.phase.`);
+  if (!phase) throw new Error(`Task ${board.id}/${task.id} cannot use provider ${provider} without refs.phase.`);
 
   const now = nowIso();
   const existing = await tryReadExecution(projectDir, board.id, task.id);

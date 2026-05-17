@@ -66,6 +66,10 @@ async function createsBoardsAndArchives() {
     await createBoard(targetDir, { id: "release", title: "Release", objective: "Ship v1" });
     await createBoard(targetDir, { id: "docs", title: "Docs", objective: "Document v1" });
     await assert.rejects(() => createBoard(targetDir, { id: "missing", title: "Missing" }), /Board objective is required/);
+    await assert.rejects(
+      () => createBoard(targetDir, { id: "unsupported", title: "Unsupported", objective: "Reject provider", executionProvider: "other" }),
+      (error) => error.code === "BACKEND_UNSUPPORTED" && error.expected.includes("gsd")
+    );
 
     const boards = await listBoards(targetDir, { useIndex: false });
     assert.deepEqual(boards.map((board) => board.id), ["docs", "release"]);
@@ -391,6 +395,18 @@ async function validatesMalformedState() {
     assert.equal(codes.includes("TASK_INVALID_STATUS"), true);
     assert.equal(codes.includes("TASK_INVALID_REFS"), true);
     assert.equal(codes.includes("TASK_INVALID_HISTORY"), true);
+
+    await writeFile(path.join(boardDir, "BOARD.json"), JSON.stringify({
+      version: 1,
+      id: "delivery",
+      title: "Delivery",
+      objective: "Invalid provider",
+      status: "active",
+      columns: ["backlog", "ready", "in_progress", "blocked", "done"],
+      executionProvider: "other"
+    }), "utf8");
+    const providerDiagnostics = await validateBoards(targetDir);
+    assert.equal(providerDiagnostics.some((item) => item.code === "BOARD_INVALID_EXECUTION_PROVIDER"), true);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }

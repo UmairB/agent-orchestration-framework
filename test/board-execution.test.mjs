@@ -19,6 +19,10 @@ export const boardExecutionTests = [
     run: rejectsInvalidAssignments
   },
   {
+    name: "rejects unsupported execution backends and missing capabilities",
+    run: rejectsUnsupportedExecutionBackends
+  },
+  {
     name: "updates execution status and synchronizes board task status",
     run: updatesExecutionStatus
   }
@@ -74,6 +78,26 @@ async function rejectsInvalidAssignments() {
     await assert.rejects(
       () => assignTaskToAgent(targetDir, "delivery", "missing-phase", "builder"),
       /without refs\.phase/
+    );
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function rejectsUnsupportedExecutionBackends() {
+  const targetDir = await mkProject();
+  try {
+    await writeAgentConfig(targetDir);
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Update execution state" });
+    await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
+
+    await assert.rejects(
+      () => assignTaskToAgent(targetDir, "delivery", "phase-30", "builder", { provider: "other" }),
+      (error) => error.code === "BACKEND_UNSUPPORTED" && error.actual === "other"
+    );
+    await assert.rejects(
+      () => assignTaskToAgent(targetDir, "delivery", "phase-30", "builder", { provider: "null" }),
+      (error) => error.code === "BACKEND_CAPABILITY_UNSUPPORTED" && error.actual === "null"
     );
   } finally {
     await rm(targetDir, { recursive: true, force: true });

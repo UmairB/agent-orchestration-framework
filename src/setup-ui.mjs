@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
+import { resolveBackend } from "./backends/index.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
@@ -208,7 +209,7 @@ export async function serveSetupUi(catalog, options = {}) {
         });
         sendJson(response, 200, { ok: true, ...result });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -222,11 +223,12 @@ export async function serveSetupUi(catalog, options = {}) {
           throw new Error("Milestone answer text is required.");
         }
         const board = await getBoard(projectDir, decodeRoutePart(boardMilestoneAnswerMatch[1]));
+        if (!board.executionProvider || resolveBackend(board.executionProvider).kind !== "gsd") throw new Error(`Board ${board.id} is not backed by GSD.`);
         const runtime = await continueGsdMilestone(projectDir, board, { answer: answer.trim() });
         const updated = await updateBoardMilestone(projectDir, board.id, runtime, { answer: answer.trim() });
         sendJson(response, 200, { ok: true, board: updated, runtime });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -244,7 +246,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const result = await addTask(projectDir, boardId, { ...item, id: taskId }, { force: Boolean(item.force) });
         sendJson(response, 200, { ok: true, task: result.task });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -261,7 +263,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const task = await editTask(projectDir, boardId, taskId, item);
         sendJson(response, 200, { ok: true, task });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -277,7 +279,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const task = await moveTask(projectDir, decodeRoutePart(taskStatusMatch[1]), decodeRoutePart(taskStatusMatch[2]), item.status);
         sendJson(response, 200, { ok: true, task });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -296,7 +298,7 @@ export async function serveSetupUi(catalog, options = {}) {
         });
         sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
       } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }

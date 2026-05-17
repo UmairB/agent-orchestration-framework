@@ -15,6 +15,7 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
+import { resolveBackend } from "./backends/index.mjs";
 import { BoardLifecycleError, addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
@@ -371,10 +372,21 @@ async function boardsMilestoneAnswerCommand(args) {
   const answer = options.text ?? options.answer;
   if (!boardId || !answer) throw new Error("Usage: aof boards milestone answer <board-id> --text <answer> [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const board = await getBoard(targetDir, boardId);
-  if (board.executionProvider !== "gsd") throw new Error(`Board ${board.id} is not backed by GSD.`);
-  const runtimeResult = await continueGsdMilestone(targetDir, board, { answer });
-  const updated = await updateBoardMilestone(targetDir, board.id, runtimeResult, { answer });
+  let runtimeResult;
+  let updated;
+  try {
+    const board = await getBoard(targetDir, boardId);
+    if (!board.executionProvider || resolveBackend(board.executionProvider).kind !== "gsd") throw new Error(`Board ${board.id} is not backed by GSD.`);
+    runtimeResult = await continueGsdMilestone(targetDir, board, { answer });
+    updated = await updateBoardMilestone(targetDir, board.id, runtimeResult, { answer });
+  } catch (error) {
+    if (options.json && isStructuredError(error)) {
+      printJson({ ok: false, ...error.toJSON() });
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
   if (options.json) {
     printJson({ board: updated.id, milestone: updated.gsd.milestone, runtime: runtimeResult });
     return;
@@ -586,7 +598,17 @@ async function boardsTaskAssignCommand(args) {
   const [boardId, taskId, agentId] = options._;
   if (!boardId || !taskId || !agentId) throw new Error("Usage: aof boards task assign <board-id> <task-id> <agent-id> [--provider gsd] [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await assignTaskToAgent(targetDir, boardId, taskId, agentId, options);
+  let result;
+  try {
+    result = await assignTaskToAgent(targetDir, boardId, taskId, agentId, options);
+  } catch (error) {
+    if (options.json && isStructuredError(error)) {
+      printJson({ ok: false, ...error.toJSON() });
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
   if (options.json) {
     printJson(result);
     return;

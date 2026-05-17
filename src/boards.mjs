@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { access, readdir, readFile, rm } from "node:fs/promises";
+import { backendSdkVersion, resolveBackend, supportedBackends } from "./backends/index.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
-import { GsdSdkError, analyzeGsdRoadmap, assertMilestone, gsdSdkVersion } from "./gsd-sdk-adapter.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
 export const BOARD_STATUSES = Object.freeze(["backlog", "ready", "in_progress", "blocked", "done"]);
@@ -54,7 +54,8 @@ export async function createBoard(projectDir, input = {}, options = {}) {
   }
 
   const now = nowIso();
-  const executionProvider = input.executionProvider === "gsd" ? "gsd" : null;
+  const executionProvider = normalizeExecutionProvider(input.executionProvider);
+  const backend = executionProvider ? resolveBackend(executionProvider) : null;
   const defaultExecutionRuntime = normalizeRuntime(input.defaultExecutionRuntime ?? input.runtime ?? "codex");
   const milestoneCommand = "$gsd-new-milestone";
   const milestoneInvocation = `${milestoneCommand} ${objective}`;
@@ -65,13 +66,13 @@ export async function createBoard(projectDir, input = {}, options = {}) {
     objective,
     status: "active",
     columns: [...BOARD_STATUSES],
-    ...(executionProvider ? {
+    ...(backend?.kind === "gsd" ? {
       executionProvider,
       defaultExecutionRuntime,
       gsd: {
         milestone: {
           status: "waiting_for_user",
-          binding: bindingState("pending-attachment"),
+          binding: bindingState("pending-attachment", { backend }),
           command: milestoneCommand,
           invocation: milestoneInvocation,
           objective,
@@ -150,7 +151,9 @@ export async function repairBoard(projectDir, boardId, options = {}) {
   const now = nowIso();
   const objective = typeof board.objective === "string" ? board.objective.trim() : "";
   if (!objective) throw new Error(`Board ${id} cannot be repaired without an objective.`);
-  if (board.executionProvider === "gsd" && board.gsd?.milestone?.id && board.gsd?.milestone?.roadmapPath) {
+  const backend = backendForBoard(board);
+  if (backend && backend.kind !== "gsd") throw new Error(`Board ${id} is not backed by GSD.`);
+  if (backend?.kind === "gsd" && board.gsd?.milestone?.id && board.gsd?.milestone?.roadmapPath) {
     const next = ensureBoundSyncCommand(board, id);
     if (next !== board) {
       await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
@@ -168,10 +171,10 @@ export async function repairBoard(projectDir, boardId, options = {}) {
       message: `Board ${id} already has a backing GSD milestone roadmap.`
     };
   }
-  if (board.executionProvider === "gsd" && board.gsd?.milestone?.roadmapPath && !board.gsd?.milestone?.id) {
-    return repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options);
+  if (backend?.kind === "gsd" && board.gsd?.milestone?.roadmapPath && !board.gsd?.milestone?.id) {
+    return repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options, backend);
   }
-  if (board.executionProvider === "gsd" && board.gsd?.milestone?.status && board.gsd.milestone.status !== "synced" && (board.gsd.milestone.invocation || board.gsd.milestone.startedAt)) {
+  if (backend?.kind === "gsd" && board.gsd?.milestone?.status && board.gsd.milestone.status !== "synced" && (board.gsd.milestone.invocation || board.gsd.milestone.startedAt)) {
     return {
       board,
       repaired: false,
@@ -192,7 +195,7 @@ export async function repairBoard(projectDir, boardId, options = {}) {
       milestone: {
         ...(board.gsd?.milestone ?? {}),
         status: "waiting_for_user",
-        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment"),
+        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment", { backend: resolveBackend("gsd") }),
         command: milestoneCommand,
         invocation: milestoneInvocation,
         objective,
@@ -227,7 +230,8 @@ export async function updateBoardMilestone(projectDir, boardId, runtimeResult, o
   const id = normalizeId(boardId);
   const boardPath = path.join(boardDirPath(paths, id), BOARD_FILE);
   const board = await readJsonFile(boardPath);
-  if (board.executionProvider !== "gsd") {
+  const backend = backendForBoard(board);
+  if (backend?.kind !== "gsd") {
     throw new Error(`Board ${id} is not backed by GSD.`);
   }
 
@@ -255,7 +259,7 @@ export async function updateBoardMilestone(projectDir, boardId, runtimeResult, o
       milestone: {
         ...(board.gsd?.milestone ?? {}),
         status,
-        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment"),
+        binding: board.gsd?.milestone?.binding ?? bindingState("pending-attachment", { backend }),
         runtime: runtimeResult.runtime ?? board.defaultExecutionRuntime ?? "codex",
         commandLine: [runtimeResult.executable, ...(runtimeResult.argv ?? [])].filter(Boolean).join(" "),
         exitCode: runtimeResult.exitCode ?? null,
@@ -298,11 +302,12 @@ export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {
 
   const boardPath = path.join(boardDirPath(paths, id), BOARD_FILE);
   const board = await readJsonFile(boardPath);
-  if (board.executionProvider !== "gsd") {
+  const backend = backendForBoard(board);
+  if (backend?.kind !== "gsd") {
     throw new Error(`Board ${id} is not backed by GSD.`);
   }
 
-  const assertion = await assertBoardMilestone(projectDir, milestoneId, options);
+  const assertion = await assertBoardMilestone(projectDir, milestoneId, options, backend);
   if (!assertion.ok) throw milestoneAssertionError(id, milestoneId, assertion);
 
   const resolvedRoadmapPath = path.resolve(projectDir, roadmapPath);
@@ -319,7 +324,7 @@ export async function attachBoardMilestoneRoadmap(projectDir, boardId, input = {
         ...(board.gsd?.milestone ?? {}),
         id: milestoneId,
         status: "ready_to_sync",
-        binding: bindingState("attached"),
+        binding: bindingState("attached", { backend }),
         roadmapPath: relativeProjectPath(projectDir, resolvedRoadmapPath),
         completedAt: board.gsd?.milestone?.completedAt ?? now,
         syncedAt: null
@@ -342,7 +347,8 @@ export async function addTask(projectDir, boardId, input = {}, options = {}) {
   const paths = boardWorkspacePaths(projectDir);
   const normalizedBoardId = normalizeId(boardId);
   const board = await readCanonicalBoard(paths, normalizedBoardId);
-  if (board.executionProvider === "gsd" && options.source !== "gsd-roadmap-sync") {
+  const backend = backendForBoard(board);
+  if (backend?.kind === "gsd" && options.source !== "gsd-roadmap-sync") {
     const bindingStatus = currentBindingStatus(board);
     if (bindingStatus !== "synced") {
       throw new Error(`Board ${normalizedBoardId} is backed by GSD and cannot accept tasks until its milestone roadmap is synced. Run ${board.gsd?.milestone?.command ?? "$gsd-new-milestone"} first, then \`${board.gsd?.taskCreation?.syncCommand ?? `aof boards sync ${normalizedBoardId}`}\`.`);
@@ -386,7 +392,8 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
   const normalizedBoardId = normalizeId(boardId);
   const boardPath = path.join(boardDirPath(paths, normalizedBoardId), BOARD_FILE);
   const board = await readJsonFile(boardPath);
-  if (board.executionProvider !== "gsd") {
+  const backend = backendForBoard(board);
+  if (backend?.kind !== "gsd") {
     throw new Error(`Board ${normalizedBoardId} is not backed by GSD.`);
   }
 
@@ -433,9 +440,9 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
 
   let phases;
   try {
-    const assertion = await assertBoardMilestone(projectDir, configuredMilestoneId, options);
+    const assertion = await assertBoardMilestone(projectDir, configuredMilestoneId, options, backend);
     if (!assertion.ok) throw milestoneAssertionError(normalizedBoardId, configuredMilestoneId, assertion);
-    phases = normalizeRoadmapPhases(await readTypedRoadmap(projectDir, options));
+    phases = normalizeRoadmapPhases(await readTypedRoadmap(projectDir, options, backend));
   } catch (error) {
     const nextError = boardErrorFromSdk(error);
     await persistBindingError(boardPath, board, configuredMilestoneId, nextError, options);
@@ -487,6 +494,7 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
         id: configuredMilestoneId,
         phases,
         binding: bindingState(hasDrift ? "drift" : "synced", {
+          backend,
           fingerprint,
           driftReason: hasDrift ? "BOARD_MILESTONE_DRIFT" : undefined
         }),
@@ -712,7 +720,13 @@ function validateBoardShape(board, diagnostics, pathName) {
   if (!validId(board.id)) diagnostics.push(error("BOARD_INVALID_ID", pathName, "Board id is required and must use a valid AOF id."));
   if (typeof board.title !== "string" || board.title.trim() === "") diagnostics.push(error("BOARD_INVALID_TITLE", pathName, "Board title is required."));
   if (board.status !== undefined && !["active", "archived"].includes(board.status)) diagnostics.push(error("BOARD_INVALID_STATUS", pathName, "Board status must be active or archived."));
-  if (board.executionProvider !== undefined && board.executionProvider !== "gsd") diagnostics.push(error("BOARD_INVALID_EXECUTION_PROVIDER", pathName, "Board executionProvider must be gsd when provided."));
+  if (board.executionProvider !== undefined) {
+    try {
+      resolveBackend(board.executionProvider);
+    } catch {
+      diagnostics.push(error("BOARD_INVALID_EXECUTION_PROVIDER", pathName, `Board executionProvider must be one of ${supportedBackends().join(", ")} when provided.`));
+    }
+  }
   if (board.defaultExecutionRuntime !== undefined && !["claude", "codex"].includes(board.defaultExecutionRuntime)) diagnostics.push(error("BOARD_INVALID_EXECUTION_RUNTIME", pathName, "Board defaultExecutionRuntime must be claude or codex."));
   if (board.executionProvider === "gsd" && board.gsd?.milestone?.roadmapPath && !board.gsd?.milestone?.id) {
     diagnostics.push(warning(
@@ -728,9 +742,9 @@ function validateBoardShape(board, diagnostics, pathName) {
   }
 }
 
-async function repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options) {
+async function repairMissingMilestoneId(projectDir, paths, boardPath, board, id, options, backend) {
   const roadmapPath = board.gsd.milestone.roadmapPath;
-  const roadmap = await readTypedRoadmap(projectDir, options);
+  const roadmap = await readTypedRoadmap(projectDir, options, backend);
   const phases = normalizeRoadmapPhases(roadmap);
   const candidates = Array.isArray(roadmap?.milestones) ? roadmap.milestones.map((item) => item.version).filter(Boolean) : [];
   const existingFingerprint = existingBoardPhaseFingerprint(await readBoardTasks(paths, id));
@@ -749,7 +763,7 @@ async function repairMissingMilestoneId(projectDir, paths, boardPath, board, id,
   }
 
   const milestoneId = normalizeMilestoneInput(candidates[0]);
-  const assertion = await assertBoardMilestone(projectDir, milestoneId, options);
+  const assertion = await assertBoardMilestone(projectDir, milestoneId, options, backend);
   if (!assertion.ok) throw milestoneAssertionError(id, milestoneId, assertion);
 
   const now = nowIso();
@@ -762,6 +776,7 @@ async function repairMissingMilestoneId(projectDir, paths, boardPath, board, id,
         id: milestoneId,
         status: "ready_to_sync",
         binding: bindingState("attached", {
+          backend,
           fingerprint: phases.length > 0 ? nextFingerprint : undefined
         }),
         completedAt: board.gsd?.milestone?.completedAt ?? now,
@@ -814,20 +829,20 @@ function ensureBoundSyncCommand(board, id) {
   };
 }
 
-async function readTypedRoadmap(projectDir, options) {
+async function readTypedRoadmap(projectDir, options, backend = resolveBackend("gsd")) {
   try {
-    return await analyzeGsdRoadmap(projectDir, adapterOptions(options));
+    return await backend.analyzeRoadmap(projectDir, options);
   } catch (error) {
     throw boardErrorFromSdk(error);
   }
 }
 
-async function assertBoardMilestone(projectDir, milestoneId, options) {
+async function assertBoardMilestone(projectDir, milestoneId, options, backend = resolveBackend("gsd")) {
   const candidates = milestoneCandidates(milestoneId);
   let lastResult = null;
   for (const candidate of candidates) {
     try {
-      const result = await assertMilestone(projectDir, candidate, adapterOptions(options));
+      const result = await backend.assertMilestone(projectDir, candidate, options);
       if (result.ok) return { ...result, expected: milestoneId, actual: result.actual ?? candidate };
       lastResult = result;
     } catch (error) {
@@ -835,15 +850,6 @@ async function assertBoardMilestone(projectDir, milestoneId, options) {
     }
   }
   return lastResult ?? { ok: false, expected: milestoneId, actual: null, code: "MILESTONE_NOT_IN_STATE" };
-}
-
-function adapterOptions(options = {}) {
-  return {
-    ...(options.gsdToolsPath ? { gsdToolsPath: options.gsdToolsPath } : {}),
-    ...(options.tools ? { tools: options.tools } : {}),
-    ...(options.ToolsClass ? { ToolsClass: options.ToolsClass } : {}),
-    ...(options.skipSurfaceProbe ? { skipSurfaceProbe: options.skipSurfaceProbe } : {})
-  };
 }
 
 function milestoneAssertionError(boardId, milestoneId, assertion) {
@@ -861,7 +867,8 @@ function milestoneAssertionError(boardId, milestoneId, assertion) {
 
 function boardErrorFromSdk(error) {
   if (error instanceof BoardLifecycleError) return error;
-  if (error instanceof GsdSdkError) {
+  if (typeof error?.toJSON === "function" && typeof error?.code === "string" && error.name !== "GsdSdkError") return error;
+  if (error?.name === "GsdSdkError") {
     return new BoardLifecycleError(error.code, error.message, {
       expected: error.expected,
       actual: error.actual,
@@ -919,10 +926,20 @@ function syncActions(phases, existingTasks) {
 function bindingState(status, details = {}) {
   return {
     status,
-    sdkVersion: gsdSdkVersion().installed,
+    sdkVersion: backendSdkVersion(details.backend ?? "gsd").installed,
     ...(details.fingerprint ? { fingerprint: details.fingerprint } : {}),
     ...(details.driftReason ? { driftReason: details.driftReason } : {})
   };
+}
+
+function normalizeExecutionProvider(value) {
+  if (value === undefined || value === null || value === "") return null;
+  return resolveBackend(value).kind;
+}
+
+function backendForBoard(board) {
+  if (!board?.executionProvider) return null;
+  return resolveBackend(board.executionProvider);
 }
 
 function phaseIdentityFingerprint(phases) {
