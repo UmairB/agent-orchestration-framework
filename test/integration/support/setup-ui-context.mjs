@@ -4,6 +4,8 @@ import { serveSetupUi } from "../../../src/setup-ui.mjs";
 export async function startSetupUi(context) {
   if (context.setupUi) return;
   await mkdir(context.projectDir, { recursive: true });
+  context.previousGsdPhaseResult = process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
+  process.env.AOF_TEST_GSD_PHASE_RESULT_JSON ??= JSON.stringify(defaultGsdPhaseResult());
   const savedItems = [];
   const catalog = {
     listItems: () => savedItems,
@@ -24,6 +26,12 @@ export async function cleanupSetupUiContext(context) {
     context.setupUi.server.close((error) => error ? reject(error) : resolve());
   });
   context.setupUi = null;
+  if (context.previousGsdPhaseResult === undefined) {
+    delete process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
+  } else {
+    process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = context.previousGsdPhaseResult;
+  }
+  delete context.previousGsdPhaseResult;
 }
 
 export async function requestSetupUi(context, method, route, body, options = {}) {
@@ -42,4 +50,14 @@ export async function requestSetupUi(context, method, route, body, options = {})
   }
   context.lastHttpResponse = { status: response.status, text, json };
   return context.lastHttpResponse;
+}
+
+function defaultGsdPhaseResult() {
+  return {
+    phaseName: "Setup UI Board Task",
+    success: true,
+    totalCostUsd: 0,
+    totalDurationMs: 1,
+    steps: []
+  };
 }

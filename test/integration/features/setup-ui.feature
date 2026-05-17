@@ -126,7 +126,7 @@ Feature: AOF setup UI API
     And HTTP response field `task.title` should equal `Phase 31 UI`
     When I assign task `phase-31` on board `delivery` to agent `builder` through the setup UI API
     Then HTTP response status should be 200
-    And HTTP response field `execution.status` should equal `running`
+    And HTTP response field `execution.status` should equal `complete`
     When I mark task `phase-31` on board `delivery` execution `complete` through the setup UI API
     Then HTTP response status should be 200
     And HTTP response field `task.status` should equal `done`

@@ -7,7 +7,7 @@ import { resolveBackend } from "./backends/index.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
-import { continueGsdMilestone } from "./gsd-runtime.mjs";
+import { continueGsdMilestone } from "./gsd-runtime-fallback.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());

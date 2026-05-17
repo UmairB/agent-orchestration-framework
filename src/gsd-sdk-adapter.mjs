@@ -2,7 +2,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { GSDTools, GSDToolsError } from "@gsd-build/sdk";
+import { GSD, GSDTools, GSDToolsError } from "@gsd-build/sdk";
 import { readJson } from "./fs.mjs";
 import { readLock } from "./lock.mjs";
 import { workspacePaths } from "./workspace.mjs";
@@ -96,6 +96,43 @@ export async function listMilestonePhases(projectDir, milestoneId, options = {})
   return Array.isArray(roadmap?.phases) ? roadmap.phases : [];
 }
 
+export async function runGsdPhase(projectDir, phaseNumber, options = {}) {
+  const projectRoot = path.resolve(projectDir);
+  const GsdClass = options.GsdClass ?? GSD;
+  assertGsdRunnerSurface(GsdClass);
+  const gsdToolsPath = options.gsdToolsPath ?? await resolveGsdToolsPath(projectRoot);
+  const gsd = options.gsd ?? new GsdClass({
+    projectDir: projectRoot,
+    ...(gsdToolsPath ? { gsdToolsPath } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.maxBudgetUsd ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
+    ...(options.maxTurns ? { maxTurns: options.maxTurns } : {})
+  });
+
+  try {
+    const result = await gsd.runPhase(String(phaseNumber), phaseRunOptions(options));
+    const failure = phaseRunnerFailure(result);
+    if (failure) {
+      throw new GsdSdkError(
+        "GSD_PHASE_FAILED",
+        `GSD phase execution failed: ${failure.subtype}.`,
+        {
+          actual: {
+            phaseNumber: String(phaseNumber),
+            subtype: failure.subtype,
+            messages: failure.messages,
+            result
+          },
+          next: `Review the execution record, fix the failed GSD phase, then retry assignment for phase ${phaseNumber}.`
+        }
+      );
+    }
+    return result;
+  } catch (error) {
+    throw wrapGsdError(error);
+  }
+}
+
 export function gsdSdkVersion() {
   const entrypoint = fileURLToPath(import.meta.resolve("@gsd-build/sdk"));
   const pkgPath = path.resolve(path.dirname(entrypoint), "..", "package.json");
@@ -127,6 +164,20 @@ export function assertGsdSdkSurface(ToolsClass = GSDTools) {
   }
 
   surfaceProbeComplete = true;
+}
+
+export function assertGsdRunnerSurface(GsdClass = GSD) {
+  if (typeof GsdClass.prototype?.runPhase !== "function") {
+    throw new GsdSdkError(
+      "GSD_SDK_SURFACE_MISMATCH",
+      "@gsd-build/sdk is missing required GSD.runPhase().",
+      {
+        expected: ["runPhase"],
+        actual: Object.getOwnPropertyNames(GsdClass.prototype ?? {}),
+        next: "Reinstall AOF dependencies with the pinned @gsd-build/sdk@0.1.0 version."
+      }
+    );
+  }
 }
 
 export function resetGsdSdkSurfaceProbeForTests() {
@@ -209,6 +260,34 @@ function applyTestRoadmapOverrides(roadmap, overrides = {}) {
     next.phase_count = overrides.phases.length;
   }
   return next;
+}
+
+function phaseRunOptions(options = {}) {
+  const next = {};
+  if (options.callbacks) next.callbacks = options.callbacks;
+  if (options.maxBudgetPerStep) next.maxBudgetPerStep = options.maxBudgetPerStep;
+  if (options.maxTurnsPerStep) next.maxTurnsPerStep = options.maxTurnsPerStep;
+  if (options.model) next.model = options.model;
+  if (options.maxGapRetries !== undefined) next.maxGapRetries = options.maxGapRetries;
+  return next;
+}
+
+function phaseRunnerFailure(result) {
+  if (!result || result.success !== false) return null;
+  for (const step of result.steps ?? []) {
+    for (const plan of step.planResults ?? []) {
+      if (plan?.success === false && plan.error?.subtype) {
+        return {
+          subtype: plan.error.subtype,
+          messages: Array.isArray(plan.error.messages) ? plan.error.messages : []
+        };
+      }
+    }
+    if (step?.success === false && step.error) {
+      return { subtype: "phase_step_failed", messages: [step.error] };
+    }
+  }
+  return { subtype: "phase_failed", messages: [] };
 }
 
 async function callTools(projectRoot, tools, command, args = [], options = {}) {

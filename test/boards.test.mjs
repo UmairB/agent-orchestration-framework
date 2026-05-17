@@ -19,7 +19,7 @@ import {
   validateBoards,
   writeBoardIndex
 } from "../src/boards.mjs";
-import { claudeGsdMilestoneCommand, claudeGsdMilestonePrompt, classifyGsdMilestoneStatus, codexGsdMilestoneCommand, codexGsdMilestonePrompt, expandClaudeCommandPrompt, gsdMilestonePrompt, runtimeOutputHasCommandFailure, runtimeOutputNeedsUser } from "../src/gsd-runtime.mjs";
+import { claudeGsdMilestoneCommand, claudeGsdMilestonePrompt, classifyGsdMilestoneStatus, codexGsdMilestoneCommand, codexGsdMilestonePrompt, continueGsdMilestone, expandClaudeCommandPrompt, gsdMilestonePrompt, runtimeOutputHasCommandFailure, runtimeOutputNeedsUser } from "../src/gsd-runtime-fallback.mjs";
 
 export const boardTests = [
   {
@@ -45,6 +45,10 @@ export const boardTests = [
   {
     name: "builds GSD runtime prompts and detects command failures",
     run: buildsGsdRuntimePromptsAndDetectsCommandFailures
+  },
+  {
+    name: "marks fallback milestone runtime output",
+    run: marksFallbackMilestoneRuntimeOutput
   },
   {
     name: "removes board directories",
@@ -329,6 +333,33 @@ async function buildsGsdRuntimePromptsAndDetectsCommandFailures() {
   assert.equal(classifyGsdMilestoneStatus({ exitCode: 0, output: "", roadmapPath: ".planning/ROADMAP.md" }), "completed");
 }
 
+async function marksFallbackMilestoneRuntimeOutput() {
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
+  const previousStatus = process.env.AOF_TEST_GSD_RUNTIME_STATUS;
+  const previousStderr = process.env.AOF_TEST_GSD_RUNTIME_STDERR;
+  try {
+    process.env.AOF_TEST_GSD_RUNTIME_STATUS = "waiting_for_user";
+    process.env.AOF_TEST_GSD_RUNTIME_STDERR = "runtime stderr";
+    const board = await createBoard(targetDir, {
+      id: "uat",
+      title: "UAT",
+      objective: "Run board UAT",
+      executionProvider: "gsd",
+      defaultExecutionRuntime: "codex"
+    });
+
+    const result = await continueGsdMilestone(targetDir, board);
+
+    assert.equal(result.status, "waiting_for_user");
+    assert.match(result.stderr, /\[fallback runtime=codex\] SDK path unavailable for test-runtime-fixture/);
+    assert.match(result.stderr, /runtime stderr/);
+  } finally {
+    restoreEnv("AOF_TEST_GSD_RUNTIME_STATUS", previousStatus);
+    restoreEnv("AOF_TEST_GSD_RUNTIME_STDERR", previousStderr);
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
 async function removesBoardDirectories() {
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-boards-"));
   try {
@@ -444,6 +475,14 @@ async function exists(filePath) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
   }
 }
 

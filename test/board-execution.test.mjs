@@ -15,6 +15,10 @@ export const boardExecutionTests = [
     run: assignsTaskAndStartsExecution
   },
   {
+    name: "records failed SDK phase execution details",
+    run: recordsFailedSdkExecution
+  },
+  {
     name: "rejects unknown agents and tasks without phase refs",
     run: rejectsInvalidAssignments
   },
@@ -46,18 +50,41 @@ async function assignsTaskAndStartsExecution() {
     await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Assign board tasks" });
     await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
 
-    const result = await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder");
+    const result = await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder", {
+      phaseRunner: successfulPhaseRunner
+    });
 
-    assert.equal(result.task.status, "in_progress");
+    assert.equal(result.task.status, "done");
     assert.equal(result.task.assignedAgent.id, "builder");
     assert.equal(result.task.execution.provider, "gsd");
-    assert.equal(result.task.execution.status, "running");
+    assert.equal(result.task.execution.status, "complete");
     assert.equal(result.execution.commands[0], "$gsd-discuss-phase 30");
+    assert.equal(result.execution.sdkResult.phaseNumber, "30");
     assert.match(await readFile(result.executionPath, "utf8"), /"assignedAgent"/);
 
     const index = await buildBoardIndex(targetDir);
-    assert.equal(index.boards[0].tasks[0].execution.status, "running");
+    assert.equal(index.boards[0].tasks[0].execution.status, "complete");
     assert.equal((await validateBoards(targetDir)).some((item) => item.severity === "error"), false);
+  } finally {
+    await rm(targetDir, { recursive: true, force: true });
+  }
+}
+
+async function recordsFailedSdkExecution() {
+  const targetDir = await mkProject();
+  try {
+    await writeAgentConfig(targetDir);
+    await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Assign board tasks" });
+    await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
+
+    const result = await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder", {
+      phaseRunner: failedPhaseRunner
+    });
+
+    assert.equal(result.task.status, "blocked");
+    assert.equal(result.task.execution.status, "failed");
+    assert.equal(result.execution.errorSubtype, "error_during_execution");
+    assert.deepEqual(result.execution.errorMessages, ["Execution failed."]);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -110,7 +137,9 @@ async function updatesExecutionStatus() {
     await writeAgentConfig(targetDir);
     await createBoard(targetDir, { id: "delivery", title: "Delivery", objective: "Reject invalid assignments" });
     await addTask(targetDir, "delivery", { id: "phase-30", title: "Phase 30", refs: { phase: "30" } });
-    await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder");
+    await assignTaskToAgent(targetDir, "delivery", "phase-30", "builder", {
+      phaseRunner: successfulPhaseRunner
+    });
 
     let result = await updateTaskExecution(targetDir, "delivery", "phase-30", {
       status: "waiting_for_user",
@@ -153,4 +182,47 @@ async function writeAgentConfig(targetDir) {
     globalRefs: [],
     packages: []
   }, null, 2)}\n`, "utf8");
+}
+
+async function successfulPhaseRunner(_projectDir, phase) {
+  return {
+    phaseNumber: String(phase),
+    phaseName: `Phase ${phase}`,
+    steps: [],
+    success: true,
+    totalCostUsd: 0,
+    totalDurationMs: 1
+  };
+}
+
+async function failedPhaseRunner(_projectDir, phase) {
+  return {
+    phaseNumber: String(phase),
+    phaseName: `Phase ${phase}`,
+    steps: [{
+      step: "execute",
+      success: false,
+      durationMs: 1,
+      planResults: [{
+        success: false,
+        sessionId: "session-1",
+        totalCostUsd: 0,
+        durationMs: 1,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0
+        },
+        numTurns: 1,
+        error: {
+          subtype: "error_during_execution",
+          messages: ["Execution failed."]
+        }
+      }]
+    }],
+    success: false,
+    totalCostUsd: 0,
+    totalDurationMs: 1
+  };
 }

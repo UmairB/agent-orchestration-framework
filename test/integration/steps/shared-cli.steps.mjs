@@ -1081,6 +1081,13 @@ async function writeGsdBoardProject(context, options = {}) {
     milestone: "v1.7",
     phases: gsdFixturePhases()
   };
+  context.gsdPhaseResult = {
+    phaseName: "Build Board Execution",
+    success: true,
+    totalCostUsd: 0,
+    totalDurationMs: 1,
+    steps: []
+  };
 }
 
 function gsdFixturePhases() {

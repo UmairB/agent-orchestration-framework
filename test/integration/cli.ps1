@@ -747,6 +747,7 @@ function Run-Cli {
   if ($GsdRuntimeOutput -ne "") { $StartInfo.Environment["AOF_TEST_GSD_RUNTIME_STDOUT"] = $GsdRuntimeOutput }
   if ($Context.Contains("GsdSdkFixtureName") -and $Context.GsdSdkFixtureName) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE"] = $Context.GsdSdkFixtureName }
   if ($Context.Contains("GsdSdkFixture") -and $Context.GsdSdkFixture) { $StartInfo.Environment["AOF_TEST_GSD_SDK_FIXTURE_JSON"] = ($Context.GsdSdkFixture | ConvertTo-Json -Depth 20 -Compress) }
+  if ($Context.Contains("GsdPhaseResult") -and $Context.GsdPhaseResult) { $StartInfo.Environment["AOF_TEST_GSD_PHASE_RESULT_JSON"] = ($Context.GsdPhaseResult | ConvertTo-Json -Depth 20 -Compress) }
 
   $Process = New-Object System.Diagnostics.Process
   $Process.StartInfo = $StartInfo
@@ -849,6 +850,7 @@ function Write-GsdBoardProject {
     $SdkFixture = @{ milestone = "v1.7"; phases = @(Get-GsdFixturePhases) }
   }
   $Context["GsdSdkFixture"] = $SdkFixture
+  $Context["GsdPhaseResult"] = @{ phaseName = "Build Board Execution"; success = $true; totalCostUsd = 0; totalDurationMs = 1; steps = @() }
 }
 
 function Get-GsdFixturePhases {
@@ -926,6 +928,7 @@ setInterval(() => {}, 1000);
   $StartInfo.RedirectStandardError = $true
   $StartInfo.UseShellExecute = $false
   $StartInfo.Environment["AOF_GLOBAL_HOME"] = $Context.GlobalDir
+  $StartInfo.Environment["AOF_TEST_GSD_PHASE_RESULT_JSON"] = (@{ phaseName = "Setup UI Board Task"; success = $true; totalCostUsd = 0; totalDurationMs = 1; steps = @() } | ConvertTo-Json -Depth 20 -Compress)
   $StartInfo.Arguments = (@("--input-type=module", "-e", $Script, $Context.ProjectDir, $Context.GlobalDir) | ForEach-Object { Quote-ProcessArg $_ }) -join " "
   $Process = New-Object System.Diagnostics.Process
   $Process.StartInfo = $StartInfo

@@ -19,7 +19,7 @@ import { resolveBackend } from "./backends/index.mjs";
 import { BoardLifecycleError, addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
 import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
 import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
-import { continueGsdMilestone } from "./gsd-runtime.mjs";
+import { continueGsdMilestone } from "./gsd-runtime-fallback.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -337,7 +337,7 @@ async function boardsMilestoneCommand(args) {
     await boardsMilestoneAttachCommand(rest);
     return;
   }
-  throw new Error(`Unknown boards milestone command "${subcommand ?? ""}".\n\nExamples:\n  aof boards milestone status board-id\n  aof boards milestone answer board-id --text "1"\n  aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md`);
+  throw new Error(`Unknown boards milestone command "${subcommand ?? ""}".\n\nMilestone creation is an interactive GSD handoff: run $gsd-new-milestone, then attach the completed roadmap with aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md.\n\nExamples:\n  aof boards milestone status board-id\n  aof boards milestone answer board-id --text "1"\n  aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md`);
 }
 
 async function boardsMilestoneStatusCommand(args) {

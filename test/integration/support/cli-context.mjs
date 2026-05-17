@@ -44,7 +44,8 @@ export function runCli(context, command, input = "", options = {}) {
       ...(options.gsdRuntimeStatus ? { AOF_TEST_GSD_RUNTIME_STATUS: options.gsdRuntimeStatus } : {}),
       ...(options.gsdRuntimeOutput ? { AOF_TEST_GSD_RUNTIME_STDOUT: options.gsdRuntimeOutput } : {}),
       ...(context.gsdSdkFixtureName ? { AOF_TEST_GSD_SDK_FIXTURE: context.gsdSdkFixtureName } : {}),
-      ...(context.gsdSdkFixture ? { AOF_TEST_GSD_SDK_FIXTURE_JSON: JSON.stringify(context.gsdSdkFixture) } : {})
+      ...(context.gsdSdkFixture ? { AOF_TEST_GSD_SDK_FIXTURE_JSON: JSON.stringify(context.gsdSdkFixture) } : {}),
+      ...(context.gsdPhaseResult ? { AOF_TEST_GSD_PHASE_RESULT_JSON: JSON.stringify(context.gsdPhaseResult) } : {})
     },
     input,
     encoding: "utf8"
@@ -73,6 +74,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   const previousGsdRuntimeStdout = process.env.AOF_TEST_GSD_RUNTIME_STDOUT;
   const previousGsdSdkFixtureName = process.env.AOF_TEST_GSD_SDK_FIXTURE;
   const previousGsdSdkFixture = process.env.AOF_TEST_GSD_SDK_FIXTURE_JSON;
+  const previousGsdPhaseResult = process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
   const previousExitCode = process.exitCode;
   const previousLog = console.log;
   const previousError = console.error;
@@ -94,6 +96,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
   if (options.gsdRuntimeOutput) process.env.AOF_TEST_GSD_RUNTIME_STDOUT = options.gsdRuntimeOutput;
   if (context.gsdSdkFixtureName) process.env.AOF_TEST_GSD_SDK_FIXTURE = context.gsdSdkFixtureName;
   if (context.gsdSdkFixture) process.env.AOF_TEST_GSD_SDK_FIXTURE_JSON = JSON.stringify(context.gsdSdkFixture);
+  if (context.gsdPhaseResult) process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = JSON.stringify(context.gsdPhaseResult);
   process.chdir(context.projectDir);
 
   try {
@@ -118,6 +121,7 @@ export async function runCliInProcess(context, command, input = "", options = {}
     restoreEnv("AOF_TEST_GSD_RUNTIME_STDOUT", previousGsdRuntimeStdout);
     restoreEnv("AOF_TEST_GSD_SDK_FIXTURE", previousGsdSdkFixtureName);
     restoreEnv("AOF_TEST_GSD_SDK_FIXTURE_JSON", previousGsdSdkFixture);
+    restoreEnv("AOF_TEST_GSD_PHASE_RESULT_JSON", previousGsdPhaseResult);
     process.exitCode = previousExitCode;
   }
 }

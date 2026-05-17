@@ -6,6 +6,7 @@ import { normalizeId, writeText } from "./fs.mjs";
 import { gsdPackageFromConfig } from "./frameworks.mjs";
 import { boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
 import { findProjectConfig } from "./workspace.mjs";
+import { runGsdPhase } from "./gsd-sdk-adapter.mjs";
 
 export const EXECUTION_STATUSES = Object.freeze(["queued", "running", "waiting_for_user", "blocked", "failed", "complete"]);
 const EXECUTION_STATUS_SET = new Set(EXECUTION_STATUSES);
@@ -55,30 +56,46 @@ export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, op
   const attemptNumber = (existing?.attempts?.length ?? 0) + 1;
   const attemptId = `attempt-${attemptNumber}`;
   const commands = gsdCommands(phase);
+  const phaseRun = await runAssignedPhase(projectDir, phase, options);
+  const status = phaseRun.failure ? "failed" : "complete";
+  const endedAt = nowIso();
   const execution = {
     version: 1,
     boardId: board.id,
     taskId: task.id,
     provider,
-    status: "running",
+    status,
     assignedAgent: agent,
     phase,
     commands,
+    ...(phaseRun.sdkResult ? { sdkResult: phaseRun.sdkResult } : {}),
+    ...(phaseRun.failure ? {
+      errorSubtype: phaseRun.failure.subtype,
+      errorMessages: phaseRun.failure.messages
+    } : {}),
     attempts: [
       ...(existing?.attempts ?? []),
       {
         id: attemptId,
-        status: "running",
+        status,
         startedAt: now,
-        commands
+        endedAt,
+        commands,
+        ...(phaseRun.sdkResult ? { sdkResult: phaseRun.sdkResult } : {}),
+        ...(phaseRun.failure ? {
+          errorSubtype: phaseRun.failure.subtype,
+          errorMessages: phaseRun.failure.messages
+        } : {})
       }
     ],
     logs: [
       ...(existing?.logs ?? []),
       {
         at: now,
-        level: "info",
-        message: `Assigned to agent ${agent.id}; started GSD execution for phase ${phase}.`
+        level: phaseRun.failure ? "error" : "info",
+        message: phaseRun.failure
+          ? `Assigned to agent ${agent.id}; GSD execution failed for phase ${phase}: ${phaseRun.failure.subtype}.`
+          : `Assigned to agent ${agent.id}; completed GSD execution for phase ${phase}.`
       }
     ],
     resume: {
@@ -88,7 +105,7 @@ export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, op
       commands
     },
     createdAt: existing?.createdAt ?? now,
-    updatedAt: now
+    updatedAt: endedAt
   };
 
   const executionPath = executionFilePath(projectDir, board.id, task.id);
@@ -101,6 +118,71 @@ export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, op
   });
 
   return { task: updatedTask, execution, executionPath };
+}
+
+async function runAssignedPhase(projectDir, phase, options = {}) {
+  const runner = options.phaseRunner ?? phaseRunnerFromEnv() ?? runGsdPhase;
+  try {
+    const sdkResult = await runner(projectDir, phase, phaseRunnerOptions(options));
+    const failure = phaseRunnerFailure(sdkResult);
+    return { sdkResult, failure };
+  } catch (error) {
+    return {
+      sdkResult: error?.actual?.result ?? null,
+      failure: failureFromError(error)
+    };
+  }
+}
+
+function phaseRunnerOptions(options = {}) {
+  return {
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.maxBudgetUsd ? { maxBudgetUsd: Number(options.maxBudgetUsd) } : {}),
+    ...(options.maxTurns ? { maxTurns: Number(options.maxTurns) } : {}),
+    ...(options.maxBudgetPerStep ? { maxBudgetPerStep: Number(options.maxBudgetPerStep) } : {}),
+    ...(options.maxTurnsPerStep ? { maxTurnsPerStep: Number(options.maxTurnsPerStep) } : {})
+  };
+}
+
+function phaseRunnerFromEnv() {
+  const raw = process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
+  if (!raw) return null;
+  return async (_projectDir, phase) => {
+    const result = JSON.parse(raw);
+    return {
+      phaseNumber: String(phase),
+      phaseName: result.phaseName ?? `Phase ${phase}`,
+      steps: result.steps ?? [],
+      success: result.success !== false,
+      totalCostUsd: result.totalCostUsd ?? 0,
+      totalDurationMs: result.totalDurationMs ?? 0
+    };
+  };
+}
+
+function phaseRunnerFailure(result) {
+  if (!result || result.success !== false) return null;
+  for (const step of result.steps ?? []) {
+    for (const plan of step.planResults ?? []) {
+      if (plan?.success === false && plan.error?.subtype) {
+        return {
+          subtype: plan.error.subtype,
+          messages: Array.isArray(plan.error.messages) ? plan.error.messages : []
+        };
+      }
+    }
+    if (step?.success === false && step.error) {
+      return { subtype: "phase_step_failed", messages: [step.error] };
+    }
+  }
+  return { subtype: "phase_failed", messages: [] };
+}
+
+function failureFromError(error) {
+  return {
+    subtype: error?.actual?.subtype ?? error?.code ?? "gsd_phase_error",
+    messages: Array.isArray(error?.actual?.messages) ? error.actual.messages : [error?.message ?? String(error)]
+  };
 }
 
 export async function readTaskExecution(projectDir, boardId, taskId) {

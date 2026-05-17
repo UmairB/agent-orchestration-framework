@@ -475,6 +475,14 @@ async function managesBoardApis() {
     listItems: () => [],
     upsertItem: () => {}
   };
+  const previousPhaseResult = process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
+  process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = JSON.stringify({
+    phaseName: "Setup UI Board Task",
+    success: true,
+    totalCostUsd: 0,
+    totalDurationMs: 1,
+    steps: []
+  });
   const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
   try {
     const boardSave = await fetchJson(`${url}api/boards/delivery`, {
@@ -515,7 +523,7 @@ async function managesBoardApis() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agentId: "builder" })
     });
-    assert.equal(assignment.execution.status, "running");
+    assert.equal(assignment.execution.status, "complete");
 
     const execution = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`);
     assert.equal(execution.execution.commands[0], "$gsd-discuss-phase 28");
@@ -539,6 +547,11 @@ async function managesBoardApis() {
     const archived = await fetchJson(`${url}api/boards/delivery/archive`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
     assert.equal(archived.board.status, "archived");
   } finally {
+    if (previousPhaseResult === undefined) {
+      delete process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
+    } else {
+      process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = previousPhaseResult;
+    }
     server.close();
     await rm(targetDir, { recursive: true, force: true });
   }

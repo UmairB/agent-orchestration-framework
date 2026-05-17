@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
+import { loadGsdState } from "./gsd-sdk-adapter.mjs";
 
 export function gsdMilestonePrompt(objective) {
   return `$gsd-new-milestone ${objective} --text`;
@@ -104,6 +105,7 @@ export async function continueGsdMilestone(projectDir, board, options = {}) {
   const testStatus = process.env.AOF_TEST_GSD_RUNTIME_STATUS;
   const entrypoint = testStatus ? null : await resolveGsdMilestoneEntrypoint(projectDir, runtime, objective);
   if (!testStatus && !entrypoint.available) {
+    const fallback = fallbackMessage(runtime, "milestone-runtime-entrypoint-missing");
     return {
       runtime,
       executable: runtime,
@@ -111,7 +113,7 @@ export async function continueGsdMilestone(projectDir, board, options = {}) {
       status: "failed",
       exitCode: 1,
       stdout: "",
-      stderr: entrypoint.message,
+      stderr: [fallback, entrypoint.message].join("\n"),
       error: entrypoint.message,
       startedAt,
       endedAt: nowIso(),
@@ -123,30 +125,32 @@ export async function continueGsdMilestone(projectDir, board, options = {}) {
     : codexGsdMilestoneCommand(objective, { ...(options.codex ?? {}), answer: options.answer, prompt: entrypoint?.prompt });
 
   if (testStatus) {
+    const state = await detectCompletedRoadmap(projectDir, runtime);
     return {
       ...command,
       status: testStatus,
       exitCode: testStatus === "failed" ? 1 : 0,
       stdout: process.env.AOF_TEST_GSD_RUNTIME_STDOUT ?? "",
-      stderr: process.env.AOF_TEST_GSD_RUNTIME_STDERR ?? "",
+      stderr: fallbackStderr(runtime, "test-runtime-fixture", process.env.AOF_TEST_GSD_RUNTIME_STDERR ?? "", state.warning),
       startedAt,
       endedAt: nowIso(),
-      roadmapPath: testStatus === "completed" ? await completedRoadmapPath(projectDir, startedAt) : null
+      roadmapPath: testStatus === "completed" ? state.roadmapPath : null
     };
   }
 
   const result = spawnSync(command.executable, command.argv, {
     cwd: projectDir,
     encoding: "utf8",
+    // WINDOWS-FALLBACK: spawned assistant CLIs need shell resolution on Windows PATH.
     shell: process.platform === "win32"
   });
   const endedAt = nowIso();
-  const roadmapPath = await completedRoadmapPath(projectDir, startedAt);
+  const state = await detectCompletedRoadmap(projectDir, runtime);
   const exitCode = typeof result.status === "number" ? result.status : 1;
   const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? result.error?.message ?? "";
+  const stderr = fallbackStderr(runtime, "interactive-milestone-creation", result.stderr ?? result.error?.message ?? "", state.warning);
   const output = [stdout, stderr].filter(Boolean).join("\n");
-  const status = classifyGsdMilestoneStatus({ exitCode, output, roadmapPath });
+  const status = classifyGsdMilestoneStatus({ exitCode, output, roadmapPath: state.roadmapPath });
   return {
     ...command,
     status,
@@ -156,7 +160,7 @@ export async function continueGsdMilestone(projectDir, board, options = {}) {
     error: result.error?.message ?? (status === "failed" ? "Runtime command failed." : undefined),
     startedAt,
     endedAt,
-    roadmapPath
+    roadmapPath: state.roadmapPath
   };
 }
 
@@ -205,14 +209,24 @@ function missingEntrypoint(runtime, message) {
   };
 }
 
-async function completedRoadmapPath(projectDir, startedAt) {
-  const roadmapPath = path.join(projectDir, ".planning", "ROADMAP.md");
-  if (!await exists(roadmapPath)) return null;
-  if (startedAt) {
-    const stats = await stat(roadmapPath);
-    if (stats.mtimeMs < new Date(startedAt).getTime()) return null;
+async function detectCompletedRoadmap(projectDir, runtime) {
+  try {
+    const state = await loadGsdState(projectDir, { skipSurfaceProbe: true });
+    return { roadmapPath: state.roadmapPresent ? ".planning/ROADMAP.md" : null, warning: null };
+  } catch (error) {
+    return {
+      roadmapPath: null,
+      warning: `[fallback runtime=${runtime}] SDK state check failed: ${error.message}`
+    };
   }
-  return ".planning/ROADMAP.md";
+}
+
+function fallbackStderr(runtime, reason, stderr = "", warning = null) {
+  return [fallbackMessage(runtime, reason), stderr, warning].filter(Boolean).join("\n");
+}
+
+function fallbackMessage(runtime, reason) {
+  return `[fallback runtime=${runtime}] SDK path unavailable for ${reason}`;
 }
 
 function nowIso() {

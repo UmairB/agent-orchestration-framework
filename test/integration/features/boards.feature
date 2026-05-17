@@ -171,9 +171,9 @@ Feature: Board and task state
     Then stdout should contain `builder`
     When I run `boards task assign delivery phase-30 builder`
     Then the command should succeed
-    And stdout should contain `Started gsd execution status=running phase=30`
+    And stdout should contain `Started gsd execution status=complete phase=30`
     And stdout should contain `$gsd-discuss-phase 30`
-    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "running"`
+    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "complete"`
     When I run `boards execution update delivery phase-30 --status waiting_for_user --message "Need input"`
     Then the command should succeed
     And stdout should contain `Task status: in_progress`
@@ -188,8 +188,8 @@ Feature: Board and task state
     Then the command should succeed
     When I run `boards task assign delivery phase-30 builder`
     Then the command should succeed
-    And stdout should contain `Started gsd execution status=running phase=30`
-    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "running"`
+    And stdout should contain `Started gsd execution status=complete phase=30`
+    And file `.aof/boards/delivery/executions/phase-30.json` should contain `"status": "complete"`
 
   Scenario: Reject assignments for unknown agents or tasks without GSD phase refs
     Given a project with GSD board execution

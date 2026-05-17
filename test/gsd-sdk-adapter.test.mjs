@@ -6,11 +6,13 @@ import {
   GsdSdkError,
   analyzeGsdRoadmap,
   assertGsdSdkSurface,
+  assertGsdRunnerSurface,
   assertMilestone,
   gsdSdkVersion,
   listMilestonePhases,
   loadGsdState,
-  resetGsdSdkSurfaceProbeForTests
+  resetGsdSdkSurfaceProbeForTests,
+  runGsdPhase
 } from "../src/gsd-sdk-adapter.mjs";
 import { MockGSDTools } from "./support/mock-gsd-tools.mjs";
 
@@ -34,6 +36,18 @@ export const gsdSdkAdapterTests = [
   {
     name: "fails strictly on uncaptured mock SDK calls",
     run: failsStrictlyOnUnknownMockCalls
+  },
+  {
+    name: "runs GSD phases through injected SDK runner",
+    run: runsPhaseThroughInjectedRunner
+  },
+  {
+    name: "surfaces failed GSD phase plan subtype",
+    run: surfacesFailedPhaseSubtype
+  },
+  {
+    name: "detects SDK runner surface mismatch",
+    run: detectsRunnerSurfaceMismatch
   },
   {
     name: "detects SDK surface mismatch",
@@ -142,6 +156,25 @@ async function failsStrictlyOnUnknownMockCalls() {
   );
 }
 
+async function runsPhaseThroughInjectedRunner() {
+  const projectDir = await tempProject();
+  const result = await runGsdPhase(projectDir, "37", {
+    GsdClass: successfulGsdClass()
+  });
+  assert.equal(result.phaseNumber, "37");
+  assert.equal(result.success, true);
+}
+
+async function surfacesFailedPhaseSubtype() {
+  const projectDir = await tempProject();
+  await assert.rejects(
+    () => runGsdPhase(projectDir, "37", { GsdClass: failingGsdClass() }),
+    (error) => error instanceof GsdSdkError
+      && error.code === "GSD_PHASE_FAILED"
+      && error.actual.subtype === "error_max_turns"
+  );
+}
+
 function detectsSurfaceMismatch() {
   resetGsdSdkSurfaceProbeForTests();
   class BrokenTools {}
@@ -152,6 +185,14 @@ function detectsSurfaceMismatch() {
   resetGsdSdkSurfaceProbeForTests();
 }
 
+function detectsRunnerSurfaceMismatch() {
+  class BrokenGsd {}
+  assert.throws(
+    () => assertGsdRunnerSurface(BrokenGsd),
+    (error) => error instanceof GsdSdkError && error.code === "GSD_SDK_SURFACE_MISMATCH"
+  );
+}
+
 function reportsSdkVersion() {
   assert.equal(gsdSdkVersion().installed, "0.1.0");
 }
@@ -160,6 +201,57 @@ async function tempProject() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "aof-gsd-sdk-"));
   await writeFile(path.join(dir, ".placeholder"), "", "utf8");
   return dir;
+}
+
+function successfulGsdClass() {
+  return class FakeGsd {
+    async runPhase(phaseNumber) {
+      return {
+        phaseNumber,
+        phaseName: "Runtime Fallback Hardening",
+        steps: [],
+        success: true,
+        totalCostUsd: 0,
+        totalDurationMs: 10
+      };
+    }
+  };
+}
+
+function failingGsdClass() {
+  return class FakeGsd {
+    async runPhase(phaseNumber) {
+      return {
+        phaseNumber,
+        phaseName: "Runtime Fallback Hardening",
+        steps: [{
+          step: "execute",
+          success: false,
+          durationMs: 5,
+          planResults: [{
+            success: false,
+            sessionId: "session-1",
+            totalCostUsd: 0,
+            durationMs: 5,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0
+            },
+            numTurns: 50,
+            error: {
+              subtype: "error_max_turns",
+              messages: ["Reached max turns."]
+            }
+          }]
+        }],
+        success: false,
+        totalCostUsd: 0,
+        totalDurationMs: 5
+      };
+    }
+  };
 }
 
 async function withEnv(values, callback) {
