@@ -222,6 +222,10 @@ Feature: Board and task state
     When I run `boards task assign delivery phase-30 missing-agent`
     Then the command should fail
     And stderr should contain `Unknown agent "missing-agent"`
+    When I run `boards task assign delivery phase-30 missing-agent --json`
+    Then the command should fail
+    And stdout should contain `"code": "BOARD_AGENT_NOT_FOUND"`
+    And stdout should contain `"next": "aof boards agents"`
 
   Scenario: Reject assignments for tasks without GSD phase refs
     Given a project with a board execution agent
@@ -232,3 +236,20 @@ Feature: Board and task state
     When I run `boards task assign manual missing-phase builder`
     Then the command should fail
     And stderr should contain `without refs.phase`
+    When I run `boards task assign manual missing-phase builder --json`
+    Then the command should fail
+    And stdout should contain `"code": "BOARD_TASK_PHASE_REF_MISSING"`
+    And stdout should contain `"next": "aof boards sync manual --milestone <milestone-id>"`
+
+  Scenario: Board JSON failures include structured remediation hints
+    Given a project with GSD board execution
+    When I run `boards create delivery --title Delivery --objective "Structured errors"`
+    Then the command should succeed
+    When I run `boards sync delivery --json`
+    Then the command should fail
+    And stdout should contain `"code": "MILESTONE_MISSING_ARG"`
+    And stdout should contain `"next": "aof boards sync delivery --milestone <milestone-id>"`
+    When I run `boards execution show delivery phase-30 --json`
+    Then the command should fail
+    And stdout should contain `"code": "TASK_EXECUTION_NOT_FOUND"`
+    And stdout should contain `"next": "aof boards task assign delivery phase-30 <agent-id>"`

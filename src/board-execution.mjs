@@ -4,7 +4,7 @@ import { loadProjectConfig } from "./dsl.mjs";
 import { BackendCapabilityError, resolveBackend } from "./backends/index.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
 import { gsdPackageFromConfig } from "./frameworks.mjs";
-import { boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
+import { BoardLifecycleError, boardWorkspacePaths, getBoard, updateTask } from "./boards.mjs";
 import { findProjectConfig } from "./workspace.mjs";
 import { runGsdPhase } from "./gsd-sdk-adapter.mjs";
 
@@ -42,14 +42,32 @@ export async function assignTaskToAgent(projectDir, boardId, taskId, agentId, op
   const normalizedAgentId = normalizeId(agentId);
   const agents = await listBoardAgents(projectDir, options);
   const agent = agents.find((item) => item.id === normalizedAgentId);
-  if (!agent) throw new Error(`Unknown agent "${normalizedAgentId}". Configure it in .aof/aof.config.json before assignment.`);
+  if (!agent) {
+    throw new BoardLifecycleError(
+      "BOARD_AGENT_NOT_FOUND",
+      `Unknown agent "${normalizedAgentId}". Configure it in .aof/aof.config.json before assignment.`,
+      { actual: normalizedAgentId, next: "aof boards agents" }
+    );
+  }
 
   const board = await getBoard(projectDir, boardId);
   const task = board.tasks.find((item) => item.id === normalizeId(taskId));
-  if (!task) throw new Error(`Task not found: ${normalizeId(boardId)}/${normalizeId(taskId)}`);
+  if (!task) {
+    throw new BoardLifecycleError(
+      "BOARD_TASK_NOT_FOUND",
+      `Task not found: ${normalizeId(boardId)}/${normalizeId(taskId)}`,
+      { actual: normalizeId(taskId), next: `aof boards show ${normalizeId(boardId)}` }
+    );
+  }
 
   const phase = phaseRef(task);
-  if (!phase) throw new Error(`Task ${board.id}/${task.id} cannot use provider ${provider} without refs.phase.`);
+  if (!phase) {
+    throw new BoardLifecycleError(
+      "BOARD_TASK_PHASE_REF_MISSING",
+      `Task ${board.id}/${task.id} cannot use provider ${provider} without refs.phase.`,
+      { expected: "refs.phase", actual: task.refs ?? null, next: `aof boards sync ${board.id} --milestone <milestone-id>` }
+    );
+  }
 
   const now = nowIso();
   const existing = await tryReadExecution(projectDir, board.id, task.id);
@@ -286,7 +304,21 @@ function gsdCommands(phase) {
 }
 
 async function readExecution(projectDir, boardId, taskId) {
-  return JSON.parse(await readFile(executionFilePath(projectDir, normalizeId(boardId), normalizeId(taskId)), "utf8"));
+  const normalizedBoardId = normalizeId(boardId);
+  const normalizedTaskId = normalizeId(taskId);
+  const filePath = executionFilePath(projectDir, normalizedBoardId, normalizedTaskId);
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new BoardLifecycleError(
+        "TASK_EXECUTION_NOT_FOUND",
+        `Task execution not found: ${normalizedBoardId}/${normalizedTaskId}`,
+        { actual: normalizedTaskId, next: `aof boards task assign ${normalizedBoardId} ${normalizedTaskId} <agent-id>` }
+      );
+    }
+    throw error;
+  }
 }
 
 async function tryReadExecution(projectDir, boardId, taskId) {
@@ -306,7 +338,11 @@ function relativeProjectPath(projectDir, filePath) {
 
 function assertExecutionStatus(status) {
   if (!EXECUTION_STATUS_SET.has(status)) {
-    throw new Error(`Invalid execution status "${status}". Use one of ${EXECUTION_STATUSES.join(", ")}.`);
+    throw new BoardLifecycleError(
+      "TASK_EXECUTION_STATUS_INVALID",
+      `Invalid execution status "${status}". Use one of ${EXECUTION_STATUSES.join(", ")}.`,
+      { expected: EXECUTION_STATUSES, actual: status, next: `Use one of: ${EXECUTION_STATUSES.join(", ")}` }
+    );
   }
 }
 

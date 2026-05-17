@@ -297,11 +297,7 @@ async function boardsSyncCommand(args) {
       dryRun: Boolean(options.dryRun)
     });
   } catch (error) {
-    if (options.json && isStructuredError(error)) {
-      printJson({ ok: false, ...error.toJSON() });
-      process.exitCode = 1;
-      return;
-    }
+    if (options.json && printStructuredJsonError(error)) return;
     throw error;
   }
   if (options.json) {
@@ -329,11 +325,7 @@ async function boardsRepairCommand(args) {
       dryRun: Boolean(options.dryRun)
     });
   } catch (error) {
-    if (options.json && isStructuredError(error)) {
-      printJson({ ok: false, ...error.toJSON() });
-      process.exitCode = 1;
-      return;
-    }
+    if (options.json && printStructuredJsonError(error)) return;
     throw error;
   }
   if (options.json) {
@@ -403,11 +395,7 @@ async function boardsMilestoneAnswerCommand(args) {
     runtimeResult = await continueGsdMilestone(targetDir, board, { answer });
     updated = await updateBoardMilestone(targetDir, board.id, runtimeResult, { answer });
   } catch (error) {
-    if (options.json && isStructuredError(error)) {
-      printJson({ ok: false, ...error.toJSON() });
-      process.exitCode = 1;
-      return;
-    }
+    if (options.json && printStructuredJsonError(error)) return;
     throw error;
   }
   if (options.json) {
@@ -437,11 +425,7 @@ async function boardsMilestoneAttachCommand(args) {
       roadmapPath
     }, { dryRun: Boolean(options.dryRun) });
   } catch (error) {
-    if (options.json && isStructuredError(error)) {
-      printJson({ ok: false, ...error.toJSON() });
-      process.exitCode = 1;
-      return;
-    }
+    if (options.json && printStructuredJsonError(error)) return;
     throw error;
   }
   if (options.json) {
@@ -625,11 +609,7 @@ async function boardsTaskAssignCommand(args) {
   try {
     result = await assignTaskToAgent(targetDir, boardId, taskId, agentId, options);
   } catch (error) {
-    if (options.json && isStructuredError(error)) {
-      printJson({ ok: false, ...error.toJSON() });
-      process.exitCode = 1;
-      return;
-    }
+    if (options.json && printStructuredJsonError(error)) return;
     throw error;
   }
   if (options.json) {
@@ -646,7 +626,13 @@ async function boardsExecutionShowCommand(args) {
   const [boardId, taskId] = options._;
   if (!boardId || !taskId) throw new Error("Usage: aof boards execution show <board-id> <task-id> [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await readTaskExecution(targetDir, boardId, taskId);
+  let result;
+  try {
+    result = await readTaskExecution(targetDir, boardId, taskId);
+  } catch (error) {
+    if (options.json && printStructuredJsonError(error)) return;
+    throw error;
+  }
   if (options.json) {
     printJson(result);
     return;
@@ -664,11 +650,17 @@ async function boardsExecutionUpdateCommand(args) {
   const [boardId, taskId] = options._;
   if (!boardId || !taskId || !options.status) throw new Error("Usage: aof boards execution update <board-id> <task-id> --status <status> [--message text] [--handoff text] [--json]");
   const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await updateTaskExecution(targetDir, boardId, taskId, {
-    status: options.status,
-    message: options.message,
-    handoff: options.handoff
-  });
+  let result;
+  try {
+    result = await updateTaskExecution(targetDir, boardId, taskId, {
+      status: options.status,
+      message: options.message,
+      handoff: options.handoff
+    });
+  } catch (error) {
+    if (options.json && printStructuredJsonError(error)) return;
+    throw error;
+  }
   if (options.json) {
     printJson(result);
     return;
@@ -1762,6 +1754,13 @@ function parseOptions(args) {
 
 function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function printStructuredJsonError(error) {
+  if (!isStructuredError(error)) return false;
+  printJson({ ok: false, ...error.toJSON() });
+  process.exitCode = 1;
+  return true;
 }
 
 function doctorStatusLabel(status) {
