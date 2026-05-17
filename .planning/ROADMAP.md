@@ -63,7 +63,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
 | v1.6 Task Management | 28-32 | 15/15 | 30/30 | Complete | 2026-05-15 |
-| v1.7 Typed GSD SDK Backend | 33-38 | 16/16 | 40/46 | In progress | - |
+| v1.7 Typed GSD SDK Backend | 33-38 | 19/19 | 40/46 | In progress | - |
 
 ## Phase Details
 
@@ -200,7 +200,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 4. User running any `aof boards` subcommand with `--json` gets structured error objects (`{code, message, expected?, actual?, next?}`) for every typed failure mode, and every typed error includes a `next:` hint with the exact remediation command — no `--json` blind spots.
 5. User on Windows running `aof boards doctor` sees `node`-on-PATH check, UNC-path warning, and BOM detection; system records the bundled `@gsd-build/sdk` version and the resolved `gsd-tools.cjs` path + reported version into `.aof/lock/packages.json` after every adapter boot.
 
-**Plans:** TBD
+**Plans:** 3/3 plans planned
 
 **Notes:**
 - Doctor is a reporter — it composes Phase 33's adapter, Phase 34's binding fields, Phase 35's backend capabilities, and Phase 37's fallback labels into one ladder. No new business logic should land here.
@@ -210,4 +210,4 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 
 ## Next
 
-v1.7 Typed GSD SDK Backend is in progress. Phase 38 is next: Doctor, Observability, And Milestone Closeout.
+v1.7 Typed GSD SDK Backend is in progress. Phase 38 is planned and ready to execute: Doctor, Observability, And Milestone Closeout.
