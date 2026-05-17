@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-16 after v1.7 roadmap creation
+**Last updated:** 2026-05-17 after Phase 37 completion
 
 ## Milestones
 
@@ -49,7 +49,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 - [x] **Phase 34: Board Lifecycle Migration And Typed Sync** — Route `aof boards sync --milestone` through the adapter, drop implicit ROADMAP.md parsing, add `binding.*` fields and structured error codes, auto-migrate v1.6 boards via `repair`. (completed 2026-05-17)
 - [x] **Phase 35: BoardBackend Seam** — Extract a minimal 4-method `BoardBackend` interface from the working Phase 34 code, register GSD as the v1 backend, add a null backend for tests, keep GSD-isms under `backend.gsd.*`. (completed 2026-05-17)
 - [x] **Phase 36: Test Surface Migration And Windows Parity** — Captured-fixture two-tier doubles, SDK-path BDD siblings, `test:integration:ps` exercises the SDK adapter, v1.6 board regression fixture, `.gitattributes` for cross-OS fingerprint stability. (completed 2026-05-17)
-- [ ] **Phase 37: Runtime Fallback Hardening And Collapse** — Rename `gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`, drop `completedRoadmapPath` mtime scraping, loud `[fallback]` stderr, parity unit test, milestone-creation handoff.
+- [x] **Phase 37: Runtime Fallback Hardening And Collapse** — Rename `gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`, drop `completedRoadmapPath` mtime scraping, loud `[fallback]` stderr, parity unit test, milestone-creation handoff. (completed 2026-05-17)
 - [ ] **Phase 38: Doctor, Observability, And Milestone Closeout** — `aof boards doctor` end-to-end ladder, SDK/tools version drift diagnostic, lock state records both versions, Windows-specific checks, milestone audit and archive.
 
 ## Progress
@@ -63,7 +63,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 | v1.4 Namespaced CLI Contract | 18-22 | 9/9 | 22/22 | Complete | 2026-05-11 |
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
 | v1.6 Task Management | 28-32 | 15/15 | 30/30 | Complete | 2026-05-15 |
-| v1.7 Typed GSD SDK Backend | 33-38 | 13/13 | 36/46 | In progress | - |
+| v1.7 Typed GSD SDK Backend | 33-38 | 16/16 | 40/46 | In progress | - |
 
 ## Phase Details
 
@@ -177,7 +177,7 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 4. Maintainer reading the repo sees `src/gsd-runtime.mjs` is gone, replaced by `src/gsd-runtime-fallback.mjs`; the `completedRoadmapPath` mtime-scraping helper is deleted; callers needing "did GSD finish?" use `loadGsdState()` instead.
 5. User running `aof boards milestone create <id>` sees a clean handoff message pointing at `$gsd-new-milestone` then `aof boards milestone attach` — no AOF-side composite that tries to fake a missing SDK runner.
 
-**Plans:** TBD
+**Plans:** 3/3 plans complete
 
 **Notes:**
 - The rename (`gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`) is the load-bearing signal that the file's role has demoted. Keep the file; just rename and prune.
@@ -210,4 +210,4 @@ v1.6 milestone details are archived under `.planning/milestones/v1.6-ROADMAP.md`
 
 ## Next
 
-v1.7 Typed GSD SDK Backend is in progress. Phase 37 is next: Runtime Fallback Hardening And Collapse.
+v1.7 Typed GSD SDK Backend is in progress. Phase 38 is next: Doctor, Observability, And Milestone Closeout.

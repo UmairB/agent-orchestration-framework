@@ -58,10 +58,10 @@ Requirements for this milestone. Each maps to one roadmap phase (Phase 33–38).
 
 ### Execution
 
-- [ ] **EXEC-01**: User can assign a phase-shaped task to an agent and AOF calls `gsd.runPhase(phaseNumber)` via the SDK adapter; `task.execution` records the typed `PhaseRunnerResult` with byte-compatible shape to the v1.6 UI consumer.
-- [ ] **EXEC-02**: Runtime-CLI execution (`claude`/`codex` spawn) is preserved only as the fallback for interactive milestone creation; every fallback invocation logs `[fallback runtime=<x>] SDK path unavailable for <reason>` to stderr.
-- [ ] **EXEC-03**: Phase execution exits non-zero on `PlanResult.success === false` and the adapter surfaces SDK `error.subtype` (e.g. `error_max_turns`, `error_during_execution`) through `GsdSdkError`.
-- [ ] **EXEC-04**: `src/gsd-runtime.mjs` is renamed to `src/gsd-runtime-fallback.mjs`; the `completedRoadmapPath` mtime-scraping helper is removed; callers needing completion status read `loadGsdState()` instead.
+- [x] **EXEC-01**: User can assign a phase-shaped task to an agent and AOF calls `gsd.runPhase(phaseNumber)` via the SDK adapter; `task.execution` records the typed `PhaseRunnerResult` with byte-compatible shape to the v1.6 UI consumer.
+- [x] **EXEC-02**: Runtime-CLI execution (`claude`/`codex` spawn) is preserved only as the fallback for interactive milestone creation; every fallback invocation logs `[fallback runtime=<x>] SDK path unavailable for <reason>` to stderr.
+- [x] **EXEC-03**: Phase execution exits non-zero on `PlanResult.success === false` and the adapter surfaces SDK `error.subtype` (e.g. `error_max_turns`, `error_during_execution`) through `GsdSdkError`.
+- [x] **EXEC-04**: `src/gsd-runtime.mjs` is renamed to `src/gsd-runtime-fallback.mjs`; the `completedRoadmapPath` mtime-scraping helper is removed; callers needing completion status read `loadGsdState()` instead.
 
 ### Migration (v1.6 boards → v1.7)
 
@@ -166,10 +166,10 @@ Locked by the roadmapper on 2026-05-16. Every v1.7 requirement maps to exactly o
 | TEST-04 | Phase 36 | Complete |
 | TEST-05 | Phase 36 | Complete |
 | TEST-06 | Phase 36 | Complete |
-| EXEC-01 | Phase 37 | Pending |
-| EXEC-02 | Phase 37 | Pending |
-| EXEC-03 | Phase 37 | Pending |
-| EXEC-04 | Phase 37 | Pending |
+| EXEC-01 | Phase 37 | Complete |
+| EXEC-02 | Phase 37 | Complete |
+| EXEC-03 | Phase 37 | Complete |
+| EXEC-04 | Phase 37 | Complete |
 | DIAG-01 | Phase 38 | Pending |
 | DIAG-02 | Phase 38 | Pending |
 | DIAG-03 | Phase 38 | Pending |

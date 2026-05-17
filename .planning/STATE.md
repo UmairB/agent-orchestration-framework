@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
-current_phase: 37
-status: executing
-stopped_at: Phase 36 completed
-last_updated: "2026-05-17T23:12:27.842Z"
-last_activity: 2026-05-17 -- Phase 37 planning complete
+current_phase: 38
+status: ready_to_discuss
+stopped_at: Phase 37 completed
+last_updated: "2026-05-17T23:59:00.000Z"
+last_activity: 2026-05-17 -- Phase 37 completed and verified
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 16
-  completed_plans: 13
-  percent: 67
+  completed_plans: 16
+  percent: 83
 ---
 
 # State: AOF
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.7 Typed GSD SDK Backend
-**Current phase:** 37
-**Status:** Ready to execute
+**Current phase:** 38
+**Status:** Ready to discuss
 
 ## Project Reference
 
@@ -38,29 +38,29 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.7 Typed GSD SDK Backend roadmap is locked. Phases 33-36 are complete. Next action is `$gsd-discuss-phase 37` for Runtime Fallback Hardening And Collapse.
+v1.7 Typed GSD SDK Backend roadmap is locked. Phases 33-37 are complete. Next action is `$gsd-discuss-phase 38` for Doctor, Observability, And Milestone Closeout.
 
 ## Current Position
 
-Phase: 37 — Runtime Fallback Hardening And Collapse
+Phase: 38 — Doctor, Observability, And Milestone Closeout
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 37 planning complete
+Status: Ready to discuss
+Last activity: 2026-05-17 -- Phase 37 completed and verified
 
-**Phase 37 scope at a glance:**
+**Phase 38 scope at a glance:**
 
-- Rename `src/gsd-runtime.mjs` to fallback-only naming and make fallback status loud.
-- Drop completed-roadmap mtime scraping and rely on typed SDK state.
-- Route phase execution through typed SDK paths where available while preserving UI task shape.
-- Keep Windows fallback safeguards explicitly documented.
-- Implement the milestone-creation handoff without an AOF-side composite.
+- Ship `aof boards doctor` as the end-to-end health ladder.
+- Surface SDK/tools version drift and missing tools diagnostics.
+- Add JSON parity and remediation hints across board commands.
+- Record SDK/tools version metadata in lock state.
+- Add Windows-specific doctor checks and close out v1.7.
 
-**Phase 37 covers:** EXEC-01, EXEC-02, EXEC-03, EXEC-04 (4 requirements).
+**Phase 38 covers:** DIAG-01, DIAG-02, DIAG-03, DIAG-04, DIAG-06, MIG-01 (6 requirements).
 
 ## Resume
 
-**Stopped at:** Phase 36 completed
-**Resume file:** .planning/phases/36-test-surface-migration-and-windows-parity/36-VERIFICATION.md
+**Stopped at:** Phase 37 completed
+**Resume file:** .planning/phases/37-runtime-fallback-hardening-and-collapse/37-VERIFICATION.md
 
 ## Memory
 
