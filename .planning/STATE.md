@@ -2,11 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: AOF Boards Dogfood UAT
+current_phase: 39
 status: planning
-last_updated: "2026-05-18T16:39:24.632Z"
-last_activity: 2026-05-18
+last_updated: "2026-05-18T17:45:58.999+01:00"
+last_activity: 2026-05-18 — v1.8 roadmap created
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,8 +18,8 @@ progress:
 
 **Initialized:** 2026-05-06
 **Current milestone:** v1.8 AOF Boards Dogfood UAT
-**Current phase:** Not started
-**Status:** Defining requirements
+**Current phase:** 39
+**Status:** Roadmap ready
 
 ## Project Reference
 
@@ -36,19 +37,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.8 AOF Boards Dogfood UAT is being defined. The milestone will dogfood `aof boards` on AOF itself through a real board, full lifecycle UAT, and fixes for confirmed findings.
+v1.8 AOF Boards Dogfood UAT roadmap is drafted. The milestone will dogfood `aof boards` on AOF itself through a real board, full lifecycle UAT, and fixes for confirmed findings.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 39 — Board Dogfood Requirements And Live State Baseline
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-18 — Milestone v1.8 started
+Status: Ready to discuss/plan phase
+Last activity: 2026-05-18 — v1.8 roadmap created
 
 ## Resume
 
-**Stopped at:** v1.8 milestone requirements definition
-**Resume file:** .planning/REQUIREMENTS.md
+**Stopped at:** v1.8 roadmap approval
+**Resume file:** .planning/ROADMAP.md
 
 ## Memory
 

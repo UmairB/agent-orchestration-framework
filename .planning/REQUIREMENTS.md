@@ -83,36 +83,36 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BOARD-01 | — | Pending |
-| BOARD-02 | — | Pending |
-| BOARD-03 | — | Pending |
-| BOARD-04 | — | Pending |
-| CLI-01 | — | Pending |
-| CLI-02 | — | Pending |
-| CLI-03 | — | Pending |
-| CLI-04 | — | Pending |
-| UI-01 | — | Pending |
-| UI-02 | — | Pending |
-| UI-03 | — | Pending |
-| UI-04 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| FIX-01 | — | Pending |
-| FIX-02 | — | Pending |
-| FIX-03 | — | Pending |
-| FIX-04 | — | Pending |
-| VER-01 | — | Pending |
-| VER-02 | — | Pending |
-| VER-03 | — | Pending |
-| VER-04 | — | Pending |
+| BOARD-01 | Phase 39 | Pending |
+| BOARD-02 | Phase 40 | Pending |
+| BOARD-03 | Phase 40 | Pending |
+| BOARD-04 | Phase 40 | Pending |
+| CLI-01 | Phase 39 | Pending |
+| CLI-02 | Phase 39 | Pending |
+| CLI-03 | Phase 39 | Pending |
+| CLI-04 | Phase 39 | Pending |
+| UI-01 | Phase 41 | Pending |
+| UI-02 | Phase 41 | Pending |
+| UI-03 | Phase 41 | Pending |
+| UI-04 | Phase 41 | Pending |
+| EXEC-01 | Phase 42 | Pending |
+| EXEC-02 | Phase 42 | Pending |
+| EXEC-03 | Phase 42 | Pending |
+| EXEC-04 | Phase 42 | Pending |
+| FIX-01 | Phase 39 | Pending |
+| FIX-02 | Phase 43 | Pending |
+| FIX-03 | Phase 43 | Pending |
+| FIX-04 | Phase 43 | Pending |
+| VER-01 | Phase 43 | Pending |
+| VER-02 | Phase 43 | Pending |
+| VER-03 | Phase 43 | Pending |
+| VER-04 | Phase 43 | Pending |
 
 **Coverage:**
 - v1.8 requirements: 24 total
-- Mapped to phases: 0
-- Unmapped: 24
+- Mapped to phases: 24
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-05-18*
-*Last updated: 2026-05-18 after initial definition*
+*Last updated: 2026-05-18 after roadmap creation*
