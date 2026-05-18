@@ -1,127 +1,128 @@
-# Research Summary: AOF v1.7 Typed GSD SDK Backend
+# Project Research Summary: v1.8 AOF Boards Dogfood UAT
 
-**Synthesized:** 2026-05-16
-**Sources:** STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md
+**Project:** AOF
+**Domain:** Local developer-tool boards backed by GSD milestone state
+**Researched:** 2026-05-18
+**Confidence:** HIGH
+
+## Executive Summary
+
+v1.8 should be a dogfood milestone, not a broad new feature build. AOF already has the necessary board stack: file-backed canonical board state, typed GSD backend calls, board doctor/validation, setup UI routes, and a boards UI. The milestone should use those surfaces on the AOF repo itself, keep the resulting board state, and fix confirmed workflow failures.
+
+The live board anchor already exists at `.aof/boards/coordination/BOARD.json`. It is GSD-backed, uses Codex runtime fallback for interactive milestone work, and is currently waiting for milestone attachment. After requirements and roadmap are approved, the board should be attached to `v1.8`, synced from `.planning/ROADMAP.md`, exercised through CLI and UI, and used for safe assignment/execution UAT.
+
+The main risk is mistaking fixture coverage for live usability. The mitigation is to require an explicit UAT log, cross-check CLI/UI/API/canonical JSON state, and tie each confirmed finding to a fix, regression test, or documented deferral.
+
+## Key Findings
+
+### Recommended Stack
+
+Use the existing stack only. No new dependencies are recommended.
+
+**Core technologies:**
+- Node.js ESM CLI: board command orchestration.
+- `.aof/boards` JSON files: canonical board, task, and execution state.
+- `@gsd-build/sdk` adapter boundary: typed state, roadmap, milestone, and phase execution integration.
+- React/Vite boards UI: visual board UAT.
+- Existing Node/BDD/PowerShell/UI build checks: regression and parity verification.
+
+### Expected Features
+
+**Must have:**
+- Real `coordination` board remains project state.
+- Board attaches to `v1.8` after roadmap approval.
+- Sync creates phase tasks from the v1.8 roadmap.
+- CLI and UI agree on board/task/binding/execution state.
+- Doctor/validate/index commands produce actionable human and JSON output.
+- Safe assignment/execution path is exercised.
+- UAT findings are fixed or explicitly deferred with rationale.
+
+**Should have:**
+- UAT script/log with reproducible command/API/UI steps.
+- Regression tests for every confirmed defect.
+- Verification matrix mapping requirements to evidence.
+
+**Defer:**
+- New backend implementations.
+- Global task hub behavior.
+- Broad UI redesign not tied to UAT failures.
+- Dependency additions.
+
+### Architecture Approach
+
+Keep the current architecture: canonical file-backed board state, typed GSD backend, explicit milestone binding, and CLI/UI surfaces over the same domain functions. The roadmap should be ordered so board sync happens only after requirements and roadmap approval.
+
+**Major components:**
+1. Board state and domain functions in `src/boards.mjs`.
+2. GSD adapter/backend and assignment execution in `src/backends/gsd-backend.mjs` and `src/board-execution.mjs`.
+3. CLI and setup UI surfaces in `src/cli.mjs`, `src/setup-ui.mjs`, and `ui/src/main.tsx`.
+
+### Critical Pitfalls
+
+1. **Fixture success masking live UX failure** — require actual UAT steps against the real board.
+2. **Premature or wrong-milestone sync** — attach and sync explicitly with `v1.8`.
+3. **Internal bridge skill leakage** — keep `aof-board-milestone-bridge` out of rendered AOF resources.
+4. **CLI/UI state disagreement** — cross-check CLI output, UI API, and canonical files.
+5. **Unbounded assignment execution** — use a safe phase or explicitly bounded execution path.
+
+## Implications for Roadmap
+
+Suggested phase structure:
+
+### Phase 39: Board Dogfood Requirements And Live State Baseline
+**Rationale:** Establish the real board and expected UAT evidence before changing behavior.
+**Delivers:** Requirements, baseline board/doctor/validate output, and UAT log scaffold.
+**Addresses:** Real board state, failure capture, verification expectations.
+
+### Phase 40: Board Attachment And Sync UAT
+**Rationale:** The board cannot become useful until the approved roadmap is attached and synced.
+**Delivers:** `coordination` attached to v1.8, synced phase tasks, attach/sync regression coverage for any findings.
+**Avoids:** Wrong milestone and premature sync pitfalls.
+
+### Phase 41: Boards UI Dogfood
+**Rationale:** The user-facing board workflow must work through the UI, not just CLI/API.
+**Delivers:** UI/API parity checks, usability fixes for confirmed findings, UI build verification.
+**Implements:** Board mode over canonical state.
+
+### Phase 42: Assignment And Execution UAT
+**Rationale:** Task assignment is the workflow that turns boards from tracking into execution.
+**Delivers:** Safe assignment/execution evidence, failure handling, execution status updates, tests.
+**Uses:** `src/board-execution.mjs` and SDK `runPhase()` path where safe.
+
+### Phase 43: UAT Findings Hardening And Closeout
+**Rationale:** Dogfood only matters if findings are resolved and verified.
+**Delivers:** Finding fixes, regression suite, PowerShell parity as relevant, UAT report, milestone audit/archive.
+
+## Confidence Assessment
+
+| Area | Confidence | Notes |
+|------|------------|-------|
+| Stack | HIGH | Directly inspected local implementation. |
+| Features | HIGH | User scope is clear and maps to existing board capabilities. |
+| Architecture | HIGH | Current modules expose the required flows. |
+| Pitfalls | HIGH | Risks are visible in current state and v1.7 design constraints. |
+
+**Overall confidence:** HIGH
+
+## Gaps To Address During Execution
+
+- Determine whether a real assignment run is safe for the selected phase; otherwise use a controlled execution update and document the boundary.
+- Verify visual UI behavior with the running boards UI once implementation reaches the UI dogfood phase.
+- Watch dirty worktree state carefully; multiple existing changes predate this milestone initialization.
+
+## Sources
+
+### Primary
+- `src/boards.mjs`
+- `src/cli.mjs`
+- `src/board-execution.mjs`
+- `src/gsd-runtime-fallback.mjs`
+- `src/setup-ui.mjs`
+- `ui/src/main.tsx`
+- `test/boards.test.mjs`
+- `test/integration/features/boards.feature`
+- `.aof/boards/coordination/BOARD.json`
 
 ---
-
-## Headline Findings
-
-1. **`@gsd-build/sdk@0.1.0` is real and adoptable** — exposes typed `GSDTools` (`stateLoad`, `roadmapAnalyze`, `phaseComplete`, `commit`, `phasePlanIndex`, `configGet/Set`, generic `exec`) plus `GSD` orchestrator (`runPhase`, `run`) plus `GSDEventStream`. Ships TS `.d.ts` so AOF gets editor types without adopting TS.
-
-2. **The SDK is a typed seam over `gsd-tools.cjs`, NOT a no-shellout boundary.** Every call spawns `execFile('node', [gsdToolsPath, cmd, ...args, '--raw'])` with 30s default timeout and `@file:` indirection for large payloads. Adoption types the calls; it does not eliminate the process boundary.
-
-3. **Version drift is the dominant operational risk.** Two release trains share the package name `@gsd-build/sdk`: the npm-published `0.1.0` (maintainer `glittercowboy`, 2026-03-27) and the CLI-bundled `1.42.2` inside `get-shit-done-cc` (or `gsd-pi@2.58.0`). They can return divergent shapes. AOF must detect mismatch via a doctor diagnostic; failure to do so will produce silent state corruption.
-
-4. **Several critical workflow handlers are NOT typed yet** — `state.milestone-switch`, `milestone.complete`, `phase.add`, `phase.add-batch`, `init.new-milestone` are reachable only through `GSDTools.exec(cmd, args)` in v0.1.0. AOF must channel them through a single typed seam with explicit input/output contracts AOF owns.
-
-5. **No SDK milestone-creation runner exists.** `GSD.run(prompt)` is a milestone *executor* (runs existing phases), `InitRunner` is for new-project only. v1.7 must hand off objective→milestone creation to the runtime CLI fallback. PROJECT.md already accepts this deferral.
-
-6. **Every v1.6 board breaks on first v1.7 sync** because the v1.6 validator never required `gsd.milestone.id`. v1.7 requires it. An explicit migration (`aof boards doctor` + auto-attach when unambiguous, fix-it hint when not) is mandatory — not a nice-to-have.
-
-7. **The `BoardBackend` interface must be minimal** (4 methods: `loadState`, `analyzeRoadmap`, `assertMilestone`, `syncBoardFromMilestone`) with a `kind: "gsd"` discriminant. v1 ships GSD + a test-noop only. Designing for hypothetical backends bakes GSD assumptions into the abstraction.
-
----
-
-## Stack Additions
-
-- Add `@gsd-build/sdk@0.1.0` as a direct dep, pinned exactly with `--save-exact`.
-- No new dev dep, no direct `ws`, no direct `@anthropic-ai/claude-agent-sdk`.
-- Node engine unchanged (`>=20`).
-- Update `scripts/supply-chain-audit.mjs` allowlist for ~30 transitives.
-- Commit `package-lock.json`; add CI guard rejecting widening to a range.
-- Lint rule: reject `@gsd-build/sdk` imports from `ui/src/**`.
-
----
-
-## Architecture Shape
-
-**One new module:** `src/gsd-sdk-adapter.mjs` — module of pure async functions (matches `src/frameworks.mjs`/`src/packages.mjs` style):
-- `loadGsdState(projectDir)` → typed `{milestoneId, statePresent, roadmapPresent, configPresent, raw}`
-- `analyzeGsdRoadmap(projectDir)` → typed `RoadmapAnalysis`
-- `assertMilestone(projectDir, milestoneId)` → throws `GsdSdkError(code, ...)`
-- `listMilestonePhases(projectDir, milestoneId)`
-- `gsdSdkVersion()` → `{installed, cliBundled, drift, driftReason?}`
-- `GsdSdkError` class
-
-**New directory:** `src/backends/`
-- `index.mjs` — `BoardBackend` JSDoc contract, `BackendError`, `resolveBackend(name)`, `BACKEND_REGISTRY = { gsd, null }`
-- `gsd-backend.mjs` — thin composition over the SDK adapter
-- `null-backend.mjs` — test-only no-op
-
-**Modified:**
-- `src/boards.mjs` — rename `syncBoardFromGsdRoadmap` → `syncBoardFromMilestone`; remove `parseRoadmapPhases` markdown regex; add `gsd.milestone.binding.{status, sdkVersion, driftReason, fingerprint}` fields; new diagnostic codes (`BOARD_MILESTONE_UNATTACHED`, `BOARD_MILESTONE_DRIFT`).
-- `src/cli.mjs` — same `aof boards sync --milestone` surface; new `aof boards doctor`; stop auto-spawning runtime on `create`/`repair`; placeholder `aof boards milestone create` prints hand-off instructions.
-- `src/board-execution.mjs` — replace `provider !== "gsd"` literal with `backend.capabilities.has("assignTask")`; record `backendPlan: { provider, runner: "sdk-deferred" }`.
-- `src/setup-ui.mjs` — import swap; response shapes additively extended with `binding.*`; **no new routes**, no SSE/WebSocket.
-- `src/gsd-runtime.mjs` → `src/gsd-runtime-fallback.mjs` — deprecate-in-place; remove `completedRoadmapPath` mtime scraping; keep slash-command builders for interactive milestone-answer.
-
-**Unchanged:** `bin/aof.mjs`, `src/adapters.mjs`, `src/dsl.mjs`, `src/frameworks.mjs`, `src/packages.mjs`, `src/fs.mjs`, `src/workspace.mjs`, `src/model.mjs`, `src/lock.mjs`, `ui/src/main.tsx` (display strings get one-line additive change; no new components).
-
-**UI scope:** DEFERRED to v1.8 — SDK-event-streamed lifecycle is explicitly out of scope per PROJECT.md. UI gains two display-only fields.
-
----
-
-## Feature Inventory
-
-### Table stakes (must ship in v1.7)
-**Adapter:** single typed seam module; 4 read/assert functions; SDK version pin + drift diagnostic; adapter is the ONLY place importing `@gsd-build/sdk` or calling `gsd-tools.cjs`.
-
-**Sync:** typed `aof boards sync <id> --milestone <id>`; hard-fail on missing/mismatched/unattached milestone; write typed `gsd.milestone.phases[]` cache into BOARD.json; `--dry-run --json` diff; drift detection on re-sync.
-
-**Lifecycle:** `create` records `waiting_for_milestone` (no auto-spawn); `repair` reads SDK state + auto-binds matching milestone; `attach` verifies milestone exists in GSD state (not just file path); boards without bound milestone surface as `pending_milestone`.
-
-**Backend Interface:** 4-method `BoardBackend` with `kind: "gsd"` discriminant; GSD as only real impl + null backend for tests; `executeTask` returns v1.6-compatible `task.execution` shape.
-
-**Diagnostics:** structured error codes (`MILESTONE_MISSING_ARG`, `MILESTONE_NOT_BOUND`, `MILESTONE_ID_MISMATCH`, `MILESTONE_NOT_IN_STATE`, `MILESTONE_INCOMPLETE`, `ROADMAP_EMPTY`, `SDK_VERSION_DRIFT`, `GSD_TOOLS_MISSING`); every error includes `next:` remediation; `--json` parity across boards subcommands; new `aof boards doctor [<id>]` runs full assertion ladder.
-
-**Execution:** phase-shaped tasks call `gsd.runPhase(phaseNumber)` instead of spawning claude/codex; runtime-CLI execution preserved ONLY as fallback for interactive milestone creation, labeled in lock state.
-
-**v1.6 Migration:** `aof boards doctor` detects v1.6-shaped boards; auto-infers milestone id from `roadmapPath` when possible; emits `BOARD_MILESTONE_ID_MISSING` warning with exact `attach` command; NEVER silently auto-picks.
-
-### Differentiators
-Per-phase `{phaseId, action: "create"|"keep"|"drift"}` in `--dry-run --json`; `aof boards doctor` end-to-end ladder; per-board phases cache; dispatch log to `.aof/cache/boards/dispatch.log.jsonl`; BoardBackend with test-noop proving swap.
-
-### Defer / Anti-features (v1.8+)
-`GSDEventStream`→UI WebSocket; single-call `createMilestoneFromObjective`; second real `BoardBackend`; `gsd.run(prompt)` full-milestone autoflight; typed `state.milestone-switch` when SDK promotes it; `phase.add` typed wrappers; cost-tracking per board; `gsd-sdk query` shellouts as third path.
-
-**Anti-features:** reimplement GSD's state logic AOF-side; fork/vendor SDK to add missing runners; AOF-side milestone runner using `GSD.run(prompt)`; implicit ROADMAP.md fallback when `--milestone` missing; runtime CLI + SDK as equal peers; adopt event stream without UI consumer; ship two real backends; adopt CLI as second integration path; markdown regex as "fallback when SDK fails."
-
----
-
-## Critical Pitfalls (ranked by impact)
-
-1. **Bundled vs published SDK drift** — HIGH severity, near-certain in field. Mitigation: boot-time version comparison; lock-state recording; doctor warning.
-2. **0.x SDK semver** — HIGH severity, certain on next minor bump. Mitigation: exact pin + contract test that fails boot on shape change + smoke against fixtures.
-3. **v1.6 board migration breakage** — HIGH severity, certain on first upgrade. Mitigation: doctor + auto-attach + fix-it hint; never auto-pick.
-4. **"Typed SDK = no shell" misconception** — MEDIUM severity, surfaces as 30s timeouts and Windows path errors. Mitigation: per-method timeouts, error wrapping, batching, docs honesty.
-5. **Slash-command fallback drift** — MEDIUM severity, accumulates over time. Mitigation: single result shape; loud `[fallback]` stderr; parity unit test.
-6. **BoardBackend over-abstraction** — HIGH severity if it lands, but preventable. Mitigation: 4 methods + `kind: "gsd"` discriminant; extract from working code in Phase 35, not designed up-front.
-7. **Reimplementing milestone-creation via composites** — MEDIUM severity, recreates the pre-v1.7 fragility. Mitigation: explicit handoff to runtime CLI; no `tools.exec("state", ["milestone-switch"])` in adapter.
-8. **Test doubles at wrong layer** — MEDIUM severity, silent failure mode. Mitigation: two-tier doubles — `MockGSDTools` with captured real fixtures + integration contract test against real SDK.
-9. **Windows-specific regressions** — MEDIUM, affects all Windows users. Mitigation: `aof doctor` checks (node on PATH, UNC paths, BOM); BDD parity on PowerShell runner.
-10. **Removing line-ending safeguards** — LOW-MEDIUM, easy to regress during "cleanup". Mitigation: `// WINDOWS-FALLBACK:` comments before deletion; `.gitattributes` enforces LF for `.aof/`/`.planning/` JSON/MD.
-
----
-
-## Suggested Phase Decomposition (for roadmapper)
-
-Five phases, numbered continuing from v1.6 (last phase was 32):
-
-- **Phase 33 — SDK adapter foundation:** add `@gsd-build/sdk@0.1.0` exact pin; write `src/gsd-sdk-adapter.mjs`; SDK version drift diagnostic; error wrapping; contract test; first captured fixture under `test/fixtures/gsd-sdk/`.
-- **Phase 34 — Board lifecycle migration + typed sync:** rename and re-route board sync through adapter; remove `parseRoadmapPhases`; add `gsd.milestone.binding.*` fields; structured error codes with `next:` hints; v1.6 board migration via `aof boards doctor` with auto-attach when unambiguous.
-- **Phase 35 — BoardBackend seam:** extract minimal interface (4 methods + `kind: "gsd"`) from the working Phase 34 code; ship null backend for tests; capability flags for `assignTask`; ensure no GSD-isms leak.
-- **Phase 36 — Test surface migration + Windows BDD parity:** captured-fixture two-tier doubles, SDK-path BDD parallel to fallback scenarios, `test:integration:ps` covers SDK path, regression for v1.6 board JSON fixture, `.gitattributes` for cross-OS fingerprint stability.
-- **Phase 37 — Runtime fallback hardening + collapse:** rename `gsd-runtime.mjs` → `gsd-runtime-fallback.mjs`; remove `completedRoadmapPath` mtime scraping; loud `[fallback runtime=…]` stderr; parity unit test; `aof boards milestone create` handoff implementation.
-- **Phase 38 — Doctor / observability / closeout:** `aof boards doctor` end-to-end ladder; lock state records SDK + tools versions; Windows-specific checks (node-on-PATH, UNC warning, BOM); milestone audit + archive.
-
-**Ordering:** 33 → (34, 37 in parallel) → 35 → 36 alongside all → 38 closes. Phase 36 (tests) runs concurrent with every phase, not as a final pass.
-
----
-
-## Open Questions for Phase 33
-
-- Does `glittercowboy`'s `@gsd-build/sdk@0.1.0` share the same `gsd-tools.cjs` JSON contract as `get-shit-done-cc@1.42.2`'s bundled `gsd-tools.cjs`? Verifiable by diffing the two bundled `gsd-tools.cjs` files; informs whether AOF needs to ship a vendored `gsd-tools.cjs` or rely on the user-installed one.
-- Should `binding.fingerprint` be exposed in `validateBoards` as a `BOARD_MILESTONE_DRIFT` diagnostic? Recommend yes (cheap, surfaces drift early).
-- `aof boards milestone create` UX while deferred: silent no-op with instructions vs hidden until v1.8? Recommend visible-with-instructions (forward-compat signal).
-- Lock state schema extension: can `.aof/lock/packages.json` add `sdkVersion` + `toolsVersion` without a separate schema migration? Depends on v1.1 Phase 9's framework lock metadata decision.
+*Research completed: 2026-05-18*
+*Ready for roadmap: yes*
