@@ -1,5 +1,51 @@
 # Milestones: AOF
 
+## v1.7 — Typed GSD SDK Backend
+
+**Status:** Shipped 2026-05-17
+**Started:** 2026-05-16
+**Completed:** 2026-05-17
+**Phases:** 33-38
+**Plans:** 19
+**Requirements:** 46/46 complete
+**Audit:** Passed with accepted process debt
+
+### Goal
+
+Replace AOF's slash-command-based GSD integration with a typed adapter over `@gsd-build/sdk`, enforce explicit board↔milestone identity, and make board execution SDK-first while preserving runtime CLIs only for interactive fallback workflows.
+
+### Delivered
+
+1. Added a single typed GSD SDK adapter boundary with pinned `@gsd-build/sdk@0.1.0`, surface probing, typed state/roadmap/milestone calls, structured errors, injected tool paths, and dispatch logging.
+2. Migrated board lifecycle and sync to explicit typed milestone binding through `aof boards sync <id> --milestone <id>`, with dry-run JSON, drift detection, v1.6 repair, and pending milestone surfacing.
+3. Extracted the internal `BoardBackend` seam with GSD as the real backend and a null backend for tests, routing lifecycle and execution through backend capabilities.
+4. Added captured SDK fixtures, the real SDK contract suite, SDK-path BDD siblings, v1.6 migration regression coverage, LF fingerprint stability, and PowerShell parity.
+5. Replaced board assignment execution with SDK `runPhase()` results and demoted runtime CLI spawning to explicit fallback-only handling with loud stderr labels.
+6. Added `aof boards doctor`, SDK/tools drift diagnostics, missing-tools checks, lock-state toolchain metadata, Windows environment warnings, and structured `--json` remediation hints.
+
+### Progress
+
+- Phase 33: SDK Adapter Foundation — complete 2026-05-16.
+- Phase 34: Board Lifecycle Migration And Typed Sync — complete 2026-05-17.
+- Phase 35: BoardBackend Seam — complete 2026-05-17.
+- Phase 36: Test Surface Migration And Windows Parity — complete 2026-05-17.
+- Phase 37: Runtime Fallback Hardening And Collapse — complete 2026-05-17.
+- Phase 38: Doctor, Observability, And Milestone Closeout — complete 2026-05-17.
+
+### Archives
+
+- [v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md)
+- [v1.7-REQUIREMENTS.md](milestones/v1.7-REQUIREMENTS.md)
+- [v1.7-MILESTONE-AUDIT.md](milestones/v1.7-MILESTONE-AUDIT.md)
+
+### Known Deferred Items
+
+- Per-phase Nyquist `VALIDATION.md` artifacts are accepted process debt for this milestone; product verification passed through phase verifications, BDD, PowerShell integration, SDK contract tests, supply-chain audit, and SDK boundary checks.
+- Phase summary files do not include `requirements-completed` frontmatter; requirements were still verified through REQUIREMENTS.md traceability and phase verification artifacts.
+- SDK event streaming into the boards UI, single-call SDK milestone creation, additional real backends, global task synchronization, broader runtime support, hosted package discovery, and Rust/native-core migration remain future scope.
+
+---
+
 ## v1.6 — Task Management
 
 **Status:** Shipped 2026-05-15

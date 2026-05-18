@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: Typed GSD SDK Backend
 current_phase: 38
-status: ready_for_milestone_completion
+status: completed
 stopped_at: v1.7 milestone audit passed
-last_updated: "2026-05-18T00:54:21.000+01:00"
-last_activity: 2026-05-17 -- v1.7 milestone audit passed
+last_updated: "2026-05-17T23:56:16.933Z"
+last_activity: 2026-05-17 — Milestone v1.7 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
@@ -20,13 +20,13 @@ progress:
 **Initialized:** 2026-05-06
 **Current milestone:** v1.7 Typed GSD SDK Backend
 **Current phase:** 38
-**Status:** Ready for milestone completion
+**Status:** v1.7 milestone complete
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-16 after starting v1.7)
+See: `.planning/PROJECT.md` (updated 2026-05-17 after shipping v1.7)
 
-**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders. v1.7 makes the GSD board↔milestone bridge typed, swappable, and free of slash-command output scraping.
+**Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
 ## Roadmap Reference
 
@@ -38,29 +38,19 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.7 Typed GSD SDK Backend audit passed. Next action is `$gsd-complete-milestone v1.7` for archive closeout.
+v1.7 Typed GSD SDK Backend is shipped and archived. Next action is `$gsd-new-milestone`.
 
 ## Current Position
 
-Phase: 38 — Doctor, Observability, And Milestone Closeout
-Plan: 3/3 plans complete
-Status: Ready for milestone completion
-Last activity: 2026-05-17 -- v1.7 milestone audit passed
-
-**Phase 38 scope at a glance:**
-
-- Ship `aof boards doctor` as the end-to-end health ladder.
-- Surface SDK/tools version drift and missing tools diagnostics.
-- Add JSON parity and remediation hints across board commands.
-- Record SDK/tools version metadata in lock state.
-- Add Windows-specific doctor checks and close out v1.7.
-
-**Phase 38 covers:** DIAG-01, DIAG-02, DIAG-03, DIAG-04, DIAG-06, MIG-01 (6 requirements).
+Phase: Milestone v1.7 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-05-17 — Milestone v1.7 completed and archived
 
 ## Resume
 
-**Stopped at:** v1.7 milestone audit passed
-**Resume file:** .planning/milestones/v1.7-MILESTONE-AUDIT.md
+**Stopped at:** v1.7 milestone archived
+**Resume file:** .planning/MILESTONES.md
 
 ## Memory
 
@@ -186,12 +176,14 @@ Last activity: 2026-05-17 -- v1.7 milestone audit passed
 
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-05-15:
+Items acknowledged and deferred at milestone close:
 
-| Category | Item | Status |
-|----------|------|--------|
-| validation_debt | Per-phase Nyquist `VALIDATION.md` artifacts for v1.6 were not generated because user chose milestone-level validation for closeout. | accepted |
+| Milestone | Category | Item | Status |
+|-----------|----------|------|--------|
+| v1.6 | validation_debt | Per-phase Nyquist `VALIDATION.md` artifacts were not generated because user chose milestone-level validation for closeout. | accepted |
+| v1.7 | validation_debt | Per-phase Nyquist `VALIDATION.md` artifacts were not generated; product verification passed through phase verifications, BDD, PowerShell integration, SDK contract tests, supply-chain audit, and SDK boundary checks. | accepted |
+| v1.7 | summary_metadata_debt | Phase summary files do not include `requirements-completed` frontmatter; requirements were verified through REQUIREMENTS.md traceability and phase VERIFICATION.md files. | accepted |
 
 ## Operator Next Steps
 
-- Plan Phase 33 SDK Adapter Foundation with `/gsd:plan-phase 33`.
+- Start the next milestone with `$gsd-new-milestone`

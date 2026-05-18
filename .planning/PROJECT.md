@@ -8,35 +8,25 @@ The current codebase provides a Node.js CLI, Claude/Codex render adapters, a set
 
 ## Current State
 
-v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. v1.3 shipped on 2026-05-09 as interactive CLI hardening. v1.4 shipped on 2026-05-11 as the namespaced CLI contract. v1.5 shipped on 2026-05-14 as Runtime Semantics And Workflow Assets. v1.6 shipped on 2026-05-15 as Task Management, adding project-local kanban boards with GSD-backed milestone/phase synchronization, agent assignment, execution records, and a dedicated boards UI.
+v1 shipped on 2026-05-07 as the assistant configuration foundation. v1.1 shipped on 2026-05-08 as the aligned core hardening milestone. v1.2 shipped on 2026-05-09 as the Global Asset Library milestone. v1.3 shipped on 2026-05-09 as interactive CLI hardening. v1.4 shipped on 2026-05-11 as the namespaced CLI contract. v1.5 shipped on 2026-05-14 as Runtime Semantics And Workflow Assets. v1.6 shipped on 2026-05-15 as Task Management. v1.7 shipped on 2026-05-17 as the Typed GSD SDK Backend, replacing brittle slash-command scraping for board sync/execution with typed SDK-backed state, explicit milestone binding, backend capabilities, SDK fixtures, runtime fallback labeling, and board doctor observability.
 
 The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, requirements, and audit snapshots under `.planning/milestones/`.
 
-## Last Shipped Milestone: v1.6 Task Management
+## Last Shipped Milestone: v1.7 Typed GSD SDK Backend
 
-**Shipped:** 2026-05-15
+**Shipped:** 2026-05-17
 
 **Delivered:**
-- File-backed `.aof/boards/<id>/BOARD.json` state with task files, validation, and a generated index/cache.
-- GSD-driven objective breakdown into board task proposals with manual apply.
-- Phase-linked task assignment, execution records, and GSD ceremony command tracking.
-- Dedicated `aof boards ui` surface with kanban columns, board navigation, progress visibility, and GSD sync/repair actions.
-- Hardened GSD-backed board lifecycle: mandatory objectives, blocked manual task creation until sync rules are met, no implicit roadmap import.
-- CLI-only `aof boards remove <id>` cleanup with `--dry-run`, and supply-chain safety defaults / lockfile audit for the new UI dependency surface.
+- Single typed GSD SDK adapter boundary with pinned dependency, surface probing, structured `GsdSdkError` wrapping, injected tool paths, and dispatch logging.
+- Explicit board↔milestone binding for sync, attach, repair, and manual-task gates, including v1.6 board migration and drift detection.
+- Internal `BoardBackend` seam with GSD as the real v1.7 implementation and a null backend for deterministic tests.
+- Captured SDK fixtures, real SDK contract tests, SDK-path BDD coverage, PowerShell parity, and LF-stable board fingerprints.
+- SDK-first board assignment execution through `runPhase()` with typed execution records and fallback-only runtime CLI handling.
+- `aof boards doctor` with toolchain version drift, missing tools, lock metadata, Windows checks, and structured remediation hints.
 
-## Current Milestone: v1.7 Typed GSD SDK Backend
+## Current Milestone
 
-**Goal:** Replace AOF's slash-command-based GSD integration with a typed adapter over `@gsd-build/sdk`, and enforce typed board↔milestone identity so board sync is no longer implicit on `.planning/ROADMAP.md`.
-
-**Target features:**
-- Add `@gsd-build/sdk` as a direct dependency and introduce a single typed adapter (`src/gsd-sdk-adapter.mjs`) covering `loadGsdState`, `analyzeGsdRoadmap`, `assertMilestone`, and `syncBoardFromGsdMilestone`.
-- Enforce typed board sync (`aof boards sync <board-id> --milestone <milestone-id>`) that fails clearly if the milestone is missing, mismatched, or unattached; remove implicit ROADMAP.md-driven sync.
-- Board create/repair must create or attach a backing GSD milestone (driven by the board objective) before any task sync; boards without a milestone surface as pending/incomplete.
-- Replace `src/gsd-runtime.mjs`'s shell-to-claude/codex pipeline with SDK-first execution; runtime CLIs remain a fallback for interactive workflows only.
-- Abstract execution behind a `BoardBackend` interface so a non-GSD backend can be swapped in later, with GSD as the v1 implementation.
-- Pin and verify `@gsd-build/sdk` version; surface a clear diagnostic when the installed `gsd-sdk` CLI version diverges from AOF's bundled SDK.
-- Defer single-call SDK milestone creation from objective until the SDK exposes a milestone-creation runner; v1.7 composes existing typed reads/mutations and hands interactive workflow off cleanly.
-- Defer SDK-event-streamed UI lifecycle output to a follow-up milestone if it cannot be delivered without scope creep.
+No active milestone is open. Start the next milestone with `$gsd-new-milestone` after selecting the next product slice.
 
 ## Core Value
 
@@ -94,14 +84,15 @@ Users can configure assistant skills, commands, agents, rules/instructions, work
 - ✓ `{{skills.*}}` and `{{workflows.*}}` placeholders validate and expand to runtime-specific generated paths — Phase 25
 - ✓ Setup UI supports Simple / Workflow-backed authoring, workflow-backed arguments, unsupported command runtime disabling, and reference insertion — Phase 26
 - ✓ Runtime semantics and workflow-backed behavior are covered by Node BDD, PowerShell BDD, UI build, repo checks, and live GSD-style UAT — Phase 27
+- ✓ AOF uses `@gsd-build/sdk@0.1.0` through a single adapter boundary for GSD state, roadmap, milestone, and phase execution calls — v1.7
+- ✓ Board sync is explicitly bound to a typed GSD milestone and no longer imports `.planning/ROADMAP.md` implicitly — v1.7
+- ✓ GSD-backed board create, attach, repair, sync, validation, and execution route through backend capabilities rather than provider literals — v1.7
+- ✓ Runtime CLI execution is fallback-only for interactive workflows and is labeled when used — v1.7
+- ✓ Board doctor diagnostics expose sync health, migration hints, SDK/tool version drift, missing tools, lock metadata, and Windows environment warnings — v1.7
 
 ### Active
 
-- [ ] Adopt `@gsd-build/sdk` as the typed integration surface for GSD; remove direct dependence on slash-command pipelines.
-- [ ] Provide a single GSD SDK adapter inside AOF that exposes typed reads (state, roadmap, milestone identity) and typed mutations.
-- [ ] Enforce explicit board↔milestone binding for `aof boards sync`, with clear errors when the milestone is missing, mismatched, or unattached.
-- [ ] Make board create/repair drive backing GSD milestone creation or attachment from the board objective before any task sync.
-- [ ] Abstract execution behind a swappable backend interface so a non-GSD backend can be introduced later without rewriting board code.
+No active requirements. The next milestone should define fresh requirements.
 
 ### Out of Scope
 
@@ -188,15 +179,15 @@ v1.4 responds to live first-run and command review findings from v1.3. The exist
 | v1.6 task boards are project-local first | The immediate user workflow is managing tasks for one project deliverable; global aggregation can build on stable project semantics later | Implemented in v1.6 |
 | Task files remain canonical and indexes are generated | This preserves GSD/AOF's file-backed workflow while allowing fast setup UI queries | Implemented in v1.6 |
 | Assigning an agent starts execution automatically | The selected workflow should reduce manual steps once task ownership is explicit | Implemented in v1.6 |
-| v1.7 standardizes on `@gsd-build/sdk` over slash-command shellouts | The SDK exposes typed reads/mutations (`state.json`, `roadmap.analyze`, `state.milestone-switch`, phase.add/batch); slash-command output scraping is brittle, runtime-coupled, and conflates execution with state | Planned for v1.7 |
-| Board sync must be typed against a specific milestone | Implicit ROADMAP.md syncing silently re-shapes board tasks if GSD state moves; explicit `--milestone <id>` binding makes drift detectable and recoverable | Planned for v1.7 |
-| Board create/repair owns GSD milestone attachment | Board objective is the natural seed for a backing milestone; without typed attachment, boards drift into a half-state where sync cannot reason about identity | Planned for v1.7 |
-| GSD is one execution backend, not the only one | Treating GSD behind a backend interface preserves the option to add alternatives (local-only, hosted, custom) without rewriting board lifecycle code | Planned for v1.7 |
-| Runtime CLIs (claude/codex) become fallback only | Interactive workflows that require a real conversation still need a runtime, but typed state/identity operations must not depend on terminal output scraping | Planned for v1.7 |
+| v1.7 standardizes on `@gsd-build/sdk` over slash-command shellouts | The SDK exposes typed reads/mutations and phase execution; slash-command output scraping is brittle, runtime-coupled, and conflates execution with state | Implemented in v1.7 |
+| Board sync must be typed against a specific milestone | Implicit ROADMAP.md syncing silently re-shapes board tasks if GSD state moves; explicit `--milestone <id>` binding makes drift detectable and recoverable | Implemented in v1.7 |
+| Board create/repair owns GSD milestone attachment | Board objective is the natural seed for a backing milestone; without typed attachment, boards drift into a half-state where sync cannot reason about identity | Implemented in v1.7 |
+| GSD is one execution backend, not the only one | Treating GSD behind a backend interface preserves the option to add alternatives without rewriting board lifecycle code | Implemented in v1.7 |
+| Runtime CLIs (claude/codex) become fallback only | Interactive workflows that require a real conversation still need a runtime, but typed state/identity operations must not depend on terminal output scraping | Implemented in v1.7 |
 
 ## Next Milestone Goals
 
-After the typed GSD SDK backend is in place, follow-ups include SDK-event-streamed UI lifecycle output, single-call SDK milestone creation from objective once the SDK exposes a runner, alternative non-GSD execution backends, global task synchronization, broader runtime support, UI-driven asset/package execution, hosted package discovery, external package archive extraction, and Rust/native-core migration.
+Potential follow-ups include SDK-event-streamed UI lifecycle output, single-call SDK milestone creation from objective once the SDK exposes a runner, alternative non-GSD execution backends, global task synchronization, broader runtime support, UI-driven asset/package execution, hosted package discovery, external package archive extraction, and Rust/native-core migration.
 
 ## Evolution
 
@@ -216,4 +207,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-16 after starting v1.7 Typed GSD SDK Backend*
+*Last updated: 2026-05-17 after shipping v1.7 Typed GSD SDK Backend*

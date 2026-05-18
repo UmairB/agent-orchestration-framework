@@ -140,6 +140,53 @@
 
 ---
 
+## Milestone: v1.7 — Typed GSD SDK Backend
+
+**Shipped:** 2026-05-17
+**Phases:** 6 | **Plans:** 19
+
+### What Was Built
+
+- A single typed GSD SDK adapter boundary with pinned `@gsd-build/sdk@0.1.0`, surface probing, structured error wrapping, injected tool paths, and dispatch logging.
+- Explicit typed board↔milestone sync, attach, repair, drift detection, and v1.6 migration behavior.
+- Internal `BoardBackend` routing with GSD as the real backend, null backend tests, and capability-based assignment gates.
+- Captured SDK fixtures, real SDK contract tests, SDK-path BDD scenarios, PowerShell parity, and LF-stable board fingerprints.
+- SDK-first phase execution records with runtime CLI behavior demoted to labeled fallback-only paths.
+- `aof boards doctor` with migration hints, SDK/tools drift diagnostics, missing-tools checks, lock metadata, Windows warnings, and structured JSON remediation.
+
+### What Worked
+
+- Keeping `src/gsd-sdk-adapter.mjs` as the only SDK/tools boundary made the migration auditable and enforceable with a script.
+- Extracting `BoardBackend` after typed sync existed avoided speculative abstraction and kept GSD behavior stable.
+- Captured fixtures plus a real SDK contract suite gave fast unit confidence without losing boundary coverage.
+- Doctor landed last, which let it report over the real adapter, lifecycle, backend, execution, migration, and Windows surfaces instead of inventing parallel logic.
+
+### What Was Inefficient
+
+- Phase summaries still do not include `requirements-completed` frontmatter, so milestone audit has to cross-check requirements through verification files and REQUIREMENTS.md.
+- Nyquist validation remains enabled but `VALIDATION.md` artifacts were not generated for the milestone phases.
+- The automated milestone completion helper created archive files but still required manual ROADMAP, PROJECT, MILESTONES, and retrospective cleanup for a useful closeout record.
+
+### Patterns Established
+
+- GSD integration belongs behind a single adapter plus a narrow internal backend seam.
+- Board sync must bind to explicit typed milestone identity; implicit active-roadmap sync is too easy to corrupt silently.
+- Runtime CLIs are acceptable only for interactive fallback workflows and must label themselves when used.
+- Diagnostic commands should compose existing state surfaces rather than duplicating business logic.
+
+### Key Lessons
+
+1. SDK migrations need both a boundary guard and captured contract fixtures; either one alone leaves a blind spot.
+2. Over-abstraction risk drops sharply when the seam is extracted from working lifecycle code rather than designed in advance.
+3. Closeout should generate summary requirement metadata during execution, not reconstruct it during milestone audit.
+
+### Cost Observations
+
+- Sessions: autonomous phase chain across phases 33-38.
+- Notable: Inline execution was used because Codex subagents were not explicitly requested; verification confidence came from unit, BDD, SDK contract, PowerShell, supply-chain, and boundary checks.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -149,6 +196,7 @@
 | v1 | multiple | 5 | Established `.aof` source-of-truth model and closeout audit discipline |
 | v1.1 | multiple | 5 | Hardened lifecycle, DSL, adapter, package, and BDD parity before expanding runtime scope |
 | v1.5 | multiple | 5 | Aligned generated assets with real Claude/Codex runtime semantics and introduced optional workflow-backed authoring |
+| v1.7 | autonomous | 6 | Replaced board/GSD slash-command scraping with typed SDK integration and backend capabilities |
 
 ### Cumulative Quality
 
@@ -157,6 +205,7 @@
 | v1 | unit, BDD integration, child-process smoke, PowerShell smoke, UI build | v1 requirements 32/32 verified | Node ESM implementation with Vite/React UI |
 | v1.1 | unit, BDD integration, setup UI HTTP BDD, PowerShell BDD parity, UI build where UI changed | v1.1 requirements 22/22 verified | No new external runtime dependency |
 | v1.5 | unit, Node BDD, PowerShell BDD, UI build, repo check, live UAT | v1.5 requirements 24/24 verified | Workflow/reference semantics added within existing Node/React stack |
+| v1.7 | unit, Node BDD, SDK contract, PowerShell BDD, supply-chain audit, SDK boundary check | v1.7 requirements 46/46 verified | Added pinned `@gsd-build/sdk@0.1.0` as the typed GSD boundary |
 
 ### Top Lessons (Verified Across Milestones)
 
@@ -164,3 +213,4 @@
 2. Keep UI execution boundaries explicit until the CLI workflows are stable.
 3. Keep behavior-level BDD scenarios shared across runner implementations to support future rewrites safely.
 4. Model hard runtime capability gaps as validation failures instead of trying to infer equivalent assets.
+5. Keep external tool integrations behind one enforceable boundary with fixture and real-contract tests.
