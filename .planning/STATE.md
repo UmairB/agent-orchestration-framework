@@ -1,30 +1,28 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Typed GSD SDK Backend
-current_phase: 38
-status: completed
-stopped_at: v1.7 milestone audit passed
-last_updated: "2026-05-17T23:56:16.933Z"
-last_activity: 2026-05-17 — Milestone v1.7 completed and archived
+milestone: v1.8
+milestone_name: AOF Boards Dogfood UAT
+status: planning
+last_updated: "2026-05-18T16:39:24.632Z"
+last_activity: 2026-05-18
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 19
-  completed_plans: 19
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # State: AOF
 
 **Initialized:** 2026-05-06
-**Current milestone:** v1.7 Typed GSD SDK Backend
-**Current phase:** 38
-**Status:** v1.7 milestone complete
+**Current milestone:** v1.8 AOF Boards Dogfood UAT
+**Current phase:** Not started
+**Status:** Defining requirements
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-05-17 after shipping v1.7)
+See: `.planning/PROJECT.md` (updated 2026-05-18 after starting v1.8)
 
 **Core value:** Users can configure assistant skills, commands, agents, rules/instructions, workflows, and GSD framework setup once in `.aof/`, then reliably generate the correct Claude Code and Codex files without hand-maintaining assistant-specific folders.
 
@@ -38,23 +36,24 @@ See: `.planning/MILESTONES.md`
 
 ## Current Focus
 
-v1.7 Typed GSD SDK Backend is shipped and archived. Next action is `$gsd-new-milestone`.
+v1.8 AOF Boards Dogfood UAT is being defined. The milestone will dogfood `aof boards` on AOF itself through a real board, full lifecycle UAT, and fixes for confirmed findings.
 
 ## Current Position
 
-Phase: Milestone v1.7 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-05-17 — Milestone v1.7 completed and archived
+Status: Defining requirements
+Last activity: 2026-05-18 — Milestone v1.8 started
 
 ## Resume
 
-**Stopped at:** v1.7 milestone archived
-**Resume file:** .planning/MILESTONES.md
+**Stopped at:** v1.8 milestone requirements definition
+**Resume file:** .planning/REQUIREMENTS.md
 
 ## Memory
 
 - Existing codebase map is available in `.planning/codebase/`.
+- The AOF board milestone bridge is an internal GSD injection skill at `.aof/skills/aof-board-milestone-bridge`; keep it out of `.aof/aof.config.json` resources so AOF apply/install does not render it into `.codex/skills` or `.claude/skills`.
 - GSD researcher and roadmapper subagent types were not installed in this runtime, so initialization research and roadmap creation were performed inline.
 - User selected YOLO mode, standard granularity, parallel execution, git-tracked docs, research enabled, plan check enabled, verifier enabled, and balanced model profile.
 - UI v1 is intentionally config editing only; CLI remains responsible for execution.

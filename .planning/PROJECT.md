@@ -26,7 +26,15 @@ The milestone archives are recorded in `.planning/MILESTONES.md`, with roadmap, 
 
 ## Current Milestone
 
-No active milestone is open. Start the next milestone with `$gsd-new-milestone` after selecting the next product slice.
+## Current Milestone: v1.8 AOF Boards Dogfood UAT
+
+**Goal:** Use `aof boards` on the AOF repo itself as a real planning and execution board, covering the full board lifecycle and turning confirmed UAT findings into fixes.
+
+**Target features:**
+- Exercise the full `aof boards` lifecycle against AOF itself: create/attach/sync a real board, inspect/repair/doctor it, use the boards UI, and assign/run safe work where appropriate.
+- Keep the board as real project state for this milestone rather than disposable test state.
+- Convert concrete UAT failures into requirements, implementation fixes, regression tests, and verification evidence.
+- Validate that v1.7's typed SDK backend, board milestone binding, runtime fallback labeling, and doctor diagnostics hold up in live use.
 
 ## Core Value
 
@@ -92,7 +100,9 @@ Users can configure assistant skills, commands, agents, rules/instructions, work
 
 ### Active
 
-No active requirements. The next milestone should define fresh requirements.
+- [ ] Users can use `aof boards` against the AOF repo itself through a real full-lifecycle dogfood workflow.
+- [ ] Confirmed board UAT failures are captured, fixed, covered by regression tests, and verified before milestone closeout.
+- [ ] The live board remains useful project state for the v1.8 milestone rather than throwaway test output.
 
 ### Out of Scope
 
@@ -207,4 +217,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-17 after shipping v1.7 Typed GSD SDK Backend*
+*Last updated: 2026-05-18 after starting v1.8 AOF Boards Dogfood UAT*
