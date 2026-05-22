@@ -145,3 +145,75 @@ PASS NODE_ON_PATH: node is available on PATH (v22.22.2).
 ## Summary
 
 Happy path complete. Board `coordination` is in `synced` state. UAT-01 (re-attach silently resets synced board state) logged. Doctor reports `ok: true` with 8 PASS and 1 WARN (SDK_VERSION_DRIFT — pre-existing).
+
+---
+
+## Error Path UAT (Disposable Board: test-attach-uat)
+
+### MILESTONE_MISSING_ARG (human)
+
+```
+Usage: aof boards sync <board-id> --milestone <milestone-id>
+```
+Exit code: 1
+
+### MILESTONE_MISSING_ARG (JSON)
+
+```json
+{
+  "ok": false,
+  "code": "MILESTONE_MISSING_ARG",
+  "message": "Usage: aof boards sync <board-id> --milestone <milestone-id>",
+  "next": "aof boards sync test-attach-uat --milestone <milestone-id>"
+}
+```
+Result: PASS — ok: false, code: MILESTONE_MISSING_ARG, next hint present ✓
+
+### MILESTONE_NOT_BOUND (human)
+
+```
+Board test-attach-uat is not bound to a GSD milestone id.
+```
+Exit code: 1
+
+### MILESTONE_NOT_BOUND (JSON)
+
+```json
+{
+  "ok": false,
+  "code": "MILESTONE_NOT_BOUND",
+  "message": "Board test-attach-uat is not bound to a GSD milestone id.",
+  "next": "aof boards milestone attach test-attach-uat --milestone v1.8 --roadmap <path>"
+}
+```
+Result: PASS — ok: false, code: MILESTONE_NOT_BOUND, next hint present ✓
+
+### MILESTONE_ID_MISMATCH (human)
+
+```
+Board test-attach-uat is bound to milestone v1.8, not v1.9.
+```
+Exit code: 1
+
+### MILESTONE_ID_MISMATCH (JSON)
+
+```json
+{
+  "ok": false,
+  "code": "MILESTONE_ID_MISMATCH",
+  "message": "Board test-attach-uat is bound to milestone v1.8, not v1.9.",
+  "expected": "v1.8",
+  "actual": "v1.9",
+  "next": "aof boards sync test-attach-uat --milestone v1.8"
+}
+```
+Result: PASS — ok: false, code: MILESTONE_ID_MISMATCH, expected/actual/next present ✓
+
+### Cleanup
+
+```
+Removed board test-attach-uat
+path: .aof/boards/test-attach-uat
+```
+`aof boards list` confirms: boards: 1 — only `coordination` ✓
+test-attach-uat board removed ✓

@@ -9,17 +9,17 @@ Requirements for the AOF Boards Dogfood UAT milestone. Each requirement maps to 
 
 ### Board Lifecycle
 
-- [ ] **BOARD-01**: User can keep the real `coordination` board as durable AOF project state for v1.8.
-- [ ] **BOARD-02**: User can attach `coordination` to milestone `v1.8` and `.planning/ROADMAP.md`.
-- [ ] **BOARD-03**: User can sync `coordination` from the v1.8 roadmap into phase-backed board tasks.
-- [ ] **BOARD-04**: User receives clear errors when syncing before attach or with the wrong milestone.
+- [x] **BOARD-01**: User can keep the real `coordination` board as durable AOF project state for v1.8.
+- [x] **BOARD-02**: User can attach `coordination` to milestone `v1.8` and `.planning/ROADMAP.md`.
+- [x] **BOARD-03**: User can sync `coordination` from the v1.8 roadmap into phase-backed board tasks.
+- [x] **BOARD-04**: User receives clear errors when syncing before attach or with the wrong milestone.
 
 ### CLI UAT
 
-- [ ] **CLI-01**: User can run `aof boards list/show/validate/index/doctor` against the real board.
-- [ ] **CLI-02**: User can inspect human and JSON output for board health and next actions.
-- [ ] **CLI-03**: User can verify CLI output matches canonical `.aof/boards` state.
-- [ ] **CLI-04**: User can capture command-level UAT evidence with repro steps and outcomes.
+- [x] **CLI-01**: User can run `aof boards list/show/validate/index/doctor` against the real board.
+- [x] **CLI-02**: User can inspect human and JSON output for board health and next actions.
+- [x] **CLI-03**: User can verify CLI output matches canonical `.aof/boards` state.
+- [x] **CLI-04**: User can capture command-level UAT evidence with repro steps and outcomes.
 
 ### Boards UI
 
@@ -37,7 +37,7 @@ Requirements for the AOF Boards Dogfood UAT milestone. Each requirement maps to 
 
 ### Findings And Fixes
 
-- [ ] **FIX-01**: User can record every confirmed UAT finding with ID, repro, severity, and expected behavior.
+- [x] **FIX-01**: User can record every confirmed UAT finding with ID, repro, severity, and expected behavior.
 - [ ] **FIX-02**: User can trace each confirmed finding to a fix, regression test, or explicit deferral.
 - [ ] **FIX-03**: User can verify internal bridge assets do not leak into rendered runtime assets.
 - [ ] **FIX-04**: User can rerun affected UAT steps after fixes and see passing results.
@@ -83,14 +83,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BOARD-01 | Phase 39 | Pending |
-| BOARD-02 | Phase 40 | Pending |
-| BOARD-03 | Phase 40 | Pending |
-| BOARD-04 | Phase 40 | Pending |
-| CLI-01 | Phase 39 | Pending |
-| CLI-02 | Phase 39 | Pending |
-| CLI-03 | Phase 39 | Pending |
-| CLI-04 | Phase 39 | Pending |
+| BOARD-01 | Phase 39 | Complete |
+| BOARD-02 | Phase 40 | Complete |
+| BOARD-03 | Phase 40 | Complete |
+| BOARD-04 | Phase 40 | Complete |
+| CLI-01 | Phase 39 | Complete |
+| CLI-02 | Phase 39 | Complete |
+| CLI-03 | Phase 39 | Complete |
+| CLI-04 | Phase 39 | Complete |
 | UI-01 | Phase 41 | Pending |
 | UI-02 | Phase 41 | Pending |
 | UI-03 | Phase 41 | Pending |
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXEC-02 | Phase 42 | Pending |
 | EXEC-03 | Phase 42 | Pending |
 | EXEC-04 | Phase 42 | Pending |
-| FIX-01 | Phase 39 | Pending |
+| FIX-01 | Phase 39 | Complete |
 | FIX-02 | Phase 43 | Pending |
 | FIX-03 | Phase 43 | Pending |
 | FIX-04 | Phase 43 | Pending |
@@ -109,6 +109,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VER-04 | Phase 43 | Pending |
 
 **Coverage:**
+
 - v1.8 requirements: 24 total
 - Mapped to phases: 24
 - Unmapped: 0
