@@ -1,7 +1,7 @@
 # Roadmap: AOF
 
 **Created:** 2026-05-06
-**Last updated:** 2026-05-18 after v1.8 roadmap creation
+**Last updated:** 2026-05-22 after phase 41 planning
 
 ## Milestones
 
@@ -40,6 +40,7 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 **Requirements:** BOARD-01, CLI-01, CLI-02, CLI-03, CLI-04, FIX-01
 
 **Success criteria:**
+
 1. The `coordination` board is confirmed as real project state with its canonical `.aof/boards/coordination/BOARD.json` preserved.
 2. Baseline CLI output is captured for `aof boards list`, `show`, `validate`, `index`, and `doctor` in human and JSON forms where supported.
 3. Baseline output is compared against canonical board JSON and any mismatches are logged as UAT findings.
@@ -52,6 +53,7 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 **Requirements:** BOARD-02, BOARD-03, BOARD-04
 
 **Success criteria:**
+
 1. `aof boards milestone attach coordination --milestone v1.8 --roadmap .planning/ROADMAP.md` binds the board to the active milestone.
 2. `aof boards sync coordination --milestone v1.8` creates one board task per v1.8 roadmap phase.
 3. Sync before attach, missing milestone arguments, and wrong milestone arguments produce clear human and JSON errors with next actions.
@@ -63,7 +65,15 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 
 **Requirements:** UI-01, UI-02, UI-03, UI-04
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 41-01-PLAN.md — TypeScript UI build + server startup + mount-time API verification
+- [ ] 41-02-PLAN.md — Sync bug fix + sync round-trip + task status mutation round-trip + execution reads
+- [ ] 41-03-PLAN.md — Evidence documentation + UAT log update + requirements completion
+
 **Success criteria:**
+
 1. The boards UI opens for the AOF repo and displays the `coordination` board and synced phase tasks.
 2. UI state for task columns, binding status, execution status, and next actions matches CLI/API/canonical JSON.
 3. Supported task moves or state updates made through the UI persist to canonical board files.
@@ -77,6 +87,7 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 **Requirements:** EXEC-01, EXEC-02, EXEC-03, EXEC-04
 
 **Success criteria:**
+
 1. `aof boards agents` lists configured board agents for the AOF project.
 2. A synced phase task can be assigned to a configured agent when the selected execution path is safe.
 3. Assignment writes an execution record and updates the task summary without corrupting board state.
@@ -90,6 +101,7 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 **Requirements:** FIX-02, FIX-03, FIX-04, VER-01, VER-02, VER-03, VER-04
 
 **Success criteria:**
+
 1. Every confirmed UAT finding is linked to a fix, regression test, or explicit deferral with rationale.
 2. Internal bridge assets are verified not to leak into rendered Claude or Codex runtime assets.
 3. Affected UAT steps are rerun after fixes and recorded as passing or explicitly deferred.
@@ -109,7 +121,7 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 | v1.5 Runtime Semantics And Workflow Assets | 23-27 | 13/13 | 24/24 | Complete | 2026-05-14 |
 | v1.6 Task Management | 28-32 | 15/15 | 30/30 | Complete | 2026-05-15 |
 | v1.7 Typed GSD SDK Backend | 33-38 | 19/19 | 46/46 | Complete | 2026-05-17 |
-| v1.8 AOF Boards Dogfood UAT | 39-43 | 0/0 | 0/24 | Planning | — |
+| v1.8 AOF Boards Dogfood UAT | 39-43 | 3/3 (phase 41) | 0/24 | Planning | — |
 
 ## Next
 
