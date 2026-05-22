@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "id": "phase-42",
+  "boardId": "coordination",
+  "title": "Phase 42: Assignment And Execution UAT",
+  "description": "Validate that synced phase tasks can move from tracking to execution through configured agents, execution records, and safe status updates.",
+  "status": "backlog",
+  "priority": "normal",
+  "deliverable": "Coordination",
+  "refs": {
+    "phase": "42",
+    "roadmap": ".planning/ROADMAP.md"
+  },
+  "history": [
+    {
+      "at": "2026-05-18T16:53:24.928Z",
+      "type": "created",
+      "status": "backlog"
+    },
+    {
+      "at": "2026-05-19T08:27:55.469Z",
+      "type": "synced",
+      "source": "gsd-roadmap"
+    }
+  ],
+  "createdAt": "2026-05-18T16:53:24.928Z",
+  "updatedAt": "2026-05-19T08:27:55.469Z",
+  "goal": "Validate that synced phase tasks can move from tracking to execution through configured agents, execution records, and safe status updates.",
+  "requirements": [
+    "EXEC-01",
+    "EXEC-02",
+    "EXEC-03",
+    "EXEC-04"
+  ],
+  "successCriteria": [
+    "`aof boards agents` lists configured board agents for the AOF project.",
+    "A synced phase task can be assigned to a configured agent when the selected execution path is safe.",
+    "Assignment writes an execution record and updates the task summary without corrupting board state.",
+    "Blocked, waiting, failed, and complete execution statuses can be inspected and updated.",
+    "If full live `runPhase()` execution is unsafe for the selected task, the boundary is documented and a controlled execution-status path is verified instead."
+  ],
+  "dependsOn": []
+}

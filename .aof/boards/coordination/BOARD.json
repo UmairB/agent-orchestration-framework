@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "id": "coordination",
+  "title": "Coordination",
+  "objective": "Plan a coordinated milestone",
+  "status": "active",
+  "columns": [
+    "backlog",
+    "ready",
+    "in_progress",
+    "blocked",
+    "done"
+  ],
+  "executionProvider": "gsd",
+  "defaultExecutionRuntime": "codex",
+  "gsd": {
+    "milestone": {
+      "status": "synced",
+      "binding": {
+        "status": "synced",
+        "sdkVersion": "0.1.0",
+        "fingerprint": "52941f0f4e03601be47c23c8b4df1fcdc2371fdf77cc899e5dda577e8e5fc31a"
+      },
+      "command": "$gsd-new-milestone",
+      "invocation": "$gsd-new-milestone Plan a coordinated milestone",
+      "objective": "Plan a coordinated milestone",
+      "createdAt": "2026-05-18T16:34:54.440Z",
+      "startedAt": "2026-05-18T16:34:54.440Z",
+      "completedAt": "2026-05-18T16:52:39.358Z",
+      "roadmapPath": ".planning/ROADMAP.md",
+      "syncedAt": "2026-05-19T12:59:38.405Z",
+      "id": "v1.8",
+      "phases": [
+        {
+          "phaseId": "39",
+          "title": "Board Dogfood Requirements And Live State Baseline",
+          "goal": "Establish the real `coordination` board as the v1.8 dogfood anchor, capture baseline board health, and prepare UAT evidence tracking before behavior changes.",
+          "requirements": [
+            "BOARD-01",
+            "CLI-01",
+            "CLI-02",
+            "CLI-03",
+            "CLI-04",
+            "FIX-01"
+          ],
+          "successCriteria": [
+            "The `coordination` board is confirmed as real project state with its canonical `.aof/boards/coordination/BOARD.json` preserved.",
+            "Baseline CLI output is captured for `aof boards list`, `show`, `validate`, `index`, and `doctor` in human and JSON forms where supported.",
+            "Baseline output is compared against canonical board JSON and any mismatches are logged as UAT findings.",
+            "A v1.8 UAT log exists with finding IDs, repro steps, severity, expected behavior, and resolution status."
+          ],
+          "dependsOn": []
+        },
+        {
+          "phaseId": "40",
+          "title": "Board Attachment And Sync UAT",
+          "goal": "Attach the live `coordination` board to milestone `v1.8`, sync roadmap phases into phase-backed tasks, and verify milestone binding failures and success paths.",
+          "requirements": [
+            "BOARD-02",
+            "BOARD-03",
+            "BOARD-04"
+          ],
+          "successCriteria": [
+            "`aof boards milestone attach coordination --milestone v1.8 --roadmap .planning/ROADMAP.md` binds the board to the active milestone.",
+            "`aof boards sync coordination --milestone v1.8` creates one board task per v1.8 roadmap phase.",
+            "Sync before attach, missing milestone arguments, and wrong milestone arguments produce clear human and JSON errors with next actions.",
+            "Board doctor reports the expected binding and task sync health after attach/sync."
+          ],
+          "dependsOn": []
+        },
+        {
+          "phaseId": "41",
+          "title": "Boards UI Dogfood",
+          "goal": "Use `aof boards ui` against the real board and verify the UI/API surface stays consistent with CLI output and canonical board files.",
+          "requirements": [
+            "UI-01",
+            "UI-02",
+            "UI-03",
+            "UI-04"
+          ],
+          "successCriteria": [
+            "The boards UI opens for the AOF repo and displays the `coordination` board and synced phase tasks.",
+            "UI state for task columns, binding status, execution status, and next actions matches CLI/API/canonical JSON.",
+            "Supported task moves or state updates made through the UI persist to canonical board files.",
+            "Repair, sync, assignment, and incomplete-state feedback is actionable when surfaced in the UI.",
+            "Any confirmed UI defects receive targeted regression coverage and `npm run ui:build` verification."
+          ],
+          "dependsOn": []
+        },
+        {
+          "phaseId": "42",
+          "title": "Assignment And Execution UAT",
+          "goal": "Validate that synced phase tasks can move from tracking to execution through configured agents, execution records, and safe status updates.",
+          "requirements": [
+            "EXEC-01",
+            "EXEC-02",
+            "EXEC-03",
+            "EXEC-04"
+          ],
+          "successCriteria": [
+            "`aof boards agents` lists configured board agents for the AOF project.",
+            "A synced phase task can be assigned to a configured agent when the selected execution path is safe.",
+            "Assignment writes an execution record and updates the task summary without corrupting board state.",
+            "Blocked, waiting, failed, and complete execution statuses can be inspected and updated.",
+            "If full live `runPhase()` execution is unsafe for the selected task, the boundary is documented and a controlled execution-status path is verified instead."
+          ],
+          "dependsOn": []
+        },
+        {
+          "phaseId": "43",
+          "title": "UAT Findings Hardening And Closeout",
+          "goal": "Resolve confirmed dogfood findings, verify the complete v1.8 board workflow, and close the milestone with traceable evidence.",
+          "requirements": [
+            "FIX-02",
+            "FIX-03",
+            "FIX-04",
+            "VER-01",
+            "VER-02",
+            "VER-03",
+            "VER-04"
+          ],
+          "successCriteria": [
+            "Every confirmed UAT finding is linked to a fix, regression test, or explicit deferral with rationale.",
+            "Internal bridge assets are verified not to leak into rendered Claude or Codex runtime assets.",
+            "Affected UAT steps are rerun after fixes and recorded as passing or explicitly deferred.",
+            "Focused board unit/integration tests pass after fixes.",
+            "UI build/API verification and PowerShell parity checks run when touched surfaces require them.",
+            "The milestone closes with a UAT report, requirement coverage, roadmap traceability, and archive-ready planning artifacts."
+          ],
+          "dependsOn": []
+        }
+      ],
+      "phaseCount": 5
+    },
+    "taskCreation": {
+      "mode": "gsd-phase",
+      "addPhaseCommand": "$gsd-phase add",
+      "syncCommand": "aof boards sync coordination --milestone v1.8",
+      "syncBlockedReason": null
+    }
+  },
+  "createdAt": "2026-05-18T16:34:54.440Z",
+  "updatedAt": "2026-05-19T12:59:38.405Z"
+}

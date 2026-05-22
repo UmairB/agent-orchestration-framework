@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "id": "phase-43",
+  "boardId": "coordination",
+  "title": "Phase 43: UAT Findings Hardening And Closeout",
+  "description": "Resolve confirmed dogfood findings, verify the complete v1.8 board workflow, and close the milestone with traceable evidence.",
+  "status": "backlog",
+  "priority": "normal",
+  "deliverable": "Coordination",
+  "refs": {
+    "phase": "43",
+    "roadmap": ".planning/ROADMAP.md"
+  },
+  "history": [
+    {
+      "at": "2026-05-18T16:53:24.929Z",
+      "type": "created",
+      "status": "backlog"
+    },
+    {
+      "at": "2026-05-19T08:27:55.472Z",
+      "type": "synced",
+      "source": "gsd-roadmap"
+    }
+  ],
+  "createdAt": "2026-05-18T16:53:24.929Z",
+  "updatedAt": "2026-05-19T08:27:55.472Z",
+  "goal": "Resolve confirmed dogfood findings, verify the complete v1.8 board workflow, and close the milestone with traceable evidence.",
+  "requirements": [
+    "FIX-02",
+    "FIX-03",
+    "FIX-04",
+    "VER-01",
+    "VER-02",
+    "VER-03",
+    "VER-04"
+  ],
+  "successCriteria": [
+    "Every confirmed UAT finding is linked to a fix, regression test, or explicit deferral with rationale.",
+    "Internal bridge assets are verified not to leak into rendered Claude or Codex runtime assets.",
+    "Affected UAT steps are rerun after fixes and recorded as passing or explicitly deferred.",
+    "Focused board unit/integration tests pass after fixes.",
+    "UI build/API verification and PowerShell parity checks run when touched surfaces require them.",
+    "The milestone closes with a UAT report, requirement coverage, roadmap traceability, and archive-ready planning artifacts."
+  ],
+  "dependsOn": []
+}

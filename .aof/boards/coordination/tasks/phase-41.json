@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "id": "phase-41",
+  "boardId": "coordination",
+  "title": "Phase 41: Boards UI Dogfood",
+  "description": "Use `aof boards ui` against the real board and verify the UI/API surface stays consistent with CLI output and canonical board files.",
+  "status": "backlog",
+  "priority": "normal",
+  "deliverable": "Coordination",
+  "refs": {
+    "phase": "41",
+    "roadmap": ".planning/ROADMAP.md"
+  },
+  "history": [
+    {
+      "at": "2026-05-18T16:53:24.926Z",
+      "type": "created",
+      "status": "backlog"
+    },
+    {
+      "at": "2026-05-18T18:00:06.973Z",
+      "type": "status_changed",
+      "from": "backlog",
+      "to": "in_progress"
+    },
+    {
+      "at": "2026-05-18T18:00:44.333Z",
+      "type": "status_changed",
+      "from": "in_progress",
+      "to": "backlog"
+    },
+    {
+      "at": "2026-05-19T08:27:55.465Z",
+      "type": "synced",
+      "source": "gsd-roadmap"
+    }
+  ],
+  "createdAt": "2026-05-18T16:53:24.926Z",
+  "updatedAt": "2026-05-19T08:27:55.465Z",
+  "goal": "Use `aof boards ui` against the real board and verify the UI/API surface stays consistent with CLI output and canonical board files.",
+  "requirements": [
+    "UI-01",
+    "UI-02",
+    "UI-03",
+    "UI-04"
+  ],
+  "successCriteria": [
+    "The boards UI opens for the AOF repo and displays the `coordination` board and synced phase tasks.",
+    "UI state for task columns, binding status, execution status, and next actions matches CLI/API/canonical JSON.",
+    "Supported task moves or state updates made through the UI persist to canonical board files.",
+    "Repair, sync, assignment, and incomplete-state feedback is actionable when surfaced in the UI.",
+    "Any confirmed UI defects receive targeted regression coverage and `npm run ui:build` verification."
+  ],
+  "dependsOn": []
+}
