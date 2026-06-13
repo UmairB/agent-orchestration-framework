@@ -1,5 +1,5 @@
 import { appendFile, mkdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +109,9 @@ export async function runGsdPhase(projectDir, phaseNumber, options = {}) {
     ...(options.maxBudgetUsd ? { maxBudgetUsd: options.maxBudgetUsd } : {}),
     ...(options.maxTurns ? { maxTurns: options.maxTurns } : {})
   });
+  if (typeof options.onEvent === "function" && typeof gsd.onEvent === "function") {
+    gsd.onEvent(options.onEvent);
+  }
 
   try {
     const result = await gsd.runPhase(String(phaseNumber), phaseRunOptions(options));
@@ -313,7 +316,7 @@ function phaseRunOptions(options = {}) {
 }
 
 function phaseRunnerFailure(result) {
-  if (!result || result.success !== false) return null;
+  if (!result) return { subtype: "phase_result_missing", messages: ["No GSD phase result was returned."] };
   for (const step of result.steps ?? []) {
     for (const plan of step.planResults ?? []) {
       if (plan?.success === false && plan.error?.subtype) {
@@ -323,11 +326,15 @@ function phaseRunnerFailure(result) {
         };
       }
     }
-    if (step?.success === false && step.error) {
-      return { subtype: "phase_step_failed", messages: [step.error] };
+    if (step?.success === false) {
+      return {
+        subtype: "phase_step_failed",
+        messages: [step.error ?? `${step.step ?? "GSD phase step"} failed.`]
+      };
     }
   }
-  return { subtype: "phase_failed", messages: [] };
+  if (result.success === false) return { subtype: "phase_failed", messages: [] };
+  return null;
 }
 
 async function callTools(projectRoot, tools, command, args = [], options = {}) {
@@ -372,7 +379,8 @@ async function resolveGsdToolsPath(projectRoot) {
       .flatMap((item) => [item.resolvedToolsPath, item.gsdToolsPath]),
     ...(Array.isArray(lock?.frameworkInstallAttempts) ? lock.frameworkInstallAttempts : [])
       .filter((item) => item?.framework === "gsd" && item?.status === "success")
-      .flatMap((item) => [item.resolvedToolsPath, item.gsdToolsPath])
+      .flatMap((item) => [item.resolvedToolsPath, item.gsdToolsPath]),
+    projectLocalGsdToolsCandidates(projectRoot)
   ]);
 }
 
@@ -381,6 +389,13 @@ function firstPathCandidate(candidates) {
     if (typeof candidate === "string" && candidate.trim()) return path.resolve(candidate);
   }
   return null;
+}
+
+function projectLocalGsdToolsCandidates(projectRoot) {
+  return [
+    path.join(projectRoot, ".codex", "get-shit-done", "bin", "gsd-tools.cjs"),
+    path.join(projectRoot, ".claude", "get-shit-done", "bin", "gsd-tools.cjs")
+  ].filter((candidate) => existsSync(candidate));
 }
 
 async function recordGsdToolchainMetadata(projectRoot, metadata) {

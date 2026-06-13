@@ -43,5 +43,11 @@
       },
       "skipped": false
     }
-  ]
+  ],
+  "gsd": {
+    "sdkVersion": "0.1.0",
+    "toolsVersion": "1.42.2",
+    "toolsPath": "C:\\Source\\umair\\aof\\.codex\\get-shit-done\\bin\\gsd-tools.cjs",
+    "checkedAt": "2026-05-22T11:12:06.524Z"
+  }
 }

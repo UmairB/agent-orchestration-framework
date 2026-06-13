@@ -23,10 +23,10 @@ Requirements for the AOF Boards Dogfood UAT milestone. Each requirement maps to 
 
 ### Boards UI
 
-- [ ] **UI-01**: User can open `aof boards ui` and view the real `coordination` board.
-- [ ] **UI-02**: User can verify UI board/task/binding state matches CLI and API state.
-- [ ] **UI-03**: User can move tasks or update visible board state through the UI where supported.
-- [ ] **UI-04**: User can see actionable repair/sync/assignment feedback when board state is incomplete or unhealthy.
+- [x] **UI-01**: User can open `aof boards ui` and view the real `coordination` board.
+- [x] **UI-02**: User can verify UI board/task/binding state matches CLI and API state.
+- [x] **UI-03**: User can move tasks or update visible board state through the UI where supported.
+- [x] **UI-04**: User can see actionable repair/sync/assignment feedback when board state is incomplete or unhealthy.
 
 ### Assignment And Execution
 
@@ -91,10 +91,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLI-02 | Phase 39 | Complete |
 | CLI-03 | Phase 39 | Complete |
 | CLI-04 | Phase 39 | Complete |
-| UI-01 | Phase 41 | Pending |
-| UI-02 | Phase 41 | Pending |
-| UI-03 | Phase 41 | Pending |
-| UI-04 | Phase 41 | Pending |
+| UI-01 | Phase 41 | Complete |
+| UI-02 | Phase 41 | Complete |
+| UI-03 | Phase 41 | Complete |
+| UI-04 | Phase 41 | Complete |
 | EXEC-01 | Phase 42 | Pending |
 | EXEC-02 | Phase 42 | Pending |
 | EXEC-03 | Phase 42 | Pending |

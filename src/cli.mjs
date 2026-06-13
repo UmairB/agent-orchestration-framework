@@ -377,8 +377,18 @@ async function boardsMilestoneStatusCommand(args) {
   }
   if (milestone?.status === "waiting_for_user") {
     console.log("");
-    console.log(`next: aof boards milestone answer ${board.id} --text "<answer>"`);
+    if (hasMilestoneRuntimeSession(milestone)) {
+      console.log(`next: aof boards milestone answer ${board.id} --text "<answer>"`);
+    } else if (milestone?.invocation || milestone?.command) {
+      console.log(`next: ${milestone.invocation ?? milestone.command}`);
+    }
   }
+}
+
+function hasMilestoneRuntimeSession(milestone) {
+  if (milestone?.runtime || milestone?.lastOutput) return true;
+  const turns = milestone?.session?.turns;
+  return Array.isArray(turns) && turns.some((turn) => turn?.role === "runtime");
 }
 
 async function boardsMilestoneAnswerCommand(args) {

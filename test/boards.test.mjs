@@ -87,6 +87,7 @@ async function createsBoardsAndArchives() {
     const boards = await listBoards(targetDir, { useIndex: false });
     assert.deepEqual(boards.map((board) => board.id), ["docs", "release"]);
     assert.equal(boards.find((board) => board.id === "release").objective, "Ship v1");
+    assert.equal(await exists(path.join(targetDir, ".aof", "skills", "aof-board-milestone-bridge", "SKILL.md")), false);
 
     await archiveBoard(targetDir, "docs");
     assert.deepEqual((await listBoards(targetDir, { useIndex: false })).map((board) => board.id), ["release"]);
@@ -109,6 +110,8 @@ async function addsAndMovesTasks() {
       deliverable: "Board foundation",
       refs: { phase: "28", plan: "28-03-PLAN.md" }
     });
+    const ready = await moveTask(targetDir, "delivery", "wire-api", "Ready");
+    assert.equal(ready.status, "ready");
     await moveTask(targetDir, "delivery", "wire-api", "in_progress");
     await editTask(targetDir, "delivery", "wire-api", {
       title: "Wire board API",
@@ -124,7 +127,10 @@ async function addsAndMovesTasks() {
     assert.equal(board.tasks[0].priority, "urgent");
     assert.equal(board.tasks[0].history[0].type, "created");
     assert.equal(board.tasks[0].history[1].type, "status_changed");
-    assert.equal(board.tasks[0].history[2].type, "edited");
+    assert.equal(board.tasks[0].history[1].to, "ready");
+    assert.equal(board.tasks[0].history[2].type, "status_changed");
+    assert.equal(board.tasks[0].history[2].to, "in_progress");
+    assert.equal(board.tasks[0].history[3].type, "edited");
     assert.deepEqual(board.tasks[0].refs, { phase: "31", plan: "31-02-PLAN.md" });
   } finally {
     await rm(targetDir, { recursive: true, force: true });
@@ -142,9 +148,25 @@ async function syncsGsdBackedBoards() {
       "",
       "**Goal:** Capture the requested execution runtime.",
       "",
+      "**Requirements:** EXEC-01, EXEC-02",
+      "",
+      "**Success criteria:**",
+      "",
+      "1. Runtime input is captured in canonical board state.",
+      "2. Invalid runtime input is rejected with a clear error.",
+      "",
       "### Phase 41: Roadmap Sync",
       "",
-      "**Goal:** Keep board tasks aligned to roadmap phases."
+      "**Goal:** Keep board tasks aligned to roadmap phases.",
+      "",
+      "**Depends on:** Phase 40 (runtime intake must exist first).",
+      "",
+      "**Requirements:** BOARD-01",
+      "",
+      "**Success criteria:**",
+      "",
+      "1. Sync creates one task per roadmap phase.",
+      "2. Sync preserves existing task execution state."
     ].join("\n"), "utf8");
     await createBoard(targetDir, {
       id: "delivery",
@@ -213,6 +235,104 @@ async function syncsGsdBackedBoards() {
     const board = await getBoard(targetDir, "delivery");
     assert.deepEqual(board.tasks.map((task) => task.id), ["phase-40", "phase-41"]);
     assert.equal(board.tasks[0].refs.phase, "40");
+    assert.equal(board.tasks[0].goal, "Capture the requested execution runtime.");
+    assert.deepEqual(board.tasks[0].requirements, ["EXEC-01", "EXEC-02"]);
+    assert.deepEqual(board.tasks[0].successCriteria, [
+      "Runtime input is captured in canonical board state.",
+      "Invalid runtime input is rejected with a clear error."
+    ]);
+    assert.deepEqual(board.tasks[0].dependsOn, []);
+    assert.equal(board.tasks[1].goal, "Keep board tasks aligned to roadmap phases.");
+    assert.deepEqual(board.tasks[1].requirements, ["BOARD-01"]);
+    assert.deepEqual(board.tasks[1].successCriteria, [
+      "Sync creates one task per roadmap phase.",
+      "Sync preserves existing task execution state."
+    ]);
+    assert.deepEqual(board.tasks[1].dependsOn, ["40"]);
+    const readyTask = await moveTask(targetDir, "delivery", "phase-40", "Ready");
+    assert.equal(readyTask.status, "ready");
+    await assert.rejects(
+      () => moveTask(targetDir, "delivery", "phase-40", "in_progress"),
+      (error) => error.code === "BOARD_TASK_ASSIGNMENT_REQUIRED"
+        && /cannot move to in_progress without an assigned agent/.test(error.message)
+    );
+
+    const runningAt = "2026-05-19T12:49:14.571Z";
+    const executionRelPath = ".aof/boards/delivery/executions/phase-40.json";
+    const taskPath = path.join(targetDir, ".aof", "boards", "delivery", "tasks", "phase-40.json");
+    const executionPath = path.join(targetDir, ".aof", "boards", "delivery", "executions", "phase-40.json");
+    await mkdir(path.dirname(executionPath), { recursive: true });
+    await writeFile(taskPath, `${JSON.stringify({
+      ...readyTask,
+      status: "in_progress",
+      assignedAgent: {
+        id: "claude",
+        description: "claude execution runtime.",
+        assignedAt: runningAt
+      },
+      execution: {
+        provider: "gsd",
+        status: "running",
+        phase: "40",
+        executionPath: executionRelPath,
+        updatedAt: runningAt
+      },
+      history: [
+        ...(readyTask.history ?? []),
+        {
+          at: runningAt,
+          type: "assigned",
+          agentId: "claude",
+          provider: "gsd",
+          executionStatus: "running",
+          boardStatus: "in_progress"
+        }
+      ],
+      updatedAt: runningAt
+    }, null, 2)}\n`, "utf8");
+    await writeFile(executionPath, `${JSON.stringify({
+      version: 1,
+      boardId: "delivery",
+      taskId: "phase-40",
+      provider: "gsd",
+      status: "running",
+      assignedAgent: {
+        id: "claude",
+        description: "claude execution runtime."
+      },
+      phase: "40",
+      commands: ["$gsd-discuss-phase 40", "$gsd-plan-phase 40", "$gsd-execute-phase 40"],
+      attempts: [
+        {
+          id: "attempt-1",
+          status: "running",
+          startedAt: runningAt,
+          commands: ["$gsd-discuss-phase 40", "$gsd-plan-phase 40", "$gsd-execute-phase 40"]
+        }
+      ],
+      logs: [],
+      createdAt: runningAt,
+      updatedAt: runningAt
+    }, null, 2)}\n`, "utf8");
+    await writeFile(path.join(targetDir, ".planning", "STATE.md"), [
+      "---",
+      "current_phase: 41",
+      "status: ready_to_execute",
+      "stopped_at: phase 40 complete - phase 41 ready to plan",
+      "---",
+      ""
+    ].join("\n"), "utf8");
+
+    const completedSync = await syncBoardFromGsdRoadmap(targetDir, "delivery", { milestoneId: "v1-7", ...sdkOptions });
+    assert.ok(completedSync.updated.some((task) => task.id === "phase-40"));
+    const completedBoard = await getBoard(targetDir, "delivery");
+    const completedTask = completedBoard.tasks.find((task) => task.id === "phase-40");
+    assert.equal(completedTask.status, "done");
+    assert.equal(completedTask.execution.status, "complete");
+    assert.equal(completedTask.assignedAgent.id, "claude");
+    const completedExecution = JSON.parse(await readFile(executionPath, "utf8"));
+    assert.equal(completedExecution.status, "complete");
+    assert.equal(completedExecution.attempts[0].status, "complete");
 
     const legacyBoardPath = path.join(targetDir, ".aof", "boards", "legacy", "BOARD.json");
     await mkdir(path.dirname(legacyBoardPath), { recursive: true });
@@ -268,6 +388,11 @@ async function startsGsdMilestoneProvisioning() {
     assert.equal(result.board.gsd.milestone.roadmapPath, null);
     assert.equal(result.board.gsd.milestone.completedAt, null);
     assert.equal(result.board.gsd.taskCreation.syncBlockedReason, "milestone-incomplete");
+    assert.equal(result.internalSkill.id, "aof-board-milestone-bridge");
+    assert.equal(await exists(path.join(targetDir, ".aof", "skills", "aof-board-milestone-bridge", "SKILL.md")), true);
+    assert.equal(await exists(path.join(targetDir, ".aof", "skills", "aof-board-milestone-bridge", "scripts", "attach-and-sync.mjs")), true);
+    const planningConfig = JSON.parse(await readFile(path.join(targetDir, ".planning", "config.json"), "utf8"));
+    assert.deepEqual(planningConfig.agent_skills["gsd-roadmapper"], [".aof/skills/aof-board-milestone-bridge"]);
 
     await assert.rejects(
       () => syncBoardFromGsdRoadmap(targetDir, "uat"),

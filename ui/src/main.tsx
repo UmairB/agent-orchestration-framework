@@ -1,7 +1,8 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import type * as React from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { Archive, Bot, CheckCircle2, Code2, Columns3, FileText, Globe2, Library, Link2, ListChecks, PlayCircle, Plus, RefreshCw, Save, Settings2, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
+import { Archive, Bot, CheckCircle2, Code2, FileText, Globe2, Library, Link2, ListChecks, Pencil, PlayCircle, Plus, RefreshCw, Save, Send, Settings2, ShieldAlert, Sparkles, Terminal, Trash2, X } from "lucide-react";
 import "./index.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -127,14 +128,51 @@ type BoardTask = {
   id: string;
   boardId: string;
   title: string;
+  goal?: string | null;
   description?: string;
   status: BoardStatus;
   priority?: string;
   deliverable?: string;
+  requirements?: string[];
+  successCriteria?: string[];
+  dependsOn?: string[];
+  dependencyText?: string | null;
   refs?: Record<string, unknown>;
   assignedAgent?: { id: string; description?: string; assignedAt?: string } | null;
-  execution?: { provider: string; status: ExecutionStatus; phase?: string; updatedAt?: string } | null;
+  execution?: ExecutionSummary | null;
   history?: Array<Record<string, unknown>>;
+};
+
+type ExecutionSummary = {
+  provider: string;
+  status: ExecutionStatus;
+  phase?: string;
+  updatedAt?: string;
+  resume?: {
+    pendingGate?: ExecutionGate | null;
+    lastGateDecision?: { gateId: string; decision: string; answeredAt: string };
+  };
+};
+
+type ExecutionGate = {
+  id: string;
+  kind: string;
+  step?: string;
+  message?: string;
+  choices?: string[];
+  createdAt?: string;
+};
+
+type ExecutionEvent = {
+  at: string;
+  type: string;
+  message?: string;
+  status?: string;
+  phase?: string;
+  agentId?: string;
+  decision?: string;
+  gate?: ExecutionGate;
+  event?: Record<string, unknown>;
 };
 
 type BoardAgent = {
@@ -444,31 +482,7 @@ function App() {
 function BoardsApp() {
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-[280px_minmax(0,1fr)] max-[860px]:grid-cols-1">
-        <aside className="border-r border-border bg-sidebar p-5 max-[860px]:border-b max-[860px]:border-r-0">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Columns3 className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold tracking-normal">AOF Boards</h1>
-              <p className="mono text-xs text-muted-foreground">Project task management</p>
-            </div>
-          </div>
-          <nav className="space-y-1">
-            <button
-              type="button"
-              className="flex h-10 w-full items-center justify-between rounded-md bg-primary px-3 text-left text-sm text-primary-foreground"
-            >
-              <span className="flex items-center gap-2"><Columns3 className="h-4 w-4" aria-hidden="true" />Boards</span>
-            </button>
-          </nav>
-          <div className="mt-6 rounded-md border border-border bg-background p-3">
-            <p className="text-sm text-muted-foreground">Manage board tasks, assignments, and execution state.</p>
-          </div>
-        </aside>
-        <BoardsPanel />
-      </div>
+      <BoardsPanel />
     </main>
   );
 }
@@ -483,6 +497,8 @@ function BoardsPanel() {
   const [showBoardForm, setShowBoardForm] = useState(false);
   const [boardDraft, setBoardDraft] = useState<{ id: string; title: string; objective: string; defaultExecutionRuntime: RuntimeId }>({ id: "", title: "", objective: "", defaultExecutionRuntime: "codex" });
   const [milestoneAnswer, setMilestoneAnswer] = useState("");
+  const [consoleTask, setConsoleTask] = useState<BoardTask | null>(null);
+  const [syncingBoardId, setSyncingBoardId] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshBoards();
@@ -493,6 +509,7 @@ function BoardsPanel() {
   }, [selectedBoardId]);
 
   async function refreshBoards(nextSelectedId = selectedBoardId) {
+    await fetch("/api/boards/index", { method: "PUT" });
     const [boardsResponse, agentsResponse, validateResponse] = await Promise.all([
       fetch("/api/boards"),
       fetch("/api/boards/agents"),
@@ -546,18 +563,27 @@ function BoardsPanel() {
 
   async function syncBoardFromRoadmap() {
     if (!board) return;
-    const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/sync`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ milestone: board.gsd?.milestone?.id })
-    });
-    const payload = await response.json();
-    if (!response.ok || payload.ok === false) {
-      setMessage(payload.error ?? "Roadmap sync failed");
-      return;
+    if (syncingBoardId === board.id) return;
+    const boardId = board.id;
+    setSyncingBoardId(boardId);
+    setMessage("Syncing GSD phases...");
+    try {
+      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/sync`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ milestone: board.gsd?.milestone?.id })
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) {
+        setMessage(payload.error ?? "Roadmap sync failed");
+        return;
+      }
+      const updated = Array.isArray(payload.updated) ? payload.updated.length : 0;
+      setMessage(`Synced ${payload.created.length} new and ${updated} updated task${payload.created.length + updated === 1 ? "" : "s"} from ${payload.phases.length} GSD phase${payload.phases.length === 1 ? "" : "s"}.`);
+      await refreshBoards(boardId);
+    } finally {
+      setSyncingBoardId((current) => current === boardId ? null : current);
     }
-    setMessage(`Synced ${payload.created.length} task${payload.created.length === 1 ? "" : "s"} from ${payload.phases.length} GSD phase${payload.phases.length === 1 ? "" : "s"}.`);
-    await refreshBoards(board.id);
   }
 
   async function repairBoardMilestone() {
@@ -612,6 +638,10 @@ function BoardsPanel() {
 
   async function assignTask(task: BoardTask, agentId: string) {
     if (!board || !agentId) return;
+    if (isTaskAssignmentLocked(task)) {
+      setMessage(`${task.id} is ${statusLabel(task.status)}; wait for execution to finish before changing agent assignment.`);
+      return;
+    }
     const response = await fetch(`/api/boards/${encodeURIComponent(board.id)}/tasks/${encodeURIComponent(task.id)}/assignment`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -665,20 +695,23 @@ function BoardsPanel() {
   }
 
   const visibleDiagnostics = diagnostics.filter((item) => item.severity !== "info");
-  const columns: BoardStatus[] = board?.columns ?? ["backlog", "ready", "in_progress", "blocked", "done"];
+  const gsdBacked = board?.executionProvider === "gsd";
+  const configuredColumns: BoardStatus[] = board?.columns ?? ["backlog", "ready", "in_progress", "blocked", "done"];
+  const columns = visibleBoardColumns(configuredColumns, gsdBacked);
   const kanbanColumns = columns.map((status) => ({ id: status, name: statusLabel(status) }));
   const kanbanTasks: BoardKanbanItem[] = board?.tasks.map((task) => ({
     id: task.id,
     name: task.title,
-    column: task.status,
+    column: visibleBoardStatus(task.status, gsdBacked),
     task
   })) ?? [];
+  const isSyncingBoard = Boolean(board && syncingBoardId === board.id);
 
   return (
-    <section className="min-h-screen min-w-0 bg-background">
+    <section className="min-h-screen w-full min-w-0 overflow-hidden bg-background">
       {message ? <p className="mb-4 rounded-md border border-border bg-card p-3 text-sm">{message}</p> : null}
 
-      <div className="grid min-h-screen min-w-0 grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-1">
+      <div className="grid min-h-screen w-full min-w-0 grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-1">
         <aside className="border-r border-border bg-sidebar p-4 max-[980px]:border-b max-[980px]:border-r-0">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -742,7 +775,7 @@ function BoardsPanel() {
           </Button>
         </aside>
 
-        <div className="min-w-0 p-5">
+        <div className="min-w-0 overflow-hidden p-5">
           {!board ? (
             <div className="rounded-md border border-dashed border-border p-8 text-sm text-muted-foreground">Select or create a board.</div>
           ) : (
@@ -785,9 +818,9 @@ function BoardsPanel() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="secondary" onClick={() => void syncBoardFromRoadmap()}>
-                        <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-                        Sync Phases
+                      <Button type="button" variant="secondary" onClick={() => void syncBoardFromRoadmap()} disabled={isSyncingBoard} aria-busy={isSyncingBoard}>
+                        <RefreshCw className={`mr-2 h-4 w-4 ${isSyncingBoard ? "animate-spin" : ""}`} aria-hidden="true" />
+                        {isSyncingBoard ? "Syncing..." : "Sync Phases"}
                       </Button>
                       {board.gsd?.milestone?.roadmapPath ? null : (
                         <Button type="button" variant="secondary" onClick={() => void repairBoardMilestone()}>
@@ -799,6 +832,9 @@ function BoardsPanel() {
                   </div>
                   {board.gsd?.milestone?.lastOutput ? (
                     <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">{board.gsd.milestone.lastOutput}</pre>
+                  ) : null}
+                  {isSyncingBoard ? (
+                    <p className="text-xs text-muted-foreground" role="status" aria-live="polite">Refreshing roadmap phases and task state...</p>
                   ) : null}
                   {board.gsd?.milestone?.status === "waiting_for_user" ? (
                     <form className="flex flex-col gap-2 sm:flex-row" onSubmit={answerBoardMilestone}>
@@ -834,9 +870,11 @@ function BoardsPanel() {
                                 task={item.task}
                                 agents={agents}
                                 columns={columns}
+                                gsdBacked={gsdBacked}
                                 onMove={moveTask}
                                 onAssign={assignTask}
                                 onSave={saveTask}
+                                onOpenConsole={setConsoleTask}
                               />
                             </KanbanCard>
                           )}
@@ -850,66 +888,481 @@ function BoardsPanel() {
           )}
         </div>
       </div>
+      {board && consoleTask ? (
+        <ExecutionConsoleModal
+          boardId={board.id}
+          task={consoleTask}
+          onClose={() => setConsoleTask(null)}
+          onRefresh={() => void refreshBoards(board.id)}
+        />
+      ) : null}
     </section>
   );
 }
 
-function TaskBoardCard({ task, agents, columns, onMove, onAssign, onSave }: {
+function TaskBoardCard({ task, agents, columns, gsdBacked, onMove, onAssign, onSave, onOpenConsole }: {
   task: BoardTask;
   agents: BoardAgent[];
   columns: BoardStatus[];
+  gsdBacked: boolean;
+  onMove: (task: BoardTask, status: BoardStatus) => Promise<void>;
+  onAssign: (task: BoardTask, agentId: string) => Promise<void>;
+  onSave: (task: BoardTask, input: { title: string; priority: string; deliverable: string }) => Promise<void>;
+  onOpenConsole: (task: BoardTask) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [agentId, setAgentId] = useState(task.assignedAgent?.id ?? "");
+  const phase = typeof task.refs?.phase === "string" ? task.refs.phase : "";
+  useEffect(() => {
+    setAgentId(task.assignedAgent?.id ?? "");
+  }, [task.assignedAgent?.id]);
+  function stopCardDrag(event: React.SyntheticEvent) {
+    event.stopPropagation();
+  }
+  function assignFromSelect(nextAgentId: string) {
+    setAgentId(nextAgentId);
+    if (!nextAgentId || nextAgentId === task.assignedAgent?.id) return;
+    void onAssign(task, nextAgentId);
+  }
+  const assignmentLocked = isTaskAssignmentLocked(task);
+  const showConsoleAction = Boolean(task.execution) && task.status !== "done" && task.execution?.status !== "complete";
+  return (
+    <article className="min-w-0 max-w-full text-sm">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <div className="min-w-0">
+          <p className="mono truncate text-xs text-muted-foreground">{task.id}</p>
+          <h4 className="mt-1 line-clamp-2 break-words pr-1 text-sm font-semibold leading-snug">{task.title}</h4>
+        </div>
+        <div className="shrink-0">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-7 w-7 shrink-0 p-0"
+            aria-label={`Edit ${task.id}`}
+            onPointerDown={stopCardDrag}
+            onMouseDown={stopCardDrag}
+            onTouchStart={stopCardDrag}
+            onClick={(event) => {
+              event.stopPropagation();
+              setEditing(true);
+            }}
+          >
+            <Pencil className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+      {task.execution ? (
+        <div className="mt-2 flex min-w-0 items-center gap-2">
+          <Badge className="max-w-full truncate px-2 text-[11px]" title={executionLabel(task.execution.status)} variant={executionVariant(task.execution.status)}>
+            {executionLabel(task.execution.status)}
+          </Badge>
+        </div>
+      ) : null}
+      {task.goal || task.description ? (
+        <p className="mt-2 line-clamp-3 break-words pr-1 text-xs leading-relaxed text-muted-foreground">{task.goal || task.description}</p>
+      ) : null}
+      {task.requirements?.length || task.dependsOn?.length ? (
+        <div className="mono mt-2 flex min-w-0 flex-wrap gap-x-2 gap-y-1 pr-1 text-xs text-muted-foreground">
+          {task.requirements?.length ? <span className="min-w-0 break-words">req: {task.requirements.join(", ")}</span> : null}
+          {task.dependsOn?.length ? <span className="min-w-0 break-words">depends: {task.dependsOn.map((item) => `phase-${item}`).join(", ")}</span> : null}
+        </div>
+      ) : null}
+      {task.assignedAgent ? <p className="mono mt-3 truncate text-xs text-muted-foreground">agent: {task.assignedAgent.id}</p> : null}
+      {!assignmentLocked || showConsoleAction ? (
+        <div className={`mt-3 grid min-w-0 gap-2 ${!assignmentLocked && showConsoleAction ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`}>
+          {!assignmentLocked ? (
+            <select
+              className="block h-9 w-full min-w-0 max-w-full rounded-md border border-input bg-background px-2 text-sm"
+              value={agentId}
+              disabled={agents.length === 0}
+              aria-label={`Assign ${task.id}`}
+              onPointerDown={stopCardDrag}
+              onMouseDown={stopCardDrag}
+              onTouchStart={stopCardDrag}
+              onChange={(event) => assignFromSelect(event.target.value)}
+            >
+              <option value="">{agents.length === 0 ? "No agents configured" : "Assign agent"}</option>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.id}</option>)}
+            </select>
+          ) : null}
+          {showConsoleAction ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className={`h-9 shrink-0 ${assignmentLocked ? "w-full px-3" : "w-9 p-0"}`}
+              aria-label={`Open console for ${task.id}`}
+              onPointerDown={stopCardDrag}
+              onMouseDown={stopCardDrag}
+              onTouchStart={stopCardDrag}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenConsole(task);
+              }}
+            >
+              <Terminal className="h-4 w-4" aria-hidden="true" />
+              {assignmentLocked ? <span className="ml-2">Console</span> : null}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {editing ? (
+        <TaskEditModal
+          task={task}
+          agents={agents}
+          columns={columns}
+          gsdBacked={gsdBacked}
+          agentId={agentId}
+          onAgentChange={setAgentId}
+          onClose={() => setEditing(false)}
+          onMove={onMove}
+          onAssign={onAssign}
+          onSave={onSave}
+        />
+      ) : null}
+    </article>
+  );
+}
+
+function TaskEditModal({ task, agents, columns, gsdBacked, agentId, onAgentChange, onClose, onMove, onAssign, onSave }: {
+  task: BoardTask;
+  agents: BoardAgent[];
+  columns: BoardStatus[];
+  gsdBacked: boolean;
+  agentId: string;
+  onAgentChange: (agentId: string) => void;
+  onClose: () => void;
   onMove: (task: BoardTask, status: BoardStatus) => Promise<void>;
   onAssign: (task: BoardTask, agentId: string) => Promise<void>;
   onSave: (task: BoardTask, input: { title: string; priority: string; deliverable: string }) => Promise<void>;
 }) {
-  const [agentId, setAgentId] = useState(task.assignedAgent?.id ?? agents[0]?.id ?? "");
   const [title, setTitle] = useState(task.title);
   const [priority, setPriority] = useState(task.priority ?? "normal");
   const [deliverable, setDeliverable] = useState(task.deliverable ?? "");
+  const [status, setStatus] = useState<BoardStatus>(visibleBoardStatus(task.status, gsdBacked));
   const phase = typeof task.refs?.phase === "string" ? task.refs.phase : "";
-  return (
-    <article className="text-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="mono truncate text-xs text-muted-foreground">{task.id}</p>
-          <Input className="mt-1 h-8" value={title} onChange={(event) => setTitle(event.target.value)} />
-        </div>
-        {task.execution ? <Badge variant={executionVariant(task.execution.status)}>{executionLabel(task.execution.status)}</Badge> : null}
-      </div>
-      <Input className="mt-2 h-8" placeholder="deliverable" value={deliverable} onChange={(event) => setDeliverable(event.target.value)} />
-      <div className="mt-3 flex flex-wrap gap-1">
-        <Badge variant="secondary">{priority || "normal"}</Badge>
-        {phase ? <Badge variant="secondary">phase {phase}</Badge> : null}
-        {task.assignedAgent ? <Badge>{task.assignedAgent.id}</Badge> : null}
-      </div>
-      <div className="mt-3 grid gap-2">
-        <Input className="h-8" placeholder="priority" value={priority} onChange={(event) => setPriority(event.target.value)} />
-        <select
-          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-          value={task.status}
-          onChange={(event) => void onMove(task, event.target.value as BoardStatus)}
-        >
-          {columns.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}
-        </select>
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-          <select
-            className="h-9 min-w-0 rounded-md border border-input bg-background px-2 text-sm"
-            value={agentId}
-            onChange={(event) => setAgentId(event.target.value)}
-          >
-            {agents.length === 0 ? <option value="">No agents</option> : agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.id}</option>)}
-          </select>
-          <Button type="button" size="sm" disabled={!agentId} onClick={() => void onAssign(task, agentId)}>
-            <PlayCircle className="h-4 w-4" aria-hidden="true" />
+  const assignmentLocked = isTaskAssignmentLocked(task);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  async function saveChanges(event: React.FormEvent) {
+    event.preventDefault();
+    await onSave(task, { title, priority, deliverable });
+    if (status !== task.status) await onMove(task, status);
+    onClose();
+  }
+
+  function assignFromSelect(nextAgentId: string) {
+    onAgentChange(nextAgentId);
+    if (!nextAgentId || nextAgentId === task.assignedAgent?.id) return;
+    void onAssign(task, nextAgentId);
+  }
+
+  return createPortal((
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-background/70 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`task-edit-${task.id}`}
+      onPointerDownCapture={(event) => event.stopPropagation()}
+      onMouseDownCapture={(event) => event.stopPropagation()}
+      onTouchStartCapture={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <form className="w-full max-w-xl rounded-md border border-border bg-card p-4 shadow-xl" onSubmit={saveChanges}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="mono text-xs text-muted-foreground">{task.id}</p>
+            <h3 id={`task-edit-${task.id}`} className="mt-1 text-lg font-semibold">Edit task</h3>
+          </div>
+          <Button type="button" size="sm" variant="secondary" onClick={onClose}>
+            <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => void onSave(task, { title, priority, deliverable })}>
-          <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-          Save
-        </Button>
+
+        <div className="mt-4 grid gap-3">
+          <Field label="Title" hint="task summary">
+            <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+          </Field>
+          <Field label="Deliverable" hint="board-facing output">
+            <Input value={deliverable} onChange={(event) => setDeliverable(event.target.value)} />
+          </Field>
+          {task.goal || task.requirements?.length || task.successCriteria?.length || task.dependsOn?.length ? (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <p className="text-sm font-semibold">Roadmap details</p>
+              {task.goal ? (
+                <Field label="Goal" hint="source-managed" className="mt-3">
+                  <Textarea value={task.goal} readOnly className="min-h-20 resize-none" />
+                </Field>
+              ) : null}
+              {task.requirements?.length ? (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Requirements</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {task.requirements.map((item) => <Badge key={item} variant="secondary">{item}</Badge>)}
+                  </div>
+                </div>
+              ) : null}
+              {task.dependsOn?.length ? (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Depends on</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {task.dependsOn.map((item) => <Badge key={item} variant="secondary">phase-{item}</Badge>)}
+                  </div>
+                  {task.dependencyText ? <p className="mt-2 text-xs text-muted-foreground">{task.dependencyText}</p> : null}
+                </div>
+              ) : null}
+              {task.successCriteria?.length ? (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-muted-foreground">Success criteria</p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs leading-relaxed text-muted-foreground">
+                    {task.successCriteria.map((item) => <li key={item}>{item}</li>)}
+                  </ol>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Priority" hint="ranking">
+              <Input value={priority} onChange={(event) => setPriority(event.target.value)} />
+            </Field>
+            <Field label="Status" hint="workflow column">
+              <select
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={status}
+                onChange={(event) => setStatus(event.target.value as BoardStatus)}
+              >
+                {columns.map((item) => (
+                  <option
+                    key={item}
+                    value={item}
+                    disabled={gsdBacked && item === "in_progress" && !task.assignedAgent && !task.execution}
+                  >
+                    {statusLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {!assignmentLocked ? (
+            <div className="grid gap-3">
+              <Field label="Agent" hint={phase ? `phase ${phase}` : "assignment"}>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={agentId}
+                  disabled={agents.length === 0}
+                  onChange={(event) => assignFromSelect(event.target.value)}
+                >
+                  <option value="">{agents.length === 0 ? "No agents configured" : "Assign agent"}</option>
+                  {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.id}</option>)}
+                </select>
+              </Field>
+            </div>
+          ) : task.assignedAgent ? (
+            <p className="mono rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">agent: {task.assignedAgent.id}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit">
+            <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+      </form>
+    </div>
+  ), document.body);
+}
+
+function ExecutionConsoleModal({ boardId, task, onClose, onRefresh }: {
+  boardId: string;
+  task: BoardTask;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [events, setEvents] = useState<ExecutionEvent[]>([]);
+  const [execution, setExecution] = useState<ExecutionSummary | null>(task.execution ?? null);
+  const [error, setError] = useState("");
+  const [hostConsoleMessage, setHostConsoleMessage] = useState("");
+  const consoleScrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingGate = execution?.resume?.pendingGate ?? null;
+  const canOpenHostConsole = Boolean(execution && execution.status !== "running");
+  const hostActionLabel = execution?.status === "waiting_for_user" ? "Take Over" : "Resume";
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadConsole() {
+      const [eventsResponse, executionResponse] = await Promise.all([
+        fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution/events`),
+        fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution`)
+      ]);
+      const eventsPayload = await eventsResponse.json();
+      const executionPayload = await executionResponse.json();
+      if (cancelled) return;
+      if (!eventsResponse.ok || eventsPayload.ok === false) setError(eventsPayload.error ?? "Failed to load console events.");
+      else setEvents(eventsPayload.events ?? []);
+      if (executionResponse.ok && executionPayload.ok !== false) setExecution(executionPayload.execution);
+    }
+    void loadConsole();
+    async function refreshConsoleEvents() {
+      const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution/events`);
+      const payload = await response.json();
+      if (response.ok && payload.ok !== false) setEvents(payload.events ?? []);
+    }
+    const source = new EventSource(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution/events?stream=true`);
+    source.addEventListener("execution", (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as ExecutionEvent;
+      setEvents((current) => [...current, parsed].slice(-500));
+      if (["execution_complete", "execution_failed", "human_gate_waiting", "human_gate_answered"].includes(parsed.type)) {
+        void refreshExecution();
+      }
+    });
+    source.onerror = () => setError("Console stream disconnected; refresh will replay persisted events.");
+    const interval = window.setInterval(() => {
+      void refreshExecution();
+      void refreshConsoleEvents();
+    }, 2000);
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      cancelled = true;
+      source.close();
+      window.clearInterval(interval);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [boardId, task.id, onClose]);
+
+  useEffect(() => {
+    const element = consoleScrollRef.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+  }, [events.length, pendingGate?.id, error, hostConsoleMessage]);
+
+  async function refreshExecution() {
+    const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution`);
+    const payload = await response.json();
+    if (response.ok && payload.ok !== false) setExecution(payload.execution);
+  }
+
+  async function answerGate(decision: string) {
+    const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution/gate`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision })
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setError(payload.error ?? "Gate answer failed.");
+      return;
+    }
+    setExecution(payload.execution);
+    setError("");
+    onRefresh();
+  }
+
+  async function openHostConsole() {
+    if (execution?.status === "running") {
+      setError("This task is actively running in the web execution runner. Host takeover is available once execution reaches user input, fails, or stops.");
+      return;
+    }
+    setHostConsoleMessage("");
+    const response = await fetch(`/api/boards/${encodeURIComponent(boardId)}/tasks/${encodeURIComponent(task.id)}/execution/host-console`, {
+      method: "POST"
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      setError(payload.error ?? "Failed to open host console.");
+      return;
+    }
+    setError("");
+    setHostConsoleMessage(`Opened ${payload.runtime ?? "agent"} resume session${payload.sessionId ? ` ${payload.sessionId}` : ""}${payload.pid ? ` (pid ${payload.pid}${payload.alive === false ? ", exited" : ""})` : ""}.`);
+  }
+
+  return createPortal((
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`execution-console-${task.id}`}
+      onPointerDownCapture={(event) => event.stopPropagation()}
+      onMouseDownCapture={(event) => event.stopPropagation()}
+      onTouchStartCapture={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="flex h-[min(760px,90vh)] w-full max-w-5xl flex-col rounded-md border border-border bg-card shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border p-4">
+          <div>
+            <p className="mono text-xs text-muted-foreground">{boardId}/{task.id}</p>
+            <h3 id={`execution-console-${task.id}`} className="mt-1 flex items-center gap-2 text-lg font-semibold">
+              <Terminal className="h-5 w-5" aria-hidden="true" />
+              Execution Console
+            </h3>
+          </div>
+          <div className="flex items-center gap-2">
+            {execution ? <Badge variant={executionVariant(execution.status)}>{executionLabel(execution.status)}</Badge> : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void openHostConsole()}
+              disabled={!canOpenHostConsole}
+              title={canOpenHostConsole ? "Open this execution in a host terminal" : "Wait for user input, failure, or stop before host takeover."}
+            >
+              <Terminal className="mr-2 h-4 w-4" aria-hidden="true" />
+              {hostActionLabel}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onClose}>
+              <X className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+
+        {pendingGate ? (
+          <div className="border-b border-border bg-muted/40 p-4">
+            <p className="text-sm font-semibold">Needs input: {pendingGate.kind}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{pendingGate.message ?? "GSD is waiting for a decision."}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(pendingGate.choices ?? []).map((choice) => (
+                <Button key={choice} type="button" size="sm" onClick={() => void answerGate(choice)}>
+                  <Send className="mr-2 h-4 w-4" aria-hidden="true" />
+                  {choice}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {hostConsoleMessage ? <p className="border-b border-border p-3 text-sm text-muted-foreground">{hostConsoleMessage}</p> : null}
+        {execution?.status === "running" ? (
+          <p className="border-b border-border p-3 text-sm text-muted-foreground">
+            Live execution is owned by the web runner. Host takeover is available after the runner reaches user input, fails, or stops.
+          </p>
+        ) : null}
+        {error ? <p className="border-b border-border p-3 text-sm text-destructive">{error}</p> : null}
+
+        <div ref={consoleScrollRef} className="min-h-0 flex-1 overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-relaxed text-zinc-100">
+          {events.length === 0 ? (
+            <p className="text-zinc-400">No console events recorded yet.</p>
+          ) : events.map((event, index) => (
+            <div key={`${event.at}-${event.type}-${index}`} className="mb-3 grid grid-cols-[150px_minmax(0,1fr)] gap-3">
+              <span className="text-zinc-500">{formatEventTime(event.at)}</span>
+              <pre className="whitespace-pre-wrap break-words">{formatExecutionEvent(event)}</pre>
+            </div>
+          ))}
+        </div>
       </div>
-    </article>
-  );
+    </div>
+  ), document.body);
 }
 
 function AssetList({ resources, selectedId, selectedSource, scope, payload, projectPayload, onSelect, onAddReference, onRemoveReference }: {
@@ -1783,6 +2236,19 @@ function statusLabel(status: BoardStatus) {
   return labels[status] ?? status;
 }
 
+function visibleBoardColumns(columns: BoardStatus[], gsdBacked: boolean) {
+  return gsdBacked ? columns.filter((status) => status !== "ready") : columns;
+}
+
+function visibleBoardStatus(status: BoardStatus, gsdBacked: boolean): BoardStatus {
+  return gsdBacked && status === "ready" ? "backlog" : status;
+}
+
+function isTaskAssignmentLocked(task: BoardTask) {
+  if (task.status === "done" || task.status === "in_progress") return true;
+  return ["complete", "queued", "running", "waiting_for_user"].includes(task.execution?.status ?? "");
+}
+
 function executionLabel(status: ExecutionStatus) {
   const labels: Record<ExecutionStatus, string> = {
     queued: "Queued",
@@ -1799,6 +2265,40 @@ function executionVariant(status: ExecutionStatus) {
   if (status === "failed" || status === "blocked") return "destructive" as const;
   if (status === "complete") return "default" as const;
   return "secondary" as const;
+}
+
+function formatEventTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatExecutionEvent(event: ExecutionEvent) {
+  if (event.type === "host_resume_started") return `host resume started: ${(event as ExecutionEvent & { command?: string }).command ?? ""}`;
+  if (event.type === "host_resume_output") return event.message ?? "";
+  if (event.type === "host_resume_exited") return `host resume exited: code ${(event as ExecutionEvent & { exitCode?: number }).exitCode ?? ""}`;
+  if (event.type === "execution_started") return `started phase ${event.phase ?? ""} with ${event.agentId ?? "agent"}`.trim();
+  if (event.type === "execution_complete") return `completed ${event.status ?? "complete"}`;
+  if (event.type === "execution_failed") return `failed ${event.status ?? ""}\n${(event as ExecutionEvent & { errorMessages?: string[] }).errorMessages?.join("\n") ?? ""}`.trim();
+  if (event.type === "human_gate_waiting") return `waiting for ${event.gate?.kind ?? "input"}\n${event.gate?.message ?? ""}`.trim();
+  if (event.type === "human_gate_answered") return `answered gate: ${event.decision ?? ""}`;
+  if (event.type === "execution_error") return `error: ${event.message ?? ""}`;
+  if (event.type === "gsd_event") return formatGsdEvent(event.event ?? {});
+  return `${event.type}${event.message ? `: ${event.message}` : ""}`;
+}
+
+function formatGsdEvent(event: Record<string, unknown>) {
+  const type = String(event.type ?? "event");
+  if (type === "session_init") return `session started: ${event.sessionId ?? ""}\nmodel=${event.model ?? ""}`.trim();
+  if (type === "assistant_text") return String(event.text ?? "");
+  if (type === "tool_call") return `tool: ${event.toolName ?? "unknown"}\n${JSON.stringify(event.input ?? {}, null, 2)}`;
+  if (type === "tool_progress") return `tool progress: ${event.toolName ?? "unknown"} ${event.elapsedSeconds ?? ""}s`.trim();
+  if (type === "phase_step_start") return `step started: ${event.step ?? ""}`;
+  if (type === "phase_step_complete") return `step complete: ${event.step ?? ""} success=${String(event.success ?? "")}`.trim();
+  if (type === "phase_complete") return `phase complete: ${event.phaseNumber ?? ""} success=${String(event.success ?? "")}`.trim();
+  if (type === "session_error") return `session error: ${JSON.stringify(event.errors ?? [], null, 2)}`;
+  if (type === "session_complete") return `session complete turns=${event.numTurns ?? ""} cost=${event.totalCostUsd ?? ""}`.trim();
+  return `${type}\n${JSON.stringify(event, null, 2)}`;
 }
 
 function getUiMode() {

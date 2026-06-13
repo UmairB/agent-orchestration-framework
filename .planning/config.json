@@ -10,5 +10,10 @@
     "verifier": true,
     "nyquist_validation": true,
     "auto_advance": true
+  },
+  "agent_skills": {
+    "gsd-roadmapper": [
+      ".aof/skills/aof-board-milestone-bridge"
+    ]
   }
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -47,6 +47,10 @@ export const gsdSdkAdapterTests = [
     run: surfacesFailedPhaseSubtype
   },
   {
+    name: "surfaces nested failed GSD phase plan subtype",
+    run: surfacesNestedFailedPhaseSubtype
+  },
+  {
     name: "detects SDK runner surface mismatch",
     run: detectsRunnerSurfaceMismatch
   },
@@ -61,6 +65,10 @@ export const gsdSdkAdapterTests = [
   {
     name: "reports GSD toolchain version drift",
     run: reportsToolchainVersionDrift
+  },
+  {
+    name: "resolves project-local GSD tools before global wrappers",
+    run: resolvesProjectLocalGsdTools
   },
   {
     name: "reports missing GSD tools",
@@ -184,6 +192,16 @@ async function surfacesFailedPhaseSubtype() {
   );
 }
 
+async function surfacesNestedFailedPhaseSubtype() {
+  const projectDir = await tempProject();
+  await assert.rejects(
+    () => runGsdPhase(projectDir, "37", { GsdClass: nestedFailingGsdClass() }),
+    (error) => error instanceof GsdSdkError
+      && error.code === "GSD_PHASE_FAILED"
+      && error.actual.subtype === "error_during_execution"
+  );
+}
+
 function detectsSurfaceMismatch() {
   resetGsdSdkSurfaceProbeForTests();
   class BrokenTools {}
@@ -216,6 +234,20 @@ async function reportsToolchainVersionDrift() {
   assert.equal(report.toolsVersion, "1.42.2");
   assert.equal(report.toolsPath, "C:/tools/gsd-tools.cjs");
   assert.equal(report.diagnostics.some((item) => item.code === "SDK_VERSION_DRIFT" && item.status === "warn"), true);
+}
+
+async function resolvesProjectLocalGsdTools() {
+  const projectDir = await tempProject();
+  const localToolsPath = path.join(projectDir, ".codex", "get-shit-done", "bin", "gsd-tools.cjs");
+  await mkdir(path.dirname(localToolsPath), { recursive: true });
+  await writeFile(localToolsPath, "// local tools\n", "utf8");
+
+  const report = await inspectGsdToolchain(projectDir, {
+    toolsVersion: "0.1.0",
+    requireToolsPath: true
+  });
+  assert.equal(report.toolsPath, localToolsPath);
+  assert.equal(report.diagnostics.some((item) => item.code === "GSD_TOOLS_MISSING"), false);
 }
 
 async function reportsMissingGsdTools() {
@@ -277,6 +309,42 @@ function failingGsdClass() {
           }]
         }],
         success: false,
+        totalCostUsd: 0,
+        totalDurationMs: 5
+      };
+    }
+  };
+}
+
+function nestedFailingGsdClass() {
+  return class FakeGsd {
+    async runPhase(phaseNumber) {
+      return {
+        phaseNumber,
+        phaseName: "Runtime Fallback Hardening",
+        steps: [{
+          step: "verify",
+          success: true,
+          durationMs: 5,
+          planResults: [{
+            success: false,
+            sessionId: "session-1",
+            totalCostUsd: 0,
+            durationMs: 5,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0
+            },
+            numTurns: 1,
+            error: {
+              subtype: "error_during_execution",
+              messages: ["Out of usage."]
+            }
+          }]
+        }],
+        success: true,
         totalCostUsd: 0,
         totalDurationMs: 5
       };

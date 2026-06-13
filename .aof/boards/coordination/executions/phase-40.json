@@ -3,7 +3,7 @@
   "boardId": "coordination",
   "taskId": "phase-40",
   "provider": "gsd",
-  "status": "running",
+  "status": "complete",
   "assignedAgent": {
     "id": "claude",
     "description": "claude execution runtime.",
@@ -21,13 +21,14 @@
   "attempts": [
     {
       "id": "attempt-1",
-      "status": "running",
+      "status": "complete",
       "startedAt": "2026-05-19T12:49:14.571Z",
       "commands": [
         "$gsd-discuss-phase 40",
         "$gsd-plan-phase 40",
         "$gsd-execute-phase 40"
-      ]
+      ],
+      "endedAt": "2026-05-22T10:30:58.768Z"
     }
   ],
   "logs": [
@@ -35,6 +36,11 @@
       "at": "2026-05-19T12:49:14.571Z",
       "level": "info",
       "message": "Assigned to agent claude; started GSD execution for phase 40."
+    },
+    {
+      "at": "2026-05-22T10:30:58.768Z",
+      "level": "info",
+      "message": "Reconciled complete from GSD state (current_phase_advanced)."
     }
   ],
   "resume": {
@@ -95,5 +101,5 @@
     ]
   },
   "createdAt": "2026-05-19T12:49:14.571Z",
-  "updatedAt": "2026-05-19T12:49:14.571Z"
+  "updatedAt": "2026-05-22T10:30:58.768Z"
 }

@@ -4,7 +4,7 @@
   "boardId": "coordination",
   "title": "Phase 40: Board Attachment And Sync UAT",
   "description": "Attach the live `coordination` board to milestone `v1.8`, sync roadmap phases into phase-backed tasks, and verify milestone binding failures and success paths.",
-  "status": "in_progress",
+  "status": "done",
   "priority": "normal",
   "deliverable": "Coordination",
   "refs": {
@@ -41,10 +41,23 @@
       "provider": "gsd",
       "executionStatus": "running",
       "boardStatus": "in_progress"
+    },
+    {
+      "at": "2026-05-22T10:30:58.768Z",
+      "type": "synced",
+      "source": "gsd-roadmap"
+    },
+    {
+      "at": "2026-05-22T10:30:58.768Z",
+      "type": "execution_reconciled",
+      "source": "gsd-state",
+      "executionStatus": "complete",
+      "boardStatus": "done",
+      "reason": "current_phase_advanced"
     }
   ],
   "createdAt": "2026-05-18T16:53:24.924Z",
-  "updatedAt": "2026-05-19T12:49:14.576Z",
+  "updatedAt": "2026-05-22T10:30:58.768Z",
   "goal": "Attach the live `coordination` board to milestone `v1.8`, sync roadmap phases into phase-backed tasks, and verify milestone binding failures and success paths.",
   "requirements": [
     "BOARD-02",
@@ -65,9 +78,9 @@
   },
   "execution": {
     "provider": "gsd",
-    "status": "running",
+    "status": "complete",
     "phase": "40",
     "executionPath": ".aof/boards/coordination/executions/phase-40.json",
-    "updatedAt": "2026-05-19T12:49:14.571Z"
+    "updatedAt": "2026-05-22T10:30:58.768Z"
   }
 }

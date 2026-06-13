@@ -18,6 +18,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import {
   createContext,
   type HTMLAttributes,
@@ -73,7 +74,7 @@ export function KanbanBoard({ id, children, className }: KanbanBoardProps) {
   return (
     <div
       className={cn(
-        "flex size-full min-h-40 flex-col overflow-hidden rounded-md border border-border bg-background text-xs shadow-sm ring-2 transition-all",
+        "flex size-full min-h-40 min-w-0 flex-col overflow-hidden rounded-md border border-border bg-background text-xs shadow-sm ring-2 transition-all",
         isOver ? "ring-primary" : "ring-transparent",
         className
       )}
@@ -95,7 +96,7 @@ export function KanbanCard<T extends KanbanItemProps = KanbanItemProps>({
   children,
   className
 }: KanbanCardProps<T>) {
-  const { attributes, listeners, setNodeRef, transition, transform, isDragging } = useSortable({ id });
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transition, transform, isDragging } = useSortable({ id });
   const { activeCardId } = useContext(KanbanContext) as KanbanContextProps;
   const style = {
     transition,
@@ -104,20 +105,33 @@ export function KanbanCard<T extends KanbanItemProps = KanbanItemProps>({
 
   return (
     <>
-      <div style={style} {...listeners} {...attributes} ref={setNodeRef}>
+      <div className="w-full min-w-0 max-w-full" style={style} ref={setNodeRef}>
         <Card
           className={cn(
-            "cursor-grab gap-4 rounded-md p-3 shadow-sm",
+            "relative w-full min-w-0 max-w-full gap-4 rounded-md p-3 pl-8 shadow-sm",
             isDragging && "pointer-events-none cursor-grabbing opacity-30",
             className
           )}
         >
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            className="absolute left-1.5 top-2 flex h-7 w-5 cursor-grab items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`Drag ${name}`}
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-4 w-4" aria-hidden="true" />
+          </button>
           {children ?? <p className="m-0 text-sm font-medium">{name}</p>}
         </Card>
       </div>
       {activeCardId === id ? (
         <t.In>
-          <Card className={cn("cursor-grab gap-4 rounded-md p-3 shadow-sm ring-2 ring-primary", isDragging && "cursor-grabbing", className)}>
+          <Card className={cn("relative w-full min-w-0 max-w-full gap-4 rounded-md p-3 pl-8 shadow-sm ring-2 ring-primary", isDragging && "cursor-grabbing", className)}>
+            <span className="absolute left-1.5 top-2 flex h-7 w-5 items-center justify-center rounded text-muted-foreground">
+              <GripVertical className="h-4 w-4" aria-hidden="true" />
+            </span>
             {children ?? <p className="m-0 text-sm font-medium">{name}</p>}
           </Card>
         </t.In>
@@ -144,9 +158,9 @@ export function KanbanCards<T extends KanbanItemProps = KanbanItemProps>({
   const items = filteredData.map((item) => item.id);
 
   return (
-    <ScrollArea className="min-h-0 overflow-hidden">
+    <ScrollArea className="min-h-0 min-w-0 overflow-hidden">
       <SortableContext items={items}>
-        <div className={cn("flex flex-grow flex-col gap-2 p-2", className)} {...props}>
+        <div className={cn("flex w-full min-w-0 flex-grow flex-col gap-2 overflow-x-hidden p-2", className)} {...props}>
           {filteredData.map(children)}
         </div>
       </SortableContext>
@@ -269,8 +283,15 @@ export function KanbanProvider<
         sensors={sensors}
         {...props}
       >
-        <div className={cn("grid size-full auto-cols-[minmax(260px,1fr)] grid-flow-col gap-4 overflow-x-auto", className)}>
-          {columns.map((column) => children(column))}
+        <div className={cn("size-full min-w-0 overflow-x-hidden overflow-y-hidden pb-2", className)}>
+          <div
+            className="grid h-full w-full min-w-0 gap-4"
+            style={{
+              gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))`
+            }}
+          >
+            {columns.map((column) => children(column))}
+          </div>
         </div>
         {typeof window !== "undefined" ? createPortal(<DragOverlay><t.Out /></DragOverlay>, document.body) : null}
       </DndContext>

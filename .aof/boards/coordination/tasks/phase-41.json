@@ -4,7 +4,7 @@
   "boardId": "coordination",
   "title": "Phase 41: Boards UI Dogfood",
   "description": "Use `aof boards ui` against the real board and verify the UI/API surface stays consistent with CLI output and canonical board files.",
-  "status": "backlog",
+  "status": "blocked",
   "priority": "normal",
   "deliverable": "Coordination",
   "refs": {
@@ -33,10 +33,31 @@
       "at": "2026-05-19T08:27:55.465Z",
       "type": "synced",
       "source": "gsd-roadmap"
+    },
+    {
+      "at": "2026-05-22T10:42:19.240Z",
+      "type": "assigned",
+      "agentId": "claude",
+      "provider": "gsd",
+      "executionStatus": "running",
+      "boardStatus": "in_progress"
+    },
+    {
+      "at": "2026-05-22T11:06:20.049Z",
+      "type": "execution_status_changed",
+      "executionStatus": "complete",
+      "boardStatus": "done"
+    },
+    {
+      "at": "2026-05-22T11:10:57.835Z",
+      "type": "execution_status_changed",
+      "executionStatus": "failed",
+      "message": "Claude rate limit rejected execution; Phase 41 did not complete.",
+      "boardStatus": "blocked"
     }
   ],
   "createdAt": "2026-05-18T16:53:24.926Z",
-  "updatedAt": "2026-05-19T08:27:55.465Z",
+  "updatedAt": "2026-05-22T11:10:57.835Z",
   "goal": "Use `aof boards ui` against the real board and verify the UI/API surface stays consistent with CLI output and canonical board files.",
   "requirements": [
     "UI-01",
@@ -51,5 +72,17 @@
     "Repair, sync, assignment, and incomplete-state feedback is actionable when surfaced in the UI.",
     "Any confirmed UI defects receive targeted regression coverage and `npm run ui:build` verification."
   ],
-  "dependsOn": []
+  "dependsOn": [],
+  "assignedAgent": {
+    "id": "claude",
+    "description": "claude execution runtime.",
+    "assignedAt": "2026-05-22T10:42:19.237Z"
+  },
+  "execution": {
+    "provider": "gsd",
+    "status": "failed",
+    "phase": "41",
+    "executionPath": ".aof/boards/coordination/executions/phase-41.json",
+    "updatedAt": "2026-05-22T11:10:57.827Z"
+  }
 }

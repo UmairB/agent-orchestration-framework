@@ -65,9 +65,10 @@ Detailed milestone roadmaps are archived under `.planning/milestones/`.
 
 **Requirements:** UI-01, UI-02, UI-03, UI-04
 
-**Plans:** 3 plans
+**Plans:** 0/3 plans complete
 
 Plans:
+
 - [ ] 41-01-PLAN.md — TypeScript UI build + server startup + mount-time API verification
 - [ ] 41-02-PLAN.md — Sync bug fix + sync round-trip + task status mutation round-trip + execution reads
 - [ ] 41-03-PLAN.md — Evidence documentation + UAT log update + requirements completion

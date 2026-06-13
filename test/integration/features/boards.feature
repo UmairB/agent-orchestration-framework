@@ -88,7 +88,8 @@ Feature: Board and task state
     When I run `boards milestone status delivery`
     Then the command should succeed
     And stdout should contain `milestone: waiting_for_user`
-    And stdout should contain `next: aof boards milestone answer delivery --text "<answer>"`
+    And stdout should contain `next: $gsd-new-milestone Ship board state`
+    And stdout should not contain `next: aof boards milestone answer delivery --text "<answer>"`
     When I run `boards milestone answer delivery --text "1"` with GSD runtime status `waiting_for_user` and output `Confirm milestone?`
     Then the command should succeed
     And stdout should contain `milestone: waiting_for_user`

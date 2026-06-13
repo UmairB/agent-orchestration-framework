@@ -4,6 +4,7 @@ import path from "node:path";
 import { access, readdir, readFile, rm } from "node:fs/promises";
 import { backendSdkVersion, resolveBackend, supportedBackends } from "./backends/index.mjs";
 import { inspectGsdToolchain } from "./gsd-sdk-adapter.mjs";
+import { ensureAofBoardMilestoneBridge } from "./internal-skills.mjs";
 import { normalizeId, writeText } from "./fs.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
@@ -59,6 +60,9 @@ export async function createBoard(projectDir, input = {}, options = {}) {
   const executionProvider = normalizeExecutionProvider(input.executionProvider);
   const backend = executionProvider ? resolveBackend(executionProvider) : null;
   const defaultExecutionRuntime = normalizeRuntime(input.defaultExecutionRuntime ?? input.runtime ?? "codex");
+  const internalSkill = backend?.kind === "gsd"
+    ? await ensureAofBoardMilestoneBridge(projectDir, options)
+    : null;
   const milestoneCommand = "$gsd-new-milestone";
   const milestoneInvocation = `${milestoneCommand} ${objective}`;
   const board = {
@@ -96,7 +100,7 @@ export async function createBoard(projectDir, input = {}, options = {}) {
     updatedAt: now
   };
   await writeText(boardPath, `${JSON.stringify(board, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
-  return { board, boardPath, dryRun: Boolean(options.dryRun) };
+  return { board, boardPath, dryRun: Boolean(options.dryRun), internalSkill };
 }
 
 export async function listBoards(projectDir, options = {}) {
@@ -217,11 +221,13 @@ export async function repairBoard(projectDir, boardId, options = {}) {
     },
     updatedAt: now
   };
+  const internalSkill = await ensureAofBoardMilestoneBridge(projectDir, options);
   await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`, { dryRun: Boolean(options.dryRun) });
   return {
     board: next,
     repaired: true,
     action: "create-gsd-milestone",
+    internalSkill,
     command: next.gsd.milestone.invocation,
     message: `Board ${id} started ${next.gsd.milestone.invocation}. Complete the GSD milestone, then sync after the milestone roadmap is attached.`
   };
@@ -358,8 +364,7 @@ export async function addTask(projectDir, boardId, input = {}, options = {}) {
     throw new Error(`Board ${normalizedBoardId} is backed by GSD. Add tasks with ${board.gsd?.taskCreation?.addPhaseCommand ?? "$gsd-phase add"}, then run \`${board.gsd?.taskCreation?.syncCommand ?? `aof boards sync ${normalizedBoardId}`}\`.`);
   }
   const id = normalizeId(input.id);
-  const status = input.status ?? "backlog";
-  assertValidStatus(status);
+  const status = normalizeTaskStatus(input.status ?? "backlog");
   const taskPath = taskFilePath(paths, normalizedBoardId, id);
   if (!options.force && await exists(taskPath)) {
     throw new Error(`Task already exists: ${normalizedBoardId}/${id}`);
@@ -373,6 +378,11 @@ export async function addTask(projectDir, boardId, input = {}, options = {}) {
     boardId: normalizedBoardId,
     title: input.title,
     description: input.description ?? "",
+    ...(input.goal !== undefined ? { goal: input.goal } : {}),
+    ...(input.requirements !== undefined ? { requirements: input.requirements } : {}),
+    ...(input.successCriteria !== undefined ? { successCriteria: input.successCriteria } : {}),
+    ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
+    ...(input.dependencyText !== undefined ? { dependencyText: input.dependencyText } : {}),
     status,
     priority: input.priority ?? "normal",
     deliverable: input.deliverable ?? "",
@@ -444,7 +454,8 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
   try {
     const assertion = await assertBoardMilestone(projectDir, configuredMilestoneId, options, backend);
     if (!assertion.ok) throw milestoneAssertionError(normalizedBoardId, configuredMilestoneId, assertion);
-    phases = normalizeRoadmapPhases(await readTypedRoadmap(projectDir, options, backend));
+    const roadmapDetails = await readRoadmapPhaseDetails(projectDir, configuredRoadmap);
+    phases = normalizeRoadmapPhases(await readTypedRoadmap(projectDir, options, backend), roadmapDetails);
   } catch (error) {
     const nextError = boardErrorFromSdk(error);
     await persistBindingError(boardPath, board, configuredMilestoneId, nextError, options);
@@ -458,24 +469,30 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
     );
   }
   const fingerprint = phaseIdentityFingerprint(phases);
+  const phaseCompletion = await readGsdPhaseCompletion(projectDir, phases);
 
   const existingTasks = await readBoardTasks(paths, normalizedBoardId);
-  const existing = new Set(existingTasks.map((task) => task.id));
+  const existingById = new Map(existingTasks.map((task) => [task.id, task]));
+  const existing = new Set(existingById.keys());
   const actions = syncActions(phases, existingTasks);
   const created = [];
+  const updated = [];
   try {
     for (const phase of phases) {
       const taskId = `phase-${phase.phaseId}`;
-      if (existing.has(taskId) || options.dryRun) continue;
+      const taskInput = roadmapTaskInput(board, phase, configuredRoadmap);
+      if (existing.has(taskId)) {
+        const existingTask = existingById.get(taskId);
+        const completion = phaseCompletion.get(phase.phaseId);
+        if (!options.dryRun && (roadmapTaskNeedsSync(existingTask, taskInput) || roadmapTaskNeedsCompletionSync(existingTask, completion))) {
+          updated.push(await syncExistingRoadmapTask(projectDir, normalizedBoardId, taskId, taskInput, { completion }));
+        }
+        continue;
+      }
+      if (options.dryRun) continue;
       const result = await addTask(projectDir, normalizedBoardId, {
         id: taskId,
-        title: `Phase ${phase.phaseId}: ${phase.title}`,
-        description: phase.goal,
-        deliverable: board.title,
-        refs: {
-          phase: phase.phaseId,
-          roadmap: configuredRoadmap
-        }
+        ...taskInput
       }, { source: "gsd-roadmap-sync" });
       created.push(result.task);
     }
@@ -518,33 +535,52 @@ export async function syncBoardFromGsdRoadmap(projectDir, boardId, options = {})
     updatedAt: now
   };
   if (!options.dryRun) await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`);
-  return { board: options.dryRun ? board : next, phases, created, actions, dryRun: Boolean(options.dryRun) };
+  return { board: options.dryRun ? board : next, phases, created, updated, actions, dryRun: Boolean(options.dryRun) };
 }
 
 export async function moveTask(projectDir, boardId, taskId, status) {
-  assertValidStatus(status);
+  const normalizedStatus = normalizeTaskStatus(status);
   const paths = boardWorkspacePaths(projectDir);
   const normalizedBoardId = normalizeId(boardId);
   const normalizedTaskId = normalizeId(taskId);
+  const board = await readCanonicalBoard(paths, normalizedBoardId);
   const taskPath = taskFilePath(paths, normalizedBoardId, normalizedTaskId);
   const task = await readJsonFile(taskPath);
+  assertTaskStatusMoveAllowed(board, task, normalizedStatus);
   const now = nowIso();
   const next = {
     ...task,
-    status,
+    status: normalizedStatus,
     history: [
       ...(Array.isArray(task.history) ? task.history : []),
       {
         at: now,
         type: "status_changed",
         from: task.status,
-        to: status
+        to: normalizedStatus
       }
     ],
     updatedAt: now
   };
   await writeText(taskPath, `${JSON.stringify(next, null, 2)}\n`);
   return next;
+}
+
+function assertTaskStatusMoveAllowed(board, task, status) {
+  const backend = backendForBoard(board);
+  if (backend?.kind !== "gsd" || status !== "in_progress") return;
+  if (!hasPhaseRef(task)) return;
+  if (task.assignedAgent?.id || task.execution?.status) return;
+
+  throw new BoardLifecycleError(
+    "BOARD_TASK_ASSIGNMENT_REQUIRED",
+    `Task ${board.id}/${task.id} cannot move to in_progress without an assigned agent.`,
+    {
+      expected: "assignedAgent",
+      actual: task.assignedAgent ?? null,
+      next: `aof boards task assign ${board.id} ${task.id} <agent-id>`
+    }
+  );
 }
 
 export async function editTask(projectDir, boardId, taskId, input = {}) {
@@ -925,9 +961,15 @@ function taskSummary(task) {
     id: task.id,
     boardId: task.boardId,
     title: task.title,
+    goal: task.goal ?? null,
+    description: task.description ?? "",
     status: task.status,
     priority: task.priority,
     deliverable: task.deliverable ?? "",
+    requirements: Array.isArray(task.requirements) ? task.requirements : [],
+    successCriteria: Array.isArray(task.successCriteria) ? task.successCriteria : [],
+    dependsOn: Array.isArray(task.dependsOn) ? task.dependsOn : [],
+    dependencyText: task.dependencyText ?? null,
     refs: task.refs ?? {},
     assignedAgent: task.assignedAgent ?? null,
     execution: task.execution ?? null,
@@ -1140,16 +1182,301 @@ async function persistBindingError(boardPath, board, milestoneId, error, options
   await writeText(boardPath, `${JSON.stringify(next, null, 2)}\n`);
 }
 
-function normalizeRoadmapPhases(roadmap) {
+async function readRoadmapPhaseDetails(projectDir, roadmapPath) {
+  if (!roadmapPath) return new Map();
+  try {
+    const text = await readFile(path.resolve(projectDir, roadmapPath), "utf8");
+    return parseRoadmapPhaseDetails(text);
+  } catch {
+    return new Map();
+  }
+}
+
+function parseRoadmapPhaseDetails(text) {
+  const details = new Map();
+  const matches = [...String(text ?? "").matchAll(/^###\s+Phase\s+(\S+)\s*:\s*(.+)$/gim)];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const phaseId = String(match[1] ?? "").trim();
+    const start = match.index + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    const body = text.slice(start, end);
+    const dependsOnText = markdownFieldValue(body, "Depends on");
+    details.set(phaseId, {
+      phaseId,
+      title: String(match[2] ?? "").trim(),
+      goal: markdownFieldValue(body, "Goal"),
+      dependsOnText,
+      dependsOn: parsePhaseDependencies(dependsOnText),
+      requirements: parseRequirementIds(markdownFieldValue(body, "Requirements")),
+      successCriteria: parseSuccessCriteria(body)
+    });
+  }
+  return details;
+}
+
+function markdownFieldValue(body, label) {
+  const pattern = new RegExp(`^\\s*\\*\\*${escapeRegExp(label)}:\\*\\*\\s*(.*)$`, "imu");
+  return String(body.match(pattern)?.[1] ?? "").trim();
+}
+
+function parseRequirementIds(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  return String(value ?? "")
+    .split(/[,;]/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseSuccessCriteria(body) {
+  const lines = String(body ?? "").split(/\r?\n/u);
+  const start = lines.findIndex((line) => /^\s*\*\*Success criteria:\*\*\s*$/iu.test(line));
+  if (start < 0) return [];
+  const criteria = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*###\s+/u.test(line) || /^\s*\*\*[^*]+:\*\*/u.test(line)) break;
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*\S)\s*$/u);
+    const bulleted = line.match(/^\s*[-*]\s+(.*\S)\s*$/u);
+    const value = numbered?.[1] ?? bulleted?.[1];
+    if (value) criteria.push(value.trim());
+  }
+  return criteria;
+}
+
+function parsePhaseDependencies(value) {
+  if (Array.isArray(value)) return normalizePhaseIds(value);
+  const text = String(value ?? "").trim();
+  if (!text || /^nothing\b/iu.test(text) || /^none\b/iu.test(text)) return [];
+  const dependencies = [];
+  for (const match of text.matchAll(/\bPhases?\s+(\d+)(?:\s*[-–]\s*(\d+))?/giu)) {
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : start;
+    if (Number.isInteger(start) && Number.isInteger(end) && end >= start && end - start <= 100) {
+      for (let phase = start; phase <= end; phase += 1) dependencies.push(String(phase));
+    }
+  }
+  if (dependencies.length === 0) dependencies.push(...(text.match(/\b\d+\b/gu) ?? []));
+  return normalizePhaseIds(dependencies);
+}
+
+function normalizePhaseIds(values) {
+  return [...new Set(values
+    .map((value) => String(value ?? "").trim().replace(/^phase-/iu, "").replace(/^Phase\s+/iu, ""))
+    .filter(Boolean))];
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeRoadmapPhases(roadmap, details = new Map()) {
   return (Array.isArray(roadmap?.phases) ? roadmap.phases : [])
     .map((phase) => {
       const phaseId = String(phase.number ?? phase.phaseId ?? phase.id ?? "").trim();
       if (!phaseId) return null;
+      const detail = details.get(phaseId) ?? {};
       const title = String(phase.name ?? phase.phase_name ?? phase.title ?? `Phase ${phaseId}`).trim();
-      const goal = String(phase.goal ?? phase.description ?? "").trim();
-      return { phaseId, title, goal };
+      const goal = String(phase.goal ?? phase.description ?? detail.goal ?? "").trim();
+      const dependencyText = String(phase.depends_on ?? phase.dependsOn ?? phase.dependencies ?? detail.dependsOnText ?? "").trim();
+      return {
+        phaseId,
+        title,
+        goal,
+        requirements: parseRequirementIds(phase.requirements ?? phase.requirement_ids ?? detail.requirements ?? []),
+        successCriteria: Array.isArray(phase.successCriteria)
+          ? phase.successCriteria
+          : Array.isArray(phase.success_criteria)
+            ? phase.success_criteria
+            : detail.successCriteria ?? [],
+        dependsOn: parsePhaseDependencies(phase.depends_on ?? phase.dependsOn ?? phase.dependencies ?? detail.dependsOn ?? dependencyText),
+        ...(dependencyText ? { dependencyText } : {})
+      };
     })
     .filter(Boolean);
+}
+
+function roadmapTaskInput(board, phase, roadmapPath) {
+  return {
+    title: `Phase ${phase.phaseId}: ${phase.title}`,
+    description: phase.goal,
+    goal: phase.goal,
+    requirements: phase.requirements ?? [],
+    successCriteria: phase.successCriteria ?? [],
+    dependsOn: phase.dependsOn ?? [],
+    ...(phase.dependencyText ? { dependencyText: phase.dependencyText } : {}),
+    deliverable: board.title,
+    refs: {
+      phase: phase.phaseId,
+      roadmap: roadmapPath
+    }
+  };
+}
+
+function roadmapTaskNeedsSync(task, input) {
+  for (const key of ["title", "description", "goal", "deliverable", "dependencyText"]) {
+    if ((task[key] ?? "") !== (input[key] ?? "")) return true;
+  }
+  for (const key of ["requirements", "successCriteria", "dependsOn"]) {
+    if (JSON.stringify(task[key] ?? []) !== JSON.stringify(input[key] ?? [])) return true;
+  }
+  const refs = task.refs ?? {};
+  return refs.phase !== input.refs.phase || refs.roadmap !== input.refs.roadmap;
+}
+
+function roadmapTaskNeedsCompletionSync(task, completion) {
+  if (!completion?.complete) return false;
+  if (task.status !== "done") return true;
+  return task.execution ? task.execution.status !== "complete" : false;
+}
+
+async function syncExistingRoadmapTask(projectDir, boardId, taskId, input, options = {}) {
+  let executionWrite = null;
+  const updated = await updateTask(projectDir, boardId, taskId, async (task) => {
+    const now = nowIso();
+    const next = syncedRoadmapTask(task, input, now);
+    if (options.completion?.complete) {
+      const reconciled = await reconcileCompletedPhaseTask(projectDir, boardId, taskId, next, options.completion, now);
+      executionWrite = reconciled.executionWrite;
+      return reconciled.task;
+    }
+    return next;
+  });
+  if (executionWrite) await writeText(executionWrite.path, `${JSON.stringify(executionWrite.execution, null, 2)}\n`);
+  return updated;
+}
+
+function syncedRoadmapTask(task, input, now) {
+  const next = {
+    ...task,
+    title: input.title,
+    description: input.description,
+    goal: input.goal,
+    requirements: input.requirements,
+    successCriteria: input.successCriteria,
+    dependsOn: input.dependsOn,
+    deliverable: input.deliverable,
+    refs: {
+      ...(task.refs ?? {}),
+      ...input.refs
+    },
+    history: [
+      ...(Array.isArray(task.history) ? task.history : []),
+      {
+        at: now,
+        type: "synced",
+        source: "gsd-roadmap"
+      }
+    ],
+    updatedAt: now
+  };
+  if (input.dependencyText) next.dependencyText = input.dependencyText;
+  else delete next.dependencyText;
+  return next;
+}
+
+async function reconcileCompletedPhaseTask(projectDir, boardId, taskId, task, completion, now) {
+  const executionPath = task.execution?.executionPath
+    ? path.resolve(projectDir, task.execution.executionPath)
+    : path.join(boardDirPath(boardWorkspacePaths(projectDir), boardId), "executions", `${taskId}.json`);
+  const existingExecution = await readOptionalJsonFile(executionPath);
+  const execution = existingExecution
+    ? existingExecution.status === "complete" ? existingExecution : completedExecution(existingExecution, completion, now)
+    : null;
+  const relativeExecutionPath = execution ? relativeProjectPath(projectDir, executionPath) : task.execution?.executionPath;
+  const alreadyComplete = task.status === "done" && task.execution?.status === "complete" && existingExecution?.status === "complete";
+  const history = alreadyComplete
+    ? task.history
+    : [
+        ...(Array.isArray(task.history) ? task.history : []),
+        {
+          at: now,
+          type: "execution_reconciled",
+          source: "gsd-state",
+          executionStatus: "complete",
+          boardStatus: "done",
+          reason: completion.reason
+        }
+      ];
+  return {
+    task: {
+      ...task,
+      status: "done",
+      ...(execution ? {
+        assignedAgent: task.assignedAgent ?? execution.assignedAgent,
+        execution: {
+          provider: execution.provider,
+          status: "complete",
+          phase: execution.phase,
+          executionPath: relativeExecutionPath,
+          updatedAt: execution.updatedAt
+        }
+      } : task.execution ? {
+        execution: {
+          ...task.execution,
+          status: "complete",
+          updatedAt: now
+        }
+      } : {}),
+      history,
+      updatedAt: now
+    },
+    executionWrite: execution && existingExecution?.status !== "complete" ? { path: executionPath, execution } : null
+  };
+}
+
+function completedExecution(execution, completion, now) {
+  const attempts = Array.isArray(execution.attempts) ? [...execution.attempts] : [];
+  if (attempts.length > 0) {
+    const lastIndex = attempts.length - 1;
+    attempts[lastIndex] = {
+      ...attempts[lastIndex],
+      status: "complete",
+      endedAt: attempts[lastIndex].endedAt ?? now
+    };
+  }
+  return {
+    ...execution,
+    status: "complete",
+    attempts,
+    logs: [
+      ...(Array.isArray(execution.logs) ? execution.logs : []),
+      {
+        at: now,
+        level: "info",
+        message: `Reconciled complete from GSD state (${completion.reason}).`
+      }
+    ],
+    updatedAt: now
+  };
+}
+
+async function readOptionalJsonFile(filePath) {
+  if (!await exists(filePath)) return null;
+  return readJsonFile(filePath);
+}
+
+async function readGsdPhaseCompletion(projectDir, phases) {
+  const statePath = path.join(projectDir, ".planning", "STATE.md");
+  let text = "";
+  try {
+    text = await readFile(statePath, "utf8");
+  } catch {
+    return new Map();
+  }
+  const currentPhase = Number(text.match(/^\s*current_phase:\s*(\d+)\s*$/imu)?.[1]);
+  const completed = new Map();
+  for (const phase of phases) {
+    const phaseId = String(phase.phaseId);
+    const phaseNumber = Number(phaseId);
+    const explicitComplete = new RegExp(`\\bphase\\s+${escapeRegExp(phaseId)}\\s+complete\\b`, "iu").test(text)
+      || new RegExp(`\\bphase-${escapeRegExp(phaseId)}\\s+complete\\b`, "iu").test(text);
+    if (Number.isInteger(phaseNumber) && Number.isInteger(currentPhase) && phaseNumber < currentPhase) {
+      completed.set(phaseId, { complete: true, reason: "current_phase_advanced" });
+    } else if (explicitComplete) {
+      completed.set(phaseId, { complete: true, reason: "state_mentions_phase_complete" });
+    }
+  }
+  return completed;
 }
 
 function syncActions(phases, existingTasks) {
@@ -1337,6 +1664,17 @@ function assertValidStatus(status) {
   if (!STATUS_SET.has(status)) {
     throw new Error(`Invalid task status "${status}". Use one of ${BOARD_STATUSES.join(", ")}.`);
   }
+}
+
+function normalizeTaskStatus(status) {
+  const normalized = String(status ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  assertValidStatus(normalized);
+  return normalized;
+}
+
+function hasPhaseRef(task) {
+  const refs = task.refs ?? {};
+  return Boolean(refs.phase ?? refs.gsd?.phase ?? refs.phaseNumber ?? refs.roadmapPhase);
 }
 
 function normalizeRuntime(value) {

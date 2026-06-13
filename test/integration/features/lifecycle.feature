@@ -40,6 +40,7 @@ Feature: AOF CLI lifecycle
     And file `.aof/aof.config.json` should exist
     And file `.aof/aof.config.json` should contain `"https://aof.local/schemas/aof.schema.json"`
     And file `.aof/aof.config.json` should contain `"resources": []`
+    And file `.aof/.gitignore` should contain `/cache/boards/dispatch.log.jsonl`
     And file `.codex/skills/project-context/SKILL.md` should not exist
     And file `.codex/commands/prime.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain runtime `codex`

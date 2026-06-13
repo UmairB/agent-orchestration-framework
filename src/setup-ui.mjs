@@ -1,12 +1,13 @@
 import http from "node:http";
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { resolveBackend } from "./backends/index.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
-import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { answerTaskExecutionGate, assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, readTaskExecutionEvents, recordGsdSessionEvent, subscribeTaskExecutionEvents, takeOverTaskExecution, updateTaskExecution } from "./board-execution.mjs";
 import { continueGsdMilestone } from "./gsd-runtime-fallback.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -193,7 +194,7 @@ export async function serveSetupUi(catalog, options = {}) {
         const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]), {
           milestoneId: item.milestone ?? item.milestoneId
         });
-        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created, actions: result.actions });
+        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created, updated: result.updated ?? [], actions: result.actions });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
@@ -294,7 +295,9 @@ export async function serveSetupUi(catalog, options = {}) {
         }
         const result = await assignTaskToAgent(projectDir, decodeRoutePart(taskAssignmentMatch[1]), decodeRoutePart(taskAssignmentMatch[2]), item.agentId, {
           ...options,
-          provider: item.provider
+          provider: item.provider,
+          backgroundExecution: true,
+          interactiveGates: true
         });
         sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
       } catch (error) {
@@ -310,6 +313,45 @@ export async function serveSetupUi(catalog, options = {}) {
         sendJson(response, 200, { ok: true, execution: result.execution, executionPath: result.executionPath });
       } catch (error) {
         sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskExecutionEventsMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/execution\/events$/);
+    if (request.method === "GET" && taskExecutionEventsMatch) {
+      try {
+        const boardId = decodeRoutePart(taskExecutionEventsMatch[1]);
+        const taskId = decodeRoutePart(taskExecutionEventsMatch[2]);
+        if (requestUrl.searchParams.get("stream") === "true" || request.headers.accept?.includes("text/event-stream")) {
+          await streamTaskExecutionEvents(response, projectDir, boardId, taskId);
+        } else {
+          sendJson(response, 200, { ok: true, events: await readTaskExecutionEvents(projectDir, boardId, taskId) });
+        }
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
+      }
+      return;
+    }
+
+    const taskExecutionHostConsoleMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/execution\/host-console$/);
+    if (request.method === "POST" && taskExecutionHostConsoleMatch) {
+      try {
+        const result = await openTaskExecutionHostConsole(projectDir, decodeRoutePart(taskExecutionHostConsoleMatch[1]), decodeRoutePart(taskExecutionHostConsoleMatch[2]));
+        sendJson(response, 200, { ok: true, ...result });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
+      }
+      return;
+    }
+
+    const taskExecutionGateMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/execution\/gate$/);
+    if (request.method === "PUT" && taskExecutionGateMatch) {
+      try {
+        const item = await readJsonBody(request);
+        const result = await answerTaskExecutionGate(projectDir, decodeRoutePart(taskExecutionGateMatch[1]), decodeRoutePart(taskExecutionGateMatch[2]), item);
+        sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
+      } catch (error) {
+        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed", undefined, error);
       }
       return;
     }
@@ -437,6 +479,197 @@ function structuredErrorDetails(error) {
 function send(response, status, contentTypeValue, body) {
   response.writeHead(status, { "content-type": contentTypeValue });
   response.end(body);
+}
+
+async function streamTaskExecutionEvents(response, projectDir, boardId, taskId) {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive"
+  });
+  const sendEvent = (event) => {
+    response.write(`event: execution\n`);
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+  for (const event of await readTaskExecutionEvents(projectDir, boardId, taskId)) {
+    sendEvent(event);
+  }
+  const unsubscribe = subscribeTaskExecutionEvents(projectDir, boardId, taskId, sendEvent);
+  response.on("close", unsubscribe);
+}
+
+async function openTaskExecutionHostConsole(projectDir, boardId, taskId) {
+  const result = await readTaskExecution(projectDir, boardId, taskId);
+  const execution = result.execution;
+  const executionPath = path.resolve(projectDir, result.executionPath);
+  const eventsPath = executionPath.replace(/\.json$/u, ".events.jsonl");
+  const events = await readTaskExecutionEvents(projectDir, boardId, taskId);
+  for (const item of events) {
+    if (item.type === "gsd_event") await recordGsdSessionEvent(projectDir, boardId, taskId, executionPath, item.event);
+  }
+  let refreshed = (await readTaskExecution(projectDir, boardId, taskId)).execution;
+  if (refreshed.status === "running") {
+    throw httpError(
+      `Task ${boardId}/${taskId} is actively running in the web execution runner. Host takeover is available once the execution reaches user input, fails, or stops.`,
+      "TASK_EXECUTION_RESUME_ACTIVE",
+      409
+    );
+  }
+  if (refreshed.status === "waiting_for_user" && refreshed.resume?.owner?.current !== "host") {
+    refreshed = (await takeOverTaskExecution(projectDir, boardId, taskId, { reason: "host-console" })).execution;
+  }
+  const session = latestResumeSession(refreshed, events);
+  if (!session?.id) {
+    throw httpError(`No resumable session id is recorded for ${boardId}/${taskId}.`, "TASK_EXECUTION_SESSION_MISSING", 409);
+  }
+  const resume = resumeCommandForSession(refreshed, session.id);
+  const transcriptPath = path.join(projectDir, ".aof", "cache", "boards", "host-console", `${escapeFilePart(boardId)}-${escapeFilePart(taskId)}-${escapeFilePart(session.id)}.transcript.txt`);
+  const script = [
+    `$Host.UI.RawUI.WindowTitle = 'AOF resume ${escapePowerShellSingleQuoted(boardId)}/${escapePowerShellSingleQuoted(taskId)}'`,
+    `Set-Location -LiteralPath '${escapePowerShellSingleQuoted(projectDir)}'`,
+    `$AofEventsPath = '${escapePowerShellSingleQuoted(eventsPath)}'`,
+    `$AofTranscriptPath = '${escapePowerShellSingleQuoted(transcriptPath)}'`,
+    `$AofSessionId = '${escapePowerShellSingleQuoted(session.id)}'`,
+    `$AofRuntime = '${escapePowerShellSingleQuoted(resume.runtime)}'`,
+    `$AofCommand = '${escapePowerShellSingleQuoted(resume.display)}'`,
+    "function Add-AofEvent { param([string]$Type, [string]$Message, [hashtable]$Extra = @{}) $event = @{ at = (Get-Date).ToUniversalTime().ToString('o'); type = $Type; message = $Message; sessionId = $AofSessionId; runtime = $AofRuntime }; foreach ($key in $Extra.Keys) { $event[$key] = $Extra[$key] }; ($event | ConvertTo-Json -Compress -Depth 10) | Add-Content -LiteralPath $AofEventsPath -Encoding utf8 }",
+    `Write-Host 'AOF resume ${escapePowerShellSingleQuoted(boardId)}/${escapePowerShellSingleQuoted(taskId)}' -ForegroundColor Cyan`,
+    `Write-Host 'status: ${escapePowerShellSingleQuoted(refreshed.status ?? "unknown")}'`,
+    `Write-Host 'agent: ${escapePowerShellSingleQuoted(refreshed.assignedAgent?.id ?? "unassigned")}'`,
+    `Write-Host 'phase: ${escapePowerShellSingleQuoted(refreshed.phase ?? "unknown")}'`,
+    `Write-Host 'session: ${escapePowerShellSingleQuoted(session.id)}'`,
+    `Write-Host 'execution: ${escapePowerShellSingleQuoted(executionPath)}' -ForegroundColor DarkGray`,
+    `Write-Host ''`,
+    `Write-Host 'Running: ${escapePowerShellSingleQuoted(resume.display)}' -ForegroundColor Yellow`,
+    "Add-AofEvent 'host_resume_started' 'Host resume process started.' @{ command = $AofCommand }",
+    "Start-Transcript -LiteralPath $AofTranscriptPath -Force | Out-Null",
+    "$tailJob = Start-Job -ArgumentList $AofTranscriptPath,$AofEventsPath,$AofSessionId,$AofRuntime -ScriptBlock { param($TranscriptPath,$EventsPath,$SessionId,$Runtime) $offset = 0; while ($true) { if (Test-Path -LiteralPath $TranscriptPath) { $text = Get-Content -LiteralPath $TranscriptPath -Raw -ErrorAction SilentlyContinue; if ($null -ne $text -and $text.Length -gt $offset) { $chunk = $text.Substring($offset); $offset = $text.Length; if ($chunk.Trim().Length -gt 0) { $event = @{ at = (Get-Date).ToUniversalTime().ToString('o'); type = 'host_resume_output'; message = $chunk; sessionId = $SessionId; runtime = $Runtime }; ($event | ConvertTo-Json -Compress -Depth 10) | Add-Content -LiteralPath $EventsPath -Encoding utf8 } } }; Start-Sleep -Milliseconds 750 } }",
+    "try {",
+    `  & '${escapePowerShellSingleQuoted(resume.executable)}' ${resume.args.map((arg) => `'${escapePowerShellSingleQuoted(arg)}'`).join(" ")}`,
+    "  $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }",
+    "} catch {",
+    "  $exitCode = 1",
+    "  Add-AofEvent 'host_resume_output' $_.Exception.Message",
+    "} finally {",
+    "  try { Stop-Transcript | Out-Null } catch {}",
+    "  if ($tailJob) { Stop-Job $tailJob -ErrorAction SilentlyContinue; Remove-Job $tailJob -Force -ErrorAction SilentlyContinue }",
+    "  Add-AofEvent 'host_resume_exited' 'Host resume process exited.' @{ exitCode = $exitCode }",
+    "}"
+  ].filter(Boolean).join("\r\n");
+  const scriptPath = path.join(projectDir, ".aof", "cache", "boards", "host-console", `${escapeFilePart(boardId)}-${escapeFilePart(taskId)}-resume.ps1`);
+  await mkdir(path.dirname(scriptPath), { recursive: true });
+  await writeFile(scriptPath, script, "utf8");
+
+  const launcherCommand = [
+    `$process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','${escapePowerShellSingleQuoted(scriptPath)}') -WorkingDirectory '${escapePowerShellSingleQuoted(projectDir)}' -WindowStyle Normal -PassThru`,
+    "Start-Sleep -Milliseconds 300",
+    "$alive = [bool](Get-Process -Id $process.Id -ErrorAction SilentlyContinue)",
+    "@{ pid = $process.Id; alive = $alive } | ConvertTo-Json -Compress"
+  ].join("; ");
+  const launch = await runProcess("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", launcherCommand], {
+    cwd: projectDir,
+    windowsHide: true
+  });
+  if (launch.code !== 0) {
+    throw httpError(`Failed to launch resume console: ${launch.stderr || launch.stdout || `exit ${launch.code}`}`, "TASK_EXECUTION_RESUME_LAUNCH_FAILED", 500);
+  }
+  const launched = parseLauncherOutput(launch.stdout);
+  if (!launched.pid) {
+    throw httpError(`Resume console launcher did not return a process id. Output: ${launch.stdout || "(empty)"}`, "TASK_EXECUTION_RESUME_LAUNCH_FAILED", 500);
+  }
+  return {
+    pid: launched.pid,
+    alive: launched.alive,
+    sessionId: session.id,
+    runtime: resume.runtime,
+    command: resume.display,
+    scriptPath: relativePath(projectDir, scriptPath),
+    transcriptPath: relativePath(projectDir, transcriptPath),
+    eventsPath: relativePath(projectDir, eventsPath),
+    executionPath: relativePath(projectDir, executionPath)
+  };
+}
+
+function latestResumeSession(execution, events) {
+  const sessions = Array.isArray(execution.resume?.sessions) ? execution.resume.sessions : [];
+  const byId = new Map(sessions.map((item) => [item.id, item]));
+  for (const item of events) {
+    const event = item.type === "gsd_event" ? item.event : item;
+    const sessionId = event?.sessionId ?? event?.session_id;
+    if (!sessionId) continue;
+    byId.set(sessionId, {
+      ...(byId.get(sessionId) ?? {}),
+      id: sessionId,
+      phase: event.phase ?? byId.get(sessionId)?.phase,
+      lastEventAt: event.timestamp ?? item.at
+    });
+  }
+  const currentSession = byId.get(execution.resume?.currentSessionId);
+  if (currentSession?.id && currentSession.status === "running") return currentSession;
+  return [...byId.values()]
+    .filter((item) => item?.id)
+    .sort((left, right) => String(right.lastEventAt ?? right.startedAt ?? "").localeCompare(String(left.lastEventAt ?? left.startedAt ?? "")))[0] ?? null;
+}
+
+function resumeCommandForSession(execution, sessionId) {
+  const runtime = execution.assignedAgent?.id === "codex" ? "codex" : "claude";
+  if (runtime === "codex") {
+    return {
+      runtime,
+      executable: "codex",
+      args: ["resume", sessionId],
+      display: `codex resume ${sessionId}`
+    };
+  }
+  return {
+    runtime,
+    executable: "claude",
+    args: ["--resume", sessionId],
+    display: `claude --resume ${sessionId}`
+  };
+}
+
+function escapePowerShellSingleQuoted(value) {
+  return String(value ?? "").replace(/'/gu, "''");
+}
+
+function relativePath(projectDir, filePath) {
+  return path.relative(projectDir, filePath).split(path.sep).join("/");
+}
+
+function escapeFilePart(value) {
+  return String(value ?? "").replace(/[^A-Za-z0-9_.-]/gu, "-");
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      ...options,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({ code: -1, stdout, stderr: error.message });
+    });
+    child.on("close", (code) => {
+      resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
+function parseLauncherOutput(stdout) {
+  try {
+    return JSON.parse(stdout.trim().split(/\r?\n/u).at(-1) ?? "{}");
+  } catch {
+    return {};
+  }
 }
 
 function readJsonBody(request) {

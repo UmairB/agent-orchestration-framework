@@ -523,10 +523,15 @@ async function managesBoardApis() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ agentId: "builder" })
     });
-    assert.equal(assignment.execution.status, "complete");
+    assert.equal(assignment.execution.status, "running");
+    assert.equal(assignment.task.assignedAgent.id, "builder");
+    assert.equal(assignment.task.status, "in_progress");
 
     const execution = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`);
     assert.equal(execution.execution.commands[0], "$gsd-discuss-phase 28");
+
+    const events = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution/events`);
+    assert.equal(events.events.some((event) => event.type === "execution_started"), true);
 
     const waiting = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`, {
       method: "PUT",
