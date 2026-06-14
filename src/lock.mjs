@@ -53,25 +53,6 @@ export function mergeFrameworkInstallAttempts(lock, attempts, generatedAt = new 
   };
 }
 
-export function mergeGsdToolchainMetadata(lock, metadata, generatedAt = new Date().toISOString()) {
-  return {
-    version: lock?.version ?? LOCK_VERSION,
-    generatedAt: lock?.generatedAt ?? generatedAt,
-    runtimes: lock?.runtimes ?? [],
-    files: lock?.files ?? [],
-    packages: lock?.packages ?? [],
-    frameworks: lock?.frameworks ?? [],
-    frameworkInstallAttempts: Array.isArray(lock?.frameworkInstallAttempts) ? lock.frameworkInstallAttempts : [],
-    gsd: {
-      ...(lock?.gsd ?? {}),
-      sdkVersion: metadata.sdkVersion ?? null,
-      toolsVersion: metadata.toolsVersion ?? null,
-      toolsPath: metadata.toolsPath ?? null,
-      checkedAt: metadata.checkedAt ?? generatedAt
-    }
-  };
-}
-
 export async function hashFileIfExists(filePath) {
   try {
     return hashContent(await readFile(filePath, "utf8"));

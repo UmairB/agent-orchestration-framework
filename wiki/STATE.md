@@ -1,47 +1,70 @@
 # ACD — Port State & Next Steps
 
 > Where the ACD build is, and what's left to lift it from the test-ground into this CLI.
-> (This is a project-state doc for the *build effort* — the methodology canon is the rest of `wiki/`.)
+> (Project-state doc for the *build effort* — the methodology canon is the rest of `wiki/`.)
 
 ## Status — 2026-06-14
 
-**Methodology: designed + documented** (this wiki). Model locked:
-`milestone > story > task`, **nested by scope**, folders `NN_type_slug`, **task-level Gherkin**,
-frontmatter-as-record + a validator, status/recency, parallelism by story.
+**GSD removed from this repo (the migration).** Done on branch `migrate/gsd-to-acd`:
+- **Layer B — boards/GSD-SDK product feature:** deleted (`src/boards*`, `gsd-sdk-adapter`,
+  `gsd-runtime-fallback`, `backends/`, `internal-skills`; the `aof boards` CLI tree;
+  `/api/boards/*`; the boards UI + `kanban.tsx`; `@gsd-build/sdk`; board tests/fixtures/scripts).
+  `npm run check` green (207 ok); PowerShell parity green (87 ok).
+- **Layer A — GSD planning methodology:** `.planning/` distilled into [`gsd-archive/`](gsd-archive/)
+  (SUMMARY + MILESTONES + RETROSPECTIVE), then deleted. Full history at tag `gsd-planning-archive`.
+  `gsd` package removed from `.aof/aof.config.json` + lock.
+- **Kept (deliberately):** the generic `aof packages` namespace (its only package was gsd) — see Open decisions.
+- **Left for the user:** delete the generated gsd dev tooling under `.claude/` and `.codex/`
+  (`gsd-*` agents, `commands/gsd/`, `get-shit-done/`, manifests).
 
-**Test-ground: proving it live** — `C:\Source\voice-vox\let-shield-portal`:
-- `.aof/aof.config.json` — the `work` section (`dir`, `agents`, `tags`)
-- `.claude/agents/aof-*` — 6 role agents (product-owner, researcher, architect, designer, developer, qa)
-- `.claude/commands/aof/*` — 8 commands (`add-milestone/story/task`, `refine`, `continue`, `verify`, `validate`, `recent`), XML-segmented with `<progress_tracking>`
-- `wiki/work/` — 33 items (14 milestones + 19 stories), validates clean
-- **Observability** — `.claude/settings.json` hooks → `.aof/log-hook.mjs` → per-item `log.jsonl`
+**Methodology: designed + documented** (this wiki). Model locked: `milestone > story > task`,
+nested by scope, folders `NN_type_slug`, task-level Gherkin, frontmatter-as-record + validator,
+status/recency, parallelism by story.
 
-**This repo:** the `work` section is in `schemas/aof.schema.json`. Nothing else ported yet.
+**Test-ground: still proving it live** — `C:\Source\voice-vox\let-shield-portal`. The user is
+**evaluating command effectiveness there**; the ACD agent/command **content is not final**, so the
+port into aof is intentionally deferred (see below).
 
-## The lift (next milestone)
+**This repo:** the `work` schema section is in `schemas/aof.schema.json`. Nothing else ported yet.
 
-Goal: turn the test-ground artifacts into **AOF source assets** so `aof assets apply` generates the
-full ACD setup into any project, with the `aof-generated` markers, for both runtimes.
+## Distribution — LOCKED decision (2026-06-14)
 
-| # | Step | Maps to |
+**ACD ships bundled inside the `aof` CLI** (not as a separate package, not vendored source).
+
+- ACD agents/commands/templates/observability-hook live as **bundled assets in the aof npm package**.
+- An **`aof work init`** command renders them into a target repo's `.claude`/`.codex`, stamped
+  `aof-generated: true` and tracked in a **manifest** (same idea as the old `gsd-file-manifest.json`).
+- **Issuing updates / bugfixes:** publish a new aof version → user runs **`aof work update`** →
+  the manifest diff re-renders only changed files cleanly (no hand-merge). This is the answer to
+  "how do we issue updates when we bugfix commands/agents."
+- Reuses the existing render-plan / lock / drift-protection / `aof-generated` machinery.
+
+## The lift (deferred — do when let-shield content stabilizes)
+
+| # | Step | Notes |
 |---|---|---|
-| 1 | **Agents → assets.** Add the 6 `aof-*` agents as `agent` resources. | `.aof/assets/agent/...` + `resources[]` |
-| 2 | **Commands → assets.** Add the 8 commands as `command` resources; verify the renderer maps the `aof:` namespace to `.claude/commands/aof/<id>.md` (+ `.codex`). | `.aof/assets/command/...` |
-| 3 | **Templates → package files.** Ship `wiki/templates/{milestone,story,task}` so commands can reference them in a generated project. | bundled files |
-| 4 | **Observability → hooks.** Declare the 3 hooks + `log-hook.mjs` as a `hooks` entry + bundled script. | `aof.config.json hooks[]` |
-| 5 | **`work` runtime.** Decide: add deterministic **`aof work` CLI subcommands** (add-milestone/story/task, recent) alongside the agent slash commands? CLI = scaffolding/CI; slash = agent runs. | `src/cli.mjs` |
-| 6 | **Validator as a CLI command.** Promote `aof:validate` logic to **`aof work validate`** so the traceability spine is **CI-enforceable** (the keystone). | new `src/` module |
-| 7 | **Methodology docs.** Decide how `wiki/` ships with the package (reference / `projectDocs`). | — |
-| 8 | **Prove the round-trip.** `aof assets apply` into a fresh repo → run a milestone end-to-end → `log.jsonl` confirms the agent loop. | — |
+| 1 | **Bundle ACD assets** in aof (e.g. `assets/acd/{agents,commands,templates,hooks}/`). | content snapshot from let-shield — defer until stable |
+| 2 | **`aof work init`** — render bundled ACD into `.claude`/`.codex` + write manifest + stamp. | new renderer; reuse render-plan |
+| 3 | **`aof work update`** — manifest-diff re-render for bugfix propagation. | the update mechanism |
+| 4 | **`aof work validate`** — promote the `aof:validate` traceability-spine logic to a CLI command (the keystone: every `@executable` scenario → green test, CI-enforceable). | methodology-stable; could be built ahead of content |
+| 5 | **`aof work` scaffolding** — add-milestone/story/task, recent (deterministic CLI alongside the agent slash-commands). | |
+| 6 | **Observability hook** — ship the session-keyed `aof-hook.mjs` + `.claude/settings.json` wiring as a bundled hook. | proven in let-shield |
+| 7 | **Prove the round-trip** — `aof work init` into a fresh repo → run a milestone end-to-end → `log.jsonl` confirms the agent loop. | |
 
 ## Open decisions
 
-- Bundle as **one ACD package** (like `gsd`) vs. individual `resources`?
-- **CLI vs slash-only** for `aof work ...`?
-- **Codex parity** now, or claude-first then port?
-- Where the methodology `wiki/` lives in the shipped package.
+- **`aof packages` namespace fate.** Its only consumer was gsd; the bundled-ACD model doesn't use it.
+  Keep as generic framework-installer infra, or remove it (+ `frameworks.mjs`, `packages.mjs`, schema
+  `packages`, tests)? Decide when resuming the ACD build.
+- **Codex parity** for ACD now, or claude-first then port?
+- Where the methodology `wiki/` ships in the package (reference / `projectDocs`).
+
+## Minor gsd remnants (cosmetic, non-blocking)
+
+- `{{GSD_ARGS}}` kept as one token in the simple-asset argument-marker detection
+  (`config-editor.mjs`, `config-inspect.mjs`) — a generic robustness heuristic, not gsd functionality.
 
 ## Don't
 
 - Don't stamp hand-authored source with `aof-generated: true` — that marker is for rendered output
-  (the CLI adds it on `apply`).
+  (the CLI adds it on `apply`/`work init`).
