@@ -261,15 +261,6 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
-  match = step.match(/^I run `(.+)` with GSD runtime status `(.+)` and output `([\s\S]*)`$/);
-  if (match) {
-    context.lastResult = await runCli(context, match[1], "", {
-      gsdRuntimeStatus: match[2],
-      gsdRuntimeOutput: match[3]
-    });
-    return;
-  }
-
   match = step.match(/^I run `(.+)`$/);
   if (match) {
     context.lastResult = await runCli(context, match[1]);
@@ -279,22 +270,6 @@ export async function runSharedCliStep(context, step) {
   match = step.match(/^I replace file `(.+)` with `([\s\S]+)`$/);
   if (match) {
     await writeFile(path.join(context.projectDir, match[1]), `${match[2]}\n`, "utf8");
-    return;
-  }
-
-  match = step.match(/^I attach roadmap `(.+)` to board `(.+)`$/);
-  if (match) {
-    const boardPath = path.join(context.projectDir, ".aof", "boards", match[2], "BOARD.json");
-    const board = JSON.parse(await readFile(boardPath, "utf8"));
-    board.gsd = board.gsd ?? {};
-    board.gsd.milestone = {
-      ...(board.gsd.milestone ?? {}),
-      id: "test-milestone",
-      status: "pending",
-      command: board.gsd.milestone?.command ?? "$gsd-new-milestone",
-      roadmapPath: match[1]
-    };
-    await writeFile(boardPath, `${JSON.stringify(board, null, 2)}\n`, "utf8");
     return;
   }
 
@@ -389,50 +364,6 @@ export async function runSharedCliStep(context, step) {
         { kind: "skill", id: "research-helper" }
       ]
     });
-    return;
-  }
-
-  if (step === "a project with a board execution agent") {
-    await runSharedCliStep(context, "an empty project");
-    await writeAofProject(context, [{
-      kind: "agent",
-      id: "builder",
-      description: "Builder agent",
-      path: "assets/agents/builder/AGENT.md",
-      bodyPath: "assets/agents/builder/AGENT.md",
-      body: "Build assigned board tasks."
-    }]);
-    return;
-  }
-
-  if (step === "a project with GSD board execution") {
-    await writeGsdBoardProject(context);
-    return;
-  }
-
-  match = step.match(/^a project with GSD board execution using SDK fixture "([^"]+)"$/);
-  if (match) {
-    await writeGsdBoardProject(context, { fixtureName: match[1] });
-    return;
-  }
-
-  match = step.match(/^a project with v1\.6 GSD board fixture using SDK fixture "([^"]+)"$/);
-  if (match) {
-    await writeGsdBoardProject(context, { fixtureName: match[1] });
-    await writeLegacyGsdBoardFixture(context, "legacy");
-    return;
-  }
-
-  match = step.match(/^a project with ambiguous v1\.6 GSD board fixture using SDK fixture "([^"]+)"$/);
-  if (match) {
-    await writeGsdBoardProject(context, {
-      fixtureName: match[1],
-      sdkFixture: {
-        milestones: [{ version: "v1.7" }, { version: "v1.8" }],
-        phases: gsdFixturePhases()
-      }
-    });
-    await writeLegacyGsdBoardFixture(context, "legacy");
     return;
   }
 
@@ -1048,64 +979,4 @@ async function writeAdapterWarningAofProject(context) {
       }
     ]
   }, null, 2)}\n`, "utf8");
-}
-
-async function writeGsdBoardProject(context, options = {}) {
-  await runSharedCliStep(context, "an empty project");
-  await writeAofProject(context, [{
-    kind: "agent",
-    id: "builder",
-    description: "Builder agent",
-    path: "assets/agents/builder/AGENT.md",
-    bodyPath: "assets/agents/builder/AGENT.md",
-    body: "Build assigned board tasks."
-  }], {
-    packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["claude", "codex"] }]
-  });
-  await mkdir(path.join(context.projectDir, ".planning"), { recursive: true });
-  await writeFile(path.join(context.projectDir, ".planning", "ROADMAP.md"), [
-    "# Roadmap",
-    "",
-    "## Phase Details",
-    "",
-    "### Phase 30: Build Board Execution",
-    "",
-    "**Goal:** Execute assigned board tasks through GSD.",
-    "",
-    "### Phase 31: Verify Board Progress",
-    "",
-    "**Goal:** Verify progress is visible in the board UI."
-  ].join("\n"), "utf8");
-  context.gsdSdkFixtureName = options.fixtureName;
-  context.gsdSdkFixture = options.sdkFixture ?? {
-    milestone: "v1.7",
-    phases: gsdFixturePhases()
-  };
-  context.gsdPhaseResult = {
-    phaseName: "Build Board Execution",
-    success: true,
-    totalCostUsd: 0,
-    totalDurationMs: 1,
-    steps: []
-  };
-  context.gsdToolsVersion = "1.42.2";
-}
-
-function gsdFixturePhases() {
-  return [
-    { number: "30", name: "Build Board Execution", goal: "Execute assigned board tasks through GSD." },
-    { number: "31", name: "Verify Board Progress", goal: "Verify progress is visible in the board UI." }
-  ];
-}
-
-async function writeLegacyGsdBoardFixture(context, boardId) {
-  const fixtureRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "fixtures");
-  const boardText = await readFile(path.join(fixtureRoot, "v1-6-board.json"), "utf8");
-  const taskDir = path.join(context.projectDir, ".aof", "boards", boardId, "tasks");
-  await mkdir(taskDir, { recursive: true });
-  await writeFile(path.join(context.projectDir, ".aof", "boards", boardId, "BOARD.json"), boardText, "utf8");
-  for (const taskName of ["phase-30.json", "phase-31.json"]) {
-    const taskText = await readFile(path.join(fixtureRoot, "v1-6-board-tasks", taskName), "utf8");
-    await writeFile(path.join(taskDir, taskName), taskText, "utf8");
-  }
 }

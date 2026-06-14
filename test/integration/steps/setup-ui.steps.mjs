@@ -50,8 +50,8 @@ export async function runStep(context, step) {
     await requestSetupUi(context, "PUT", `/api/config/resources/agent/${match[1]}`, {
       id: match[1],
       kind: "agent",
-      description: "Board execution agent",
-      body: "Execute assigned board tasks.",
+      description: "Sample agent",
+      body: "Execute the assigned task.",
       runtimes: ["codex"],
       overrides: {}
     });
@@ -129,60 +129,6 @@ export async function runStep(context, step) {
 
   if (step === "I request setup UI global config") {
     await requestSetupUi(context, "GET", "/api/config/global");
-    return;
-  }
-
-  match = step.match(/^I create board `(.+)` through the setup UI API$/);
-  if (match) {
-    await requestSetupUi(context, "PUT", `/api/boards/${match[1]}`, {
-      title: "Delivery",
-      objective: "Ship setup UI board management"
-    });
-    return;
-  }
-
-  match = step.match(/^I create task `(.+)` on board `(.+)` through the setup UI API$/);
-  if (match) {
-    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}`, {
-      title: "Phase 31",
-      status: "ready",
-      priority: "normal",
-      deliverable: "Kanban setup UI",
-      refs: { phase: "31" }
-    });
-    return;
-  }
-
-  match = step.match(/^I edit task `(.+)` on board `(.+)` through the setup UI API$/);
-  if (match) {
-    await requestSetupUi(context, "PATCH", `/api/boards/${match[2]}/tasks/${match[1]}`, {
-      title: "Phase 31 UI",
-      priority: "high",
-      deliverable: "Kanban setup UI",
-      refs: { phase: "31" }
-    });
-    return;
-  }
-
-  match = step.match(/^I assign task `(.+)` on board `(.+)` to agent `(.+)` through the setup UI API$/);
-  if (match) {
-    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}/assignment`, {
-      agentId: match[3]
-    });
-    return;
-  }
-
-  match = step.match(/^I mark task `(.+)` on board `(.+)` execution `(.+)` through the setup UI API$/);
-  if (match) {
-    await requestSetupUi(context, "PUT", `/api/boards/${match[2]}/tasks/${match[1]}/execution`, {
-      status: match[3],
-      message: `Marked ${match[3]} from setup UI test.`
-    });
-    return;
-  }
-
-  if (step === "I request board validation through the setup UI API") {
-    await requestSetupUi(context, "GET", "/api/boards/validate");
     return;
   }
 
