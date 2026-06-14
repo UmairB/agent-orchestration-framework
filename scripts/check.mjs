@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 run("supply-chain audit", path.join(repoRoot, "scripts", "supply-chain-audit.mjs"));
-run("SDK boundary", path.join(repoRoot, "scripts", "check-sdk-boundary.mjs"));
 run("tests", path.join(repoRoot, "scripts", "test.mjs"));
 run("child-process smoke", path.join(repoRoot, "test", "integration", "cli-child-process.test.mjs"));
 run("UI build", path.join(repoRoot, "scripts", "ui-build.mjs"));

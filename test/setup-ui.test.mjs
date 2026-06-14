@@ -44,10 +44,6 @@ export const setupUiTests = [
   {
     name: "setup UI keeps static paths inside ui root",
     run: keepsStaticPathsInsideUiRoot
-  },
-  {
-    name: "setup UI manages board APIs",
-    run: managesBoardApis
   }
 ];
 
@@ -454,109 +450,6 @@ async function keepsStaticPathsInsideUiRoot() {
     response = await fetch(`${url}missing-file.js`);
     assert.equal(response.status, 404);
   } finally {
-    server.close();
-    await rm(targetDir, { recursive: true, force: true });
-  }
-}
-
-async function managesBoardApis() {
-  const targetDir = await mkdtemp(path.join(os.tmpdir(), "aof-"));
-  await mkdir(path.join(targetDir, ".aof"), { recursive: true });
-  await writeFile(path.join(targetDir, ".aof", "aof.config.json"), `${JSON.stringify({
-    $schema: "../schemas/aof.schema.json",
-    name: "setup-board-api",
-    resources: [
-      { kind: "agent", id: "builder", description: "Builder", body: "Build the task." }
-    ],
-    globalRefs: [],
-    packages: []
-  }, null, 2)}\n`, "utf8");
-  const catalog = {
-    listItems: () => [],
-    upsertItem: () => {}
-  };
-  const previousPhaseResult = process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
-  process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = JSON.stringify({
-    phaseName: "Setup UI Board Task",
-    success: true,
-    totalCostUsd: 0,
-    totalDurationMs: 1,
-    steps: []
-  });
-  const { server, url } = await serveSetupUi(catalog, { port: 0, projectDir: targetDir });
-  try {
-    const boardSave = await fetchJson(`${url}api/boards/delivery`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Delivery", objective: "Ship board state" })
-    });
-    assert.equal(boardSave.ok, true);
-    assert.equal(boardSave.board.id, "delivery");
-
-    const taskSave = await fetchJson(`${url}api/boards/delivery/tasks/wire-api`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Wire API", status: "ready", refs: { phase: "28" } })
-    });
-    assert.equal(taskSave.task.status, "ready");
-
-    const move = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/status`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "in_progress" })
-    });
-    assert.equal(move.task.status, "in_progress");
-
-    const edit = await fetchJson(`${url}api/boards/delivery/tasks/wire-api`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Wire board API", priority: "urgent", refs: { phase: "28" } })
-    });
-    assert.equal(edit.task.title, "Wire board API");
-    assert.equal(edit.task.priority, "urgent");
-
-    const agents = await fetchJson(`${url}api/boards/agents`);
-    assert.equal(agents.agents[0].id, "builder");
-
-    const assignment = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/assignment`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentId: "builder" })
-    });
-    assert.equal(assignment.execution.status, "running");
-    assert.equal(assignment.task.assignedAgent.id, "builder");
-    assert.equal(assignment.task.status, "in_progress");
-
-    const execution = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`);
-    assert.equal(execution.execution.commands[0], "$gsd-discuss-phase 28");
-
-    const events = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution/events`);
-    assert.equal(events.events.some((event) => event.type === "execution_started"), true);
-
-    const waiting = await fetchJson(`${url}api/boards/delivery/tasks/wire-api/execution`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: "waiting_for_user", message: "Need input." })
-    });
-    assert.equal(waiting.task.status, "in_progress");
-
-    const show = await fetchJson(`${url}api/boards/delivery`);
-    assert.equal(show.board.tasks[0].execution.status, "waiting_for_user");
-
-    const index = await fetchJson(`${url}api/boards/index`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
-    assert.equal(index.index.boards[0].taskCount, 1);
-
-    const validate = await fetchJson(`${url}api/boards/validate`);
-    assert.equal(validate.valid, true);
-
-    const archived = await fetchJson(`${url}api/boards/delivery/archive`, { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" });
-    assert.equal(archived.board.status, "archived");
-  } finally {
-    if (previousPhaseResult === undefined) {
-      delete process.env.AOF_TEST_GSD_PHASE_RESULT_JSON;
-    } else {
-      process.env.AOF_TEST_GSD_PHASE_RESULT_JSON = previousPhaseResult;
-    }
     server.close();
     await rm(targetDir, { recursive: true, force: true });
   }

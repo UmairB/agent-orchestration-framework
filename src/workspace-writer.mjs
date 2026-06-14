@@ -3,7 +3,7 @@ import { writeText } from "./fs.mjs";
 import { assetBodyPath } from "./config-editor.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
-const WORKSPACE_GITIGNORE = "/cache/boards/dispatch.log.jsonl\n";
+const WORKSPACE_GITIGNORE = "/work/\n";
 
 export async function writeWorkspaceConfig(targetDir, config) {
   const paths = workspacePaths(targetDir);

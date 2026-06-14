@@ -15,11 +15,6 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
-import { resolveBackend } from "./backends/index.mjs";
-import { BoardLifecycleError, addTask, archiveBoard, attachBoardMilestoneRoadmap, createBoard, doctorBoards, getBoard, listBoards, moveTask, removeBoard, repairBoard, syncBoardFromGsdRoadmap, updateBoardMilestone, validateBoards, writeBoardIndex } from "./boards.mjs";
-import { applyBreakdownProposal, createBreakdownProposal, readBreakdownProposal, refreshBreakdownProposal } from "./board-breakdown.mjs";
-import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
-import { continueGsdMilestone } from "./gsd-runtime-fallback.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -49,634 +44,11 @@ export async function run(argv) {
     return;
   }
 
-  if (command === "boards") {
-    await boardsCommand(rest);
-    return;
-  }
-
   if (["add", "apply", "sync", "clean", "global", "install", "migrate", "validate", "doctor", "config", "catalog"].includes(command)) {
     throw removedCommandError(command);
   }
 
   throw new Error(`Unknown command "${command}".\n\n${helpText()}`);
-}
-
-async function boardsCommand(args) {
-  const [subcommand, ...rest] = args;
-
-  if (subcommand === "ui") {
-    await boardsUiCommand(rest);
-    return;
-  }
-
-  if (subcommand === "list") {
-    await boardsListCommand(rest);
-    return;
-  }
-
-  if (subcommand === "create") {
-    await boardsCreateCommand(rest);
-    return;
-  }
-
-  if (subcommand === "show") {
-    await boardsShowCommand(rest);
-    return;
-  }
-
-  if (subcommand === "archive") {
-    await boardsArchiveCommand(rest);
-    return;
-  }
-
-  if (subcommand === "remove") {
-    await boardsRemoveCommand(rest);
-    return;
-  }
-
-  if (subcommand === "validate") {
-    await boardsValidateCommand(rest);
-    return;
-  }
-
-  if (subcommand === "doctor") {
-    await boardsDoctorCommand(rest);
-    return;
-  }
-
-  if (subcommand === "index") {
-    await boardsIndexCommand(rest);
-    return;
-  }
-
-  if (subcommand === "sync") {
-    await boardsSyncCommand(rest);
-    return;
-  }
-
-  if (subcommand === "repair") {
-    await boardsRepairCommand(rest);
-    return;
-  }
-  if (subcommand === "milestone") {
-    await boardsMilestoneCommand(rest);
-    return;
-  }
-
-  if (subcommand === "task") {
-    await boardsTaskCommand(rest);
-    return;
-  }
-
-  if (subcommand === "agents") {
-    await boardsAgentsCommand(rest);
-    return;
-  }
-
-  if (subcommand === "execution") {
-    await boardsExecutionCommand(rest);
-    return;
-  }
-
-  if (subcommand === "breakdown") {
-    await boardsBreakdownCommand(rest);
-    return;
-  }
-
-  throw new Error(`Unknown boards command "${subcommand ?? ""}".\n\nExamples:\n  aof boards create release --title "Release" --objective "Ship v1"\n  aof boards sync release\n  aof boards task move release phase-30 in_progress`);
-}
-
-async function boardsListCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const boards = await listBoards(targetDir, { includeArchived: Boolean(options.archived) });
-  if (options.json) {
-    printJson({ boards });
-    return;
-  }
-  if (boards.length === 0) {
-    console.log("boards: 0");
-    return;
-  }
-  console.log(`boards: ${boards.length}`);
-  for (const board of boards) {
-    console.log(`- ${board.id} status=${board.status} tasks=${board.taskCount} title=${board.title}`);
-  }
-}
-
-async function boardsCreateCommand(args) {
-  const options = parseOptions(args);
-  const [id] = options._;
-  if (!id || !options.objective) throw new Error("Usage: aof boards create <id> --title <title> --objective <text> [--execution-runtime claude|codex] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const gsdConfigured = await isGsdExecutionConfigured(targetDir, options);
-  const runtime = parseExecutionRuntime(options);
-  const result = await createBoard(targetDir, {
-    id,
-    title: options.title,
-    objective: options.objective ?? options.deliverable,
-    executionProvider: gsdConfigured ? "gsd" : undefined,
-    defaultExecutionRuntime: runtime
-  }, { force: Boolean(options.force), dryRun: Boolean(options.dryRun) });
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`${result.dryRun ? "Would create" : "Created"} board ${result.board.id}`);
-  if (result.board.executionProvider === "gsd") {
-    console.log(`execution: gsd runtime=${result.board.defaultExecutionRuntime}`);
-    console.log(`${result.dryRun ? "would continue" : "continue"}: ${result.board.gsd.milestone.invocation ?? result.board.gsd.milestone.command}`);
-    console.log(`milestone: ${result.board.gsd.milestone.status}`);
-    console.log(`binding: ${result.board.gsd.milestone.binding?.status ?? "unknown"}`);
-    console.log(`objective: ${result.board.gsd.milestone.objective}`);
-    console.log(`sync: blocked until GSD milestone completes`);
-  }
-}
-
-async function boardsShowCommand(args) {
-  const options = parseOptions(args);
-  const [id] = options._;
-  if (!id) throw new Error("Usage: aof boards show <id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const board = await getBoard(targetDir, id);
-  if (options.json) {
-    printJson({ board });
-    return;
-  }
-  console.log(`board: ${board.id}`);
-  console.log(`title: ${board.title}`);
-  console.log(`objective: ${board.objective ?? ""}`);
-  console.log(`status: ${board.status}`);
-  if (board.executionProvider) {
-    console.log(`execution: ${board.executionProvider} runtime=${board.defaultExecutionRuntime}`);
-    console.log(`milestone: ${board.gsd?.milestone?.status ?? "unknown"}`);
-    console.log(`binding: ${board.gsd?.milestone?.binding?.status ?? "unknown"}`);
-    if (board.gsd?.milestone?.invocation) console.log(`started: ${board.gsd.milestone.invocation}`);
-    if (board.gsd?.taskCreation?.syncCommand) console.log(`sync: ${board.gsd.taskCreation.syncCommand}`);
-  }
-  console.log(`tasks: ${board.tasks.length}`);
-  for (const task of board.tasks) {
-    console.log(`- ${task.id} status=${task.status} priority=${task.priority} title=${task.title}`);
-  }
-}
-
-async function boardsArchiveCommand(args) {
-  const options = parseOptions(args);
-  const [id] = options._;
-  if (!id) throw new Error("Usage: aof boards archive <id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const board = await archiveBoard(targetDir, id);
-  if (options.json) {
-    printJson({ board });
-    return;
-  }
-  console.log(`Archived board ${board.id}`);
-}
-
-async function boardsRemoveCommand(args) {
-  const options = parseOptions(args);
-  const [id] = options._;
-  if (!id) throw new Error("Usage: aof boards remove <id> [--dry-run] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await removeBoard(targetDir, id, { dryRun: Boolean(options.dryRun) });
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`${result.dryRun ? "Would remove" : "Removed"} board ${result.id}`);
-  console.log(`path: ${relativeDisplayPath(result.boardDir, targetDir)}`);
-}
-
-async function boardsValidateCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const diagnostics = await validateBoards(targetDir);
-  await printBoardValidationResult(diagnostics, options);
-}
-
-async function boardsDoctorCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const report = await doctorBoards(targetDir, { boardId });
-  if (options.json) {
-    printJson(report);
-    if (!report.ok) process.exitCode = 1;
-    return;
-  }
-  console.log(`doctor: ${report.ok ? "healthy" : "issues found"}`);
-  for (const check of report.checks) {
-    console.log(`${doctorStatusLabel(check.status)} ${check.code}${check.boardId ? ` board=${check.boardId}` : ""}: ${check.message}`);
-    if (check.next) console.log(`  next: ${check.next}`);
-  }
-  if (!report.ok) process.exitCode = 1;
-}
-
-async function boardsIndexCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await writeBoardIndex(targetDir);
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`Updated ${relativeDisplayPath(result.indexPath, targetDir)}`);
-  console.log(`boards: ${result.index.boards.length}`);
-}
-
-async function boardsSyncCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  const milestoneId = options.milestone ?? options.milestoneId;
-  if (!boardId) throw new Error("Usage: aof boards sync <board-id> --milestone <milestone-id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let result;
-  try {
-    result = await syncBoardFromGsdRoadmap(targetDir, boardId, {
-      milestoneId,
-      dryRun: Boolean(options.dryRun)
-    });
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson({ ok: true, ...result });
-    return;
-  }
-  console.log(`${result.dryRun ? "Would sync" : "Synced"} board ${result.board.id} with GSD roadmap`);
-  console.log(`phases: ${result.phases.length}`);
-  console.log(`created: ${result.created.length}`);
-  if (result.actions?.some((item) => item.action === "drift")) console.log(`drift: ${result.actions.filter((item) => item.action === "drift").length}`);
-  for (const task of result.created) console.log(`- ${task.id} phase=${task.refs.phase} title=${task.title}`);
-  console.log(`add phase: ${result.board.gsd.taskCreation.addPhaseCommand}`);
-}
-
-async function boardsRepairCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  if (!boardId) throw new Error("Usage: aof boards repair <board-id> [--execution-runtime claude|codex] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const runtime = parseExecutionRuntime(options, { optional: true });
-  let result;
-  try {
-    result = await repairBoard(targetDir, boardId, {
-      defaultExecutionRuntime: runtime,
-      dryRun: Boolean(options.dryRun)
-    });
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(result.message);
-  if (result.command) console.log(`continue: ${result.command}`);
-  if (result.board.gsd?.milestone?.objective) console.log(`objective: ${result.board.gsd.milestone.objective}`);
-  if (result.board.gsd?.milestone?.binding?.status) console.log(`binding: ${result.board.gsd.milestone.binding.status}`);
-}
-
-async function boardsMilestoneCommand(args) {
-  const [subcommand, ...rest] = args;
-  if (subcommand === "status") {
-    await boardsMilestoneStatusCommand(rest);
-    return;
-  }
-  if (subcommand === "answer") {
-    await boardsMilestoneAnswerCommand(rest);
-    return;
-  }
-  if (subcommand === "attach") {
-    await boardsMilestoneAttachCommand(rest);
-    return;
-  }
-  throw new Error(`Unknown boards milestone command "${subcommand ?? ""}".\n\nMilestone creation is an interactive GSD handoff: run $gsd-new-milestone, then attach the completed roadmap with aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md.\n\nExamples:\n  aof boards milestone status board-id\n  aof boards milestone answer board-id --text "1"\n  aof boards milestone attach board-id --milestone v1.7 --roadmap .planning/ROADMAP.md`);
-}
-
-async function boardsMilestoneStatusCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  if (!boardId) throw new Error("Usage: aof boards milestone status <board-id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const board = await getBoard(targetDir, boardId);
-  const milestone = board.gsd?.milestone;
-  if (options.json) {
-    printJson({ board: board.id, milestone });
-    return;
-  }
-  console.log(`board: ${board.id}`);
-  console.log(`milestone: ${milestone?.status ?? "none"}`);
-  if (milestone?.runtime) console.log(`runtime: ${milestone.runtime}`);
-  if (milestone?.invocation) console.log(`invocation: ${milestone.invocation}`);
-  if (milestone?.lastOutput) {
-    console.log("");
-    console.log("last output:");
-    console.log(milestone.lastOutput);
-  }
-  if (milestone?.status === "waiting_for_user") {
-    console.log("");
-    if (hasMilestoneRuntimeSession(milestone)) {
-      console.log(`next: aof boards milestone answer ${board.id} --text "<answer>"`);
-    } else if (milestone?.invocation || milestone?.command) {
-      console.log(`next: ${milestone.invocation ?? milestone.command}`);
-    }
-  }
-}
-
-function hasMilestoneRuntimeSession(milestone) {
-  if (milestone?.runtime || milestone?.lastOutput) return true;
-  const turns = milestone?.session?.turns;
-  return Array.isArray(turns) && turns.some((turn) => turn?.role === "runtime");
-}
-
-async function boardsMilestoneAnswerCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  const answer = options.text ?? options.answer;
-  if (!boardId || !answer) throw new Error("Usage: aof boards milestone answer <board-id> --text <answer> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let runtimeResult;
-  let updated;
-  try {
-    const board = await getBoard(targetDir, boardId);
-    if (!board.executionProvider || resolveBackend(board.executionProvider).kind !== "gsd") throw new Error(`Board ${board.id} is not backed by GSD.`);
-    runtimeResult = await continueGsdMilestone(targetDir, board, { answer });
-    updated = await updateBoardMilestone(targetDir, board.id, runtimeResult, { answer });
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson({ board: updated.id, milestone: updated.gsd.milestone, runtime: runtimeResult });
-    return;
-  }
-  console.log(`board: ${updated.id}`);
-  console.log(`runtime: ${runtimeResult.runtime} status=${runtimeResult.status} exit=${runtimeResult.exitCode}`);
-  console.log(`milestone: ${updated.gsd.milestone.status}`);
-  if (updated.gsd.milestone.lastOutput) {
-    console.log("");
-    console.log(updated.gsd.milestone.lastOutput);
-  }
-}
-
-async function boardsMilestoneAttachCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  const milestoneId = options.milestone ?? options.milestoneId;
-  const roadmapPath = options.roadmap ?? options.roadmapPath;
-  if (!boardId || !milestoneId || !roadmapPath) throw new Error("Usage: aof boards milestone attach <board-id> --milestone <milestone-id> --roadmap <path> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let board;
-  try {
-    board = await attachBoardMilestoneRoadmap(targetDir, boardId, {
-      milestoneId,
-      roadmapPath
-    }, { dryRun: Boolean(options.dryRun) });
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson({ ok: true, board: board.id, milestone: board.gsd.milestone });
-    return;
-  }
-  console.log(`Attached board ${board.id} to milestone ${board.gsd.milestone.id}`);
-  console.log(`roadmap: ${board.gsd.milestone.roadmapPath}`);
-  console.log(`binding: ${board.gsd.milestone.binding?.status ?? "unknown"}`);
-  console.log(`sync: ${board.gsd.taskCreation.syncCommand}`);
-}
-
-async function boardsTaskCommand(args) {
-  const [subcommand, ...rest] = args;
-  if (subcommand === "add") {
-    await boardsTaskAddCommand(rest);
-    return;
-  }
-  if (subcommand === "move") {
-    await boardsTaskMoveCommand(rest);
-    return;
-  }
-  if (subcommand === "assign") {
-    await boardsTaskAssignCommand(rest);
-    return;
-  }
-  throw new Error(`Unknown boards task command "${subcommand ?? ""}".\n\nExamples:\n  aof boards task add release wire-api --title "Wire board API"\n  aof boards task move release wire-api in_progress`);
-}
-
-async function boardsAgentsCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const agents = await listBoardAgents(targetDir, options);
-  if (options.json) {
-    printJson({ agents });
-    return;
-  }
-  console.log(`agents: ${agents.length}`);
-  for (const agent of agents) console.log(`- ${agent.id} source=${agent.source} runtimes=${agent.runtimes.join(",")}`);
-}
-
-async function boardsExecutionCommand(args) {
-  const [subcommand, ...rest] = args;
-  if (subcommand === "show") {
-    await boardsExecutionShowCommand(rest);
-    return;
-  }
-  if (subcommand === "update") {
-    await boardsExecutionUpdateCommand(rest);
-    return;
-  }
-  throw new Error(`Unknown boards execution command "${subcommand ?? ""}".\n\nExamples:\n  aof boards execution show release wire-api\n  aof boards execution update release wire-api --status waiting_for_user --message "Need input"`);
-}
-
-async function boardsBreakdownCommand(args) {
-  const [subcommandOrBoardId, ...rest] = args;
-
-  if (subcommandOrBoardId === "show") {
-    await boardsBreakdownShowCommand(rest);
-    return;
-  }
-
-  if (subcommandOrBoardId === "apply") {
-    await boardsBreakdownApplyCommand(rest);
-    return;
-  }
-
-  if (subcommandOrBoardId === "refresh") {
-    await boardsBreakdownRefreshCommand(rest);
-    return;
-  }
-
-  await boardsBreakdownCreateCommand(args);
-}
-
-async function boardsBreakdownCreateCommand(args) {
-  const options = parseOptions(args);
-  const [boardId] = options._;
-  if (!boardId || !options.objective) throw new Error("Usage: aof boards breakdown <board-id> --objective <text> [--id proposal-id] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await createBreakdownProposal(targetDir, boardId, {
-    id: options.id,
-    objective: options.objective,
-    force: Boolean(options.force)
-  });
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  printBreakdownProposal(result.proposal, targetDir, result.proposalPath);
-}
-
-async function boardsBreakdownShowCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, proposalId] = options._;
-  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown show <board-id> <proposal-id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const proposal = await readBreakdownProposal(targetDir, boardId, proposalId);
-  if (options.json) {
-    printJson({ proposal });
-    return;
-  }
-  printBreakdownProposal(proposal, targetDir);
-}
-
-async function boardsBreakdownApplyCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, proposalId] = options._;
-  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown apply <board-id> <proposal-id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await applyBreakdownProposal(targetDir, boardId, proposalId);
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  if (result.alreadyApplied) {
-    console.log(`Proposal ${result.proposal.id} was already applied`);
-    return;
-  }
-  console.log(`Applied proposal ${result.proposal.id}`);
-  for (const task of result.applied) console.log(`- ${task.id} status=${task.status} title=${task.title}`);
-}
-
-async function boardsBreakdownRefreshCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, proposalId] = options._;
-  if (!boardId || !proposalId) throw new Error("Usage: aof boards breakdown refresh <board-id> <proposal-id> --id <new-proposal-id> [--objective text] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await refreshBreakdownProposal(targetDir, boardId, proposalId, {
-    id: options.id,
-    objective: options.objective,
-    force: Boolean(options.force)
-  });
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  printBreakdownProposal(result.proposal, targetDir, result.proposalPath);
-}
-
-async function boardsTaskAddCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, taskId] = options._;
-  if (!boardId || !taskId || !options.title) throw new Error("Usage: aof boards task add <board-id> <task-id> --title <title> [--status status] [--priority priority] [--deliverable text]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = await addTask(targetDir, boardId, {
-    id: taskId,
-    title: options.title,
-    description: options.description,
-    status: options.status,
-    priority: options.priority,
-    deliverable: options.deliverable,
-    refs: parseJsonOption(options.refs, "refs")
-  }, { force: Boolean(options.force), dryRun: Boolean(options.dryRun) });
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`${result.dryRun ? "Would create" : "Created"} task ${result.task.boardId}/${result.task.id}`);
-}
-
-async function boardsTaskMoveCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, taskId, status] = options._;
-  if (!boardId || !taskId || !status) throw new Error("Usage: aof boards task move <board-id> <task-id> <status> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const task = await moveTask(targetDir, boardId, taskId, status);
-  if (options.json) {
-    printJson({ task });
-    return;
-  }
-  console.log(`Moved task ${task.boardId}/${task.id} to ${task.status}`);
-}
-
-async function boardsTaskAssignCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, taskId, agentId] = options._;
-  if (!boardId || !taskId || !agentId) throw new Error("Usage: aof boards task assign <board-id> <task-id> <agent-id> [--provider gsd] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let result;
-  try {
-    result = await assignTaskToAgent(targetDir, boardId, taskId, agentId, options);
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`Assigned task ${result.task.boardId}/${result.task.id} to ${result.execution.assignedAgent.id}`);
-  console.log(`Started ${result.execution.provider} execution status=${result.execution.status} phase=${result.execution.phase}`);
-  for (const command of result.execution.commands) console.log(`- ${command}`);
-}
-
-async function boardsExecutionShowCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, taskId] = options._;
-  if (!boardId || !taskId) throw new Error("Usage: aof boards execution show <board-id> <task-id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let result;
-  try {
-    result = await readTaskExecution(targetDir, boardId, taskId);
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`execution: ${result.execution.boardId}/${result.execution.taskId}`);
-  console.log(`provider: ${result.execution.provider}`);
-  console.log(`status: ${result.execution.status}`);
-  console.log(`agent: ${result.execution.assignedAgent.id}`);
-  console.log(`phase: ${result.execution.phase}`);
-  for (const log of result.execution.logs ?? []) console.log(`- ${log.at} ${log.message}`);
-}
-
-async function boardsExecutionUpdateCommand(args) {
-  const options = parseOptions(args);
-  const [boardId, taskId] = options._;
-  if (!boardId || !taskId || !options.status) throw new Error("Usage: aof boards execution update <board-id> <task-id> --status <status> [--message text] [--handoff text] [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  let result;
-  try {
-    result = await updateTaskExecution(targetDir, boardId, taskId, {
-      status: options.status,
-      message: options.message,
-      handoff: options.handoff
-    });
-  } catch (error) {
-    if (options.json && printStructuredJsonError(error)) return;
-    throw error;
-  }
-  if (options.json) {
-    printJson(result);
-    return;
-  }
-  console.log(`Updated execution ${result.execution.boardId}/${result.execution.taskId} to ${result.execution.status}`);
-  console.log(`Task status: ${result.task.status}`);
 }
 
 async function assetsCommand(args) {
@@ -1185,11 +557,6 @@ async function assetsUiCommand(args) {
   await setupUiCommand({ ...options, uiMode: "assets" });
 }
 
-async function boardsUiCommand(args) {
-  const options = parseOptions(args);
-  await setupUiCommand({ ...options, uiMode: "boards" });
-}
-
 async function packagesAddCommand(args) {
   const options = parseOptions(args);
   const [packageId] = options._;
@@ -1398,48 +765,23 @@ async function migrateCommand(args) {
   console.log(`${paths.configPath} is now authoritative; root aof.config.json is legacy and was left untouched.`);
 }
 
-async function installCommand(args) {
-  const options = parseOptions(args);
-  const framework = options._[0];
-
-  if (options.fromLock) {
-    await installFromLockCommand(options);
-    return;
-  }
-
-  if (options.interactive && !framework) {
-    await interactiveInstallCommand(options);
-    return;
-  }
-
-  if (framework && !framework.startsWith("--")) {
-    await frameworkInstallCommand(framework, options);
-    return;
-  }
-
-  await setupUiCommand({ ...options, uiMode: "assets" });
-}
-
 async function setupUiCommand(options) {
-  const uiMode = options.uiMode === "boards" ? "boards" : "assets";
-  const command = uiMode === "boards" ? "aof boards ui" : "aof assets ui";
-  const description = uiMode === "boards" ? "board/task management UI" : "project/global asset editor";
+  const description = "project/global asset editor";
 
   if (options.noServe || options.dryRun) {
     console.log("Setup UI not started.");
-    console.log(`Run \`${command}\` to open the local ${description}.`);
+    console.log("Run `aof assets ui` to open the local project/global asset editor.");
     return;
   }
 
-  const defaultUiPort = uiMode === "boards" ? "4187" : "4177";
-  const uiPort = Number.parseInt(options.port ?? defaultUiPort, 10);
+  const uiPort = Number.parseInt(options.port ?? "4177", 10);
   const apiPort = Number.parseInt(options.apiPort ?? String(uiPort + 1), 10);
   const { serveSetupUi } = await import("./setup-ui.mjs");
   const { server } = await serveSetupUi(null, { port: apiPort });
-  const frontend = startSetupUiFrontend(uiPort, uiMode, `http://127.0.0.1:${apiPort}`);
-  const uiUrl = `http://127.0.0.1:${uiPort}/?mode=${uiMode}`;
+  const frontend = startSetupUiFrontend(uiPort, `http://127.0.0.1:${apiPort}`);
+  const uiUrl = `http://127.0.0.1:${uiPort}/?mode=assets`;
 
-  console.log(`AOF ${uiMode} UI is running locally.`);
+  console.log("AOF assets UI is running locally.");
   console.log(`Open this URL in your browser: ${uiUrl}`);
   console.log(`Project: ${process.cwd()}`);
   console.log(`Use the UI for ${description}. Keep this terminal open while you use it.`);
@@ -1466,7 +808,7 @@ async function setupUiCommand(options) {
   });
 }
 
-function startSetupUiFrontend(port, uiMode = "assets", apiUrl = "http://127.0.0.1:4178") {
+function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const uiDir = path.join(repoRoot, "ui");
   const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
@@ -1475,7 +817,7 @@ function startSetupUiFrontend(port, uiMode = "assets", apiUrl = "http://127.0.0.
     stdio: "inherit",
     env: {
       ...process.env,
-      VITE_AOF_UI_MODE: uiMode,
+      VITE_AOF_UI_MODE: "assets",
       VITE_AOF_API_URL: apiUrl,
       BROWSER: "none"
     }
@@ -1766,71 +1108,6 @@ function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function printStructuredJsonError(error) {
-  if (!isStructuredError(error)) return false;
-  printJson({ ok: false, ...error.toJSON() });
-  process.exitCode = 1;
-  return true;
-}
-
-function doctorStatusLabel(status) {
-  if (status === "pass") return "PASS";
-  if (status === "warn") return "WARN";
-  return "FAIL";
-}
-
-function isStructuredError(error) {
-  return error instanceof BoardLifecycleError || typeof error?.toJSON === "function" && typeof error?.code === "string";
-}
-
-function printBreakdownProposal(proposal, targetDir, proposalPath) {
-  console.log(`proposal: ${proposal.id}`);
-  console.log(`board: ${proposal.boardId}`);
-  console.log(`status: ${proposal.status}`);
-  console.log(`objective: ${proposal.objective}`);
-  if (proposal.refreshOf) console.log(`refreshOf: ${proposal.refreshOf}`);
-  if (proposalPath) console.log(`path: ${relativeDisplayPath(proposalPath, targetDir)}`);
-  console.log(`tasks: ${proposal.tasks.length}`);
-  for (const task of proposal.tasks) {
-    console.log(`- ${task.id} status=${task.status} title=${task.title}`);
-  }
-}
-
-function parseJsonOption(value, name) {
-  if (value === undefined) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch (error) {
-    throw new Error(`Invalid JSON for --${name}: ${error.message}`);
-  }
-}
-
-async function printBoardValidationResult(diagnostics, options) {
-  const errors = diagnostics.filter((item) => item.severity === "error");
-  const warnings = diagnostics.filter((item) => item.severity === "warning");
-  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
-
-  if (options.json) {
-    printJson({
-      valid: !failed,
-      strict: Boolean(options.strict),
-      errors: errors.length,
-      warnings: warnings.length,
-      diagnostics
-    });
-  } else if (!failed) {
-    console.log("valid: boards passed validation");
-    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
-    for (const warning of warnings) console.log(`warning: ${warning.code} ${warning.path} ${warning.message}`);
-  } else {
-    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
-    console.log(`invalid: ${reason}`);
-    for (const item of diagnostics) console.log(`${item.severity}: ${item.code} ${item.path} ${item.message}`);
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
 function parseRuntimes(options) {
   const selected = [];
   if (options.claude) selected.push("claude");
@@ -1846,23 +1123,6 @@ function parseRuntimes(options) {
 
 function hasRuntimeOptions(options) {
   return Boolean(options.claude || options.codex || options.runtime);
-}
-
-function parseExecutionRuntime(options, settings = {}) {
-  const explicit = options.executionRuntime ?? options.runtime;
-  if (explicit !== undefined) {
-    const runtimes = String(explicit).split(",").map((runtime) => runtime.trim()).filter(Boolean);
-    if (runtimes.length !== 1 || !["claude", "codex"].includes(runtimes[0])) {
-      throw new Error("Invalid execution runtime. Use --execution-runtime claude or --execution-runtime codex.");
-    }
-    return runtimes[0];
-  }
-  if (options.claude && options.codex) {
-    throw new Error("Choose one execution runtime for boards: --execution-runtime claude or --execution-runtime codex.");
-  }
-  if (options.claude) return "claude";
-  if (options.codex) return "codex";
-  return settings.optional ? undefined : "codex";
 }
 
 async function runtimesForApply(configPath, options) {
@@ -1947,40 +1207,13 @@ Packages:
   aof packages install [gsd] [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
   aof packages install --from-lock [--dry-run] [--json]
 
-Boards:
-  aof boards ui [--port 4187] [--api-port 4188]
-  aof boards list [--archived] [--json]
-  aof boards create id --title text --objective text [--execution-runtime claude|codex] [--json]
-  aof boards show id [--json]
-  aof boards archive id [--json]
-  aof boards remove id [--dry-run] [--json]
-  aof boards validate [--json] [--strict]
-  aof boards doctor [board-id] [--json]
-  aof boards index [--json]
-  aof boards sync id --milestone milestone-id [--json]
-  aof boards milestone attach id --milestone milestone-id --roadmap path [--json]
-  aof boards repair id [--runtime claude|codex] [--json]
-  aof boards agents [--json]
-  aof boards task add board-id task-id --title text [--status status] [--priority priority] [--deliverable text] [--refs json]
-  aof boards task move board-id task-id status [--json]
-  aof boards task assign board-id task-id agent-id [--provider gsd] [--json]
-  aof boards execution show board-id task-id [--json]
-  aof boards execution update board-id task-id --status status [--message text] [--handoff text] [--json]
-  aof boards breakdown board-id --objective text [--id proposal-id] [--json]
-  aof boards breakdown show board-id proposal-id [--json]
-  aof boards breakdown apply board-id proposal-id [--json]
-  aof boards breakdown refresh board-id proposal-id --id new-proposal-id [--objective text] [--json]
-
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.
   project commands inspect, validate, diagnose, and migrate the current repository's AOF workspace.
   assets apply renders source assets into the runtimes selected in .aof/aof.config.json unless runtime flags narrow the run.
   packages add records package intent only and never runs installer code.
   packages install prints a network/package-code boundary before executing installers.
-  boards stores canonical task state in .aof/boards and generated indexes in .aof/cache/boards.
-  GSD-backed boards start with $gsd-new-milestone and sync tasks from GSD roadmap phases.
   assets ui opens the project/global asset editor.
-  boards ui opens the board/task management UI.
   --strict promotes adapter warnings to command failures for CI.
 `;
 }
