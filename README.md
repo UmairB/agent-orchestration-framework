@@ -205,24 +205,6 @@ package runtime support. `aof project doctor` adds project health checks such as
 stale root config detection, generated-output drift summary, missing assets,
 managed package intent, and suggested next commands.
 
-Manage project-local boards and GSD milestone health:
-
-```sh
-aof boards create delivery --title Delivery --objective "Ship board state"
-aof boards milestone attach delivery --milestone v1.7 --roadmap .planning/ROADMAP.md
-aof boards sync delivery --milestone v1.7
-aof boards doctor delivery
-aof boards doctor delivery --json
-```
-
-`aof boards doctor [board-id]` reports a pass/warn/fail ladder for board state,
-GSD milestone binding, roadmap analysis, task sync health, SDK/tool version
-drift, and Windows environment risks. v1.6-shaped boards missing
-`gsd.milestone.id` get a `BOARD_MILESTONE_ID_MISSING` warning with the exact
-`aof boards milestone attach ...` remediation command. Board/GSD failures under
-`--json` use stable `{ ok: false, code, message, expected?, actual?, next? }`
-objects for automation.
-
 Start the local setup UI:
 
 ```sh
