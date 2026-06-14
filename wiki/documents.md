@@ -1,139 +1,138 @@
-# The Document Model
+# The Work Stream & Documents
 
-> **The question this document answers:** *What documents make up a milestone, and what does
-> each one own?*
+> **The question this document answers:** *What items and documents make up the work stream, and
+> what does each one own?*
 
-ACD organises a milestone into single-purpose documents. The governing rule is **one question per
-document** ([philosophy.md → principle 2](philosophy.md)): each file answers exactly one question,
-and a line is in the wrong file when it answers a different one.
+ACD organises work as a flat, chronological **stream** of items, governed by **one question per
+document** ([philosophy.md → principle 2](philosophy.md)): each file answers exactly one question.
 
-## The taxonomy
+## The three item types
 
-| Document | The one question it answers | Owner | Verified by |
+Work is a hierarchy of three types — but the hierarchy is expressed by **reference**, not by
+folder nesting:
+
+| Type | Is | Holds | Groups |
 |---|---|---|---|
-| `SPEC.md` | *Why* are we doing this, and what's in/out of scope? | product-owner | — |
-| `RESEARCH.md` | What did we *learn* that constrains the choices? | researcher | — |
-| `ARCHITECTURE.md` | *How* did we decide to build it, and *why that way*? | architect | arch-tests (fitness functions) |
-| `DESIGN.md` | *How* should it look and feel, and *why*? | designer | visual review |
-| `tasks/*.feature` | *What will be observably true* when it's done? | product-owner (Three Amigos) | `@executable` → CI |
-| `UAT.md` | *How does a human confirm it* in the real world, and have they? | qa | `@manual` → sign-off |
-| `STATE.md` | *Where are we* now, and what happened? | product-owner | — |
+| **task** | the atomic unit of work | a `.feature` file (its scenarios *are* the acceptance criteria) | — |
+| **story** | a user-facing deliverable | `STORY.md` (the user story + status) + its tasks | tasks |
+| **milestone** | a delivery container | the shared `SPEC` / `STATE` / `ADR` / `DESIGN` / `RESEARCH` / `UAT` | stories |
 
-Owners and the collaboration around them are detailed in [agents.md](agents.md).
+Read top-down: a **milestone** groups **stories**, a **story** groups **tasks**, a **task** is the
+acceptance criteria. Read for *value*: the **story** is the unit of user-facing delivery and of
+**parallelism**; the **task** is the unit of work and of testing.
 
-## The spine vs the conditional documents
+## The flat stream and the folder convention
 
-- **Spine (always present):** `SPEC.md`, `tasks/*.feature`, `STATE.md`. Every milestone has a
-  reason, a contract, and a ledger.
-- **Conditional (present only when they have content):** `RESEARCH.md` (only if there was a real
-  unknown to resolve), `ARCHITECTURE.md` (only if a non-trivial decision was made), `DESIGN.md`
-  (only if there is UI), `UAT.md` (only if something needs human/live verification).
+Every top-level item is a numbered folder directly under the work dir:
 
-Do not create an empty conditional document. Its absence is information: no `DESIGN.md` means no
-UI work; no `ARCHITECTURE.md` means nothing was decided worth recording.
+```
+work/
+  00_milestone_console-shell/
+  01_story_shell-layout/             parent: 00
+  02_story_theming/                  parent: 00
+  03_milestone_platform-foundation/
+  04_story_database-package/         parent: 03
+  47_task_snapshot-perf-fix/         (adhoc — no parent)
+```
 
-## Each document in detail
+- **Folder name = `NN_type_slug`** — split on the first two `_` → `[number, type, slug]`. The slug
+  uses `-` for spaces and never contains `_`. Regex: `^(\d+)_(milestone|story|task)_([a-z0-9-]+)$`.
+- **Number** = creation order = the timeline (a stable id; never renumber). Scanning the last *N*
+  folders is the catch-up-on-recent-delivery view.
+- **Grouping is by reference:** an item names its container in frontmatter `parent: <number>`. A
+  milestone's stories are *separate top-level items* pointing back at it — that is what keeps the
+  stream flat and chronological. Reconstruct a group on demand (`list --milestone 03`).
+- **Standalone** items omit `parent`: a lone `task` (adhoc fix) or a lone `story` (a group of adhoc
+  work). Depth scales with planning; adhoc stays flat.
 
-### SPEC.md — the brief
+### What nests vs what's flat
 
-**Answers:** why + scope. The product-owner's statement of intent.
+- **Tasks of a story nest physically** inside that story: `01_story_shell-layout/tasks/00_sidebar-ia.feature`.
+- **Stories of a milestone do not nest** — they are top-level items with `parent:`.
+- A **standalone/adhoc task** is its own top-level folder (`47_task_snapshot-perf-fix/`) containing
+  its `.feature`.
 
-**Contains:** the goal; what's in scope and explicitly out of scope; dependencies; the acceptance
-summary (a checklist that points at the feature files, not a restatement of them).
+## Frontmatter — the authoritative record
 
-**Does not contain:** how it's built (→ ARCHITECTURE), what was learned (→ RESEARCH), the detailed
-outcomes (→ feature files). The SPEC frames; the feature files specify.
+The folder name is a human-scannable **index**; the frontmatter is the machine-authoritative
+**record**. They intentionally carry the same identity (`type`/`number`/`slug`) — decoupled so the
+record survives a change of folder convention or an export to another store. **The validator
+asserts they agree** (controlled redundancy, not silent drift).
 
-### RESEARCH.md — the evidence
+Each item has **one canonical record doc**: a milestone's `SPEC.md`, a story's `STORY.md`. It
+carries the full record:
 
-**Answers:** what we learned. Findings that constrain the design — SDK realities, vendor
-behaviour, prior-art, measured facts.
+```yaml
+---
+type: story            # milestone | story | task
+number: 01
+slug: shell-layout
+title: "Shell layout"
+parent: 00             # the container's number; omit when standalone
+status: in-progress    # not-started | in-progress | blocked | in-review | done
+owner: product-owner
+created: 2026-06-13
+updated: 2026-06-13
+---
+```
 
-**Contains:** findings with sources; the constraints they impose; assumptions to confirm later
-(and which are CI-testable vs live-only).
+- **Supporting docs** (a milestone's `STATE`/`ARCHITECTURE`/`DESIGN`/`RESEARCH`/`UAT`) carry only
+  `doc: <kind>` — they inherit identity from the folder; they do not restate `number`/`slug`/`status`.
+- **Tasks carry no frontmatter** — Gherkin can't. A task's identity is its folder/file name; its
+  metadata is its **tags** (`@executable`/`@manual`, etc., see [acceptance-criteria.md](acceptance-criteria.md)).
+  This is *why* the type is encoded in the name.
 
-**Does not contain:** the decision the findings led to (→ ARCHITECTURE). Research reports facts;
-the architect decides what to do about them.
+## Documents by level
 
-### ARCHITECTURE.md — the reasoning (ADRs)
+### Milestone documents (the shared, heavy context)
 
-**Answers:** how/why decided. A log of **Architecture Decision Records**: numbered, immutable,
-superseded-not-edited.
+| Document | The one question it answers | Owner |
+|---|---|---|
+| `SPEC.md` *(record)* | *Why + scope* of the milestone (its objective + which stories) | product-owner |
+| `STATE.md` | *Where are we, what happened* (running log) | product-owner |
+| `ARCHITECTURE.md` | *How decided, why* — ADRs + fitness functions | architect |
+| `DESIGN.md` | *How it looks & feels, why* | designer |
+| `RESEARCH.md` | *What we learned* that constrains choices | researcher |
+| `UAT.md` | *How a human confirms it*, and have they | qa |
 
-**Each ADR contains:** context → the decision → alternatives considered → consequences. Plus any
-**structural invariant** the decision implies (e.g. "no provider conditionals in the machinery"),
-which becomes a **fitness function** — an automated arch-test that enforces the invariant in CI.
+Spine: `SPEC.md` (always). The rest are **conditional** — present only when they have content
+(absence is information). They are produced by `refine`, per-milestone, when the work needs them.
 
-**Does not contain:** observable behaviour (→ feature files). "Returns the editor URL ending in
-`?tab=workflows`" is an outcome; "we source it from the shared registry, not a config key" is the
-ADR behind it. The feature states the first and *references* the ADR for the second.
+### Story document
 
-**Scope note:** a decision local to this milestone lives here; a *durable* principle that outlives
-every milestone belongs in a project-level architecture reference, linked from here.
+| Document | The one question it answers | Owner |
+|---|---|---|
+| `STORY.md` *(record)* | *Why this story* — the user story (`As a / I want / so that`) + its task list | product-owner |
 
-### DESIGN.md — the experience
+A standalone story's `STORY.md` is self-contained (it has no milestone SPEC to inherit from). A
+milestone-bound story inherits the milestone's ADRs/design/research.
 
-**Answers:** how it looks and feels, and why. UI/UX intent.
+### Task document
 
-**Contains:** layout and interaction intent; component choices and their rationale; mockup/Figma
-links. Prefer a visual artifact to prose — Gherkin and markdown are poor at expressing visual
-design.
+| Document | The one question it answers | Owner |
+|---|---|---|
+| `*.feature` | *What is observably true* when done — the acceptance criteria | product-owner (Three Amigos) |
 
-**Does not contain:** UI *behaviour* (→ feature files). "The form offers Telnyx for workflow
-templates" is a behavioural outcome and is a scenario; "the provider picker is a radio group laid
-out thus" is design.
+The task is the home of the Gherkin. It has no user story (that's the parent story's). See
+**[acceptance-criteria.md](acceptance-criteria.md)**.
 
-### tasks/*.feature — the contract
+## Status & recency
 
-**Answers:** what will be observably true. The executable acceptance criteria.
-
-This is the heart of ACD and has its own document: **[acceptance-criteria.md](acceptance-criteria.md)**.
-
-### UAT.md — the sign-off
-
-**Answers:** how a human confirms it, and have they. Verification that lives outside or alongside
-the automated suite.
-
-**Contains:** for each `@manual` scenario, the **procedure**, the **environment**, and the
-**sign-off** — and a `verifies →` pointer to the scenario it confirms. Plus human-acceptance
-judgments that aren't scenarios at all, and live/credentialed checks CI can't run.
-
-**Does not contain:** restated outcomes. It **references** feature scenarios; it never copies their
-text. It is a *frontier*, not a graveyard — items migrate out to `@executable` as they get
-automated, so a shrinking UAT.md is a sign of maturity. See
-[acceptance-criteria.md → Tags](acceptance-criteria.md#tags) and
-[workflow.md](workflow.md).
-
-### STATE.md — the ledger
-
-**Answers:** where we are, and what happened. The living record.
-
-**Contains:** status; a progress checklist; notes and decisions-in-flight; surprises and
-corrections; live findings. It is the forensic history of the milestone.
-
-**Owned by a single writer** — the product-owner (orchestrator). Sub-agents report completion back;
-the PO records it. One writer avoids merge races on shared state.
-
-**Has a lifecycle.** STATE.md grows during the milestone and is **summarised/collapsed at milestone
-close** — the durable conclusions graduate into ADRs, the architecture reference, or the next
-milestone's SPEC; the blow-by-blow is archived. STATE is append-mostly *during* the work and
-*compacted* at the end. Do not let it become an unbounded log nobody reads past line 50.
+- **Status** lives per level: a milestone/story in its record's frontmatter; a **task** is done when
+  its `@executable` feature is green (or carries `@wip` until then).
+- **Recency:** `created` (≈ the folder number) vs `updated` (last touch). Scan the last *N* folders
+  for recently-*created* work; sort all items by `updated` for recently-*worked-on* work.
 
 ## The cross-linking rule
 
-A fact lives in one document; others **reference** it. Concretely:
-
-- a feature scenario references the ADR that justifies its design;
-- a UAT item references the scenario it verifies (`verifies → @tag "scenario name"`);
-- the SPEC's acceptance summary references the feature files, not their text;
-- STATE references everything and restates nothing durable.
-
-If you find yourself copy-pasting a fact between documents, one of them is wrong. Replace the copy
-with a link.
+A fact lives in one place; others **reference** it. The user story lives on `STORY.md`; the
+milestone references its stories (and they reference it) by number; the SPEC's scope points at its
+stories, not their text; UAT references the scenario it verifies. Copy-pasting a fact between docs
+means one of them is wrong — replace the copy with a link.
 
 ## Next
 
-- The contract in full → [acceptance-criteria.md](acceptance-criteria.md)
+- The acceptance criteria in full → [acceptance-criteria.md](acceptance-criteria.md)
 - Who owns and writes these → [agents.md](agents.md)
 - The order they're produced in → [workflow.md](workflow.md)
 - Copy-paste skeletons → [templates/](templates/)

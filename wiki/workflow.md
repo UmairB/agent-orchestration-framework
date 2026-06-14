@@ -1,30 +1,32 @@
-# The Milestone Workflow
+# The Workflow
 
-> **The question this document answers:** *What is the sequence of a milestone, from start to
-> sign-off?*
+> **The question this document answers:** *What is the sequence from idea to accepted delivery?*
 
 This is the lifecycle that ties the [documents](documents.md) and the [agents](agents.md) together:
-the order artifacts are produced, the gate at each handoff, and how the pipeline collapses for
-small work.
+the order artifacts are produced, the gate at each handoff, and how the pipeline collapses for small
+work. It spans the hierarchy — a **milestone** is framed and broken into **stories**, each story's
+**tasks** are contracted and built.
 
 ## The pipeline
 
-A substantial milestone runs through eight stages. Each stage produces or consumes a durable
-artifact — the handoff is always a file ([philosophy.md → principle 6](philosophy.md)).
+A substantial milestone runs through nine stages. Each produces or consumes a durable artifact — the
+handoff is always a file ([philosophy.md → principle 6](philosophy.md)).
 
 | # | Stage | Agent | Produces / consumes | Gate to pass |
 |---|---|---|---|---|
-| 1 | **Frame** | product-owner | `SPEC.md` | Scope is bounded; in/out is explicit; dependencies named |
-| 2 | **Research** | researcher | `RESEARCH.md` | Every unknown that blocks a decision has a finding + source |
+| 1 | **Frame** | product-owner | milestone `SPEC.md` | Objective + scope bounded; dependencies named |
+| 2 | **Research** | researcher | `RESEARCH.md` | Every blocking unknown has a finding + source |
 | 3 | **Decide** | architect (+ designer) | `ARCHITECTURE.md` (ADRs, fitness functions); `DESIGN.md` | Each decision has context + alternatives + consequences; invariants have arch-tests |
-| 4 | **Contract** | Three Amigos | `tasks/*.feature` | Every outcome is black-box observable; cases are in Examples tables; Dev + QA signed the elaboration |
-| 5 | **Build** | developer | code + `@executable` step definitions | Every `@executable` row is green; traceability lint passes |
-| 6 | **Review** | architect + qa + tooling | review notes → fixes | Structural conformance (architect), behavioural conformance (QA), craft pass (tooling) all clear |
-| 7 | **Verify** | qa | `UAT.md` sign-offs | Every `@manual` scenario has a recorded procedure + result + sign-off |
-| 8 | **Accept** | product-owner | milestone acceptance; `STATE.md` compaction | The SPEC's acceptance summary is satisfied; STATE is summarised; durable conclusions graduated |
+| 4 | **Break down** | product-owner + architect | one `STORY.md` per story (with `parent:`) | The milestone splits into **independent** stories; cross-story coupling is minimised |
+| 5 | **Contract** | Three Amigos | each story's task `*.feature` files | Every outcome is black-box observable; cases are in Examples tables; Dev + QA signed the elaboration |
+| 6 | **Build** | developer (one per story) | code + `@executable` step definitions | Every `@executable` row green; traceability lint passes |
+| 7 | **Review** | architect + qa + tooling | review notes → fixes | Structural (architect) + behavioural (QA) + craft (tooling) all clear |
+| 8 | **Verify** | qa | `UAT.md` sign-offs | Every `@manual` scenario has a recorded procedure + result + sign-off |
+| 9 | **Accept** | product-owner | milestone acceptance; `STATE.md` compaction | All stories accepted; STATE summarised; durable conclusions graduated |
 
-`STATE.md` is updated by the product-owner *throughout* — it is the running ledger of stages 1–8,
-compacted at stage 8.
+Stages **6–8 run per story, in parallel** — independent stories fan out one-per-agent (and per
+worktree when they mutate files). The milestone is accepted (stage 9) once its stories are.
+`STATE.md` is the product-owner's running ledger throughout, compacted at accept.
 
 ## The gates, in plain terms
 
@@ -45,21 +47,20 @@ already enforce, so passing a gate is mechanical, not a meeting:
 - **Verify → Accept:** every `@manual` item is signed off in `UAT.md`.
 - **Accept:** the PO confirms the SPEC's intent is delivered and compacts `STATE.md`.
 
-## Conditional collapse — most milestones aren't substantial
+## Conditional collapse — the item type selects the pipeline
 
-The eight-stage pipeline is the *maximum*. [Conditional activation](agents.md#conditional-activation--the-anti-ceremony-guardrail)
-means real milestones usually run a subset. The size of the work selects the pipeline:
+The nine-stage pipeline is the *maximum*, for a full milestone. The **item type you create** picks
+how much of it runs — depth scales with planning ([conditional activation](agents.md#conditional-activation--the-anti-ceremony-guardrail)):
 
-| Milestone size | Pipeline |
+| You create | Pipeline |
 |---|---|
-| **Trivial** (one-line fix, rename) | Frame (lightweight) → Build → Accept. PO + developer. |
-| **Small** (no UI, no unknowns) | Frame → Contract → Build → Review (QA + architect) → Accept. |
-| **Standard** (a decision, maybe research) | + Research + Decide stages, as needed. |
-| **Substantial** (UI + decisions + unknowns) | All eight stages, all six agents. |
+| **A `task`** (adhoc fix) | Contract (write the `.feature`) → Build → Review → Accept. No milestone, no story, no SPEC. |
+| **A `story`** (group of adhoc work) | + `STORY.md` (the user story) and its tasks; Frame/Decide only if it needs them. |
+| **A `milestone`** | The full pipeline — Frame → … → Break down into stories → … → Accept. |
 
-The selector is content, not policy: a stage runs because its artifact has content, and skips
-because it doesn't. There is no "lightweight mode" toggle — absence of content *is* the lightweight
-mode.
+Within a milestone, the *stage* selector is still content: Research/Decide/Design run only when the
+work has unknowns / decisions / UI. Absence of content *is* the lightweight mode — there is no
+toggle.
 
 ## Where verification lives across the pipeline
 

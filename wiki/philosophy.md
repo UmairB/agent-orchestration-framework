@@ -65,10 +65,11 @@ methodology. The defence is structural:
 
 ### 5. Conditional ceremony — scale to the work
 
-Process is a cost. Documents and agents appear **only when they have content**. A milestone with
-no UI has no `DESIGN.md` and no designer. A one-line fix is `SPEC` + a feature + a developer, and
-nothing else. The full six-agent, seven-document ceremony is for a *substantial* milestone; small
-ones collapse. This is the explicit guardrail against becoming the heavy thing ACD replaced.
+Process is a cost. Documents and agents appear **only when they have content**, and the **item type
+sets the baseline**: an adhoc **task** is a single `.feature` and a developer — no milestone, no
+SPEC; a milestone with no UI has no `DESIGN.md` and no designer. The full six-agent ceremony is for a
+*substantial milestone*; a standalone story or task collapses to a fraction of it. This is the
+explicit guardrail against becoming the heavy thing ACD replaced.
 
 ### 6. Artifacts are the interface
 

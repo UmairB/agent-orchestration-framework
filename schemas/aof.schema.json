@@ -74,6 +74,7 @@
       "items": { "$ref": "#/$defs/projectDoc" }
     },
     "settings": { "$ref": "#/$defs/settings" },
+    "work": { "$ref": "#/$defs/work" },
     "items": {
       "type": "array",
       "items": { "type": "string" }
@@ -341,6 +342,42 @@
         "codex": {
           "type": "object",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "work": {
+      "type": "object",
+      "description": "Configuration for the ACD (Acceptance-Criteria Development) work stream: the flat, chronological stream of milestone / story / task items.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Path, relative to the repo root, to the flat work-item stream (NN_type_slug folders)."
+        },
+        "agents": {
+          "type": "object",
+          "description": "How ACD role agents are orchestrated.",
+          "properties": {
+            "mode": {
+              "enum": ["orchestrated", "solo"],
+              "description": "orchestrated = the main session spawns role sub-agents; solo = the main session performs every role inline."
+            },
+            "productOwner": {
+              "enum": ["inline", "agent"],
+              "description": "inline = the main session authors SPEC/story/acceptance; agent = delegate authoring to the aof-product-owner sub-agent."
+            }
+          },
+          "additionalProperties": false
+        },
+        "tags": {
+          "type": "object",
+          "description": "Project-specific tag vocabulary (the closed set the validator enforces). Universal tags (@executable, @manual, @bug, @wip, @milestone-NN, @uat-<id>) are owned by the framework, not configured here.",
+          "properties": {
+            "layers": { "type": "array", "items": { "type": "string" } },
+            "refinements": { "type": "array", "items": { "type": "string" } },
+            "domains": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

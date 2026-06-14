@@ -1,24 +1,37 @@
-# Milestone Templates
+# Item Templates
 
-Copy-paste skeletons for an ACD milestone. Start a milestone by copying this folder to
-`<milestones-root>/NNN-name/` and deleting the documents you don't need
-([conditional activation](../agents.md#conditional-activation--the-anti-ceremony-guardrail) — only
-the **spine** is mandatory).
+Copy-paste skeletons for the three ACD work-item types. Every item is a folder named
+`NN_type_slug` in the flat work stream (see [documents.md](../documents.md)).
 
 ```
-NNN-name/
-  SPEC.md              ← spine        why + scope
-  STATE.md             ← spine        progress + history
-  tasks/*.feature      ← spine        observable outcomes (the contract)
-  RESEARCH.md          ← conditional  what we learned          (only if there was an unknown)
-  ARCHITECTURE.md      ← conditional  ADRs + invariants        (only if a decision was made)
-  DESIGN.md            ← conditional  UI/UX intent             (only if there is UI)
-  UAT.md               ← conditional  human/live verification  (only if CI can't prove it)
+task/                 ← a task: the atomic unit (a .feature = acceptance criteria)
+  example.feature
+story/                ← a story: a user-facing group of tasks
+  STORY.md
+milestone/            ← a milestone: a group of stories + shared context
+  SPEC.md             spine (the record doc)
+  STATE.md            spine (the running log)
+  ARCHITECTURE.md     conditional (ADRs + fitness functions)
+  DESIGN.md           conditional (UI/UX)
+  RESEARCH.md         conditional (findings)
+  UAT.md              conditional (human/live verification)
 ```
 
-Each template carries inline guidance in HTML comments (`<!-- ... -->`) and Gherkin comments
-(`# ...`). Delete the guidance as you fill the document in. The rules each template enforces are in:
+## How to start an item
 
-- [documents.md](../documents.md) — what each document owns
-- [acceptance-criteria.md](../acceptance-criteria.md) — the feature-file rules
-- [workflow.md](../workflow.md) — the order to produce them in
+- **Adhoc task** → a `NN_task_<slug>/` folder containing one `<slug>.feature` (from `task/`). No
+  story, no SPEC. The lightest unit.
+- **Standalone story** → a `NN_story_<slug>/` folder with `STORY.md` (omit `parent`) + `tasks/`.
+- **Story under a milestone** → same, with `parent: <milestone-number>`.
+- **Milestone** → a `NN_milestone_<slug>/` folder with `SPEC.md` + `STATE.md`; add the conditional
+  docs as the work needs them (produced by `refine`). Its stories are *separate* numbered items
+  pointing back via `parent`.
+
+## The rules each template encodes
+
+- The **record doc** (`SPEC.md` / `STORY.md`) carries the full frontmatter (`type`/`number`/`slug`/
+  `title`/`parent`/`status`/dates); supporting docs carry only `doc: <kind>`; tasks carry none
+  (folder name + tags). Validator keeps folder name ↔ frontmatter in sync.
+- The **user story** lives on `STORY.md`, never on a task.
+- **Acceptance criteria** live on task `.feature` files. See [acceptance-criteria.md](../acceptance-criteria.md).
+- Conditional docs appear only when they have content — absence is information.

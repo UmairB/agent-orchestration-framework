@@ -1,22 +1,29 @@
-# Acceptance Criteria — The Feature Files
+# Acceptance Criteria — The Task Feature Files
 
-> **The question this document answers:** *What goes in a feature file, and how is it verified?*
+> **The question this document answers:** *What goes in a task's feature file, and how is it
+> verified?*
 
-The feature files are the heart of ACD: the **executable contract of observable behaviour**. They
-are what makes the deliverable visible ([philosophy.md → principle 3](philosophy.md)) and what the
-agents collaborate to produce. This document defines exactly what is — and is not — allowed inside
-one, and how a scenario connects to a passing test.
+A **task** is the atomic unit of work, and its `.feature` file is the heart of ACD: the **executable
+contract of observable behaviour**. Acceptance criteria live at the **task** level — the task's
+scenarios *are* its criteria. This is what makes the deliverable visible
+([philosophy.md → principle 3](philosophy.md)). This document defines exactly what is — and is not —
+allowed inside a task feature, and how a scenario connects to a passing test.
 
-## What a feature file is for
+## What a task feature file is for
 
-A feature file states **what will be observably true when the work is done**. Nothing else. It is
+A task feature states **what will be observably true when the task is done**. Nothing else. It is
 written in Gherkin so that a reviewer, a future QA specialist, or a PM tool can read the deliverable
 in seconds without reading the source.
 
+**No user story.** The `As a / I want / so that` belongs to the *parent story* (`STORY.md`), not the
+task. A task feature opens with `Feature: <name>` and, optionally, a one-line objective
+(`In order to … the system must …`) — then its scenarios. A standalone (adhoc) task feature is the
+same: a goal line + scenarios, no user story.
+
 It is *not* a place for design decisions, implementation notes, research findings, or structural
 invariants. Each of those has its own home ([documents.md](documents.md)); putting them in a
-feature file destroys the one property the feature file exists to provide — that "it's a `.feature`
-file" reliably means "here is a tested, observable outcome."
+feature file destroys the one property it exists to provide — that "it's a `.feature` file" reliably
+means "here is a tested, observable outcome."
 
 ## The litmus test (apply it to every line)
 
@@ -83,13 +90,14 @@ A reader skims **outlines**; a tester reads **tables**; the suite runs **rows**.
 audiences. Push exhaustive enumeration into Examples tables, keep top-level scenarios to the 3–7
 headline behaviours.
 
-## Granularity: "acceptance surface," not "task"
+## Granularity: a task is one coherent unit of work
 
-A feature file covers a **coherent acceptance surface**, which floats between "one method's edge
-cases" and "one whole capability" — not a uniform "task." `provider-workflow-read-write.feature`
-(a subsystem's read/write contract) and `dashboard-deep-link.feature` (one small behaviour) are
-both legitimate; they're just different-sized surfaces. Name the unit honestly: a surface, not a
-task.
+One `.feature` = one **task** = one coherent unit of work, whose scenarios are its acceptance
+criteria. A task can be a method's edge cases or one small behaviour; if it sprawls across several
+unrelated behaviours, that's the signal to split it into multiple tasks under the same **story**.
+The story is the user-facing grouping; the tasks are its testable units. When a current artifact
+mixes a user story with many scenarios, split it: user story → `STORY.md`, scenarios → one or more
+task features.
 
 ## The same scenario, three roles
 
@@ -108,21 +116,59 @@ levels, and `@manual → @executable` is the migration you drive over time. This
 Every feature and scenario carries tags. They make the contract queryable across a monorepo and —
 critically — they drive verification routing.
 
-| Tag class | Examples | Purpose |
-|---|---|---|
-| Milestone | `@milestone-321` | Which milestone owns it |
-| Layer | `@application`, `@portal-admin` | Primary architectural layer |
-| Refinement | `@providers`, `@workflow`, `@workflow-ui` | Sub-area within the layer |
-| Domain | `@telnyx`, `@knowledge-base` | Feature/provider/domain |
-| **Verification** | **`@executable`** / **`@manual`** | **How this scenario is verified** |
+### The allowed tags (the closed vocabulary)
 
-The **verification tags are load-bearing**:
+Tags fall into two tiers. **Universal** tags are part of ACD and are identical in every project.
+**Project-specific** tags name your own architecture and product — the methodology defines the
+*class*, your project enumerates the *values*.
 
-- `@executable` — verified by an automated test. Subject to the traceability lint below.
-- `@manual` — verified by a human procedure recorded in `UAT.md` (which `verifies →` back to it).
+> **Where the enforced list lives.** The authoritative, machine-checked vocabulary is owned by the
+> **ACD commands/skills** (the universal tags) and **project config** (the project-specific values);
+> a lint rejects any tag outside it. This section is the human registry the tooling implements —
+> keep them in lockstep: a tag's *name* is enforced by the tooling, its *meaning* is documented
+> here. Adding a tag is a deliberate edit to the skills / project config **and** this registry,
+> never an ad-hoc keystroke in a feature file.
+
+**Universal — verification** · *exactly one per scenario* · load-bearing (drives routing):
+
+| Tag | Meaning |
+|---|---|
+| `@executable` | Verified by an automated test. Subject to the traceability lint below. |
+| `@manual` | Verified by a human procedure in `UAT.md` (which `verifies →` back to it). |
 
 An `@manual` scenario that becomes automatable is **re-tagged `@executable`** and its UAT entry is
-deleted. The frontier shrinks toward the irreducibly-manual core.
+deleted — the frontier shrinks toward the irreducibly-manual core.
+
+**Universal — lifecycle / lineage** · *optional, repeatable*:
+
+| Tag | Meaning |
+|---|---|
+| `@bug` | Born from a defect — a permanent regression guard. |
+| `@wip` | Not yet green; pending / in-progress. Excluded from the green gate. |
+| `@uat-<id>` | Lineage pointer to the originating UAT finding (e.g. `@uat-F01`). Lint: must resolve to a real finding. |
+
+*Deliberately not used:* a separate `@regression` — `@bug` is the regression marker (avoid
+redundant tags).
+
+> **No milestone/story membership tag.** A task's place in the hierarchy is **structural** — its
+> folder (`NN_story_slug/tasks/…`) and the `parent:` references — not a tag. Don't restate
+> membership as `@milestone-NN`; the tooling derives the set of a milestone's tasks from the stream
+> (`list --milestone 03`). Tags are for *cross-cutting* facets (verification, lineage, layer,
+> domain), not containment.
+
+**Project-specific** · *your architecture names these; values enumerated in project config*
+(examples are from the `voice-vox` reference, illustrative only):
+
+| Class | Cardinality | Examples | Means |
+|---|---|---|---|
+| Layer | one or more | `@application`, `@portal-admin` | Primary architectural layer |
+| Refinement | pairs with a layer | `@providers`, `@workflow`, `@workflow-ui` | Sub-area within the layer |
+| Domain | one or more | `@telnyx`, `@retell`, `@knowledge-base` | Feature / provider / subject |
+
+> **Controlled vocabulary or it rots.** A queryable contract depends on a *closed* set with *one
+> spelling per concept* — `@knowledge-base`, never also `@kb`. The moment two scenarios spell the
+> same concept differently, every query silently misses rows. That is why the list is enforced by
+> tooling, not convention.
 
 ## Traceability — the spine
 

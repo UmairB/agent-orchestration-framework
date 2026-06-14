@@ -2,22 +2,25 @@
 
 > **The question this document answers:** *Who owns what, and how do the agents collaborate?*
 
-ACD delivers a milestone with six specialist agents. The model works — where naive multi-agent
-setups fail on context loss — because [the document model came first](philosophy.md): each agent
-owns one durable artifact, and the artifacts are the handoff interface, not chat.
+ACD delivers work with six specialist agents. The model works — where naive multi-agent setups fail
+on context loss — because [the document model came first](philosophy.md): each agent owns one
+durable artifact, and the artifacts are the handoff interface, not chat.
 
 ## The six roles
 
 | Agent | Owns | Reads |
 |---|---|---|
-| **product-owner** | `SPEC.md` + milestone acceptance + orchestration | everything |
+| **product-owner** | milestone `SPEC.md` + story `STORY.md` (the user story) + acceptance + orchestration | everything |
 | **researcher** | `RESEARCH.md` | SPEC |
 | **architect** | `ARCHITECTURE.md` / ADRs + fitness functions + **structural code review** | RESEARCH, SPEC |
 | **designer** | `DESIGN.md` | SPEC, RESEARCH |
-| **developer** | code + `@executable` step definitions | feature files, ADRs, DESIGN |
-| **qa** | `UAT.md` + test-case design + **behavioural sign-off** | feature files, SPEC |
+| **developer** | code + `@executable` step definitions | task features, ADRs, DESIGN |
+| **qa** | `UAT.md` + test-case design + **behavioural sign-off** | task features, SPEC |
 
-One role, one owned artifact — except the feature files, which are co-authored (see Three Amigos).
+One role, one owned artifact — except the **task features**, which are co-authored (see Three
+Amigos). Ownership spans the hierarchy: the PO writes the milestone `SPEC` (objective + scope) and
+each story's `STORY.md` (its user story); the Three Amigos author the **task** `.feature` files
+beneath a story.
 
 ## product-owner is the orchestrator
 
@@ -48,7 +51,20 @@ shape the contract — instead of being a downstream rubber stamp.
 
 > Concretely, this maps onto the Scenario-Outline structure: **PO writes the outcome, QA enumerates
 > the cases, the developer implements the step definitions.** Three amigos, three sub-artifacts, one
-> feature file.
+> task feature.
+
+## Stories are the unit of parallelism
+
+A milestone's **stories are designed to be independent**, so they run **concurrently — one story per
+agent** (and, when they mutate files, one git worktree per agent). Two jobs follow:
+
+- **architect** (at refine time) draws **story boundaries to minimise cross-story coupling** — the
+  fewer dependencies between stories, the wider the fan-out.
+- **product-owner** (the orchestrator) **fans out one story per agent** at build time, and only
+  serialises where a real dependency forces it.
+
+Tasks *within* a story may be sequential; **stories should not be**. Maximising independent stories
+is an explicit design goal, not an accident — it is where the orchestrator earns its keep.
 
 ## The review model: review decomposes by contract
 
@@ -119,26 +135,30 @@ The agents never depend on each other's memory; they depend on each other's **fi
 of handoffs is [workflow.md](workflow.md). The short version:
 
 ```
-product-owner (SPEC)
+product-owner (milestone SPEC)
       │
       ▼
 researcher (RESEARCH) ──► architect (ADRs + fitness fns) ──► designer (DESIGN)
       │                                                              │
-      └──────────────► Three Amigos author tasks/*.feature ◄─────────┘
-                                   │
-                                   ▼
-                         developer (code + step defs)
-                                   │
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                     ▼
-   architect: structural   qa: behavioural        tooling: craft
-        review                review/sign-off
-                                   │
-                                   ▼
-                         qa runs @manual / UAT, signs off
-                                   │
-                                   ▼
-                    product-owner accepts the milestone
+      ▼                                                              │
+PO + architect: break down into independent STORY.md's ◄────────────┘
+      │
+      ▼   (per story, fanned out — one agent each)
+Three Amigos author the story's task *.feature files
+      │
+      ▼
+developer (code + step defs)
+      │
+   ┌──┴───────────────────┬────────────────────┐
+   ▼                      ▼                     ▼
+architect: structural   qa: behavioural      tooling: craft
+   review                review/sign-off
+                          │
+                          ▼
+                qa runs @manual / UAT, signs off  →  story accepted
+                          │
+                          ▼ (all stories accepted)
+            product-owner accepts the milestone
 ```
 
 ## Next
