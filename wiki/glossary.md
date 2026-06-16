@@ -19,7 +19,7 @@ the stream. → [documents.md](documents.md)
 
 ### Milestone
 A delivery container that groups **stories** and holds their shared docs (SPEC/STATE/ADR/DESIGN/
-RESEARCH/UAT). The top of the hierarchy. → [documents.md](documents.md)
+RESEARCH/UAT/SECURITY/COMPLIANCE). The top of the hierarchy. → [documents.md](documents.md)
 
 ### Story
 A user-facing deliverable that groups **tasks**. Owns the user story (`STORY.md`) and is the unit of
@@ -55,6 +55,23 @@ The litmus test. → [acceptance-criteria.md](acceptance-criteria.md#the-litmus-
 ### Conditional activation
 The rule that an agent runs — or a document exists — only when its artifact has content. The
 anti-ceremony guardrail; the item type (task/story/milestone) sets the baseline depth. → [workflow.md](workflow.md)
+
+### Domain specialist
+A conditionally-activated technical expert the **architect** fans out at the Decide stage, owning one
+conditional domain document — `security` (`SECURITY.md`, threat model) and `compliance`
+(`COMPLIANCE.md`, GDPR/ISO 27001 map) today; `cloud`/`performance`/`data` are future instances. An
+extension of the architect's altitude, not a new core role. → [agents.md](agents.md#domain-specialists--the-architects-conditional-tier)
+
+### Planning
+The product-altitude work *above* the work stream — discovery, strategy, prioritisation — that
+decides which milestones to build and why, often across several at once. ACD owns only the seam
+(the PRD), not the planning method, which is supplied by plugins. → [planning.md](planning.md)
+
+### PRD
+The product requirements document a [planning](planning.md) effort produces: the boundary artifact
+that hands off from `/planning` to `/work`. Lives upstream of the work stream and outside the
+methodology boundary (its format is the planning tool's, not ACD's); the product-owner shatters it
+into milestone `SPEC.md`s. Flow is one-directional — PRD → SPECs, never back. → [planning.md](planning.md)
 
 ### Drift
 The decay where the same fact, restated in multiple places, diverges between copies. Defended by

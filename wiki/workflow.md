@@ -7,6 +7,9 @@ the order artifacts are produced, the gate at each handoff, and how the pipeline
 work. It spans the hierarchy — a **milestone** is framed and broken into **stories**, each story's
 **tasks** are contracted and built.
 
+> **Where milestones come from.** This lifecycle starts at a framed milestone. For multi-milestone
+> initiatives, the milestone itself is derived upstream from a PRD — see [planning.md](planning.md).
+
 ## The pipeline
 
 A substantial milestone runs through nine stages. Each produces or consumes a durable artifact — the
@@ -16,7 +19,7 @@ handoff is always a file ([philosophy.md → principle 6](philosophy.md)).
 |---|---|---|---|---|
 | 1 | **Frame** | product-owner | milestone `SPEC.md` | Objective + scope bounded; dependencies named |
 | 2 | **Research** | researcher | `RESEARCH.md` | Every blocking unknown has a finding + source |
-| 3 | **Decide** | architect (+ designer) | `ARCHITECTURE.md` (ADRs, fitness functions); `DESIGN.md` | Each decision has context + alternatives + consequences; invariants have arch-tests |
+| 3 | **Decide** | architect (+ designer; + security / compliance) | `ARCHITECTURE.md` (ADRs, fitness functions); `DESIGN.md`; `SECURITY.md`; `COMPLIANCE.md` | Each decision has context + alternatives + consequences; invariants have arch-tests; every threat & obligation maps to a control |
 | 4 | **Break down** | product-owner + architect | one `STORY.md` per story (with `parent:`) | The milestone splits into **independent** stories; cross-story coupling is minimised |
 | 5 | **Contract** | Three Amigos | each story's task `*.feature` files | Every outcome is black-box observable; cases are in Examples tables; Dev + QA signed the elaboration |
 | 6 | **Build** | developer (one per story) | code + `@executable` step definitions | Every `@executable` row green; traceability lint passes |
@@ -59,8 +62,9 @@ how much of it runs — depth scales with planning ([conditional activation](age
 | **A `milestone`** | The full pipeline — Frame → … → Break down into stories → … → Accept. |
 
 Within a milestone, the *stage* selector is still content: Research/Decide/Design run only when the
-work has unknowns / decisions / UI. Absence of content *is* the lightweight mode — there is no
-toggle.
+work has unknowns / decisions / UI, and the architect fans out the **security** specialist only when
+there's an attack surface and the **compliance** specialist only when the work touches regulated or
+personal data. Absence of content *is* the lightweight mode — there is no toggle.
 
 ## Where verification lives across the pipeline
 
@@ -75,6 +79,12 @@ ACD has three verification surfaces; they activate at different stages and route
 
 Green CI proves surfaces 1 and 2; `UAT.md` sign-offs prove surface 3. Together they prove the whole
 contract is true — not just present.
+
+**Security and compliance add no fourth surface.** A security invariant is a fitness function
+(surface 1); a security outcome is an `@executable` scenario (surface 2); an irreducibly-manual
+control — a pen-test, a DPIA sign-off — is a `@manual`/UAT item (surface 3). `SECURITY.md` and
+`COMPLIANCE.md` are the *maps* from each threat or obligation to the surface that proves it, written
+at Decide alongside the ADRs.
 
 ## Integration across milestones
 

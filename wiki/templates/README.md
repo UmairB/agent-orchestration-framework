@@ -15,6 +15,8 @@ milestone/            ← a milestone: a group of stories + shared context
   DESIGN.md           conditional (UI/UX)
   RESEARCH.md         conditional (findings)
   UAT.md              conditional (human/live verification)
+  SECURITY.md         conditional (threat model + technical controls)
+  COMPLIANCE.md       conditional (GDPR / ISO 27001 obligation→evidence map)
 ```
 
 ## How to start an item

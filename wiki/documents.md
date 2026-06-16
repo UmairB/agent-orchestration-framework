@@ -15,7 +15,7 @@ folder nesting:
 |---|---|---|---|
 | **task** | the atomic unit of work | a `.feature` file (its scenarios *are* the acceptance criteria) | — |
 | **story** | a user-facing deliverable | `STORY.md` (the user story + status) + its tasks | tasks |
-| **milestone** | a delivery container | the shared `SPEC` / `STATE` / `ADR` / `DESIGN` / `RESEARCH` / `UAT` | stories |
+| **milestone** | a delivery container | the shared `SPEC` / `STATE` / `ADR` / `DESIGN` / `RESEARCH` / `UAT` / `SECURITY` / `COMPLIANCE` | stories |
 
 Read top-down: a **milestone** groups **stories**, a **story** groups **tasks**, a **task** is the
 acceptance criteria. Read for *value*: the **story** is the unit of user-facing delivery and of
@@ -94,9 +94,14 @@ updated: 2026-06-13
 | `DESIGN.md` | *How it looks & feels, why* | designer |
 | `RESEARCH.md` | *What we learned* that constrains choices | researcher |
 | `UAT.md` | *How a human confirms it*, and have they | qa |
+| `SECURITY.md` | *What could an attacker do, and how we stop them* — threat model + controls | security |
+| `COMPLIANCE.md` | *Which obligations bind us* (GDPR, ISO 27001) *and where each is evidenced* | compliance |
 
 Spine: `SPEC.md` (always). The rest are **conditional** — present only when they have content
 (absence is information). They are produced by `refine`, per-milestone, when the work needs them.
+`SECURITY.md` and `COMPLIANCE.md` are owned by the [domain specialists](agents.md#domain-specialists--the-architects-conditional-tier)
+the architect fans out — they *reference* the controls (scenarios, fitness functions, ADRs) that
+satisfy each threat or obligation, never restating them.
 
 ### Story document
 
@@ -127,8 +132,9 @@ The task is the home of the Gherkin. It has no user story (that's the parent sto
 
 A fact lives in one place; others **reference** it. The user story lives on `STORY.md`; the
 milestone references its stories (and they reference it) by number; the SPEC's scope points at its
-stories, not their text; UAT references the scenario it verifies. Copy-pasting a fact between docs
-means one of them is wrong — replace the copy with a link.
+stories, not their text; UAT references the scenario it verifies; `SECURITY.md` and `COMPLIANCE.md`
+reference the controls that defend each threat or obligation. Copy-pasting a fact between docs means
+one of them is wrong — replace the copy with a link.
 
 ## Next
 

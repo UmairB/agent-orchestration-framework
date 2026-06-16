@@ -4,7 +4,9 @@
 
 ACD delivers work with six specialist agents. The model works — where naive multi-agent setups fail
 on context loss — because [the document model came first](philosophy.md): each agent owns one
-durable artifact, and the artifacts are the handoff interface, not chat.
+durable artifact, and the artifacts are the handoff interface, not chat. Substantial milestones may
+also fan out **domain specialists** (security, compliance, …) — conditionally-activated technical
+experts the architect spawns when the work has that surface; they obey the same one-artifact rule.
 
 ## The six roles
 
@@ -31,8 +33,49 @@ and sequences**. Don't add a separate "PM" for coordination — the orchestrator
 coordination for free. (Split a pure-coordination PM out only if a milestone ever needs cross-team
 scheduling, which per-milestone work doesn't.)
 
+**Orchestration has two tiers.** The product-owner orchestrates the *milestone* — it sequences the
+five core sub-agents and owns the product intent. The **architect sub-orchestrates the technical
+specialists** inside the Decide stage: when the work has a security, compliance, cloud, or
+performance surface, the architect fans out a [domain specialist](#domain-specialists--the-architects-conditional-tier)
+and folds its artifact into the technical contract. This is the one sanctioned case of a sub-agent
+spawning sub-agents, and it is safe for the same reason the top tier is — the specialist hands back a
+**file**, not a memory, so nesting adds no context loss. The PO never micromanages a threat model;
+the architect, at the right altitude, does.
+
 The PO also owns `STATE.md` as its **single writer**: sub-agents report completion back, the PO
 records it. One writer, no merge races.
+
+## Domain specialists — the architect's conditional tier
+
+Some milestones carry a surface the core six don't cover: an attack surface, a regulatory
+obligation, a cloud topology, a performance budget. ACD handles these with **domain specialists** —
+technical experts the **architect fans out at the Decide stage**, each owning one **conditional**
+domain document. They are an *extension* of the architect's altitude, not new core roles, so the six
+stay six.
+
+| Specialist | Owns | The one question it answers | Activates when |
+|---|---|---|---|
+| **security** | `SECURITY.md` | What could an attacker do, and how do we stop them? (threat model + technical controls) | the work has a meaningful attack surface |
+| **compliance** | `COMPLIANCE.md` | Which obligations (GDPR, ISO 27001, …) bind us, and where is each evidenced? | the work touches regulated or personal data |
+
+Three properties keep this ACD-native rather than ceremony:
+
+- **Architect-shaped, not developer-shaped.** Like the architect, a specialist *reads, researches,
+  runs tests, owns its document, and (security) writes fitness functions* — but it **never edits
+  implementation**. So it stays an independent reviewer of the developer; it cannot grade its own
+  homework.
+- **Conditional activation governs them.** Neither fires on trivial work. `security` fires on an
+  attack surface; `compliance` fires on regulated/personal data. Absence of the document *is* the
+  decision not to run the specialist.
+- **Reference, never restate.** A control lives **once** — as a fitness function, an `@executable`
+  scenario, or an ADR. `SECURITY.md` is the threat model that *points at* those controls;
+  `COMPLIANCE.md` maps each obligation to the control (often a security one) that evidences it.
+  Neither doc copies an implementation, and neither is a fourth verification surface — they route
+  into the existing three.
+
+The tier is **open-ended**: a `cloud`, `performance`, or `data` specialist joins it the same way —
+the architect fans it out, it owns its conditional doc — without touching the core six or widening
+the product-owner's span.
 
 ## Who authors the feature files: Three Amigos
 
@@ -89,6 +132,21 @@ The **craft** slice (naming, duplication, bugs in paths no scenario exercises) i
 architect's altitude — hand it to an automated adversarial-review/simplify pass, with the architect
 as the human backstop only for calls the tool flags but can't decide.
 
+### Domain review is a conditional lens
+
+When a [domain document](#domain-specialists--the-architects-conditional-tier) exists, its specialist
+adds a review *lens* — but **not** a fourth verification surface. Each decomposes into the same three
+surfaces the table above uses:
+
+| Lens | Checks against | Owner | Decomposes into |
+|---|---|---|---|
+| **Security** | the threat model (`SECURITY.md`) | **security** | fitness functions (invariants) + `@executable` scenarios (outcomes); residual is a `@manual` pen-test in `UAT.md` |
+| **Compliance** | the obligation map (`COMPLIANCE.md`) | **compliance** | mostly `@manual` evidence in `UAT.md` + ADRs; a few fitness functions (e.g. PII encrypted at rest) |
+
+This adds a third independent reviewer of the developer for regulated work and keeps the
+no-self-grading property: the specialist that reviews against a contract never wrote the
+implementation.
+
 ## Don't grade your own homework
 
 The developer implements code **and** step definitions, but it does not own the *contract* it's
@@ -125,6 +183,8 @@ aspirational:
 | designer | ✓ | ✓ | — (UI assets only) | — | DESIGN |
 | developer | ✓ | — | ✓ | ✓ | code, step defs |
 | qa | ✓ | — | — (tests/cases only) | ✓ | UAT, Examples tables |
+| security | ✓ | ✓ | — (review only) | ✓ | SECURITY.md, security arch-tests |
+| compliance | ✓ | ✓ | — | — | COMPLIANCE.md |
 
 (Exact tool lists are an implementation detail of the agent definitions; the **shape** — who can
 and cannot edit implementation — is the contract.)
@@ -139,9 +199,12 @@ product-owner (milestone SPEC)
       │
       ▼
 researcher (RESEARCH) ──► architect (ADRs + fitness fns) ──► designer (DESIGN)
-      │                                                              │
-      ▼                                                              │
-PO + architect: break down into independent STORY.md's ◄────────────┘
+      │                        │                                    │
+      │                        ▼  fans out — conditional            │
+      │                   security    (SECURITY.md)                 │
+      │                   compliance  (COMPLIANCE.md)               │
+      ▼                                                             │
+PO + architect: break down into independent STORY.md's ◄───────────┘
       │
       ▼   (per story, fanned out — one agent each)
 Three Amigos author the story's task *.feature files

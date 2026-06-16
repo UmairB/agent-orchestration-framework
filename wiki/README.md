@@ -25,7 +25,9 @@ scenario maps to a green test.
 1. **Declarative outcomes.** Acceptance criteria (Gherkin, at the **task** level) state what's
    observably true when done — not how to build it. → [acceptance-criteria.md](acceptance-criteria.md)
 2. **One question per document.** Each artifact answers exactly one question. → [documents.md](documents.md)
-3. **Specialist agents, document handoffs.** Six roles, each owning one artifact. → [agents.md](agents.md)
+3. **Specialist agents, document handoffs.** Six core roles, each owning one artifact — plus
+   conditional **domain specialists** (security, compliance, …) the architect fans out when the work
+   needs them. → [agents.md](agents.md)
 
 ## The work stream
 
@@ -62,6 +64,7 @@ See [documents.md](documents.md) for the hierarchy, folder convention, and front
 | [acceptance-criteria.md](acceptance-criteria.md) | *What goes in a task's feature file* and how is it verified? |
 | [agents.md](agents.md) | *Who owns what* and how do the agents collaborate? |
 | [workflow.md](workflow.md) | *What is the sequence* from idea to accepted delivery? |
+| [planning.md](planning.md) | *Where do milestones come from* — how does planning hand off to delivery? |
 | [glossary.md](glossary.md) | What do the *terms* mean? |
 | [templates/](templates/) | Copy-paste item skeletons. |
 
