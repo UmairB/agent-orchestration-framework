@@ -15,6 +15,7 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
+import { loadWorkspace, findWork, validateWork, nextWork } from "./work.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -41,6 +42,11 @@ export async function run(argv) {
 
   if (command === "project") {
     await projectCommand(rest);
+    return;
+  }
+
+  if (command === "work") {
+    await workCommand(rest);
     return;
   }
 
@@ -167,6 +173,106 @@ async function projectCommand(args) {
   }
 
   throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run`);
+}
+
+async function workCommand(args) {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "find") {
+    await workFindCommand(rest);
+    return;
+  }
+
+  if (subcommand === "validate") {
+    await workValidateCommand(rest);
+    return;
+  }
+
+  if (subcommand === "next") {
+    await workNextCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work validate\n  aof work next 03-10`);
+}
+
+async function workFindCommand(args) {
+  const options = parseOptions(args);
+  const query = options._[0];
+  if (!query) {
+    throw new Error("Usage: aof work find <ref | query>   (e.g. aof work find 04, aof work find 04/02, aof work find auth)");
+  }
+
+  const { workDir } = await loadWorkspace(process.cwd(), options.config);
+  const rows = await findWork(workDir, query);
+
+  if (options.json) {
+    console.log(JSON.stringify(rows.map((row) => ({ ...row, dir: path.relative(process.cwd(), row.dir) })), null, 2));
+    return;
+  }
+
+  if (rows.length === 0) {
+    console.log(`No work item matches "${query}".`);
+    process.exitCode = 1;
+    return;
+  }
+
+  for (const row of rows) {
+    const title = row.title ? `  — ${row.title}` : "";
+    console.log(`${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${row.slug}${title}`);
+    console.log(`        ${path.relative(process.cwd(), row.dir)}`);
+  }
+}
+
+async function workValidateCommand(args) {
+  const options = parseOptions(args);
+  const scope = options._[0];
+  const { workDir, config } = await loadWorkspace(process.cwd(), options.config);
+  const findings = await validateWork(workDir, config, scope);
+
+  if (options.json) {
+    console.log(JSON.stringify(findings.map((finding) => ({ path: path.relative(process.cwd(), finding.path), problem: finding.problem })), null, 2));
+    if (findings.length > 0) process.exitCode = 1;
+    return;
+  }
+
+  if (findings.length === 0) {
+    console.log(`PASS — ${scope ? `${scope} is` : "work stream is"} well-formed.`);
+    return;
+  }
+
+  console.log(`${findings.length} issue(s):`);
+  for (const finding of findings) {
+    console.log(`  ${path.relative(process.cwd(), finding.path)} — ${finding.problem}`);
+  }
+  console.log("\nNote: test-traceability (@executable → green test; @manual/@uat → VERIFICATION rows) is not yet checked here.");
+  process.exitCode = 1;
+}
+
+async function workNextCommand(args) {
+  const options = parseOptions(args);
+  const scope = options._[0];
+  const { workDir } = await loadWorkspace(process.cwd(), options.config);
+  const result = await nextWork(workDir, scope);
+
+  if (options.json) {
+    const payload = result.path ? { ...result, path: path.relative(process.cwd(), result.path) } : result;
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+
+  if (result.state === "done") {
+    console.log(`Nothing actionable${scope ? ` in ${scope}` : ""} — everything is done.`);
+    return;
+  }
+
+  if (result.state === "blocked") {
+    console.log(`Blocked: ${result.ref} (${result.slug}) waits on milestone(s) ${result.waitingOn.join(", ")} — not done.`);
+    return;
+  }
+
+  console.log(`${result.ref.padEnd(7)} ${result.type.padEnd(9)} ${(result.status ?? "-").padEnd(12)} ${result.slug}`);
+  console.log(`        ${path.relative(process.cwd(), result.path)}`);
 }
 
 async function initCommand(args) {
@@ -1206,6 +1312,11 @@ Packages:
   aof packages validate [--json] [--strict]
   aof packages install [gsd] [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
   aof packages install --from-lock [--dry-run] [--json]
+
+Work (ACD work stream):
+  aof work find <ref | query> [--json]   resolve a milestone (04), story (04/02), or slug (auth)
+  aof work validate [ref] [--json]       folder↔frontmatter, tag vocabulary, depends graph
+  aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
 
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.

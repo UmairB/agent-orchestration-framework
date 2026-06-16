@@ -14,10 +14,12 @@ import { setupUiTests } from "../test/setup-ui.test.mjs";
 import { schemaTests } from "../test/schema.test.mjs";
 import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
 import { packageTests } from "../test/packages.test.mjs";
+import { workTests } from "../test/work.test.mjs";
 
 const tests = [
   ...adapterWarningTests,
   ...packageTests,
+  ...workTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
