@@ -1,6 +1,6 @@
 # Item Templates
 
-Copy-paste skeletons for the three ACD work-item types. Every item is a folder named
+Copy-paste skeletons for the ACD work-item types. Every item is a folder named
 `NN_type_slug` in the flat work stream (see [documents.md](../documents.md)).
 
 ```
@@ -17,6 +17,9 @@ milestone/            ← a milestone: a group of stories + shared context
   UAT.md              conditional (human/live verification)
   SECURITY.md         conditional (threat model + technical controls)
   COMPLIANCE.md       conditional (GDPR / ISO 27001 obligation→evidence map)
+uat/                  ← a uat session: a cross-milestone acceptance gate (groups no stories)
+  SESSION.md          spine (the record doc — scope, plan, checks, findings, verdict)
+  STATE.md            spine (the running log + feedback inbox)
 ```
 
 ## How to start an item
@@ -28,6 +31,9 @@ milestone/            ← a milestone: a group of stories + shared context
 - **Milestone** → a `NN_milestone_<slug>/` folder with `SPEC.md` + `STATE.md`; add the conditional
   docs as the work needs them (produced by `refine`). Its stories are *separate* numbered items
   pointing back via `parent`.
+- **UAT session** → a `NN_uat_<slug>/` folder with `SESSION.md` + `STATE.md` (from `uat/`). It
+  `depends:` on the milestones it accepts, groups no stories, and gates downstream work. Created by
+  `aof:add-uat`; run/accepted by `aof:verify`.
 
 ## The rules each template encodes
 

@@ -348,7 +348,7 @@
     },
     "work": {
       "type": "object",
-      "description": "Configuration for the ACD (Acceptance-Criteria Development) work stream: the flat, chronological stream of milestone / story / task items.",
+      "description": "Configuration for the ACD (Acceptance-Criteria Development) work stream: the flat, chronological stream of milestone / story / task / uat items.",
       "properties": {
         "dir": {
           "type": "string",

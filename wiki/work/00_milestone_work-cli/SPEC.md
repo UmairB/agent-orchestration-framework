@@ -3,10 +3,10 @@ type: milestone
 number: 00
 slug: work-cli
 title: "Work CLI"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-16
-updated: 2026-06-16
+updated: 2026-06-17
 ---
 # 00 · Work CLI
 
@@ -29,7 +29,9 @@ test-traceability check; the board UI (03).
 
 ## Stories
 
-<!-- to be broken down — `aof:refine 00` -->
+- [x] `00_story_resolve-items` — enumerate & resolve any item from the `NN_type_slug` index (the content-free discovery engine + `aof work find`)
+- [x] `01_story_validate-stream` — `aof work validate`: folder↔frontmatter, closed tag vocabulary, depends graph (resolves + acyclic), CI exit code
+- [x] `02_story_order-work` — `aof work next`: the next actionable item in dependency order (ready / blocked / done)
 
 ## Dependencies
 

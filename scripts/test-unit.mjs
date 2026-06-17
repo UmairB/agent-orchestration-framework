@@ -15,11 +15,19 @@ import { schemaTests } from "../test/schema.test.mjs";
 import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
 import { packageTests } from "../test/packages.test.mjs";
 import { workTests } from "../test/work.test.mjs";
+import { resolveItemsTests } from "../test/work-resolve.test.mjs";
+import { validateStreamTests } from "../test/work-validate.test.mjs";
+import { orderWorkTests } from "../test/work-next.test.mjs";
+import { archTests as workContentFreeDiscoveryTests } from "../test/arch/work-content-free-discovery.test.mjs";
 
 const tests = [
   ...adapterWarningTests,
   ...packageTests,
   ...workTests,
+  ...resolveItemsTests,
+  ...validateStreamTests,
+  ...orderWorkTests,
+  ...workContentFreeDiscoveryTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

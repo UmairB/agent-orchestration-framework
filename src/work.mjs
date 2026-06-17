@@ -9,12 +9,16 @@
 //   work/NN_milestone_slug/SPEC.md
 //   work/NN_milestone_slug/stories/SS_story_slug/STORY.md
 //   work/NN_milestone_slug/stories/SS_story_slug/tasks/*.feature
+//   work/NN_uat_slug/SESSION.md          (an acceptance session over a span of delivery)
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { findProjectConfig } from "./workspace.mjs";
 import { readJson } from "./fs.mjs";
 
-const ITEM_RE = /^(\d+)_(milestone|story|task)_([a-z0-9-]+)$/;
+// `uat` is a top-level acceptance session: like a milestone it sits in the
+// stream, carries `depends`, and gates downstream work — but it groups no
+// stories (it references existing scenarios, it delivers no new behaviour).
+const ITEM_RE = /^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$/;
 const VALID_STATUS = new Set(["not-started", "in-progress", "blocked", "in-review", "done"]);
 const UNIVERSAL_TAGS = new Set(["@executable", "@manual", "@uat", "@bug", "@wip"]);
 const VERIFICATION_TAGS = new Set(["@executable", "@manual", "@uat"]);
@@ -85,8 +89,13 @@ export async function listItems(workDir) {
 function recordDoc(item) {
   if (item.type === "milestone") return "SPEC.md";
   if (item.type === "story") return "STORY.md";
+  if (item.type === "uat") return "SESSION.md";
   return null;
 }
+
+// Top-level "drivers" of the stream — items that sit at the root, carry
+// `depends`, and participate in ordering/gating (milestones and uat sessions).
+const isDriver = (item) => item.type === "milestone" || item.type === "uat";
 
 // Minimal frontmatter reader: `key: value`, inline lists `[a, b]`, quoted
 // scalars. Block lists are not needed — `depends` is authored inline.
@@ -134,7 +143,9 @@ export async function findWork(workDir, query) {
   let matches;
 
   if (/^\d+$/.test(ref)) {
-    matches = items.filter((item) => item.type === "milestone" && sameNum(item.number, ref));
+    // A bare number is the top-level item at that slot — a milestone, a uat
+    // session, or an adhoc story/task (numbers are unique among top-level items).
+    matches = items.filter((item) => item.parent == null && sameNum(item.number, ref));
   } else {
     const pair = ref.match(/^(\d+)\/(\d+)$/);
     if (pair) {
@@ -262,12 +273,16 @@ export async function validateWork(workDir, config, scopeRef) {
   const milestoneNumbers = new Set(
     items.filter((item) => item.type === "milestone").map((item) => Number.parseInt(item.number, 10)),
   );
+  // `depends` may point at any top-level driver (a milestone or a uat gate).
+  const driverNumbers = new Set(
+    items.filter(isDriver).map((item) => Number.parseInt(item.number, 10)),
+  );
   const graph = new Map();
 
   for (const item of items) {
-    const meta = item.type === "milestone" || item.type === "story" ? await readMeta(item) : {};
+    const meta = recordDoc(item) ? await readMeta(item) : {};
 
-    if (item.type === "milestone") {
+    if (isDriver(item)) {
       const deps = asList(meta.depends).map((value) => Number.parseInt(value, 10));
       graph.set(Number.parseInt(item.number, 10), deps);
     }
@@ -293,11 +308,11 @@ export async function validateWork(workDir, config, scopeRef) {
       }
     }
 
-    // 3a. depends references resolve
-    if (item.type === "milestone") {
+    // 3a. depends references resolve (to any top-level driver)
+    if (isDriver(item)) {
       for (const dep of asList(meta.depends)) {
-        if (!milestoneNumbers.has(Number.parseInt(dep, 10))) {
-          add(path.join(item.dir, "SPEC.md"), `depends "${dep}" does not resolve to a milestone`);
+        if (!driverNumbers.has(Number.parseInt(dep, 10))) {
+          add(path.join(item.dir, recordDoc(item)), `depends "${dep}" does not resolve to a milestone/uat item`);
         }
       }
     }
@@ -355,52 +370,56 @@ const ready = (item, status) => ({
 });
 
 // The next actionable item, respecting `depends`: the first not-`done`
-// milestone whose dependencies are all `done`, drilled into its first
-// not-`done` story. Returns { state: "ready" | "blocked" | "done", ... }.
+// top-level driver (milestone or uat session) whose dependencies are all
+// `done`. A milestone is drilled into its first not-`done` story; a uat
+// session is itself the actionable item (it groups no stories — running it
+// is the work). Returns { state: "ready" | "blocked" | "done", ... }.
 export async function nextWork(workDir, scopeRef) {
   const items = await listItems(workDir);
-  const milestones = items
-    .filter((item) => item.type === "milestone")
+  const drivers = items
+    .filter(isDriver)
     .sort((a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10));
 
   const statusCache = new Map();
-  const milestoneStatus = async (num) => {
+  const driverStatus = async (num) => {
     if (statusCache.has(num)) return statusCache.get(num);
-    const item = milestones.find((m) => Number.parseInt(m.number, 10) === num);
+    const item = drivers.find((d) => Number.parseInt(d.number, 10) === num);
     const status = item ? (await readMeta(item)).status ?? null : null;
     statusCache.set(num, status);
     return status;
   };
 
   const within = inRange(scopeRef);
-  const scoped = milestones.filter((m) => within(Number.parseInt(m.number, 10)));
+  const scoped = drivers.filter((d) => within(Number.parseInt(d.number, 10)));
   let blocked = null;
 
-  for (const milestone of scoped) {
-    const meta = await readMeta(milestone);
-    statusCache.set(Number.parseInt(milestone.number, 10), meta.status ?? null);
+  for (const driver of scoped) {
+    const meta = await readMeta(driver);
+    statusCache.set(Number.parseInt(driver.number, 10), meta.status ?? null);
     if (meta.status === "done") continue;
 
     const unmet = [];
     for (const dep of asList(meta.depends)) {
-      if ((await milestoneStatus(Number.parseInt(dep, 10))) !== "done") unmet.push(String(dep));
+      if ((await driverStatus(Number.parseInt(dep, 10))) !== "done") unmet.push(String(dep));
     }
     if (unmet.length > 0) {
-      blocked ??= { state: "blocked", ref: milestone.ref, type: "milestone", slug: milestone.slug, status: meta.status ?? null, path: milestone.dir, waitingOn: unmet };
+      blocked ??= { state: "blocked", ref: driver.ref, type: driver.type, slug: driver.slug, status: meta.status ?? null, path: driver.dir, waitingOn: unmet };
       continue;
     }
 
+    if (driver.type === "uat") return ready(driver, meta.status); // run the session
+
     const stories = items
-      .filter((item) => item.type === "story" && item.parent === milestone.number)
+      .filter((item) => item.type === "story" && item.parent === driver.number)
       .sort((a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10));
 
-    if (stories.length === 0) return ready(milestone, meta.status); // needs break-down
+    if (stories.length === 0) return ready(driver, meta.status); // needs break-down
 
     for (const story of stories) {
       const storyMeta = await readMeta(story);
       if (storyMeta.status !== "done") return ready(story, storyMeta.status);
     }
-    return ready(milestone, meta.status); // all stories done -- milestone needs accepting
+    return ready(driver, meta.status); // all stories done -- milestone needs accepting
   }
 
   return blocked ?? { state: "done" };

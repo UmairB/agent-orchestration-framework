@@ -15,7 +15,7 @@ function frontmatter(fields) {
 
 // Build a tiny two-milestone stream in a temp dir; flags toggle each defect.
 async function buildFixture(options = {}) {
-  const { mismatch, badTag, doubleVerification, danglingDepends, cycle, m0Status = "done", m1Status = "not-started" } = options;
+  const { mismatch, badTag, doubleVerification, danglingDepends, cycle, uat, uatDangling, uatMismatch, m0Status = "done", m1Status = "not-started" } = options;
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-work-"));
   const work = path.join(root, "work");
 
@@ -69,6 +69,24 @@ async function buildFixture(options = {}) {
       depends: danglingDepends ? ["99"] : ["00"],
     }),
   );
+
+  if (uat || uatDangling || uatMismatch) {
+    const session = path.join(work, "02_uat_acceptance");
+    await mkdir(session, { recursive: true });
+    await writeFile(
+      path.join(session, "SESSION.md"),
+      frontmatter({
+        type: uatMismatch ? "milestone" : "uat",
+        number: "02",
+        slug: "acceptance",
+        status: "not-started",
+        owner: "qa",
+        created: "2026-01-01",
+        updated: "2026-01-02",
+        depends: uatDangling ? ["99"] : ["00", "01"],
+      }),
+    );
+  }
 
   return { root, work };
 }
@@ -192,6 +210,70 @@ export const workTests = [
       withFixture({ m1Status: "done" }, async (work) => {
         const next = await nextWork(work);
         assert.equal(next.state, "done");
+      }),
+  },
+  {
+    name: "work: listItems enumerates a top-level uat session (no stories drilled)",
+    run: () =>
+      withFixture({ uat: true }, async (work) => {
+        const items = await listItems(work);
+        const session = items.find((item) => item.ref === "02");
+        assert.equal(session.type, "uat");
+        assert.equal(session.parent, null);
+        assert.deepEqual(items.map((item) => item.ref).sort(), ["00", "00/00", "01", "02"]);
+      }),
+  },
+  {
+    name: "work: findWork resolves a bare number to a top-level uat session",
+    run: () =>
+      withFixture({ uat: true }, async (work) => {
+        const rows = await findWork(work, "02");
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].type, "uat");
+        assert.equal(rows[0].slug, "acceptance");
+      }),
+  },
+  {
+    name: "work: validateWork passes a well-formed uat session (SESSION.md + resolving depends)",
+    run: () =>
+      withFixture({ uat: true, m1Status: "done" }, async (work) => {
+        assert.deepEqual(await validateWork(work, CONFIG), []);
+      }),
+  },
+  {
+    name: "work: validateWork flags a uat session whose frontmatter type ≠ folder type",
+    run: () =>
+      withFixture({ uatMismatch: true }, async (work) => {
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(findings.some((finding) => /type .* ≠ folder type "uat"/.test(finding.problem)));
+      }),
+  },
+  {
+    name: "work: validateWork flags a dangling uat depends reference",
+    run: () =>
+      withFixture({ uatDangling: true }, async (work) => {
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(findings.some((finding) => /depends "99" does not resolve/.test(finding.problem)));
+      }),
+  },
+  {
+    name: "work: nextWork returns a ready uat session once its milestones are done",
+    run: () =>
+      withFixture({ uat: true, m1Status: "done" }, async (work) => {
+        const next = await nextWork(work);
+        assert.equal(next.state, "ready");
+        assert.equal(next.ref, "02");
+        assert.equal(next.type, "uat");
+      }),
+  },
+  {
+    name: "work: nextWork reports a uat session blocked while a milestone it accepts is not done",
+    run: () =>
+      withFixture({ uat: true, m1Status: "in-progress" }, async (work) => {
+        const next = await nextWork(work, "02");
+        assert.equal(next.state, "blocked");
+        assert.equal(next.ref, "02");
+        assert.deepEqual(next.waitingOn, ["01"]);
       }),
   },
 ];

@@ -6,10 +6,10 @@
 ACD organises work as a flat, chronological **stream** of items, governed by **one question per
 document** ([philosophy.md → principle 2](philosophy.md)): each file answers exactly one question.
 
-## The three item types
+## The item types
 
-Work is a hierarchy of three types — but the hierarchy is expressed by **reference**, not by
-folder nesting:
+Work is a hierarchy of three delivery types — but the hierarchy is expressed by **reference**, not
+by folder nesting:
 
 | Type | Is | Holds | Groups |
 |---|---|---|---|
@@ -20,6 +20,20 @@ folder nesting:
 Read top-down: a **milestone** groups **stories**, a **story** groups **tasks**, a **task** is the
 acceptance criteria. Read for *value*: the **story** is the unit of user-facing delivery and of
 **parallelism**; the **task** is the unit of work and of testing.
+
+A fourth type sits *beside* this hierarchy rather than inside it — an acceptance **gate**:
+
+| Type | Is | Holds | Groups |
+|---|---|---|---|
+| **uat** | an acceptance **session** over a span of delivery | `SESSION.md` (scope / plan / checks / findings / verdict) + `STATE` | nothing |
+
+A **uat** session delivers no new behaviour and groups no stories. It is a top-level stream item
+that `depends:` on the milestones it accepts, *references* their existing scenarios (re-running what
+can be automated, brokering the human `@uat` ones), and **gates** the stream — downstream work that
+`depends:` on it waits until it is `done`. It answers the whole-is-more-than-its-parts question a
+per-milestone close gate can't: *is the delivery so far acceptable as an integrated whole?* Don't
+confuse it with the `@uat` **tag**, which marks a single scenario as needing human acceptance within
+its own milestone — the session is the cross-milestone event; the tag is the per-scenario lane.
 
 ## The flat stream and the folder convention
 
@@ -36,7 +50,7 @@ work/
 ```
 
 - **Folder name = `NN_type_slug`** — split on the first two `_` → `[number, type, slug]`. The slug
-  uses `-` for spaces and never contains `_`. Regex: `^(\d+)_(milestone|story|task)_([a-z0-9-]+)$`.
+  uses `-` for spaces and never contains `_`. Regex: `^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$`.
 - **Number** = creation order = the timeline (a stable id; never renumber). Scanning the last *N*
   folders is the catch-up-on-recent-delivery view.
 - **Grouping is by reference:** an item names its container in frontmatter `parent: <number>`. A
@@ -64,7 +78,7 @@ carries the full record:
 
 ```yaml
 ---
-type: story            # milestone | story | task
+type: story            # milestone | story | task | uat
 number: 01
 slug: shell-layout
 title: "Shell layout"
@@ -120,6 +134,20 @@ milestone-bound story inherits the milestone's ADRs/design/research.
 
 The task is the home of the Gherkin. It has no user story (that's the parent story's). See
 **[acceptance-criteria.md](acceptance-criteria.md)**.
+
+### UAT-session documents
+
+| Document | The one question it answers | Owner |
+|---|---|---|
+| `SESSION.md` *(record)* | *Is the delivery so far acceptable as a whole, and have we confirmed it* — scope (the milestones accepted), plan, live/env checks, findings, verdict | qa |
+| `STATE.md` | *Where are we in the session, what happened* — running log + the `## Feedback (for retro)` inbox | qa |
+
+The record doc carries the full frontmatter (`type: uat`, plus a `depends:` list naming the
+milestones it accepts) and answers a *different* question from a milestone `SPEC.md`: not "why this
+delivery" but "did this delivery pass." It **references** the scenarios it confirms (`verifies →`),
+never restating them. Its **findings** are tracked, routed defects (the verify flow); its **STATE
+feedback** is raw process notes for the retrospective — the two are deliberately separate (a finding
+becomes a `@bug` scenario in the *owning* milestone; feedback becomes a `RETROSPECTIVE.md` lesson).
 
 ## Status & recency
 
