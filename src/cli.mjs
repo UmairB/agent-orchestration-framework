@@ -16,6 +16,8 @@ import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
 import { loadWorkspace, findWork, validateWork, nextWork } from "./work.mjs";
+import { initWork } from "./work-init.mjs";
+import { updateWork } from "./work-update.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -193,7 +195,129 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work validate\n  aof work next 03-10`);
+  if (subcommand === "init") {
+    await workInitCommand(rest);
+    return;
+  }
+
+  if (subcommand === "update") {
+    await workUpdateCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work validate\n  aof work next 03-10`);
+}
+
+async function workInitCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options._[0] ?? process.cwd());
+  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : ["claude"];
+
+  const result = await initWork({
+    targetDir,
+    runtimes,
+    dryRun: Boolean(options.dryRun),
+    force: Boolean(options.force)
+  });
+
+  if (result.guarded) {
+    if (options.json) {
+      printJson({ guarded: true, manifest: relativeDisplayPath(result.manifestPath, targetDir), message: result.message });
+    } else {
+      console.error(result.message);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.json) {
+    printJson({
+      targetDir: path.relative(process.cwd(), targetDir) || ".",
+      runtimes: result.runtimes,
+      dryRun: result.dryRun,
+      summary: result.summary,
+      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
+      actions: result.actions.map((item) => ({ action: item.action, path: relativeDisplayPath(item.path, targetDir) })),
+      notInstallable: result.notInstallable
+    });
+    return;
+  }
+
+  if (result.dryRun) {
+    console.log("dry-run: the following files would be written (nothing written):");
+  }
+  for (const item of result.actions) {
+    console.log(`  ${formatFriendlyApplyAction(item, { dryRun: result.dryRun, targetDir })}`);
+  }
+  reportNotInstallable(result.notInstallable);
+  if (!result.dryRun) {
+    const { created, updated, skipped } = result.summary;
+    const drift = result.summary["drift-warning"];
+    console.log(`Initialised ACD: ${created} created, ${updated} updated, ${skipped} kept, ${drift} drift-warning.`);
+    console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
+  }
+}
+
+async function workUpdateCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options._[0] ?? process.cwd());
+
+  const result = await updateWork({
+    targetDir,
+    dryRun: Boolean(options.dryRun),
+    force: Boolean(options.force)
+  });
+
+  if (result.notInitialized) {
+    if (options.json) {
+      printJson({ notInitialized: true, manifest: relativeDisplayPath(result.manifestPath, targetDir), message: result.message });
+    } else {
+      console.error(result.message);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.json) {
+    printJson({
+      targetDir: path.relative(process.cwd(), targetDir) || ".",
+      runtimes: result.runtimes,
+      dryRun: result.dryRun,
+      summary: result.summary,
+      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
+      actions: result.actions.map((item) => ({ action: item.action, path: relativeDisplayPath(item.path, targetDir) })),
+      notInstallable: result.notInstallable
+    });
+    return;
+  }
+
+  if (result.dryRun) {
+    console.log("dry-run: the following changes would be applied (nothing written):");
+  }
+  for (const item of result.actions) {
+    console.log(`  ${formatFriendlyApplyAction(item, { dryRun: result.dryRun, targetDir })}`);
+  }
+  reportNotInstallable(result.notInstallable);
+  if (!result.dryRun) {
+    const { created, updated, skipped, deleted } = result.summary;
+    const drift = result.summary["drift-warning"];
+    console.log(`Updated ACD: ${created} created, ${updated} updated, ${skipped} up-to-date, ${deleted} deleted, ${drift} drift-warning.`);
+    console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
+  }
+}
+
+function reportNotInstallable(notInstallable = []) {
+  if (notInstallable.length === 0) return;
+  const byRuntime = new Map();
+  for (const item of notInstallable) {
+    const list = byRuntime.get(item.runtime) ?? [];
+    list.push(item);
+    byRuntime.set(item.runtime, list);
+  }
+  for (const [runtime, items] of byRuntime) {
+    const kinds = [...new Set(items.map((item) => item.kind))].join(", ");
+    console.log(`Not installable on ${runtime} (${kinds}): ${items.map((item) => item.id).join(", ")} — unsupported by the capability matrix; not written.`);
+  }
 }
 
 async function workFindCommand(args) {
@@ -1314,6 +1438,8 @@ Packages:
   aof packages install --from-lock [--dry-run] [--json]
 
 Work (ACD work stream):
+  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]   render the ACD bundle into a repo
+  aof work update [dir] [--dry-run] [--force]   re-render the bundle, drift-checked against the install manifest
   aof work find <ref | query> [--json]   resolve a milestone (04), story (04/02), or slug (auth)
   aof work validate [ref] [--json]       folder↔frontmatter, tag vocabulary, depends graph
   aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)

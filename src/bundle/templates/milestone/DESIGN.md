@@ -18,13 +18,9 @@ doc: design
 
 ### <surface name>
 
-- **Mockup:** <Figma / image / design-bundle link>  *(the visual source of truth)*
+- **Mockup:** <Figma / image / design-bundle link>
 - **Layout & interaction:** <intent — not pixel specs>
 - **Component choices:** <what, and WHY (the rationale is the part worth writing down)>
-- **Binding checklist (when a mock exists):** the checkable facts the mock fixes — the regions in
-  order, the components each holds, the states (empty / loading / error / populated), and which design
-  ramp each uses. The developer builds to this; the design-conformance review (`aof:continue` /
-  `aof:verify`) verifies the built surface against it.
 
 ## Behavioural outcomes (cross-reference)
 

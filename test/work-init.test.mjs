@@ -1,0 +1,515 @@
+// Traceability wiring for milestone 01 / story 01 `work-init`.
+//
+// Every @executable scenario AND every Scenario-Outline Examples row across the
+// story's four task features is covered here, exercised against the REAL init
+// implementation (`initWork` in ../src/work-init.mjs) which is itself a thin
+// orchestrator over the locked engine (no drift logic authored in tests):
+//
+//   00_render-bundle-into-repo.feature — renders supported members; --dry-run
+//        writes nothing; a directory arg targets that directory, not cwd
+//   01_stamp-and-manifest.feature      — frontmatter/comment stamps + lock-v2
+//        install manifest at .aof/aof.work.lock.json (never .aof/aof.lock.json)
+//   02_runtime-selection.feature       — --runtime selects; codex commands are
+//        reported not-installable per the capability matrix
+//   03_init-guard-and-force.feature    — first-install guard + --force re-render
+import assert from "node:assert/strict";
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { initWork, WORK_LOCK_PATH, workLockPath } from "../src/work-init.mjs";
+import { loadBundle } from "../src/work-bundle.mjs";
+
+async function tempRepo(prefix = "aof-init-test-") {
+  return mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+function p(dir, ...rel) {
+  return path.join(dir, ...rel);
+}
+
+async function listFilesRecursive(dir) {
+  const out = [];
+  async function walk(current) {
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else out.push(full);
+    }
+  }
+  await walk(dir);
+  return out;
+}
+
+const FRONTMATTER_STAMP = "aof-generated: true";
+const TEMPLATE_MARKER = "<!-- aof-generated: bundle -->";
+
+export const workInitTests = [
+  // ====================================================================
+  // 00_render-bundle-into-repo.feature
+  // ====================================================================
+
+  {
+    name: "work-init/render: init renders the bundle members onto disk under the runtime root (exit 0)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+        assert.equal(result.guarded, false, "not guarded on a clean repo");
+        // aof-* agent files exist under the runtime root.
+        const bundle = loadBundle();
+        for (const agent of bundle.resources.filter((r) => r.kind === "agent")) {
+          assert.ok(existsSync(p(repo, ".claude", "agents", `${agent.id}.md`)), `agent ${agent.id} exists`);
+        }
+        // command members under the commands/aof/ namespace directory.
+        for (const command of bundle.resources.filter((r) => r.kind === "command")) {
+          assert.ok(existsSync(p(repo, ".claude", "commands", "aof", `${command.id}.md`)), `command ${command.id} under commands/aof/`);
+        }
+        // milestone template files exist under the fixed bundle template location.
+        assert.ok(existsSync(p(repo, "aof", "templates", "milestone")), "milestone templates dir exists");
+        const milestoneFiles = await readdir(p(repo, "aof", "templates", "milestone"));
+        assert.ok(milestoneFiles.length > 0, "milestone template files exist");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/render: a named agent member lands at .claude/agents/aof-architect.md",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "aof-architect.md exists");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/render: command members are namespaced under aof and invoked with the aof: prefix",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const refinePath = p(repo, ".claude", "commands", "aof", "refine.md");
+        assert.ok(existsSync(refinePath), "commands/aof/refine.md exists");
+        const content = await readFile(refinePath, "utf8");
+        const match = /^aof-invocation:\s*(.+)$/m.exec(content);
+        assert.ok(match, "frontmatter carries aof-invocation");
+        assert.equal(match[1].trim(), "/aof:refine", "aof-invocation equals /aof:refine");
+        // No flat command file at commands/refine.md.
+        assert.ok(!existsSync(p(repo, ".claude", "commands", "refine.md")), "no flat commands/refine.md");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/render: --dry-run reports the planned writes but writes nothing (exit 0)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"], dryRun: true });
+        assert.equal(result.guarded, false, "dry-run is not guarded on a clean repo");
+        assert.ok(result.actions.length > 0, "reports the files it would write");
+        assert.equal(result.manifestWritten, false, "manifest not written on dry-run");
+        // The runtime root contains no files; the work lock does not exist.
+        assert.ok(!existsSync(p(repo, ".claude")), "no runtime root written");
+        assert.ok(!existsSync(workLockPath(repo)), ".aof/aof.work.lock.json does not exist");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/render: init targets the given directory, not the CLI's own cwd",
+    run: async () => {
+      // The CLI cwd is an unrelated temp dir; the target is a distinct "consumer".
+      const cliCwd = await tempRepo("aof-init-cwd-");
+      const consumer = p(cliCwd, "consumer");
+      await mkdir(consumer, { recursive: true });
+      const originalCwd = process.cwd();
+      try {
+        process.chdir(cliCwd);
+        await initWork({ targetDir: consumer, runtimes: ["claude"] });
+        // Rendered files appear under consumer and its runtime root.
+        assert.ok(existsSync(p(consumer, ".claude", "agents", "aof-architect.md")), "files appear under consumer");
+        assert.ok(existsSync(workLockPath(consumer)), "manifest under consumer");
+        // No ACD files under the CLI's own cwd (only the consumer/ subtree).
+        const cwdFiles = (await listFilesRecursive(cliCwd))
+          .filter((f) => !f.startsWith(consumer));
+        assert.equal(cwdFiles.length, 0, `no ACD files outside consumer/: ${cwdFiles.join(", ")}`);
+      } finally {
+        process.chdir(originalCwd);
+        await rm(cliCwd, { recursive: true, force: true });
+      }
+    }
+  },
+  // Scenario Outline: a bundle member of a given kind lands at its conventional location.
+  {
+    name: "work-init/render: outline — member kinds land at conventional locations (agent, command, template)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const rows = [
+          { kind: "agent", id: "aof-architect", location: p(repo, ".claude", "agents", "aof-architect.md") },
+          { kind: "command", id: "refine", location: p(repo, ".claude", "commands", "aof", "refine.md") }
+        ];
+        for (const row of rows) {
+          assert.ok(existsSync(row.location), `${row.kind} ${row.id} at ${row.location}`);
+        }
+        // template member → the fixed bundle template location.
+        assert.ok(existsSync(p(repo, "aof", "templates", "milestone")), "template at fixed bundle template location");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+
+  // ====================================================================
+  // 01_stamp-and-manifest.feature
+  // ====================================================================
+
+  {
+    name: "work-init/stamp: every rendered resource file carries the frontmatter stamp",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const architect = await readFile(p(repo, ".claude", "agents", "aof-architect.md"), "utf8");
+        assert.ok(architect.includes(FRONTMATTER_STAMP), "aof-architect.md frontmatter stamped");
+        // Every written agent AND command file carries the frontmatter stamp.
+        const bundle = loadBundle();
+        for (const agent of bundle.resources.filter((r) => r.kind === "agent")) {
+          const content = await readFile(p(repo, ".claude", "agents", `${agent.id}.md`), "utf8");
+          assert.ok(content.includes(FRONTMATTER_STAMP), `agent ${agent.id} stamped`);
+        }
+        for (const command of bundle.resources.filter((r) => r.kind === "command")) {
+          const content = await readFile(p(repo, ".claude", "commands", "aof", `${command.id}.md`), "utf8");
+          assert.ok(content.includes(FRONTMATTER_STAMP), `command ${command.id} stamped`);
+        }
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/stamp: every rendered template file begins with the comment-form marker",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const templateRoot = p(repo, "aof", "templates");
+        const files = (await listFilesRecursive(templateRoot));
+        assert.ok(files.length > 0, "template files written");
+        for (const file of files) {
+          const content = await readFile(file, "utf8");
+          assert.ok(content.startsWith(TEMPLATE_MARKER), `${file} begins with ${TEMPLATE_MARKER}`);
+        }
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/manifest: the install manifest is a lock-v2 record at the fixed path",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const lockPath = workLockPath(repo);
+        assert.ok(existsSync(lockPath), ".aof/aof.work.lock.json exists");
+        const lock = JSON.parse(await readFile(lockPath, "utf8"));
+        assert.equal(lock.version, 2, "version === 2");
+        assert.ok(lock.bundle && typeof lock.bundle.version === "string" && lock.bundle.version.length > 0, "bundle.version recorded");
+        assert.deepEqual(lock.runtimes, ["claude"], "runtimes lists the rendered runtimes");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/manifest: one content-addressed entry per written file (path fwd-slash, sha256 hash, resource id+kind)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        // One entry for each file init wrote (created/updated actions).
+        const writtenCount = result.actions.filter((a) => a.action === "create" || a.action === "update").length;
+        assert.equal(lock.files.length, writtenCount, "one manifest entry per written file");
+        for (const entry of lock.files) {
+          assert.ok(!entry.path.includes("\\"), `${entry.path} uses forward slashes`);
+          assert.ok(entry.hash.startsWith("sha256:"), `${entry.path} hash begins with sha256:`);
+          assert.ok(entry.resource && typeof entry.resource.id === "string", `${entry.path} resource has id`);
+          assert.ok(typeof entry.resource.kind === "string", `${entry.path} resource has kind`);
+        }
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/manifest: init writes only the work manifest, never the consumer's own lock",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        assert.ok(existsSync(workLockPath(repo)), ".aof/aof.work.lock.json exists");
+        assert.ok(!existsSync(p(repo, ".aof", "aof.lock.json")), ".aof/aof.lock.json does not exist");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  // Scenario Outline: a written file of a given class carries its stamp form.
+  {
+    name: "work-init/stamp: outline — stamp form by file class (agent/command frontmatter; template comment marker)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        // agent → frontmatter key
+        const agent = await readFile(p(repo, ".claude", "agents", "aof-architect.md"), "utf8");
+        assert.ok(agent.includes(FRONTMATTER_STAMP), "agent stamp form = frontmatter key");
+        // command → frontmatter key
+        const command = await readFile(p(repo, ".claude", "commands", "aof", "refine.md"), "utf8");
+        assert.ok(command.includes(FRONTMATTER_STAMP), "command stamp form = frontmatter key");
+        // template → comment marker
+        const templateFiles = await listFilesRecursive(p(repo, "aof", "templates"));
+        const template = await readFile(templateFiles[0], "utf8");
+        assert.ok(template.startsWith(TEMPLATE_MARKER), "template stamp form = comment marker");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+
+  // ====================================================================
+  // 02_runtime-selection.feature
+  // ====================================================================
+
+  {
+    name: "work-init/runtime: with no --runtime, init renders for claude",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const result = await initWork({ targetDir: repo });
+        assert.equal(result.guarded, false, "exit 0");
+        assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "files under .claude");
+        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        assert.ok(lock.runtimes.includes("claude"), "runtimes lists claude");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/runtime: --runtime codex renders supported members and reports unsupported commands; no command force-written",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const result = await initWork({ targetDir: repo, runtimes: ["codex"] });
+        // agent members appear under .codex
+        assert.ok(existsSync(p(repo, ".codex", "agents", "aof-architect.md")), "codex agent rendered");
+        // output reports command members as not installable on codex
+        const codexCommands = result.notInstallable.filter((n) => n.kind === "command" && n.runtime === "codex");
+        assert.ok(codexCommands.length > 0, "command members reported not installable on codex");
+        // no command file written under .codex (any namespace)
+        assert.ok(!existsSync(p(repo, ".codex", "commands", "aof", "refine.md")), "no namespaced codex command file");
+        assert.ok(!existsSync(p(repo, ".codex", "commands", "refine.md")), "no flat codex command file");
+        // not force-written under ANY runtime root
+        assert.ok(!existsSync(p(repo, ".claude", "commands")), "no command force-written under .claude either");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/runtime: --runtime claude,codex renders for both runtimes",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude", "codex"] });
+        assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "claude root populated");
+        assert.ok(existsSync(p(repo, ".codex", "agents", "aof-architect.md")), "codex root populated");
+        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        assert.ok(lock.runtimes.includes("claude") && lock.runtimes.includes("codex"), "runtimes lists both");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  // Scenario Outline: a member kind on a runtime is rendered or reported unsupported.
+  {
+    name: "work-init/runtime: outline — (claude,agent)=rendered (claude,command)=rendered (codex,agent)=rendered (codex,command)=reported-unsupported",
+    run: async () => {
+      const rows = [
+        { runtime: "claude", kind: "agent", id: "aof-architect", outcome: "rendered" },
+        { runtime: "claude", kind: "command", id: "refine", outcome: "rendered" },
+        { runtime: "codex", kind: "agent", id: "aof-architect", outcome: "rendered" },
+        { runtime: "codex", kind: "command", id: "refine", outcome: "reported-unsupported" }
+      ];
+      for (const row of rows) {
+        const repo = await tempRepo();
+        try {
+          const result = await initWork({ targetDir: repo, runtimes: [row.runtime] });
+          const root = row.runtime === "claude" ? ".claude" : ".codex";
+          if (row.outcome === "rendered") {
+            const where = row.kind === "agent"
+              ? p(repo, root, "agents", `${row.id}.md`)
+              : p(repo, root, "commands", "aof", `${row.id}.md`);
+            assert.ok(existsSync(where), `(${row.runtime},${row.kind}) rendered at ${where}`);
+          } else {
+            const reported = result.notInstallable.some((n) => n.kind === row.kind && n.runtime === row.runtime);
+            assert.ok(reported, `(${row.runtime},${row.kind}) reported unsupported`);
+            const flat = p(repo, root, "commands", `${row.id}.md`);
+            const nested = p(repo, root, "commands", "aof", `${row.id}.md`);
+            assert.ok(!existsSync(flat) && !existsSync(nested), `(${row.runtime},${row.kind}) not written`);
+          }
+        } finally {
+          await rm(repo, { recursive: true, force: true });
+        }
+      }
+    }
+  },
+
+  // ====================================================================
+  // 03_init-guard-and-force.feature
+  // ====================================================================
+
+  {
+    name: "work-init/guard: init succeeds when there is no existing work manifest",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        assert.ok(!existsSync(workLockPath(repo)), "no manifest before run");
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+        assert.equal(result.guarded, false, "exit 0");
+        assert.ok(existsSync(workLockPath(repo)), "manifest exists after run");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/guard: re-running init refuses when the work manifest already exists (non-zero, points to update, no overwrite)",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        // Mark a rendered file so we can prove it is not overwritten.
+        const architectPath = p(repo, ".claude", "agents", "aof-architect.md");
+        const before = await readFile(architectPath, "utf8");
+        await writeFile(architectPath, `${before}\nUSER EDIT`, "utf8");
+        const edited = await readFile(architectPath, "utf8");
+
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+        assert.equal(result.guarded, true, "guarded → CLI maps to non-zero exit");
+        assert.ok(/aof work update/.test(result.message), "message points to aof work update");
+        // No rendered file overwritten.
+        const after = await readFile(architectPath, "utf8");
+        assert.equal(after, edited, "rendered file not overwritten");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/guard: re-running init does not touch the existing manifest",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const before = await readFile(workLockPath(repo), "utf8");
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const after = await readFile(workLockPath(repo), "utf8");
+        assert.equal(after, before, "manifest unchanged after a refused re-run");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/guard: --force on an initialised repo re-renders from scratch and rewrites the manifest",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        // Mutate a rendered file; --force should re-render it back.
+        const architectPath = p(repo, ".claude", "agents", "aof-architect.md");
+        const original = await readFile(architectPath, "utf8");
+        await writeFile(architectPath, "TAMPERED", "utf8");
+        const before = await readFile(workLockPath(repo), "utf8");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+
+        const result = await initWork({ targetDir: repo, runtimes: ["claude"], force: true });
+        assert.equal(result.guarded, false, "exit 0 with --force");
+        // Bundle files re-rendered (the tampered file is restored to canonical content).
+        const restored = await readFile(architectPath, "utf8");
+        assert.equal(restored, original, "bundle file re-rendered from scratch");
+        // Manifest rewritten.
+        const after = await readFile(workLockPath(repo), "utf8");
+        assert.notEqual(after, before, "manifest rewritten");
+        assert.equal(result.manifestWritten, true, "manifest written on force");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  // Scenario Outline: the init guard maps the precondition to an outcome.
+  {
+    name: "work-init/guard: outline — decision table (no manifest → render+write; present → refuse; present+force → re-render+rewrite)",
+    run: async () => {
+      // Row 1: no work manifest, no flag → render + write manifest.
+      {
+        const repo = await tempRepo();
+        try {
+          const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+          assert.equal(result.guarded, false, "row1: not guarded");
+          assert.equal(result.manifestWritten, true, "row1: manifest written");
+          assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "row1: rendered");
+        } finally {
+          await rm(repo, { recursive: true, force: true });
+        }
+      }
+      // Row 2: work manifest present, no flag → refuse, no writes.
+      {
+        const repo = await tempRepo();
+        try {
+          await initWork({ targetDir: repo, runtimes: ["claude"] });
+          const lockBefore = await readFile(workLockPath(repo), "utf8");
+          const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
+          assert.equal(result.guarded, true, "row2: guarded (refuse)");
+          assert.equal(result.manifestWritten, false, "row2: no manifest write");
+          assert.equal(result.actions.length, 0, "row2: no actions");
+          assert.equal(await readFile(workLockPath(repo), "utf8"), lockBefore, "row2: manifest untouched");
+        } finally {
+          await rm(repo, { recursive: true, force: true });
+        }
+      }
+      // Row 3: work manifest present, --force → re-render + rewrite manifest.
+      {
+        const repo = await tempRepo();
+        try {
+          await initWork({ targetDir: repo, runtimes: ["claude"] });
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          const result = await initWork({ targetDir: repo, runtimes: ["claude"], force: true });
+          assert.equal(result.guarded, false, "row3: not guarded");
+          assert.equal(result.manifestWritten, true, "row3: manifest rewritten");
+          assert.ok(existsSync(workLockPath(repo)), "row3: manifest present");
+        } finally {
+          await rm(repo, { recursive: true, force: true });
+        }
+      }
+    }
+  }
+];
