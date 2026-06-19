@@ -24,6 +24,15 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      `aof-researcher` → `RESEARCH.md`; non-trivial decision → `aof-architect` → ADRs in
      `ARCHITECTURE.md` + fitness-function arch-tests (move any invariant out of features); UI →
      `aof-designer` → `DESIGN.md`.
+
+     **Recall prior lessons first (before authoring ADRs/stories).** Role-scoped, run unconditionally
+     (memory may be off — see below): the **architect**, before writing an ADR, runs `aof work memory
+     recall "<the decision in a few words>" --area architecture --block`; the **PO**, before the
+     break-down, runs a recall keyed to the milestone's domain — `aof work memory recall "<milestone
+     objective keywords>" --item <ref> --block`. Read the returned block and acknowledge any surfaced
+     **near-miss** relevant to a decision — honoured, or consciously departed from, in `ARCHITECTURE.md`
+     (or `STATE.md`). An **empty block means nothing to surface** (memory may be off) — proceed
+     unchanged.
   2. **Break down** (with `aof-architect`): partition into **independent** stories — minimise
      cross-story coupling to maximise parallelism. For each, create `stories/<SS>_story_<slug>/`
      (`STORY.md`, `parent:` this milestone) and list it in the milestone `SPEC.md` `## Stories`.

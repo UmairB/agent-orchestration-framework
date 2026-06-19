@@ -26,6 +26,37 @@ import { archTests as acdInstallManifestContractTests } from "../test/arch/acd-i
 import { archTests as acdGeneratedStampTests } from "../test/arch/acd-generated-stamp.test.mjs";
 import { archTests as acdCapabilityDelegationTests } from "../test/arch/acd-capability-delegation.test.mjs";
 import { archTests as acdNoClobberWithoutForceTests } from "../test/arch/acd-no-clobber-without-force.test.mjs";
+import { planningInitTests } from "../test/planning-init.test.mjs";
+import { planningPrdTests } from "../test/planning-prd.test.mjs";
+import { archTests as acdPlanningInstallCommandsTests } from "../test/arch/acd-planning-install-commands.test.mjs";
+import { archTests as acdPlanningProvenanceShaTests } from "../test/arch/acd-planning-provenance-sha.test.mjs";
+import { archTests as acdPlanningLockIsolationTests } from "../test/arch/acd-planning-lock-isolation.test.mjs";
+import { archTests as acdPlanningNoCodexInstallTests } from "../test/arch/acd-planning-no-codex-install.test.mjs";
+import { archTests as acdPlanningClonableRefTests } from "../test/arch/acd-planning-clonable-ref.test.mjs";
+import { archTests as acdUnifiedLockSectionsTests } from "../test/arch/acd-unified-lock-sections.test.mjs";
+import { workMemorySeamTests } from "../test/work-memory-seam.test.mjs";
+import { memoryIndexingTests } from "../test/memory-indexing.test.mjs";
+import { memoryRetrievalTests } from "../test/memory-retrieval.test.mjs";
+import { archTests as acdMemoryBackendSelectionTests } from "../test/arch/acd-memory-backend-selection.test.mjs";
+import { archTests as acdMemoryDerivedIndexTests } from "../test/arch/acd-memory-derived-index.test.mjs";
+import { archTests as acdMemoryIndexLocationTests } from "../test/arch/acd-memory-index-location.test.mjs";
+import { archTests as acdMemoryRankingTests } from "../test/arch/acd-memory-ranking.test.mjs";
+import { archTests as acdMemoryBackendInterfaceTests } from "../test/arch/acd-memory-backend-interface.test.mjs";
+import { archTests as acdMemoryRecallContractTests } from "../test/arch/acd-memory-recall-contract.test.mjs";
+import { memoryIntegrationTests } from "../test/memory-integration.test.mjs";
+import { memoryRecallBlockTests } from "../test/memory-recall-block.test.mjs";
+import { memoryHooksInertTests } from "../test/memory-hooks-inert.test.mjs";
+// milestone 03 — work board UI
+import { workListTests } from "../test/work-list.test.mjs";
+import { archTests as acdWorkListContractTests } from "../test/arch/acd-work-list-contract.test.mjs";
+import { boardApiTests } from "../test/board-api.test.mjs";
+import { boardServeTests } from "../test/board-serve.test.mjs";
+import { archTests as acdBoardWriteIsolationTests } from "../test/arch/acd-board-write-isolation.test.mjs";
+import { terminalDockTests } from "../test/terminal-dock.test.mjs";
+import { terminalWsTests } from "../test/terminal-ws.test.mjs";
+import { archTests as acdTerminalServerOnlyTests } from "../test/arch/acd-terminal-server-only.test.mjs";
+import { archTests as acdVibeyardAttributionTests } from "../test/arch/acd-vibeyard-attribution.test.mjs";
+import { archTests as acdBoardSingleServerTests } from "../test/arch/acd-board-single-server.test.mjs";
 
 const tests = [
   ...adapterWarningTests,
@@ -42,6 +73,36 @@ const tests = [
   ...acdGeneratedStampTests,
   ...acdCapabilityDelegationTests,
   ...acdNoClobberWithoutForceTests,
+  ...planningInitTests,
+  ...planningPrdTests,
+  ...acdPlanningInstallCommandsTests,
+  ...acdPlanningProvenanceShaTests,
+  ...acdPlanningLockIsolationTests,
+  ...acdPlanningNoCodexInstallTests,
+  ...acdPlanningClonableRefTests,
+  ...acdUnifiedLockSectionsTests,
+  ...workMemorySeamTests,
+  ...memoryIndexingTests,
+  ...memoryRetrievalTests,
+  ...acdMemoryBackendSelectionTests,
+  ...acdMemoryDerivedIndexTests,
+  ...acdMemoryIndexLocationTests,
+  ...acdMemoryRankingTests,
+  ...acdMemoryBackendInterfaceTests,
+  ...acdMemoryRecallContractTests,
+  ...memoryIntegrationTests,
+  ...memoryRecallBlockTests,
+  ...memoryHooksInertTests,
+  ...workListTests,
+  ...acdWorkListContractTests,
+  ...boardApiTests,
+  ...boardServeTests,
+  ...acdBoardWriteIsolationTests,
+  ...terminalDockTests,
+  ...terminalWsTests,
+  ...acdTerminalServerOnlyTests,
+  ...acdVibeyardAttributionTests,
+  ...acdBoardSingleServerTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

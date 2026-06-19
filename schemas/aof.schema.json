@@ -75,6 +75,7 @@
     },
     "settings": { "$ref": "#/$defs/settings" },
     "work": { "$ref": "#/$defs/work" },
+    "memory": { "$ref": "#/$defs/memory" },
     "items": {
       "type": "array",
       "items": { "type": "string" }
@@ -378,9 +379,28 @@
             "domains": { "type": "array", "items": { "type": "string" } }
           },
           "additionalProperties": false
+        },
+        "ui": {
+          "type": "object",
+          "description": "UI / design-review settings. ACD does NOT boot the app — the project runs it; ACD only points at it.",
+          "properties": {
+            "baseUrl": { "type": "string", "description": "Base URL of the running app the design-conformance review renders surfaces against (e.g. https://localhost:1234); each DESIGN.md surface's Route is appended. Overridable per run with `aof:verify --url`." }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "description": "Work-memory backend selection (milestone 05). OPTIONAL — an absent `memory` key is equivalent to { \"backend\": \"none\" } (the graceful no-op). `backend` is an enum of the registered backend names.",
+      "properties": {
+        "backend": {
+          "enum": ["local", "none"],
+          "description": "The memory backend that answers the `aof work memory` verbs. `local` = the cheap derived-index backend; `none` = a no-op so ACD runs unchanged when memory is absent."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

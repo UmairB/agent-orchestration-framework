@@ -15,9 +15,12 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
-import { loadWorkspace, findWork, validateWork, nextWork } from "./work.mjs";
+import { loadWorkspace, findWork, listStream, validateWork, nextWork } from "./work.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
+import { workMemoryCommand } from "./work-memory.mjs";
+import { serveBoard } from "./board-serve.mjs";
+import { initPlanning } from "./planning-init.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -49,6 +52,11 @@ export async function run(argv) {
 
   if (command === "work") {
     await workCommand(rest);
+    return;
+  }
+
+  if (command === "planning") {
+    await planningCommand(rest);
     return;
   }
 
@@ -185,6 +193,11 @@ async function workCommand(args) {
     return;
   }
 
+  if (subcommand === "list") {
+    await workListCommand(rest);
+    return;
+  }
+
   if (subcommand === "validate") {
     await workValidateCommand(rest);
     return;
@@ -205,7 +218,58 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work validate\n  aof work next 03-10`);
+  if (subcommand === "memory") {
+    await workMemoryCommandCli(rest);
+    return;
+  }
+
+  if (subcommand === "board") {
+    await workBoardCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]`);
+}
+
+async function workBoardCommand(args) {
+  const options = parseOptions(args);
+  // Default to 4180 so it does not collide with `aof assets ui` (4177 frontend /
+  // 4178 API); the board serves on this single port.
+  const port = Number.parseInt(options.port ?? "4180", 10);
+  const projectDir = path.resolve(options.target ?? process.cwd());
+
+  let session;
+  try {
+    session = await serveBoard({ projectDir, port });
+  } catch (error) {
+    if (error.code === "ui-build-missing") {
+      console.error(error.message);
+      process.exitCode = 1;
+      return;
+    }
+    if (error.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+
+  const { server, boardUrl } = session;
+  console.log("AOF work board is running locally.");
+  console.log(`Open this URL in your browser: ${boardUrl}`);
+  console.log(`Project: ${projectDir}`);
+  console.log("Press Ctrl+C to stop the board.");
+
+  await new Promise((resolve) => {
+    const shutdown = () => {
+      server.close(() => {
+        resolve();
+      });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 }
 
 async function workInitCommand(args) {
@@ -306,6 +370,93 @@ async function workUpdateCommand(args) {
   }
 }
 
+// `aof work memory <verb>` — delegates to the memory seam (milestone 05, story
+// 00). The seam owns argv/scope parsing, config-driven backend selection, the
+// frozen-interface dispatch, and the --json-vs-text rendering; it sets
+// process.exitCode non-zero on an unknown/missing verb.
+async function workMemoryCommandCli(args) {
+  await workMemoryCommand(args, { loadWorkspace });
+}
+
+async function planningCommand(args) {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "init") {
+    await planningInitCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown planning command "${subcommand ?? ""}".\n\nExamples:\n  aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]`);
+}
+
+async function planningInitCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options._[0] ?? process.cwd());
+  const runtime = options.runtime ?? "claude";
+
+  if (!["claude", "codex"].includes(runtime)) {
+    throw new Error(`Unsupported runtime "${runtime}". Expected one of: claude, codex.`);
+  }
+
+  const result = await initPlanning({
+    targetDir,
+    runtime,
+    dryRun: Boolean(options.dryRun),
+    force: Boolean(options.force),
+    withOptional: Boolean(options.withOptional),
+    // In --json mode, suppress the human boundary/warning/codex lines so stdout is
+    // pure JSON (the plan/codex/manualFallback are carried in the JSON payload).
+    log: options.json ? () => {} : undefined
+  });
+
+  // Guarded refusal (ADR-006), sha rejection (ADR-002), and a failed runtime step
+  // (the honesty gate) all map to a non-zero exit, mirroring the work-init guard.
+  if (result.guarded || result.shaRejected || result.installFailed) {
+    if (options.json) {
+      printJson({
+        guarded: Boolean(result.guarded),
+        shaRejected: Boolean(result.shaRejected),
+        installFailed: Boolean(result.installFailed),
+        manifest: relativeDisplayPath(result.manifestPath, targetDir),
+        message: result.message
+      });
+    } else {
+      console.error(result.message);
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.json) {
+    printJson({
+      targetDir: path.relative(process.cwd(), targetDir) || ".",
+      runtime: result.runtime,
+      dryRun: result.dryRun,
+      sha: result.sha,
+      plan: result.planCommands,
+      codex: result.codex,
+      manualFallback: result.manualFallback,
+      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
+      plugins: result.manifest?.plugins ?? null
+    });
+    return;
+  }
+
+  if (result.dryRun) {
+    // The plan/codex preview lines were already printed by initPlanning via the
+    // console.log default. Nothing more to print for a dry-run.
+    return;
+  }
+
+  console.log(`Pinned the pm-skills marketplace at ${result.sha} for ${result.runtime}.`);
+  if (result.runtime === "claude") {
+    console.log(`Installed ${result.manifest.plugins.length} planner plugin(s): ${result.manifest.plugins.map((entry) => entry.name).join(", ")}.`);
+  } else {
+    console.log("Codex: marketplace registered; plugins NOT installed (see the manual fallback above).");
+  }
+  console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
+}
+
 function reportNotInstallable(notInstallable = []) {
   if (notInstallable.length === 0) return;
   const byRuntime = new Map();
@@ -345,6 +496,52 @@ async function workFindCommand(args) {
     const title = row.title ? `  — ${row.title}` : "";
     console.log(`${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${row.slug}${title}`);
     console.log(`        ${path.relative(process.cwd(), row.dir)}`);
+  }
+}
+
+// `aof work list [scope] [--json]` — the whole work stream as the board's data
+// source. `--json` emits the frozen flat-array contract (ADR-002) as pure JSON
+// on stdout (no human chrome); the bare command prints a depth-indented human
+// listing (ref · type · status · title), optionally narrowed to a scope subtree.
+async function workListCommand(args) {
+  const options = parseOptions(args);
+  const scope = options._[0];
+  const { workDir } = await loadWorkspace(process.cwd(), options.config);
+  const rows = await listStream(workDir);
+
+  // JSON mode is the contract surface: the WHOLE stream, pure JSON, byte-stable
+  // across runs. Scope narrowing is a human-view affordance only; the contract
+  // emits the full stream so the board binds to one fixture.
+  if (options.json) {
+    console.log(JSON.stringify(rows, null, 2));
+    return;
+  }
+
+  // Scope semantics mirror validateWork's `inScope`: an item is in scope if its
+  // own number equals the scope OR its parent equals the scope.
+  const inScope = (row) => {
+    if (!scope) return true;
+    const ref = scope.trim();
+    const itemNumber = row.ref.includes("/") ? row.ref.split("/")[1] : row.ref;
+    if (/^\d+$/.test(ref)) {
+      const driver = row.parent ?? itemNumber;
+      return Number.parseInt(driver, 10) === Number.parseInt(ref, 10);
+    }
+    const pair = ref.match(/^(\d+)\/(\d+)$/);
+    if (pair) return row.ref === `${pair[1]}/${pair[2]}` || row.ref === ref;
+    return row.slug.includes(ref);
+  };
+
+  const listed = rows.filter(inScope);
+  if (listed.length === 0) {
+    console.log(`Nothing in scope${scope ? ` for "${scope}"` : ""}.`);
+    return;
+  }
+
+  for (const row of listed) {
+    const indent = row.parent == null ? "" : "  ";
+    const title = row.title ?? "-";
+    console.log(`${indent}${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${title}`);
   }
 }
 
@@ -1323,7 +1520,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -1441,8 +1638,12 @@ Work (ACD work stream):
   aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]   render the ACD bundle into a repo
   aof work update [dir] [--dry-run] [--force]   re-render the bundle, drift-checked against the install manifest
   aof work find <ref | query> [--json]   resolve a milestone (04), story (04/02), or slug (auth)
+  aof work list [scope] [--json]         the whole stream (or a subtree); --json emits the flat-array board contract
+  aof work memory <verb> [args] [--json]   recall/brief/ingest/reindex/status via the configured backend
   aof work validate [ref] [--json]       folder↔frontmatter, tag vocabulary, depends graph
   aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
+  aof work board [--port]                serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
+  aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]   install the bought planner (pm-skills), record pinned-sha provenance
 
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.

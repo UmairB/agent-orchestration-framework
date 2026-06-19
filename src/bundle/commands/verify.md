@@ -42,8 +42,11 @@ that have content** — no empty "None" placeholders (absence of a section is in
 5. **Retrospective (conditional).** Run `aof:retrospective <ref>` — the retrospective session: it
    triages the milestone's STATE `## Feedback (for retro)` notes + the VERIFICATION findings + any
    blocker stops, and distils the lessons into `RETROSPECTIVE.md` (no doc if the run was clean). Then
-   **archive** the STATE `## Feedback (for retro)` section as part of the compaction — its lessons
-   have graduated, exactly as durable decisions graduate into ADRs.
+   **fold the just-written lessons into memory**: run `aof work memory ingest` so this milestone's
+   `R<n>` entries + `ADR-NNN` blocks become recallable in the next milestone's `aof:refine`/`aof:continue`
+   (a no-op when memory is off — safe to run always). Then **archive** the STATE `## Feedback (for retro)`
+   section as part of the compaction — its lessons have graduated, exactly as durable decisions graduate
+   into ADRs.
 </process>
 
 <progress_tracking>

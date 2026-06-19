@@ -26,6 +26,11 @@ Dispatch on the item's `type`:
      every task's `@executable` scenarios/rows are green and fitness functions pass; else inline. Flag,
      don't change, a wrong scenario — and note any blocker or contract problem in the milestone's
      `STATE.md` `## Feedback (for retro)` section (distilled into `RETROSPECTIVE.md` at `aof:verify`).
+
+     **Recall prior gotchas first.** Before building, the developer runs (unconditionally — memory may
+     be off) `aof work memory recall "<milestone domain / story keywords>" --kind near-miss --block` and
+     considers the surfaced gotchas, recording at `aof:verify` (in `VERIFICATION.md`) any that shaped the
+     build. An **empty block means nothing to surface** (memory may be off) — proceed unchanged.
   3. **Review** — `aof-architect` (structural) + `aof-qa` (behavioural) + an automated craft pass; apply
      confirmed fixes.
 - **task** — build that single task to green, then review.

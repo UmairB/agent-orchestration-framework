@@ -137,7 +137,7 @@
         "id": "continue",
         "kind": "command"
       },
-      "hash": "sha256:17583b9a6d2d4751bfb996ef3bbe8fc864b88d267adfb148d7e2118b11042d6e"
+      "hash": "sha256:9d5927ab5781ba4b8bf9930be4ec682b7db732fa167f9c0f622977104156dc07"
     },
     {
       "path": ".claude/commands/aof/feedback.md",
@@ -164,7 +164,7 @@
         "id": "refine",
         "kind": "command"
       },
-      "hash": "sha256:894b96314810ce6f96e32aa94edb4a93a0f9e8c936b20d4bfaa6fcb4c9e2707a"
+      "hash": "sha256:43cb7bf8b1bd80d673abcb259323b2df2e79929c1973b8e24207c201d0f950d3"
     },
     {
       "path": ".claude/commands/aof/retrospective.md",
@@ -182,7 +182,7 @@
         "id": "shatter",
         "kind": "command"
       },
-      "hash": "sha256:bb3b99af26a3d3e32078236fac1118340a60ffecc68a9354e9fa1347e7d2a51d"
+      "hash": "sha256:b5bc534e669d10d6d4a9917fd7eb3275617619f59439bf12e5bfaf36801041b8"
     },
     {
       "path": ".claude/commands/aof/validate.md",
@@ -200,7 +200,7 @@
         "id": "verify",
         "kind": "command"
       },
-      "hash": "sha256:e63dd23387402394f173d1eead21fa29d4d7aada74d4b0bc351a66882abbe385"
+      "hash": "sha256:77d81caf3b41f4459b226f29dd4fc4e5e39de01427e36e03abc5a6e8427a8ca0"
     },
     {
       "path": "aof/templates/milestone/ARCHITECTURE.md",

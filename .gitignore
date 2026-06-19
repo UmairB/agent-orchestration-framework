@@ -5,6 +5,7 @@ ui/dist/
 .claude/
 .codex/
 .aof-test/
+.aof/aof.memory.index.json
 *.sqlite
 *.sqlite-journal
 .DS_Store
