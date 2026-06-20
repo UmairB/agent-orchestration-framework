@@ -24,10 +24,11 @@ verify to `done`.
 ## Where the durable record lives (pointers, not restatements)
 
 - **Design decisions →** [ARCHITECTURE.md](ARCHITECTURE.md) ADR-001…005 + the fitness-function table.
-- **Evidence, findings, accept →** [VERIFICATION.md](VERIFICATION.md). Two non-blocking findings, routed
-  per ADR-004: **F-01 → milestone 06** (RED-until-built fitness functions reding the shared suite);
-  **F-02 → milestone 01** (`aof work init` writes no `.gitignore` baseline — PO decision: self-contained
-  nested `.gitignore` under `.aof/`, possibly `.claude/`).
+- **Evidence, findings, accept →** [VERIFICATION.md](VERIFICATION.md). **F-01 withdrawn** (a
+  non-reproducible transient RED — milestone 06 is built + accepted, suite is 777/0). **F-02 → milestone
+  01** (`aof work init` wrote no `.gitignore` baseline): the one real finding, **implemented post-accept**
+  at the user's direction — `aof work init` now writes a self-contained nested `.aof/.gitignore`
+  (`src/aof-gitignore.mjs`), and the memory backend's git-ignore moved from the repo-root append to it.
 - **Lessons →** [RETROSPECTIVE.md](RETROSPECTIVE.md) R1–R4.
 
 ## Durable build decisions (not ADRs — preserved here for the next milestone)

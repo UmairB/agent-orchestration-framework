@@ -9,23 +9,23 @@ doc: retrospective
 # 04 · Round-trip Proof — Retrospective
 
 The build itself was clean — three review lenses passed with no blockers (`STATE.md`). The lessons
-below come from the `STATE.md` `## Feedback (for retro)` craft notes and the two `VERIFICATION.md`
-findings (F-01, F-02); both findings were non-blocking and routed to their owning milestones.
+below come from the `STATE.md` `## Feedback (for retro)` craft notes and the `VERIFICATION.md` findings.
+F-02 was the one real finding (routed to milestone 01 and implemented post-accept); F-01 was withdrawn.
 
-## R1 — A RED-until-built fitness function must not be registered in the shared runner before its implementation exists
+## R1 — WITHDRAWN: do not raise a finding off a single unreproduced test run — re-run first
 
-- **Kind:** near-miss · **Area:** process · **Stage:** build · **Owner:** architect / runner-wiring · **Raised by:** aof:verify (sweep)
-- **What happened.** `scripts/test.mjs` + `scripts/check.mjs` came up RED during verify — not from any
-  milestone-04 lane, but from milestone 06's `acd-headroom-*` fitness functions, registered while their
-  plugin is unbuilt. They were also wired into `test.mjs` but not `test-unit.mjs`.
-- **Why.** A fitness function authored RED-by-design is only safe to register once the build that turns
-  it green lands. Registering at Decide time reds the shared suite, which masks real regressions (you
-  can't tell expected-RED from a true break). Milestone 04 hit the *same* tension and deliberately
-  **deferred** its own roundtrip fitness-function registration to story 00's build (`STATE.md`); 06 did not.
-- **Lesson.** Keep a milestone's RED-by-design fitness functions **unregistered** (or otherwise
-  quarantined from the green-required suites) until its build flips them green — then register into **all**
-  runners together so coverage can't drift between them.
-- **Refs:** `VERIFICATION.md` F-01 (→ milestone 06); `ARCHITECTURE.md` (04 fitness-function "EXPECTED RED" convention).
+- **Kind:** misunderstanding · **Area:** process · **Stage:** verify · **Owner:** aof:verify · **Raised by:** self-correction
+- **What happened.** During the sweep the shared suite transiently showed 9 `acd-headroom-*` failures.
+  I raised F-01 diagnosing them as milestone-06 "RED-until-built" fitness functions registered before
+  their plugin existed. That was **wrong**: milestone 06 is built and accepted (`aof:verify 06`,
+  2026-06-20) with all 5 headroom fitness functions green; on re-run the suite is 777 ok / 0 not ok,
+  deterministic across two runs, and the tests are isolated (`mkdtemp`). F-01 is withdrawn.
+- **Why.** I treated an unreproduced RED as a structural fact and reasoned a whole story around it
+  (registration discipline) instead of first re-running to establish reproducibility — especially
+  unwise during a window of known infra instability (the classifier outage that preceded these runs).
+- **Lesson.** A transient RED is not a finding until it reproduces. Re-run (ideally twice) before
+  writing it up, and check whether the "owning" milestone is actually unbuilt before attributing cause.
+- **Refs:** `VERIFICATION.md` F-01 (withdrawn); milestone 06 `STATE.md` (accepted, headroom green).
 
 ## R2 — A cold-start integration proof catches install gaps that per-unit tests miss; route them, don't patch them
 
