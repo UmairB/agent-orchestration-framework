@@ -5,6 +5,114 @@
   ],
   "entries": [
     {
+      "path": ".aof/templates/work/milestone/ARCHITECTURE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:9b3e85b4e484231a5f7ada2cb074e95c3a8b235326af9b40e1c2f127171075c9"
+    },
+    {
+      "path": ".aof/templates/work/milestone/COMPLIANCE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:81de7f819485c25039975065e2cbc9743cc8d3b801d29f851752e458bb4751e3"
+    },
+    {
+      "path": ".aof/templates/work/milestone/DESIGN.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:99519bc65c9c99312df7f6fb998cabf3a2979fc91041b2c5bfb733e6c0dd65ce"
+    },
+    {
+      "path": ".aof/templates/work/milestone/RESEARCH.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:a76f56e561d6a52c14bd5f603c0826e4ecb69b937aae134ae08ed3432621b80a"
+    },
+    {
+      "path": ".aof/templates/work/milestone/SECURITY.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:98c5c2913643886c873a21bd1543f46595d7227638b2d1b261b2f34b6e747a14"
+    },
+    {
+      "path": ".aof/templates/work/milestone/SPEC.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:4f84f971ed62e7f99981e39626dd2f9fe9ff1f12283c43b69de6ece973ddfe01"
+    },
+    {
+      "path": ".aof/templates/work/milestone/STATE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:22aac55bccd5a8c78991bc5ad4b9c994c4bad304dffff214dca4fdc731051e15"
+    },
+    {
+      "path": ".aof/templates/work/milestone/UAT.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:526436fec432d377720696577b9f10597db1bfa7c79471be0b0c085698870d49"
+    },
+    {
+      "path": ".aof/templates/work/story/STORY.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "story",
+        "kind": "template"
+      },
+      "hash": "sha256:ab11aa5ff77cddd86b542c0a1e9785561cdf66f855b90cf491e4f4fa83d770d4"
+    },
+    {
+      "path": ".aof/templates/work/task/example.feature",
+      "runtime": "claude",
+      "resource": {
+        "id": "task",
+        "kind": "template"
+      },
+      "hash": "sha256:1e61fc947a0e21092cef9702e37d8afca9c3d683d00c9a1455b457114850b074"
+    },
+    {
+      "path": ".aof/templates/work/uat/SESSION.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "uat",
+        "kind": "template"
+      },
+      "hash": "sha256:e6533a6634a2d6f674a909133928461ddf420775ca7544ed9c84ee5d497cf908"
+    },
+    {
+      "path": ".aof/templates/work/uat/STATE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "uat",
+        "kind": "template"
+      },
+      "hash": "sha256:a5f4217a4efbfaa97039fe1dbff14a98e8b9a84f21ca5c1a817f03960259e468"
+    },
+    {
       "path": ".claude/agents/aof-architect.md",
       "runtime": "claude",
       "resource": {
@@ -83,7 +191,7 @@
         "id": "add-milestone",
         "kind": "command"
       },
-      "hash": "sha256:fcbc6030f42a012a75d4a07c30b51b1d7a764d90714fb58ae70465be6c5c0c6c"
+      "hash": "sha256:d8b80ea7d547f60c5f6f95eafdf7ddb3f9bc01afacd24e265a50e9abd47f3b0a"
     },
     {
       "path": ".claude/commands/aof/add-story.md",
@@ -92,7 +200,7 @@
         "id": "add-story",
         "kind": "command"
       },
-      "hash": "sha256:46b02c4fc53208135164bccd7fcf1ea926d43b216406582df50bfd005d7ecd25"
+      "hash": "sha256:8d36942b56d67affc36a90021f1711a63aadde846791684c2f4360e212174d61"
     },
     {
       "path": ".claude/commands/aof/add-task.md",
@@ -101,7 +209,7 @@
         "id": "add-task",
         "kind": "command"
       },
-      "hash": "sha256:19a2bd3627cb7de7f3662c2aa7e65c3bd22375e6b6c4b40e2ef6b5216a2dc1f9"
+      "hash": "sha256:ec0657153ee5161423bc1cd4d994d978a06a0c9c4da58772c236005791f0135c"
     },
     {
       "path": ".claude/commands/aof/add-uat.md",
@@ -110,7 +218,7 @@
         "id": "add-uat",
         "kind": "command"
       },
-      "hash": "sha256:86494c74b16d06d17116700d4b634200f1d15f8e95791f8e3a96eb0bcb76c948"
+      "hash": "sha256:8adc05a690b2b38531e7f38a691dbb5fd84267517fa7a66dca00b075e9562857"
     },
     {
       "path": ".claude/commands/aof/autonomous.md",
@@ -201,114 +309,6 @@
         "kind": "command"
       },
       "hash": "sha256:77d81caf3b41f4459b226f29dd4fc4e5e39de01427e36e03abc5a6e8427a8ca0"
-    },
-    {
-      "path": "aof/templates/milestone/ARCHITECTURE.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:9b3e85b4e484231a5f7ada2cb074e95c3a8b235326af9b40e1c2f127171075c9"
-    },
-    {
-      "path": "aof/templates/milestone/COMPLIANCE.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:81de7f819485c25039975065e2cbc9743cc8d3b801d29f851752e458bb4751e3"
-    },
-    {
-      "path": "aof/templates/milestone/DESIGN.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:99519bc65c9c99312df7f6fb998cabf3a2979fc91041b2c5bfb733e6c0dd65ce"
-    },
-    {
-      "path": "aof/templates/milestone/RESEARCH.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:a76f56e561d6a52c14bd5f603c0826e4ecb69b937aae134ae08ed3432621b80a"
-    },
-    {
-      "path": "aof/templates/milestone/SECURITY.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:98c5c2913643886c873a21bd1543f46595d7227638b2d1b261b2f34b6e747a14"
-    },
-    {
-      "path": "aof/templates/milestone/SPEC.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:4f84f971ed62e7f99981e39626dd2f9fe9ff1f12283c43b69de6ece973ddfe01"
-    },
-    {
-      "path": "aof/templates/milestone/STATE.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:22aac55bccd5a8c78991bc5ad4b9c994c4bad304dffff214dca4fdc731051e15"
-    },
-    {
-      "path": "aof/templates/milestone/UAT.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "milestone",
-        "kind": "template"
-      },
-      "hash": "sha256:526436fec432d377720696577b9f10597db1bfa7c79471be0b0c085698870d49"
-    },
-    {
-      "path": "aof/templates/story/STORY.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "story",
-        "kind": "template"
-      },
-      "hash": "sha256:ab11aa5ff77cddd86b542c0a1e9785561cdf66f855b90cf491e4f4fa83d770d4"
-    },
-    {
-      "path": "aof/templates/task/example.feature",
-      "runtime": "claude",
-      "resource": {
-        "id": "task",
-        "kind": "template"
-      },
-      "hash": "sha256:1e61fc947a0e21092cef9702e37d8afca9c3d683d00c9a1455b457114850b074"
-    },
-    {
-      "path": "aof/templates/uat/SESSION.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "uat",
-        "kind": "template"
-      },
-      "hash": "sha256:e6533a6634a2d6f674a909133928461ddf420775ca7544ed9c84ee5d497cf908"
-    },
-    {
-      "path": "aof/templates/uat/STATE.md",
-      "runtime": "claude",
-      "resource": {
-        "id": "uat",
-        "kind": "template"
-      },
-      "hash": "sha256:a5f4217a4efbfaa97039fe1dbff14a98e8b9a84f21ca5c1a817f03960259e468"
     }
   ]
 }

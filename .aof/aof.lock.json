@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "generatedAt": "2026-05-16T12:27:59.277Z",
+  "version": 2,
+  "generatedAt": "2026-06-19T10:48:34.719Z",
   "runtimes": [
     "claude",
     "codex"

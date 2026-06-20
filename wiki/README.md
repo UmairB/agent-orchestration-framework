@@ -65,6 +65,7 @@ See [documents.md](documents.md) for the hierarchy, folder convention, and front
 | [agents.md](agents.md) | *Who owns what* and how do the agents collaborate? |
 | [workflow.md](workflow.md) | *What is the sequence* from idea to accepted delivery? |
 | [planning.md](planning.md) | *Where do milestones come from* — how does planning hand off to delivery? |
+| [memory.md](memory.md) | *Where do a milestone's lessons go* and how does the next one recall them? |
 | [glossary.md](glossary.md) | What do the *terms* mean? |
 | [templates/](templates/) | Copy-paste item skeletons. |
 

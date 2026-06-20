@@ -17,7 +17,7 @@ For: "$ARGUMENTS"
 1. **Under a story** (`under story <ref>`): create `<story>/tasks/<MM>_<slug>.feature` (`MM` = next
    local index) and add it to the story's `STORY.md` `## Tasks`. **Standalone**: top-level
    `<work.dir>/<NN>_task_<slug>/` containing `<slug>.feature`.
-2. Scaffold the `.feature` (template: `wiki/templates/task/example.feature`):
+2. Scaffold the `.feature` (template: `.aof/templates/work/task/example.feature`):
    - **No user story** — an optional one-line objective (`In order to … the system must …`).
    - Exactly one verification tag — `@executable` (default), `@manual` (an agent-runnable live/technical
      check the suite can't do yet), or `@uat` (genuinely needs a human to judge) — + layer/refinement/

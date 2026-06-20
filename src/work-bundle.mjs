@@ -110,10 +110,13 @@ export function loadBundle() {
 
 // --- template rendering (ADR-005, comment-form stamp) -----------------------
 // A template member is a directory of plain markdown docs. Each file renders to
-// a fixed bundle location (`aof/templates/<member-id>/<file>`) with the
-// comment-form stamp prepended. Each rendered FILE contributes a manifest entry.
+// a fixed, project-agnostic location under the tool workspace
+// (`.aof/templates/work/<member-id>/<file>`) with the comment-form stamp prepended —
+// NOT under `wiki/` (which is one project's own convention, not every project's)
+// and NOT a bare top-level `aof/`. The `work/` segment namespaces the work-item
+// templates. Each rendered FILE contributes a manifest entry.
 function templateOutputPath(member, file) {
-  return ["aof", "templates", member.id, file].join("/");
+  return [".aof", "templates", "work", member.id, file].join("/");
 }
 
 export function renderBundleTemplateOutputs(bundle, options = {}) {

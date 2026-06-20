@@ -17,7 +17,7 @@ For: "$ARGUMENTS"
 1. **Under a milestone** (`under milestone NN`): create inside that milestone's `stories/` as
    `<SS>_story_<slug>/` (`SS` = next local index there). **Standalone**: top-level
    `<work.dir>/<NN>_story_<slug>/` (next stream number).
-2. Scaffold (template: `wiki/templates/story/STORY.md`): `STORY.md` frontmatter (`type: story`,
+2. Scaffold (template: `.aof/templates/work/story/STORY.md`): `STORY.md` frontmatter (`type: story`,
    `number`, `slug`, `title`, `parent: <milestone NN if nested, else omit>`, `status: not-started`,
    `owner: product-owner`, `created`/`updated`: today); `## User story` (real "so that"); `## Tasks`
    (empty); `## Notes`. Empty `tasks/`.

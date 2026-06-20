@@ -8,17 +8,66 @@
 //   00_render-bundle-into-repo.feature — renders supported members; --dry-run
 //        writes nothing; a directory arg targets that directory, not cwd
 //   01_stamp-and-manifest.feature      — frontmatter/comment stamps + lock-v2
-//        install manifest at .aof/aof.work.lock.json (never .aof/aof.lock.json)
+//        install manifest as the `work` SECTION of the unified .aof/aof.lock.json
+//        (never a separate .aof/aof.work.lock.json) — ADR-009
 //   02_runtime-selection.feature       — --runtime selects; codex commands are
 //        reported not-installable per the capability matrix
 //   03_init-guard-and-force.feature    — first-install guard + --force re-render
+//
+// Story 02 / task 01 (ADR-009, unified lock) @executable scenarios are folded in
+// here too: the work manifest is the `work` section of aof.lock.json, no separate
+// aof.work.lock.json is written, and writing the `work` section preserves the
+// foreign asset/`planning` sections.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { initWork, WORK_LOCK_PATH, workLockPath } from "../src/work-init.mjs";
+import { initWork, workLockPath } from "../src/work-init.mjs";
 import { loadBundle } from "../src/work-bundle.mjs";
+
+// ADR-009: the install manifest is the `work` SECTION of the unified lock. Read the
+// section the same way every reader does (the top-level lock JSON's `.work` key).
+async function readWorkSection(repo) {
+  const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+  return lock.work;
+}
+
+async function lockFileNames(repo) {
+  return (await readdir(path.join(repo, ".aof"))).filter((name) => name.endsWith(".lock.json"));
+}
+
+// A pre-existing unified lock carrying foreign sections (asset fields + a
+// `planning` section) that `work init`/`update` must preserve byte-intact.
+function seededForeignLock() {
+  return {
+    version: 2,
+    generatedAt: "2026-06-19T00:00:00.000Z",
+    runtimes: ["claude"],
+    files: [
+      {
+        path: ".claude/agents/own-resource.md",
+        runtime: "claude",
+        resource: { id: "own-resource", kind: "agent" },
+        hash: "sha256:" + "c".repeat(64),
+        generatedAt: "2026-06-19T00:00:00.000Z"
+      }
+    ],
+    packages: [],
+    frameworks: [],
+    frameworkInstallAttempts: [],
+    planning: {
+      generatedAt: "2026-06-19T00:00:00.000Z",
+      source: "phuryn/pm-skills",
+      marketplaceName: "pm-skills",
+      marketplaceVersion: "2.0.0",
+      sha: "d384f0c9eb81fe74656a4f6da168587836939edb",
+      runtime: "claude",
+      plugins: [{ name: "pm-execution", marketplace: "pm-skills" }],
+      codex: null
+    }
+  };
+}
 
 async function tempRepo(prefix = "aof-init-test-") {
   return mkdtemp(path.join(os.tmpdir(), prefix));
@@ -72,8 +121,8 @@ export const workInitTests = [
           assert.ok(existsSync(p(repo, ".claude", "commands", "aof", `${command.id}.md`)), `command ${command.id} under commands/aof/`);
         }
         // milestone template files exist under the fixed bundle template location.
-        assert.ok(existsSync(p(repo, "aof", "templates", "milestone")), "milestone templates dir exists");
-        const milestoneFiles = await readdir(p(repo, "aof", "templates", "milestone"));
+        assert.ok(existsSync(p(repo, ".aof", "templates", "work", "milestone")), "milestone templates dir exists");
+        const milestoneFiles = await readdir(p(repo, ".aof", "templates", "work", "milestone"));
         assert.ok(milestoneFiles.length > 0, "milestone template files exist");
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -122,7 +171,7 @@ export const workInitTests = [
         assert.equal(result.manifestWritten, false, "manifest not written on dry-run");
         // The runtime root contains no files; the work lock does not exist.
         assert.ok(!existsSync(p(repo, ".claude")), "no runtime root written");
-        assert.ok(!existsSync(workLockPath(repo)), ".aof/aof.work.lock.json does not exist");
+        assert.ok(!existsSync(workLockPath(repo)), ".aof/aof.lock.json does not exist");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -167,7 +216,7 @@ export const workInitTests = [
           assert.ok(existsSync(row.location), `${row.kind} ${row.id} at ${row.location}`);
         }
         // template member → the fixed bundle template location.
-        assert.ok(existsSync(p(repo, "aof", "templates", "milestone")), "template at fixed bundle template location");
+        assert.ok(existsSync(p(repo, ".aof", "templates", "work", "milestone")), "template at fixed bundle template location");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -207,7 +256,7 @@ export const workInitTests = [
       const repo = await tempRepo();
       try {
         await initWork({ targetDir: repo, runtimes: ["claude"] });
-        const templateRoot = p(repo, "aof", "templates");
+        const templateRoot = p(repo, ".aof", "templates", "work");
         const files = (await listFilesRecursive(templateRoot));
         assert.ok(files.length > 0, "template files written");
         for (const file of files) {
@@ -220,17 +269,18 @@ export const workInitTests = [
     }
   },
   {
-    name: "work-init/manifest: the install manifest is a lock-v2 record at the fixed path",
+    name: "work-init/manifest: the install manifest is a lock-v2 `work` section of the unified lock",
     run: async () => {
       const repo = await tempRepo();
       try {
         await initWork({ targetDir: repo, runtimes: ["claude"] });
         const lockPath = workLockPath(repo);
-        assert.ok(existsSync(lockPath), ".aof/aof.work.lock.json exists");
-        const lock = JSON.parse(await readFile(lockPath, "utf8"));
-        assert.equal(lock.version, 2, "version === 2");
-        assert.ok(lock.bundle && typeof lock.bundle.version === "string" && lock.bundle.version.length > 0, "bundle.version recorded");
-        assert.deepEqual(lock.runtimes, ["claude"], "runtimes lists the rendered runtimes");
+        assert.ok(existsSync(lockPath), ".aof/aof.lock.json exists");
+        assert.equal(path.basename(lockPath), "aof.lock.json", "the unified lock path");
+        const work = await readWorkSection(repo);
+        assert.ok(work && typeof work === "object", "the `work` section is present");
+        assert.ok(work.bundle && typeof work.bundle.version === "string" && work.bundle.version.length > 0, "work.bundle.version recorded");
+        assert.deepEqual(work.runtimes, ["claude"], "work.runtimes lists the rendered runtimes");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -242,11 +292,11 @@ export const workInitTests = [
       const repo = await tempRepo();
       try {
         const result = await initWork({ targetDir: repo, runtimes: ["claude"] });
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        const work = await readWorkSection(repo);
         // One entry for each file init wrote (created/updated actions).
         const writtenCount = result.actions.filter((a) => a.action === "create" || a.action === "update").length;
-        assert.equal(lock.files.length, writtenCount, "one manifest entry per written file");
-        for (const entry of lock.files) {
+        assert.equal(work.files.length, writtenCount, "one manifest entry per written file");
+        for (const entry of work.files) {
           assert.ok(!entry.path.includes("\\"), `${entry.path} uses forward slashes`);
           assert.ok(entry.hash.startsWith("sha256:"), `${entry.path} hash begins with sha256:`);
           assert.ok(entry.resource && typeof entry.resource.id === "string", `${entry.path} resource has id`);
@@ -257,14 +307,50 @@ export const workInitTests = [
       }
     }
   },
+  // ====================================================================
+  // Story 02 / task 01 — 01_work-manifest-section.feature (@executable)
+  // ====================================================================
   {
-    name: "work-init/manifest: init writes only the work manifest, never the consumer's own lock",
+    // @executable: the work bundle manifest is written to the `work` section of
+    // .aof/aof.lock.json and no separate aof.work.lock.json is written.
+    name: "work-init/manifest: the work manifest is the `work` section of aof.lock.json — no separate aof.work.lock.json",
     run: async () => {
       const repo = await tempRepo();
       try {
         await initWork({ targetDir: repo, runtimes: ["claude"] });
-        assert.ok(existsSync(workLockPath(repo)), ".aof/aof.work.lock.json exists");
-        assert.ok(!existsSync(p(repo, ".aof", "aof.lock.json")), ".aof/aof.lock.json does not exist");
+        // Exactly one lock file under .aof/ — the unified lock.
+        assert.deepEqual(await lockFileNames(repo), ["aof.lock.json"], "only the unified aof.lock.json exists");
+        assert.ok(!existsSync(p(repo, ".aof", "aof.work.lock.json")), "no separate aof.work.lock.json is written");
+        const work = await readWorkSection(repo);
+        assert.ok(work && Array.isArray(work.files) && work.files.length > 0, "the manifest is recorded under the `work` section");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    // @executable (task 01): writing the `work` section preserves the other lock
+    // sections — here a pre-existing asset + `planning` set survives byte-intact and
+    // only the `work` key is added.
+    name: "work-init/manifest: writing the `work` section preserves the asset fields and the `planning` section",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await mkdir(p(repo, ".aof"), { recursive: true });
+        const seeded = seededForeignLock();
+        await writeFile(workLockPath(repo), `${JSON.stringify(seeded, null, 2)}\n`, "utf8");
+
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+
+        assert.deepEqual(await lockFileNames(repo), ["aof.lock.json"], "still only the unified aof.lock.json");
+        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        // The `work` section was added.
+        assert.ok(lock.work && Array.isArray(lock.work.files) && lock.work.files.length > 0, "the `work` section is added");
+        // The foreign sections survive byte-intact.
+        assert.deepEqual(lock.files, seeded.files, "asset files[] preserved unchanged");
+        assert.deepEqual(lock.packages, seeded.packages, "asset packages preserved");
+        assert.deepEqual(lock.frameworks, seeded.frameworks, "asset frameworks preserved");
+        assert.deepEqual(lock.planning, seeded.planning, "the `planning` section preserved unchanged");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -284,7 +370,7 @@ export const workInitTests = [
         const command = await readFile(p(repo, ".claude", "commands", "aof", "refine.md"), "utf8");
         assert.ok(command.includes(FRONTMATTER_STAMP), "command stamp form = frontmatter key");
         // template → comment marker
-        const templateFiles = await listFilesRecursive(p(repo, "aof", "templates"));
+        const templateFiles = await listFilesRecursive(p(repo, ".aof", "templates", "work"));
         const template = await readFile(templateFiles[0], "utf8");
         assert.ok(template.startsWith(TEMPLATE_MARKER), "template stamp form = comment marker");
       } finally {
@@ -305,8 +391,8 @@ export const workInitTests = [
         const result = await initWork({ targetDir: repo });
         assert.equal(result.guarded, false, "exit 0");
         assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "files under .claude");
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        assert.ok(lock.runtimes.includes("claude"), "runtimes lists claude");
+        const work = await readWorkSection(repo);
+        assert.ok(work.runtimes.includes("claude"), "work.runtimes lists claude");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -341,8 +427,8 @@ export const workInitTests = [
         await initWork({ targetDir: repo, runtimes: ["claude", "codex"] });
         assert.ok(existsSync(p(repo, ".claude", "agents", "aof-architect.md")), "claude root populated");
         assert.ok(existsSync(p(repo, ".codex", "agents", "aof-architect.md")), "codex root populated");
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        assert.ok(lock.runtimes.includes("claude") && lock.runtimes.includes("codex"), "runtimes lists both");
+        const work = await readWorkSection(repo);
+        assert.ok(work.runtimes.includes("claude") && work.runtimes.includes("codex"), "work.runtimes lists both");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

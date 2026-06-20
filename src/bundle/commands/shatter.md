@@ -16,8 +16,11 @@ Read `.aof/aof.config.json` → `work.dir`, `work.agents`. The **only** input is
 artifact. shatter is a `/work` command: it knows nothing about *how* the PRD was produced (which
 planner, which plugins, whether they're installed) — it just consumes the document.
 
-1. **Resolve the PRD** from "$ARGUMENTS" (a path), else auto-discover `PRD-*.md` in the workspace
-   root. **No PRD** → stop and ask for one (pass its path, or produce one upstream with your planner
+1. **Resolve the PRD** per the `discoverPrd(workspaceDir, explicitPath)` rule in
+   `src/planning-prd.mjs`: an explicit "$ARGUMENTS" path always wins (even an unprefixed one), else
+   auto-find a single `PRD-*.md` at the workspace root. `PRD-*.md` is an agent-honoured CONVENTION, not
+   a tool-enforced path — so **never guess among other `*.md`**: zero or two-or-more `PRD-*.md` (and no
+   explicit path) → **stop and ask** for one (pass its path, or produce one upstream with your planner
    first). Don't author product strategy here — that's upstream of the seam.
 2. **Conditional.** Planning earns its place only when the work spans several milestones. A single
    milestone → `aof:add-milestone` directly; no PRD needed.
@@ -27,9 +30,10 @@ planner, which plugins, whether they're installed) — it just consumes the docu
 Spawn `aof-product-owner` (orchestrated) or run inline (per `work.agents.productOwner`) to **shatter**
 the PRD:
 
-1. **Read the seam, not the whole PRD.** Extract only ACD's input contract: the initiative's
-   **objective(s)**, **scope** (in/out), and enough structure to identify **milestone-sized chunks**.
-   The PRD's other sections are the planner's business — ignore them.
+1. **Read the seam, not the whole PRD.** Extract only ACD's input contract — the read-out the
+   `readSeam(prd)` rule in `src/planning-prd.mjs` pins: the initiative's **objective(s)**, **scope**
+   (in/out), and enough structure to identify **milestone-sized chunks**. The PRD's other sections are
+   the planner's business — ignore them.
 2. **Identify the milestones.** Partition the initiative into framed, independently-deliverable
    milestones. Number them as the next contiguous block in `work.dir` — continue the timeline, never
    renumber existing items. Confirm the partition with the user (`AskUserQuestion`) only for a genuine

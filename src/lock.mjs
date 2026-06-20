@@ -38,8 +38,14 @@ async function renameWithRetry(source, target) {
   }
 }
 
+// ADR-009 (unified lock): read-merge-write — SPREAD the current lock and replace
+// ONLY frameworkInstallAttempts. Reconstructing from a fixed field set here would
+// DROP the foreign `planning`/`work` sections (and any unknown key) on every
+// `packages install`/replay. The flat asset fields are normalised with their
+// usual fallbacks; everything else (incl. `planning`/`work`) is carried through.
 export function mergeFrameworkInstallAttempts(lock, attempts, generatedAt = new Date().toISOString()) {
   return {
+    ...(lock && typeof lock === "object" ? lock : {}),
     version: lock?.version ?? LOCK_VERSION,
     generatedAt: lock?.generatedAt ?? generatedAt,
     runtimes: lock?.runtimes ?? [],

@@ -15,27 +15,30 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { LOCK_VERSION, writeLock } from "../../src/lock.mjs";
+import { writeLock } from "../../src/lock.mjs";
 import { createLockManifest, executeApplyActions, planApplyActions } from "../../src/render-plan.mjs";
 import { loadBundle } from "../../src/work-bundle.mjs";
 import { synthesizeBundleConfig } from "../../src/work-bundle-synthesis.mjs";
 import { updateWork, workLockPath } from "../../src/work-update.mjs";
 
 // Base install reusing the engine path init uses (no hand-rolled drift logic).
+// ADR-009: the install manifest is the `work` SECTION of the unified lock (minus
+// its own `version`), so write it under `work` exactly as initWork does.
 async function installBase(repo, bundle, runtimes = ["claude"], version = "1.0.0") {
   const { desiredOutputs } = await synthesizeBundleConfig(bundle, { runtimes, targetDir: repo });
   const actions = await planApplyActions(desiredOutputs, null, { force: false, targetDir: repo });
   await executeApplyActions(actions);
   const base = createLockManifest({ actions, desiredOutputs, previousLock: null, config: { packages: [] }, runtimes });
   await writeLock(workLockPath(repo), {
-    version: LOCK_VERSION,
-    generatedAt: base.generatedAt,
-    bundle: { version },
-    runtimes,
-    files: base.files.map((entry) => ({ ...entry, path: String(entry.path).replaceAll("\\", "/") })),
-    packages: base.packages,
-    frameworks: base.frameworks,
-    frameworkInstallAttempts: base.frameworkInstallAttempts
+    work: {
+      generatedAt: base.generatedAt,
+      bundle: { version },
+      runtimes,
+      files: base.files.map((entry) => ({ ...entry, path: String(entry.path).replaceAll("\\", "/") })),
+      packages: base.packages,
+      frameworks: base.frameworks,
+      frameworkInstallAttempts: base.frameworkInstallAttempts
+    }
   });
 }
 

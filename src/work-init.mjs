@@ -6,9 +6,15 @@
 //     the SHARED synthesis in work-bundle-synthesis.mjs — the same one update uses)
 //     and delegates to planApplyActions(previousLock = null) → executeApplyActions
 //     → createLockManifest. (Guarded by acd-reuses-render-plan.)
-//   ADR-004: the per-repo install manifest is a lock-v2 record written to the
-//     FIXED path `.aof/aof.work.lock.json` (never `.aof/aof.lock.json`), with a
-//     top-level `bundle: { version }`. (Guarded by acd-install-manifest-contract.)
+//   ADR-004 → ADR-009: the per-repo install manifest is a lock-v2 record written
+//     read-merge-write into the SINGLE unified project lock `.aof/aof.lock.json`
+//     (workspacePaths().lockPath) as its `work` SECTION — the separate per-vertical
+//     work-lock file is eliminated. work init owns ONLY the `work` key: it reads
+//     the current lock and writes `{ ...currentLock, work: <manifest> }`,
+//     preserving the flat asset fields and the `planning` section it does not own,
+//     and never reconstructs the lock from a fixed field set. The manifest carries
+//     a `bundle: { version }` minus its own `version` (the unified lock carries ONE
+//     top-level version). (Guarded by acd-install-manifest-contract, section form.)
 //   ADR-005: every rendered file is self-identifying — frontmatter `aof-generated:
 //     true` for resources, the comment-form `<!-- aof-generated: bundle -->` for
 //     templates. (The renderers already emit these; guarded by acd-generated-stamp.)
@@ -20,19 +26,19 @@
 //   ADR-007: command members carry `commandNamespace: "aof"` and the adapter's
 //     general namespace rule renders them under `commands/aof/<id>.md`.
 import path from "node:path";
-import { LOCK_VERSION, readLock, writeLock } from "./lock.mjs";
+import { readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, executeApplyActions, planApplyActions } from "./render-plan.mjs";
 import { RUNTIMES } from "./model.mjs";
 import { loadBundle } from "./work-bundle.mjs";
 import { bundleVersion, summarizeActions, synthesizeBundleConfig } from "./work-bundle-synthesis.mjs";
+import { workspacePaths } from "./workspace.mjs";
 
-// The fixed install-manifest path (ADR-004). A literal `aof.work.lock.json` so the
-// acd-install-manifest-contract fitness function can grep this source for it and
-// prove init never touches the consumer's own `.aof/aof.lock.json`.
-export const WORK_LOCK_PATH = path.join(".aof", "aof.work.lock.json");
-
+// ADR-009: the install manifest lives in the `work` section of the single unified
+// project lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There
+// is no separate per-vertical work-lock file. The acd-install-manifest-contract
+// fitness function greps this source to prove init names ONLY the unified lock.
 export function workLockPath(targetDir) {
-  return path.join(targetDir, ".aof", "aof.work.lock.json");
+  return workspacePaths(targetDir).lockPath;
 }
 
 // `aof work init [dir] [--dry-run] [--runtime <r>] [--force]`.
@@ -50,10 +56,12 @@ export async function initWork(options = {}) {
 
   const lockPath = workLockPath(targetDir);
 
-  // Guard (ADR-003 / task 03): init is a first-install. If a work manifest already
-  // exists and --force was not given, refuse and write nothing.
+  // Guard (ADR-003 / task 03 → ADR-009): init is a first-install. Key off the
+  // PRESENCE of the `work` SECTION of the unified lock (the lock may already exist
+  // for the asset/`planning` verticals). If the section is present and --force was
+  // not given, refuse and write nothing.
   const existing = await readLock(lockPath);
-  if (existing && !force) {
+  if (existing && existing.work && !force) {
     return {
       targetDir,
       runtimes,
@@ -63,7 +71,7 @@ export async function initWork(options = {}) {
       manifestWritten: false,
       actions: [],
       notInstallable: [],
-      message: `An ACD install already exists at ${WORK_LOCK_PATH.replaceAll("\\", "/")}. Run \`aof work update\` to deliver bundle changes, or \`aof work init --force\` to re-render from scratch.`
+      message: "An ACD install already exists in .aof/aof.lock.json. Run `aof work update` to deliver bundle changes, or `aof work init --force` to re-render from scratch."
     };
   }
 
@@ -96,8 +104,9 @@ export async function initWork(options = {}) {
 
   await executeApplyActions(actions);
 
-  // Install manifest (ADR-004): a lock-v2 record from createLockManifest, plus the
-  // top-level `bundle: { version }`. Written to the fixed path, NEVER aof.lock.json.
+  // Install manifest (ADR-004 → ADR-009): a lock-v2 record from createLockManifest,
+  // MINUS its own `version` (the unified lock carries ONE top-level version), plus
+  // the `bundle: { version }`. This is the `work` SECTION of the unified lock.
   const baseManifest = createLockManifest({
     actions,
     desiredOutputs,
@@ -106,7 +115,6 @@ export async function initWork(options = {}) {
     runtimes
   });
   const manifest = {
-    version: LOCK_VERSION,
     generatedAt: baseManifest.generatedAt,
     bundle: { version: bundleVersion() },
     runtimes,
@@ -117,7 +125,11 @@ export async function initWork(options = {}) {
     frameworks: baseManifest.frameworks,
     frameworkInstallAttempts: baseManifest.frameworkInstallAttempts
   };
-  await writeLock(lockPath, manifest);
+  // Read-merge-write (ADR-009): preserve the flat asset fields and the `planning`
+  // section; replace ONLY the `work` key. --force re-renders and re-pins `work`
+  // while still preserving the foreign sections. Never reconstruct from a fixed set.
+  const currentLock = (await readLock(lockPath)) ?? {};
+  await writeLock(lockPath, { ...currentLock, work: manifest });
 
   return {
     targetDir,

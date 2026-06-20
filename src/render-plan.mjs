@@ -102,7 +102,14 @@ export function createLockManifest({ actions, desiredOutputs, previousLock, conf
     .map((filePath) => priorByPath.get(filePath))
     .filter(Boolean);
 
+  // ADR-009 (unified lock): read-merge-write. Spread the prior lock FIRST so any
+  // foreign section it carries (the `planning`/`work` domains, or an unknown key)
+  // survives, then overwrite ONLY the flat asset fields this writer owns. This is
+  // the seam the asset-apply path uses (it passes the whole unified lock as
+  // previousLock); work init/update pass their own `work` section and then pick
+  // specific fields off the result, so no foreign key leaks into the `work` nest.
   return {
+    ...(previousLock && typeof previousLock === "object" ? previousLock : {}),
     version: LOCK_VERSION,
     generatedAt,
     runtimes,

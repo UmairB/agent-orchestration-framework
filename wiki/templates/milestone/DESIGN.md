@@ -19,6 +19,8 @@ doc: design
 ### <surface name>
 
 - **Mockup:** <Figma / image / design-bundle link>  *(the visual source of truth)*
+- **Route:** <the path this surface renders at, e.g. `/properties` — appended to the design-review base
+  URL (`work.ui.baseUrl` / `aof:verify --url`) so the conformance review can render it>
 - **Layout & interaction:** <intent — not pixel specs>
 - **Component choices:** <what, and WHY (the rationale is the part worth writing down)>
 - **Binding checklist (when a mock exists):** the checkable facts the mock fixes — the regions in

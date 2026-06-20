@@ -7,11 +7,15 @@
 //     shared synthesis in work-bundle-synthesis.mjs) and delegates to
 //     createRenderPlan → planApplyActions(previousLock = the install manifest) →
 //     executeApplyActions → createLockManifest. (Guarded by acd-reuses-render-plan.)
-//   ADR-004: the per-repo install manifest is a lock-v2 record read from AND
-//     rewritten to the FIXED path `.aof/aof.work.lock.json` (never
-//     `.aof/aof.lock.json`), with a top-level `bundle: { version }`. update passes
-//     this manifest to planApplyActions as `previousLock`. (Guarded by
-//     acd-install-manifest-contract.)
+//   ADR-004 → ADR-009: the per-repo install manifest is the `work` SECTION of the
+//     SINGLE unified project lock `.aof/aof.lock.json` (workspacePaths().lockPath) —
+//     the separate per-vertical work-lock file is eliminated. update reads the
+//     unified lock, passes the `work` SECTION (its recorded `files[]`) to
+//     planApplyActions as `previousLock` for the drift-check, rebuilds the `work`
+//     manifest, and writes `{ ...currentLock, work: <manifest> }` — preserving the
+//     flat asset fields and the `planning` section, never reconstructing from a
+//     fixed field set. The no-manifest guard keys off ABSENCE of `lock.work`.
+//     (Guarded by acd-install-manifest-contract, section form.)
 //   ADR-005: drift detection is the engine's: a managed file whose hash diverges
 //     from the manifest classifies as `drift-warning` and is preserved, never
 //     overwritten without --force. (Guarded by acd-no-clobber-without-force.)
@@ -19,19 +23,19 @@
 //     shared synthesis — no `runtime === "codex"`/`"claude"` installability branch
 //     lives here. (Guarded by acd-capability-delegation.)
 import path from "node:path";
-import { LOCK_VERSION, readLock, writeLock } from "./lock.mjs";
+import { readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, executeApplyActions, planApplyActions } from "./render-plan.mjs";
 import { RUNTIMES } from "./model.mjs";
 import { loadBundle } from "./work-bundle.mjs";
 import { bundleVersion, summarizeActions, synthesizeBundleConfig } from "./work-bundle-synthesis.mjs";
+import { workspacePaths } from "./workspace.mjs";
 
-// The fixed install-manifest path (ADR-004). A literal `aof.work.lock.json` so the
-// acd-install-manifest-contract fitness function can grep this source for it and
-// prove update never touches the consumer's own `.aof/aof.lock.json`.
-export const WORK_LOCK_PATH = path.join(".aof", "aof.work.lock.json");
-
+// ADR-009: the install manifest is the `work` section of the single unified project
+// lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There is no
+// separate per-vertical work-lock file. The acd-install-manifest-contract fitness
+// function greps this source to prove update names ONLY the unified lock.
 export function workLockPath(targetDir) {
-  return path.join(targetDir, ".aof", "aof.work.lock.json");
+  return workspacePaths(targetDir).lockPath;
 }
 
 // `aof work update [dir] [--dry-run] [--force]`.
@@ -54,11 +58,14 @@ export async function updateWork(options = {}) {
 
   const lockPath = workLockPath(targetDir);
 
-  // No-manifest guard (task 00): update re-renders against a prior install. If
-  // there is no work manifest the repo was never initialised — refuse, write
+  // No-manifest guard (task 00 → ADR-009): update re-renders against a prior
+  // install. Key off ABSENCE of the `work` SECTION of the unified lock (the lock
+  // may exist for the asset/`planning` verticals while `work` has never run). If
+  // there is no `work` section the repo was never `work init`-ed — refuse, write
   // nothing, and direct the user to init.
-  const previousLock = await readLock(lockPath);
-  if (!previousLock) {
+  const currentLock = await readLock(lockPath);
+  const workSection = currentLock?.work ?? null;
+  if (!workSection) {
     return {
       targetDir,
       dryRun,
@@ -68,9 +75,13 @@ export async function updateWork(options = {}) {
       manifestWritten: false,
       actions: [],
       notInstallable: [],
-      message: `No ACD install found at ${WORK_LOCK_PATH.replaceAll("\\", "/")}. Run \`aof work init\` first to install the ACD bundle.`
+      message: "No ACD install found in .aof/aof.lock.json. Run `aof work init` first to install the ACD bundle."
     };
   }
+
+  // The drift-check baseline is the `work` SECTION (its recorded `files[]` hashes),
+  // NOT the whole unified lock — the engine compares desired vs on-disk vs this.
+  const previousLock = workSection;
 
   // Re-render for the runtimes recorded at install time (ADR-006). Falls back to
   // claude only if a legacy manifest omitted them.
@@ -106,11 +117,12 @@ export async function updateWork(options = {}) {
 
   await executeApplyActions(actions);
 
-  // Rewrite the install manifest (task 03, ADR-004): createLockManifest produces
-  // the lock-v2 record — it already PRESERVES drift-warned entries (keeps their
-  // PRIOR entry, passed as previousLock) and DROPS deleted ones. Re-attach the
-  // top-level `bundle: { version }` set to the NEW bundle release. Written to the
-  // fixed path, NEVER aof.lock.json.
+  // Rewrite the install manifest (task 03, ADR-004 → ADR-009): createLockManifest
+  // produces the lock-v2 record — it already PRESERVES drift-warned entries (keeps
+  // their PRIOR entry, passed as previousLock = the `work` section) and DROPS
+  // deleted ones. Re-attach the `bundle: { version }` set to the NEW bundle release,
+  // MINUS the section's own `version` (the unified lock carries ONE top-level
+  // version). This is the rewritten `work` SECTION.
   const baseManifest = createLockManifest({
     actions,
     desiredOutputs,
@@ -118,8 +130,11 @@ export async function updateWork(options = {}) {
     config: { packages: [] },
     runtimes
   });
+  // ADR-009: build the `work` section by EXPLICIT field selection — do NOT spread
+  // `baseManifest`. createLockManifest spreads its `previousLock` (here the prior
+  // `work` section), so baseManifest carries a stale top-level `version`/`bundle`;
+  // spreading it would leak those into the nested `work` section. Pick fields only.
   const manifest = {
-    version: LOCK_VERSION,
     generatedAt: baseManifest.generatedAt,
     // The NEW bundle release version (ADR-002 bundleVersion). A test that drives a
     // synthesized bundle may pass `bundleVersionOverride` to model a release bump.
@@ -132,7 +147,9 @@ export async function updateWork(options = {}) {
     frameworks: baseManifest.frameworks,
     frameworkInstallAttempts: baseManifest.frameworkInstallAttempts
   };
-  await writeLock(lockPath, manifest);
+  // Read-merge-write (ADR-009): preserve the flat asset fields and the `planning`
+  // section; replace ONLY the `work` key. Never reconstruct from a fixed field set.
+  await writeLock(lockPath, { ...(currentLock ?? {}), work: manifest });
 
   return {
     targetDir,

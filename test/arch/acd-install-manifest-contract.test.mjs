@@ -1,24 +1,33 @@
-// Fitness function for milestone 01 / ADR-004:
-// "The install manifest is read/written only at the fixed path
-//  .aof/aof.work.lock.json, never the consumer's own .aof/aof.lock.json; and it
-//  conforms to lock-v2 shape."
+// Fitness function for milestone 02 / ADR-009 (supersedes m01-ADR-004's file-isolation):
+// "aof work init/update write ONLY the `work` section of the unified
+//  .aof/aof.lock.json. They never write a separate aof.work.lock.json, preserve the
+//  asset fields and the `planning` section, and the `work` section conforms to the
+//  frozen lock-v2 install-manifest schema. The bundle drift-check reads the `work`
+//  section's recorded hashes."
+//
+// Reframed 2026-06-19 from FILE-isolation ("touch only aof.work.lock.json") to
+// SECTION-isolation ("write only the `work` section of aof.lock.json; preserve the
+// foreign sections"). RED until the developer migrates `work init`/`update` to
+// read-merge-write the unified lock (src/work-init.mjs / src/work-update.mjs: read
+// the unified lock, replace only `work`, write the merged whole; drift-check keys
+// off `previousLock.work`). That red is expected and correct.
 //
 // Two proofs:
-//  1. Source — grep the init source for the manifest path literal
-//     `aof.work.lock.json` and assert NO read/write of `aof.lock.json`.
-//  2. Behavioural — produce a manifest by running init into a temp repo and
-//     validate it against the frozen schema (version: 2, bundle.version,
-//     lock-shaped files[] with {path, runtime, resource:{id,kind}, hash,
-//     generatedAt}, and the compatibility arrays packages/frameworks/
-//     frameworkInstallAttempts).
+//  1. Source — grep work-init/update: they name the unified `aof.lock.json`,
+//     NEVER a separate `aof.work.lock.json`.
+//  2. Behavioural — seed `.aof/aof.lock.json` with asset + `planning` sections, run
+//     init/update, and assert: only `aof.lock.json` exists under `.aof/`, the `work`
+//     section conforms to the frozen lock-v2 manifest schema, and the seeded
+//     asset/`planning` sections survive byte-intact.
 import assert from "node:assert/strict";
-import { readFile, mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { initWork, workLockPath } from "../../src/work-init.mjs";
+import { initWork } from "../../src/work-init.mjs";
 import { updateWork } from "../../src/work-update.mjs";
 import { loadBundle } from "../../src/work-bundle.mjs";
+import { workspacePaths } from "../../src/workspace.mjs";
 
 const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 const initSourcePath = path.join(srcDir, "work-init.mjs");
@@ -30,12 +39,11 @@ function stripComments(source) {
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 }
 
-function assertFixedPathOnly(code, label) {
-  assert.ok(/aof\.work\.lock\.json/.test(code), `${label} references the fixed work-lock literal`);
-  // The only lock path the code names is the work lock. A bare `aof.lock.json`
-  // (not preceded by `work.`) would be the consumer's own lock.
-  const bareLock = /(^|[^.])(?<!work\.)aof\.lock\.json/;
-  assert.ok(!bareLock.test(code.replaceAll("aof.work.lock.json", "")), `${label} never reads/writes aof.lock.json`);
+// The unified lock the writer must name and preserve. It writes the `work` section
+// of `aof.lock.json` and must NOT name the eliminated `aof.work.lock.json`.
+function assertWorkSectionOnly(code, label) {
+  assert.ok(/aof\.lock\.json/.test(code), `${label} references the unified aof.lock.json`);
+  assert.ok(!/aof\.work\.lock\.json/.test(code), `${label} never names the eliminated aof.work.lock.json`);
 }
 
 function newerBundle(bundle) {
@@ -45,87 +53,117 @@ function newerBundle(bundle) {
   };
 }
 
+// A pre-existing unified lock with the `planning` section populated. The `work` key
+// is intentionally ABSENT (work init has not run yet).
+function seededPlanningLock() {
+  return {
+    planning: {
+      generatedAt: "2026-06-19T00:00:00.000Z",
+      source: "phuryn/pm-skills",
+      marketplaceName: "pm-skills",
+      marketplaceVersion: "2.0.0",
+      sha: "d384f0c9eb81fe74656a4f6da168587836939edb",
+      runtime: "claude",
+      plugins: [{ name: "pm-execution", marketplace: "pm-skills" }],
+      codex: null
+    }
+  };
+}
+
+function assertWorkManifestSchema(work) {
+  assert.ok(work && typeof work === "object", "lock.work section present");
+  assert.ok(work.bundle && typeof work.bundle.version === "string" && work.bundle.version.length > 0, "work.bundle.version present");
+  assert.ok(Array.isArray(work.runtimes) && work.runtimes.length > 0, "work.runtimes[]");
+  assert.ok(typeof work.generatedAt === "string", "work.generatedAt present");
+  assert.ok(Array.isArray(work.files) && work.files.length > 0, "work.files[]");
+  for (const entry of work.files) {
+    assert.ok(typeof entry.path === "string" && !entry.path.includes("\\"), `${entry.path} repo-relative forward-slash path`);
+    assert.ok(typeof entry.runtime === "string", "entry.runtime");
+    assert.ok(entry.resource && typeof entry.resource.id === "string" && typeof entry.resource.kind === "string", "entry.resource {id,kind}");
+    assert.match(entry.hash, /^sha256:[0-9a-f]{64}$/, `${entry.path} hash is sha256:<hex>`);
+    assert.ok(typeof entry.generatedAt === "string", "entry.generatedAt");
+  }
+  assert.deepEqual(work.packages, [], "work.packages: []");
+  assert.deepEqual(work.frameworks, [], "work.frameworks: []");
+  assert.deepEqual(work.frameworkInstallAttempts, [], "work.frameworkInstallAttempts: []");
+}
+
 export const archTests = [
   {
-    name: "arch/ADR-004: init uses the fixed literal aof.work.lock.json and never touches aof.lock.json",
+    name: "arch/ADR-009: work init writes the unified aof.lock.json and never the eliminated aof.work.lock.json",
     run: async () => {
       const code = stripComments(await readFile(initSourcePath, "utf8"));
-      assertFixedPathOnly(code, "init");
+      assertWorkSectionOnly(code, "init");
     }
   },
   {
-    name: "arch/ADR-004: update uses the fixed literal aof.work.lock.json and never touches aof.lock.json",
+    name: "arch/ADR-009: work update writes the unified aof.lock.json and never the eliminated aof.work.lock.json",
     run: async () => {
       const code = stripComments(await readFile(updateSourcePath, "utf8"));
-      assertFixedPathOnly(code, "update");
+      assertWorkSectionOnly(code, "update");
     }
   },
   {
-    name: "arch/ADR-004: an update-produced manifest conforms to the frozen lock-v2 schema and leaves aof.lock.json untouched",
+    name: "arch/ADR-009: work init records a frozen lock-v2 `work` section in the unified lock, preserving a pre-existing `planning` section",
     run: async () => {
-      const repo = await mkdtemp(path.join(os.tmpdir(), "aof-arch-update-manifest-"));
+      const repo = await mkdtemp(path.join(os.tmpdir(), "aof-arch-work-section-"));
       try {
+        const lockPath = workspacePaths(repo).lockPath;
+        await mkdir(path.dirname(lockPath), { recursive: true });
+        const seeded = seededPlanningLock();
+        await writeFile(lockPath, `${JSON.stringify(seeded, null, 2)}\n`, "utf8");
+
         await initWork({ targetDir: repo, runtimes: ["claude"] });
-        // The consumer's own lock is present with its own contents.
-        await mkdir(path.join(repo, ".aof"), { recursive: true });
-        const ownLockPath = path.join(repo, ".aof", "aof.lock.json");
-        const ownLockContent = `${JSON.stringify({ version: 2, note: "consumer apply lock" }, null, 2)}\n`;
-        await writeFile(ownLockPath, ownLockContent, "utf8");
 
-        await updateWork({ targetDir: repo, bundleOverride: newerBundle(loadBundle()), bundleVersionOverride: "9.9.9" });
+        // Exactly one lock under .aof/.
+        const entries = (await readdir(path.dirname(lockPath))).filter((name) => name.endsWith(".lock.json"));
+        assert.deepEqual(entries, ["aof.lock.json"], "only the unified aof.lock.json under .aof/");
 
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        assert.equal(lock.version, 2, "version === 2 (LOCK_VERSION)");
-        assert.equal(lock.bundle.version, "9.9.9", "bundle.version records the new release");
-        assert.ok(Array.isArray(lock.runtimes) && lock.runtimes.length > 0, "runtimes[]");
-        assert.ok(Array.isArray(lock.files) && lock.files.length > 0, "files[]");
-        for (const entry of lock.files) {
-          assert.ok(typeof entry.path === "string" && !entry.path.includes("\\"), `${entry.path} forward-slash path`);
-          assert.ok(entry.resource && typeof entry.resource.id === "string" && typeof entry.resource.kind === "string", "entry.resource {id,kind}");
-          assert.match(entry.hash, /^sha256:[0-9a-f]{64}$/, `${entry.path} hash is sha256:<hex>`);
-        }
-        assert.deepEqual(lock.packages, [], "packages: []");
-        assert.deepEqual(lock.frameworks, [], "frameworks: []");
-        assert.deepEqual(lock.frameworkInstallAttempts, [], "frameworkInstallAttempts: []");
-        // The consumer's own lock is byte-for-byte unchanged by update.
-        assert.equal(await readFile(ownLockPath, "utf8"), ownLockContent, "aof.lock.json untouched");
+        const lock = JSON.parse(await readFile(lockPath, "utf8"));
+        assertWorkManifestSchema(lock.work);
+        // The foreign `planning` section survives byte-intact.
+        assert.deepEqual(lock.planning, seeded.planning, "the pre-existing `planning` section preserved unchanged");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
     }
   },
   {
-    name: "arch/ADR-004: a produced manifest conforms to the frozen lock-v2 install-manifest schema",
+    name: "arch/ADR-009: work update rewrites the `work` section and leaves the asset fields and `planning` section intact",
     run: async () => {
-      const repo = await mkdtemp(path.join(os.tmpdir(), "aof-arch-manifest-"));
+      const repo = await mkdtemp(path.join(os.tmpdir(), "aof-arch-work-update-section-"));
       try {
+        // Init first so there is a `work` section, then layer asset + planning state.
         await initWork({ targetDir: repo, runtimes: ["claude"] });
-        const lockPath = workLockPath(repo);
-        assert.equal(path.basename(lockPath), "aof.work.lock.json", "manifest at the fixed filename");
+        const lockPath = workspacePaths(repo).lockPath;
+        const afterInit = JSON.parse(await readFile(lockPath, "utf8"));
+        const assetFiles = [
+          {
+            path: ".claude/agents/own-resource.md",
+            runtime: "claude",
+            resource: { id: "own-resource", kind: "agent" },
+            hash: "sha256:" + "b".repeat(64),
+            generatedAt: "2026-06-19T00:00:00.000Z"
+          }
+        ];
+        const planning = seededPlanningLock().planning;
+        await writeFile(
+          lockPath,
+          `${JSON.stringify({ ...afterInit, files: assetFiles, planning }, null, 2)}\n`,
+          "utf8"
+        );
+
+        await updateWork({ targetDir: repo, bundleOverride: newerBundle(loadBundle()), bundleVersionOverride: "9.9.9" });
+
+        const entries = (await readdir(path.dirname(lockPath))).filter((name) => name.endsWith(".lock.json"));
+        assert.deepEqual(entries, ["aof.lock.json"], "still only the unified aof.lock.json under .aof/");
+
         const lock = JSON.parse(await readFile(lockPath, "utf8"));
-
-        assert.equal(lock.version, 2, "version === 2 (LOCK_VERSION)");
-        assert.ok(lock.bundle && typeof lock.bundle.version === "string" && lock.bundle.version.length > 0, "bundle.version present");
-        assert.ok(Array.isArray(lock.runtimes) && lock.runtimes.length > 0, "runtimes[]");
-        assert.ok(typeof lock.generatedAt === "string", "generatedAt present");
-
-        assert.ok(Array.isArray(lock.files) && lock.files.length > 0, "files[]");
-        for (const entry of lock.files) {
-          assert.ok(typeof entry.path === "string" && !entry.path.includes("\\"), `${entry.path} repo-relative forward-slash path`);
-          assert.ok(typeof entry.runtime === "string", "entry.runtime");
-          assert.ok(entry.resource && typeof entry.resource.id === "string" && typeof entry.resource.kind === "string", "entry.resource {id,kind}");
-          assert.match(entry.hash, /^sha256:[0-9a-f]{64}$/, `${entry.path} hash is sha256:<hex>`);
-          assert.ok(typeof entry.generatedAt === "string", "entry.generatedAt");
-        }
-
-        // Compatibility arrays — present and empty for the bundle.
-        assert.deepEqual(lock.packages, [], "packages: []");
-        assert.deepEqual(lock.frameworks, [], "frameworks: []");
-        assert.deepEqual(lock.frameworkInstallAttempts, [], "frameworkInstallAttempts: []");
-
-        // The consumer's own lock is never created by init.
-        const ownLockExists = await readFile(path.join(repo, ".aof", "aof.lock.json"), "utf8").then(() => true).catch(() => false);
-        assert.equal(ownLockExists, false, "no .aof/aof.lock.json written");
+        assertWorkManifestSchema(lock.work);
+        assert.equal(lock.work.bundle.version, "9.9.9", "work.bundle.version records the new release");
+        // Asset fields and planning section are carried through unchanged.
+        assert.deepEqual(lock.files, assetFiles, "asset files[] preserved unchanged");
+        assert.deepEqual(lock.planning, planning, "the `planning` section preserved unchanged");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

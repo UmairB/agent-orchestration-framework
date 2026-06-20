@@ -26,7 +26,7 @@ For: "$ARGUMENTS"
      this session gates (default to all milestones below `NN` that aren't themselves uat sessions).
    Confirm the span with the user if it's ambiguous; each entry must resolve to a real milestone
    (`aof work validate` enforces this).
-3. **Scaffold** (templates: `wiki/templates/uat/`):
+3. **Scaffold** (templates: `.aof/templates/work/uat/`):
    - `SESSION.md` — frontmatter (`type: uat`, `number`, `slug`, `title`, `status: not-started`,
      `owner: qa`, `depends: [<the accepted milestones>]`, `created`/`updated`: today); `## Scope`
      (the accepted milestones — referenced, never restated; entry/exit criteria); `## Plan` (the

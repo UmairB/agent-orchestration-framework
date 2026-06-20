@@ -11,9 +11,14 @@
 //        drift-warned + preserved; --force overwrites with the new bundle content
 //   02_delete-stale-members.feature      — a dropped member is deleted if
 //        unmodified, drift-warned + preserved if edited locally
-//   03_update-rewrites-manifest.feature  — the rewritten .aof/aof.work.lock.json
-//        records the new release + fresh hashes; drift-warned entries preserved;
-//        deleted absent; the consumer's own .aof/aof.lock.json untouched
+//   03_update-rewrites-manifest.feature  — the rewritten `work` SECTION of the
+//        unified .aof/aof.lock.json records the new release + fresh hashes;
+//        drift-warned entries preserved; deleted absent
+//
+// Story 02 / task 01 (ADR-009, unified lock) @executable scenarios are folded in
+// here too: the manifest is the `work` section of aof.lock.json (no separate
+// aof.work.lock.json); writing the `work` section preserves the asset/`planning`
+// sections; and the drift-check reads the `work` section's recorded hashes.
 //
 // The fixture members `fixture-added-member` / `fixture-dropped-member` are
 // SYNTHESIZED, not shipped ACD actors: tests pass `updateWork({ bundleOverride })`
@@ -23,11 +28,11 @@
 // the SAME engine path init uses (synthesize → planApplyActions(null) →
 // executeApplyActions → createLockManifest → writeLock) — no hand-rolled drift.
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { LOCK_VERSION, writeLock } from "../src/lock.mjs";
+import { writeLock } from "../src/lock.mjs";
 import { createLockManifest, executeApplyActions, planApplyActions } from "../src/render-plan.mjs";
 import { loadBundle } from "../src/work-bundle.mjs";
 import { synthesizeBundleConfig } from "../src/work-bundle-synthesis.mjs";
@@ -50,13 +55,15 @@ function fwd(filePath) {
 // desired set, plans against an EMPTY previousLock, executes, and writes the
 // install manifest exactly as init does. It lets a test seed a repo whose manifest
 // includes a synthesized fixture member (so update can later drop it).
-async function installBase(repo, bundle, runtimes = ["claude"], version = "1.0.0") {
+async function installBase(repo, bundle, runtimes = ["claude"], version = "1.0.0", foreign = {}) {
   const { desiredOutputs } = await synthesizeBundleConfig(bundle, { runtimes, targetDir: repo });
   const actions = await planApplyActions(desiredOutputs, null, { force: false, targetDir: repo });
   await executeApplyActions(actions);
   const base = createLockManifest({ actions, desiredOutputs, previousLock: null, config: { packages: [] }, runtimes });
-  const manifest = {
-    version: LOCK_VERSION,
+  // ADR-009: the install manifest is the `work` SECTION of the unified lock (minus
+  // its own `version`). Build it exactly as initWork does and read-merge-write it
+  // under `work`, preserving any seeded foreign sections (asset fields/`planning`).
+  const work = {
     generatedAt: base.generatedAt,
     bundle: { version },
     runtimes,
@@ -65,8 +72,46 @@ async function installBase(repo, bundle, runtimes = ["claude"], version = "1.0.0
     frameworks: base.frameworks,
     frameworkInstallAttempts: base.frameworkInstallAttempts
   };
-  await writeLock(workLockPath(repo), manifest);
-  return manifest;
+  await writeLock(workLockPath(repo), { ...foreign, work });
+  return work;
+}
+
+// Read the `work` SECTION of the unified lock the way every reader does.
+async function readWorkSection(repo) {
+  const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+  return lock.work;
+}
+
+// A pre-existing unified lock carrying foreign sections (asset fields + a
+// `planning` section) that `work update` must preserve byte-intact.
+function seededForeignLock() {
+  return {
+    version: 2,
+    generatedAt: "2026-06-19T00:00:00.000Z",
+    runtimes: ["claude"],
+    files: [
+      {
+        path: ".claude/agents/own-resource.md",
+        runtime: "claude",
+        resource: { id: "own-resource", kind: "agent" },
+        hash: "sha256:" + "c".repeat(64),
+        generatedAt: "2026-06-19T00:00:00.000Z"
+      }
+    ],
+    packages: [],
+    frameworks: [],
+    frameworkInstallAttempts: [],
+    planning: {
+      generatedAt: "2026-06-19T00:00:00.000Z",
+      source: "phuryn/pm-skills",
+      marketplaceName: "pm-skills",
+      marketplaceVersion: "2.0.0",
+      sha: "d384f0c9eb81fe74656a4f6da168587836939edb",
+      runtime: "claude",
+      plugins: [{ name: "pm-execution", marketplace: "pm-skills" }],
+      codex: null
+    }
+  };
 }
 
 // A synthesized agent member that is not a shipped ACD actor.
@@ -466,14 +511,14 @@ export const workUpdateTests = [
 
         const result = await updateWork({ targetDir: repo, bundleOverride: next, bundleVersionOverride: "2.5.0" });
         assert.equal(result.manifestWritten, true, "manifest rewritten");
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        assert.equal(lock.bundle.version, "2.5.0", "bundle.version records the new release");
+        const work = await readWorkSection(repo);
+        assert.equal(work.bundle.version, "2.5.0", "work.bundle.version records the new release");
 
         // Each updated/created member's files[] hash matches the file freshly written.
         const { hashFileIfExists } = await import("../src/lock.mjs");
         for (const item of result.actions.filter((a) => a.action === "update" || a.action === "create")) {
           const rel = fwd(item.path);
-          const entry = lock.files.find((f) => f.path === rel);
+          const entry = work.files.find((f) => f.path === rel);
           assert.ok(entry, `manifest has an entry for ${rel}`);
           const diskHash = await hashFileIfExists(p(repo, ...rel.split("/")));
           assert.equal(entry.hash, diskHash, `${rel} manifest hash matches the file on disk`);
@@ -490,8 +535,8 @@ export const workUpdateTests = [
       try {
         const base = loadBundle();
         await installBase(repo, base, ["claude"], "1.0.0");
-        const lockBefore = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        const archEntryBefore = lockBefore.files.find((f) => f.path === ARCHITECT_REL);
+        const workBefore = await readWorkSection(repo);
+        const archEntryBefore = workBefore.files.find((f) => f.path === ARCHITECT_REL);
 
         // Edit locally + change upstream → drift-warning.
         const architect = p(repo, ".claude", "agents", "aof-architect.md");
@@ -499,8 +544,8 @@ export const workUpdateTests = [
         const result = await updateWork({ targetDir: repo, bundleOverride: withChangedArchitect(base), bundleVersionOverride: "2.0.0" });
         assert.equal(classOf(result, ARCHITECT_REL), "drift-warning", "the member drifted");
 
-        const lockAfter = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        const archEntryAfter = lockAfter.files.find((f) => f.path === ARCHITECT_REL);
+        const workAfter = await readWorkSection(repo);
+        const archEntryAfter = workAfter.files.find((f) => f.path === ARCHITECT_REL);
         assert.ok(archEntryAfter, "drift-warned member's entry is NOT dropped from the manifest");
         assert.deepEqual(archEntryAfter, archEntryBefore, "the entry is unchanged from before the update (prior entry preserved)");
       } finally {
@@ -509,26 +554,66 @@ export const workUpdateTests = [
     }
   },
   {
-    name: "work-update/manifest: rewrite stays valid lock-v2 at the fixed path and never touches the consumer's own lock",
+    // @executable (task 01): writing the `work` section preserves the other lock
+    // sections — a pre-existing asset + `planning` set survives byte-intact, only
+    // the `work` key is rewritten, and the unified lock remains the only lock file.
+    name: "work-update/manifest: re-rendering the `work` section preserves the asset fields and the `planning` section",
     run: async () => {
       const repo = await tempRepo();
       try {
         const base = loadBundle();
-        await installBase(repo, base);
-        // The consumer's own lock is present with its own contents.
-        await mkdir(p(repo, ".aof"), { recursive: true });
-        const ownLockPath = p(repo, ".aof", "aof.lock.json");
-        const ownLockContent = `${JSON.stringify({ version: 2, note: "consumer's own apply lock", files: [] }, null, 2)}\n`;
-        await writeFile(ownLockPath, ownLockContent, "utf8");
+        // Seed the unified lock with foreign asset + `planning` sections AND a base
+        // `work` section in one read-merge-write (so update has something to rewrite).
+        const seeded = seededForeignLock();
+        await installBase(repo, base, ["claude"], "1.0.0", seeded);
 
         await updateWork({ targetDir: repo, bundleOverride: withChangedArchitect(base), bundleVersionOverride: "2.0.0" });
 
-        // Work lock is valid lock-v2 at the fixed path.
-        const workLock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        assert.equal(workLock.version, 2, "version 2");
-        assert.equal(path.basename(workLockPath(repo)), "aof.work.lock.json", "at the fixed path");
-        // The consumer's own lock is byte-for-byte unchanged.
-        assert.equal(await readFile(ownLockPath, "utf8"), ownLockContent, "aof.lock.json byte-for-byte unchanged");
+        // The unified lock is the only lock file.
+        const lockFiles = (await readdir(p(repo, ".aof"))).filter((n) => n.endsWith(".lock.json"));
+        assert.deepEqual(lockFiles, ["aof.lock.json"], "only the unified aof.lock.json under .aof/");
+        assert.equal(path.basename(workLockPath(repo)), "aof.lock.json", "the unified lock path");
+
+        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        // The `work` section was rewritten to the new release.
+        assert.equal(lock.work.bundle.version, "2.0.0", "work.bundle.version rewritten");
+        // The foreign sections survive byte-intact.
+        assert.deepEqual(lock.files, seeded.files, "asset files[] preserved unchanged");
+        assert.deepEqual(lock.packages, seeded.packages, "asset packages preserved");
+        assert.deepEqual(lock.frameworks, seeded.frameworks, "asset frameworks preserved");
+        assert.deepEqual(lock.planning, seeded.planning, "the `planning` section preserved unchanged");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    // @executable (task 01): the bundle drift-check reads the `work` section's
+    // recorded hashes. A tracked bundle file modified since install is drift-warned
+    // (not overwritten) because its on-disk hash diverges from the `work` section's
+    // recorded entry — proving update keys off `lock.work.files`, not a flat lock.
+    name: "work-update/drift-check: a tracked file modified since install drift-warns from the `work` section's recorded hash",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        const base = loadBundle();
+        // Seed foreign sections alongside the base `work` section so the lock has
+        // BOTH a `planning` section and the `work` section whose hashes drive drift.
+        await installBase(repo, base, ["claude"], "1.0.0", seededForeignLock());
+        // The `work` section records the tracked file's install hash.
+        const recorded = (await readWorkSection(repo)).files.find((f) => f.path === ARCHITECT_REL);
+        assert.ok(recorded && recorded.hash, "the `work` section records the tracked file's install hash");
+
+        // Modify the tracked file on disk so its hash diverges from the recording.
+        const architect = p(repo, ".claude", "agents", "aof-architect.md");
+        const edited = `${await readFile(architect, "utf8")}\nLOCAL EDIT\n`;
+        await writeFile(architect, edited, "utf8");
+
+        // Run update without --force: the engine compares disk-hash vs the `work`
+        // section's recorded hash → drift-warning; the file is NOT overwritten.
+        const result = await updateWork({ targetDir: repo, bundleOverride: withChangedArchitect(base), bundleVersionOverride: "2.0.0" });
+        assert.equal(classOf(result, ARCHITECT_REL), "drift-warning", "drift fires from the `work` section's recorded hash");
+        assert.equal(await readFile(architect, "utf8"), edited, "the modified file is not overwritten");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -544,9 +629,9 @@ export const workUpdateTests = [
         // Base install: includes the soon-to-be-stale fixture member.
         const withFixture = withMember(base, fixtureMember("fixture-dropped-member"));
         await installBase(repo, withFixture, ["claude"], "1.0.0");
-        const lockBefore = JSON.parse(await readFile(workLockPath(repo), "utf8"));
-        const updatedHashBefore = lockBefore.files.find((f) => f.path === ".claude/agents/aof-developer.md").hash;
-        const driftEntryBefore = lockBefore.files.find((f) => f.path === ARCHITECT_REL);
+        const workBefore = await readWorkSection(repo);
+        const updatedHashBefore = workBefore.files.find((f) => f.path === ".claude/agents/aof-developer.md").hash;
+        const driftEntryBefore = workBefore.files.find((f) => f.path === ARCHITECT_REL);
 
         // Set up one of each class:
         //  - updated: aof-developer changes upstream, disk unmodified.
@@ -569,25 +654,25 @@ export const workUpdateTests = [
         };
 
         const result = await updateWork({ targetDir: repo, bundleOverride: next, bundleVersionOverride: "2.0.0" });
-        const lock = JSON.parse(await readFile(workLockPath(repo), "utf8"));
+        const work = await readWorkSection(repo);
 
         // updated → new hash
         assert.equal(classOf(result, ".claude/agents/aof-developer.md"), "update", "developer updated");
-        const devEntry = lock.files.find((f) => f.path === ".claude/agents/aof-developer.md");
+        const devEntry = work.files.find((f) => f.path === ".claude/agents/aof-developer.md");
         assert.notEqual(devEntry.hash, updatedHashBefore, "updated member → new hash");
 
         // created → new entry
         assert.equal(classOf(result, ".claude/agents/fixture-added-member.md"), "create", "added created");
-        assert.ok(lock.files.some((f) => f.path === ".claude/agents/fixture-added-member.md"), "created member → new entry");
+        assert.ok(work.files.some((f) => f.path === ".claude/agents/fixture-added-member.md"), "created member → new entry");
 
         // drift-warned → prior entry preserved
         assert.equal(classOf(result, ARCHITECT_REL), "drift-warning", "architect drift-warned");
-        const archEntry = lock.files.find((f) => f.path === ARCHITECT_REL);
+        const archEntry = work.files.find((f) => f.path === ARCHITECT_REL);
         assert.deepEqual(archEntry, driftEntryBefore, "drift-warned member → prior entry preserved");
 
         // deleted → absent
         assert.equal(classOf(result, ".claude/agents/fixture-dropped-member.md"), "delete", "fixture deleted");
-        assert.ok(!lock.files.some((f) => f.path === ".claude/agents/fixture-dropped-member.md"), "deleted member → absent from manifest");
+        assert.ok(!work.files.some((f) => f.path === ".claude/agents/fixture-dropped-member.md"), "deleted member → absent from manifest");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

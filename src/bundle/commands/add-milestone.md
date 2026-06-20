@@ -16,7 +16,7 @@ Read `.aof/aof.config.json` → `work.dir`, `work.agents`.
 For: "$ARGUMENTS"
 1. Next top-level number `NN` = max `NN` across `work.dir` + 1, zero-padded. Slug = kebab. Folder:
    `<work.dir>/<NN>_milestone_<slug>/`.
-2. Scaffold (templates: `wiki/templates/milestone/`):
+2. Scaffold (templates: `.aof/templates/work/milestone/`):
    - `SPEC.md` — frontmatter (`type: milestone`, `number`, `slug`, `title`, `status: not-started`,
      `owner: product-owner`, `created`/`updated`: today); `## Objective`; `## Scope` (in/out);
      `## Stories` (empty — "to be broken down"); `## Dependencies`.
