@@ -52,8 +52,10 @@ import { archTests as acdWorkListContractTests } from "../test/arch/acd-work-lis
 import { boardApiTests } from "../test/board-api.test.mjs";
 import { boardServeTests } from "../test/board-serve.test.mjs";
 import { archTests as acdBoardWriteIsolationTests } from "../test/arch/acd-board-write-isolation.test.mjs";
+import { boardActionTests } from "../test/board-action.test.mjs";
 import { terminalDockTests } from "../test/terminal-dock.test.mjs";
 import { terminalWsTests } from "../test/terminal-ws.test.mjs";
+import { terminalSessionsTests } from "../test/terminal-sessions.test.mjs";
 import { archTests as acdTerminalServerOnlyTests } from "../test/arch/acd-terminal-server-only.test.mjs";
 import { archTests as acdVibeyardAttributionTests } from "../test/arch/acd-vibeyard-attribution.test.mjs";
 import { archTests as acdBoardSingleServerTests } from "../test/arch/acd-board-single-server.test.mjs";
@@ -98,8 +100,10 @@ const tests = [
   ...boardApiTests,
   ...boardServeTests,
   ...acdBoardWriteIsolationTests,
+  ...boardActionTests,
   ...terminalDockTests,
   ...terminalWsTests,
+  ...terminalSessionsTests,
   ...acdTerminalServerOnlyTests,
   ...acdVibeyardAttributionTests,
   ...acdBoardSingleServerTests,

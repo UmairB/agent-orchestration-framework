@@ -176,6 +176,56 @@ export async function findWork(workDir, query) {
   return rows;
 }
 
+// ----------------------------------------------------------------- list ----
+
+// The board's read model: the WHOLE stream serialised as a flat array, one
+// element per `listItems` item, each carrying exactly the seven frozen contract
+// fields `{ ref, type, slug, status, title, parent, dir }` (ARCHITECTURE
+// ADR-002). Flat-with-`parent` — `parent` is the only tree edge (null at
+// depth 0); the consumer (the board) derives the hierarchy from it.
+//
+// Order is deterministic depth-first preorder: top-level items sorted by number
+// ascending, each milestone immediately followed by its stories sorted by
+// number. `dir` is the absolute item directory, forward-slashed (the
+// lock-manifest path convention) so the JSON is byte-stable across OSes.
+//
+// This is the single source of the `aof work list --json` contract; the board
+// API (story 01) reuses it. Keep it a thin pass over `listItems` — no new
+// traversal, no convenience fields.
+export async function listStream(workDir) {
+  const items = await listItems(workDir);
+
+  const byNum = (a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10);
+  const topLevel = items.filter((item) => item.parent == null).sort(byNum);
+
+  const ordered = [];
+  for (const item of topLevel) {
+    ordered.push(item);
+    if (item.type === "milestone") {
+      ordered.push(
+        ...items
+          .filter((child) => child.parent === item.number)
+          .sort(byNum),
+      );
+    }
+  }
+
+  const rows = [];
+  for (const item of ordered) {
+    const meta = await readMeta(item);
+    rows.push({
+      ref: item.ref,
+      type: item.type,
+      slug: item.slug,
+      status: meta.status ?? null,
+      title: meta.title ?? null,
+      parent: item.parent,
+      dir: item.dir.replaceAll("\\", "/"),
+    });
+  }
+  return rows;
+}
+
 // ------------------------------------------------------------- validate ----
 
 function checkFeatureTags(text, relPath, projectTags, add) {
@@ -336,7 +386,7 @@ export async function validateWork(workDir, config, scopeRef) {
   // across scenarios in one file, but one report per issue is enough.
   const seen = new Set();
   return findings.filter((finding) => {
-    const key = `${finding.path} ${finding.problem}`;
+    const key = `${finding.path}${finding.problem}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

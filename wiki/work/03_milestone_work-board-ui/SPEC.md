@@ -3,10 +3,10 @@ type: milestone
 number: 03
 slug: work-board-ui
 title: "Work Board UI"
-status: not-started
+status: in-progress
 owner: product-owner
 created: 2026-06-16
-updated: 2026-06-17
+updated: 2026-06-20
 depends: [00]
 ---
 # 03 · Work Board UI
@@ -63,7 +63,22 @@ vibeyard is **guidance for what's possible**, not a base to fork. The determinat
 
 ## Stories
 
-<!-- to be broken down — `aof:refine 03` -->
+Broken down `aof:refine 03 --autonomous` (2026-06-19) — see [ARCHITECTURE.md](ARCHITECTURE.md) ADR-005
+for the partition rationale. The three stories are **independent** by construction, decoupled by two
+frozen seams: the `aof work list --json` stream contract (ADR-002, the m02-PRD-fixture analogue) and the
+disjoint `/api/work*` ↔ `/ws/terminal` route namespaces (ADR-001). Story 01 builds against a fixture of
+story 00's contract; story 02 lives on its own WS namespace + a thin "selected ref + provider" launch
+contract — so all three can be built in parallel.
+
+- [x] `00_story_work-list-json` — `aof work list --json`: emit the whole stream as the frozen flat array
+  `{ ref, type, slug, status, title, parent, dir }` per item — the board's locked data contract — plus a
+  readable human listing.
+- [x] `01_story_work-board` — the React board surface + its `/api/work*` API: render the hierarchical tree
+  with derived-status chips, open an item's records (SPEC/VERIFICATION/RETROSPECTIVE/findings), and the
+  three actions (add feedback / validate / next). Owns the board's only write (the feedback append).
+- [ ] `02_story_agent-terminal` — the in-app agent terminal: node-pty + `ws@8` at `/ws/terminal` + an
+  xterm pane + the ported `CliProvider` seam (claude/codex/gemini), launched against the selected item;
+  a missing provider degrades to the dock error state, never a crash. (vibeyard recipe, MIT-attributed.)
 
 ## Dependencies
 

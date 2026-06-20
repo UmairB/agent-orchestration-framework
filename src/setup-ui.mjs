@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
+import { handleWorkApi } from "./board-ui.mjs";
+import { attachTerminalWebSocket } from "./terminal-ws.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -13,7 +15,7 @@ const VALID_CATALOG_KINDS = new Set(["skill", "agent"]);
 export async function serveSetupUi(catalog, options = {}) {
   const port = Number.parseInt(options.port ?? "4177", 10);
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const uiRoot = path.join(repoRoot, "ui");
+  const uiRoot = options.uiRoot ? path.resolve(options.uiRoot) : path.join(repoRoot, "ui");
   const projectDir = path.resolve(options.projectDir ?? process.cwd());
 
   const server = http.createServer(async (request, response) => {
@@ -115,6 +117,8 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
+    if (await handleWorkApi(request, response, { projectDir })) return;
+
     if (requestUrl.pathname.startsWith("/api/")) {
       sendApiError(response, 404, "API route not found.", "not-found");
       return;
@@ -133,7 +137,21 @@ export async function serveSetupUi(catalog, options = {}) {
     });
   });
 
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  // Story 02: the terminal WebSocket (/ws/terminal) on the SAME server (ADR-001).
+  // `spawn`/`which` are optional injection seams for tests (no real PTY/PATH).
+  attachTerminalWebSocket(server, { projectDir, spawn: options.spawn, which: options.which, recordSessions: options.recordSessions });
+
+  // Reject (don't hang) when the port can't be bound — e.g. EADDRINUSE — so a
+  // caller (the board launcher) can degrade honestly instead of an unhandled
+  // 'error' event tearing down the process while the listen promise never settles.
+  await new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", onError);
+      resolve();
+    });
+  });
   const address = server.address();
   return { server, url: `http://127.0.0.1:${address.port}/` };
 }

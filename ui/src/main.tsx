@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Board } from "@/board/Board";
 
 type RuntimeId = "claude" | "codex";
 type ResourceKind = "skill" | "command" | "agent" | "rule";
@@ -1256,8 +1257,10 @@ function bodyLabel(kind: ResourceKind) {
   return "Instructions";
 }
 
+const uiMode = new URLSearchParams(location.search).get("mode") ?? import.meta.env.VITE_AOF_UI_MODE;
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    {uiMode === "board" ? <Board /> : <App />}
   </StrictMode>
 );

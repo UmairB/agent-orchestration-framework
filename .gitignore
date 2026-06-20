@@ -10,3 +10,6 @@ ui/dist/
 *.sqlite-journal
 .DS_Store
 *.log
+
+# Runtime: live agent-terminal session registry (operational, not committed)
+.aof/terminal-sessions.json
