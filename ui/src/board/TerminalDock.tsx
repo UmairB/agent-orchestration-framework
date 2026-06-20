@@ -273,7 +273,10 @@ export function TerminalDock({
         </span>
 
         {/* Provider picker — radio-semantics, exactly one selected (DESIGN §4). The
-            selected provider carries a teal dot. */}
+            selected provider carries a teal dot. Changing the provider re-runs the
+            session effect (providerId is a dep), which tears down a live WS/PTY —
+            so the segments are DISABLED while a session is RUNNING (the cheap
+            data-loss guard; exactly-one-selected is preserved). */}
         <span className="text-xs text-zinc-500">provider:</span>
         <div
           role="radiogroup"
@@ -282,16 +285,20 @@ export function TerminalDock({
         >
           {VISIBLE_PROVIDERS.map((id) => {
             const active = isSelected(picker, id);
+            const locked = dock.state === DOCK_STATES.RUNNING;
             return (
               <button
                 key={id}
                 type="button"
                 role="radio"
                 aria-checked={active}
+                disabled={locked}
+                title={locked ? "Stop the running session to switch provider" : undefined}
                 onClick={() => setPicker((current) => selectProvider(current, id))}
                 className={cn(
                   "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors",
-                  active ? "bg-primary text-primary-foreground" : "text-zinc-400 hover:text-zinc-100"
+                  active ? "bg-primary text-primary-foreground" : "text-zinc-400 hover:text-zinc-100",
+                  locked && "cursor-not-allowed opacity-60 hover:text-zinc-400"
                 )}
               >
                 <span

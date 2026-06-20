@@ -4,10 +4,10 @@ number: 02
 slug: agent-terminal
 title: "The agent terminal — run the agent CLI against the selected item, in-app"
 parent: 3
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-19
-updated: 2026-06-19
+updated: 2026-06-20
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

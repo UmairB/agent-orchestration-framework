@@ -141,9 +141,12 @@ export function DetailPanel({
             <StatusChip status={item.status} />
           </span>
         </div>
-        <h2 className="mt-2 text-[16px] font-bold leading-snug">{item.title ?? item.slug}</h2>
+        <h2 className="mt-2 text-[16px] font-bold leading-snug">{item.title ?? humanizeSlug(item.slug)}</h2>
         <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="mono truncate text-xs text-muted-foreground">{item.slug}</span>
+          {/* The slug meta line is redundant when there is no title (the H2 already
+              shows the humanized slug), so suppress it with an em-dash to avoid
+              printing the slug twice. */}
+          <span className="mono truncate text-xs text-muted-foreground">{item.title ? item.slug : "—"}</span>
           <PrimaryActionButton
             item={item}
             action={action ?? { kind: "adhoc", label: "Run agent" }}
@@ -406,6 +409,17 @@ function TaskCounts({ counts }: { counts: TaskFeature["counts"] }) {
         ))}
     </span>
   );
+}
+
+// A title-cased reading of a slug, for the H2 fallback when an item has no
+// explicit title — "work-board-ui" → "Work Board Ui". Keeps the H2 readable
+// without re-printing the raw slug twice (the meta line is then suppressed).
+function humanizeSlug(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 // Strip the YAML frontmatter block and HTML comments so the rendered doc reads as

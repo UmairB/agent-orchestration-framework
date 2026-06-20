@@ -2,7 +2,7 @@
 doc: verification
 ref: "03"
 verified: 2026-06-20
-verdict: in-progress
+verdict: accepted
 ---
 # 03 · Work Board UI — Verification
 
@@ -87,15 +87,28 @@ the collapse-on-success feedback composer. Two non-blocking design-gaps logged b
 (carried, Findings count) and **DG-7** (new, the actions-strip Validate/Next emphasis is inverted). No
 *design* blocker is open.
 
-## @uat / @manual pending
+## User sign-off
 
-- **A4 — end-to-end live agent stream (`@uat`).** With node-pty (server) + ws (server) + xterm
-  (browser) wired, Run agent against a selected item spawns the chosen provider and the dock walks
-  idle → connecting → running → exited, with input echo and resize reflow. Requires a real agent CLI
-  on PATH + a human watching the loop. **Now performable** via `aof work board` →
-  `http://127.0.0.1:4180/?mode=board` (F-1 resolved). **PENDING — QA `@uat` sign-off.**
-  pending → `00_run-agent-terminal.feature` `@uat` scenarios (walks idle→connecting→running; keystroke
-  echo; resize reflow; exited(0); exited(non-zero)).
+- **A4 — end-to-end live agent stream (`@uat`): PASS — operator sign-off (2026-06-20, `aof:verify 03`).**
+  - **Procedure (brokered, human-performed):** with the operator's `aof work board` server already live
+    on `127.0.0.1:4180` (the port-in-use probe at this verify confirmed a board server running), the
+    operator opened `http://127.0.0.1:4180/?mode=board`, selected an item, picked provider **claude**, and
+    pressed Run agent / Verify — then walked all five `@uat` scenarios of
+    `00_run-agent-terminal.feature` against the DESIGN §4 connection-state ramp.
+  - **Result:** **all five passed.** (1) the dock walked **idle → connecting → running** with the agent's
+    output painting in the xterm viewport; (2) **keystrokes echoed** in the viewport and reached the agent;
+    (3) **dragging the dock taller reflowed** the output with no clipped/mis-wrapped lines; (4) a clean
+    finish showed **exited (code 0)** with scrollback retained + a restart affordance; (5) a non-zero
+    finish showed **exited (1)** read as a failure, distinct from the clean exit. No defect observed.
+  - **Sign-off:** operator (the work-stream's developer/operator) — *"All 5 passed — sign off."*
+  - verifies → `00_run-agent-terminal.feature` `@uat` scenarios (idle→connecting→running + output visible;
+    keystroke echo; resize reflow; exited(0) + scrollback + restart; exited(non-zero) distinct).
+
+## @manual resolved (recap)
+
+- **A2** (`pty.spawn` smoke) **PASS**, **A7** (real provider present/missing) **PASS**, story-01
+  rendered-UI **resolved** — all recorded above (`## @manual evidence`, `## @uat / @manual pending`
+  history). No `@manual`/`@uat` lane remains open.
 - **A7 — a present/missing provider on a real machine (`@manual`). RESOLVED above (PASS).** The
   missing-provider end-to-end path was executed against the real server (dock error state, board+server
   stay up); all three providers resolve present on this machine. The only residual — a present provider
@@ -265,8 +278,12 @@ From the design-conformance review (`aof-designer`, code-vs-mock). Both **non-bl
     the primary-ish button (teal at `size="sm"` so it stays subordinate to the full-size header Run-agent)
     and **Validate** the neutral `secondary`/grey button; keep Add feedback `outline`; align the
     file-header comment.
-  - *routed-to:* `aof:continue 03` (developer) — small CSS-class change. *status:* open (deferred,
-    non-blocking; rides along with the milestone, like DG-1).
+  - *routed-to:* `aof:continue 03` (developer) — small CSS-class change. *status:* **RESOLVED**
+    (2026-06-20, `aof:continue 03` review gate). `ActionsStrip.tsx` now renders **Validate** as the
+    neutral `secondary` button and **Next** as a primary-tinted subordinate (border-`primary/40`,
+    `bg-primary/5`, `text-primary`) at `size`-strip scale, with Run-agent (detail header, full teal) the
+    single headline — the DESIGN §3 / Documented-default-6 order Run-agent > Next > Validate. The fix is
+    part of this milestone's acceptance commit; the file-header comment was aligned.
 
 - **F-2 — the approved redesign wants per-item data the frozen `work list --json` contract (ADR-002)
   does not carry; rendered honestly (omitted/softened), but full fidelity needs a superseding
@@ -307,11 +324,24 @@ routed to `aof:continue 03`). `aof work validate 03/01` = **PASS**. No blocker f
 
 ---
 
-**Milestone 03 — NOT YET ACCEPTED; stays `in-progress` (2026-06-20).** Stories: 00 `done`, **01 `done`
-(accepted now)**, 02 (`agent-terminal`) still `in-review`. The milestone is accepted only when ALL its
-stories are (`SPEC.md` rule), so it remains in-progress pending story 02 — whose **A4 `@uat` live
-agent-stream** human sign-off is the one remaining gate (the only `@uat` in the milestone; it belongs to
-story 02, not 01).
+**Milestone 03 — ACCEPTED (2026-06-20, `aof:verify 03`).** All three stories are `done` (00, 01, and now
+**02 `agent-terminal`**, accepted on this run). Every lane is satisfied: the full `@executable` suite is
+**green (636 ok / 0 not-ok)** with all **five fitness functions** green (`acd-work-list-contract`,
+`acd-board-write-isolation`, `acd-board-single-server`, `acd-terminal-server-only`,
+`acd-vibeyard-attribution`); the `@manual` lanes are PASS (A2 `pty.spawn` smoke; A7 real provider
+present/missing; story-01 rendered UI); and the milestone's **one** `@uat` gate — story 02's **A4 live
+agent-stream** — was **signed off by the operator** ("All 5 passed": idle→connecting→running with live
+output, keystroke echo, resize reflow, exited(0) with scrollback+restart, exited(≠0) distinct — see
+`## User sign-off`). `aof work validate 03` = **PASS** (+ test-traceability and litmus hold). **No
+blocker finding is open.** Story 02 → `STORY.md status: done`, ticked in `SPEC.md ## Stories`; milestone
+→ `SPEC.md status: done`; `STATE.md` compacted; `RETROSPECTIVE.md` distilled (the run was not clean —
+F-1 was a blocker + carry-over feedback). **DG-7** (Validate/Next emphasis) was **resolved** at the
+2026-06-20 `aof:continue 03` review gate — the `ActionsStrip.tsx` fix is part of this acceptance commit.
+The remaining non-blocking items ride along as deferred backlog — **DG-1** (Findings count, deferred
+behind F-2) and the **F-2** contract extension — none gate acceptance.
+
+*(historical — interim milestone verdict, 2026-06-20: NOT YET ACCEPTED, stayed `in-progress` after
+story 01 was accepted, pending story 02's A4 `@uat` human sign-off — now satisfied above.)*
 
 *(historical — milestone-level verdict, 2026-06-19, `aof:verify 03`; F-1 resolved via
 `aof:continue 03` same session, the `@uat` lane now unblocked):*

@@ -145,16 +145,19 @@ async function handleTasks(response, workspace, params) {
     .map((entry) => entry.name)
     .sort();
 
-  const tasks = [];
-  for (const file of fileNames) {
-    const text = await readFile(path.join(tasksDir, file), "utf8");
-    const parsed = parseFeature(text);
-    const counts = { executable: 0, manual: 0, uat: 0 };
-    for (const scenario of parsed.scenarios) {
-      if (scenario.lane && counts[scenario.lane] !== undefined) counts[scenario.lane] += 1;
-    }
-    tasks.push({ file, feature: parsed.feature, scenarios: parsed.scenarios, counts });
-  }
+  // Read + parse the feature files in parallel; Promise.all preserves the input
+  // (sorted) order, so the `tasks` array is built in the SAME order as before.
+  const tasks = await Promise.all(
+    fileNames.map(async (file) => {
+      const text = await readFile(path.join(tasksDir, file), "utf8");
+      const parsed = parseFeature(text);
+      const counts = { executable: 0, manual: 0, uat: 0 };
+      for (const scenario of parsed.scenarios) {
+        if (scenario.lane && counts[scenario.lane] !== undefined) counts[scenario.lane] += 1;
+      }
+      return { file, feature: parsed.feature, scenarios: parsed.scenarios, counts };
+    })
+  );
 
   sendJson(response, 200, { ref: item.ref, tasks });
 }
@@ -273,12 +276,22 @@ async function appendFeedbackBullet(statePath, bullet) {
 }
 
 // Resolve an item by ref to its native-path `dir` (+ ref/type) using findWork —
-// the canonical resolver. Returns null when nothing resolves.
+// the canonical resolver. Returns null when nothing resolves. Used by the
+// READ-ONLY routes (doc/tasks), where a slug fallback is acceptable.
 async function resolveItem(workDir, ref) {
   if (!ref) return null;
   const rows = await findWork(workDir, ref);
   // Prefer an exact ref match; findWork can return slug matches for free text.
   return rows.find((row) => row.ref === ref) ?? rows[0] ?? null;
+}
+
+// EXACT-ref resolver for the WRITE route (feedback): there is NO slug fallback,
+// so a typo'd/partial ref returns null (→ 404) rather than appending the bullet
+// to the first free-text slug match (the wrong item).
+async function resolveItemExact(workDir, ref) {
+  if (!ref) return null;
+  const rows = await findWork(workDir, ref);
+  return rows.find((row) => row.ref === ref) ?? null;
 }
 
 function scopeParam(params) {

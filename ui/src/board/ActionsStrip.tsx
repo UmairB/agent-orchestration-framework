@@ -4,6 +4,7 @@
 // the inline feedback composer appends one bullet; Validate/Next render INLINE
 // (not toasts).
 import { useState } from "react";
+import { Send } from "lucide-react";
 import { workApi } from "./api";
 import type { Finding, NextResponse, WorkItem } from "./api";
 
@@ -85,19 +86,23 @@ export function ActionsStrip({
         >
           + Add feedback
         </button>
+        {/* Validate = NEUTRAL secondary (DESIGN §3): a check, not the loudest
+            button. Run-agent (detail header, teal) is the single headline. */}
         <button
           type="button"
           disabled={busy !== null}
           onClick={() => void runValidate()}
-          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition hover:bg-secondary/80 disabled:opacity-50"
         >
           {busy === "validate" ? "Validating..." : "✓ Validate"}
         </button>
+        {/* Next = primary-ish (navigation) but visually SUBORDINATE to Run-agent:
+            a quiet primary-tinted outline, not the full teal fill. */}
         <button
           type="button"
           disabled={busy !== null}
           onClick={() => void runNext()}
-          className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium transition hover:border-primary/50 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary transition hover:bg-primary/10 disabled:opacity-50"
         >
           {busy === "next" ? "Resolving..." : "→ Next"}
         </button>
@@ -124,6 +129,7 @@ export function ActionsStrip({
               onClick={() => void submitFeedback()}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
             >
+              <Send className="h-3.5 w-3.5" aria-hidden="true" />
               {busy === "feedback" ? "Adding..." : "Submit"}
             </button>
           </div>

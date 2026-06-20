@@ -19,8 +19,6 @@ export type Milestone = {
   inProgress: number;
   blocked: number;
   notStarted: number;
-  // The progress-bar fill percentage (DESIGN): round((done + inReview*0.66)/total*100).
-  fillPct: number;
 };
 
 export type Derived = {
@@ -69,12 +67,6 @@ export function deriveBoard(items: WorkItem[]): Derived {
     const inProgress = tally("in-progress");
     const blocked = tally("blocked");
     const notStarted = tally("not-started");
-    const fillPct =
-      total === 0
-        ? item.status === "done"
-          ? 100
-          : 0
-        : Math.round(((done + inReview * 0.66) / total) * 100);
     return {
       item,
       num: item.ref,
@@ -85,7 +77,6 @@ export function deriveBoard(items: WorkItem[]): Derived {
       inProgress,
       blocked,
       notStarted,
-      fillPct: Math.max(0, Math.min(100, fillPct)),
     };
   });
 

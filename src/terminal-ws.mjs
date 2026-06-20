@@ -116,9 +116,11 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
     // Resolution failure is non-fatal: spawn against projectDir.
   }
 
-  // Honest-degrade gate (ADR-003): a missing binary / failed prerequisites →
-  // the error control-frame, no spawn attempt, no faked success.
-  if (!provider.validatePrerequisites(baseEnv)) {
+  // Resolve the binary path ONCE and reuse it for both the honest-degrade gate
+  // and the spawn (avoids re-walking PATH per call). A null path is the missing
+  // binary → the error control-frame, no spawn attempt, no faked success (ADR-003).
+  const bin = provider.resolveBinaryPath(baseEnv);
+  if (bin === null) {
     sendControl(ws, {
       type: "error",
       message: `${provider.id} CLI not found — install it or pick another provider.`,
@@ -127,7 +129,6 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
     return;
   }
 
-  const bin = provider.resolveBinaryPath(baseEnv);
   const args = provider.buildArgs();
   const sessionId = `${ref || "session"}:${provider.id}:${Date.now()}`;
   const env = provider.buildEnv(sessionId, baseEnv);

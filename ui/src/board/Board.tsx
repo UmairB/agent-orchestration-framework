@@ -7,6 +7,7 @@ import { Overview } from "./Overview";
 import { BoardLanes } from "./BoardLanes";
 import { DetailPanel } from "./DetailPanel";
 import { TerminalDock } from "./TerminalDock";
+import { StatusRing, statusMeta, LANE_ORDER } from "./status";
 
 // The two-level work board (DESIGN — two views in one screen). A slim top bar
 // over either VIEW 1 (the "Work items" overview of milestone cards) or VIEW 2
@@ -282,16 +283,12 @@ export function Board() {
   );
 }
 
-// A compact "◷ status legend" hover affordance in the top bar.
+// A compact "◷ status legend" hover affordance in the top bar. Each row paints
+// the REAL <StatusRing> shape (the same glyph-ring the cards show) next to its
+// label, so the legend mirrors the painted ramp 1:1 — not a different vocabulary
+// of inline text glyphs.
 function StatusLegend() {
   const [open, setOpen] = useState(false);
-  const entries = [
-    { label: "○ not-started" },
-    { label: "◐ in-progress" },
-    { label: "◔ in-review" },
-    { label: "! blocked" },
-    { label: "✓ done" },
-  ];
   return (
     <span className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button type="button" className="transition hover:text-foreground" aria-label="Status legend">
@@ -299,9 +296,10 @@ function StatusLegend() {
       </button>
       {open ? (
         <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-border bg-card p-2 shadow-lg">
-          {entries.map((e) => (
-            <p key={e.label} className="py-0.5 text-xs text-foreground">
-              {e.label}
+          {LANE_ORDER.map((status) => (
+            <p key={status} className="flex items-center gap-2 py-0.5 text-xs text-foreground">
+              <StatusRing status={status} size={14} />
+              <span>{statusMeta(status).short}</span>
             </p>
           ))}
         </div>

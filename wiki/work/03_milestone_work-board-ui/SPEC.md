@@ -3,7 +3,7 @@ type: milestone
 number: 03
 slug: work-board-ui
 title: "Work Board UI"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-16
 updated: 2026-06-20
@@ -76,7 +76,7 @@ contract — so all three can be built in parallel.
 - [x] `01_story_work-board` — the React board surface + its `/api/work*` API: render the hierarchical tree
   with derived-status chips, open an item's records (SPEC/VERIFICATION/RETROSPECTIVE/findings), and the
   three actions (add feedback / validate / next). Owns the board's only write (the feedback append).
-- [ ] `02_story_agent-terminal` — the in-app agent terminal: node-pty + `ws@8` at `/ws/terminal` + an
+- [x] `02_story_agent-terminal` — the in-app agent terminal: node-pty + `ws@8` at `/ws/terminal` + an
   xterm pane + the ported `CliProvider` seam (claude/codex/gemini), launched against the selected item;
   a missing provider degrades to the dock error state, never a crash. (vibeyard recipe, MIT-attributed.)
 

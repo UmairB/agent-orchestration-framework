@@ -89,7 +89,7 @@ export function BoardLanes({
         <EmptyMilestone />
       ) : (
         <div
-          className="grid min-h-0 flex-1 gap-px bg-[#eef0f3]"
+          className="grid min-h-0 flex-1 gap-px bg-border"
           style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}
           onClick={(e) => {
             // A click that did not land on a story card = empty lane area →
@@ -250,7 +250,7 @@ function tone(t: "quiet" | "primary" | "accent" | "destructive"): string {
 
 function EmptyMilestone() {
   return (
-    <div className="grid min-h-0 flex-1 place-items-center bg-[#eef0f3] p-10 text-center">
+    <div className="grid min-h-0 flex-1 place-items-center bg-muted p-10 text-center">
       <div className="flex flex-col items-center gap-3">
         <span className="inline-block h-12 w-12 rounded-full border-2 border-dashed border-muted-foreground/40" aria-hidden="true" />
         <p className="text-sm font-medium">No stories in this milestone yet</p>
