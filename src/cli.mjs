@@ -19,6 +19,7 @@ import { loadWorkspace, findWork, listStream, validateWork, nextWork } from "./w
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
+import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { initPlanning } from "./planning-init.mjs";
 
@@ -228,7 +229,17 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]`);
+  if (subcommand === "use-headroom") {
+    await workUseHeadroomCommand(rest);
+    return;
+  }
+
+  if (subcommand === "unuse-headroom") {
+    await workUnuseHeadroomCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work use-headroom\n  aof work unuse-headroom`);
 }
 
 async function workBoardCommand(args) {
@@ -272,6 +283,25 @@ async function workBoardCommand(args) {
   });
 }
 
+// `aof work use-headroom [dir]` — enable the headroom plugin (config-only read-merge-
+// write of work.headroom; never the lock). PATH-checks headroom and prints a one-line
+// install hint when it is absent, but always writes the config and never installs (ADR-004/005).
+async function workUseHeadroomCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
+  const result = await useHeadroom({ targetDir });
+  console.log(`Enabled headroom in ${result.configPath}`);
+}
+
+// `aof work unuse-headroom [dir]` — disable the headroom plugin (sets enabled:false but
+// keeps the block so the providers choice survives; never the lock) (ADR-004).
+async function workUnuseHeadroomCommand(args) {
+  const options = parseOptions(args);
+  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
+  const result = await unuseHeadroom({ targetDir });
+  console.log(`Disabled headroom in ${result.configPath}`);
+}
+
 async function workInitCommand(args) {
   const options = parseOptions(args);
   const targetDir = path.resolve(options._[0] ?? process.cwd());
@@ -281,7 +311,8 @@ async function workInitCommand(args) {
     targetDir,
     runtimes,
     dryRun: Boolean(options.dryRun),
-    force: Boolean(options.force)
+    force: Boolean(options.force),
+    withHeadroom: Boolean(options.withHeadroom)
   });
 
   if (result.guarded) {
@@ -1520,7 +1551,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom"].includes(key)) {
       options[key] = true;
       continue;
     }

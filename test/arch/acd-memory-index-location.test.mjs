@@ -3,9 +3,11 @@
 //  git-ignored, and every record matches the frozen MemoryRecord shape."
 //
 // Behavioural proof: reindex into a temp project; assert the ONLY memory file
-// written under .aof/ is aof.memory.index.json; assert that project's .gitignore
-// ignores it; validate each record against the frozen MemoryRecord shape
-// (required keys present; absent-type fields present as "").
+// written under .aof/ is aof.memory.index.json; assert it is git-ignored via the
+// SELF-CONTAINED nested .aof/.gitignore (milestone 04 finding F-02 — never the
+// repo-root .gitignore; a nested ignore is applied by git relative to its own dir);
+// validate each record against the frozen MemoryRecord shape (required keys present;
+// absent-type fields present as "").
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -14,7 +16,8 @@ import path from "node:path";
 import { reindex, memoryIndexPath } from "../../src/memory/local-indexing.mjs";
 
 const FIXED_NAME = "aof.memory.index.json";
-const GITIGNORE_ENTRY = ".aof/aof.memory.index.json";
+// F-02: ignored via the nested .aof/.gitignore, so the entry is relative to .aof/.
+const GITIGNORE_ENTRY = "aof.memory.index.json";
 
 const MEMORY_RECORD_KEYS = [
   "recordType", "id", "item", "itemSlug", "title",
@@ -100,15 +103,16 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-005: the project's .gitignore ignores the index path after reindex",
+    name: "arch/ADR-005: the index is git-ignored via the nested .aof/.gitignore after reindex (F-02)",
     run: async () => {
       const { projectRoot, ctx } = await tempProject();
       try {
         await reindex(null, ctx);
-        const gitignorePath = path.join(projectRoot, ".gitignore");
-        assert.ok(existsSync(gitignorePath), ".gitignore exists after reindex");
+        const gitignorePath = path.join(projectRoot, ".aof", ".gitignore");
+        assert.ok(existsSync(gitignorePath), ".aof/.gitignore exists after reindex");
+        assert.ok(!existsSync(path.join(projectRoot, ".gitignore")), "the repo-root .gitignore is left untouched (F-02)");
         const lines = (await readFile(gitignorePath, "utf8")).split(/\r?\n/).map((l) => l.trim());
-        assert.ok(lines.includes(GITIGNORE_ENTRY), `.gitignore ignores ${GITIGNORE_ENTRY}`);
+        assert.ok(lines.includes(GITIGNORE_ENTRY), `.aof/.gitignore ignores ${GITIGNORE_ENTRY}`);
       } finally {
         await rm(projectRoot, { recursive: true, force: true });
       }

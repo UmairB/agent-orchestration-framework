@@ -129,6 +129,57 @@ export const workInitTests = [
       }
     }
   },
+
+  // F-02 (milestone 04 round-trip finding → 01): init establishes a self-contained
+  // nested `.aof/.gitignore` baseline (ignoring the derived memory index), never the
+  // repo-root .gitignore; idempotent + additive across a re-init.
+  {
+    name: "work-init/gitignore: a cold init writes a nested .aof/.gitignore ignoring the derived memory index, never the repo root",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"] });
+        const nested = p(repo, ".aof", ".gitignore");
+        assert.ok(existsSync(nested), ".aof/.gitignore exists after init");
+        assert.ok(!existsSync(p(repo, ".gitignore")), "the repo-root .gitignore is NOT created/touched");
+        const lines = (await readFile(nested, "utf8")).split(/\r?\n/).map((l) => l.trim());
+        assert.ok(lines.includes("aof.memory.index.json"), ".aof/.gitignore ignores the derived memory index");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/gitignore: --dry-run writes no .aof/.gitignore",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        await initWork({ targetDir: repo, runtimes: ["claude"], dryRun: true });
+        assert.ok(!existsSync(p(repo, ".aof", ".gitignore")), "dry-run writes no .aof/.gitignore");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
+  {
+    name: "work-init/gitignore: init is additive + idempotent — it preserves existing .aof/.gitignore lines and never duplicates the entry",
+    run: async () => {
+      const repo = await tempRepo();
+      try {
+        // Seed a pre-existing nested .aof/.gitignore (e.g. an assistant-workspace `/work/`).
+        await mkdir(p(repo, ".aof"), { recursive: true });
+        await writeFile(p(repo, ".aof", ".gitignore"), "/work/\n", "utf8");
+        await initWork({ targetDir: repo, runtimes: ["claude"], force: true });
+        const content = await readFile(p(repo, ".aof", ".gitignore"), "utf8");
+        const lines = content.split(/\r?\n/).map((l) => l.trim());
+        assert.ok(lines.includes("/work/"), "the pre-existing line is preserved");
+        assert.ok(lines.includes("aof.memory.index.json"), "the index entry was added");
+        assert.equal(lines.filter((l) => l === "aof.memory.index.json").length, 1, "no duplicate index entry");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    }
+  },
   {
     name: "work-init/render: a named agent member lands at .claude/agents/aof-architect.md",
     run: async () => {

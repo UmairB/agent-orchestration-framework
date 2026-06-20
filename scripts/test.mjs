@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import { adapterTests } from "../test/adapters.test.mjs";
 import { catalogTests } from "../test/catalog.test.mjs";
 import { pathTests } from "../test/paths.test.mjs";
@@ -59,8 +60,28 @@ import { terminalSessionsTests } from "../test/terminal-sessions.test.mjs";
 import { archTests as acdTerminalServerOnlyTests } from "../test/arch/acd-terminal-server-only.test.mjs";
 import { archTests as acdVibeyardAttributionTests } from "../test/arch/acd-vibeyard-attribution.test.mjs";
 import { archTests as acdBoardSingleServerTests } from "../test/arch/acd-board-single-server.test.mjs";
+// milestone 04 — round-trip proof (story 00: the frozen harness)
+import { roundtripHarnessTests } from "../test/roundtrip-harness.test.mjs";
+import { archTests as acdRoundtripIsolationTests } from "../test/arch/acd-roundtrip-isolation.test.mjs";
+import { archTests as acdRoundtripReusesShippedCodeTests } from "../test/arch/acd-roundtrip-reuses-shipped-code.test.mjs";
+import { archTests as acdRoundtripHarnessContractTests } from "../test/arch/acd-roundtrip-harness-contract.test.mjs";
+import { archTests as acdRoundtripRegistrationTests } from "../test/arch/acd-roundtrip-registration.test.mjs";
+// milestone 04 — round-trip proof (story 01: install-proof, story 02: loop-proof)
+import { installProofTests } from "../test/roundtrip-install-proof.test.mjs";
+import { loopProofTests } from "../test/roundtrip-loop-proof.test.mjs";
+// milestone 06 — headroom plugin (ADRs 001–005; RED-until-built fitness functions)
+import { archTests as acdHeadroomConfigSchemaTests } from "../test/arch/acd-headroom-config-schema.test.mjs";
+import { archTests as acdHeadroomHonestDegradeTests } from "../test/arch/acd-headroom-honest-degrade.test.mjs";
+import { archTests as acdHeadroomConfigIsolationTests } from "../test/arch/acd-headroom-config-isolation.test.mjs";
+import { archTests as acdHeadroomNoDependencyTests } from "../test/arch/acd-headroom-no-dependency.test.mjs";
+import { archTests as acdHeadroomNoProxyRuntimeTests } from "../test/arch/acd-headroom-no-proxy-runtime.test.mjs";
+// milestone 06 — headroom plugin (story 00: config-contract @executable traceability)
+import { headroomConfigContractTests } from "../test/headroom-config-contract.test.mjs";
+// milestone 06 — headroom plugin (story 01: toggle-cli, story 02: wrap-routing @executable traceability)
+import { headroomToggleCliTests } from "../test/headroom-toggle-cli.test.mjs";
+import { headroomWrapRoutingTests } from "../test/headroom-wrap-routing.test.mjs";
 
-const tests = [
+export const tests = [
   ...adapterWarningTests,
   ...packageTests,
   ...bundleTests,
@@ -107,6 +128,21 @@ const tests = [
   ...acdTerminalServerOnlyTests,
   ...acdVibeyardAttributionTests,
   ...acdBoardSingleServerTests,
+  ...roundtripHarnessTests,
+  ...acdRoundtripIsolationTests,
+  ...acdRoundtripReusesShippedCodeTests,
+  ...acdRoundtripHarnessContractTests,
+  ...acdRoundtripRegistrationTests,
+  ...installProofTests,
+  ...loopProofTests,
+  ...acdHeadroomConfigSchemaTests,
+  ...acdHeadroomHonestDegradeTests,
+  ...acdHeadroomConfigIsolationTests,
+  ...acdHeadroomNoDependencyTests,
+  ...acdHeadroomNoProxyRuntimeTests,
+  ...headroomConfigContractTests,
+  ...headroomToggleCliTests,
+  ...headroomWrapRoutingTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
@@ -123,31 +159,49 @@ const tests = [
   ...catalogTests
 ];
 
-let failures = 0;
+// Run the suite ONLY when this module is the entry point. The
+// acd-roundtrip-registration meta-test imports the assembled `tests` array above
+// to verify every arch-test is registered; that import must NOT re-run the suite.
+async function runSuite() {
+  let failures = 0;
 
-console.log("# unit");
-for (const { name, run } of tests) {
-  try {
-    await run();
-    console.log(`ok - ${name}`);
-  } catch (error) {
-    failures += 1;
-    console.error(`not ok - ${name}`);
-    console.error(error.stack ?? error.message);
+  console.log("# unit");
+  for (const { name, run } of tests) {
+    try {
+      await run();
+      console.log(`ok - ${name}`);
+    } catch (error) {
+      failures += 1;
+      console.error(`not ok - ${name}`);
+      console.error(error.stack ?? error.message);
+    }
+  }
+
+  console.log("# integration");
+  const previousInProcess = process.env.AOF_IN_PROCESS_INTEGRATION;
+  process.env.AOF_IN_PROCESS_INTEGRATION = "1";
+  await import("../test/integration/cli.mjs");
+
+  if (previousInProcess === undefined) {
+    delete process.env.AOF_IN_PROCESS_INTEGRATION;
+  } else {
+    process.env.AOF_IN_PROCESS_INTEGRATION = previousInProcess;
+  }
+
+  if (failures > 0 || process.exitCode) {
+    process.exitCode = 1;
   }
 }
 
-console.log("# integration");
-const previousInProcess = process.env.AOF_IN_PROCESS_INTEGRATION;
-process.env.AOF_IN_PROCESS_INTEGRATION = "1";
-await import("../test/integration/cli.mjs");
-
-if (previousInProcess === undefined) {
-  delete process.env.AOF_IN_PROCESS_INTEGRATION;
-} else {
-  process.env.AOF_IN_PROCESS_INTEGRATION = previousInProcess;
-}
-
-if (failures > 0 || process.exitCode) {
-  process.exitCode = 1;
+// Invoke WITHOUT a blocking top-level await: the acd-roundtrip-registration
+// meta-test resolves the assembled suite by `import()`-ing this module, and a
+// pending top-level await here would deadlock that import. Letting runSuite()
+// run on its own keeps the event loop alive until it settles and sets the exit
+// code, while the module's evaluation completes immediately for importers.
+const invokedDirectly = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (invokedDirectly) {
+  runSuite().catch((error) => {
+    console.error(error.stack ?? error.message);
+    process.exitCode = 1;
+  });
 }

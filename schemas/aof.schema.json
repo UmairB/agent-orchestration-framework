@@ -387,6 +387,16 @@
             "baseUrl": { "type": "string", "description": "Base URL of the running app the design-conformance review renders surfaces against (e.g. https://localhost:1234); each DESIGN.md surface's Route is appended. Overridable per run with `aof:verify --url`." }
           },
           "additionalProperties": false
+        },
+        "headroom": {
+          "type": "object",
+          "description": "OPTIONAL headroom plugin config (milestone 06). Absent ≡ off — the work-board terminal launch is byte-for-byte unchanged when this block is absent or { enabled: false }. Closed (additionalProperties:false), peer to work.ui.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "The master switch. An absent block OR enabled:false leaves the terminal launch unchanged (raw passthrough)." },
+            "mode": { "enum": ["wrap"], "description": "wrap ONLY in v0; proxy is rejected at the schema (ADR-002 — a different runtime topology, not yet shipped). An enabled block with no mode defaults to wrap at runtime." },
+            "providers": { "type": "array", "items": { "enum": ["claude", "codex"] }, "description": "OPTIONAL subset of routable providers to front; absent ⇒ both [\"claude\",\"codex\"]. gemini is never a valid member (ADR-003 — not OpenAI-compatible, never routable)." }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

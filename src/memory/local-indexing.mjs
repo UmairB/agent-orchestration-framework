@@ -13,18 +13,19 @@
 // recordType are present as "" (never omitted) so retrieval filters uniformly.
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { readFile, appendFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { listItems } from "../work.mjs";
 import { readJson, writeText } from "../fs.mjs";
+import { ensureAofGitignore } from "../aof-gitignore.mjs";
 
 // The index-format version (ADR-005). Bump on a breaking record-shape change.
 export const INDEX_VERSION = 1;
 
 // The fixed, git-ignored store location (ADR-005), relative to the project root
 // (the directory holding `.aof/`). The index is the only persistent artifact the
-// local backend owns, and it is disposable.
+// local backend owns, and it is disposable. It is git-ignored via the nested
+// `.aof/.gitignore` baseline owned by src/aof-gitignore.mjs (F-02).
 const INDEX_REL = path.join(".aof", "aof.memory.index.json");
-const GITIGNORE_ENTRY = ".aof/aof.memory.index.json";
 
 export function memoryIndexPath(projectRoot) {
   return path.join(projectRoot, INDEX_REL);
@@ -216,39 +217,20 @@ export async function buildIndex(only, ctx) {
   };
 }
 
-// ------------------------------------------------------------- .gitignore ----
-
-// Idempotently ensure the project's `.gitignore` ignores the derived index
-// (ADR-005). `.aof/` is tracked in this repo, so this is a real deliverable: a
-// committed index would be an authoritative second copy (ADR-001 violation).
-async function ensureGitignored(projectRoot) {
-  const gitignorePath = path.join(projectRoot, ".gitignore");
-  let existing = "";
-  if (existsSync(gitignorePath)) {
-    existing = await readFile(gitignorePath, "utf8");
-    const ignored = existing
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .some((line) => line === GITIGNORE_ENTRY);
-    if (ignored) return false; // already ignored — no duplicate entry
-  }
-  const needsNewline = existing.length > 0 && !existing.endsWith("\n");
-  await appendFile(gitignorePath, `${needsNewline ? "\n" : ""}${GITIGNORE_ENTRY}\n`, "utf8");
-  return true;
-}
-
 // ----------------------------------------------------------- reindex/status ----
 
 // Reconstruct the derived index from the work-stream `.md` files and write it to
-// the fixed path (ADR-005), idempotently adding that path to `.gitignore`. A
-// fresh `reindex` fully reconstructs — nothing accretes (ADR-001). `only` scopes
-// the rebuild to one milestone; `ingest` is an alias of this (ADR-003).
+// the fixed path (ADR-005), idempotently ensuring it is git-ignored via the nested
+// `.aof/.gitignore` baseline (F-02 — never the repo-root `.gitignore`). `.aof/` is
+// tracked, so a committed index would be an authoritative second copy (ADR-001
+// violation). A fresh `reindex` fully reconstructs — nothing accretes (ADR-001).
+// `only` scopes the rebuild to one milestone; `ingest` is an alias of this (ADR-003).
 export async function reindex(only, ctx) {
   const { projectRoot } = ctx;
   const index = await buildIndex(only, ctx);
   const storePath = memoryIndexPath(projectRoot);
   await writeText(storePath, `${JSON.stringify(index, null, 2)}\n`);
-  await ensureGitignored(projectRoot);
+  await ensureAofGitignore(projectRoot);
   return {
     backend: "local",
     recordCount: index.recordCount,

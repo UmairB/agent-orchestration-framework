@@ -32,6 +32,8 @@ import { RUNTIMES } from "./model.mjs";
 import { loadBundle } from "./work-bundle.mjs";
 import { bundleVersion, summarizeActions, synthesizeBundleConfig } from "./work-bundle-synthesis.mjs";
 import { workspacePaths } from "./workspace.mjs";
+import { ensureAofGitignore } from "./aof-gitignore.mjs";
+import { setHeadroomEnabled, readConfig, writeConfig } from "./work-headroom.mjs";
 
 // ADR-009: the install manifest lives in the `work` section of the single unified
 // project lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There
@@ -53,6 +55,7 @@ export async function initWork(options = {}) {
   const runtimes = normalizeRuntimes(options.runtimes);
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
+  const withHeadroom = Boolean(options.withHeadroom);
 
   const lockPath = workLockPath(targetDir);
 
@@ -104,6 +107,13 @@ export async function initWork(options = {}) {
 
   await executeApplyActions(actions);
 
+  // Establish the workspace `.gitignore` baseline (milestone 04 round-trip finding
+  // F-02): a SELF-CONTAINED nested `.aof/.gitignore` that ignores the derived,
+  // regenerable artifacts (the memory index) — never the repo-root `.gitignore`.
+  // The tracked install (lock, config, rendered members) stays committed. Idempotent
+  // and additive, so a re-render (--force) or a later memory reindex composes cleanly.
+  await ensureAofGitignore(targetDir);
+
   // Install manifest (ADR-004 → ADR-009): a lock-v2 record from createLockManifest,
   // MINUS its own `version` (the unified lock carries ONE top-level version), plus
   // the `bundle: { version }`. This is the `work` SECTION of the unified lock.
@@ -131,6 +141,17 @@ export async function initWork(options = {}) {
   const currentLock = (await readLock(lockPath)) ?? {};
   await writeLock(lockPath, { ...currentLock, work: manifest });
 
+  // `--with-headroom` (ADR-004): the SAME config write as use-headroom, applied to the
+  // fresh config. `aof work init` does not otherwise write aof.config.json (it renders
+  // the bundle + writes the lock), so this is genuinely NEW config-writing wiring. We
+  // create-or-merge the config, set the enabled work.headroom block (deep-merge, never
+  // clobbering work.* siblings) and record the selected runtimes so the resulting
+  // config observably selects them. Without the flag the config is left untouched, so
+  // work.headroom stays absent (the off default, ADR-001). The lock is never read/written here.
+  if (withHeadroom) {
+    await writeHeadroomConfig(targetDir, runtimes);
+  }
+
   return {
     targetDir,
     runtimes,
@@ -154,4 +175,21 @@ function normalizeRuntimes(runtimes) {
     }
   }
   return deduped;
+}
+
+// `--with-headroom`: create-or-merge aof.config.json with the enabled work.headroom
+// block, reusing work-headroom.mjs's IDENTICAL readConfig/writeConfig (so the config
+// path resolution and JSON style are the SAME as `use-headroom` — no second, divergent
+// idiom). It also records the selected runtimes so the resulting config observably
+// selects them (task 03's "the resulting config selects the runtimes" scenario).
+// NOTE: `config.runtimes` is written ONLY on this `--with-headroom` path — a plain
+// `aof work init` writes no aof.config.json at all (it renders the bundle + lock), so
+// the runtimes key is a deliberate `--with-headroom`-only side effect, not a general
+// init behaviour. The headroom `providers` default stays ["claude","codex"], independent
+// of --runtime (the resolver intersects at runtime). Never touches the lock.
+async function writeHeadroomConfig(targetDir, runtimes) {
+  const { configPath, config } = await readConfig(targetDir);
+  config.runtimes = runtimes;
+  setHeadroomEnabled(config);
+  await writeConfig(configPath, config);
 }

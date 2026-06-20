@@ -16,6 +16,7 @@ import { WebSocketServer } from "ws";
 import { loadWorkspace, findWork } from "./work.mjs";
 import { resolveProvider, PROVIDER_IDS } from "./terminal-providers.mjs";
 import { registerSession, unregisterSession } from "./terminal-sessions.mjs";
+import { resolveHeadroomLaunch } from "./headroom.mjs";
 
 // The single terminal pathname (ADR-001). Any other upgrade pathname is destroyed.
 const TERMINAL_PATH = "/ws/terminal";
@@ -106,14 +107,19 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
 
   // Resolve the item's directory from the ref, in-process, to use as PTY cwd.
   // A missing/unresolvable ref falls back to projectDir rather than crashing.
+  // The workspace config is retained for the headroom resolver (ADR-003): it is
+  // hoisted out of the try and left undefined on the catch path, so a config
+  // resolution failure is treated as plugin-off and never breaks the terminal.
   let cwd = projectDir;
+  let headroomConfig = undefined;
   try {
     const workspace = await loadWorkspace(projectDir);
+    headroomConfig = workspace.config;
     const rows = await findWork(workspace.workDir, ref);
     const item = rows.find((row) => row.ref === ref) ?? rows[0] ?? null;
     if (item?.dir) cwd = item.dir;
   } catch {
-    // Resolution failure is non-fatal: spawn against projectDir.
+    // Resolution failure is non-fatal: spawn against projectDir, plugin off.
   }
 
   // Resolve the binary path ONCE and reuse it for both the honest-degrade gate
@@ -133,9 +139,24 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
   const sessionId = `${ref || "session"}:${provider.id}:${Date.now()}`;
   const env = provider.buildEnv(sessionId, baseEnv);
 
+  // The headroom plugin's single seam ↔ runtime call (ADR-003). It runs AFTER the
+  // provider gate (a missing PROVIDER fires the error frame above and never reaches
+  // here) and BEFORE spawn: a pure decoration of the already-computed raw launch.
+  // Plugin off / not-routable (gemini) / headroom-absent all return the raw launch
+  // unchanged; enabled + routable + headroom on PATH returns the wrapped launch.
+  // The injected `which` is the same PATH lookup the provider seam uses.
+  const launch = resolveHeadroomLaunch({
+    providerId: provider.id,
+    config: headroomConfig,
+    rawBin: bin,
+    rawArgs: args,
+    env: baseEnv,
+    which,
+  });
+
   let term;
   try {
-    term = await spawn(bin, args, {
+    term = await spawn(launch.bin, launch.args, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,

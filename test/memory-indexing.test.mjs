@@ -418,35 +418,40 @@ export const memoryIndexingTests = [
     },
   },
   {
-    name: "03/gitignore: reindex adds the index path to .gitignore when it is absent",
+    name: "03/gitignore: reindex ignores the index via the nested .aof/.gitignore when it is absent",
     run: async () => {
       const { projectRoot, ctx } = await tempStream([
         { number: "01", slug: "acd-asset-bundle", retro: TINY_RETRO },
       ]);
       try {
-        const gitignorePath = path.join(projectRoot, ".gitignore");
-        assert.ok(!existsSync(gitignorePath), "no .gitignore yet");
+        // F-02: the baseline is a SELF-CONTAINED nested .aof/.gitignore, never the repo root.
+        const gitignorePath = path.join(projectRoot, ".aof", ".gitignore");
+        assert.ok(!existsSync(gitignorePath), "no .aof/.gitignore yet");
+        assert.ok(!existsSync(path.join(projectRoot, ".gitignore")), "the repo-root .gitignore is left untouched");
         await reindex(null, ctx);
-        assert.ok(existsSync(gitignorePath), ".gitignore created");
+        assert.ok(existsSync(gitignorePath), ".aof/.gitignore created");
+        assert.ok(!existsSync(path.join(projectRoot, ".gitignore")), "the repo-root .gitignore is still untouched");
+        // The entry is relative to .aof/ (git applies a nested ignore from its own dir).
         const lines = (await readFile(gitignorePath, "utf8")).split(/\r?\n/).map((l) => l.trim());
-        assert.ok(lines.includes(".aof/aof.memory.index.json"), ".gitignore ignores the index path");
+        assert.ok(lines.includes("aof.memory.index.json"), ".aof/.gitignore ignores the index");
       } finally {
         await rm(projectRoot, { recursive: true, force: true });
       }
     },
   },
   {
-    name: "03/gitignore: reindex does not duplicate an existing .gitignore entry",
+    name: "03/gitignore: reindex does not duplicate an existing nested .aof/.gitignore entry",
     run: async () => {
       const { projectRoot, ctx } = await tempStream([
         { number: "01", slug: "acd-asset-bundle", retro: TINY_RETRO },
       ]);
       try {
-        const gitignorePath = path.join(projectRoot, ".gitignore");
-        await writeFile(gitignorePath, "node_modules/\n.aof/aof.memory.index.json\n", "utf8");
+        const gitignorePath = path.join(projectRoot, ".aof", ".gitignore");
+        await mkdir(path.join(projectRoot, ".aof"), { recursive: true });
+        await writeFile(gitignorePath, "# pre-existing\naof.memory.index.json\n", "utf8");
         await reindex(null, ctx);
         const content = await readFile(gitignorePath, "utf8");
-        const count = content.split(/\r?\n/).filter((l) => l.trim() === ".aof/aof.memory.index.json").length;
+        const count = content.split(/\r?\n/).filter((l) => l.trim() === "aof.memory.index.json").length;
         assert.equal(count, 1, "exactly one entry (no duplicate)");
       } finally {
         await rm(projectRoot, { recursive: true, force: true });
@@ -454,19 +459,20 @@ export const memoryIndexingTests = [
     },
   },
   {
-    name: "03/gitignore: the written index path is recorded in .gitignore after reindex (git treats it as ignored)",
+    name: "03/gitignore: the written index path is git-ignored via the nested .aof/.gitignore after reindex",
     run: async () => {
       // We assert the observable file-outcome that drives git's ignore decision:
-      // the index's fixed path matches a .gitignore entry. (Running real `git
-      // check-ignore` would require a git repo + git on PATH; the entry presence
-      // is the deterministic outcome the scenario hinges on.)
+      // the index's fixed name matches an entry in its own dir's .gitignore (git
+      // applies a nested ignore relative to that dir). Running real `git check-ignore`
+      // would require a git repo + git on PATH; the entry presence is the
+      // deterministic outcome the scenario hinges on.
       const { projectRoot, ctx } = await tempStream([
         { number: "01", slug: "acd-asset-bundle", retro: TINY_RETRO },
       ]);
       try {
         await reindex(null, ctx);
-        const lines = (await readFile(path.join(projectRoot, ".gitignore"), "utf8")).split(/\r?\n/).map((l) => l.trim());
-        assert.ok(lines.includes(".aof/aof.memory.index.json"), "the written index path is git-ignored");
+        const lines = (await readFile(path.join(projectRoot, ".aof", ".gitignore"), "utf8")).split(/\r?\n/).map((l) => l.trim());
+        assert.ok(lines.includes("aof.memory.index.json"), "the written index is git-ignored by .aof/.gitignore");
       } finally {
         await rm(projectRoot, { recursive: true, force: true });
       }

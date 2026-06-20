@@ -61,6 +61,15 @@ import { terminalWsTests } from "../test/terminal-ws.test.mjs";
 import { archTests as acdTerminalServerOnlyTests } from "../test/arch/acd-terminal-server-only.test.mjs";
 import { archTests as acdVibeyardAttributionTests } from "../test/arch/acd-vibeyard-attribution.test.mjs";
 import { archTests as acdBoardSingleServerTests } from "../test/arch/acd-board-single-server.test.mjs";
+// milestone 04 — round-trip proof (story 00: the frozen harness)
+import { roundtripHarnessTests } from "../test/roundtrip-harness.test.mjs";
+import { archTests as acdRoundtripIsolationTests } from "../test/arch/acd-roundtrip-isolation.test.mjs";
+import { archTests as acdRoundtripReusesShippedCodeTests } from "../test/arch/acd-roundtrip-reuses-shipped-code.test.mjs";
+import { archTests as acdRoundtripHarnessContractTests } from "../test/arch/acd-roundtrip-harness-contract.test.mjs";
+import { archTests as acdRoundtripRegistrationTests } from "../test/arch/acd-roundtrip-registration.test.mjs";
+// milestone 04 — round-trip proof (story 01: install-proof, story 02: loop-proof)
+import { installProofTests } from "../test/roundtrip-install-proof.test.mjs";
+import { loopProofTests } from "../test/roundtrip-loop-proof.test.mjs";
 
 const tests = [
   ...adapterWarningTests,
@@ -111,6 +120,13 @@ const tests = [
   ...acdTerminalServerOnlyTests,
   ...acdVibeyardAttributionTests,
   ...acdBoardSingleServerTests,
+  ...roundtripHarnessTests,
+  ...acdRoundtripIsolationTests,
+  ...acdRoundtripReusesShippedCodeTests,
+  ...acdRoundtripHarnessContractTests,
+  ...acdRoundtripRegistrationTests,
+  ...installProofTests,
+  ...loopProofTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
