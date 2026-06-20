@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export async function readJson(filePath) {
@@ -16,8 +17,22 @@ export async function writeText(filePath, content, { dryRun = false } = {}) {
   }
 
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, content, "utf8");
+  const tempPath = path.join(path.dirname(filePath), `.tmp-${path.basename(filePath)}-${process.pid}-${Date.now()}-${randomUUID()}`);
+  await writeFile(tempPath, content, "utf8");
+  await renameWithRetry(tempPath, filePath);
   return { path: filePath, action: "write" };
+}
+
+async function renameWithRetry(source, target) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      if (!["EACCES", "EPERM"].includes(error.code) || attempt === 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
 }
 
 export function normalizeId(id) {

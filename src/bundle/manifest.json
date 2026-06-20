@@ -1,0 +1,314 @@
+{
+  "bundleVersion": "0.1.0",
+  "runtimes": [
+    "claude"
+  ],
+  "entries": [
+    {
+      "path": ".aof/templates/work/milestone/ARCHITECTURE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:9b3e85b4e484231a5f7ada2cb074e95c3a8b235326af9b40e1c2f127171075c9"
+    },
+    {
+      "path": ".aof/templates/work/milestone/COMPLIANCE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:81de7f819485c25039975065e2cbc9743cc8d3b801d29f851752e458bb4751e3"
+    },
+    {
+      "path": ".aof/templates/work/milestone/DESIGN.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:99519bc65c9c99312df7f6fb998cabf3a2979fc91041b2c5bfb733e6c0dd65ce"
+    },
+    {
+      "path": ".aof/templates/work/milestone/RESEARCH.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:a76f56e561d6a52c14bd5f603c0826e4ecb69b937aae134ae08ed3432621b80a"
+    },
+    {
+      "path": ".aof/templates/work/milestone/SECURITY.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:98c5c2913643886c873a21bd1543f46595d7227638b2d1b261b2f34b6e747a14"
+    },
+    {
+      "path": ".aof/templates/work/milestone/SPEC.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:4f84f971ed62e7f99981e39626dd2f9fe9ff1f12283c43b69de6ece973ddfe01"
+    },
+    {
+      "path": ".aof/templates/work/milestone/STATE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:22aac55bccd5a8c78991bc5ad4b9c994c4bad304dffff214dca4fdc731051e15"
+    },
+    {
+      "path": ".aof/templates/work/milestone/UAT.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:526436fec432d377720696577b9f10597db1bfa7c79471be0b0c085698870d49"
+    },
+    {
+      "path": ".aof/templates/work/story/STORY.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "story",
+        "kind": "template"
+      },
+      "hash": "sha256:ab11aa5ff77cddd86b542c0a1e9785561cdf66f855b90cf491e4f4fa83d770d4"
+    },
+    {
+      "path": ".aof/templates/work/task/example.feature",
+      "runtime": "claude",
+      "resource": {
+        "id": "task",
+        "kind": "template"
+      },
+      "hash": "sha256:1e61fc947a0e21092cef9702e37d8afca9c3d683d00c9a1455b457114850b074"
+    },
+    {
+      "path": ".aof/templates/work/uat/SESSION.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "uat",
+        "kind": "template"
+      },
+      "hash": "sha256:e6533a6634a2d6f674a909133928461ddf420775ca7544ed9c84ee5d497cf908"
+    },
+    {
+      "path": ".aof/templates/work/uat/STATE.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "uat",
+        "kind": "template"
+      },
+      "hash": "sha256:a5f4217a4efbfaa97039fe1dbff14a98e8b9a84f21ca5c1a817f03960259e468"
+    },
+    {
+      "path": ".claude/agents/aof-architect.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-architect",
+        "kind": "agent"
+      },
+      "hash": "sha256:8a120054160a7313c5d4129158dc261aaa7a65dfbd4eb4f3d5acbd242b39b17f"
+    },
+    {
+      "path": ".claude/agents/aof-compliance.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-compliance",
+        "kind": "agent"
+      },
+      "hash": "sha256:5a408a27097196df3e2b4a17782052271e28da16122b7aa91bb3cca9ce6d28d3"
+    },
+    {
+      "path": ".claude/agents/aof-designer.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-designer",
+        "kind": "agent"
+      },
+      "hash": "sha256:9edfc9d3aafc4dc50cf2f855c38eaf2b6e7f864625aa5700b06fa2c942971191"
+    },
+    {
+      "path": ".claude/agents/aof-developer.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-developer",
+        "kind": "agent"
+      },
+      "hash": "sha256:5bfca79027ad00bf822c135c1499e8bd9ced79e149d3a92a80050b154a67a66e"
+    },
+    {
+      "path": ".claude/agents/aof-product-owner.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-product-owner",
+        "kind": "agent"
+      },
+      "hash": "sha256:5f4bef91cf79cd21141c1a69715fa8435d9e643381a0ab9bd0f26657b9be8908"
+    },
+    {
+      "path": ".claude/agents/aof-qa.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-qa",
+        "kind": "agent"
+      },
+      "hash": "sha256:450c8f02e49e04a9f0d3c6379e10b2afb6446bb0aa5543706da799b3d1bd55db"
+    },
+    {
+      "path": ".claude/agents/aof-researcher.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-researcher",
+        "kind": "agent"
+      },
+      "hash": "sha256:97e6246c240078523c390f1a8cea6ec582c9829a9738ccf58c588efdd8a0c0fe"
+    },
+    {
+      "path": ".claude/agents/aof-security.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "aof-security",
+        "kind": "agent"
+      },
+      "hash": "sha256:7444fed824e28da177b80b915a685c890ef9b9562c8ccdfd5ac7c0af2c80b59b"
+    },
+    {
+      "path": ".claude/commands/aof/add-milestone.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "add-milestone",
+        "kind": "command"
+      },
+      "hash": "sha256:d8b80ea7d547f60c5f6f95eafdf7ddb3f9bc01afacd24e265a50e9abd47f3b0a"
+    },
+    {
+      "path": ".claude/commands/aof/add-story.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "add-story",
+        "kind": "command"
+      },
+      "hash": "sha256:8d36942b56d67affc36a90021f1711a63aadde846791684c2f4360e212174d61"
+    },
+    {
+      "path": ".claude/commands/aof/add-task.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "add-task",
+        "kind": "command"
+      },
+      "hash": "sha256:ec0657153ee5161423bc1cd4d994d978a06a0c9c4da58772c236005791f0135c"
+    },
+    {
+      "path": ".claude/commands/aof/add-uat.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "add-uat",
+        "kind": "command"
+      },
+      "hash": "sha256:8adc05a690b2b38531e7f38a691dbb5fd84267517fa7a66dca00b075e9562857"
+    },
+    {
+      "path": ".claude/commands/aof/autonomous.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "autonomous",
+        "kind": "command"
+      },
+      "hash": "sha256:734c282303e9e78d5fe89e62576da0cc384a661f5232e9e11f52e61dfbf8ab29"
+    },
+    {
+      "path": ".claude/commands/aof/code-review.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "code-review",
+        "kind": "command"
+      },
+      "hash": "sha256:bc98c919227bb0591add2ab3d60e45e86cb10bde0f106591cbfe8b9b3d17158c"
+    },
+    {
+      "path": ".claude/commands/aof/continue.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "continue",
+        "kind": "command"
+      },
+      "hash": "sha256:9d5927ab5781ba4b8bf9930be4ec682b7db732fa167f9c0f622977104156dc07"
+    },
+    {
+      "path": ".claude/commands/aof/feedback.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "feedback",
+        "kind": "command"
+      },
+      "hash": "sha256:a1126ed1db4def4f95f60ef0fdc6723eff11f378cead2cf6d08f0cd17c488ab8"
+    },
+    {
+      "path": ".claude/commands/aof/recent.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "recent",
+        "kind": "command"
+      },
+      "hash": "sha256:2be5ef0ea969063bdb9a8daebe7645847b34dd67674ad73460a9d7fb0cce8604"
+    },
+    {
+      "path": ".claude/commands/aof/refine.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "refine",
+        "kind": "command"
+      },
+      "hash": "sha256:43cb7bf8b1bd80d673abcb259323b2df2e79929c1973b8e24207c201d0f950d3"
+    },
+    {
+      "path": ".claude/commands/aof/retrospective.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "retrospective",
+        "kind": "command"
+      },
+      "hash": "sha256:5bc8acc543472790b60ef1e53828c91d019376c459d01a08da7cd86de9012f6a"
+    },
+    {
+      "path": ".claude/commands/aof/shatter.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "shatter",
+        "kind": "command"
+      },
+      "hash": "sha256:b5bc534e669d10d6d4a9917fd7eb3275617619f59439bf12e5bfaf36801041b8"
+    },
+    {
+      "path": ".claude/commands/aof/validate.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "validate",
+        "kind": "command"
+      },
+      "hash": "sha256:c35e3e920ea07e0753843e0ca3dbd87622769c30b687d5cf22b5ad2950a8336b"
+    },
+    {
+      "path": ".claude/commands/aof/verify.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "verify",
+        "kind": "command"
+      },
+      "hash": "sha256:77d81caf3b41f4459b226f29dd4fc4e5e39de01427e36e03abc5a6e8427a8ca0"
+    }
+  ]
+}

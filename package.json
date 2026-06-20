@@ -13,7 +13,7 @@
     "test": "node ./scripts/test.mjs",
     "test:unit": "node ./scripts/test-unit.mjs",
     "test:integration": "node ./test/integration/cli.mjs",
-    "test:integration:ps": "powershell -ExecutionPolicy Bypass -File ./test/integration/cli.ps1",
+    "test:integration:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File ./test/integration/cli.ps1",
     "test:smoke:cli": "node ./test/integration/cli-child-process.test.mjs",
     "test:all": "node ./scripts/test.mjs",
     "security:supply-chain": "node ./scripts/supply-chain-audit.mjs",
@@ -33,6 +33,11 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.4.2"
+    "@inquirer/prompts": "^8.4.2",
+    "node-pty": "1.1.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0"
   }
 }

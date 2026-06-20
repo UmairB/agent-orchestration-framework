@@ -361,6 +361,9 @@ function workflowRuntimePath(runtime, id) {
 
 function resourcePath(runtime, resource) {
   if (resource.kind === "skill") return path.join("skills", resource.id, "SKILL.md");
+  if (resource.kind === "command" && resource.commandNamespace) {
+    return path.join("commands", resource.commandNamespace, `${resource.id}.md`);
+  }
   if (resource.kind === "command") return path.join("commands", `${resource.id}.md`);
   if (resource.kind === "agent") return path.join("agents", `${resource.id}.md`);
   if (resource.kind === "rule" && runtime === "claude") return path.join("rules", `${resource.id}.md`);
@@ -384,11 +387,14 @@ function renderResource(runtime, adapter, resource, workflowIndex = new Map(), a
   }
 
   if (resource.kind === "command") {
+    const invocationName = resource.commandNamespace
+      ? `${resource.commandNamespace}:${resource.id}`
+      : resource.id;
     return [
       "---",
       "aof-generated: true",
       `description: ${resource.description ?? ""}`,
-      `aof-invocation: ${adapter.commandPrefix}${resource.id}`,
+      `aof-invocation: ${adapter.commandPrefix}${invocationName}`,
       `aof-runtime: ${runtime}`,
       "---",
       "",

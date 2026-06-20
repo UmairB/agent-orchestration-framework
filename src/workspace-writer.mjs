@@ -3,6 +3,8 @@ import { writeText } from "./fs.mjs";
 import { assetBodyPath } from "./config-editor.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
+const WORKSPACE_GITIGNORE = "/work/\n";
+
 export async function writeWorkspaceConfig(targetDir, config) {
   const paths = workspacePaths(targetDir);
   const resources = [];
@@ -20,6 +22,7 @@ export async function writeWorkspaceConfig(targetDir, config) {
     resources.push(metadata);
   }
 
+  await writeText(path.join(paths.workspaceDir, ".gitignore"), WORKSPACE_GITIGNORE);
   await writeText(paths.configPath, `${JSON.stringify({
     $schema: config.$schema ?? "https://aof.local/schemas/aof.schema.json",
     name: config.name ?? "assistant-project",

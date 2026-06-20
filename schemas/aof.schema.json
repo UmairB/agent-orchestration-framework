@@ -74,6 +74,8 @@
       "items": { "$ref": "#/$defs/projectDoc" }
     },
     "settings": { "$ref": "#/$defs/settings" },
+    "work": { "$ref": "#/$defs/work" },
+    "memory": { "$ref": "#/$defs/memory" },
     "items": {
       "type": "array",
       "items": { "type": "string" }
@@ -344,6 +346,71 @@
         }
       },
       "additionalProperties": true
+    },
+    "work": {
+      "type": "object",
+      "description": "Configuration for the ACD (Acceptance-Criteria Development) work stream: the flat, chronological stream of milestone / story / task / uat items.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Path, relative to the repo root, to the flat work-item stream (NN_type_slug folders)."
+        },
+        "agents": {
+          "type": "object",
+          "description": "How ACD role agents are orchestrated.",
+          "properties": {
+            "mode": {
+              "enum": ["orchestrated", "solo"],
+              "description": "orchestrated = the main session spawns role sub-agents; solo = the main session performs every role inline."
+            },
+            "productOwner": {
+              "enum": ["inline", "agent"],
+              "description": "inline = the main session authors SPEC/story/acceptance; agent = delegate authoring to the aof-product-owner sub-agent."
+            }
+          },
+          "additionalProperties": false
+        },
+        "tags": {
+          "type": "object",
+          "description": "Project-specific tag vocabulary (the closed set the validator enforces). Universal tags (@executable, @manual, @bug, @wip, @milestone-NN, @uat-<id>) are owned by the framework, not configured here.",
+          "properties": {
+            "layers": { "type": "array", "items": { "type": "string" } },
+            "refinements": { "type": "array", "items": { "type": "string" } },
+            "domains": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "ui": {
+          "type": "object",
+          "description": "UI / design-review settings. ACD does NOT boot the app — the project runs it; ACD only points at it.",
+          "properties": {
+            "baseUrl": { "type": "string", "description": "Base URL of the running app the design-conformance review renders surfaces against (e.g. https://localhost:1234); each DESIGN.md surface's Route is appended. Overridable per run with `aof:verify --url`." }
+          },
+          "additionalProperties": false
+        },
+        "headroom": {
+          "type": "object",
+          "description": "OPTIONAL headroom plugin config (milestone 06). Absent ≡ off — the work-board terminal launch is byte-for-byte unchanged when this block is absent or { enabled: false }. Closed (additionalProperties:false), peer to work.ui.",
+          "properties": {
+            "enabled": { "type": "boolean", "description": "The master switch. An absent block OR enabled:false leaves the terminal launch unchanged (raw passthrough)." },
+            "mode": { "enum": ["wrap"], "description": "wrap ONLY in v0; proxy is rejected at the schema (ADR-002 — a different runtime topology, not yet shipped). An enabled block with no mode defaults to wrap at runtime." },
+            "providers": { "type": "array", "items": { "enum": ["claude", "codex"] }, "description": "OPTIONAL subset of routable providers to front; absent ⇒ both [\"claude\",\"codex\"]. gemini is never a valid member (ADR-003 — not OpenAI-compatible, never routable)." }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "memory": {
+      "type": "object",
+      "description": "Work-memory backend selection (milestone 05). OPTIONAL — an absent `memory` key is equivalent to { \"backend\": \"none\" } (the graceful no-op). `backend` is an enum of the registered backend names.",
+      "properties": {
+        "backend": {
+          "enum": ["local", "none"],
+          "description": "The memory backend that answers the `aof work memory` verbs. `local` = the cheap derived-index backend; `none` = a no-op so ACD runs unchanged when memory is absent."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

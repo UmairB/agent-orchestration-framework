@@ -110,27 +110,3 @@ Feature: AOF setup UI API
     When I remove global skill `shared-review` from the project through the setup UI API
     Then HTTP response status should be 200
     And HTTP response field `globalRefs.length` should equal `0`
-
-  Scenario: Manage a board task through the setup UI API
-    Given a running setup UI server
-    When I save agent resource `builder` through the setup UI API
-    Then HTTP response status should be 200
-    When I create board `delivery` through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `board.id` should equal `delivery`
-    When I create task `phase-31` on board `delivery` through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `task.status` should equal `ready`
-    When I edit task `phase-31` on board `delivery` through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `task.title` should equal `Phase 31 UI`
-    When I assign task `phase-31` on board `delivery` to agent `builder` through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `execution.status` should equal `running`
-    When I mark task `phase-31` on board `delivery` execution `complete` through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `task.status` should equal `done`
-    When I request board validation through the setup UI API
-    Then HTTP response status should be 200
-    And HTTP response field `valid` should equal `true`
-    And HTTP response field `warnings` should equal `1`

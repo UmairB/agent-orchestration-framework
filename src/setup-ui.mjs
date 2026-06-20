@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
-import { addTask, archiveBoard, createBoard, editTask, getBoard, listBoards, moveTask, repairBoard, syncBoardFromGsdRoadmap, validateBoards, writeBoardIndex } from "./boards.mjs";
-import { assignTaskToAgent, isGsdExecutionConfigured, listBoardAgents, readTaskExecution, updateTaskExecution } from "./board-execution.mjs";
+import { handleWorkApi } from "./board-ui.mjs";
+import { attachTerminalWebSocket } from "./terminal-ws.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -15,7 +15,7 @@ const VALID_CATALOG_KINDS = new Set(["skill", "agent"]);
 export async function serveSetupUi(catalog, options = {}) {
   const port = Number.parseInt(options.port ?? "4177", 10);
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const uiRoot = path.join(repoRoot, "ui");
+  const uiRoot = options.uiRoot ? path.resolve(options.uiRoot) : path.join(repoRoot, "ui");
   const projectDir = path.resolve(options.projectDir ?? process.cwd());
 
   const server = http.createServer(async (request, response) => {
@@ -96,212 +96,6 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === "/api/boards") {
-      try {
-        sendJson(response, 200, { ok: true, boards: await listBoards(projectDir, { includeArchived: requestUrl.searchParams.get("archived") === "true" }) });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    if (request.method === "PUT" && requestUrl.pathname === "/api/boards/index") {
-      try {
-        const result = await writeBoardIndex(projectDir);
-        sendJson(response, 200, { ok: true, index: result.index, indexPath: result.indexPath });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    if (request.method === "GET" && requestUrl.pathname === "/api/boards/validate") {
-      try {
-        const diagnostics = await validateBoards(projectDir);
-        const errors = diagnostics.filter((item) => item.severity === "error");
-        const warnings = diagnostics.filter((item) => item.severity === "warning");
-        sendJson(response, 200, { ok: true, valid: errors.length === 0, errors: errors.length, warnings: warnings.length, diagnostics });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    if (request.method === "GET" && requestUrl.pathname === "/api/boards/agents") {
-      try {
-        sendJson(response, 200, { ok: true, agents: await listBoardAgents(projectDir, options) });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    if (request.method === "PUT") {
-      const boardCreateMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)$/);
-      if (boardCreateMatch) {
-        try {
-          const routeId = decodeRoutePart(boardCreateMatch[1]);
-          const item = await readJsonBody(request);
-          if (item.id !== undefined && item.id !== routeId) {
-            sendApiError(response, 400, "Board id in payload does not match request path.", "route-payload-mismatch");
-            return;
-          }
-          const gsdConfigured = await isGsdExecutionConfigured(projectDir, options);
-          const result = await createBoard(projectDir, {
-            ...item,
-            id: routeId,
-            executionProvider: gsdConfigured ? "gsd" : item.executionProvider,
-            defaultExecutionRuntime: item.defaultExecutionRuntime ?? "codex"
-          }, { force: Boolean(item.force) });
-          sendJson(response, 200, { ok: true, board: result.board });
-        } catch (error) {
-          sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-        }
-        return;
-      }
-    }
-
-    const boardShowMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)$/);
-    if (request.method === "GET" && boardShowMatch) {
-      try {
-        const routeId = decodeRoutePart(boardShowMatch[1]);
-        sendJson(response, 200, { ok: true, board: await getBoard(projectDir, routeId) });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const boardArchiveMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/archive$/);
-    if (request.method === "PUT" && boardArchiveMatch) {
-      try {
-        sendJson(response, 200, { ok: true, board: await archiveBoard(projectDir, decodeRoutePart(boardArchiveMatch[1])) });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const boardSyncMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/sync$/);
-    if (request.method === "PUT" && boardSyncMatch) {
-      try {
-        const result = await syncBoardFromGsdRoadmap(projectDir, decodeRoutePart(boardSyncMatch[1]));
-        sendJson(response, 200, { ok: true, board: result.board, phases: result.phases, created: result.created });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const boardRepairMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/repair$/);
-    if (request.method === "PUT" && boardRepairMatch) {
-      try {
-        const item = await readOptionalJsonBody(request);
-        const result = await repairBoard(projectDir, decodeRoutePart(boardRepairMatch[1]), {
-          defaultExecutionRuntime: item.defaultExecutionRuntime
-        });
-        sendJson(response, 200, { ok: true, ...result });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const taskMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)$/);
-    if (request.method === "PUT" && taskMatch) {
-      try {
-        const boardId = decodeRoutePart(taskMatch[1]);
-        const taskId = decodeRoutePart(taskMatch[2]);
-        const item = await readJsonBody(request);
-        if (item.id !== undefined && item.id !== taskId) {
-          sendApiError(response, 400, "Task id in payload does not match request path.", "route-payload-mismatch");
-          return;
-        }
-        const result = await addTask(projectDir, boardId, { ...item, id: taskId }, { force: Boolean(item.force) });
-        sendJson(response, 200, { ok: true, task: result.task });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    if (request.method === "PATCH" && taskMatch) {
-      try {
-        const boardId = decodeRoutePart(taskMatch[1]);
-        const taskId = decodeRoutePart(taskMatch[2]);
-        const item = await readJsonBody(request);
-        if (item.id !== undefined && item.id !== taskId) {
-          sendApiError(response, 400, "Task id in payload does not match request path.", "route-payload-mismatch");
-          return;
-        }
-        const task = await editTask(projectDir, boardId, taskId, item);
-        sendJson(response, 200, { ok: true, task });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const taskStatusMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/status$/);
-    if (request.method === "PUT" && taskStatusMatch) {
-      try {
-        const item = await readJsonBody(request);
-        if (!item.status) {
-          sendApiError(response, 400, "Task status is required.", "validation-failed");
-          return;
-        }
-        const task = await moveTask(projectDir, decodeRoutePart(taskStatusMatch[1]), decodeRoutePart(taskStatusMatch[2]), item.status);
-        sendJson(response, 200, { ok: true, task });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const taskAssignmentMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/assignment$/);
-    if (request.method === "PUT" && taskAssignmentMatch) {
-      try {
-        const item = await readJsonBody(request);
-        if (!item.agentId) {
-          sendApiError(response, 400, "Agent id is required.", "validation-failed");
-          return;
-        }
-        const result = await assignTaskToAgent(projectDir, decodeRoutePart(taskAssignmentMatch[1]), decodeRoutePart(taskAssignmentMatch[2]), item.agentId, {
-          ...options,
-          provider: item.provider
-        });
-        sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
-    const taskExecutionMatch = requestUrl.pathname.match(/^\/api\/boards\/([^/]+)\/tasks\/([^/]+)\/execution$/);
-    if (request.method === "GET" && taskExecutionMatch) {
-      try {
-        const result = await readTaskExecution(projectDir, decodeRoutePart(taskExecutionMatch[1]), decodeRoutePart(taskExecutionMatch[2]));
-        sendJson(response, 200, { ok: true, execution: result.execution, executionPath: result.executionPath });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-    if (request.method === "PUT" && taskExecutionMatch) {
-      try {
-        const item = await readJsonBody(request);
-        if (!item.status) {
-          sendApiError(response, 400, "Execution status is required.", "validation-failed");
-          return;
-        }
-        const result = await updateTaskExecution(projectDir, decodeRoutePart(taskExecutionMatch[1]), decodeRoutePart(taskExecutionMatch[2]), item);
-        sendJson(response, 200, { ok: true, task: result.task, execution: result.execution, executionPath: result.executionPath });
-      } catch (error) {
-        sendApiError(response, error.status ?? 400, error.message, error.code ?? "request-failed");
-      }
-      return;
-    }
-
     if (request.method === "GET" && requestUrl.pathname === "/api/items" && catalog) {
       sendJson(response, 200, catalog.listItems());
       return;
@@ -323,6 +117,8 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
+    if (await handleWorkApi(request, response, { projectDir })) return;
+
     if (requestUrl.pathname.startsWith("/api/")) {
       sendApiError(response, 404, "API route not found.", "not-found");
       return;
@@ -341,7 +137,21 @@ export async function serveSetupUi(catalog, options = {}) {
     });
   });
 
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  // Story 02: the terminal WebSocket (/ws/terminal) on the SAME server (ADR-001).
+  // `spawn`/`which` are optional injection seams for tests (no real PTY/PATH).
+  attachTerminalWebSocket(server, { projectDir, spawn: options.spawn, which: options.which, recordSessions: options.recordSessions });
+
+  // Reject (don't hang) when the port can't be bound — e.g. EADDRINUSE — so a
+  // caller (the board launcher) can degrade honestly instead of an unhandled
+  // 'error' event tearing down the process while the listen promise never settles.
+  await new Promise((resolve, reject) => {
+    const onError = (error) => reject(error);
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", onError);
+      resolve();
+    });
+  });
   const address = server.address();
   return { server, url: `http://127.0.0.1:${address.port}/` };
 }
@@ -388,13 +198,24 @@ function sendJson(response, status, payload) {
   send(response, status, "application/json", JSON.stringify(payload));
 }
 
-function sendApiError(response, status, message, code, diagnostics) {
+function sendApiError(response, status, message, code, diagnostics, error) {
   sendJson(response, status, {
     ok: false,
     error: message,
     code,
+    ...structuredErrorDetails(error),
     ...(diagnostics ? { diagnostics } : {})
   });
+}
+
+function structuredErrorDetails(error) {
+  if (!error || typeof error.toJSON !== "function") return {};
+  const details = error.toJSON();
+  return {
+    ...(details.expected !== undefined ? { expected: details.expected } : {}),
+    ...(details.actual !== undefined ? { actual: details.actual } : {}),
+    ...(details.next !== undefined ? { next: details.next } : {})
+  };
 }
 
 function send(response, status, contentTypeValue, body) {
@@ -430,15 +251,6 @@ function readJsonBody(request) {
     });
     request.on("error", reject);
   });
-}
-
-async function readOptionalJsonBody(request) {
-  try {
-    return await readJsonBody(request);
-  } catch (error) {
-    if (error.code === "empty-json") return {};
-    throw error;
-  }
 }
 
 function contentType(filePath) {

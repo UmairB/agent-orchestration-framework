@@ -11,7 +11,6 @@ Feature: AOF CLI lifecycle
     And stdout should contain `aof project validate`
     And stdout should contain `aof assets add skill|command|rule|agent [id]`
     And stdout should contain `aof assets apply`
-    And stdout should contain `aof boards ui [--port 4187]`
     And stdout should contain `aof project migrate`
     And stdout should not contain `aof add [kind id]`
     And stdout should not contain `aof migrate [dir]`
@@ -25,14 +24,6 @@ Feature: AOF CLI lifecycle
     And stderr should contain `Removed command "install"`
     And stderr should contain `aof assets ui`
 
-  Scenario: Board UI has a dedicated launcher
-    Given an empty project
-    When I run `boards ui --no-serve`
-    Then the command should succeed
-    And stdout should contain `aof boards ui`
-    And stdout should contain `board/task management UI`
-    And stdout should not contain `aof assets ui`
-
   Scenario: Initialize an empty AOF project
     Given an empty project
     When I run `init --codex`
@@ -40,6 +31,7 @@ Feature: AOF CLI lifecycle
     And file `.aof/aof.config.json` should exist
     And file `.aof/aof.config.json` should contain `"https://aof.local/schemas/aof.schema.json"`
     And file `.aof/aof.config.json` should contain `"resources": []`
+    And file `.aof/.gitignore` should contain `/work/`
     And file `.codex/skills/project-context/SKILL.md` should not exist
     And file `.codex/commands/prime.md` should not exist
     And JSON file `.aof/aof.lock.json` should contain runtime `codex`

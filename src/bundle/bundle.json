@@ -1,0 +1,32 @@
+{
+  "members": [
+    { "id": "aof-architect", "kind": "agent", "file": "agents/aof-architect.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-compliance", "kind": "agent", "file": "agents/aof-compliance.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-designer", "kind": "agent", "file": "agents/aof-designer.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-developer", "kind": "agent", "file": "agents/aof-developer.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-product-owner", "kind": "agent", "file": "agents/aof-product-owner.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-qa", "kind": "agent", "file": "agents/aof-qa.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-researcher", "kind": "agent", "file": "agents/aof-researcher.md", "runtimes": ["claude", "codex"] },
+    { "id": "aof-security", "kind": "agent", "file": "agents/aof-security.md", "runtimes": ["claude", "codex"] },
+
+    { "id": "add-milestone", "kind": "command", "file": "commands/add-milestone.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "add-story", "kind": "command", "file": "commands/add-story.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "add-task", "kind": "command", "file": "commands/add-task.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "add-uat", "kind": "command", "file": "commands/add-uat.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "autonomous", "kind": "command", "file": "commands/autonomous.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "code-review", "kind": "command", "file": "commands/code-review.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "continue", "kind": "command", "file": "commands/continue.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "feedback", "kind": "command", "file": "commands/feedback.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "recent", "kind": "command", "file": "commands/recent.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "refine", "kind": "command", "file": "commands/refine.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "retrospective", "kind": "command", "file": "commands/retrospective.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "shatter", "kind": "command", "file": "commands/shatter.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "validate", "kind": "command", "file": "commands/validate.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "verify", "kind": "command", "file": "commands/verify.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+
+    { "id": "milestone", "kind": "template", "dir": "templates/milestone" },
+    { "id": "story", "kind": "template", "dir": "templates/story" },
+    { "id": "task", "kind": "template", "dir": "templates/task" },
+    { "id": "uat", "kind": "template", "dir": "templates/uat" }
+  ]
+}

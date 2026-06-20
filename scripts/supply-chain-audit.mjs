@@ -9,7 +9,12 @@ const nodeModulesPath = path.join(repoRoot, "node_modules");
 
 const allowedInstallScripts = new Set([
   "esbuild",
-  "fsevents"
+  "fsevents",
+  // node-pty@1.1.0 (ADR-003): its install script is `node scripts/prebuild.js ||
+  // node-gyp rebuild`, where prebuild.js only does fs.existsSync(prebuilds/<plat>)
+  // + process.exit(0) — it does NOT download or compile when the bundled
+  // win32-x64 N-API prebuilt is present (RESEARCH §2, verified from the tarball).
+  "node-pty"
 ]);
 
 const knownBadVersions = new Map([

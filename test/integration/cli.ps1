@@ -16,7 +16,6 @@ if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Syst
 . (Join-Path $StepsDir "dsl.steps.ps1")
 . (Join-Path $StepsDir "packages.steps.ps1")
 . (Join-Path $StepsDir "adapter-policy.steps.ps1")
-. (Join-Path $StepsDir "boards.steps.ps1")
 . (Join-Path $StepsDir "setup-ui.steps.ps1")
 
 function Get-FeatureFiles {
@@ -51,7 +50,7 @@ function Parse-Feature {
 
 function Run-Scenario {
   param($FeatureFile, $Scenario)
-  $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof-bdd-" + [System.Guid]::NewGuid().ToString("N"))
+  $Root = Join-Path ([System.IO.Path]::GetTempPath()) ("aof bdd " + [System.Guid]::NewGuid().ToString("N"))
   $Context = [ordered]@{ ProjectDir = Join-Path $Root "project"; DataDir = Join-Path $Root "data"; GlobalDir = Join-Path $Root "global-aof"; LastResult = $null; LastHttpResponse = $null; SetupUiProcess = $null; SetupUiUrl = $null }
   try {
     foreach ($Step in $Scenario.Steps) { Run-FeatureStep $Context $Step $FeatureFile }
@@ -66,7 +65,6 @@ function Run-FeatureStep {
   $FeatureName = Split-Path $FeatureFile -Leaf
   switch ($FeatureName) {
     "adapter-policy.feature" { Run-AdapterPolicyStep $Context $Step; return }
-    "boards.feature" { Run-BoardsStep $Context $Step; return }
     "dsl.feature" { Run-DslStep $Context $Step; return }
     "lifecycle.feature" { Run-LifecycleStep $Context $Step; return }
     "packages.feature" { Run-PackagesStep $Context $Step; return }
@@ -418,6 +416,18 @@ function Run-Step {
       hooks = @(@{ id = "test-after-write"; event = "PostToolUse"; command = "npm test"; runtimes = @("codex") })
       projectDocs = @(@{ id = "root"; body = "Guidance"; targets = @("AGENTS.md"); runtimes = @("codex") })
       settings = @{ codex = @{ approval_policy = "on-request" } }
+    }
+    return
+  }
+
+  if ($Step -match "^I save agent resource ``(.+)`` through the setup UI API$") {
+    Invoke-SetupUiJson $Context "PUT" "/api/config/resources/agent/$($Matches[1])" @{
+      id = $Matches[1]
+      kind = "agent"
+      description = "Sample agent"
+      body = "Execute the assigned task."
+      runtimes = @("codex")
+      overrides = @{}
     }
     return
   }

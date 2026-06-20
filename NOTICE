@@ -1,0 +1,46 @@
+aof — Agent Orchestration Framework
+Copyright (c) the aof authors. Licensed under the MIT License.
+
+This product includes software adapted from third-party projects.
+
+================================================================================
+Third-party attributions
+================================================================================
+
+vibeyard (https://github.com/elirantutia/vibeyard)
+--------------------------------------------------------------------------------
+The agent terminal (milestone 03, story 02) adapts code from vibeyard, which is
+licensed under the MIT License. The adapted pieces are the recipe — NOT the
+package: the node-pty spawn-options block and the onData/onExit/write/resize/kill
+lifecycle (win32-guarded), the CliProvider interface
+(resolveBinaryPath / validatePrerequisites / buildArgs / buildEnv → pty.spawn),
+and the xterm terminal-pane wiring pattern. vibeyard's Electron IPC carrier was
+replaced with a WebSocket (`ws@8`) at /ws/terminal (ADR-003).
+
+Files in this repository that carry the corresponding per-file vibeyard MIT
+attribution notice:
+  - src/terminal-ws.mjs
+  - src/terminal-providers.mjs
+  - ui/src/board/TerminalDock.tsx
+  - ui/src/board/terminal/dock-state.mjs
+  - ui/src/board/terminal/provider-picker.mjs
+  - ui/src/board/terminal/resize.mjs
+
+MIT License (vibeyard)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

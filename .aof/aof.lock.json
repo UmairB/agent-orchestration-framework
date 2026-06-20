@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "generatedAt": "2026-06-19T10:48:34.719Z",
+  "runtimes": [
+    "claude",
+    "codex"
+  ],
+  "files": [],
+  "packages": [],
+  "frameworks": [],
+  "frameworkInstallAttempts": []
+}

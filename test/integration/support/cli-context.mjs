@@ -40,7 +40,7 @@ export function runCli(context, command, input = "", options = {}) {
       NODE_NO_WARNINGS: "1",
       ...promptEnv,
       ...(options.resourceInput ? { AOF_TEST_RESOURCE_INPUT: options.resourceInput } : {}),
-      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {})
+      ...(options.frameworkStatuses ? { AOF_TEST_FRAMEWORK_INSTALL_STATUS: options.frameworkStatuses } : {}),
     },
     input,
     encoding: "utf8"

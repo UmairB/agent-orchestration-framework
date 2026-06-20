@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runCli } from "../support/cli-context.mjs";
 import {
   assertLastResult,
@@ -272,21 +273,6 @@ export async function runSharedCliStep(context, step) {
     return;
   }
 
-  match = step.match(/^I attach roadmap `(.+)` to board `(.+)`$/);
-  if (match) {
-    const boardPath = path.join(context.projectDir, ".aof", "boards", match[2], "BOARD.json");
-    const board = JSON.parse(await readFile(boardPath, "utf8"));
-    board.gsd = board.gsd ?? {};
-    board.gsd.milestone = {
-      ...(board.gsd.milestone ?? {}),
-      status: "pending",
-      command: board.gsd.milestone?.command ?? "$gsd-new-milestone",
-      roadmapPath: match[1]
-    };
-    await writeFile(boardPath, `${JSON.stringify(board, null, 2)}\n`, "utf8");
-    return;
-  }
-
   if (step === "the command should succeed") {
     assertLastResult(context);
     assert.equal(context.lastResult.status, 0, formatResult(context.lastResult));
@@ -378,48 +364,6 @@ export async function runSharedCliStep(context, step) {
         { kind: "skill", id: "research-helper" }
       ]
     });
-    return;
-  }
-
-  if (step === "a project with a board execution agent") {
-    await runSharedCliStep(context, "an empty project");
-    await writeAofProject(context, [{
-      kind: "agent",
-      id: "builder",
-      description: "Builder agent",
-      path: "assets/agents/builder/AGENT.md",
-      bodyPath: "assets/agents/builder/AGENT.md",
-      body: "Build assigned board tasks."
-    }]);
-    return;
-  }
-
-  if (step === "a project with GSD board execution") {
-    await runSharedCliStep(context, "an empty project");
-    await writeAofProject(context, [{
-      kind: "agent",
-      id: "builder",
-      description: "Builder agent",
-      path: "assets/agents/builder/AGENT.md",
-      bodyPath: "assets/agents/builder/AGENT.md",
-      body: "Build assigned board tasks."
-    }], {
-      packages: [{ id: "gsd", namespace: "gsd", source: "npm:get-shit-done-cc@latest", runtimes: ["claude", "codex"] }]
-    });
-    await mkdir(path.join(context.projectDir, ".planning"), { recursive: true });
-    await writeFile(path.join(context.projectDir, ".planning", "ROADMAP.md"), [
-      "# Roadmap",
-      "",
-      "## Phase Details",
-      "",
-      "### Phase 30: Build Board Execution",
-      "",
-      "**Goal:** Execute assigned board tasks through GSD.",
-      "",
-      "### Phase 31: Verify Board Progress",
-      "",
-      "**Goal:** Verify progress is visible in the board UI."
-    ].join("\n"), "utf8");
     return;
   }
 
