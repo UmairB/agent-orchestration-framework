@@ -25,6 +25,23 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      `ARCHITECTURE.md` + fitness-function arch-tests (move any invariant out of features); UI →
      `aof-designer` → `DESIGN.md`.
 
+     **UI / designer path — elicit a mock, or make the binding checklist mandatory (ADR-003).** When the
+     milestone has UI and `aof-designer` authors `DESIGN.md`, **elicit mocks from the user at refine**:
+     ask, per surface, whether they have a mock (an image / a local HTML export from Figma / claude.ai
+     design / a screenshot). This gives the read-only designer a baseline it can actually `Read` at review
+     time (the root cause being fixed: m03's mock was a remote `claude.ai/design` link the read-only
+     designer could not open). For each surface:
+     - **An existing mock is committed under the milestone's `mocks/` dir** — `wiki/work/NN_milestone_<slug>/mocks/<surface>.png`,
+       committed as a locally-readable artifact. Export any remote design into `mocks/` and commit the
+       file; never leave a remote design-tool link as the sole reference.
+     - **The committed mock is referenced from `DESIGN.md` as the conformance source of truth** for that
+       surface — a locally-readable artifact, never a remote-link-only reference.
+     - **With no mock, the binding checklist is mandatory and is the source of truth** — `aof-designer`
+       fills the surface's mandatory binding checklist in `DESIGN.md` (layout regions in order, the
+       components each region holds, the states empty/loading/error/populated, the design ramp each uses)
+       so the surface still has a baseline the review can judge against (rather than an INCONCLUSIVE on a
+       missing baseline). A surface with neither a committed mock nor a checklist has no baseline.
+
      **Recall prior lessons first (before authoring ADRs/stories).** Role-scoped, run unconditionally
      (memory may be off — see below): the **architect**, before writing an ADR, runs `aof work memory
      recall "<the decision in a few words>" --area architecture --block`; the **PO**, before the

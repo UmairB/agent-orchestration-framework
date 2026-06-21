@@ -29,7 +29,7 @@
         "id": "milestone",
         "kind": "template"
       },
-      "hash": "sha256:99519bc65c9c99312df7f6fb998cabf3a2979fc91041b2c5bfb733e6c0dd65ce"
+      "hash": "sha256:96f1b330e231cdb2c1677c72a9863b94856c9eb03ff42a23cfd01045f8bdb770"
     },
     {
       "path": ".aof/templates/work/milestone/RESEARCH.md",
@@ -137,7 +137,7 @@
         "id": "aof-designer",
         "kind": "agent"
       },
-      "hash": "sha256:9edfc9d3aafc4dc50cf2f855c38eaf2b6e7f864625aa5700b06fa2c942971191"
+      "hash": "sha256:7574987276540f99c9f55d7cf2e2ee6596b33b957fa250efd4aa75f3c33b62da"
     },
     {
       "path": ".claude/agents/aof-developer.md",
@@ -164,7 +164,7 @@
         "id": "aof-qa",
         "kind": "agent"
       },
-      "hash": "sha256:450c8f02e49e04a9f0d3c6379e10b2afb6446bb0aa5543706da799b3d1bd55db"
+      "hash": "sha256:352a4c333169140ea043efaff058074fdc47093c86c5d6efe8cf952735884bc7"
     },
     {
       "path": ".claude/agents/aof-researcher.md",
@@ -245,7 +245,7 @@
         "id": "continue",
         "kind": "command"
       },
-      "hash": "sha256:9d5927ab5781ba4b8bf9930be4ec682b7db732fa167f9c0f622977104156dc07"
+      "hash": "sha256:195a6f74af8ee0100d04af0a70c16010942fe92587a9306b61c35bf0bc46b216"
     },
     {
       "path": ".claude/commands/aof/feedback.md",
@@ -272,7 +272,7 @@
         "id": "refine",
         "kind": "command"
       },
-      "hash": "sha256:43cb7bf8b1bd80d673abcb259323b2df2e79929c1973b8e24207c201d0f950d3"
+      "hash": "sha256:42ba2b33bc74370a62e9ac878bf3217c704d2acfd60f2fbee45123c50cd4c350"
     },
     {
       "path": ".claude/commands/aof/retrospective.md",
@@ -308,7 +308,7 @@
         "id": "verify",
         "kind": "command"
       },
-      "hash": "sha256:77d81caf3b41f4459b226f29dd4fc4e5e39de01427e36e03abc5a6e8427a8ca0"
+      "hash": "sha256:eefb58613782571a1fa455b721294b7d2df239d244937a494bec6674c920c131"
     }
   ]
 }

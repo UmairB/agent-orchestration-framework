@@ -80,6 +80,14 @@ import { headroomConfigContractTests } from "../test/headroom-config-contract.te
 // milestone 06 — headroom plugin (story 01: toggle-cli, story 02: wrap-routing @executable traceability)
 import { headroomToggleCliTests } from "../test/headroom-toggle-cli.test.mjs";
 import { headroomWrapRoutingTests } from "../test/headroom-wrap-routing.test.mjs";
+// milestone 07 — design-conformance verification (ADRs 001–005 carry fitness functions; ADR-006 is the
+// story-partition rationale, no arch-test). NEW: role-split, verdict-contract, template-baseline,
+// a11y-config-schema, and the design-conformance-bundled drift guard.
+import { archTests as acdDesignRoleSplitTests } from "../test/arch/acd-design-role-split.test.mjs";
+import { archTests as acdConformanceVerdictContractTests } from "../test/arch/acd-conformance-verdict-contract.test.mjs";
+import { archTests as acdDesignTemplateBaselineTests } from "../test/arch/acd-design-template-baseline.test.mjs";
+import { archTests as acdA11yConfigSchemaTests } from "../test/arch/acd-a11y-config-schema.test.mjs";
+import { archTests as acdDesignConformanceBundledTests } from "../test/arch/acd-design-conformance-bundled.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -143,6 +151,11 @@ export const tests = [
   ...headroomConfigContractTests,
   ...headroomToggleCliTests,
   ...headroomWrapRoutingTests,
+  ...acdDesignRoleSplitTests,
+  ...acdConformanceVerdictContractTests,
+  ...acdDesignTemplateBaselineTests,
+  ...acdA11yConfigSchemaTests,
+  ...acdDesignConformanceBundledTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
