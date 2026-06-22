@@ -88,6 +88,69 @@ import { archTests as acdConformanceVerdictContractTests } from "../test/arch/ac
 import { archTests as acdDesignTemplateBaselineTests } from "../test/arch/acd-design-template-baseline.test.mjs";
 import { archTests as acdA11yConfigSchemaTests } from "../test/arch/acd-a11y-config-schema.test.mjs";
 import { archTests as acdDesignConformanceBundledTests } from "../test/arch/acd-design-conformance-bundled.test.mjs";
+// milestone 08 — CLI command core (story 00: the in-process registry of the six work operations)
+import { commandCoreContractTests } from "../test/command-core-contract.test.mjs";
+// milestone 08 — CLI command core (story 01: the CLI face; story 02: the board face; story 03: the
+// enforcing fitness functions — the route↔command/command↔CLI bijection + the no-UI-core-import / no-subprocess guards)
+import { cliFaceContractTests } from "../test/cli-face-contract.test.mjs";
+import { boardFaceContractTests } from "../test/board-face-contract.test.mjs";
+import { archTests as acdWorkCommandRouteCoverageTests } from "../test/arch/acd-work-command-route-coverage.test.mjs";
+import { archTests as acdWorkCommandCliBijectionTests } from "../test/arch/acd-work-command-cli-bijection.test.mjs";
+import { archTests as acdWorkUiNoCoreImportTests } from "../test/arch/acd-work-ui-no-core-import.test.mjs";
+import { archTests as acdWorkCommandNoSubprocessTests } from "../test/arch/acd-work-command-no-subprocess.test.mjs";
+// milestone 09 — graphify command core (story 00: the three graph:* commands + the
+// driver/normalizer + the `aof graph` dispatch; @executable traceability)
+import { graphCommandCoreTests } from "../test/graph-command-core.test.mjs";
+// milestone 09 — graphify command core (story 01: binary-provisioning — the
+// resolveGraphifyBinary absent-case behaviour + the doctorConfig graphify-binary
+// check, ADR-002/ADR-004; @executable traceability)
+import { graphBinaryProvisioningTests } from "../test/graph-binary-provisioning.test.mjs";
+// milestone 09 — graphify command core (story 02: rendered-faces — the graphify
+// skill + MCP config entry rendered through the existing asset/lock/drift
+// machinery, invoking aof graph not graphify, ADR-005; @executable traceability)
+import { graphRenderedFacesTests } from "../test/graph-rendered-faces.test.mjs";
+// milestone 09 — graphify command core (story 04: mcp-server-runtime — the stdio
+// MCP server `aof graph serve` whose tools map tools/call → invoke("graph:…")
+// behind the registry, ADR-005 amendment + ADR-006 inv. 2; @executable traceability)
+import { graphMcpServerTests } from "../test/graph-mcp-server.test.mjs";
+// milestone 09 — graphify command core (story 03: the SIX enforcing fitness
+// functions of ADR-006 — registration+CLI bijection, no-face-spawn, binary-absent
+// clean failure, privacy-no-widening, result-from-graph.json, no-npx-install)
+import { archTests as acdGraphCommandCliBijectionTests } from "../test/arch/acd-graph-command-cli-bijection.test.mjs";
+import { archTests as acdGraphNoFaceSpawnTests } from "../test/arch/acd-graph-no-face-spawn.test.mjs";
+import { archTests as acdGraphBinaryAbsentTests } from "../test/arch/acd-graph-binary-absent.test.mjs";
+import { archTests as acdGraphPrivacyBoundaryTests } from "../test/arch/acd-graph-privacy-boundary.test.mjs";
+import { archTests as acdGraphJsonNormalizationTests } from "../test/arch/acd-graph-json-normalization.test.mjs";
+import { archTests as acdGraphifyNoNpxInstallTests } from "../test/arch/acd-graphify-no-npx-install.test.mjs";
+// milestone 12 — managed tool provisioning (story 00: the spine — the store
+// geometry + store-first resolver, ADR-001; the provider registry + uv lane +
+// frozen tool descriptors, ADR-002; @executable traceability)
+import { toolStorePathResolutionTests } from "../test/tool-store-path-resolution.test.mjs";
+import { toolProviderRegistryTests } from "../test/tool-provider-registry.test.mjs";
+// milestone 12 — managed tool provisioning (story 01: the lifecycle surface —
+// the project:provision command + CLI dispatch, ADR-003 task 00; the three
+// store-aware doctorConfig checks superseding graphify-binary, ADR-003 task 01;
+// @executable traceability)
+import { toolProvisionCommandTests } from "../test/tool-provision-command.test.mjs";
+import { toolDoctorChecksTests } from "../test/tool-doctor-checks.test.mjs";
+// milestone 12 — managed tool provisioning (story 02: graphify retrofit — the
+// store-first re-point of resolveGraphifyBinary onto resolveManagedBinary, ADR-004
+// task 00; @executable traceability)
+import { graphifyStoreFirstTests } from "../test/graphify-store-first.test.mjs";
+// milestone 12 — managed tool provisioning (story 03: headroom retrofit — the
+// store-first re-point of headroom's defaultWhich onto resolveManagedBinary, ADR-004
+// task 00; the headroom descriptor's uv-lane plan + the tool-platform platform-matrix
+// warning, ADR-004 task 01 @executable; @executable traceability)
+import { headroomStoreFirstTests } from "../test/headroom-store-first.test.mjs";
+import { headroomProvisionPlatformTests } from "../test/headroom-provision-platform.test.mjs";
+// milestone 12 — managed tool provisioning (story 04: the FIVE provisioning fitness
+// functions of ADR-005 — store-first resolution, AOF_GLOBAL_HOME-honoured/no-hardcoded
+// -home, provider-neutral registry, npx-lane-preserved, uninstall-store-scoped)
+import { archTests as acdToolStoreResolutionOrderTests } from "../test/arch/acd-tool-store-resolution-order.test.mjs";
+import { archTests as acdToolStoreGlobalHomeTests } from "../test/arch/acd-tool-store-global-home.test.mjs";
+import { archTests as acdProviderNeutralRegistryTests } from "../test/arch/acd-provider-neutral-registry.test.mjs";
+import { archTests as acdNpxLanePreservedTests } from "../test/arch/acd-npx-lane-preserved.test.mjs";
+import { archTests as acdUninstallStoreScopedTests } from "../test/arch/acd-uninstall-store-scoped.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -156,6 +219,35 @@ export const tests = [
   ...acdDesignTemplateBaselineTests,
   ...acdA11yConfigSchemaTests,
   ...acdDesignConformanceBundledTests,
+  ...commandCoreContractTests,
+  ...cliFaceContractTests,
+  ...boardFaceContractTests,
+  ...acdWorkCommandRouteCoverageTests,
+  ...acdWorkCommandCliBijectionTests,
+  ...acdWorkUiNoCoreImportTests,
+  ...acdWorkCommandNoSubprocessTests,
+  ...graphCommandCoreTests,
+  ...graphBinaryProvisioningTests,
+  ...graphRenderedFacesTests,
+  ...graphMcpServerTests,
+  ...acdGraphCommandCliBijectionTests,
+  ...acdGraphNoFaceSpawnTests,
+  ...acdGraphBinaryAbsentTests,
+  ...acdGraphPrivacyBoundaryTests,
+  ...acdGraphJsonNormalizationTests,
+  ...acdGraphifyNoNpxInstallTests,
+  ...toolStorePathResolutionTests,
+  ...toolProviderRegistryTests,
+  ...toolProvisionCommandTests,
+  ...toolDoctorChecksTests,
+  ...graphifyStoreFirstTests,
+  ...headroomStoreFirstTests,
+  ...headroomProvisionPlatformTests,
+  ...acdToolStoreResolutionOrderTests,
+  ...acdToolStoreGlobalHomeTests,
+  ...acdProviderNeutralRegistryTests,
+  ...acdNpxLanePreservedTests,
+  ...acdUninstallStoreScopedTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,
