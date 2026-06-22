@@ -3,10 +3,10 @@ type: milestone
 number: 10
 slug: graphify-memory-backend
 title: "Graphify Memory Backend — graph-grounded recall"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 depends: [05, 09]
 origin: wiki/planning/PRD-graphify-integration.md
 ---
@@ -68,7 +68,36 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-- [ ] _to be broken down — `aof:refine 10`_
+Broken down `2026-06-22` (`aof:refine 10`) into **four** stories — **00 is the spine; 01 / 02 / 03 fan out
+from its frozen contract in parallel** (the critical path is 00 only). See [ARCHITECTURE.md](ARCHITECTURE.md)
+(6 ADRs), [RESEARCH.md](RESEARCH.md) (§A–§O), and the runnable pre-refine [spike/](spike/FINDINGS.md) for
+what each consumes. The load-bearing decisions are resolved: **(1)** graphify is a file-level ranking
+SIGNAL, **not** the record source — `graph:query` is opaque (`09/ADR-001`) and graph nodes carry no line
+(`source_location: null`, spike-confirmed), so the records come from the milestone-05 markdown parsers
+(`source:line` spine intact) and the graph **re-ranks** them: **"graph-grounded recall" = "graph-reranked
+recall over 05's records"** (ADR-001). **(2)** The extraction backend defaults to **`claude-cli`** — the
+user's own Claude subscription (no metered key, no third-party key, no shim; graphify-native, spike-proven)
+— surfaced + opt-in; **credential-local but NOT data-local** (prose is still sent to Anthropic for
+inference; `ollama` is the only on-box option), aof states this plainly (ADR-003). **(3)** Graph scope =
+work stream only; codebase grounding stays milestone 11 (ADR-006). Contracts are **not yet authored** — this
+refine stopped at the break-down gate (no `--autonomous`); each story's task `.feature` files are authored
+at its Contract stage (`aof:refine 10/SS`).
+
+- [x] **00 · [graphify-backend-module](stories/00_story_graphify-backend-module/STORY.md)** — the graphify
+  memory backend satisfying the frozen `{name, recall, reindex, status}` interface (`05/ADR-003`); the
+  `$defs/memory` enum + `BACKEND_REGISTRY` wiring; `reindex` rebuilding the 05 records + (re)building the
+  graph via `invoke("graph:build")`; the `{workspace}` seam-bridge (ADR-001/002/005). The spine. _done — 22 @executable green, @manual live build verified (275-node work-stream graph, claude-cli keyless), F-01 git-ignore fixed._
+- [x] **01 · [graph-grounded-reranking](stories/01_story_graph-grounded-reranking/STORY.md)** — the pure
+  re-ranker `recall` reads: the work-stream graph re-orders the 05 records by file relatedness, joined by
+  `source_file`, on top of 05's base ranking (ADR-001). The value. Fixture-testable, no binary. _done — 13 @executable green; shared `graph-normalize.mjs` extracted (09 preserved); architect PASS._
+- [x] **02 · [extraction-posture-and-fallback](stories/02_story_extraction-posture-and-fallback/STORY.md)** —
+  the `claude-cli` extraction default + honest classification in `graph-build.mjs` + the binary-absent
+  graceful degrade to un-graph-ranked 05 recall (ADR-003/004). Opt-in, never silently networked, never
+  crashing. _done — 17 @executable green; claude-cli classified by knowledge; visible per-verb degrade; architect PASS._
+- [x] **03 · [graphify-memory-fitness](stories/03_story_graphify-memory-fitness/STORY.md)** — the six
+  enforcing arch-tests (records-from-parsers, derived-index, via-command, selection-enum, classified,
+  binary-absent-degrades); the contract is the ARCHITECTURE.md fitness table (no `.feature` pass, mirrors
+  05/03 and 09/03). Asserts against 00/01/02. _done — all 6 GREEN, mutation-verified non-vacuous; full suite 1067 ok / 0 fail._
 
 ## Dependencies
 

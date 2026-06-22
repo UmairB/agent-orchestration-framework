@@ -122,6 +122,36 @@ import { archTests as acdGraphBinaryAbsentTests } from "../test/arch/acd-graph-b
 import { archTests as acdGraphPrivacyBoundaryTests } from "../test/arch/acd-graph-privacy-boundary.test.mjs";
 import { archTests as acdGraphJsonNormalizationTests } from "../test/arch/acd-graph-json-normalization.test.mjs";
 import { archTests as acdGraphifyNoNpxInstallTests } from "../test/arch/acd-graphify-no-npx-install.test.mjs";
+// milestone 10 — graphify memory backend (story 00: the spine — the graphify backend
+// module satisfying the frozen 05 interface, the $defs/memory enum + BACKEND_REGISTRY
+// registration (ADR-003), reindex rebuilding the 05 records + (re)building the graph via
+// invoke("graph:build") with a fail-soft binary-absent skip (ADR-001/002/004/006), and
+// recall returning the frozen RecallResult over 05-sourced records; @executable traceability)
+import { graphifyBackendSelectionTests } from "../test/graphify-backend-selection.test.mjs";
+import { graphifyReindexTests } from "../test/graphify-reindex.test.mjs";
+import { graphifyRecallTests } from "../test/graphify-recall.test.mjs";
+// milestone 10 — graphify memory backend (story 01: graph-grounded-reranking — the
+// pure re-ranker `rerank(records, normalizedGraph, query, scope, opts)` that layers
+// the work-stream graph's file-level relatedness boost onto the 05 base ranking
+// (ADR-001), driven over the committed reranking fixtures; @executable traceability)
+import { graphifyRerankingTests } from "../test/graphify-reranking.test.mjs";
+// milestone 10 — graphify memory backend (story 02: extraction-posture-and-fallback —
+// the claude-cli classification in graph-build.mjs (isNetworkBackend/classifyEgress, by
+// KNOWLEDGE) + the surfaced extraction backend (ADR-003), and the binary-absent degrade
+// across recall/brief/reindex/status (un-graph-ranked 05 recall + a visible diagnostic,
+// ADR-004); @executable traceability)
+import { graphifyPostureTests } from "../test/graphify-posture.test.mjs";
+import { graphifyDegradeTests } from "../test/graphify-degrade.test.mjs";
+// milestone 10 — graphify memory backend (story 03: the SIX enforcing fitness
+// functions of ADR-006 — records-from-the-05-parsers, derived-index (records + graph
+// git-ignored), reach-graphify-only-via-the-09-command, selection-enum + single-read,
+// claude-cli-classified-honestly, binary-absent-degrades-not-crashes)
+import { archTests as acdGraphifyRecordsFromParsersTests } from "../test/arch/acd-graphify-records-from-parsers.test.mjs";
+import { archTests as acdGraphifyDerivedIndexTests } from "../test/arch/acd-graphify-derived-index.test.mjs";
+import { archTests as acdGraphifyBackendViaCommandTests } from "../test/arch/acd-graphify-backend-via-command.test.mjs";
+import { archTests as acdGraphifyBackendSelectionTests } from "../test/arch/acd-graphify-backend-selection.test.mjs";
+import { archTests as acdGraphifyBackendClassifiedTests } from "../test/arch/acd-graphify-backend-classified.test.mjs";
+import { archTests as acdGraphifyBinaryAbsentDegradesTests } from "../test/arch/acd-graphify-binary-absent-degrades.test.mjs";
 // milestone 12 — managed tool provisioning (story 00: the spine — the store
 // geometry + store-first resolver, ADR-001; the provider registry + uv lane +
 // frozen tool descriptors, ADR-002; @executable traceability)
@@ -236,6 +266,18 @@ export const tests = [
   ...acdGraphPrivacyBoundaryTests,
   ...acdGraphJsonNormalizationTests,
   ...acdGraphifyNoNpxInstallTests,
+  ...graphifyBackendSelectionTests,
+  ...graphifyReindexTests,
+  ...graphifyRecallTests,
+  ...graphifyRerankingTests,
+  ...graphifyPostureTests,
+  ...graphifyDegradeTests,
+  ...acdGraphifyRecordsFromParsersTests,
+  ...acdGraphifyDerivedIndexTests,
+  ...acdGraphifyBackendViaCommandTests,
+  ...acdGraphifyBackendSelectionTests,
+  ...acdGraphifyBackendClassifiedTests,
+  ...acdGraphifyBinaryAbsentDegradesTests,
   ...toolStorePathResolutionTests,
   ...toolProviderRegistryTests,
   ...toolProvisionCommandTests,

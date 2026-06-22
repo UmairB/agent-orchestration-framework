@@ -9,11 +9,16 @@
 //  (`present, version unknown`)."
 //
 // The absent case is made HERMETIC via the additive options seam ADR-002/story 01
-// added to resolveGraphifyBinary ({ pathValue:"", useLocator:false }) — an empty
-// injected PATH is the ONLY source consulted, with no process-global mutation. The
-// doctor states are driven via doctorConfig's injectable options.resolveGraphifyBinary
-// seam (default: the real resolver), so all three states are CI-assertable with no
-// live graphify binary.
+// added to resolveGraphifyBinary ({ pathValue:"", useLocator:false }) — empty PATH
+// + locator skipped — PLUS an explicitly isolated managed store root
+// (verify-2026-06-22, finding-F1): the store-first resolver derives its store root
+// from env.AOF_GLOBAL_HOME, so neutralizing only the PATH leg still let the store
+// leg consult the operator's real ~/.aof/tools/graphify and return found:true.
+// Pinning env: { AOF_GLOBAL_HOME: <empty dir> } isolates the store leg to a
+// guaranteed-empty root, so the absent assertion holds regardless of whether the
+// operator has graphify provisioned. The doctor states are driven via doctorConfig's
+// injectable resolveManagedBinary seam (default: the real resolver), so all states
+// are CI-assertable with no live graphify binary.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -87,20 +92,35 @@ export const archTests = [
   {
     name: "arch/ADR-006 inv.3: resolveGraphifyBinary() returns a structured { found:false, hint } when graphify is absent (no throw, no ENOENT)",
     run: async () => {
-      let resolved;
-      // The hermetic absent case: empty PATH + no OS locator, so nothing is found.
-      assert.doesNotThrow(
-        () => { resolved = resolveGraphifyBinary({ pathValue: "", useLocator: false }); },
-        "resolveGraphifyBinary never throws on a missing binary"
-      );
-      assert.equal(resolved.found, false, "the resolver reports found:false structurally");
-      assert.equal(typeof resolved.hint, "string", "the miss carries a string install hint");
-      // milestone-12 ADR-004: resolveGraphifyBinary is re-pointed store-first onto
-      // resolveManagedBinary, whose miss hint names the single lifecycle command
-      // (superseding the 09 two-step `uv tool install graphifyy` + `graphify install`).
-      assert.ok(/aof project provision/.test(resolved.hint), "the hint names the `aof project provision` command");
-      // The structured miss never leaks a live-binary handle.
-      assert.ok(!("path" in resolved), "the absent result carries no resolved binary path");
+      // The hermetic absent case on BOTH resolver legs (finding-F1): empty PATH + no
+      // OS locator neutralizes the PATH leg, and AOF_GLOBAL_HOME is EXPLICITLY
+      // isolated to a fresh empty dir (no tools/graphify under it) so the store-first
+      // leg is a clean miss too — the assertion holds regardless of whether the
+      // operator has graphify provisioned in their real ~/.aof store.
+      const storeRoot = await mkdtemp(path.join(os.tmpdir(), "aof-graph-empty-store-"));
+      try {
+        let resolved;
+        assert.doesNotThrow(
+          () => {
+            resolved = resolveGraphifyBinary({
+              pathValue: "",
+              useLocator: false,
+              env: { ...process.env, AOF_GLOBAL_HOME: storeRoot },
+            });
+          },
+          "resolveGraphifyBinary never throws on a missing binary"
+        );
+        assert.equal(resolved.found, false, "the resolver reports found:false structurally");
+        assert.equal(typeof resolved.hint, "string", "the miss carries a string install hint");
+        // milestone-12 ADR-004: resolveGraphifyBinary is re-pointed store-first onto
+        // resolveManagedBinary, whose miss hint names the single lifecycle command
+        // (superseding the 09 two-step `uv tool install graphifyy` + `graphify install`).
+        assert.ok(/aof project provision/.test(resolved.hint), "the hint names the `aof project provision` command");
+        // The structured miss never leaks a live-binary handle.
+        assert.ok(!("path" in resolved), "the absent result carries no resolved binary path");
+      } finally {
+        await rm(storeRoot, { recursive: true, force: true });
+      }
     },
   },
   {

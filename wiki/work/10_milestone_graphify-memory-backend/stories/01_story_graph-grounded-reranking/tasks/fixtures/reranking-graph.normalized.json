@@ -1,0 +1,17 @@
+{
+  "//": "DETERMINISTIC re-ranker fixture (story 10/01). This is the ALREADY-NORMALIZED graph shape the re-ranker consumes directly — 09/ADR-003's normalizeGraph output { nodes, edges, hyperedges } (GraphNode {id,label,fileType,sourceFile,community,normLabel}; GraphEdge {source,target,relation,confidence,confidenceScore?}). It is fed straight into rerank(records, normalizedGraph, query, scope, opts) with NO binary and NO normalizeGraph round-trip.",
+  "//fixture-design": "The query 'derived index invariant' anchors on ANCHOR.md (community 1). Three CANDIDATE files carry records that base-rank as an exact 3-way TIE (identical bodies): CENTRAL.md is GOD-NODE central (highest edge degree) AND shares the query anchor's community 1; RELATED.md is connected to the anchor by a semantically_similar_to INFERRED edge AND co-member of community 1; ISOLATED.md is a node with NO edges in a DIFFERENT community (0) — graph-isolated from the query anchor. The graph term must lift CENTRAL and RELATED above ISOLATED, flipping the base stable-order winner (ISOLATED) to LAST. Records join to nodes by source_file (file-level), never by graph id.",
+  "nodes": [
+    { "id": "anchor_doc",   "label": "Anchor (derived index invariant)",   "fileType": "document",  "sourceFile": "ANCHOR.md",   "community": 1, "normLabel": "anchor (derived index invariant)" },
+    { "id": "central_doc",  "label": "Central decision (god node)",        "fileType": "rationale", "sourceFile": "CENTRAL.md",  "community": 1, "normLabel": "central decision (god node)" },
+    { "id": "related_doc",  "label": "Related decision (similar-to)",      "fileType": "rationale", "sourceFile": "RELATED.md",  "community": 1, "normLabel": "related decision (similar-to)" },
+    { "id": "isolated_doc", "label": "Isolated decision (no edges)",       "fileType": "rationale", "sourceFile": "ISOLATED.md", "community": 0, "normLabel": "isolated decision (no edges)" }
+  ],
+  "edges": [
+    { "source": "anchor_doc",  "target": "central_doc", "relation": "references", "confidence": "EXTRACTED" },
+    { "source": "central_doc", "target": "related_doc", "relation": "references", "confidence": "EXTRACTED" },
+    { "source": "central_doc", "target": "anchor_doc",  "relation": "references", "confidence": "EXTRACTED" },
+    { "source": "related_doc", "target": "anchor_doc",  "relation": "semantically_similar_to", "confidence": "INFERRED", "confidenceScore": 0.82 }
+  ],
+  "hyperedges": []
+}

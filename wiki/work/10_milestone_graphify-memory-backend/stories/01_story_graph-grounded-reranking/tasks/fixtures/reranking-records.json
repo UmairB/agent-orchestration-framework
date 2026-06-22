@@ -1,0 +1,40 @@
+{
+  "//": "DETERMINISTIC re-ranker fixture records (story 10/01) — frozen 05/ADR-005 MemoryRecords. Paired with reranking-graph.normalized.json. The three CANDIDATE records (ISOLATED, RELATED, CENTRAL) carry IDENTICAL bodies and are the same recordType with no title-term match, so the 05 base ranking (05/ADR-006) scores them an EXACT 3-way TIE — broken only by stable fixture order (ISOLATED first). They join to graph nodes by source_file (the FILE in source 'path:line'), never by graph id. OFFSCOPE is a foil for the scope-pre-filter scenario (different area). Two records SAME-FILE (CENTRAL, CENTRAL_TWO) prove the file-level join gives both the SAME graph signal.",
+  "records": [
+    {
+      "recordType": "adr", "id": "ISOLATED", "item": "10", "itemSlug": "graphify-memory-backend",
+      "title": "isolated decision", "area": "architecture", "stage": "", "kind": "",
+      "owner": "", "status": "accepted", "summary": "",
+      "text": "the derived index invariant holds across rebuilds",
+      "source": "10_milestone_graphify-memory-backend/ISOLATED.md:10"
+    },
+    {
+      "recordType": "adr", "id": "RELATED", "item": "10", "itemSlug": "graphify-memory-backend",
+      "title": "related decision", "area": "architecture", "stage": "", "kind": "",
+      "owner": "", "status": "accepted", "summary": "",
+      "text": "the derived index invariant holds across rebuilds",
+      "source": "10_milestone_graphify-memory-backend/RELATED.md:10"
+    },
+    {
+      "recordType": "adr", "id": "CENTRAL", "item": "10", "itemSlug": "graphify-memory-backend",
+      "title": "central decision", "area": "architecture", "stage": "", "kind": "",
+      "owner": "", "status": "accepted", "summary": "",
+      "text": "the derived index invariant holds across rebuilds",
+      "source": "10_milestone_graphify-memory-backend/CENTRAL.md:20"
+    },
+    {
+      "recordType": "adr", "id": "CENTRAL_TWO", "item": "10", "itemSlug": "graphify-memory-backend",
+      "title": "central decision addendum", "area": "architecture", "stage": "", "kind": "",
+      "owner": "", "status": "accepted", "summary": "",
+      "text": "the derived index invariant holds across rebuilds",
+      "source": "10_milestone_graphify-memory-backend/CENTRAL.md:40"
+    },
+    {
+      "recordType": "lesson", "id": "OFFSCOPE", "item": "10", "itemSlug": "graphify-memory-backend",
+      "title": "an off-area lesson", "area": "process", "stage": "", "kind": "retrospective",
+      "owner": "", "status": "", "summary": "",
+      "text": "the derived index invariant holds across rebuilds",
+      "source": "10_milestone_graphify-memory-backend/RETROSPECTIVE.md:12"
+    }
+  ]
+}

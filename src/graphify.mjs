@@ -26,12 +26,19 @@
 // The pure, fully-testable core here is `normalizeGraph` (ADR-003): it reads the
 // NetworkX `node_link_data` `links` key (NOT `edges`), preserves
 // confidence/confidenceScore (score present ONLY for INFERRED), maps node fields
-// to camelCase, and keeps `graph.hyperedges` SEPARATE. The spawn helpers need the
-// live binary, so they are exercised only by @manual scenarios (no CI test).
-import path from "node:path";
+// to camelCase, and keeps `graph.hyperedges` SEPARATE. As of milestone 10/01 that
+// pure core lives in the spawn-free `./graph-normalize.mjs` so the graphify MEMORY
+// backend can reach it WITHOUT importing this spawn site; this module RE-EXPORTS
+// `graphJsonPath`/`readGraph`/`normalizeGraph` from there so 09's command code +
+// tests are behaviour-preserved (they still import them from here). The spawn
+// helpers need the live binary, so they are exercised only by @manual scenarios.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { resolveManagedBinary } from "./tool-store.mjs";
+// The PURE normalizer (extracted 10/01) — re-exported below so existing 09
+// importers (`src/commands/graph-*.mjs`, the 09 tests) keep importing from here.
+import { graphJsonPath, readGraph, normalizeGraph } from "./graph-normalize.mjs";
+
+export { graphJsonPath, readGraph, normalizeGraph };
 
 // The two names RESEARCH §G flags as load-bearing: install via the PyPI package
 // `graphifyy` (double-y), invoke the `graphify` binary (single-y). A doctor/lock
@@ -43,16 +50,6 @@ export const GRAPHIFY_BINARY = "graphify";
 // 0.8.44, 2026-06-19). The verb mapping is gated on this; an unexpected installed
 // version is a doctor warning (ADR-004), never a silent mismap.
 export const PINNED_GRAPHIFY_VERSION = "0.8.44";
-
-// The on-disk graph artifact, relative to the project root (RESEARCH §D/§I).
-const GRAPH_OUT_DIR = "graphify-out";
-const GRAPH_JSON = "graph.json";
-
-// Resolve <projectRoot>/graphify-out/graph.json — the one stable machine artifact
-// every graph op reads. Raw absolute (basis-neutral, 08/ADR-002).
-export function graphJsonPath(projectRoot) {
-  return path.join(projectRoot, GRAPH_OUT_DIR, GRAPH_JSON);
-}
 
 // --------------------------------------------------------------- resolution ---
 
@@ -99,10 +96,34 @@ export function resolveGraphifyBinary(options = {}) {
 // spawn when the binary is absent (ADR-004): callers guard with
 // resolveGraphifyBinary() first and throw a structured graphify-missing error.
 
-// graph build — `graphify extract <path> [--backend X] [--token-budget N]`
-// (RESEARCH §B). cwd = projectRoot so the artifact lands under
-// <projectRoot>/graphify-out/ (#756, RESEARCH §I). A null/absent backend passes
-// NO --backend flag → code/AST only, zero egress (privacy boundary, ADR-005).
+// graphifyBuildArgs(input, projectRoot) — the PURE, testable core of the build
+// argv (the `normalizeGraph` idiom: a no-spawn helper a unit test can drive
+// without the live binary). graphify 0.8.44 `extract <path>` defaults `--out` to
+// the EXTRACTION TARGET (`<path>`), NOT the cwd — so when the build target ≠
+// projectRoot, the #756 `cwd=projectRoot` discipline (which fixes the READ verbs)
+// does NOT control extract's WRITE location, and the graph lands under the target
+// folder where the driver can't find it under projectRoot. Fix: ALWAYS pin
+// `--out <projectRoot>` so the artifact lands at <projectRoot>/graphify-out/ for
+// the query family to read (verify-2026-06-22, finding-F2). A null/absent backend
+// still passes NO --backend flag → code/AST only, zero egress (the ADR-006 inv. 4
+// egress=none privacy invariant; preserved exactly).
+export function graphifyBuildArgs(input, projectRoot) {
+  const args = ["extract", input.path, "--out", projectRoot];
+  if (input.backend) {
+    args.push("--backend", input.backend);
+  }
+  if (input.tokenBudget != null) {
+    args.push("--token-budget", String(input.tokenBudget));
+  }
+  return args;
+}
+
+// graph build — `graphify extract <path> --out <projectRoot> [--backend X]
+// [--token-budget N]` (RESEARCH §B; finding-F2). cwd = projectRoot so the query
+// family finds <projectRoot>/graphify-out/graph.json (#756, RESEARCH §I), AND
+// `--out projectRoot` so extract WRITES there (its --out default is <path>, the
+// target — not cwd). A null/absent backend passes NO --backend flag → code/AST
+// only, zero egress (privacy boundary, ADR-005).
 export function runGraphifyBuild(input, { projectRoot }) {
   const resolved = resolveGraphifyBinary();
   if (!resolved.found) {
@@ -110,13 +131,7 @@ export function runGraphifyBuild(input, { projectRoot }) {
     error.code = "graphify-missing";
     throw error;
   }
-  const args = ["extract", input.path];
-  if (input.backend) {
-    args.push("--backend", input.backend);
-  }
-  if (input.tokenBudget != null) {
-    args.push("--token-budget", String(input.tokenBudget));
-  }
+  const args = graphifyBuildArgs(input, projectRoot);
   const result = spawnSync(resolved.path, args, {
     cwd: projectRoot,
     encoding: "utf8",
@@ -181,93 +196,8 @@ export function runGraphifyTriage(input, { projectRoot }) {
 }
 
 // --------------------------------------------------------------- read graph ---
-
-// readGraph(graphPath) — parse the raw graph.json (NetworkX node_link_data). The
-// ADR-003 normalizer (normalizeGraph) does the shaping; this is the bare read.
-export function readGraph(graphPath) {
-  const raw = readFileSync(graphPath, "utf8");
-  return JSON.parse(raw);
-}
-
-// ------------------------------------------------------------- normalization --
-// The pure, fully-testable @executable core (ADR-003). The key spelling is
-// load-bearing: NetworkX node_link_data emits top-level `nodes` and `links`
-// (links, NOT edges — NetworkX remaps edges→links for portability). Reading
-// `edges` would yield a silently empty edge set — the bug this forbids.
-
-// normalizeGraph(raw) → { nodes, edges, hyperedges }. Throws a surfaced
-// graph-format error when `links` is absent but `edges` is present (a future
-// graphify shape change), rather than returning a silently empty edge set.
-export function normalizeGraph(raw) {
-  if (!raw || typeof raw !== "object") {
-    const error = new Error("graph.json is not an object.");
-    error.code = "graph-format";
-    throw error;
-  }
-
-  const hasLinks = Array.isArray(raw.links);
-  const hasEdges = Array.isArray(raw.edges);
-
-  // The load-bearing format guard: a `links`-absent + `edges`-present graph is a
-  // SURFACED format error (graphify changed its node_link_data shape), never a
-  // silent empty edge set (ADR-003 / RESEARCH §D).
-  if (!hasLinks && hasEdges) {
-    const error = new Error(
-      "graph.json carries an `edges` array but no `links` array — expected NetworkX node_link_data (`links`, not `edges`)."
-    );
-    error.code = "graph-format";
-    throw error;
-  }
-
-  const nodes = Array.isArray(raw.nodes) ? raw.nodes.map(normalizeNode) : [];
-  const edges = hasLinks ? raw.links.map(normalizeEdge) : [];
-
-  // Hyperedges (3+ nodes) live separately under graph.hyperedges and must NEVER
-  // be flattened into pairwise edges (RESEARCH §D constraint).
-  const rawHyperedges = raw.graph && Array.isArray(raw.graph.hyperedges) ? raw.graph.hyperedges : [];
-  const hyperedges = rawHyperedges.map(normalizeHyperedge);
-
-  return { nodes, edges, hyperedges };
-}
-
-// Node fields → camelCase GraphNode, keyed on the stable `id` join key
-// (RESEARCH §D): id/label/file_type/source_file/community/norm_label.
-function normalizeNode(node) {
-  return {
-    id: node.id,
-    label: node.label,
-    fileType: node.file_type,
-    sourceFile: node.source_file,
-    community: node.community,
-    normLabel: node.norm_label,
-  };
-}
-
-// Edge fields → GraphEdge (RESEARCH §D): source/target/relation/confidence, plus
-// confidenceScore present ONLY for INFERRED. graphify sets confidence_score only
-// on INFERRED edges; an INFERRED edge that omits the float must normalize to an
-// ABSENT confidenceScore, NEVER a fabricated 0.
-function normalizeEdge(edge) {
-  const normalized = {
-    source: edge.source,
-    target: edge.target,
-    relation: edge.relation,
-    confidence: edge.confidence,
-  };
-  // Preserve confidenceScore only when graphify actually provided a numeric score
-  // (INFERRED). Absent/undefined/null → omit the field entirely (never 0).
-  if (typeof edge.confidence_score === "number") {
-    normalized.confidenceScore = edge.confidence_score;
-  }
-  return normalized;
-}
-
-// Hyperedges normalize as a separate shape; carry the member node ids + any
-// relation/label, never merged into the pairwise edge list.
-function normalizeHyperedge(hyperedge) {
-  return {
-    nodes: Array.isArray(hyperedge.nodes) ? [...hyperedge.nodes] : [],
-    relation: hyperedge.relation,
-    ...(hyperedge.id != null ? { id: hyperedge.id } : {}),
-  };
-}
+// `readGraph` + the ADR-003 `normalizeGraph` (and its node/edge/hyperedge
+// shaping) now live in the spawn-free `./graph-normalize.mjs` (extracted 10/01)
+// and are re-exported at the top of this module. The graphify memory backend
+// imports them from there directly; 09's command code + tests still import them
+// from here, unchanged.

@@ -21,9 +21,14 @@
 //
 // The absent case is made HERMETIC via the additive options seam story 01 added to
 // resolveGraphifyBinary ({ pathValue:"", useLocator:false }) — no process-global
-// PATH mutation. The doctor states are driven via doctorConfig's injectable
-// options.resolveGraphifyBinary seam (default: the real resolver), so all three
-// states are CI-assertable with the binary stubbed — no live graphify needed.
+// PATH mutation — PLUS an explicitly isolated managed store root (verify-2026-06-22,
+// finding-F1): resolveGraphifyBinary is store-first, so neutralizing only the PATH
+// leg still let the store leg consult the operator's real ~/.aof/tools/graphify
+// (provisioned by milestone 12) and return found:true. Injecting
+// env: { AOF_GLOBAL_HOME: <empty dir> } isolates the store leg to a guaranteed-empty
+// root so the absent assertions hold regardless of the operator's machine. The
+// doctor states are driven via doctorConfig's injectable resolveManagedBinary seam
+// (default: the real resolver), so all states are CI-assertable — no live graphify.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -36,6 +41,20 @@ import {
 import { doctorConfig } from "../src/config-inspect.mjs";
 
 // --- fixtures ----------------------------------------------------------------
+
+// An isolated, guaranteed-empty managed-store root for the absent-binary assertions
+// (finding-F1). resolveManagedBinary derives the store root from
+// env.AOF_GLOBAL_HOME, so pointing it at a fresh empty temp dir (no tools/graphify
+// under it) makes the store leg a clean miss — hermetic regardless of whether the
+// operator has graphify provisioned in their real ~/.aof store.
+async function isolatedStoreRoot() {
+  return mkdtemp(path.join(os.tmpdir(), "aof-graph-empty-store-"));
+}
+
+// The env that isolates the store leg to an empty root (finding-F1).
+function isolatedEnv(root) {
+  return { ...process.env, AOF_GLOBAL_HOME: root };
+}
 
 // A minimal valid project so doctorConfig runs end-to-end (it resolves the same
 // checks[] `aof project doctor` surfaces — config-inspect.mjs / cli.mjs:1457).
@@ -114,23 +133,33 @@ export const graphBinaryProvisioningTests = [
     // it does not throw (and does not spawn graphify to learn it is absent).
     name: "graph-binary/00 absent graphify resolves to a structured miss with install guidance",
     async run() {
-      // Hermetic absence via the additive seam: empty PATH + locator skipped, so
-      // an empty injected PATH is the ONLY source consulted — no process-global
-      // PATH mutation, deterministic on every platform/CI. The store leg is a clean
-      // miss because no AOF_GLOBAL_HOME store copy is provisioned here.
-      let result;
-      assert.doesNotThrow(() => {
-        result = resolveGraphifyBinary({ pathValue: "", useLocator: false });
-      }, "resolveGraphifyBinary must never throw on an absent binary");
-      assert.equal(result.found, false, "absent → found:false (a structured miss, not an ENOENT)");
-      assert.equal(typeof result.hint, "string");
-      assert.ok(
-        result.hint.includes("aof project provision graphify"),
-        `hint must name "aof project provision graphify" — got: ${result.hint}`
-      );
-      // The miss is purely structured: no version/path leaks into an absent result.
-      assert.equal(result.path, undefined, "an absent result carries no binary path");
-      assert.equal(result.version, undefined, "an absent result asserts no version");
+      // Hermetic absence on BOTH resolver legs: empty PATH + locator skipped
+      // neutralizes the PATH leg, and AOF_GLOBAL_HOME is EXPLICITLY isolated to a
+      // fresh empty dir (no tools/graphify under it) so the store-first leg is a
+      // clean miss too (finding-F1) — the test now holds regardless of whether the
+      // operator has graphify provisioned in their real ~/.aof store.
+      const storeRoot = await isolatedStoreRoot();
+      try {
+        let result;
+        assert.doesNotThrow(() => {
+          result = resolveGraphifyBinary({
+            pathValue: "",
+            useLocator: false,
+            env: isolatedEnv(storeRoot),
+          });
+        }, "resolveGraphifyBinary must never throw on an absent binary");
+        assert.equal(result.found, false, "absent → found:false (a structured miss, not an ENOENT)");
+        assert.equal(typeof result.hint, "string");
+        assert.ok(
+          result.hint.includes("aof project provision graphify"),
+          `hint must name "aof project provision graphify" — got: ${result.hint}`
+        );
+        // The miss is purely structured: no version/path leaks into an absent result.
+        assert.equal(result.path, undefined, "an absent result carries no binary path");
+        assert.equal(result.version, undefined, "an absent result asserts no version");
+      } finally {
+        await rm(storeRoot, { recursive: true, force: true });
+      }
     },
   },
 
@@ -143,12 +172,24 @@ export const graphBinaryProvisioningTests = [
     // manual steps.
     name: "graph-binary/00 the install hint names the provision command",
     async run() {
-      const result = resolveGraphifyBinary({ pathValue: "", useLocator: false });
-      assert.equal(result.found, false);
-      assert.ok(
-        result.hint.includes("aof project provision graphify"),
-        `hint must name the provision command "aof project provision graphify" — got: ${result.hint}`
-      );
+      // Both resolver legs isolated (finding-F1): empty PATH + locator skipped, and
+      // AOF_GLOBAL_HOME pinned to a fresh empty dir so the store-first leg is a clean
+      // miss regardless of the operator's real ~/.aof store.
+      const storeRoot = await isolatedStoreRoot();
+      try {
+        const result = resolveGraphifyBinary({
+          pathValue: "",
+          useLocator: false,
+          env: isolatedEnv(storeRoot),
+        });
+        assert.equal(result.found, false);
+        assert.ok(
+          result.hint.includes("aof project provision graphify"),
+          `hint must name the provision command "aof project provision graphify" — got: ${result.hint}`
+        );
+      } finally {
+        await rm(storeRoot, { recursive: true, force: true });
+      }
     },
   },
 

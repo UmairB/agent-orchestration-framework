@@ -18,7 +18,11 @@ import { workspacePaths } from "./workspace.mjs";
 
 // Paths (relative to `.aof/`) the workspace must never commit — derived/regenerable
 // artifacts a committed copy of which would be a duplicate authoritative source.
-export const AOF_GITIGNORE_ENTRIES = ["aof.memory.index.json"];
+// Both memory backends keep their derived record store here: the local backend's
+// `aof.memory.index.json` (05/ADR-005) and the graphify backend's
+// `aof.memory.graphify.index.json` (10/ADR-005) — each rebuilt from the `.md` stream,
+// never an authoritative second copy, so each is git-ignored by this baseline.
+export const AOF_GITIGNORE_ENTRIES = ["aof.memory.index.json", "aof.memory.graphify.index.json"];
 
 const HEADER = "# aof — derived/regenerable artifacts; never commit (the tracked install is committed).\n";
 
@@ -40,6 +44,46 @@ export async function ensureAofGitignore(targetDir, entries = AOF_GITIGNORE_ENTR
   if (!had) {
     await mkdir(workspaceDir, { recursive: true });
     await writeFile(gitignorePath, `${HEADER}${missing.join("\n")}\n`, "utf8");
+    return true;
+  }
+  const needsNewline = existing.length > 0 && !existing.endsWith("\n");
+  await appendFile(gitignorePath, `${needsNewline ? "\n" : ""}${missing.join("\n")}\n`, "utf8");
+  return true;
+}
+
+// --------------------------------------------------- graphify-out (10/ADR-005) --
+
+// The graphify backend's derived graph artifact lands at `<projectRoot>/graphify-out/`
+// (where `graph:build` writes it, src/graphify.mjs `--out <projectRoot>`) — OUTSIDE
+// `.aof/`, so the nested `.aof/.gitignore` baseline above cannot cover it. A committed
+// graph would be an authoritative second copy (05/ADR-001 / 10/ADR-005 violation): the
+// graph is a pure ranking layer, derived and disposable, holding no fact the records do
+// not. We apply the SAME self-contained nested-ignore idiom as F-02 (never touch the
+// repo-root `.gitignore`): write `<projectRoot>/graphify-out/.gitignore` whose `*`
+// ignores everything in the directory (git applies a nested ignore relative to its own
+// directory) while `!.gitignore` keeps the ignore file itself out of the ignore set —
+// so the discipline is self-documenting in the tree. Idempotent; returns true iff
+// created/changed.
+export const GRAPHIFY_OUT_DIR = "graphify-out";
+export const GRAPHIFY_OUT_GITIGNORE = ["*", "!.gitignore"];
+
+const GRAPHIFY_OUT_HEADER =
+  "# aof — graphify's derived graph (10/ADR-005); never commit (rebuilt from the .md stream).\n";
+
+export async function ensureGraphifyOutGitignore(projectRoot, entries = GRAPHIFY_OUT_GITIGNORE) {
+  const outDir = path.join(projectRoot, GRAPHIFY_OUT_DIR);
+  const gitignorePath = path.join(outDir, ".gitignore");
+
+  const had = existsSync(gitignorePath);
+  const existing = had ? await readFile(gitignorePath, "utf8") : "";
+
+  const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = entries.filter((entry) => !present.has(entry));
+  if (missing.length === 0) return false;
+
+  if (!had) {
+    await mkdir(outDir, { recursive: true });
+    await writeFile(gitignorePath, `${GRAPHIFY_OUT_HEADER}${missing.join("\n")}\n`, "utf8");
     return true;
   }
   const needsNewline = existing.length > 0 && !existing.endsWith("\n");

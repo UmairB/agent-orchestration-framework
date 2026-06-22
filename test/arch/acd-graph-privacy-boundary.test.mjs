@@ -26,6 +26,12 @@ import { graphBuildCommand, classifyEgress } from "../../src/commands/graph-buil
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const srcDir = path.join(repoRoot, "src");
 const DRIVER = path.join(srcDir, "graphify.mjs");
+// The pure graph.json read/normalize helpers were extracted to graph-normalize.mjs
+// (10/01, a spawn-free module the graphify memory backend imports without touching
+// the spawn site); graphify.mjs re-exports them. The driver's only file READ
+// (readGraph) lives there now, so the "reads only the graph artifact" guard scans
+// BOTH modules — the egress invariant is unchanged, only the read's home moved.
+const NORMALIZER = path.join(srcDir, "graph-normalize.mjs");
 const GRAPH_COMMANDS = [
   path.join(srcDir, "commands", "graph-build.mjs"),
   path.join(srcDir, "commands", "graph-query.mjs"),
@@ -125,25 +131,30 @@ export const archTests = [
   {
     name: "arch/ADR-006 inv.4: the driver READS only the graph.json artifact — never source-file contents to ship to a backend",
     run: async () => {
-      const raw = await readFile(DRIVER, "utf8");
-      const code = stripCommentsAndStrings(raw);
-      // The only file the driver reads is the graph artifact: every readFile* call
-      // targets graphPath / graph.json, never input.path (the source folder). A
-      // read of input.path contents would mean aof is marshalling source to ship.
+      // The driver's only file READ is `readGraph`, extracted to graph-normalize.mjs
+      // (10/01) and re-exported from graphify.mjs. Scan BOTH so the invariant holds
+      // wherever the read lives: every readFile* call targets graphPath / graph.json,
+      // never input.path (the source folder). A read of input.path contents would
+      // mean aof is marshalling source to ship to a backend.
       const readRe = /\b(readFileSync|readFile)\s*\(\s*([A-Za-z_$][\w.$]*)/g;
-      const reads = [...code.matchAll(readRe)];
-      assert.ok(reads.length >= 1, "the driver reads the graph.json artifact");
-      for (const match of reads) {
-        const target = match[2];
-        assert.ok(
-          /graphPath|graph/i.test(target),
-          `the driver's file read targets the graph artifact (got read of \`${target}\`), never source-file contents`
-        );
-        assert.ok(
-          !/input/.test(target),
-          "the driver never reads input.path (the source folder) contents to ship to a backend"
-        );
+      let totalReads = 0;
+      for (const module of [DRIVER, NORMALIZER]) {
+        const code = stripCommentsAndStrings(await readFile(module, "utf8"));
+        const reads = [...code.matchAll(readRe)];
+        totalReads += reads.length;
+        for (const match of reads) {
+          const target = match[2];
+          assert.ok(
+            /graphPath|graph/i.test(target),
+            `the file read targets the graph artifact (got read of \`${target}\` in ${path.basename(module)}), never source-file contents`
+          );
+          assert.ok(
+            !/input/.test(target),
+            "the driver never reads input.path (the source folder) contents to ship to a backend"
+          );
+        }
       }
+      assert.ok(totalReads >= 1, "the driver reads the graph.json artifact (via readGraph in graph-normalize.mjs)");
     },
   },
   {

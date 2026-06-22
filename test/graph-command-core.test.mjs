@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWorkspace } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
-import { normalizeGraph } from "../src/graphify.mjs";
+import { normalizeGraph, graphifyBuildArgs } from "../src/graphify.mjs";
 import { classifyEgress, isNetworkBackend } from "../src/commands/graph-build.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -235,6 +235,61 @@ export const graphCommandCoreTests = [
       assert.equal(isNetworkBackend(undefined), false, "an absent backend is code-only → offline allows it");
       assert.equal(isNetworkBackend(null), false, "a null backend is code-only → offline allows it");
       assert.equal(isNetworkBackend("claude"), true, "a network backend (claude) is precisely what offline forbids");
+    },
+  },
+
+  // ═══ 00 build-argv: --out pins projectRoot for the WRITE verb (@finding-F2) ═══
+  // Regression guard for verify-2026-06-22 finding-F2: graphify 0.8.44 `extract`
+  // defaults --out to the EXTRACTION TARGET (not cwd), so a build whose target ≠
+  // projectRoot wrote graph.json under the target folder and then failed to read it
+  // under projectRoot (the #756 cwd discipline fixes the READ verbs, not extract's
+  // WRITE location). The fix pins `--out <projectRoot>` on the build argv. Asserted
+  // on the PURE graphifyBuildArgs helper so the guard is CI-runnable with NO live
+  // binary (the @manual 00/02 build lane cannot guard this in CI). Also re-asserts
+  // the ADR-006 inv. 4 egress=none privacy invariant: a null/absent backend yields
+  // NO --backend flag.
+  {
+    name: "graph-core/00 the build argv pins --out to the projectRoot (finding-F2) and gates --backend on egress",
+    async run() {
+      const projectRoot = "/some/project/root";
+      const target = "/some/other/target/dir";
+
+      // (a) --out is present and immediately followed by the projectRoot value, so
+      // extract WRITES the graph under <projectRoot>/graphify-out/ even when the
+      // build target differs from the project root.
+      const noBackendArgs = graphifyBuildArgs({ path: target }, projectRoot);
+      assert.deepEqual(
+        noBackendArgs.slice(0, 2),
+        ["extract", target],
+        "the argv starts with `extract <target>`"
+      );
+      const outIndex = noBackendArgs.indexOf("--out");
+      assert.notEqual(outIndex, -1, "the build argv always carries --out");
+      assert.equal(
+        noBackendArgs[outIndex + 1],
+        projectRoot,
+        "--out is immediately followed by the projectRoot value (finding-F2: extract writes target-relative by default)"
+      );
+
+      // (b) the egress=none guard (ADR-006 inv. 4): a no-backend input yields NO
+      // --backend flag at all — code/AST only, zero egress.
+      assert.ok(
+        !noBackendArgs.includes("--backend"),
+        "a no-backend input passes NO --backend flag (the egress=none privacy invariant)"
+      );
+
+      // (c) a --backend claude input carries `--backend claude` (the egress hop),
+      // and --out projectRoot still holds.
+      const backendArgs = graphifyBuildArgs({ path: target, backend: "claude" }, projectRoot);
+      const backendIndex = backendArgs.indexOf("--backend");
+      assert.notEqual(backendIndex, -1, "a backend input carries a --backend flag");
+      assert.equal(backendArgs[backendIndex + 1], "claude", "the --backend flag names the requested backend");
+      const backendOutIndex = backendArgs.indexOf("--out");
+      assert.equal(
+        backendArgs[backendOutIndex + 1],
+        projectRoot,
+        "--out still pins the projectRoot when a backend is set"
+      );
     },
   },
 

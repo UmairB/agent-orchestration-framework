@@ -24,19 +24,43 @@ import {
 } from "../graphify.mjs";
 
 // Backend classification (RESEARCH §F). A NETWORK backend reaches a remote API
-// (claude/gemini/openai/kimi/deepseek); ollama is LOCAL (runs on-box). The
-// distinction drives the ADR-001 offline guard ONLY — it is NOT the egress field:
-// egress reports whether the doc/media HOP ran, regardless of locality (ADR-005).
-const NETWORK_BACKENDS = new Set(["claude", "gemini", "openai", "kimi", "deepseek"]);
+// (claude/gemini/openai/kimi/deepseek/claude-cli); ollama is LOCAL (runs on-box).
+// The distinction drives the ADR-001 offline guard ONLY — it is NOT the egress
+// field: egress reports whether the doc/media HOP ran, regardless of locality
+// (ADR-005).
+//
+// `claude-cli` is graphify's native credential-local default (10/ADR-003): it
+// shells the user's logged-in `claude -p` (no metered ANTHROPIC_API_KEY; billed to
+// the plan). It is registered here BY KNOWLEDGE so the classification is by
+// enumeration, not by the unknown-name network fall-through: billed-to-plan is
+// orthogonal to egress — the prose IS still sent to Anthropic for inference, so it
+// DOES cross the network (isNetworkBackend === true). It is NOT data-local; `ollama`
+// remains the ONLY data-resident (on-box) backend. Both still egress "docs-media"
+// (the doc/media hop ran) — locality is a separate privacy property (ADR-005).
+const NETWORK_BACKENDS = new Set(["claude", "claude-cli", "gemini", "openai", "kimi", "deepseek"]);
 const LOCAL_BACKENDS = new Set(["ollama"]);
 
 // True when `backend` names a backend that crosses the network (a remote API).
-// null/absent/local (ollama) → false. Unknown names are treated as NETWORK
-// (fail-closed: an unrecognised backend is assumed to egress until proven local).
+// null/absent/local (ollama) → false. A KNOWN network backend (NETWORK_BACKENDS,
+// claude-cli INCLUDED — 10/ADR-003) is classified network by ENUMERATION, never by
+// accident. An UNKNOWN name still falls closed to NETWORK (an unrecognised backend
+// is assumed to egress until proven local) — but the known set is the by-knowledge
+// path, so adding claude-cli to NETWORK_BACKENDS makes its classification a
+// deliberate fact, not a fall-through the moment the default ever changes.
 export function isNetworkBackend(backend) {
   if (backend == null) return false;
   if (LOCAL_BACKENDS.has(backend)) return false;
-  return true;
+  if (NETWORK_BACKENDS.has(backend)) return true;
+  return true; // fail-closed: unknown names are assumed to egress until proven local
+}
+
+// True when `backend` is a KNOWN network backend (registered in NETWORK_BACKENDS),
+// i.e. its network classification is BY KNOWLEDGE, not by the unknown-name
+// fall-through. `isNetworkBackend` returns true for BOTH a known-network name and an
+// unknown one (fail-closed); this distinguishes them so the 10/ADR-003 contract —
+// "claude-cli is network by enumeration" — is observable, not merely incidental.
+export function isKnownNetworkBackend(backend) {
+  return backend != null && NETWORK_BACKENDS.has(backend);
 }
 
 // classifyEgress(backend) → the egress field for a BuildResult (ADR-001/ADR-005).
