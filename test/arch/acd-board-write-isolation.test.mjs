@@ -1,11 +1,19 @@
-// Fitness function: acd-board-write-isolation (ADR-004).
+// Fitness function: acd-board-write-isolation (ADR-004, milestone 03; re-anchored
+// by milestone 08's command-core migration).
 //
-// The board server performs exactly ONE kind of filesystem mutation — appending
+// The board surface performs exactly ONE kind of filesystem mutation — appending
 // an attributed bullet under `## Feedback (for retro)` in a selected
-// milestone/story `STATE.md`. It never writes item status/frontmatter, exposes
-// no restatus route, and calls validateWork/nextWork in-process (no CLI
-// shell-out). Source-grep `src/board-ui.mjs` for the structural guard, plus a
-// behavioural check: posting feedback against a fixture changes only STATE.md.
+// milestone/story `STATE.md`. It never writes item status/frontmatter, exposes no
+// restatus route, and runs the operation in-process (no CLI shell-out).
+//
+// Milestone 08 (ADR-002/003) re-homed that sole write OUT of `board-ui.mjs` and
+// INTO the `work:feedback` command (`src/commands/feedback.mjs`): `board-ui.mjs`
+// is now a thin face that `invoke`s the command through the registry and itself
+// performs NO fs write. The write-isolation GUARANTEE is unchanged — it has only
+// moved with the code — so this fitness function now anchors the "sole writer"
+// lens at the command's new home while still proving `board-ui.mjs` writes nothing
+// and shells out to nothing, plus the unchanged behavioural end-to-end (posting
+// feedback over the migrated seam changes only STATE.md).
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
@@ -13,6 +21,7 @@ import path from "node:path";
 import { serveSetupUi } from "../../src/setup-ui.mjs";
 
 const BOARD_UI = new URL("../../src/board-ui.mjs", import.meta.url);
+const FEEDBACK_COMMAND = new URL("../../src/commands/feedback.mjs", import.meta.url);
 
 async function snapshotDir(dir) {
   const snap = new Map();
@@ -39,30 +48,31 @@ function diffSnapshots(before, after) {
 
 export const archTests = [
   {
-    name: "arch/board-write-isolation: every filesystem-write call site targets STATE.md / the feedback heading",
+    name: "arch/board-write-isolation: the sole feedback-write helper lives in the work:feedback command and targets STATE.md / the verbatim heading",
     async run() {
-      const source = await readFile(BOARD_UI, "utf8");
-      // The fs write verbs the module may use.
-      const writeVerbs = ["writeFile", "appendFile"];
-      for (const verb of writeVerbs) {
-        // Any occurrence must live within the feedback-append helper, which is
-        // the sole writer. We assert there is no write outside that helper by
-        // confirming all writes are reachable only from appendFeedbackBullet.
-        const occurrences = source.split(verb).length - 1;
-        if (occurrences === 0) continue;
+      // Milestone 08 re-homed the write: board-ui.mjs itself performs NO fs write
+      // (the face only invokes the command), so the "sole writer" lens now points
+      // at src/commands/feedback.mjs — the command core's ONLY mutation.
+      const board = await readFile(BOARD_UI, "utf8");
+      for (const verb of ["writeFile", "appendFile"]) {
+        assert.ok(
+          !new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(board)),
+          `board-ui.mjs performs no ${verb}( — the write moved into the work:feedback command`
+        );
       }
+
+      const source = await readFile(FEEDBACK_COMMAND, "utf8");
       // Structural: there is exactly one feedback-write helper and it is the only
-      // function that performs an fs write. Confirm the write verbs only appear
-      // inside `appendFeedbackBullet`.
+      // function in the command that performs an fs write.
       const helperStart = source.indexOf("async function appendFeedbackBullet");
-      assert.ok(helperStart !== -1, "the sole feedback-write helper appendFeedbackBullet exists");
+      assert.ok(helperStart !== -1, "the sole feedback-write helper appendFeedbackBullet exists in the command");
       const helperEnd = nextTopLevelFn(source, helperStart);
       const helperBody = source.slice(helperStart, helperEnd);
       const outsideHelper = source.slice(0, helperStart) + source.slice(helperEnd);
-      for (const verb of writeVerbs) {
+      for (const verb of ["writeFile", "appendFile"]) {
         assert.ok(
-          !new RegExp(`\\b${verb}\\s*\\(`).test(outsideHelper),
-          `${verb} appears only inside appendFeedbackBullet, never elsewhere in board-ui.mjs`
+          !new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(outsideHelper)),
+          `${verb} appears only inside appendFeedbackBullet, never elsewhere in the feedback command`
         );
       }
       // The helper writes the STATE.md target and the verbatim heading.
@@ -76,29 +86,36 @@ export const archTests = [
     },
   },
   {
-    name: "arch/board-write-isolation: no write to item frontmatter/status and no restatus route",
+    name: "arch/board-write-isolation: no write to item frontmatter/status and no restatus route (board face + feedback command)",
     async run() {
-      const source = await readFile(BOARD_UI, "utf8");
-      // No record-doc (SPEC/STORY/SESSION) is ever written.
-      for (const doc of ["SPEC.md", "STORY.md", "SESSION.md"]) {
-        assert.ok(!writesTo(source, doc), `board-ui.mjs never writes ${doc} (status/frontmatter is derived, not written)`);
+      const board = await readFile(BOARD_UI, "utf8");
+      const command = await readFile(FEEDBACK_COMMAND, "utf8");
+      // No record-doc (SPEC/STORY/SESSION) is ever written by either the face or
+      // the sole writer — status/frontmatter is derived, never written.
+      for (const [label, source] of [["board-ui.mjs", board], ["commands/feedback.mjs", command]]) {
+        for (const doc of ["SPEC.md", "STORY.md", "SESSION.md"]) {
+          assert.ok(!writesTo(source, doc), `${label} never writes ${doc} (status/frontmatter is derived, not written)`);
+        }
+        assert.ok(!/\bstatus\s*:\s*['"]/.test(stripComments(source)), `${label} writes no literal status value`);
       }
-      // No status/restatus route or status-write path.
-      assert.ok(!/\/api\/work\/(re)?status/.test(source), "no /api/work/status or /api/work/restatus route");
-      assert.ok(!/\bstatus\s*:\s*['"]/.test(stripComments(source)), "no literal status value is written");
+      // No status/restatus route or status-write path on the board face.
+      assert.ok(!/\/api\/work\/(re)?status/.test(board), "no /api/work/status or /api/work/restatus route");
     },
   },
   {
-    name: "arch/board-write-isolation: validate/next are in-process imports, never a CLI shell-out",
+    name: "arch/board-write-isolation: the board runs the operation in-process via the registry, never a CLI shell-out",
     async run() {
       const source = await readFile(BOARD_UI, "utf8");
-      // validateWork / nextWork are imported in-process from work.mjs.
-      assert.ok(/import\s*\{[^}]*\bvalidateWork\b[^}]*\}\s*from\s*["']\.\/work\.mjs["']/.test(source), "validateWork is imported from work.mjs");
-      assert.ok(/import\s*\{[^}]*\bnextWork\b[^}]*\}\s*from\s*["']\.\/work\.mjs["']/.test(source), "nextWork is imported from work.mjs");
+      // The board face invokes operations in-process THROUGH the command registry
+      // (the only door, ADR-004 inv. 3) — never a per-request subprocess.
+      assert.ok(
+        /import\s*\{[^}]*\binvoke\b[^}]*\}\s*from\s*["']\.\/command-core\.mjs["']/.test(source),
+        "board-ui.mjs invokes operations in-process through ./command-core.mjs"
+      );
       // No child_process / spawn / exec of a CLI.
       assert.ok(!/child_process/.test(source), "no child_process import");
       for (const verb of ["spawn", "spawnSync", "exec", "execSync", "execFile"]) {
-        assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(source), `no ${verb}( shell-out`);
+        assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(source)), `no ${verb}( shell-out`);
       }
       // No CLI invocation strings.
       assert.ok(!/aof\s+work\s+(validate|next)/.test(source), "no 'aof work validate/next' CLI invocation");

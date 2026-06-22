@@ -1,0 +1,191 @@
+// Fitness function for milestone 08 / ADR-004 inv. 2 (command → CLI injection):
+// "Every command in the registry has a non-null `cli` adapter (`cli.argv`/
+//  `cli.render` are functions) AND a reachable `aof work <sub>` dispatch branch —
+//  no command the CLI cannot run."
+//
+// Three proofs, generalising the acd-work-list-contract spawn idiom to all six:
+//   (a) import the registry; assert each command's `cli` adapter is present with
+//       `argv`/`render` functions;
+//   (b) source-grep `workCommand` in `cli.mjs` for a reachable dispatch branch per
+//       subcommand (`subcommand === "<sub>"`, comments discounted);
+//   (c) CLI spawn-and-parse: build a fixture stream and `spawnSync` each of
+//       `aof work {list,doc,tasks,validate,next,feedback} --json` with sensible
+//       args, asserting a clean run + parseable JSON. feedback WRITES, so its args
+//       target a real fixture item and it must succeed + append.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { listCommands } from "../../src/command-core.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const cliPath = path.join(repoRoot, "bin", "aof.mjs");
+const CLI_MJS = path.join(repoRoot, "src", "cli.mjs");
+
+// The six work-surface subcommands, each backed by a work:<op> command.
+const SUBCOMMANDS = ["list", "doc", "tasks", "validate", "next", "feedback"];
+
+function stripComments(source) {
+  return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+// Isolate the `workCommand` function body so the dispatch grep cannot be satisfied
+// by a `subcommand === "<sub>"` that belongs to some OTHER command's dispatcher.
+function workCommandBody(source) {
+  const start = source.search(/(?:async\s+)?function\s+workCommand\s*\(/);
+  if (start === -1) return "";
+  // Walk to the next top-level `function ` declaration after the start.
+  const re = /\n(?:export\s+)?(?:async\s+)?function\s/g;
+  re.lastIndex = start + 1;
+  const next = re.exec(source);
+  return source.slice(start, next ? next.index : source.length);
+}
+
+// --- the CLI fixture stream (mirrors acd-work-list-contract's builder) --------
+
+const FIXTURE_ITEMS = [
+  { ref: "03", type: "milestone", slug: "board", status: "in-progress", title: "Board" },
+  { ref: "03/01", type: "story", slug: "board-ui", status: "in-progress", title: "Board UI" },
+];
+
+function frontmatter(fields) {
+  const lines = Object.entries(fields).map(([key, value]) => `${key}: ${value}`);
+  return `---\n${lines.join("\n")}\n---\n`;
+}
+
+async function buildFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), "aof-cli-bijection-"));
+  const aofDir = path.join(root, ".aof");
+  const workDir = path.join(root, "wiki", "work");
+  await mkdir(aofDir, { recursive: true });
+  const milestoneDir = path.join(workDir, "03_milestone_board");
+  const storyDir = path.join(milestoneDir, "stories", "01_story_board-ui");
+  const tasksDir = path.join(storyDir, "tasks");
+  await mkdir(tasksDir, { recursive: true });
+  await writeFile(
+    path.join(aofDir, "aof.config.json"),
+    `${JSON.stringify({ name: "fixture", work: { dir: "./wiki/work" } }, null, 2)}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(milestoneDir, "SPEC.md"),
+    frontmatter({ type: "milestone", number: "03", slug: "board", status: "in-progress", title: '"Board"', created: "2026-06-19", updated: "2026-06-19" }),
+    "utf8"
+  );
+  await writeFile(
+    path.join(storyDir, "STORY.md"),
+    frontmatter({ type: "story", number: "01", slug: "board-ui", parent: "03", status: "in-progress", title: '"Board UI"', created: "2026-06-19", updated: "2026-06-19" }),
+    "utf8"
+  );
+  await writeFile(path.join(storyDir, "STATE.md"), "# 03/01 · State\n", "utf8");
+  // One task feature so `work tasks 03/01` parses a real scenario (not just []).
+  await writeFile(
+    path.join(tasksDir, "01_probe.feature"),
+    "Feature: Probe\n\n  @executable\n  Scenario: it runs\n    Given a thing\n    When it happens\n    Then it works\n",
+    "utf8"
+  );
+  return root;
+}
+
+// Sensible args per subcommand against the fixture above. Reads resolve `03/01`;
+// feedback writes to the milestone/story STATE.md with a real note.
+function argsFor(sub) {
+  switch (sub) {
+    case "list": return ["work", "list", "--json"];
+    case "doc": return ["work", "doc", "03", "SPEC", "--json"];
+    case "tasks": return ["work", "tasks", "03/01", "--json"];
+    case "validate": return ["work", "validate", "--json"];
+    case "next": return ["work", "next", "--json"];
+    case "feedback": return ["work", "feedback", "03/01", "--note", "bijection probe", "--actor", "arch-test", "--json"];
+    default: throw new Error(`unmapped subcommand ${sub}`);
+  }
+}
+
+function runCli(root, args) {
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, NODE_NO_WARNINGS: "1" },
+  });
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+export const archTests = [
+  {
+    name: "arch/ADR-004 inv.2: every registered command carries a non-null cli adapter (argv + render functions)",
+    run: async () => {
+      const commands = listCommands();
+      assert.ok(commands.length > 0, "the registry is non-empty");
+      for (const command of commands) {
+        assert.ok(command.cli != null, `${command.id} has a non-null cli adapter`);
+        assert.equal(typeof command.cli.argv, "function", `${command.id} cli.argv is a function`);
+        assert.equal(typeof command.cli.render, "function", `${command.id} cli.render is a function`);
+      }
+    },
+  },
+  {
+    name: "arch/ADR-004 inv.2: workCommand in cli.mjs has a reachable dispatch branch per subcommand",
+    run: async () => {
+      const body = workCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
+      assert.ok(body.length > 0, "workCommand is defined in cli.mjs");
+      for (const sub of SUBCOMMANDS) {
+        assert.ok(
+          new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body),
+          `workCommand dispatches \`subcommand === "${sub}"\` (no command the CLI cannot run)`
+        );
+      }
+    },
+  },
+  {
+    name: "arch/ADR-004 inv.2: aof work <sub> --json runs cleanly and emits parseable JSON for every subcommand",
+    run: async () => {
+      const root = await buildFixture();
+      try {
+        for (const sub of SUBCOMMANDS) {
+          const result = runCli(root, argsFor(sub));
+          // `validate` is the one read that DESIGNS to exit 1 when findings exist
+          // (cli.mjs:615) — both 0 and 1 are clean runs for it; every other op
+          // exits 0. None may crash (>1 or a null status from a thrown error).
+          const acceptable = sub === "validate" ? [0, 1] : [0];
+          assert.ok(
+            acceptable.includes(result.status),
+            `aof ${argsFor(sub).join(" ")} exits ${acceptable.join("/")} (got ${result.status}; stderr: ${result.stderr})`
+          );
+          // The --json face emits a single parseable JSON document on stdout.
+          let parsed;
+          assert.doesNotThrow(() => { parsed = JSON.parse(result.stdout); }, `aof ${argsFor(sub).join(" ")} emits parseable JSON (stdout: ${result.stdout.slice(0, 200)})`);
+          assert.ok(parsed !== undefined, `aof ${argsFor(sub).join(" ")} produced a JSON value`);
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "arch/ADR-004 inv.2: aof work feedback --json writes exactly one bullet to the target STATE.md",
+    run: async () => {
+      const root = await buildFixture();
+      try {
+        const statePath = path.join(root, "wiki", "work", "03_milestone_board", "stories", "01_story_board-ui", "STATE.md");
+        const before = await readFile(statePath, "utf8");
+        assert.ok(!before.includes("## Feedback (for retro)"), "fixture STATE.md starts with no feedback heading");
+
+        const result = runCli(root, argsFor("feedback"));
+        assert.equal(result.status, 0, `aof work feedback exits 0 (stderr: ${result.stderr})`);
+        const parsed = JSON.parse(result.stdout);
+        assert.equal(parsed.ok, true, "the feedback result envelope is { ok: true, … }");
+
+        const after = await readFile(statePath, "utf8");
+        const headingCount = after.split("## Feedback (for retro)").length - 1;
+        assert.equal(headingCount, 1, "exactly one verbatim feedback heading after the write");
+        assert.ok(after.includes("bijection probe"), "the appended bullet carries the note");
+        const bullets = after.split(/\r?\n/).filter((line) => line.trim().startsWith("- "));
+        assert.equal(bullets.length, 1, "exactly one bullet appended under the heading");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
+];
