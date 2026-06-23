@@ -3,10 +3,10 @@ type: milestone
 number: 09
 slug: graphify-command-core
 title: "Graphify Command Core — graphify arrives as aof commands"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 depends: [08]
 origin: wiki/planning/PRD-graphify-integration.md
 ---
@@ -84,21 +84,21 @@ stays in 02, the net-new aof MCP **server runtime** became **story 04** (PO deci
 authored `2026-06-21` (Three Amigos: PO scenarios + QA examples/tagging + developer feasibility) for
 00/01/02/04; 03's contract is ADR-006 itself (six arch-tests, no `.feature` pass).
 
-- [ ] **00 · [graph-command-core](stories/00_story_graph-command-core/STORY.md)** — the three `graph:*`
+- [x] **00 · [graph-command-core](stories/00_story_graph-command-core/STORY.md)** — the three `graph:*`
   commands + the sole graphify driver (`src/graphify.mjs`); freezes the command/result contract (ADR-001)
-  and the driver seam (ADR-002/003). The spine. 4 tasks. _in-review_
-- [ ] **01 · [binary-provisioning](stories/01_story_binary-provisioning/STORY.md)** — the install decision
+  and the driver seam (ADR-002/003). The spine. 4 tasks. _done_
+- [x] **01 · [binary-provisioning](stories/01_story_binary-provisioning/STORY.md)** — the install decision
   made real: `resolveGraphifyBinary` + the `graphify-binary` `aof project doctor` check (ADR-004); the npx
-  installer untouched. Consumes 00. 2 tasks. _in-review_
-- [ ] **02 · [rendered-faces](stories/02_story_rendered-faces/STORY.md)** — the graphify skill + the MCP
+  installer untouched. Consumes 00. 2 tasks. _done_
+- [x] **02 · [rendered-faces](stories/02_story_rendered-faces/STORY.md)** — the graphify skill + the MCP
   **config entry** through the existing asset/lock/drift machinery, invoking `aof graph <verb>` (ADR-005).
-  Consumes 00's frozen verb surface. 2 tasks. _in-review_
-- [ ] **03 · [graph-fitness](stories/03_story_graph-fitness/STORY.md)** — the six enforcing arch-tests
+  Consumes 00's frozen verb surface. 2 tasks. _done_
+- [x] **03 · [graph-fitness](stories/03_story_graph-fitness/STORY.md)** — the six enforcing arch-tests
   (ADR-006 — the load-bearing deliverable). Asserts against 00; five RED-until-built, no-npx GREEN now.
-  6 arch-tests. _in-review_
-- [ ] **04 · [mcp-server-runtime](stories/04_story_mcp-server-runtime/STORY.md)** — the net-new aof MCP
+  6 arch-tests. _done_
+- [x] **04 · [mcp-server-runtime](stories/04_story_mcp-server-runtime/STORY.md)** — the net-new aof MCP
   server (`aof graph serve`) whose tools answer via `invoke("graph:…")` behind the registry; the runtime the
-  02 config entry targets (ADR-005 amended). Consumes 00. 2 tasks. _in-review_
+  02 config entry targets (ADR-005 amended). Consumes 00. 2 tasks. _done_
 
 ## Dependencies
 

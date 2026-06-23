@@ -192,7 +192,13 @@ It exposes a small surface the `graph:*` commands call — `resolveGraphifyBinar
   doctor entry is written: spec `graphifyy`, binary `graphify` (`RESEARCH §G`).
 - **The cwd discipline** — every query-family spawn runs with `cwd = ctx.workspace.projectRoot` so
   graphify finds `<projectRoot>/graphify-out/graph.json` (#756, `RESEARCH §I`). Build writes under the
-  same root. The driver NEVER relies on `GRAPHIFY_OUT`.
+  same root. The driver NEVER relies on `GRAPHIFY_OUT`. *(Amendment, verify-2026-06-22, finding-F2:* the
+  `cwd=projectRoot` discipline covers the READ verbs (query/path/explain read `graphify-out` relative to
+  cwd), but graphify 0.8.44 `extract <path>` defaults `--out` to the EXTRACTION TARGET (`<path>`), NOT
+  the cwd — so a build whose target ≠ projectRoot wrote the graph under the target folder, where the
+  driver then could not find it under projectRoot. The driver therefore pins `--out projectRoot` on the
+  build (WRITE) verb so extract writes to `<projectRoot>/graphify-out/`, matching where the query family
+  reads.*)*
 - **Version pinning** — the driver pins a graphify version (the version the contract is verified
   against) and treats the verb mapping as version-gated (`RESEARCH §A`); an unexpected version is a
   doctor warning (ADR-004), not a silent mismap.

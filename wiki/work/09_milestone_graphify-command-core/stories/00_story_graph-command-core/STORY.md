@@ -4,10 +4,10 @@ number: 00
 slug: graph-command-core
 title: "The graph command core — graph:build/query/triage registered into the 08 core + the sole graphify driver (the spine)"
 parent: 09
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 # 00 · The graph command core — the registered commands + the sole graphify driver (the spine)
 
@@ -28,7 +28,7 @@ so that the aof CLI is the single source of truth for graphify, the contract is 
 
 - [x] **00 · [graph-commands-registered](tasks/00_graph-commands-registered.feature)** — the three `graph:*` commands carry the frozen `{id,input,run,cli}` shape, register into the SAME core, and dispatch from `aof graph <verb>` with `--json` (the 08 bijection, extended). _@executable green._
 - [x] **01 · [graph-json-normalization](tasks/01_graph-json-normalization.feature)** — the driver normalizes `graph.json` reading `links` (NOT `edges`), preserving `confidence`/`confidenceScore`, keeping `hyperedges` separate — against a committed fixture (ADR-003). _@executable green._
-- [ ] **02 · [driver-spawn-and-cwd](tasks/02_driver-spawn-and-cwd.feature)** — `src/graphify.mjs` is the sole graphify spawn site; resolves the `graphify` binary, cwd's into `projectRoot` (#756), pins a version; a real build over a folder produces `graphify-out/graph.json` (live → **@manual, deferred to `aof:verify`**).
+- [x] **02 · [driver-spawn-and-cwd](tasks/02_driver-spawn-and-cwd.feature)** — `src/graphify.mjs` is the sole graphify spawn site; resolves the `graphify` binary, cwd's into `projectRoot` (#756), pins a version; a real build over a folder produces `graphify-out/graph.json`. _@manual verified live 2026-06-22 (graphify 0.8.44 from the `~/.aof` store): build writes `<projectRoot>/graphify-out/graph.json` (nodeCount/edgeCount graph-derived, egress=none offline) and a subsequent query finds it — after the finding-F2 `--out projectRoot` driver fix (see [VERIFICATION.md](../../VERIFICATION.md))._
 - [x] **03 · [query-triage-results](tasks/03_query-triage-results.feature)** — `graph:query` / `graph:triage` carry graphify's **opaque** markdown `stdout` + a `graphPath` to the whole graph (ADR-001 amendment — no per-query subgraph, no structured `prs[]`); both fail clearly when no `graph.json` exists yet (the build precondition). _@executable rows green; live success rows @manual (verify)._
 
 ## Notes

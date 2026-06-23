@@ -4,10 +4,10 @@ number: 03
 slug: graph-fitness
 title: "The graphify fitness functions — registration+CLI, no-face-spawn, binary-absent, privacy, graph.json, no-npx — as arch-tests"
 parent: 09
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 # 03 · The graphify fitness functions — the load-bearing structural guarantee
 

@@ -4,10 +4,10 @@ number: 04
 slug: mcp-server-runtime
 title: "The aof MCP server runtime — aof graph serve, a stdio MCP face that answers tool calls via invoke(graph:…)"
 parent: 09
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 # 04 · The aof MCP server runtime — the server the rendered MCP entry launches
 

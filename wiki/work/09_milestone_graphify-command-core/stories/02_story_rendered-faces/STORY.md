@@ -4,10 +4,10 @@ number: 02
 slug: rendered-faces
 title: "Rendered faces — the graphify skill + MCP config entry, through the existing asset/lock/drift machinery, invoking aof graph"
 parent: 09
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 # 02 · Rendered faces — the graphify skill + MCP face over the aof graph commands
 

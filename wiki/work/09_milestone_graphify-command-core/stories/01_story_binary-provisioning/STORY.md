@@ -4,10 +4,10 @@ number: 01
 slug: binary-provisioning
 title: "Binary provisioning — assets-only + an aof project doctor graphify-binary check (the npx installer untouched)"
 parent: 09
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 # 01 · Binary provisioning — the Python-binary install path made real
 
