@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   parseRetrospective,
   parseArchitecture,
+  parseAof,
   reindex,
   status,
   memoryIndexPath,
@@ -53,6 +54,7 @@ async function tempStream(milestones) {
     await mkdir(dir, { recursive: true });
     if (m.retro != null) await writeFile(path.join(dir, "RETROSPECTIVE.md"), m.retro, "utf8");
     if (m.arch != null) await writeFile(path.join(dir, "ARCHITECTURE.md"), m.arch, "utf8");
+    if (m.aof != null) await writeFile(path.join(dir, "AOF.md"), m.aof, "utf8");
   }
   await mkdir(path.join(projectRoot, ".aof"), { recursive: true });
   return { projectRoot, workDir, ctx: { workDir, projectRoot, configMemory: {} } };
@@ -106,6 +108,36 @@ doc: architecture
 **Decision.** the old decision.
 `;
 
+// An AOF.md digest fixture: an h1 title, an HTML comment, three `## ` sections, and
+// an h3 subsection (which must fold into its parent, not become its own record).
+const SAMPLE_AOF = `---
+doc: digest
+milestone: 06
+slug: knowledge-rag
+imported: true
+importedBy: aof
+---
+# 06 · Knowledge Base & RAG — Digest
+
+<!-- aof digest: each ## section indexes as one summary record. -->
+
+## Intent
+
+Answer from docs, not just tools: a dedicated KB index, top-K retrieval, citations.
+
+## Delivered
+
+A retriever seam, ingestion pipeline, KB index, retrieval grounding, citations. Done.
+
+### A subsection that is NOT its own record
+
+This prose stays inside Delivered.
+
+## Key decision
+
+Self-rolled retrieval over Azure "On Your Data".
+`;
+
 function recordById(records, id) {
   return records.find((r) => r.id === id);
 }
@@ -121,6 +153,16 @@ function assertFrozenShape(record) {
     assert.equal(typeof record[key], "string", `record ${record.id} field "${key}" is a string`);
   }
   assert.ok(["lesson", "adr"].includes(record.recordType), `record ${record.id} recordType is lesson|adr`);
+}
+
+// The frozen MemoryRecord shape for a digest `summary` record (same 13 fields,
+// every value a string; recordType is "summary").
+function assertAofShape(record) {
+  for (const key of MEMORY_RECORD_KEYS) {
+    assert.ok(key in record, `record ${record.id} has key "${key}"`);
+    assert.equal(typeof record[key], "string", `record ${record.id} field "${key}" is a string`);
+  }
+  assert.equal(record.recordType, "summary", `record ${record.id} recordType is summary`);
 }
 
 // Resolve a record's source (path:line) against a work directory, asserting live
@@ -580,6 +622,92 @@ export const memoryIndexingTests = [
       assert.equal(rec.area, "code");
       assert.equal(rec.stage, "build", "Stage from the SECOND meta line is captured");
       assert.equal(rec.owner, "developer", "Owner from the SECOND meta line is captured");
+    },
+  },
+
+  // ====================================================================
+  // AOF.md digest → `summary` records (05/ADR-007 localised additive source).
+  // A digest gives a milestone whose SPEC/STATE carry no ADR/retro records a
+  // recallable presence; each `## ` section is one summary record that resolves
+  // to its heading line. h1 (the digest title) and h3+ subsections are NOT roots.
+  // ====================================================================
+  {
+    name: "aof/digest: each ## section becomes a summary record (h1 + h3 excluded) with the frozen shape",
+    run: async () => {
+      const recs = parseAof(SAMPLE_AOF, { item: "06", itemSlug: "knowledge-rag", workRelPath: "06_milestone_knowledge-rag/AOF.md" });
+      assert.deepEqual(recs.map((r) => r.id), ["intent", "delivered", "key-decision"], "one summary per ## section; h1/h3 are not roots");
+      for (const r of recs) assertAofShape(r);
+      const intent = recs.find((r) => r.id === "intent");
+      assert.equal(intent.title, "Intent", "title is the heading text");
+      assert.ok(/Answer from docs/.test(intent.text), "text carries the section body");
+      assert.ok(intent.summary.length > 0 && /Answer from docs/.test(intent.summary), "summary is the section's gist line");
+      // The h3 subsection's prose stays inside its parent (Delivered), not its own record.
+      const delivered = recs.find((r) => r.id === "delivered");
+      assert.ok(/stays inside Delivered/.test(delivered.text), "an h3 subsection's prose folds into its parent section");
+      // Each source line is the section's own ## heading.
+      const lines = SAMPLE_AOF.split(/\r?\n/);
+      for (const r of recs) {
+        const ln = Number.parseInt(r.source.split(":").pop(), 10);
+        assert.match(lines[ln - 1], /^##\s+\S/, `${r.id} source points at its ## heading`);
+      }
+    },
+  },
+  {
+    name: "aof/digest: an empty/whitespace heading yields no record (no fabrication)",
+    run: async () => {
+      const recs = parseAof(`# T — Digest\n\n## \n\nbody with no heading text\n`, { item: "06", itemSlug: "x", workRelPath: "06_milestone_x/AOF.md" });
+      assert.equal(recs.length, 0, "a `## ` with no title text produces no record");
+    },
+  },
+  {
+    name: "aof/digest: reindex scans a milestone's AOF.md and contributes its summary records (resolving on disk)",
+    run: async () => {
+      const { projectRoot, workDir, ctx } = await tempStream([
+        { number: "06", slug: "knowledge-rag", aof: SAMPLE_AOF },
+      ]);
+      try {
+        const result = await reindex(null, ctx);
+        const summaries = result.records.filter((r) => r.recordType === "summary");
+        assert.equal(summaries.length, 3, "3 summary records from the digest");
+        assert.ok(summaries.every((r) => r.item === "06"), "items are the milestone number");
+        const headingLine = await assertSourceResolves(summaries[0], workDir);
+        assert.match(headingLine, /^##\s+\S/, "the summary's source resolves to a ## heading in AOF.md");
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "aof/digest: a milestone-scoped reindex includes that milestone's AOF.md digest",
+    run: async () => {
+      const { projectRoot, ctx } = await tempStream([
+        { number: "06", slug: "knowledge-rag", aof: SAMPLE_AOF },
+        { number: "07", slug: "other", arch: TINY_ARCH },
+      ]);
+      try {
+        const result = await reindex("06", ctx);
+        assert.ok(result.records.length > 0, "scoped reindex produced records");
+        assert.ok(result.records.every((r) => r.item === "06"), "every record is milestone 06");
+        assert.ok(result.records.some((r) => r.recordType === "summary"), "the digest's summary records are included");
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "aof/digest: status reports a summaries count, and lessons+adrs+summaries == recordCount",
+    run: async () => {
+      const { projectRoot, ctx } = await tempStream([
+        { number: "06", slug: "knowledge-rag", aof: SAMPLE_AOF, retro: TINY_RETRO, arch: TINY_ARCH },
+      ]);
+      try {
+        await reindex(null, ctx);
+        const result = await status(ctx);
+        assert.equal(result.summaries, 3, "3 summary records counted");
+        assert.equal(result.lessons + result.adrs + result.summaries, result.recordCount, "the full type split sums to recordCount");
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
     },
   },
 ];

@@ -13,10 +13,12 @@
 // recordType are present as "" (never omitted) so retrieval filters uniformly.
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { listItems } from "../work.mjs";
 import { readJson, writeText } from "../fs.mjs";
 import { ensureAofGitignore } from "../aof-gitignore.mjs";
+import { importStoreRoot } from "../import/store.mjs";
+import { ARCHITECTURE_FILE, RETROSPECTIVE_FILE } from "../import/materialize.mjs";
 
 // The index-format version (ADR-005). Bump on a breaking record-shape change.
 export const INDEX_VERSION = 1;
@@ -168,19 +170,157 @@ export function parseArchitecture(text, { item, itemSlug, workRelPath }) {
   });
 }
 
+// ------------------------------------------------------------- AOF parser ----
+
+// One `summary` MemoryRecord per `## ` section of an `AOF.md` digest — a recallable
+// overview of a milestone whose SPEC/STATE carry no ADR/retro records (so a milestone
+// aof didn't drive still grounds recall). A digest is a NEW source in the 05/ADR-007
+// "add a source = localised additive change" sense: its records carry the frozen
+// MemoryRecord shape and a resolving `source:line` (the section heading), and the
+// digest `.md` is the rebuildable source — it never duplicates SPEC/STATE as authority,
+// it summarises and points. The lesson/adr-only fields are present-as-"" (ADR-005).
+// h1 (the digest title) and h3+ subsections are NOT section roots — only `## ` is.
+export function parseAof(text, { item, itemSlug, workRelPath }) {
+  return splitSections(text, /^##\s+\S/)
+    .map((section) => {
+      const title = cleanTitle(section.header.replace(/^##\s+/, ""));
+      const body = section.body.join("\n").trim();
+      // A stable heading-slug id (sections are unique within a digest); the `item`
+      // namespaces it across milestones, so `intent`/`delivered`/`key-decision` suffice.
+      const id = slugifyHeading(title);
+      // The gist line: the first non-empty, non-comment prose line of the section.
+      const summary = section.body
+        .map((line) => line.trim())
+        .find((line) => line.length > 0 && !/^<!--/.test(line)) ?? "";
+      return {
+        recordType: "summary",
+        id,
+        item,
+        itemSlug,
+        title,
+        area: "", // a digest is a general overview — no architecture/area classification
+        stage: "",
+        kind: "",
+        owner: "",
+        status: "",
+        summary,
+        text: [title, body].filter(Boolean).join(" \n "), // searchable blob
+        source: `${workRelPath}:${section.line}`,
+      };
+    })
+    .filter((record) => record.title.length > 0); // never a record for an empty heading
+}
+
+// A heading → a stable kebab id ("Key decision" → "key-decision"). Empty → "section".
+function slugifyHeading(title) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+
 // ------------------------------------------------------------- index build ----
 
-// Forward-slash, work-relative path for a record's `source` (so it resolves the
-// same on every platform).
+// Forward-slash path relative to a base dir for a record's `source` (so it resolves
+// the same on every platform). Used per-leg: the work-stream leg bases on `workDir`,
+// the import leg on the import-store root (13/ADR-005 — leg-aware resolution).
 function toWorkRel(workDir, absPath) {
   return path.relative(workDir, absPath).split(path.sep).join("/");
+}
+
+// The stable, NON-numeric, namespaced `item` an imported record carries
+// (13/story-02 Three-Amigos decision): `import:<sourceSlug>/<milestoneRef>`. It is
+// reproducible across a clean re-import, satisfies the frozen `MemoryRecord` string
+// `item` field, renders in renderRecallBlock's `(m<item>)`, and — because it is
+// non-numeric and `applyScope`'s `--item` is an EXACT string match — never collides
+// with a work-stream `--item NN`. The prefix is what makes a record an IMPORT leg
+// (resolveRecordSourcePath keys off it). `import:` matches the import-store folder
+// geometry (<sourceSlug>/import-<milestoneRef>) but stays human-legible.
+export const IMPORT_ITEM_PREFIX = "import:";
+
+export function importItem(sourceSlug, milestoneRef) {
+  return `${IMPORT_ITEM_PREFIX}${sourceSlug}/${milestoneRef}`;
+}
+
+// True when a record was contributed by the import leg (its `item` is namespaced
+// `import:…`). The single predicate the leg-aware source resolver keys off.
+export function isImportRecord(record) {
+  return typeof record?.item === "string" && record.item.startsWith(IMPORT_ITEM_PREFIX);
+}
+
+// Leg-aware resolution of a record's `source` ("<rel>:<line>") to an ABSOLUTE
+// "<absPath>:<line>" (13/ADR-005). An IMPORT record (item starts `import:`) resolves
+// its `source` against the import-store root; a work-stream record against `workDir`.
+// Exported so callers (the derived-index fitness function, the recall verifier, the
+// story-03 arch-test) resolve uniformly without re-deriving the leg rule. Returns
+// `{ path, line, absPath }`; `line` is the 1-based integer, `absPath` the resolved file.
+export function resolveRecordSourcePath(record, { workDir, projectRoot } = {}) {
+  const source = String(record?.source ?? "");
+  const idx = source.lastIndexOf(":");
+  const rel = idx >= 0 ? source.slice(0, idx) : source;
+  const line = idx >= 0 ? Number.parseInt(source.slice(idx + 1), 10) : NaN;
+  const base = isImportRecord(record) ? importStoreRoot(projectRoot) : workDir;
+  const absPath = path.resolve(base, rel);
+  return { path: rel, line, absPath };
+}
+
+async function readDirSafe(dir) {
+  try {
+    return await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+// Scan the import store (13/ADR-003/004 — a SECOND scan root) for the materialized
+// knowledge artifacts and run the EXISTING parsers UNTOUCHED, emitting the same
+// frozen `MemoryRecord`s as the work stream. The store geometry (13/ADR-004) is
+//   <importStoreRoot>/<sourceSlug>/import-<milestoneRef>/{ARCHITECTURE,RETROSPECTIVE}.md
+// SPEC.md is recovered intent — legible, NEVER a record source (13/ADR-001), so it
+// is skipped. Each record's `item` is the namespaced `import:<sourceSlug>/<ref>` and
+// its `source` is relative to the import-store ROOT (leg-aware — 13/ADR-005). The
+// scan tolerates an absent store (returns []) so a project with no imports indexes
+// exactly as before (the localised additive model — 05/ADR-007).
+async function scanImportStore(projectRoot) {
+  const root = importStoreRoot(projectRoot);
+  if (!projectRoot || !existsSync(root)) return [];
+
+  const records = [];
+  for (const sourceEntry of await readDirSafe(root)) {
+    if (!sourceEntry.isDirectory()) continue;
+    const sourceSlug = sourceEntry.name;
+    const sourceDir = path.join(root, sourceSlug);
+    for (const msEntry of await readDirSafe(sourceDir)) {
+      if (!msEntry.isDirectory()) continue;
+      // The materialized folder is `import-<milestoneRef>` (13/ADR-004); recover the
+      // ref for the namespaced `item`/`itemSlug`.
+      const folder = msEntry.name;
+      const milestoneRef = folder.startsWith("import-") ? folder.slice("import-".length) : folder;
+      const dir = path.join(sourceDir, folder);
+      const meta = { item: importItem(sourceSlug, milestoneRef), itemSlug: folder };
+
+      const retroPath = path.join(dir, RETROSPECTIVE_FILE);
+      const archPath = path.join(dir, ARCHITECTURE_FILE);
+      if (existsSync(retroPath)) {
+        const text = await readFile(retroPath, "utf8");
+        records.push(...parseRetrospective(text, { ...meta, workRelPath: toWorkRel(root, retroPath) }));
+      }
+      if (existsSync(archPath)) {
+        const text = await readFile(archPath, "utf8");
+        records.push(...parseArchitecture(text, { ...meta, workRelPath: toWorkRel(root, archPath) }));
+      }
+    }
+  }
+  return records;
 }
 
 // Build the record set from the live `.md` files. `only` (e.g. "01") scopes the
 // rebuild to one milestone; null/undefined scans the whole stream. Reused by
 // both `reindex` and the derived-index fitness function.
+//
+// On a WHOLE-STREAM rebuild (`only` null/undefined) the import-store scan is COMPOSED
+// onto the work-stream records (13/ADR-003 — the localised additive model). A
+// milestone-SCOPED rebuild (`only` set to a work-stream number) stays work-stream-only:
+// imports carry a non-numeric namespaced `item`, so they are never "milestone NN".
 export async function buildRecords(only, ctx) {
-  const { workDir } = ctx;
+  const { workDir, projectRoot } = ctx;
   const items = await listItems(workDir);
   const milestones = items
     .filter((item) => item.type === "milestone" && item.parent == null)
@@ -191,6 +331,7 @@ export async function buildRecords(only, ctx) {
     const meta = { item: item.number, itemSlug: item.slug };
     const retroPath = path.join(item.dir, "RETROSPECTIVE.md");
     const archPath = path.join(item.dir, "ARCHITECTURE.md");
+    const aofPath = path.join(item.dir, "AOF.md");
     if (existsSync(retroPath)) {
       const text = await readFile(retroPath, "utf8");
       records.push(...parseRetrospective(text, { ...meta, workRelPath: toWorkRel(workDir, retroPath) }));
@@ -199,6 +340,18 @@ export async function buildRecords(only, ctx) {
       const text = await readFile(archPath, "utf8");
       records.push(...parseArchitecture(text, { ...meta, workRelPath: toWorkRel(workDir, archPath) }));
     }
+    // AOF.md digest → `summary` records (05/ADR-007 localised additive source). A
+    // milestone without one indexes exactly as before — the scan is conditional.
+    if (existsSync(aofPath)) {
+      const text = await readFile(aofPath, "utf8");
+      records.push(...parseAof(text, { ...meta, workRelPath: toWorkRel(workDir, aofPath) }));
+    }
+  }
+
+  // Compose the import-store scan onto the work-stream records on a whole-stream
+  // rebuild (13/ADR-003). A milestone-scoped rebuild stays work-stream-only.
+  if (!only) {
+    records.push(...(await scanImportStore(projectRoot)));
   }
   return records;
 }
@@ -256,14 +409,16 @@ export async function status(ctx) {
   const records = Array.isArray(index?.records) ? index.records : [];
   const lessons = records.filter((r) => r.recordType === "lesson").length;
   const adrs = records.filter((r) => r.recordType === "adr").length;
+  const summaries = records.filter((r) => r.recordType === "summary").length;
   return {
     backend: "local",
     // Report the LIVE array length, not the persisted `recordCount` field — a stale
-    // or hand-edited store must not report a count that disagrees with lessons+adrs.
+    // or hand-edited store must not report a count that disagrees with the type split.
     recordCount: records.length,
     store: storePath,
     present: Boolean(index),
     lessons,
     adrs,
+    summaries,
   };
 }

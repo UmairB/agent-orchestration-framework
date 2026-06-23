@@ -266,7 +266,10 @@ export function renderRecallText(result) {
     const tag =
       record.recordType === "lesson"
         ? [record.kind, record.area].filter(Boolean).join("/") || "lesson"
-        : `adr${record.status ? `/${record.status}` : ""}`;
+        : record.recordType === "adr"
+          ? `adr${record.status ? `/${record.status}` : ""}`
+          : record.recordType || "record"; // e.g. a `summary` digest record
+
     const score = typeof record.score === "number" ? `, score ${round(record.score)}` : "";
     lines.push(`  > [${record.id} · m${record.item}] ${record.title}  (${tag}${score})`);
     const gist = (record.summary || record.text || "").replace(/\s+/g, " ").trim().slice(0, 180);
