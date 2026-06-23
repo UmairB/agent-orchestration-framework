@@ -54,6 +54,21 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      cross-story coupling to maximise parallelism. For each, create `stories/<SS>_story_<slug>/`
      (`STORY.md`, `parent:` this milestone) and list it in the milestone `SPEC.md` `## Stories`.
 
+     **Ground boundaries in the codebase graph first.** Run unconditionally (a silent no-op when graphify
+     is absent — mirrors the memory-recall hook above): **before** drawing any story boundary, build the
+     codebase graph fresh — `aof graph build src` (the repo source root, where call/dependency coupling
+     lives; read back the `builtAt`/`egress`/counts the `BuildResult` returns so freshness is visible) —
+     then run `aof graph impact <the candidate modules / files at each boundary>` to get the **exact**
+     dependents + dependencies of each from the graph's edges (deterministic — not the fuzzy
+     similarity-seeded `graph query`, which you may still use for open-ended "what's the god-node here"
+     exploration). Draw boundaries that **follow the real call/dependency coupling** `graph impact`
+     reports — a boundary that cuts a file away from the modules that import it is a bad cut — and **cite
+     the graph-derived coupling** in the breakdown rationale / `ARCHITECTURE.md`. **Advisory only:** YOU
+     draw the partition using your own judgment — the graph informs it, never auto-rewrites it; no graph
+     output feeds a gate or work-mutation. If
+     `aof graph build` returns the structured `graphify-missing` miss, note the graph is unavailable and
+     draw boundaries from reading the source exactly as before — no block, no crash, no noise.
+
 - **story — Contract (Three Amigos):** author the task `.feature` files under `tasks/`: PO writes the
   headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility. **Litmus**
   every line; tag each scenario (one verification — `@executable`/`@manual`/`@uat` — +

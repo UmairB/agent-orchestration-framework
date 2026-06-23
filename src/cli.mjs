@@ -68,6 +68,11 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "import") {
+    await importCommand(rest);
+    return;
+  }
+
   if (["add", "apply", "sync", "clean", "global", "install", "migrate", "validate", "doctor", "config", "catalog"].includes(command)) {
     throw removedCommandError(command);
   }
@@ -335,6 +340,15 @@ async function graphCommand(args) {
     return;
   }
 
+  // `aof graph impact <path> [<path> ...]` (milestone 11 re-open / ADR-007): the
+  // DETERMINISTIC, edge-based coupling lookup the running agents consume — exact
+  // dependencies + dependents for the given files, computed from graph.json (no
+  // fuzz, no spawn). Thin argv → invoke("graph:impact") → render/--json face.
+  if (subcommand === "impact") {
+    await graphVerbCommand("graph:impact", rest);
+    return;
+  }
+
   // `aof graph serve` (story 04, ADR-005 amendment): launch the stdio MCP server
   // the story-02 rendered MCP config entry targets (command:"aof", args:["graph",
   // "serve"]). It is a thin transport face over the SAME command core — it reaches
@@ -344,7 +358,7 @@ async function graphCommand(args) {
     return;
   }
 
-  console.error(`Unknown graph command "${subcommand ?? ""}".\n\nExamples:\n  aof graph build <folder> [--backend claude] [--json]\n  aof graph query "what calls main" [--json]\n  aof graph triage [--mode conflicts] [--json]\n  aof graph serve`);
+  console.error(`Unknown graph command "${subcommand ?? ""}".\n\nExamples:\n  aof graph build <folder> [--backend claude] [--json]\n  aof graph query "what calls main" [--json]\n  aof graph impact src/command-core.mjs [src/cli.mjs ...] [--json]\n  aof graph triage [--mode conflicts] [--json]\n  aof graph serve`);
   process.exitCode = 1;
 }
 
@@ -389,6 +403,59 @@ async function graphServeCommand(args) {
   const options = parseOptions(args);
   const workspace = await loadWorkspace(process.cwd(), options.config);
   await serveStdio({ workspace });
+}
+
+// `aof import <unit> <repo> [selector] [--dry-run] [--json]` — the top-level
+// import dispatch (a sibling of `aof graph` / `aof work`, 13/ADR-002). The only
+// import unit in v0 is `milestone` (SPEC §Scope): an unknown sub-noun exits
+// non-zero citing the supported unit "milestone". `milestone` is a thin
+// argv → invoke("import:milestone") → render/--json face over the registered
+// command, mirroring graphVerbCommand (the getCommand → loadWorkspace → invoke →
+// cli.json/render idiom, INCLUDING the --json single-structured-envelope discipline).
+async function importCommand(args) {
+  const [unit, ...rest] = args;
+
+  if (unit === "milestone") {
+    await importMilestoneCommandCli(rest);
+    return;
+  }
+
+  // SPEC §Scope: the unit of import is a milestone, not arbitrary content —
+  // "milestone" is the only supported sub-noun in v0, so an unknown sub-noun
+  // exits non-zero citing the supported unit (stderr + non-zero exit).
+  console.error(
+    `Unknown import unit "${unit ?? ""}". The supported import unit is "milestone".\n\nUsage: aof import milestone <repo> <selector> [--dry-run] [--json]`
+  );
+  process.exitCode = 1;
+}
+
+// `aof import milestone <repo> [selector]` — the thin face over the registered
+// import:milestone command (13/ADR-002). Mirrors graphVerbCommand: getCommand →
+// loadWorkspace → invoke → cli.json/render. A missing <repo> throws the command's
+// missing-repo usage error (propagated to bin/aof.mjs: stderr + non-zero exit). In
+// --json mode a command error is emitted as a SINGLE structured envelope
+// { ok:false, error, code } on stdout (+ non-zero exit), exactly like the graph
+// verbs — so `aof import milestone … --json` always emits one parseable envelope.
+async function importMilestoneCommandCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("import:milestone");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error (missing-repo / ambiguous /
+  // unsupported) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
 }
 
 async function workBoardCommand(args) {

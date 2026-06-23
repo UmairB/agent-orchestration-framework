@@ -36,10 +36,20 @@ import { feedbackCommand } from "./commands/feedback.mjs";
 import { graphBuildCommand } from "./commands/graph-build.mjs";
 import { graphQueryCommand } from "./commands/graph-query.mjs";
 import { graphTriageCommand } from "./commands/graph-triage.mjs";
+// milestone 11 (re-open / ADR-007) — graph:impact: the DETERMINISTIC, edge-based,
+// file-anchored coupling lookup the running ACD agents consume (dependencies +
+// dependents straight from graph.json's edges). Reads the structured graph via the
+// pure normalizer (NOT a spawn, NOT a markdown parse) — supersedes the milestone's
+// original ADR-002 "zero production code" stance, which left it with no real consumer.
+import { graphImpactCommand } from "./commands/graph-impact.mjs";
 // milestone 12 — managed tool provisioning (project:provision registers into the
 // SAME core; 12/ADR-003). It drives story 00's provider registry/resolver and is
 // global-store oriented (reads no project files).
 import { projectProvisionCommand } from "./commands/project-provision.mjs";
+// milestone 13 — external milestone import (import:milestone registers into the
+// SAME core; 13/ADR-002). It reads a source repo READ-ONLY and materializes a
+// recovered milestone as a frozen artifact pair in the .aof/ import store.
+import { importMilestoneCommand } from "./commands/import-milestone.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -60,7 +70,9 @@ const COMMANDS = [
   graphBuildCommand,
   graphQueryCommand,
   graphTriageCommand,
+  graphImpactCommand,
   projectProvisionCommand,
+  importMilestoneCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

@@ -3,10 +3,10 @@ type: milestone
 number: 11
 slug: graphify-codebase-intelligence
 title: "Graphify Codebase Intelligence — grounding for the ACD agents"
-status: not-started
+status: in-progress
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-23
 depends: [09]
 origin: wiki/planning/PRD-graphify-integration.md
 ---
@@ -63,7 +63,37 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-- [ ] _to be broken down — `aof:refine 11`_
+Broken down `2026-06-22` (`aof:refine 11 --autonomous`) into **four** stories — **00 is the spine; 01 / 02
+fan out from its frozen convention in parallel; 03 (fitness) asserts against all three** (the critical path
+is 00 only). See [ARCHITECTURE.md](ARCHITECTURE.md) (6 ADRs + a 4-row fitness table) for what each consumes.
+The load-bearing decisions are resolved: **(1)** the grounding reaches all three consumers as
+**agent-consumed command OUTPUT** (`graph:query` answers for coupling, `graph:triage` queue for PR-impact),
+legible-to-an-agent and **never parsed by aof** — the crux that distinguishes 11 from 10 (10's consumer was
+a *program* needing structured `graph.json`; 11's are *LLM agents* that read graphify's markdown natively),
+ADR-001. **(2)** 11 is **pure prompt-wiring** over the existing 09 commands — **zero production code**; aof
+adds no new module/command/helper/render (ADR-002). **(3)** Freshness is a **build-fresh-at-the-decision-point**
+prompt discipline over `graph:build` (already returns `builtAt`/`egress`); the codebase graph is a
+**git-ignored derived** artifact (ADR-003) — closing a cross-milestone gap (`graphify-out/` is un-ignored
+today). **(4)** Advisory-only: no `graph:*` output feeds a gate/merge/work-mutation (ADR-004). Scope = the
+**codebase** (`graph:build { path: src }`), distinct from 10's work-stream scope (ADR-005). Contracts
+authored `2026-06-22` (Three Amigos: PO scenarios + QA examples/tagging + developer feasibility) for
+00/01/02; 03's contract is the ADR-006 fitness table itself (four arch-tests, no `.feature` pass — mirrors
+05/03, 09/03, 10/03).
+
+- [ ] **00 · [grounding-convention-and-discipline](stories/00_story_grounding-convention-and-discipline/STORY.md)** —
+  the shared grounding convention (build-fresh → run the registered command → read the legible output → cite
+  it) + the freshness/derivation discipline (git-ignore `graphify-out/`, closing the open gap) + the
+  advisory-only boundary + the no-op-when-absent gate (ADR-002/003/004). The spine. 2 tasks.
+- [ ] **01 · [architect-refine-coupling-grounding](stories/01_story_architect-refine-coupling-grounding/STORY.md)** —
+  the two coupling seams: the `aof-architect` agent prompt (structural review + story boundaries, inherited by
+  `continue` + `code-review`) and `refine.md` step 2 read `graph:query` coupling (ADR-001/002). Consumes 00's
+  convention. 2 tasks.
+- [ ] **02 · [code-review-pr-impact-triage](stories/02_story_code-review-pr-impact-triage/STORY.md)** — the
+  PR-impact seam: `code-review.md` step 3 surfaces `graph:triage`'s ranked queue as advisory review context
+  (ADR-001/004). Consumes 00's convention. 1 task.
+- [ ] **03 · [codebase-intelligence-fitness](stories/03_story_codebase-intelligence-fitness/STORY.md)** — the
+  four enforcing arch-tests (ADR-006 — the load-bearing deliverable): no-parse, via-commands (no new
+  spawn/module), advisory-only, derived/git-ignored. Asserts against 00/01/02; no `.feature` pass. 4 arch-tests.
 
 ## Dependencies
 

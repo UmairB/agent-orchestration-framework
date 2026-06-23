@@ -119,7 +119,7 @@
         "id": "aof-architect",
         "kind": "agent"
       },
-      "hash": "sha256:8a120054160a7313c5d4129158dc261aaa7a65dfbd4eb4f3d5acbd242b39b17f"
+      "hash": "sha256:46f5d94fa996f1f67552153ad2392b26f9916f55e6b87dd1366167d128213447"
     },
     {
       "path": ".claude/agents/aof-compliance.md",
@@ -236,7 +236,7 @@
         "id": "code-review",
         "kind": "command"
       },
-      "hash": "sha256:bc98c919227bb0591add2ab3d60e45e86cb10bde0f106591cbfe8b9b3d17158c"
+      "hash": "sha256:e820bd5aacd7f43ad17c8d32721710cd4ec3e8bd5b87cdd1c9230683bec342cc"
     },
     {
       "path": ".claude/commands/aof/continue.md",
@@ -272,7 +272,7 @@
         "id": "refine",
         "kind": "command"
       },
-      "hash": "sha256:42ba2b33bc74370a62e9ac878bf3217c704d2acfd60f2fbee45123c50cd4c350"
+      "hash": "sha256:3d1e958c6f6b90a032fc4a8845d06db40b7e68505b5aadbbf40b1ff8e6add8dc"
     },
     {
       "path": ".claude/commands/aof/retrospective.md",

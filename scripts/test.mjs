@@ -40,6 +40,7 @@ import { memoryIndexingTests } from "../test/memory-indexing.test.mjs";
 import { memoryRetrievalTests } from "../test/memory-retrieval.test.mjs";
 import { archTests as acdMemoryBackendSelectionTests } from "../test/arch/acd-memory-backend-selection.test.mjs";
 import { archTests as acdMemoryDerivedIndexTests } from "../test/arch/acd-memory-derived-index.test.mjs";
+import { archTests as acdMemoryAofDigestTests } from "../test/arch/acd-memory-aof-digest.test.mjs";
 import { archTests as acdMemoryIndexLocationTests } from "../test/arch/acd-memory-index-location.test.mjs";
 import { archTests as acdMemoryRankingTests } from "../test/arch/acd-memory-ranking.test.mjs";
 import { archTests as acdMemoryBackendInterfaceTests } from "../test/arch/acd-memory-backend-interface.test.mjs";
@@ -152,6 +153,23 @@ import { archTests as acdGraphifyBackendViaCommandTests } from "../test/arch/acd
 import { archTests as acdGraphifyBackendSelectionTests } from "../test/arch/acd-graphify-backend-selection.test.mjs";
 import { archTests as acdGraphifyBackendClassifiedTests } from "../test/arch/acd-graphify-backend-classified.test.mjs";
 import { archTests as acdGraphifyBinaryAbsentDegradesTests } from "../test/arch/acd-graphify-binary-absent-degrades.test.mjs";
+// milestone 11 — graphify codebase intelligence (story 03: the FOUR enforcing fitness
+// functions of ADR-006 — no-parse/legible-output (the agent reads command OUTPUT, aof
+// never parses; no NEW src/ module reads graph.json), reached-only-via-the-09-commands
+// (no new spawn site / no new graph-reaching module; the seams invoke `aof graph
+// build/query/triage`), advisory-only (no graph output feeds a gate/merge/status-write/
+// work-mutation; the triage queue is ranking context, never an auto-block), and
+// derived+git-ignored (graphify-out/ git-ignored at the REPO ROOT; the freshness step
+// builds-then-queries). Pure prompt-wiring + spawn/parse-surface assertions — no .feature.)
+import { archTests as acdCodebaseGroundingNoParseTests } from "../test/arch/acd-codebase-grounding-no-parse.test.mjs";
+import { archTests as acdCodebaseGroundingViaCommandsTests } from "../test/arch/acd-codebase-grounding-via-commands.test.mjs";
+import { archTests as acdCodebaseGroundingAdvisoryTests } from "../test/arch/acd-codebase-grounding-advisory.test.mjs";
+import { archTests as acdCodebaseGraphDerivedTests } from "../test/arch/acd-codebase-graph-derived.test.mjs";
+// milestone 11 (re-open / ADR-007) — graph:impact: the DETERMINISTIC, edge-based
+// coupling command the running agents consume. The NON-VACUOUS value test (computeImpact
+// returns EXACT dependents/dependencies; the build-first precondition), replacing the
+// superseded "zero production code" stance with a real, tested consumer.
+import { tests as graphImpactTests } from "../test/graph-impact.test.mjs";
 // milestone 12 — managed tool provisioning (story 00: the spine — the store
 // geometry + store-first resolver, ADR-001; the provider registry + uv lane +
 // frozen tool descriptors, ADR-002; @executable traceability)
@@ -181,6 +199,41 @@ import { archTests as acdToolStoreGlobalHomeTests } from "../test/arch/acd-tool-
 import { archTests as acdProviderNeutralRegistryTests } from "../test/arch/acd-provider-neutral-registry.test.mjs";
 import { archTests as acdNpxLanePreservedTests } from "../test/arch/acd-npx-lane-preserved.test.mjs";
 import { archTests as acdUninstallStoreScopedTests } from "../test/arch/acd-uninstall-store-scoped.test.mjs";
+// milestone 13 — external milestone import (story 00: the spine — the registered
+// import:milestone command + `aof import milestone` dispatch, the read-only
+// source-access seam, and the FROZEN materialize artifact pair + .aof/ import-store
+// layout, ADR-001/002/004/005; @executable traceability — the @manual live-remote
+// rows are deferred)
+import { importCommandCoreTests } from "../test/import-command-core.test.mjs";
+// milestone 13 — external milestone import (story 01: source-shape recovery — the
+// REAL recovery heuristics behind story 00's frozen recoverMilestone seam: an
+// aof-structured source's own SPEC/ARCHITECTURE/RETROSPECTIVE, an arbitrary repo's
+// README/docs/ADRs/git-log, and "absence is information" — recover what is present,
+// mark what is absent, never fabricate, ADR-001/005; @executable traceability — the
+// @manual real-world-repo recovery row is deferred)
+import { importRecoveryTests } from "../test/import-recovery.test.mjs";
+// milestone 13 — external milestone import (story 02: import reaches memory — the
+// EXTENDED buildRecords scan over the .aof/ import store (the existing parsers into
+// the existing index, leg-aware source) + the import command's backend reindex
+// trigger so imported precedent is recall-able through the unchanged `aof work
+// memory` verbs, ADR-003/001/005; @executable traceability — the @manual
+// graphify-backend recall row is deferred, it needs the live binary)
+import { importIntoMemoryTests } from "../test/import-into-memory.test.mjs";
+// milestone 13 — external milestone import (story 03: the SIX enforcing fitness
+// functions of ADR-001..005 — artifact-shape (reuse the 05 doc shapes, no new
+// parser/record shape, SPEC.md never indexed), read-only-source (registered command +
+// no git write verb / no shell-string spawn / only read-only fetch), indexer-extends-scan
+// (one index, no bespoke store, no direct index write) + no-graphify-spawn (graphify
+// reached only by the backend via the 09 commands), not-a-work-item (the store is outside
+// workDir, non-NN_type_slug, git-ignored via the nested ignore — the resolver never
+// enumerates it), and derived-index (source resolves in the store, clean re-import
+// snapshot, git-ignored). Arch-tests only; no .feature.)
+import { archTests as acdImportArtifactShapeTests } from "../test/arch/acd-import-artifact-shape.test.mjs";
+import { archTests as acdImportReadOnlySourceTests } from "../test/arch/acd-import-read-only-source.test.mjs";
+import { archTests as acdImportIndexerExtendsScanTests } from "../test/arch/acd-import-indexer-extends-scan.test.mjs";
+import { archTests as acdImportNoGraphifySpawnTests } from "../test/arch/acd-import-no-graphify-spawn.test.mjs";
+import { archTests as acdImportNotAWorkItemTests } from "../test/arch/acd-import-not-a-work-item.test.mjs";
+import { archTests as acdImportDerivedIndexTests } from "../test/arch/acd-import-derived-index.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -210,6 +263,7 @@ export const tests = [
   ...memoryRetrievalTests,
   ...acdMemoryBackendSelectionTests,
   ...acdMemoryDerivedIndexTests,
+  ...acdMemoryAofDigestTests,
   ...acdMemoryIndexLocationTests,
   ...acdMemoryRankingTests,
   ...acdMemoryBackendInterfaceTests,
@@ -278,6 +332,11 @@ export const tests = [
   ...acdGraphifyBackendSelectionTests,
   ...acdGraphifyBackendClassifiedTests,
   ...acdGraphifyBinaryAbsentDegradesTests,
+  ...graphImpactTests,
+  ...acdCodebaseGroundingNoParseTests,
+  ...acdCodebaseGroundingViaCommandsTests,
+  ...acdCodebaseGroundingAdvisoryTests,
+  ...acdCodebaseGraphDerivedTests,
   ...toolStorePathResolutionTests,
   ...toolProviderRegistryTests,
   ...toolProvisionCommandTests,
@@ -290,6 +349,15 @@ export const tests = [
   ...acdProviderNeutralRegistryTests,
   ...acdNpxLanePreservedTests,
   ...acdUninstallStoreScopedTests,
+  ...importCommandCoreTests,
+  ...importRecoveryTests,
+  ...importIntoMemoryTests,
+  ...acdImportArtifactShapeTests,
+  ...acdImportReadOnlySourceTests,
+  ...acdImportIndexerExtendsScanTests,
+  ...acdImportNoGraphifySpawnTests,
+  ...acdImportNotAWorkItemTests,
+  ...acdImportDerivedIndexTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

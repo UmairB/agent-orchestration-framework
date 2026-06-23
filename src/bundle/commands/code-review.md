@@ -33,7 +33,24 @@ default = the whole branch) and the **`--auto-complete`** flag.
    fragile inline string). Capture the PR number/URL; `gh pr view --web` to open it.
 
 3. **Review.** Spawn `aof-architect` (Task) on the PR diff (`gh pr diff` / changed files) for
-   structural conformance to the ADRs/fitness functions. Its verdict also flags surfaces:
+   structural conformance to the ADRs/fitness functions.
+
+   **Surface the PR-impact blast-radius as ranking context (advisory).** Run unconditionally (a silent
+   no-op when graphify is absent): when handing the diff to `aof-architect`, first build the codebase graph
+   fresh — `aof graph build src` (the repo source root; read back the `builtAt`/`egress`/counts so
+   freshness is visible) — then run **`aof graph impact <the files changed in the diff>`**. It returns,
+   deterministically, each changed file's **dependents** (`imported/called by ←` — the blast-radius: who
+   breaks if this changes) and **dependencies**. Rank the review by that blast-radius — review the changed
+   files with the most dependents first. (You MAY also run `aof graph triage` for graphify's own
+   PR-impact queue as a secondary, fuzzier signal; `graph impact` on the actual diff is the exact one.)
+   The agent **READS** the structured impact as advisory context. **Advisory only:** the impact is ranking context for the
+   reviewer; it is **never** an auto-block input to the merge — the merge gate (step 6: CI-green +
+   no-blocking-finding) is **unchanged**, and any concern the rank raises flows through the normal
+   human/agent-judged finding path, never a separate graph-gate (no wiring into
+   `work.codeReview.autoComplete`). If `aof graph build`/`triage` returns the structured `graphify-missing`
+   miss, note the graph is unavailable and review unranked exactly as before — no block, no crash, no noise.
+
+   Its verdict also flags surfaces:
    - **attack surface** (auth, secrets, tenant isolation, untrusted input, crypto) → spawn
      `aof-security` → it reviews against / authors `SECURITY.md`.
    - **regulated or personal data** (PII, payments, tenant data crossing a boundary) → spawn

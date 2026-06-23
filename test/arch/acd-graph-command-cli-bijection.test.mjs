@@ -30,8 +30,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 const CLI_MJS = path.join(repoRoot, "src", "cli.mjs");
 
-// The three graph verbs, each backed by a graph:<verb> command.
-const GRAPH_VERBS = ["build", "query", "triage"];
+// The graph verbs, each backed by a graph:<verb> command. `impact` is the
+// milestone-11/ADR-007 deterministic edge-based coupling command (the running agents'
+// primary grounding signal) — covered here so its argv/render/dispatch are CI-locked
+// like the others (gap caught at the ADR-007 structural review).
+const GRAPH_VERBS = ["build", "query", "triage", "impact"];
 const GRAPH_COMMAND_IDS = GRAPH_VERBS.map((verb) => `graph:${verb}`);
 
 function stripComments(source) {
@@ -73,6 +76,9 @@ function argsFor(verb) {
     case "build": return ["graph", "build", ".", "--json"];
     case "query": return ["graph", "query", "what calls main", "--json"];
     case "triage": return ["graph", "triage", "--json"];
+    // impact takes a path positional; against the fixture (no built graph) it resolves
+    // to the structured no-graph error envelope — which still parses as one JSON doc.
+    case "impact": return ["graph", "impact", "src/cli.mjs", "--json"];
     default: throw new Error(`unmapped graph verb ${verb}`);
   }
 }
