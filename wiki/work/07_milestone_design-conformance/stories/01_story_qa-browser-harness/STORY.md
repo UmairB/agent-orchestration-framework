@@ -4,10 +4,10 @@ number: 01
 slug: qa-browser-harness
 title: "QA runs the browser harness and owns the regression + the optional a11y lane"
 parent: 7
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

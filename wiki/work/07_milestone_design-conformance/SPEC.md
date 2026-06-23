@@ -3,10 +3,10 @@ type: milestone
 number: 07
 slug: design-conformance
 title: "Design-Conformance Verification"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 depends: [01, 03]
 ---
 <!--
@@ -78,15 +78,15 @@ Out of scope:
      artifact is the derived `manifest.json` (ADR-005/006). See ARCHITECTURE.md for the ADRs + fitness
      functions. -->
 
-- [ ] `stories/00_story_designer-fidelity-judge` — the designer is a read-only fidelity judge of a
+- [x] `stories/00_story_designer-fidelity-judge` — the designer is a read-only fidelity judge of a
   rendered screenshot it is handed: region-by-region `CONFORMS`/`GAPS`/`INCONCLUSIVE` vs the committed
   mock + binding checklist, `INCONCLUSIVE`-when-no-baseline (no `Bash`). Owns
   `src/bundle/agents/aof-designer.md`. (ADR-001/002/003)
-- [ ] `stories/01_story_qa-browser-harness` — QA runs the Playwright browser harness, owns the
+- [x] `stories/01_story_qa-browser-harness` — QA runs the Playwright browser harness, owns the
   `toHaveScreenshot` regression that locks the designer-approved baseline + the functional checks, and
   the optional opt-in a11y lane. Owns `src/bundle/agents/aof-qa.md` + the additive, closed
   `work.ui.a11y` schema block. (ADR-001/002/004)
-- [ ] `stories/02_story_review-wiring-and-convention` — `refine` elicits + commits the mock; the DESIGN
+- [x] `stories/02_story_review-wiring-and-convention` — `refine` elicits + commits the mock; the DESIGN
   template makes the binding checklist mandatory; `verify`/`continue` render the surface and hand the
   screenshot to the designer + spawn QA; and the whole loop lands in `src/bundle/` behind a drift guard.
   Owns `src/bundle/commands/{refine,verify,continue}.md` + `templates/milestone/DESIGN.md` + the drift

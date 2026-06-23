@@ -87,14 +87,32 @@ set) or add `.aof/templates/` to `.gitignore` as a local install artifact — ou
 `aof work validate` → **PASS — work stream is well-formed.** Test-traceability + litmus were closed at review
 (STATE: every `@executable` row backed by an assertion; lane audit PASS). Full suite green (above).
 
+## Re-verification (2026-06-22)
+Re-ran the gate in the current post-08–12 tree: the `@executable` suite is green (**990 ok / 0 not-ok**, up
+from 798 at the 07 build) and the **17 design-conformance arch-test rows** (the five new fitness functions +
+the manifest guard) are all green; `aof work validate 07` = **PASS**; F1 stays resolved; **no blocker open**.
+The deferred residuals remain structurally un-exercisable — there are **0 committed mocks** anywhere under
+`wiki/work` and `work.ui.baseUrl` is still unset, so no served surface + baseline exists to run the 5 `@uat`
++ 22 `@manual` rows. Nothing changed since the hold except that the loop's deliverable is still green.
+
 ## Accept decision
-**HELD — not accepted (operator decision, 2026-06-21).** The deliverable (the bundled design-conformance
-machinery) is fully verified: `@executable` suite + all five new fitness functions green (798/0), `aof work
-validate` PASS, and the live-state `@manual` paths (no-baseUrl → INCONCLUSIVE, a11y-off → no-run) confirmed.
-**No blocker finding is open** (F1 resolved). Acceptance is nonetheless **held** by operator choice: the one
-`@uat` scenario (designer judgment quality on a real rendered surface) and the served-app `@manual` residuals
-cannot be exercised against a machinery-only milestone with no served UI surface — they are deferred to the
-**first real UI milestone that consumes the loop** (a live render + baseline + human sign-off). Until then,
-07 stays `in-progress` with its three stories `in-review`; no statuses flipped, no retrospective run. Re-run
-`aof:verify 07` once a real UI surface (e.g. m03's board, or the next UI milestone) can exercise the live
-render + the `@uat` judgment-quality check.
+**Accepted on the machinery deliverable — 2026-06-22 (supersedes the 2026-06-21 operator HOLD).** 07 *is* the
+design-conformance loop's machinery (agents, commands, DESIGN template, schema, fitness functions); it is
+fully verified and green (990/0 suite + 17 design-conformance arch-tests, `validate 07` PASS) with **no
+blocker open**. The `@uat`/served-app residuals do **not** test 07's deliverable — they test the loop's
+*output quality on a consumer surface*, which by construction needs a downstream UI milestone with a committed
+mock + served base URL; gating a machinery milestone on a consumer that does not yet exist left it parked
+across two sessions (see RETROSPECTIVE R4). The residuals are therefore **carried forward** as an explicit
+obligation on the **first real UI milestone that consumes the loop** — to be homed in that milestone's verify
+or a cross-milestone **UAT session** (`aof:add-uat`), flagged "exercise on first consumer," not "blocks 07."
+All three stories are `done`; `SPEC.md status: done`, its `## Stories` boxes ticked, `STATE.md` compacted, and
+[RETROSPECTIVE.md](RETROSPECTIVE.md) written (R1–R4). The `@executable` deliverable's task boxes were all
+green; the deferred residuals are tracked above, not as open story tasks.
+
+### Carried-forward obligation (for the first UI consumer)
+Exercise these against a served UI surface with a committed baseline (a future UI milestone's verify or a UAT
+session over it): story 00/01 `@uat` (judgment quality — CONFORMS vs the right GAPS + reviewer agreement);
+story 02/01 `@manual` (served-app render reaches a non-INCONCLUSIVE verdict); story 01/00 `@manual` (QA
+harness regression vs a served surface); story 01/02 `@manual` (a11y ON run); story 02/00 `@manual` ×3 (refine
+commits a user-supplied mock / makes the checklist the baseline); story 00/01 `@manual` decision-table
+(screenshot-present CONFORMS/GAPS rows).

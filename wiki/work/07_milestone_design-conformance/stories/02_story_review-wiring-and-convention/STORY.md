@@ -4,10 +4,10 @@ number: 02
 slug: review-wiring-and-convention
 title: "The review renders + hands off, the committed-mock convention, and the bundle lands in source"
 parent: 7
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

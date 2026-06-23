@@ -4,10 +4,10 @@ number: 00
 slug: designer-fidelity-judge
 title: "The designer is a read-only fidelity judge of a rendered screenshot"
 parent: 7
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-06-22
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
