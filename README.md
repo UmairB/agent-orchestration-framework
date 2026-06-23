@@ -1,33 +1,83 @@
 # AOF
 
-AOF is a small CLI and DSL for defining assistant-facing project assets once, then rendering them into runtime-specific folders such as `.claude` and `.codex`.
+AOF (Agent Orchestration Framework) is a local CLI for three things:
 
-The initial target is local CLI usage:
+- **Asset rendering** — define assistant-facing project assets (skills, commands, agents, rules) once in a portable `.aof/aof.config.json`, then render them into runtime-specific folders such as `.claude/` and `.codex/`.
+- **The ACD work stream** (`aof work`) — an agent-driven delivery system: milestones → stories → tasks under `wiki/work/`, with a bundled set of agent prompts and slash-commands that refine, build, review, and verify each item. `aof work init` renders that bundle into a repo.
+- **Graphify codebase intelligence** (`aof graph`) — a code knowledge graph (call/import/dependency edges, communities) the agents query to ground structural review and refactoring in real coupling instead of grep-and-infer.
 
-- initialize a project with a portable `.aof/aof.config.json`
-- store project assets under `.aof/` and reusable global assets under `~/.aof`
-- delegate framework-level installs such as GSD to the framework's own installer
+## Local setup
 
-## Usage
+There is **no published package or installer yet** — the CLI is wired up locally with `npm link`. Requires **Node ≥ 20**.
 
 ```sh
-npm link
-aof init
-aof assets add skill code-review
-aof assets add
-aof project migrate
-aof assets apply --dry-run
-aof project validate
+# from the repo root
+npm install        # install dependencies
+npm link           # register `aof` globally → this repo's ./bin/aof.mjs
+
+# verify
+aof --help
 aof project doctor
-aof assets clean --dry-run
-aof project show
-aof assets add --global skill shared-review --codex
-aof assets add --global
-aof assets list --global
-aof packages add gsd --codex
-aof packages install gsd --dry-run
-aof assets ui
 ```
+
+`npm link` makes the `aof` command available from any directory, always pointing at **this working copy** (`which aof` resolves to the global node bin, which symlinks to `./bin/aof.mjs` here). Because it is a symlink, edits under `src/` take effect immediately — there is no build/rebuild step for the CLI. To use it inside another repo, just run `aof …` there; the same global `aof` resolves. To remove the link later: `npm rm -g aof`.
+
+The setup UI (`aof assets ui`) and the work board (`aof work board`) serve a built front-end — build it once with `npm run ui:build` (see [Tests](#tests)).
+
+## Command surface
+
+```sh
+aof init [dir]                                 # scaffold an empty .aof workspace
+aof project show|validate|doctor|migrate|provision
+aof assets add|list|show|apply|clean|ui …      # the asset/DSL surface (below)
+aof packages add|install gsd …                 # managed framework packs (e.g. GSD)
+aof work init|update|find|list|next|validate|memory|board …   # the ACD work stream
+aof graph build|query|impact|triage|serve      # graphify codebase intelligence
+aof planning init                              # install the bought planner (pm-skills)
+aof import milestone <repo> <selector>         # recover a milestone from another repo
+```
+
+### The ACD work stream (`aof work`)
+
+`aof work init` renders the bundled ACD agents (`.claude/agents/aof-*`) and slash-commands (`.claude/commands/aof/*`) into a repo; `aof work update` re-renders them when the bundle changes (drift-checked against the install manifest). The work itself lives as Markdown under `wiki/work/` (milestones → stories → tasks), driven by the slash-commands (`/aof:refine`, `/aof:continue`, `/aof:verify`, …).
+
+```sh
+aof work init                      # render the ACD bundle into this repo
+aof work find 11 --json            # resolve a milestone (11), story (11/02), or slug (auth)
+aof work list --json               # the whole stream (the board's flat-array contract)
+aof work next                      # next actionable item in dependency order
+aof work validate                  # folder↔frontmatter, tag vocabulary, depends graph
+aof work board                     # serve the local board UI (built ui/dist)
+```
+
+Recall over prior decisions is a configurable memory backend (`memory.backend` in `.aof/aof.config.json` — `local` or `graphify`):
+
+```sh
+aof work memory status
+aof work memory reindex            # rebuild the derived index from the work stream
+aof work memory recall "pin line endings"
+```
+
+### Graphify codebase intelligence (`aof graph`)
+
+The graph commands shell out to the `graphify` binary (a managed tool). Provision it once into the per-machine tool store:
+
+```sh
+aof project provision graphify
+```
+
+Keep the corpus code-only (so builds are keyless and local, no LLM, no egress) with a `.graphifyignore` that excludes docs/media. Then build and query a code graph:
+
+```sh
+aof graph build src                # AST-extract a code graph → graphify-out/graph.json
+aof graph impact src/cli.mjs       # exact dependents (blast-radius) + dependencies, from the edges
+aof graph query "what calls main"  # a fuzzy, similarity-seeded natural-language answer
+aof graph triage                   # graphify's PR-impact ranking
+```
+
+`graphify-out/` is a derived, git-ignored build artifact (rebuild on demand, never committed). `aof graph impact` is the **deterministic, edge-based** coupling lookup the ACD review/refine agents consume; `aof graph query` is the fuzzier NL hint.
+
+## Assets
 
 When a command needs interactive input, AOF uses keyboard-driven terminal
 prompts. Use arrow keys to move, space to toggle checkbox choices, and Enter to
@@ -517,10 +567,16 @@ does not bypass adapter warning failures under `--strict`.
 
 ## Tests
 
-Unit tests exercise the core modules:
+Run the full suite — the canonical entry point:
 
 ```sh
-node ./scripts/test-unit.mjs
+npm test            # = node ./scripts/test.mjs
+```
+
+This runs the unit + arch (fitness-function) + BDD-traceability tests, including the `work`, `graph`, and memory suites. `scripts/test-unit.mjs` is an older **partial** subset that omits the graph/work tests, so prefer `npm test`:
+
+```sh
+node ./scripts/test-unit.mjs    # legacy partial unit subset
 ```
 
 Integration tests are BDD-style feature tests that launch the CLI as an external process in isolated temp projects:
