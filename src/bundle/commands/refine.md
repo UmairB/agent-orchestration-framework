@@ -25,6 +25,23 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      `ARCHITECTURE.md` + fitness-function arch-tests (move any invariant out of features); UI →
      `aof-designer` → `DESIGN.md`.
 
+     **UI / designer path — elicit a mock, or make the binding checklist mandatory (ADR-003).** When the
+     milestone has UI and `aof-designer` authors `DESIGN.md`, **elicit mocks from the user at refine**:
+     ask, per surface, whether they have a mock (an image / a local HTML export from Figma / claude.ai
+     design / a screenshot). This gives the read-only designer a baseline it can actually `Read` at review
+     time (the root cause being fixed: m03's mock was a remote `claude.ai/design` link the read-only
+     designer could not open). For each surface:
+     - **An existing mock is committed under the milestone's `mocks/` dir** — `wiki/work/NN_milestone_<slug>/mocks/<surface>.png`,
+       committed as a locally-readable artifact. Export any remote design into `mocks/` and commit the
+       file; never leave a remote design-tool link as the sole reference.
+     - **The committed mock is referenced from `DESIGN.md` as the conformance source of truth** for that
+       surface — a locally-readable artifact, never a remote-link-only reference.
+     - **With no mock, the binding checklist is mandatory and is the source of truth** — `aof-designer`
+       fills the surface's mandatory binding checklist in `DESIGN.md` (layout regions in order, the
+       components each region holds, the states empty/loading/error/populated, the design ramp each uses)
+       so the surface still has a baseline the review can judge against (rather than an INCONCLUSIVE on a
+       missing baseline). A surface with neither a committed mock nor a checklist has no baseline.
+
      **Recall prior lessons first (before authoring ADRs/stories).** Role-scoped, run unconditionally
      (memory may be off — see below): the **architect**, before writing an ADR, runs `aof work memory
      recall "<the decision in a few words>" --area architecture --block`; the **PO**, before the
@@ -36,6 +53,21 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
   2. **Break down** (with `aof-architect`): partition into **independent** stories — minimise
      cross-story coupling to maximise parallelism. For each, create `stories/<SS>_story_<slug>/`
      (`STORY.md`, `parent:` this milestone) and list it in the milestone `SPEC.md` `## Stories`.
+
+     **Ground boundaries in the codebase graph first.** Run unconditionally (a silent no-op when graphify
+     is absent — mirrors the memory-recall hook above): **before** drawing any story boundary, build the
+     codebase graph fresh — `aof graph build src` (the repo source root, where call/dependency coupling
+     lives; read back the `builtAt`/`egress`/counts the `BuildResult` returns so freshness is visible) —
+     then run `aof graph impact <the candidate modules / files at each boundary>` to get the **exact**
+     dependents + dependencies of each from the graph's edges (deterministic — not the fuzzy
+     similarity-seeded `graph query`, which you may still use for open-ended "what's the god-node here"
+     exploration). Draw boundaries that **follow the real call/dependency coupling** `graph impact`
+     reports — a boundary that cuts a file away from the modules that import it is a bad cut — and **cite
+     the graph-derived coupling** in the breakdown rationale / `ARCHITECTURE.md`. **Advisory only:** YOU
+     draw the partition using your own judgment — the graph informs it, never auto-rewrites it; no graph
+     output feeds a gate or work-mutation. If
+     `aof graph build` returns the structured `graphify-missing` miss, note the graph is unavailable and
+     draw boundaries from reading the source exactly as before — no block, no crash, no noise.
 
 - **story — Contract (Three Amigos):** author the task `.feature` files under `tasks/`: PO writes the
   headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility. **Litmus**

@@ -384,7 +384,15 @@
           "type": "object",
           "description": "UI / design-review settings. ACD does NOT boot the app — the project runs it; ACD only points at it.",
           "properties": {
-            "baseUrl": { "type": "string", "description": "Base URL of the running app the design-conformance review renders surfaces against (e.g. https://localhost:1234); each DESIGN.md surface's Route is appended. Overridable per run with `aof:verify --url`." }
+            "baseUrl": { "type": "string", "description": "Base URL of the running app the design-conformance review renders surfaces against (e.g. https://localhost:1234); each DESIGN.md surface's Route is appended. Overridable per run with `aof:verify --url`." },
+            "a11y": {
+              "type": "object",
+              "description": "OPTIONAL a11y lane config (milestone 07, ADR-004). Records the conformance LEVEL only; the lane opts IN via work.tags.domains containing the bare string \"a11y\" — NOT \"@a11y\"; it is deliberately the lone unprefixed domain token, so do not \"normalise\" it to an @-prefix or the opt-in silently breaks (no schema change to enable). Absent ≡ default/off. Closed (additionalProperties:false), peer to work.ui.baseUrl.",
+              "properties": {
+                "level": { "enum": ["A", "AA", "AAA"], "description": "WCAG conformance level; default AA when the lane is on. Enum-only (the work.headroom.mode precedent — no separate type:string)." }
+              },
+              "additionalProperties": false
+            }
           },
           "additionalProperties": false
         },
@@ -406,8 +414,8 @@
       "description": "Work-memory backend selection (milestone 05). OPTIONAL — an absent `memory` key is equivalent to { \"backend\": \"none\" } (the graceful no-op). `backend` is an enum of the registered backend names.",
       "properties": {
         "backend": {
-          "enum": ["local", "none"],
-          "description": "The memory backend that answers the `aof work memory` verbs. `local` = the cheap derived-index backend; `none` = a no-op so ACD runs unchanged when memory is absent."
+          "enum": ["local", "none", "graphify"],
+          "description": "The memory backend that answers the `aof work memory` verbs. `local` = the cheap derived-index backend; `none` = a no-op so ACD runs unchanged when memory is absent; `graphify` = the graph-grounded backend (records from the 05 parsers, re-ranked by a work-stream graph built via invoke('graph:build'))."
         }
       },
       "additionalProperties": false

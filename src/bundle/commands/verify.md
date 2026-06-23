@@ -1,6 +1,6 @@
 ---
 description: Verify and accept a work item — run the automated + agent-run checks, bring a human in only for genuine @uat acceptance, log/triage findings, capture process lessons in RETROSPECTIVE, sign off, mark done. A milestone is accepted once its stories are.
-argument-hint: <item ref>
+argument-hint: "<item ref> [--url <baseUrl>]"
 allowed-tools: [Read, Grep, Glob, Write, Edit, Bash, Task, SlashCommand]
 ---
 <objective>
@@ -9,9 +9,11 @@ checks; pull the human in ONLY when a scenario genuinely needs one (`@uat`).
 </objective>
 
 <config>
-Read `.aof/aof.config.json` → `work.dir`, `work.agents`. Resolve the ref by running
-`aof work find "$ARGUMENTS" --json` (never glob `**/*.md`), then detect which verification lanes are in
-scope — `@executable`, `@manual`, `@uat`.
+Read `.aof/aof.config.json` → `work.dir`, `work.agents`, `work.ui.baseUrl`. Parse `$ARGUMENTS` into the
+**ref** and an optional **`--url <baseUrl>`**. Resolve the ref by running `aof work find "<ref>" --json`
+(never glob `**/*.md`), then detect which verification lanes are in scope — `@executable`, `@manual`,
+`@uat`. The **design-review base URL** = `--url` if given, else `work.ui.baseUrl` (may be absent — ACD
+never boots the app; the project serves it).
 
 The ref may be a **milestone**, a **story**, or a **uat session**. A uat session (`type: uat`) is a
 cross-milestone acceptance gate: its record doc is its own `SESSION.md` (not a milestone
@@ -30,6 +32,19 @@ that have content** — no empty "None" placeholders (absence of a section is in
    confirm green. For each `@manual` scenario (agent-runnable — run a command, hit an endpoint, inspect
    state), spawn `aof-developer` (or run inline) to execute it and record procedure + result + a
    `verifies →` pointer under **## Verification evidence**. Never restate the outcome.
+
+   **Design conformance (UI items) — render → hand to the designer → spawn QA (ADR-001/002/003).** When
+   the item has UI (a `DESIGN.md` / frontend surface), run the design-conformance review and log every
+   divergence as a **design-gap** finding (step 3). The orchestration is the only party that bridges
+   "run the browser" to "judge the result" — it renders, then hands the screenshot to the read-only
+   designer to JUDGE. A green `@executable` suite does **not** prove design fidelity (the litmus keeps
+   visual fidelity out of the `.feature`), so catch the drift here. The step:
+   - **Render** each DESIGN surface via `npx playwright screenshot` against the base URL (`--url` if given, else `work.ui.baseUrl`) with the surface's `Route` appended — `npx playwright screenshot "<baseUrl><Route>" <out>.png`.
+   - **Breakpoints.** Take the render at the defined breakpoints — the `390` / `768` / `1280` default (mobile / tablet / desktop), DESIGN-overridable per milestone (a surface's `DESIGN.md` may state its own widths).
+   - **On-demand Playwright.** Playwright is invoked on-demand via `npx`; it is NOT a `package.json` dependency (browser availability is a build-time `@manual` confirmation, never a refine blocker or a hard dep).
+   - **Hand off to the designer.** Spawn `aof-designer` to JUDGE the rendered screenshot they pass it (the ADR-001 hand-off) — give it the screenshot path(s) + the conformance baseline (the committed mock under `mocks/` and/or the binding checklist) and have it return the region-by-region verdict. Do NOT instruct the designer to run the browser itself — it has no `Bash`; it only judges the screenshot it is handed.
+   - **Spawn QA.** Spawn `aof-qa` for the browser harness / regression / a11y — QA runs the Playwright harness, owns the `toHaveScreenshot` visual-regression that locks the designer-approved baseline, and the optional axe-core-via-Playwright a11y lane.
+   - **Verdict.** The verdict is `CONFORMS` / `GAPS` / `INCONCLUSIVE`. It is `INCONCLUSIVE` when no base URL / screenshot is available or no baseline exists (no committed mock AND no binding checklist). A DESIGN surface with no renderable `Route` collapses to `INCONCLUSIVE` naming the missing `Route`. Name the missing baseline as the gap rather than inferring from component code — never read the component code and call it a `CONFORMS`/`GAPS` verdict; the honest answer is `INCONCLUSIVE` + "produce the missing baseline / render".
 2. **Human acceptance — only if `@uat` scenarios exist.** Spawn `aof-qa` to broker it: **stop and
    prompt the user** to perform each `@uat` procedure, then record their result + sign-off under
    **## User sign-off**. Skip this step entirely when there are no `@uat` scenarios (most

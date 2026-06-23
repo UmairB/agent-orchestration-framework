@@ -31,8 +31,19 @@ Dispatch on the item's `type`:
      be off) `aof work memory recall "<milestone domain / story keywords>" --kind near-miss --block` and
      considers the surfaced gotchas, recording at `aof:verify` (in `VERIFICATION.md`) any that shaped the
      build. An **empty block means nothing to surface** (memory may be off) — proceed unchanged.
-  3. **Review** — `aof-architect` (structural) + `aof-qa` (behavioural) + an automated craft pass; apply
-     confirmed fixes.
+  3. **Review** — `aof-architect` (structural) + `aof-qa` (behavioural) + **`aof-designer` (design
+     conformance, when the story has UI)** + an automated craft pass; apply confirmed fixes.
+
+     **Design conformance (when the story has UI) — render → hand to the designer → spawn QA
+     (ADR-001/002/003).** Catch design-gaps here (at build) — far cheaper than at the `aof:verify` gate
+     or a cross-milestone UAT. The orchestration renders, then hands the screenshot to the read-only
+     designer to JUDGE (it is the only party that bridges "run the browser" to "judge the result"):
+     - **Render** each DESIGN surface via `npx playwright screenshot` against the base URL (`--url` if given, else `work.ui.baseUrl`) with the surface's `Route` appended — `npx playwright screenshot "<baseUrl><Route>" <out>.png`.
+     - **Breakpoints.** Take the render at the defined breakpoints — the `390` / `768` / `1280` default (mobile / tablet / desktop), DESIGN-overridable per milestone (a surface's `DESIGN.md` may state its own widths).
+     - **On-demand Playwright.** Playwright is invoked on-demand via `npx`; it is NOT a `package.json` dependency.
+     - **Hand off to the designer.** Spawn `aof-designer` to JUDGE the rendered screenshot they pass it (the ADR-001 hand-off) — give it the screenshot path(s) + the conformance baseline (the committed mock under `mocks/` and/or the binding checklist) and have it return the region-by-region verdict. Do NOT instruct the designer to run the browser itself — it has no `Bash`; it only judges the screenshot it is handed.
+     - **Spawn QA.** Spawn `aof-qa` for the browser harness / regression / a11y — QA runs the Playwright harness, owns the `toHaveScreenshot` regression, and the optional axe-core-via-Playwright a11y lane.
+     - **Verdict.** The verdict is `CONFORMS` / `GAPS` / `INCONCLUSIVE`. It is `INCONCLUSIVE` when no base URL / screenshot is available or no baseline exists (no committed mock AND no binding checklist). A DESIGN surface with no renderable `Route` collapses to `INCONCLUSIVE` naming the missing `Route`. Name the missing baseline as the gap rather than inferring from component code — never read the component code and call it a `CONFORMS`/`GAPS` verdict; the honest answer is `INCONCLUSIVE` + "produce the missing baseline / render".
 - **task** — build that single task to green, then review.
 </process>
 

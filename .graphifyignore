@@ -1,0 +1,29 @@
+# Code-only graph corpus — keep `aof graph build .` fully local (egress: none, no LLM key).
+# Excluding docs/media leaves a pure code corpus that builds with no API key and no egress.
+*.md
+*.mdx
+*.qmd
+*.txt
+*.rst
+*.html
+*.yaml
+*.yml
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.docx
+*.xlsx
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.m4v
+*.mp3
+*.wav
+*.m4a
+*.ogg

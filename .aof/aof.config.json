@@ -9,7 +9,7 @@
     "tags": {
       "layers": ["@cli", "@ui", "@docs"],
       "refinements": ["@work", "@planning", "@assets", "@adapter"],
-      "domains": ["@work-stream", "@validate", "@scaffold", "@planning", "@board", "@distribution", "@round-trip", "@memory"]
+      "domains": ["@work-stream", "@validate", "@scaffold", "@planning", "@board", "@distribution", "@round-trip", "@memory", "@design"]
     }
   },
   "resources": [],

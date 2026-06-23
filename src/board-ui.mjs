@@ -1,31 +1,24 @@
-// `/api/work*` — the work board's read-mostly HTTP API (milestone 03, story 01).
+// `/api/work*` — the work board's read-mostly HTTP API (milestone 03, story 01;
+// re-homed onto the command core in milestone 08, story 02).
 //
-// This module owns the board's HTTP namespace (ADR-001): list / doc / validate /
-// next / feedback, all under the frozen `/api/work` prefix. It is wired into the
-// single `http.createServer` in `setup-ui.mjs` via one additive line; the
-// terminal WebSocket (`/ws/terminal`, story 02) is a disjoint namespace on the
+// This module owns the board's HTTP namespace (ADR-001): list / doc / tasks /
+// validate / next / feedback, all under the frozen `/api/work` prefix. It is
+// wired into the single `http.createServer` in `setup-ui.mjs` via one additive
+// line; the terminal WebSocket (`/ws/terminal`) is a disjoint namespace on the
 // same server.
 //
-// The board is READ-MOSTLY (ADR-004): list/doc reads, validate/next are
-// in-process calls to `work.mjs` exports (never a CLI shell-out), and the SOLE
-// filesystem mutation is the feedback append — one attributed bullet under the
-// verbatim `## Feedback (for retro)` heading in a selected milestone/story's
-// `STATE.md`. There is no status/frontmatter write and no restatus route.
+// After the milestone-08 migration (ADR-003) this is a THIN FACE: each route is
+// a `HTTP → invoke(id, input, { workspace }) → board-projection` adapter and
+// carries ZERO operation logic of its own. The operations live in the command
+// core (`./command-core.mjs` → `src/commands/*`); this module obtains the
+// `workspace` and `invoke` it needs THROUGH that single registry door (ADR-004
+// inv. 3 — its only operation-bearing import is `./command-core.mjs`). The board
+// face's two jobs are TRANSPORT (read the JSON body, map the error/status
+// envelope, own the unknown-route 404) and PATH DISPLAY (`displayPath`:
+// relativise the command's basis-neutral raw paths to `projectRoot` + forward
+// slashes — the milestone-03 wire, ADR-002).
 import path from "node:path";
-import { readFile, writeFile, appendFile, readdir } from "node:fs/promises";
-import { loadWorkspace, listStream, findWork, validateWork, nextWork } from "./work.mjs";
-import { parseFeature } from "./feature-parse.mjs";
-
-// The verbatim feedback heading — must match templates/uat/STATE.md and
-// src/bundle/commands/feedback.md byte-for-byte (ADR-004 / 02_add-feedback.feature).
-const FEEDBACK_HEADING = "## Feedback (for retro)";
-// The docs the detail panel may request, mapped to their on-disk filename.
-const DOC_FILES = {
-  SPEC: "SPEC.md",
-  STORY: "STORY.md",
-  VERIFICATION: "VERIFICATION.md",
-  RETROSPECTIVE: "RETROSPECTIVE.md",
-};
+import { invoke, loadWorkspace } from "./command-core.mjs";
 
 // Returns true if the request was an `/api/work*` route (handled here), else
 // false so the caller falls through to its own routing/404.
@@ -45,253 +38,88 @@ export async function handleWorkApi(request, response, options = {}) {
     // error.status ?? 500 to a JSON error response) rather than escaping the
     // handler — the caller awaits this bare in the http.createServer callback.
     const workspace = await loadWorkspace(path.resolve(options.projectDir ?? process.cwd()));
+    const ctx = { workspace };
+    const params = requestUrl.searchParams;
 
     if (request.method === "GET" && pathname === "/api/work/list") {
-      sendJson(response, 200, await listStream(workspace.workDir));
+      // The list rows pass straight through — `dir` is already forward-slashed
+      // by listStream, so no path projection is needed (ADR-002).
+      const rows = await invoke("work:list", {}, ctx);
+      sendJson(response, 200, rows);
       return true;
     }
 
     if (request.method === "GET" && pathname === "/api/work/doc") {
-      await handleDoc(response, workspace, requestUrl.searchParams);
+      const result = await invoke(
+        "work:doc",
+        { ref: (params.get("ref") ?? "").trim(), doc: (params.get("doc") ?? "").trim() },
+        ctx
+      );
+      sendJson(response, 200, result);
       return true;
     }
 
     if (request.method === "GET" && pathname === "/api/work/tasks") {
-      await handleTasks(response, workspace, requestUrl.searchParams);
+      const result = await invoke("work:tasks", { ref: (params.get("ref") ?? "").trim() }, ctx);
+      sendJson(response, 200, result);
       return true;
     }
 
     if (request.method === "GET" && pathname === "/api/work/validate") {
-      await handleValidate(response, workspace, requestUrl.searchParams);
+      const result = await invoke("work:validate", { scope: scopeParam(params) }, ctx);
+      // Project each finding's raw-absolute path to projectRoot-relative +
+      // forward-slashed — the milestone-03 board wire (ADR-002/003 face adapter).
+      sendJson(response, 200, {
+        findings: result.findings.map((finding) => ({
+          path: displayPath(workspace.projectRoot, finding.path),
+          problem: finding.problem,
+        })),
+      });
       return true;
     }
 
     if (request.method === "GET" && pathname === "/api/work/next") {
-      await handleNext(response, workspace, requestUrl.searchParams);
+      const result = await invoke("work:next", { scope: scopeParam(params) }, ctx);
+      // Project the next item's raw-absolute path (when present) to
+      // projectRoot-relative + forward-slashed — the milestone-03 board wire.
+      const payload = { ...result };
+      if (typeof payload.path === "string") {
+        payload.path = displayPath(workspace.projectRoot, payload.path);
+      }
+      sendJson(response, 200, payload);
       return true;
     }
 
     if (request.method === "POST" && pathname === "/api/work/feedback") {
-      await handleFeedback(request, response, workspace);
+      // readJsonBody is the HTTP-body transport reader (its payload-too-large /
+      // empty-json / malformed-json errors are HTTP-body concerns, not operation
+      // logic — they stay in the face). The default actor "you" now lives in the
+      // command, so the raw body.actor passes straight through.
+      const body = await readJsonBody(request);
+      const result = await invoke(
+        "work:feedback",
+        { ref: body.ref, note: body.note, actor: body.actor, refs: body.refs },
+        ctx
+      );
+      sendJson(response, 200, result);
       return true;
     }
   } catch (error) {
+    // The command (and the body reader) throw Errors carrying the same
+    // `.code`/`.status` the board set inline before the migration, so the
+    // `{ ok:false, error, code }` envelope + status mapping is preserved
+    // byte-for-byte (ADR-003): invalid-doc/missing-ref/missing-note/
+    // unsupported-target → 400, ref-not-found → 404, payload-too-large → 413,
+    // empty-json/malformed-json → 400.
     sendApiError(response, error.status ?? 500, error.message, error.code ?? "work-api-failed");
     return true;
   }
 
   // An unknown `/api/work*` route: own the response with a 404 so the caller's
-  // generic guard does not also try to respond.
+  // generic guard does not also try to respond. (A routing concern, not an
+  // operation — it stays in the face, ADR-003.)
   sendApiError(response, 404, "Work API route not found.", "not-found");
   return true;
-}
-
-async function handleDoc(response, workspace, params) {
-  const ref = (params.get("ref") ?? "").trim();
-  const docName = (params.get("doc") ?? "").trim().toUpperCase();
-  const fileName = DOC_FILES[docName];
-  if (!fileName) {
-    sendApiError(response, 400, `Unknown document "${params.get("doc") ?? ""}".`, "invalid-doc");
-    return;
-  }
-
-  const item = await resolveItem(workspace.workDir, ref);
-  if (!item) {
-    sendApiError(response, 404, `No item resolves to ref "${ref}".`, "ref-not-found");
-    return;
-  }
-
-  // path.join on the native dir (findWork returns the OS-native path); a missing
-  // file is NOT an error — ENOENT → { present: false, body: "" } (ADR-004).
-  try {
-    const body = await readFile(path.join(item.dir, fileName), "utf8");
-    sendJson(response, 200, { ref: item.ref, doc: docName, present: true, body });
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      sendJson(response, 200, { ref: item.ref, doc: docName, present: false, body: "" });
-      return;
-    }
-    throw error;
-  }
-}
-
-// READ-ONLY (ADR-004): a story's tasks are the `<dir>/tasks/*.feature` files.
-// The browser can't read disk, so we parse them server-side and return the
-// scenarios + per-task lane counts. This route NEVER writes (the sole writer is
-// appendFeedbackBullet) and NEVER shells out. A missing `tasks/` dir is
-// absent-not-error → { ref, tasks: [] }, like /api/work/doc's ENOENT path.
-async function handleTasks(response, workspace, params) {
-  const ref = (params.get("ref") ?? "").trim();
-  const item = await resolveItem(workspace.workDir, ref);
-  if (!item) {
-    sendApiError(response, 404, `No item resolves to ref "${ref}".`, "ref-not-found");
-    return;
-  }
-
-  const tasksDir = path.join(item.dir, "tasks");
-  let entries;
-  try {
-    entries = await readdir(tasksDir, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      sendJson(response, 200, { ref: item.ref, tasks: [] });
-      return;
-    }
-    throw error;
-  }
-
-  const fileNames = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".feature"))
-    .map((entry) => entry.name)
-    .sort();
-
-  // Read + parse the feature files in parallel; Promise.all preserves the input
-  // (sorted) order, so the `tasks` array is built in the SAME order as before.
-  const tasks = await Promise.all(
-    fileNames.map(async (file) => {
-      const text = await readFile(path.join(tasksDir, file), "utf8");
-      const parsed = parseFeature(text);
-      const counts = { executable: 0, manual: 0, uat: 0 };
-      for (const scenario of parsed.scenarios) {
-        if (scenario.lane && counts[scenario.lane] !== undefined) counts[scenario.lane] += 1;
-      }
-      return { file, feature: parsed.feature, scenarios: parsed.scenarios, counts };
-    })
-  );
-
-  sendJson(response, 200, { ref: item.ref, tasks });
-}
-
-async function handleValidate(response, workspace, params) {
-  const scope = scopeParam(params);
-  const findings = await validateWork(workspace.workDir, workspace.config, scope);
-  sendJson(response, 200, {
-    findings: findings.map((finding) => ({
-      path: displayPath(workspace.projectRoot, finding.path),
-      problem: finding.problem,
-    })),
-  });
-}
-
-async function handleNext(response, workspace, params) {
-  const scope = scopeParam(params);
-  const result = await nextWork(workspace.workDir, scope);
-  const payload = { ...result };
-  if (typeof payload.path === "string") {
-    payload.path = displayPath(workspace.projectRoot, payload.path);
-  }
-  sendJson(response, 200, payload);
-}
-
-async function handleFeedback(request, response, workspace) {
-  const body = await readJsonBody(request);
-  const ref = typeof body.ref === "string" ? body.ref.trim() : "";
-  const note = typeof body.note === "string" ? body.note.trim() : "";
-  const actor = typeof body.actor === "string" && body.actor.trim() ? body.actor.trim() : "you";
-  const refs = typeof body.refs === "string" ? body.refs.trim() : "";
-
-  if (!ref) {
-    sendApiError(response, 400, "A target ref is required.", "missing-ref");
-    return;
-  }
-  if (!note) {
-    sendApiError(response, 400, "Feedback note is required.", "missing-note");
-    return;
-  }
-
-  // The feedback route is a WRITE, so it must resolve by EXACT ref — never the
-  // free-text slug fallback the read routes tolerate. A typo'd/partial ref must
-  // 404, not silently append the bullet to the first slug match (the wrong item).
-  const item = await resolveItemExact(workspace.workDir, ref);
-  if (!item) {
-    sendApiError(response, 404, `No item resolves to ref "${ref}".`, "ref-not-found");
-    return;
-  }
-  if (item.type !== "milestone" && item.type !== "story") {
-    sendApiError(response, 400, "Feedback targets a milestone or story item.", "unsupported-target");
-    return;
-  }
-
-  // The canonical bullet form (templates/uat/STATE.md:30): em-dash before
-  // "Raised by:", and exactly three spaces before an optional "Refs:".
-  const bullet = refs
-    ? `- ${note} — Raised by: ${actor}   Refs: ${refs}`
-    : `- ${note} — Raised by: ${actor}`;
-
-  await appendFeedbackBullet(path.join(item.dir, "STATE.md"), bullet);
-  sendJson(response, 200, { ok: true, bullet });
-}
-
-// The board's ONLY filesystem write: ensure the verbatim `## Feedback (for
-// retro)` heading exists (creating it if absent), then append exactly one bullet
-// beneath the existing entries — never disturbing prior content (ADR-004).
-async function appendFeedbackBullet(statePath, bullet) {
-  let original;
-  try {
-    original = await readFile(statePath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    original = null;
-  }
-
-  if (original === null) {
-    // No STATE.md at all: create it with the heading and the one bullet.
-    await writeFile(statePath, `${FEEDBACK_HEADING}\n\n${bullet}\n`, "utf8");
-    return;
-  }
-
-  if (!original.includes(FEEDBACK_HEADING)) {
-    // Heading absent: append it verbatim, then the bullet, beneath existing body.
-    const prefix = original.length === 0 || original.endsWith("\n") ? "" : "\n";
-    const gap = original.length === 0 ? "" : "\n";
-    await appendFile(statePath, `${prefix}${gap}${FEEDBACK_HEADING}\n\n${bullet}\n`, "utf8");
-    return;
-  }
-
-  // Heading present: insert the bullet at the end of the heading's section,
-  // beneath any existing bullets, without rewriting them.
-  const lines = original.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => line.trim() === FEEDBACK_HEADING);
-  // Find where this section ends (the next heading, or end of file).
-  let sectionEnd = lines.length;
-  for (let i = headingIndex + 1; i < lines.length; i += 1) {
-    if (/^#{1,6}\s/.test(lines[i])) {
-      sectionEnd = i;
-      break;
-    }
-  }
-  // Walk back over trailing blank lines so the new bullet sits with the others.
-  let insertAt = sectionEnd;
-  while (insertAt > headingIndex + 1 && lines[insertAt - 1].trim() === "") {
-    insertAt -= 1;
-  }
-  // If the section has no bullet yet, leave a blank line after the heading.
-  if (insertAt === headingIndex + 1) {
-    lines.splice(insertAt, 0, "", bullet);
-  } else {
-    lines.splice(insertAt, 0, bullet);
-  }
-  const newline = original.includes("\r\n") ? "\r\n" : "\n";
-  await writeFile(statePath, lines.join(newline), "utf8");
-}
-
-// Resolve an item by ref to its native-path `dir` (+ ref/type) using findWork —
-// the canonical resolver. Returns null when nothing resolves. Used by the
-// READ-ONLY routes (doc/tasks), where a slug fallback is acceptable.
-async function resolveItem(workDir, ref) {
-  if (!ref) return null;
-  const rows = await findWork(workDir, ref);
-  // Prefer an exact ref match; findWork can return slug matches for free text.
-  return rows.find((row) => row.ref === ref) ?? rows[0] ?? null;
-}
-
-// EXACT-ref resolver for the WRITE route (feedback): there is NO slug fallback,
-// so a typo'd/partial ref returns null (→ 404) rather than appending the bullet
-// to the first free-text slug match (the wrong item).
-async function resolveItemExact(workDir, ref) {
-  if (!ref) return null;
-  const rows = await findWork(workDir, ref);
-  return rows.find((row) => row.ref === ref) ?? null;
 }
 
 function scopeParam(params) {
@@ -301,6 +129,9 @@ function scopeParam(params) {
 
 // Turn an absolute item path into a forward-slashed path relative to the project
 // root for display on the wire (Windows host → forward slashes, ADR-002 style).
+// This is the BOARD's path-display face adapter — it stays here (presentation,
+// not operation): the command returns basis-neutral raw paths, the board
+// projects them to the milestone-03 projectRoot-relative + slashed wire.
 function displayPath(projectRoot, absolutePath) {
   const relative = path.relative(projectRoot, absolutePath);
   return relative.replaceAll("\\", "/");
@@ -321,6 +152,10 @@ function send(response, status, contentTypeValue, body) {
   response.end(body);
 }
 
+// The HTTP request-body reader for the feedback write (transport, not
+// operation): caps the body size (413), rejects an empty (400) or malformed
+// (400) JSON body. These are HTTP-body concerns and stay in the face; the
+// resolved JSON object is handed to the command as its input.
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let body = "";

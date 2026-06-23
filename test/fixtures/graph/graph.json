@@ -1,0 +1,99 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {
+    "hyperedges": [
+      {
+        "id": "he1",
+        "nodes": ["n1", "n2", "n3"],
+        "relation": "co_change"
+      },
+      {
+        "id": "he2",
+        "nodes": ["n2", "n4", "n5"],
+        "relation": "shared_community"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "label": "main",
+      "file_type": "code",
+      "source_file": "src/main.py",
+      "community": 0,
+      "norm_label": "main"
+    },
+    {
+      "id": "n2",
+      "label": "handler",
+      "file_type": "code",
+      "source_file": "src/handler.py",
+      "community": 0,
+      "norm_label": "handler"
+    },
+    {
+      "id": "n3",
+      "label": "README",
+      "file_type": "document",
+      "source_file": "docs/README.md",
+      "community": 1,
+      "norm_label": "readme"
+    },
+    {
+      "id": "n4",
+      "label": "diagram",
+      "file_type": "image",
+      "source_file": "docs/arch.png",
+      "community": 1,
+      "norm_label": "diagram"
+    },
+    {
+      "id": "n5",
+      "label": "paper",
+      "file_type": "paper",
+      "source_file": "docs/spec.pdf",
+      "community": 2,
+      "norm_label": "paper"
+    }
+  ],
+  "links": [
+    {
+      "source": "n1",
+      "target": "n2",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.py"
+    },
+    {
+      "source": "n1",
+      "target": "n3",
+      "relation": "imports",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main.py"
+    },
+    {
+      "source": "n2",
+      "target": "n3",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.62,
+      "source_file": "src/handler.py"
+    },
+    {
+      "source": "n3",
+      "target": "n5",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 1.0,
+      "source_file": "docs/README.md"
+    },
+    {
+      "source": "n4",
+      "target": "n5",
+      "relation": "depicts",
+      "confidence": "AMBIGUOUS",
+      "source_file": "docs/arch.png"
+    }
+  ]
+}

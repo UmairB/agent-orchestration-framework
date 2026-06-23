@@ -1,2 +1,5 @@
 /cache/
 **/.tmp-*
+# derived memory stores (re-derivable from the work stream; never an authoritative copy)
+aof.memory.index.json
+aof.memory.graphify.index.json

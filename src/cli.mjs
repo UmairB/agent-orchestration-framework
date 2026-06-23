@@ -15,7 +15,9 @@ import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, leg
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
-import { loadWorkspace, findWork, listStream, validateWork, nextWork } from "./work.mjs";
+import { loadWorkspace, findWork } from "./work.mjs";
+import { invoke, getCommand } from "./command-core.mjs";
+import { serveStdio } from "./graph-mcp-server.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
@@ -56,8 +58,18 @@ export async function run(argv) {
     return;
   }
 
+  if (command === "graph") {
+    await graphCommand(rest);
+    return;
+  }
+
   if (command === "planning") {
     await planningCommand(rest);
+    return;
+  }
+
+  if (command === "import") {
+    await importCommand(rest);
     return;
   }
 
@@ -183,7 +195,54 @@ async function projectCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run`);
+  if (subcommand === "provision") {
+    await projectProvisionCli(rest);
+    return;
+  }
+
+  throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run\n  aof project provision graphify [--version 0.8.44] [--uninstall] [--dry-run] [--json]`);
+}
+
+// `aof project provision <tool> [--version V] [--force] [--uninstall] [--dry-run]
+//  [--json]` — the 12/ADR-003 lifecycle surface, routed through the command core
+// (invoke("project:provision", …), the 08 bijection). It mirrors graphVerbCommand's
+// getCommand → loadWorkspace → invoke → cli.json/render idiom, INCLUDING the
+// --json single-pass envelope (print ONLY command.cli.json(result)). Unlike the
+// graph verbs, provision is GLOBAL-STORE oriented and reads no project files —
+// loadWorkspace is best-effort (a dir with no .aof config still provisions), so it
+// is wrapped in try/catch and a minimal ctx is passed when no workspace resolves.
+async function projectProvisionCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("project:provision");
+
+  let workspace;
+  try {
+    workspace = await loadWorkspace(process.cwd(), options.config);
+  } catch {
+    // Provision does not need a real project — proceed with no workspace.
+    workspace = undefined;
+  }
+  const ctx = { workspace };
+
+  const input = command.cli.argv(options._, options);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, input, ctx);
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      // A single structured error envelope (mirrors graphVerbCommand) — the
+      // --json face always emits one parseable envelope, success OR error.
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error propagates to bin/aof.mjs
+  // (stderr + non-zero exit).
+  const result = await invoke(command.id, input, ctx);
+  console.log(command.cli.render(result));
 }
 
 async function workCommand(args) {
@@ -206,6 +265,21 @@ async function workCommand(args) {
 
   if (subcommand === "next") {
     await workNextCommand(rest);
+    return;
+  }
+
+  if (subcommand === "doc") {
+    await workDocCommand(rest);
+    return;
+  }
+
+  if (subcommand === "tasks") {
+    await workTasksCommand(rest);
+    return;
+  }
+
+  if (subcommand === "feedback") {
+    await workFeedbackCommand(rest);
     return;
   }
 
@@ -239,7 +313,149 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work use-headroom\n  aof work unuse-headroom`);
+}
+
+// `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
+// 09/ADR-001). Each verb is a thin argv → invoke("graph:<verb>") → render/--json
+// face over the registered command, exactly the workListCommand idiom. The
+// `serve` verb is the seam story 04 (mcp-server-runtime) will fill — declared but
+// not implemented here (ADR-005 amendment), so it currently falls through to the
+// unknown-verb error, which story 04 replaces with the server launch.
+async function graphCommand(args) {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand === "build") {
+    await graphVerbCommand("graph:build", rest);
+    return;
+  }
+
+  if (subcommand === "query") {
+    await graphVerbCommand("graph:query", rest);
+    return;
+  }
+
+  if (subcommand === "triage") {
+    await graphVerbCommand("graph:triage", rest);
+    return;
+  }
+
+  // `aof graph impact <path> [<path> ...]` (milestone 11 re-open / ADR-007): the
+  // DETERMINISTIC, edge-based coupling lookup the running agents consume — exact
+  // dependencies + dependents for the given files, computed from graph.json (no
+  // fuzz, no spawn). Thin argv → invoke("graph:impact") → render/--json face.
+  if (subcommand === "impact") {
+    await graphVerbCommand("graph:impact", rest);
+    return;
+  }
+
+  // `aof graph serve` (story 04, ADR-005 amendment): launch the stdio MCP server
+  // the story-02 rendered MCP config entry targets (command:"aof", args:["graph",
+  // "serve"]). It is a thin transport face over the SAME command core — it reaches
+  // the graph ONLY through invoke("graph:…"), and spawns no graphify itself.
+  if (subcommand === "serve") {
+    await graphServeCommand(rest);
+    return;
+  }
+
+  console.error(`Unknown graph command "${subcommand ?? ""}".\n\nExamples:\n  aof graph build <folder> [--backend claude] [--json]\n  aof graph query "what calls main" [--json]\n  aof graph impact src/command-core.mjs [src/cli.mjs ...] [--json]\n  aof graph triage [--mode conflicts] [--json]\n  aof graph serve`);
+  process.exitCode = 1;
+}
+
+// The shared graph verb face: getCommand → loadWorkspace → invoke → cli.json/
+// render (the workListCommand idiom). CRITICAL (the reachability @executable
+// scenario): in --json mode, a command error (graphify-missing / no-graph) is
+// caught and emitted as a SINGLE structured JSON envelope { ok:false, error, code }
+// on stdout (+ non-zero exit), so `aof graph <verb> --json` ALWAYS emits one
+// parseable JSON envelope — success OR structured error — even with no binary or
+// no graph present. The non-json face lets the error propagate to bin/aof.mjs
+// (stderr + non-zero exit).
+async function graphVerbCommand(id, args) {
+  const options = parseOptions(args);
+  const command = getCommand(id);
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      // A single structured error envelope — proves the verb is dispatched even
+      // when its preconditions (live binary / built graph) are not met.
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error propagates to bin/aof.mjs
+  // (stderr + non-zero exit), which is the missing-graph @executable path.
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof graph serve` — start the stdio MCP server (story 04, ADR-005 amendment).
+// loadWorkspace resolves the ctx the server's tool handlers pass to invoke; the
+// server then speaks line-delimited JSON-RPC 2.0 over stdin/stdout until EOF. It
+// reaches the graph ONLY through invoke("graph:…") and spawns no graphify itself
+// (the driver src/graphify.mjs is the sole spawn site — ADR-006 inv. 2).
+async function graphServeCommand(args) {
+  const options = parseOptions(args);
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  await serveStdio({ workspace });
+}
+
+// `aof import <unit> <repo> [selector] [--dry-run] [--json]` — the top-level
+// import dispatch (a sibling of `aof graph` / `aof work`, 13/ADR-002). The only
+// import unit in v0 is `milestone` (SPEC §Scope): an unknown sub-noun exits
+// non-zero citing the supported unit "milestone". `milestone` is a thin
+// argv → invoke("import:milestone") → render/--json face over the registered
+// command, mirroring graphVerbCommand (the getCommand → loadWorkspace → invoke →
+// cli.json/render idiom, INCLUDING the --json single-structured-envelope discipline).
+async function importCommand(args) {
+  const [unit, ...rest] = args;
+
+  if (unit === "milestone") {
+    await importMilestoneCommandCli(rest);
+    return;
+  }
+
+  // SPEC §Scope: the unit of import is a milestone, not arbitrary content —
+  // "milestone" is the only supported sub-noun in v0, so an unknown sub-noun
+  // exits non-zero citing the supported unit (stderr + non-zero exit).
+  console.error(
+    `Unknown import unit "${unit ?? ""}". The supported import unit is "milestone".\n\nUsage: aof import milestone <repo> <selector> [--dry-run] [--json]`
+  );
+  process.exitCode = 1;
+}
+
+// `aof import milestone <repo> [selector]` — the thin face over the registered
+// import:milestone command (13/ADR-002). Mirrors graphVerbCommand: getCommand →
+// loadWorkspace → invoke → cli.json/render. A missing <repo> throws the command's
+// missing-repo usage error (propagated to bin/aof.mjs: stderr + non-zero exit). In
+// --json mode a command error is emitted as a SINGLE structured envelope
+// { ok:false, error, code } on stdout (+ non-zero exit), exactly like the graph
+// verbs — so `aof import milestone … --json` always emits one parseable envelope.
+async function importMilestoneCommandCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("import:milestone");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error (missing-repo / ambiguous /
+  // unsupported) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
 }
 
 async function workBoardCommand(args) {
@@ -537,94 +753,121 @@ async function workFindCommand(args) {
 async function workListCommand(args) {
   const options = parseOptions(args);
   const scope = options._[0];
-  const { workDir } = await loadWorkspace(process.cwd(), options.config);
-  const rows = await listStream(workDir);
+  // Rewired through the registry (ADR-002/003): the data comes from work:list via
+  // invoke; the CLI applies its own face projection (here, pretty 2-space --json)
+  // and keeps the scope-view affordance below (a CLI-face presentation, not
+  // operation logic). list's input takes no positionals, so cli.argv ignores them.
+  const command = getCommand("work:list");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const rows = await invoke(command.id, command.cli.argv(options._, options), { workspace });
 
   // JSON mode is the contract surface: the WHOLE stream, pure JSON, byte-stable
-  // across runs. Scope narrowing is a human-view affordance only; the contract
-  // emits the full stream so the board binds to one fixture.
+  // across runs. The human render (the command's CLI adapter) applies the
+  // scope-narrowing view affordance — the contract `--json` form stays the full
+  // stream so the board binds to one fixture.
   if (options.json) {
-    console.log(JSON.stringify(rows, null, 2));
+    console.log(JSON.stringify(command.cli.json(rows), null, 2));
     return;
   }
-
-  // Scope semantics mirror validateWork's `inScope`: an item is in scope if its
-  // own number equals the scope OR its parent equals the scope.
-  const inScope = (row) => {
-    if (!scope) return true;
-    const ref = scope.trim();
-    const itemNumber = row.ref.includes("/") ? row.ref.split("/")[1] : row.ref;
-    if (/^\d+$/.test(ref)) {
-      const driver = row.parent ?? itemNumber;
-      return Number.parseInt(driver, 10) === Number.parseInt(ref, 10);
-    }
-    const pair = ref.match(/^(\d+)\/(\d+)$/);
-    if (pair) return row.ref === `${pair[1]}/${pair[2]}` || row.ref === ref;
-    return row.slug.includes(ref);
-  };
-
-  const listed = rows.filter(inScope);
-  if (listed.length === 0) {
-    console.log(`Nothing in scope${scope ? ` for "${scope}"` : ""}.`);
-    return;
-  }
-
-  for (const row of listed) {
-    const indent = row.parent == null ? "" : "  ";
-    const title = row.title ?? "-";
-    console.log(`${indent}${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${title}`);
-  }
+  console.log(command.cli.render(rows, { scope }));
 }
 
 async function workValidateCommand(args) {
   const options = parseOptions(args);
   const scope = options._[0];
-  const { workDir, config } = await loadWorkspace(process.cwd(), options.config);
-  const findings = await validateWork(workDir, config, scope);
+  // Rewired through the registry (ADR-002/003): work:validate returns the richer
+  // { findings } envelope with RAW absolute paths. The CLI --json adapter
+  // (cli.json) UNWRAPS to the bare [{path,problem}] array and re-bases each path
+  // to cwd (path.relative, OS separators) — the CLI's historical wire, preserved
+  // byte-for-byte. The scoped human framing below stays a CLI-face affordance.
+  const command = getCommand("work:validate");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
 
   if (options.json) {
-    console.log(JSON.stringify(findings.map((finding) => ({ path: path.relative(process.cwd(), finding.path), problem: finding.problem })), null, 2));
-    if (findings.length > 0) process.exitCode = 1;
+    console.log(JSON.stringify(command.cli.json(result), null, 2));
+    if (result.findings.length > 0) process.exitCode = 1;
     return;
   }
 
-  if (findings.length === 0) {
-    console.log(`PASS — ${scope ? `${scope} is` : "work stream is"} well-formed.`);
-    return;
-  }
-
-  console.log(`${findings.length} issue(s):`);
-  for (const finding of findings) {
-    console.log(`  ${path.relative(process.cwd(), finding.path)} — ${finding.problem}`);
-  }
-  console.log("\nNote: test-traceability (@executable → green test; @manual/@uat → VERIFICATION rows) is not yet checked here.");
-  process.exitCode = 1;
+  console.log(command.cli.render(result, { scope }));
+  // A non-empty findings list is a non-zero exit (today's CLI behaviour).
+  if (result.findings.length > 0) process.exitCode = 1;
 }
 
 async function workNextCommand(args) {
   const options = parseOptions(args);
   const scope = options._[0];
-  const { workDir } = await loadWorkspace(process.cwd(), options.config);
-  const result = await nextWork(workDir, scope);
+  // Rewired through the registry (ADR-002/003): work:next returns the core result
+  // with a RAW absolute path; the CLI --json adapter (cli.json) re-bases it to cwd
+  // (path.relative) and leaves a path-less (done) result whole — today's wire,
+  // byte-for-byte. The scoped done/blocked human lines stay a CLI-face affordance.
+  const command = getCommand("work:next");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
 
   if (options.json) {
-    const payload = result.path ? { ...result, path: path.relative(process.cwd(), result.path) } : result;
-    console.log(JSON.stringify(payload, null, 2));
+    console.log(JSON.stringify(command.cli.json(result), null, 2));
     return;
   }
 
-  if (result.state === "done") {
-    console.log(`Nothing actionable${scope ? ` in ${scope}` : ""} — everything is done.`);
+  console.log(command.cli.render(result, { scope }));
+}
+
+// `aof work doc <ref> <DOC> [--json]` — a thin argv → command → result face over
+// work:doc (ADR-003). A READ: resolves with the command's resolver (slug-fallback
+// tolerated). `--json` emits the command's `{ ref, doc, present, body }` result;
+// the bare command prints the body (or an absence line). An unknown DOC name /
+// unresolved ref throws the command's error (invalid-doc / ref-not-found) up to
+// bin/aof.mjs, which prints error.message to stderr and exits non-zero.
+async function workDocCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("work:doc");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+
+  if (options.json) {
+    console.log(JSON.stringify(command.cli.json(result), null, 2));
     return;
   }
+  console.log(command.cli.render(result));
+}
 
-  if (result.state === "blocked") {
-    console.log(`Blocked: ${result.ref} (${result.slug}) waits on milestone(s) ${result.waitingOn.join(", ")} — not done.`);
+// `aof work tasks <ref> [--json]` — a thin argv → command → result face over
+// work:tasks (ADR-003). A READ: a resolved item with no tasks dir is the empty
+// list (exit 0); an unresolved ref throws ref-not-found up to the top-level catch
+// (stderr + non-zero exit). `--json` emits the `{ ref, tasks }` command result.
+async function workTasksCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("work:tasks");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+
+  if (options.json) {
+    console.log(JSON.stringify(command.cli.json(result), null, 2));
     return;
   }
+  console.log(command.cli.render(result));
+}
 
-  console.log(`${result.ref.padEnd(7)} ${result.type.padEnd(9)} ${(result.status ?? "-").padEnd(12)} ${result.slug}`);
-  console.log(`        ${path.relative(process.cwd(), result.path)}`);
+// `aof work feedback <ref> --note "…" [--actor …] [--refs …]` — the ONLY CLI work
+// write, a thin argv → command → result face over work:feedback (ADR-003). The
+// command resolves EXACT-only (resolveItemExact): a non-exact ref throws
+// ref-not-found rather than writing to a slug-matched wrong item, and a missing
+// note throws missing-note BEFORE any write — both propagate to bin/aof.mjs
+// (stderr + non-zero exit). An omitted --actor defaults to "you" inside the
+// command. `--json` emits the `{ ok, bullet }` result.
+async function workFeedbackCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("work:feedback");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+
+  if (options.json) {
+    console.log(JSON.stringify(command.cli.json(result), null, 2));
+    return;
+  }
+  console.log(command.cli.render(result));
 }
 
 async function initCommand(args) {
@@ -1551,7 +1794,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall"].includes(key)) {
       options[key] = true;
       continue;
     }

@@ -18,11 +18,19 @@
 // when headroom is ABSENT it STILL writes the config (intent honoured) AND prints a
 // one-line install hint pointing at github.com/chopratejas/headroom; when PRESENT it
 // writes the config and prints NO hint. It NEVER runs an installer (ADR-005). headroom
-// is referenced ONLY as the PATH binary-name string "headroom" — never an aof import.
-import { delimiter, join } from "node:path";
+// is referenced ONLY as the PATH binary-name string "headroom" — never an aof import of
+// the headroom PACKAGE. The relative import of ./headroom.mjs below is aof's OWN module.
+//
+// milestone-12 / ADR-004 RE-POINT: this advisory PATH-hint lookup now resolves the
+// managed store copy first (via resolveHeadroomBinary), falling back to PATH — for
+// consistency with headroom.mjs's runtime resolver and graphify (story 02). The
+// config read-merge-write is UNCHANGED: useHeadroom writes the config BEFORE and
+// INDEPENDENT of the lookup (the lookup only drives whether the install hint prints),
+// so the acd-headroom-config-isolation guard stays green.
 import { existsSync } from "node:fs";
 import { readJson, writeText } from "./fs.mjs";
 import { findProjectConfig } from "./workspace.mjs";
+import { resolveHeadroomBinary } from "./headroom.mjs";
 
 // The default providers a fresh enable fronts (ADR-001). Independent of `--runtime` —
 // the resolver intersects with the routable set at runtime.
@@ -31,29 +39,17 @@ const DEFAULT_PROVIDERS = ["claude", "codex"];
 // The headroom repo named in the install hint (ADR-004/005). aof never installs it.
 const HEADROOM_REPO = "github.com/chopratejas/headroom";
 
-// Default PATH lookup for an executable name — the same shape terminal-providers.mjs /
-// headroom.mjs use (honour PATHEXT on win32 so a `.cmd`/`.exe` shim resolves like the
-// shell would). Returns the resolved absolute path, or null when nothing on PATH
-// matches. Defined LOCALLY so the surface stays self-contained and headroom is referenced
-// purely as a PATH binary-name probe; injected via the `which` param so tests can stub it.
-function defaultWhich(bin, env = process.env) {
+// Default lookup for the "headroom" binary — RE-POINTED STORE-FIRST (ADR-004), the
+// same store-first-then-PATH resolution headroom.mjs uses. It DELEGATES to
+// resolveHeadroomBinary so a provisioned headroom is reported on the hint path too.
+// Its (bin, env) => path|null CONTRACT is preserved (an absent headroom yields null →
+// the install hint still prints); injected via the `which` param so tests can stub it.
+// `_bin` is intentionally unused — this default lookup is headroom-specific; its sole
+// caller (useHeadroom) always passes "headroom". The shape is kept for the `which` seam.
+function defaultWhich(_bin, env = process.env) {
   const pathValue = env.PATH ?? env.Path ?? "";
-  if (!pathValue) return null;
-  const dirs = pathValue.split(delimiter).filter(Boolean);
-  const exts = process.platform === "win32"
-    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
-    : [""];
-  for (const dir of dirs) {
-    for (const ext of exts) {
-      const candidate = join(dir, ext ? `${bin}${ext}` : bin);
-      try {
-        if (existsSync(candidate)) return candidate;
-      } catch {
-        // ignore unreadable PATH entries
-      }
-    }
-  }
-  return null;
+  const resolved = resolveHeadroomBinary({ env, pathValue });
+  return resolved.path ?? null;
 }
 
 // Read the current config (or {} on a fresh project) WITHOUT touching the lock. The

@@ -7,39 +7,57 @@
 // decision-table branch is a unit case with a stubbed `which` and no PTY.
 //
 // headroom (github.com/chopratejas/headroom) is referenced ONLY as the PATH binary
-// name string "headroom" — never an aof import, never an installer shell-out (ADR-005).
-import { delimiter, join } from "node:path";
-import { existsSync } from "node:fs";
+// name string "headroom" — never an aof import of the headroom PACKAGE, never an
+// installer shell-out (ADR-005). The relative import of ./tool-store.mjs below is
+// aof's OWN module (the store-first resolver), NOT the headroom package — the
+// no-dependency guard (acd-headroom-no-dependency) excludes relative siblings.
+//
+// milestone-12 / ADR-004 RE-POINT: headroom's DEFAULT binary lookup now resolves
+// the managed store copy first (~/.aof/tools/headroom/<version>/{Scripts|bin}/
+// headroom[.exe]) and falls back to the existing PATH probe — so a provisioned
+// headroom wins over a stray global, exactly as graphify does (story 02). ONLY the
+// default lookup moves: resolveHeadroomLaunch's decision table (branches 1–4) and
+// its injected `which ?? defaultWhich` seam are UNCHANGED.
+import { resolveManagedBinary, HEADROOM_DESCRIPTOR } from "./tool-store.mjs";
 
 // The set of providers headroom can ever front. headroom's proxy is OpenAI- and
 // Anthropic-compatible only; gemini (Google GenAI) is not OpenAI-compatible, so it is
 // NEVER routable — it can never enter the routable set even when listed in config.
 const ROUTABLE = ["claude", "codex"];
 
-// Default PATH lookup for an executable name — the same shape terminal-providers.mjs
-// uses (honour PATHEXT on win32 so a `.cmd`/`.exe` shim resolves like the shell would).
-// Returns the resolved absolute path, or null when nothing on PATH matches. Defined
-// LOCALLY (not imported) so the resolver stays self-contained and the headroom lookup
-// is purely a PATH binary-name probe. Injected via the `which` param so the resolver
-// is total and side-effect-free under test.
-function defaultWhich(bin, env = process.env) {
+// resolveHeadroomBinary(options?) — the store-first binary-resolution seam (ADR-004),
+// mirroring story 02's resolveGraphifyBinary. It DELEGATES to tool-store.mjs's
+// resolveManagedBinary, keyed on headroom's name/pinned-version/binary, so the managed
+// store copy wins over a stray global and, on a store miss, it falls back to the SAME
+// PATH walk milestone 06 did (now living inside the shared resolver). A total miss is
+// the structured no-throw { found:false, hint } — never an opaque ENOENT.
+//
+// `options` forwards the resolver's injectable seams (env/platform/pathValue/
+// useLocator/probe) so callers and tests can drive store/PATH/probe hermetically
+// without mutating process-global state. The production default lookup passes only
+// env + the env's PATH (see defaultWhich below).
+export function resolveHeadroomBinary(options = {}) {
+  return resolveManagedBinary({
+    name: HEADROOM_DESCRIPTOR.name,
+    version: HEADROOM_DESCRIPTOR.version,
+    binary: "headroom",
+    ...options,
+  });
+}
+
+// Default lookup for the "headroom" binary — RE-POINTED STORE-FIRST (ADR-004). It
+// resolves the managed store copy first, falling back to the PATH probe milestone 06
+// used. Its (bin, env) => path|null CONTRACT is preserved exactly (resolveHeadroomLaunch
+// branch 3 depends on it): an absent headroom still yields `null`, so the honest
+// raw-launch degrade is untouched. Injected via the `which` param so the resolver is
+// total and side-effect-free under test; ONLY the default resolution moves store-first.
+// `_bin` is intentionally unused: this default lookup is headroom-specific (it resolves
+// the headroom descriptor), and its sole caller (resolveHeadroomLaunch branch 3) always
+// passes the literal "headroom". The (bin, env) shape is kept to satisfy the `which` seam.
+function defaultWhich(_bin, env = process.env) {
   const pathValue = env.PATH ?? env.Path ?? "";
-  if (!pathValue) return null;
-  const dirs = pathValue.split(delimiter).filter(Boolean);
-  const exts = process.platform === "win32"
-    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
-    : [""];
-  for (const dir of dirs) {
-    for (const ext of exts) {
-      const candidate = join(dir, ext ? `${bin}${ext}` : bin);
-      try {
-        if (existsSync(candidate)) return candidate;
-      } catch {
-        // ignore unreadable PATH entries
-      }
-    }
-  }
-  return null;
+  const resolved = resolveHeadroomBinary({ env, pathValue });
+  return resolved.path ?? null;
 }
 
 // resolveHeadroomLaunch — the frozen seam ↔ runtime contract (ADR-003). It is a pure

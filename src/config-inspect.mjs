@@ -28,6 +28,13 @@ import {
 } from "./model.mjs";
 import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { globalWorkspacePaths } from "./workspace.mjs";
+// milestone 12 (ADR-003) — the store-first managed-tool resolver + the frozen
+// tool descriptors the three new doctor checks consult (SUPERSEDING the 09
+// graphify-binary check in place with the store-aware managed-tool check).
+import { resolveManagedBinary, toolDescriptors } from "./tool-store.mjs";
+import { delimiter } from "node:path";
+import { spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_GLOBAL_REF_KINDS = new Set(supportedGlobalRefKinds());
@@ -292,12 +299,247 @@ export async function doctorConfig(projectDir = process.cwd(), options = {}) {
     details: inspection.packages
   });
 
+  // milestone 12 / ADR-003 — the 09 `graphify-binary` check is SUPERSEDED IN
+  // PLACE by three store-aware checks (it resolved PATH-only; these resolve
+  // store-first via the ADR-001 resolver). The `aof project doctor` CLI face is
+  // unchanged — it renders checks[] + --json (cli.mjs:1476); these ride it.
+  //   managed-tool   — one per managed tool: store-first resolution → ok(version)/
+  //                    ok("not managed")/ok("version unknown")/warning(guidance).
+  //   provider-prereq — uv on PATH (any uv-lane tool) → ok; absent → warning.
+  //   tool-platform  — the descriptor's platform matrix supports this platform →
+  //                    ok; unsupported → warning. Advisory, NEVER an error.
+  for (const check of managedToolChecks(options)) checks.push(check);
+  checks.push(providerPrereqCheck(options));
+  for (const check of toolPlatformChecks(options)) checks.push(check);
+
   return {
     ...inspection,
     checks,
     suggestions: suggestionsFor(inspection, checks)
   };
 }
+
+// ---------------------------------------------------------- managed-tool ------
+// managedToolChecks(options) → one `managed-tool` check per managed tool (ADR-003,
+// SUPERSEDES the 09 graphify-binary check). Each resolves STORE-FIRST via the
+// ADR-001 resolver (resolveManagedBinary), then maps the resolution state to an
+// HONEST severity. The four states (the full ADR-003 matrix):
+//   - found, source "store", version present → ok, message names the resolved
+//     version (and that it came from the store);
+//   - found, source "store", version null    → ok, "present, version unknown"
+//     (RESEARCH §A4 — never fabricate a dotted version we did not observe);
+//   - found, source "path"                    → ok, "present on PATH, not managed";
+//   - not found                               → warning, the `aof project
+//     provision <tool>` guidance (NOT error — a project may not use the tool).
+// It NEVER throws: a resolver failure (or any error) degrades to a warning, so
+// `aof project doctor` does not crash because a tool is absent or the resolver
+// explodes. `options.resolveManagedBinary` + `options.managedTools` are injectable
+// seams (defaults: the real resolver + toolDescriptors()) so every state is
+// CI-assertable with the resolver stubbed. Story 03 consumes this same builder.
+// A check carries `details.tool` so a caller can find a specific tool's check via
+// `id === "managed-tool" && details.tool === "<name>"`.
+export function managedToolChecks(options = {}) {
+  const resolve = options.resolveManagedBinary ?? resolveManagedBinary;
+  const descriptors = options.managedTools ?? toolDescriptors();
+  return descriptors.map((descriptor) => managedToolCheckFor(descriptor, resolve, options));
+}
+
+function managedToolCheckFor(descriptor, resolve, options) {
+  const tool = descriptor.name;
+  let resolved;
+  try {
+    resolved = resolve({
+      name: descriptor.name,
+      version: descriptor.version,
+      binary: descriptor.binaries?.[0],
+      env: options.env,
+      platform: options.platform,
+    });
+  } catch (error) {
+    // The resolver is contracted never to throw on a miss, but the doctor check
+    // must NEVER crash regardless — degrade to a warning with the guidance.
+    return {
+      id: "managed-tool",
+      severity: "warning",
+      message: `Run \`aof project provision ${tool}\` to install ${tool} into the managed tool store.`,
+      details: { tool, found: false, error: error?.message ?? String(error) },
+    };
+  }
+
+  if (!resolved || !resolved.found) {
+    return {
+      id: "managed-tool",
+      severity: "warning",
+      message: resolved?.hint ?? `Run \`aof project provision ${tool}\` to install ${tool} into the managed tool store.`,
+      details: { tool, found: false },
+    };
+  }
+
+  // Present on PATH only (a store miss fell back to PATH) — ok, but flagged as
+  // the operator's own binary, NOT an aof-managed install.
+  if (resolved.source === "path") {
+    return {
+      id: "managed-tool",
+      severity: "ok",
+      message: `${tool} is present on PATH, not managed.`,
+      details: { tool, found: true, source: "path", version: resolved.version ?? null, path: resolved.path },
+    };
+  }
+
+  // Present from the store but the version probe failed — ok, version unknown.
+  // We never fabricate a dotted version we did not observe (RESEARCH §A4).
+  if (resolved.version == null) {
+    return {
+      id: "managed-tool",
+      severity: "ok",
+      message: `${tool} is present, version unknown.`,
+      details: { tool, found: true, source: resolved.source ?? "store", version: null, path: resolved.path },
+    };
+  }
+
+  // Present from the store with a probed version — ok, naming the resolved
+  // version and that it is the managed store copy.
+  return {
+    id: "managed-tool",
+    severity: "ok",
+    message: `${tool} is present from the store (version ${resolved.version}).`,
+    details: { tool, found: true, source: resolved.source ?? "store", version: resolved.version, path: resolved.path },
+  };
+}
+
+// --------------------------------------------------------- provider-prereq ----
+// providerPrereqCheck(options) → the lane prerequisite (`uv` on PATH for any
+// uv-lane tool) is present (ADR-003). present → ok (confirms uv is available);
+// absent → warning carrying the install-uv guidance. NEVER an error — a project
+// may not use the uv lane at all. `options.uvPresent` (a boolean) short-circuits
+// the probe when provided; otherwise an injectable `options.which` probe is used
+// (default: a PATH probe for "uv"). NEVER throws. Story 03 consumes this builder.
+export function providerPrereqCheck(options = {}) {
+  let present;
+  try {
+    if (typeof options.uvPresent === "boolean") {
+      present = options.uvPresent;
+    } else {
+      const which = options.which ?? defaultUvWhich;
+      present = Boolean(which("uv"));
+    }
+  } catch (error) {
+    // A probe failure must NEVER crash the doctor — treat it as a warning.
+    return {
+      id: "provider-prereq",
+      severity: "warning",
+      message: "Install uv (the uv-lane provider): see https://docs.astral.sh/uv/getting-started/installation/.",
+      details: { provider: "uv", present: false, error: error?.message ?? String(error) },
+    };
+  }
+
+  if (present) {
+    return {
+      id: "provider-prereq",
+      severity: "ok",
+      message: "uv is available (the uv-lane provider prerequisite).",
+      details: { provider: "uv", present: true },
+    };
+  }
+
+  return {
+    id: "provider-prereq",
+    severity: "warning",
+    message: "Install uv (the uv-lane provider): see https://docs.astral.sh/uv/getting-started/installation/.",
+    details: { provider: "uv", present: false },
+  };
+}
+
+// The default `uv` PATH probe: prefer the platform locator (`where`/`which`),
+// fall back to scanning PATH dirs. Returns a path string when found, else null —
+// NEVER throws (a missing locator / empty PATH degrades to null).
+function defaultUvWhich(binary, platform = process.platform, pathValue = process.env.PATH ?? "") {
+  const locator = platform === "win32" ? "where" : "which";
+  try {
+    const probe = spawnSync(locator, [binary], { encoding: "utf8" });
+    if (probe.status === 0 && typeof probe.stdout === "string") {
+      const first = probe.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+      if (first) return first;
+    }
+  } catch {
+    // locator absent — fall through to the manual PATH scan.
+  }
+  const exeNames = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`, `${binary}.bat`, binary] : [binary];
+  for (const dir of (pathValue ?? "").split(delimiter).filter(Boolean)) {
+    for (const exe of exeNames) {
+      const candidate = path.join(dir, exe);
+      try {
+        if (statSync(candidate).isFile()) return candidate;
+      } catch {
+        // missing candidate — keep scanning.
+      }
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------- tool-platform -----
+// toolPlatformCheckFor(descriptor, platform) → whether a tool's descriptor
+// platform matrix supports `platform` (ADR-003). An ABSENT matrix, or an entry
+// with supported:true (EVEN when it carries prereqs/note), is ok; supported:false
+// is a warning naming the prereq (e.g. "needs Rust") or "unsupported on this
+// platform". It is ALWAYS advisory — NEVER an error, NEVER throws. Story 03's test
+// calls this single-tool helper directly (e.g. headroom on linux/darwin/win32).
+export function toolPlatformCheckFor(descriptor, platform = process.platform) {
+  const tool = descriptor?.name;
+  const matrix = descriptor?.platforms;
+  // No matrix → supported everywhere (ADR-002: absent ⇒ supported).
+  if (!matrix || matrix[platform] == null) {
+    return {
+      id: "tool-platform",
+      severity: "ok",
+      message: `${tool} is supported on ${platform}.`,
+      details: { tool, platform, supported: true },
+    };
+  }
+
+  const entry = matrix[platform];
+  // supported:true (even with prereqs/note) → ok. A note is surfaced but it does
+  // not downgrade the severity.
+  if (entry.supported !== false) {
+    const suffix = entry.note ? ` (${entry.note})` : "";
+    return {
+      id: "tool-platform",
+      severity: "ok",
+      message: `${tool} is supported on ${platform}${suffix}.`,
+      details: { tool, platform, supported: true },
+    };
+  }
+
+  // supported:false → warning naming the prereq or "unsupported on this platform".
+  const prereqs = Array.isArray(entry.prereqs) && entry.prereqs.length ? entry.prereqs.join(", ") : null;
+  const reason = prereqs
+    ? `needs ${prereqs}`
+    : entry.note || "unsupported on this platform";
+  return {
+    id: "tool-platform",
+    severity: "warning",
+    message: `${tool} on ${platform}: ${reason}.`,
+    details: { tool, platform, supported: false },
+  };
+}
+
+// toolPlatformChecks(options) → one `tool-platform` check per managed tool, over
+// `toolPlatformCheckFor(descriptor, options.platform ?? process.platform)` (ADR-003).
+// Tools with no matrix emit ok (supported everywhere). NEVER throws.
+export function toolPlatformChecks(options = {}) {
+  const descriptors = options.managedTools ?? toolDescriptors();
+  const platform = options.platform ?? process.platform;
+  return descriptors.map((descriptor) => toolPlatformCheckFor(descriptor, platform));
+}
+
+// NOTE (milestone 12 / ADR-003 supersession): the former `graphifyBinaryCheck`
+// (09/ADR-004 Option B — PATH-only graphify resolution + a version-pin drift
+// warning) is REMOVED here. It is SUPERSEDED IN PLACE by the store-first
+// `managedToolChecks` above, which resolves graphify (and every managed tool)
+// through the ADR-001 store-first resolver and emits the `managed-tool` check.
+// The graphify retrofit's resolver-hint (src/graphify.mjs) is a SEPARATE story's
+// concern (12/ADR-004) and is intentionally untouched here.
 
 function validateGlobalRefs(raw, diagnostics) {
   if (!Array.isArray(raw.globalRefs)) return [];

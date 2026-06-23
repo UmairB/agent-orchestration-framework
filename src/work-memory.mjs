@@ -34,7 +34,12 @@ const SCOPE_FLAGS = ["area", "stage", "kind", "owner", "item"];
 // `selectBackendName` below — the registry maps the already-resolved name.
 export const BACKEND_REGISTRY = {
   none: () => noneBackend,
-  local: () => import("./memory/local-backend.mjs").then((m) => m.default)
+  local: () => import("./memory/local-backend.mjs").then((m) => m.default),
+  // `graphify` (milestone 10) is loaded LAZILY too — the seam never imports the
+  // graphify backend (nor, transitively, the command core it reaches graphify
+  // through) unless a project actually selects it. Same one-line registration as
+  // `local`; selection still happens only in `selectBackendName` above (ADR-002).
+  graphify: () => import("./memory/graphify-backend.mjs").then((m) => m.default)
 };
 
 // The ONE place config.memory?.backend is read (ADR-002 invariant). Absent memory
