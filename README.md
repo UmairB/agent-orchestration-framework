@@ -1,10 +1,8 @@
-# AOF
+# AOF — Agent Orchestration Framework
 
-AOF (Agent Orchestration Framework) is a local CLI for three things:
+AOF is a local CLI for **agent-driven delivery**. Its heart is **`aof work`**: an opinionated workflow (ACD — Agent-Centric Delivery) where a milestone is broken into independent stories and tasks under `wiki/work/`, and a bundled team of subagents plus `/aof:*` slash-commands refine, build, review, and verify each one. Around that core it grows a code knowledge graph, a recall memory, a board UI, and an asset renderer.
 
-- **Asset rendering** — define assistant-facing project assets (skills, commands, agents, rules) once in a portable `.aof/aof.config.json`, then render them into runtime-specific folders such as `.claude/` and `.codex/`.
-- **The ACD work stream** (`aof work`) — an agent-driven delivery system: milestones → stories → tasks under `wiki/work/`, with a bundled set of agent prompts and slash-commands that refine, build, review, and verify each item. `aof work init` renders that bundle into a repo.
-- **Graphify codebase intelligence** (`aof graph`) — a code knowledge graph (call/import/dependency edges, communities) the agents query to ground structural review and refactoring in real coupling instead of grep-and-infer.
+Everything is local Markdown + JSON — no service, no database.
 
 ## Local setup
 
@@ -24,33 +22,76 @@ aof project doctor
 
 The setup UI (`aof assets ui`) and the work board (`aof work board`) serve a built front-end — build it once with `npm run ui:build` (see [Tests](#tests)).
 
-## Command surface
+---
 
-```sh
-aof init [dir]                                 # scaffold an empty .aof workspace
-aof project show|validate|doctor|migrate|provision
-aof assets add|list|show|apply|clean|ui …      # the asset/DSL surface (below)
-aof packages add|install gsd …                 # managed framework packs (e.g. GSD)
-aof work init|update|find|list|next|validate|memory|board …   # the ACD work stream
-aof graph build|query|impact|triage|serve      # graphify codebase intelligence
-aof planning init                              # install the bought planner (pm-skills)
-aof import milestone <repo> <selector>         # recover a milestone from another repo
+## `aof work` — the ACD work stream
+
+### The model
+
+A **milestone** groups **stories**; each story groups **tasks** (one `.feature` each). They live as self-contained folders under `wiki/work/` with Markdown record docs and frontmatter status:
+
+```txt
+wiki/work/11_milestone_graphify-codebase-intelligence/
+  SPEC.md            # why + scope (product owner)
+  STATE.md           # where are we, what happened (running narrative)
+  ARCHITECTURE.md    # numbered, immutable ADRs + fitness functions (architect)
+  DESIGN.md          # UI/UX intent (designer, conditional)
+  RESEARCH.md        # resolved unknowns (researcher, conditional)
+  VERIFICATION.md    # evidence + findings (verify)
+  RETROSPECTIVE.md   # carried lessons
+  stories/NN_story_<slug>/STORY.md + tasks/NN_<slug>.feature
 ```
 
-### The ACD work stream (`aof work`)
+The unit of independence is the **story** — boundaries follow real coupling so stories build in parallel. A `depends:` graph orders the work; `aof work next` walks it.
 
-`aof work init` renders the bundled ACD agents (`.claude/agents/aof-*`) and slash-commands (`.claude/commands/aof/*`) into a repo; `aof work update` re-renders them when the bundle changes (drift-checked against the install manifest). The work itself lives as Markdown under `wiki/work/` (milestones → stories → tasks), driven by the slash-commands (`/aof:refine`, `/aof:continue`, `/aof:verify`, …).
+### Claude commands (`/aof:*`)
+
+`aof work init` renders the lifecycle as Claude slash-commands into `.claude/commands/aof/`. Drive a milestone from a planning PRD all the way to accepted:
+
+| Command | What it does |
+|---|---|
+| `/aof:shatter` | a planning PRD → a series of framed milestone SPECs, with cross-milestone `depends` edges (the roadmap) |
+| `/aof:refine` | break a milestone into independent stories, or author a story's task contracts via Three Amigos (PO scenarios + QA examples + developer feasibility); produces ARCHITECTURE / DESIGN / RESEARCH as needed |
+| `/aof:continue` | execute/resume a work item — build its tasks to green, then structural + behavioural review; fans out a milestone's independent stories |
+| `/aof:code-review` | ship + review a branch — commit & push in per-story batches, open a PR, run architect review (with conditional security/compliance lenses), fix findings, optionally squash-merge |
+| `/aof:verify` | verify + accept — run the automated + agent-run checks, bring a human in only for `@uat`, log/triage findings, capture lessons in RETROSPECTIVE, sign off |
+| `/aof:validate` | validate the stream — `aof work validate` + the agent-only checks (test-traceability, litmus) |
+| `/aof:autonomous` | run a range of milestones end-to-end, unattended — refine → build → verify each in dependency order, gating on `aof work validate`; resumable |
+| `/aof:retrospective` | triage a milestone's mistakes/blockers into RETROSPECTIVE.md as carryable lessons |
+| `/aof:add-milestone` · `/aof:add-story` · `/aof:add-task` · `/aof:add-uat` | scaffold a milestone / story / task / cross-milestone UAT gate |
+| `/aof:feedback` | capture a mistake, blocker, or UAT observation the instant it's noticed (any actor) |
+| `/aof:recent` | scan the work stream chronologically (catch up / filter by type, status, milestone) |
+
+The commands spawn a team of read-/write-scoped **subagents** (also rendered into `.claude/agents/`):
+
+`aof-product-owner` (SPEC, stories, finding triage) · `aof-architect` (ADRs, fitness-function arch-tests, structural review) · `aof-developer` (implements a story's tasks) · `aof-qa` (test-case design, behavioural review, Playwright browser harness, `@uat` brokering) · `aof-designer` (DESIGN.md, read-only fidelity judge) · `aof-researcher` (RESEARCH.md) · `aof-security` / `aof-compliance` (conditional tiers).
+
+### `aof work` CLI commands
+
+The slash-commands, the board, and automation read/drive the stream through these:
 
 ```sh
-aof work init                      # render the ACD bundle into this repo
-aof work find 11 --json            # resolve a milestone (11), story (11/02), or slug (auth)
-aof work list --json               # the whole stream (the board's flat-array contract)
-aof work next                      # next actionable item in dependency order
-aof work validate                  # folder↔frontmatter, tag vocabulary, depends graph
-aof work board                     # serve the local board UI (built ui/dist)
+aof work init [dir]                  # render the ACD bundle (agents + commands) into a repo
+aof work update [dir]                # re-render the bundle, drift-checked against the install manifest
+aof work find <ref|query> [--json]   # resolve a milestone (11), story (11/02), or slug (auth)
+aof work list [scope] [--json]       # the whole stream (or a subtree); --json is the board's flat-array contract
+aof work next [range] [--json]       # next actionable item in dependency order (drives autonomous)
+aof work validate [ref] [--json]     # folder↔frontmatter, tag vocabulary, depends graph
+aof work doc <ref> <DOC> [--json]    # read a record doc (SPEC / STATE / ARCHITECTURE / …)
+aof work tasks <ref> [--json]        # an item's task list
+aof work feedback <ref> --note "…" [--actor …]   # append an attributed feedback bullet (the only CLI write)
+aof work memory <verb> [args] [--json]           # recall / brief / ingest / reindex / status
+aof work board [--port 4180]         # serve the local board UI (built ui/dist) — one origin
+aof work use-headroom | unuse-headroom           # toggle the headroom context-compression plugin
 ```
 
-Recall over prior decisions is a configurable memory backend (`memory.backend` in `.aof/aof.config.json` — `local` or `graphify`):
+### Memory & recall (milestones 05 · 10 · 14)
+
+Agents recall prior decisions, ADRs, and lessons across milestones through a configurable backend (`memory.backend` in `.aof/aof.config.json`):
+
+- **`local`** — a keyless, fully-local lexical index (milestone 05).
+- **`graphify`** — graph-grounded recall layered on the same records (milestone 10).
+- **AOF.md digest** — a recallable per-milestone summary as a memory source (milestone 14).
 
 ```sh
 aof work memory status
@@ -58,512 +99,73 @@ aof work memory reindex            # rebuild the derived index from the work str
 aof work memory recall "pin line endings"
 ```
 
-### Graphify codebase intelligence (`aof graph`)
+The derived index is git-ignored and re-derivable — never an authoritative second copy.
 
-The graph commands shell out to the `graphify` binary (a managed tool). Provision it once into the per-machine tool store:
+### Graphify codebase intelligence (milestones 09 · 11)
+
+The ACD agents ground structural review and story-boundary drawing in a real **code knowledge graph** (call/import/dependency edges, communities) instead of grep-and-infer. The graph commands shell out to the managed `graphify` binary — provision it once per machine:
 
 ```sh
 aof project provision graphify
 ```
 
-Keep the corpus code-only (so builds are keyless and local, no LLM, no egress) with a `.graphifyignore` that excludes docs/media. Then build and query a code graph:
+Keep the corpus code-only (so builds are keyless and local — no LLM, no egress) with a `.graphifyignore` that excludes docs/media, then:
 
 ```sh
 aof graph build src                # AST-extract a code graph → graphify-out/graph.json
-aof graph impact src/cli.mjs       # exact dependents (blast-radius) + dependencies, from the edges
+aof graph impact src/cli.mjs       # EXACT dependents (blast-radius) + dependencies, from the edges
 aof graph query "what calls main"  # a fuzzy, similarity-seeded natural-language answer
 aof graph triage                   # graphify's PR-impact ranking
 ```
 
-`graphify-out/` is a derived, git-ignored build artifact (rebuild on demand, never committed). `aof graph impact` is the **deterministic, edge-based** coupling lookup the ACD review/refine agents consume; `aof graph query` is the fuzzier NL hint.
+`graphify-out/` is a derived, git-ignored build artifact (rebuild on demand, never committed). `aof graph impact` is the **deterministic, edge-based** coupling lookup the review/refine agents consume; `aof graph query` is the fuzzier NL hint.
 
-## Assets
+---
 
-When a command needs interactive input, AOF uses keyboard-driven terminal
-prompts. Use arrow keys to move, space to toggle checkbox choices, and Enter to
-confirm. Automation should pass explicit flags such as `--codex` instead of
-depending on interactive prompts.
+## Built by these milestones
 
-Dry-run the generated files:
+The `aof work` system was itself built with `aof work` — dogfooded milestone by milestone under `wiki/work/`:
 
-```sh
-aof assets apply --dry-run
-```
+| # | Milestone | Adds |
+|---|---|---|
+| 00 | Work CLI | the `aof work` command surface over `wiki/work/` |
+| 01 | ACD Asset Bundle | the bundled subagents + slash-commands; `aof work init` / `update` |
+| 02 | Planning Init | `aof planning init` — installs the bought planner (pm-skills) with pinned-sha provenance |
+| 03 | Work Board UI | `aof work board` — a local board over the stream |
+| 04 | Round-trip Proof | end-to-end proof of the loop: `aof work init` → refine → continue → verify in a fresh repo |
+| 05 | Work Memory | `aof work memory` — recall over prior decisions (local backend) |
+| 06 | Headroom Plugin | optional, config-gated **headroom** context-compression over the board terminal's `claude`/`codex` |
+| 07 | Design-Conformance | designer fidelity judge + QA Playwright browser harness wired into `/aof:verify` |
+| 08 | CLI Command Core | the command registry — the UI and MCP faces are thin adapters over one CLI contract |
+| 09 | Graphify Command Core | `aof graph build` / `query` / `triage` — graphify arrives as aof commands |
+| 10 | Graphify Memory Backend | `memory.backend: graphify` — graph-grounded recall |
+| 11 | Graphify Codebase Intelligence | `aof graph impact` + the agents grounding review in real coupling *(in progress)* |
+| 12 | Managed Tool Provisioning | `aof project provision` — aof owns its external tools in the `~/.aof` home |
+| 13 | External Milestone Import | `aof import milestone <repo> <selector>` — recover a milestone from another repo as recallable knowledge |
+| 14 | AOF.md Digest | a recallable per-milestone summary as a memory source |
 
-`aof assets apply --dry-run` prints the same action plan that a real apply
-would use without writing runtime files, deleting stale files, or updating
-`.aof/aof.lock.json`. Each action includes the runtime, source asset, and
-reason so automation can distinguish creates, updates, deletes, skips, and
-drift warnings.
+---
 
-Scaffold a file-backed `.aof/` asset:
+## Assets (secondary)
 
-```sh
-aof assets add skill code-review --codex
-```
+Before the work stream, AOF was an **asset renderer**, and that surface remains: define assistant-facing assets once in a portable `.aof/aof.config.json`, then render them into runtime folders (`.claude/`, `.codex/`).
 
-`aof assets add [kind id]` writes source files under `.aof/assets/` and
-updates `.aof/aof.config.json`. Run `aof assets add` without `kind id` to
-choose the asset type, id, runtimes, description, and initial body
-interactively. It refuses config or file collisions unless `--force` is
-supplied.
-
-Create reusable global source assets:
-
-```sh
-aof assets add --global skill shared-review --codex
-aof assets add --global
-aof assets list --global
-aof assets show --global skill shared-review
-aof assets validate --global
-```
-
-`aof assets ... --global` manages source assets in the user-global AOF
-workspace at `~/.aof`. The global workspace mirrors project layout with
-`~/.aof/aof.config.json` and `~/.aof/assets/<kind>/<id>/...`. Global source
-asset commands currently create and inspect skills, agents, and rules.
-
-Reference global assets from a project without copying their source files into
-project `.aof`:
-
-```json
-{
-  "name": "project",
-  "resources": [],
-  "globalRefs": [
-    { "kind": "skill", "id": "shared-review" }
-  ]
-}
-```
-
-Then render normally:
+Four portable resource kinds — `skill`, `command` (Claude-only), `agent`, `rule` — plus expanded primitives (`mcpServers`, `hooks`, `projectDocs`, `settings`, workflow-backed assets). Source bodies live under `.aof/assets/`; reusable **global** assets live under `~/.aof` and are referenced (not copied) via `globalRefs`.
 
 ```sh
-aof assets apply --codex
+aof init                              # scaffold an empty .aof workspace
+aof assets add skill code-review      # scaffold a file-backed source asset
+aof assets apply --dry-run            # preview the render plan (creates/updates/deletes/drift)
+aof assets apply                      # render runtime outputs + write .aof/aof.lock.json
+aof assets ui                         # the local source-asset editor (Project / Global scopes)
+
+aof project show | validate | doctor  # inspect / validate / diagnose the workspace
+aof packages add gsd                  # declare a managed framework pack (e.g. GSD); install via `aof packages install`
 ```
 
-Referenced global skills, agents, and rules render alongside project-local
-resources. Runtime overrides declared on the global asset are honored, and lock
-entries record global source scope. Associated helper/code files for global
-skill directories can be listed explicitly with `files`:
+`aof assets apply` is lock-driven and idempotent: it records every generated path + content hash in `.aof/aof.lock.json`, reports a `drift-warning` (and skips) when it sees a hand-edited generated file, and prunes only files it still owns. `--strict` promotes adapter warnings to failures for CI. The full DSL — overrides, workflow-backed assets, `{{skills.*}}` / `{{workflows.*}}` references, MCP/hooks/docs primitives, and the per-runtime adapter rules — is configured in `.aof/aof.config.json`; run `aof project validate` / `aof project doctor` to check it.
 
-```json
-{
-  "kind": "skill",
-  "id": "research-helper",
-  "path": "assets/skills/research-helper/SKILL.md",
-  "files": [
-    "search.py",
-    "query.md"
-  ],
-  "runtimes": ["codex"]
-}
-```
-
-Associated file paths are relative to the asset directory containing `SKILL.md`
-and cannot escape that directory. For a referenced global skill, the example
-above renders to `.codex/skills/research-helper/search.py` and
-`.codex/skills/research-helper/query.md` alongside the generated `SKILL.md`.
-AOF supports associated files for skills and Claude command assets.
-
-Render generated outputs and managed package intent:
-
-```sh
-aof assets apply --codex --dry-run
-aof assets apply --codex
-```
-
-`aof assets apply` applies generated runtime outputs and writes lock state.
-Package installers are not run from the assets namespace; package execution
-belongs under `aof packages ...`.
-
-Remove lock-owned generated outputs:
-
-```sh
-aof assets clean --dry-run
-aof assets clean
-```
-
-`aof assets clean` deletes only generated files recorded in
-`.aof/aof.lock.json` whose current content still matches the recorded hash.
-Drifted files are preserved and remain in the lock.
-
-Install only Codex assets:
-
-```sh
-aof assets apply --codex
-```
-
-Declare GSD package intent without running installer code:
-
-```sh
-aof packages add gsd --codex
-aof packages list
-aof packages show gsd
-aof packages validate
-```
-
-`aof packages add gsd` writes package intent to `.aof/aof.config.json`. It does
-not run `npm`, `npx`, or installer code. Runtime flags such as `--codex`,
-`--claude`, and `--runtime codex,claude` record the runtimes the package should
-target.
-
-Preview the GSD installer commands without running networked installs:
-
-```sh
-aof packages install gsd --dry-run
-```
-
-Run the configured GSD installer:
-
-```sh
-aof packages install gsd
-```
-
-Non-dry-run package installs print a network/package-code boundary before each
-runtime command. The boundary includes the exact command, package source,
-runtime, scope, and a warning that npm package code may run. Each runtime
-attempt is recorded in `.aof/aof.lock.json`, including successes, failures, and
-skips. Successful matching attempts are skipped on later runs unless `--force`
-is supplied.
-
-Replay managed install intent from lock state:
-
-```sh
-aof packages install --from-lock --dry-run
-aof packages install --from-lock
-```
-
-Removed top-level `aof install ...` commands fail with guidance instead of
-executing.
-
-Inspect `.aof/` configuration for automation:
-
-```sh
-aof project show
-aof project show --json
-aof project validate
-aof project validate --json
-aof project doctor
-aof project doctor --json
-```
-
-`project` means the current repository's AOF workspace and health.
-`aof project validate` checks JSON shape, resource kinds, runtimes, file-backed
-asset paths, runtime override identity, package ids, package sources, and
-package runtime support. `aof project doctor` adds project health checks such as
-stale root config detection, generated-output drift summary, missing assets,
-managed package intent, and suggested next commands.
-
-Start the local setup UI:
-
-```sh
-aof assets ui
-```
-
-The setup UI is a source configuration editor with explicit Project and Global
-scopes. Project scope edits the current repository `.aof`; Global scope edits
-the reusable source library in `~/.aof`. Project assets are editable in Project
-scope. Referenced global assets are shown separately as read-only project
-references, with a remove-reference action.
-
-Global scope can create and edit skills, agents, and rules. Global assets can
-be added to the current project with “Use in this project”, which writes a
-`globalRefs` entry and does not copy source files into project `.aof`. Global
-skill helper files can also be edited as explicit text associated files; paths
-are relative to the skill asset directory and follow the same safety rules as
-the `files` manifest.
-
-Project scope also edits file-backed skills, commands, agents, and rules;
-Simple vs Workflow-backed mode, runtime targets, runtime-specific overrides,
-and compact JSON editors for workflows, MCP servers, hooks, project docs, and
-runtime settings. Simple assets hide argument fields and reject argument-like
-content. Workflow-backed assets can select a workflow and configure wrapper
-argument metadata. The editor can insert known `{{skills.*}}` and
-`{{workflows.*}}` references into asset bodies. It shows runtime capability
-differences and adapter warnings before apply, including command assets being
-Claude-only and Codex rule guidance rendering through `AGENTS.md`.
-
-The UI writes source-of-truth files under `.aof/` only. It does not run
-`aof init`, `aof assets apply`, dry-run, package installers, or shell commands.
-Use the Review tab for validation, capability summaries, package intent, and
-the next CLI commands to run in a terminal.
-
-The setup UI binds to `127.0.0.1` and is intended for local repository editing.
-Its API still treats request bodies and static paths as untrusted input:
-malformed JSON, invalid asset routes, oversized bodies, and static path
-traversal attempts are rejected with structured JSON
-errors.
-
-## DSL
-
-The project keeps reproducibility metadata locally:
-
-```txt
-.aof/aof.config.json  # project asset metadata and global references
-.aof/aof.lock.json    # generated output manifest and install intent
-.aof/assets/          # source asset bodies and runtime overrides
-```
-
-Root `aof.config.json` is treated as legacy input. When both root `aof.config.json` and `.aof/aof.config.json` exist, `.aof/aof.config.json` is authoritative. Run an explicit migration when adopting the workspace model:
-
-```sh
-aof project migrate
-```
-
-Migration leaves the root `aof.config.json` untouched and writes the new workspace files under `.aof/`.
-Editor saves also write `.aof/aof.config.json`; they do not silently mutate a
-legacy root config. `aof project doctor` reports a warning when both files exist
-so stale root config is visible.
-
-Project and global resources currently support four portable resource kinds:
-
-- `skill`: rendered to `<runtime>/skills/<id>/SKILL.md`
-- `command`: Claude-only, rendered to `.claude/commands/<id>.md`
-- `agent`: rendered to `<runtime>/agents/<id>.md`
-- `rule`: natural-language assistant guidance
-
-Codex does not have a command primitive. AOF rejects command assets that target
-Codex instead of mapping them into Codex skills. If you want Codex behavior,
-author a `skill` explicitly.
-
-Generated source assets use kind-specific body files:
-
-```txt
-.aof/assets/skills/<id>/SKILL.md
-.aof/assets/commands/<id>/COMMAND.md
-.aof/assets/agents/<id>/AGENT.md
-.aof/assets/rules/<id>/RULE.md
-```
-
-Resources can target all runtimes or a subset:
-
-```json
-{
-  "kind": "command",
-  "id": "repo-prime",
-  "runtimes": ["claude"],
-  "description": "Prime the assistant with repository context.",
-  "prompt": "Inspect the repository before making changes."
-}
-```
-
-Simple assets render their body directly and do not support arguments. Content
-such as `$ARGUMENTS`, `{{GSD_ARGS}}`, `argument-hint`, or `{{args.phase}}`
-belongs in workflow-backed assets.
-
-Workflow-backed assets split shared procedure from runtime-specific invocation
-wrappers. Define shared process instructions in top-level `workflows[]`, usually
-from `.aof/assets/workflows/<id>/WORKFLOW.md`:
-
-```json
-{
-  "workflows": [
-    {
-      "id": "audit",
-      "path": "assets/workflows/audit/WORKFLOW.md",
-      "argumentHint": "<milestone>",
-      "arguments": [
-        { "name": "milestone", "description": "Milestone number", "required": true }
-      ]
-    }
-  ],
-  "resources": [
-    { "kind": "command", "id": "audit", "workflow": "audit", "runtimes": ["claude"] },
-    { "kind": "skill", "id": "audit", "workflow": "audit", "runtimes": ["codex"] }
-  ]
-}
-```
-
-Applying that config renders the workflow to `.claude/aof/workflows/audit.md`
-and `.codex/aof/workflows/audit.md`. The Claude command and Codex skill wrappers
-reference the runtime-specific workflow path. If a wrapper has its own
-`body`/`prompt`/`instructions`, that explicit wrapper body wins; otherwise AOF
-generates a small default wrapper body with the workflow path and argument
-metadata. Argument metadata is rendering guidance only.
-
-Resource and workflow bodies can reference generated runtime paths with strict
-asset reference placeholders:
-
-```md
-Use {{skills.ci}} and follow {{workflows.audit}}.
-```
-
-`{{skills.<id>}}` expands to `.claude/skills/<id>/SKILL.md` or
-`.codex/skills/<id>/SKILL.md`. `{{workflows.<id>}}` expands to
-`.claude/aof/workflows/<id>.md` or `.codex/aof/workflows/<id>.md`.
-References are validated before apply writes. AOF rejects missing references,
-references to assets that do not target the runtime being rendered, and
-unsupported namespaces such as `{{commands.ci}}`.
-
-Inline content can be moved into separate files by replacing `body`, `prompt`, or `instructions` with `path`. New `.aof/` workspaces prefer file-backed assets:
-
-```json
-{
-  "kind": "skill",
-  "id": "code-review",
-  "runtimes": ["claude", "codex"],
-  "description": "Review code changes.",
-  "path": "assets/skills/code-review/SKILL.md"
-}
-```
-
-Runtime-specific overrides live beside the asset:
-
-```txt
-.aof/assets/skills/code-review/overrides/claude.json
-.aof/assets/skills/code-review/overrides/codex.json
-```
-
-Overrides shallow-merge with shared metadata and can change runtime-specific fields such as `description`, `body`, `model`, `tools`, or `paths`. They cannot change identity fields such as `id` or `kind`.
-
-Rules render differently per runtime:
-
-- Claude Code: `.claude/rules/<id>.md`, including `paths` frontmatter when provided.
-- Codex: `AGENTS.md` or nested `AGENTS.md` for natural-language guidance.
-- Codex `.codex/rules/*.rules` files are execution-policy rules, not natural-language guidance. AOF treats them as a separate future asset type.
-
-Expanded project primitives live beside `resources[]` in `.aof/aof.config.json`.
-They are rendered by `aof assets apply` like other generated outputs:
-
-```json
-{
-  "name": "demo",
-  "resources": [],
-  "mcpServers": [
-    {
-      "id": "docs",
-      "transport": "http",
-      "url": "https://example.test/mcp",
-      "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" },
-      "runtimes": ["claude", "codex"]
-    },
-    {
-      "id": "local-tools",
-      "transport": "stdio",
-      "command": "node",
-      "args": ["tools/mcp-server.mjs"],
-      "env": { "NODE_ENV": "development" },
-      "runtimes": ["codex"]
-    }
-  ],
-  "hooks": [
-    {
-      "id": "test-after-write",
-      "event": "PostToolUse",
-      "matcher": "Write",
-      "type": "command",
-      "command": "npm test",
-      "runtimes": ["claude", "codex"]
-    }
-  ],
-  "projectDocs": [
-    {
-      "id": "root-guidance",
-      "path": "assets/docs/root.md",
-      "targets": ["AGENTS.md", "CLAUDE.md"],
-      "runtimes": ["claude", "codex"]
-    }
-  ],
-  "settings": {
-    "claude": {
-      "permissions": { "allow": ["Bash(npm test)"] }
-    },
-    "codex": {
-      "model": "gpt-5.4",
-      "approval_policy": "on-request"
-    }
-  }
-}
-```
-
-`mcpServers[]` renders to root `.mcp.json` for Claude Code and
-`.codex/config.toml` for Codex. `hooks[]` supports the common command-hook
-shape and renders to `.claude/settings.json` and `.codex/config.toml` when the
-target runtime can represent the shared fields. Runtime-specific `claude` and
-`codex` objects are passed only to the matching runtime; non-matching runtime
-objects are intentionally ignored without warnings.
-
-`projectDocs[]` renders root `AGENTS.md` for Codex and root `CLAUDE.md` for
-Claude Code. File-backed docs can include other `.aof/` files relative to the
-source doc:
-
-```md
-Shared project guidance.
-
-{{include partials/testing.md}}
-```
-
-Includes are rejected when they are missing, recursive, absolute, or escape the
-`.aof/` workspace. Multiple docs targeting the same root file are ordered by id.
-
-Generated assistant folders such as `.claude/` and `.codex/` are output, not source of truth for this project. AOF writes small generated markers into Markdown output where the format allows it, but `.aof/aof.lock.json` is authoritative for ownership. The lock manifest records generated file paths, target runtimes, source asset ids and kinds, content hashes, managed framework intent, and framework install attempts.
-
-When `aof assets apply` sees that a file it previously generated has been manually edited, it reports a `drift-warning` and skips overwriting that file. This includes root `AGENTS.md`, root `CLAUDE.md`, root `.mcp.json`, `.claude/settings.json`, and `.codex/config.toml` when they are generated from expanded primitives. Re-run with `aof assets apply --force` to explicitly overwrite drifted generated files. When an asset is removed or retargeted, AOF prunes stale generated files only if the lock says AOF owns them and their content still matches the prior generated hash; stale files with manual edits are left in place with a warning.
-
-Framework packages declared in `.aof/aof.config.json` are recorded as managed intent in the lock during `aof assets apply`. `aof assets apply` does not run framework installers; use `aof packages install gsd` for installer execution.
-
-## Adapter Warnings
-
-AOF reports adapter warnings when a valid `.aof/` configuration asks for
-behavior that a selected runtime cannot represent cleanly. Warnings are
-computed at command time and are not written to `.aof/aof.lock.json`.
-
-Commands that surface adapter warnings:
-
-```sh
-aof project validate
-aof project validate --json
-aof project doctor
-aof project doctor --json
-aof assets validate
-aof assets validate --json
-aof assets apply --dry-run
-aof assets apply --dry-run --json
-```
-
-Human output uses a compact block before apply actions:
-
-```txt
-adapter-warnings:
-- [adapter.skipped-runtime-output] hooks[0] runtime=codex source=hook:notify output=.codex/config.toml
-  reason: Common hook field(s) "timeout" cannot be represented directly by the codex adapter.
-  remediation: Move runtime-specific hook fields under "codex" or remove "codex" from this hook's runtimes.
-create: .codex/skills/context/SKILL.md runtime=codex source=skill:context reason=file does not exist
-```
-
-JSON output exposes a top-level `adapterWarnings` array:
-
-```json
-{
-  "adapterWarnings": [
-    {
-      "code": "adapter.skipped-runtime-output",
-      "severity": "warning",
-      "path": "hooks[0]",
-      "kind": "hook",
-      "id": "notify",
-      "runtime": "codex",
-      "generatedPath": ".codex/config.toml",
-      "reason": "Common hook field(s) \"timeout\" cannot be represented directly by the codex adapter.",
-      "remediation": "Move runtime-specific hook fields under \"codex\" or remove \"codex\" from this hook's runtimes."
-    }
-  ]
-}
-```
-
-Use `--strict` to turn adapter warnings into failures for CI:
-
-```sh
-aof project validate --strict
-aof project doctor --strict
-aof assets validate --strict
-aof assets apply --strict
-```
-
-For `aof assets apply --strict`, AOF stops before generated files, stale
-deletes, or lock updates run. `--force` only affects generated-output drift; it
-does not bypass adapter warning failures under `--strict`.
+---
 
 ## Tests
 
@@ -573,60 +175,16 @@ Run the full suite — the canonical entry point:
 npm test            # = node ./scripts/test.mjs
 ```
 
-This runs the unit + arch (fitness-function) + BDD-traceability tests, including the `work`, `graph`, and memory suites. `scripts/test-unit.mjs` is an older **partial** subset that omits the graph/work tests, so prefer `npm test`:
+This runs the unit + arch (fitness-function) + BDD-traceability tests, including the `work`, `graph`, and memory suites. `scripts/test-unit.mjs` is an older **partial** subset that omits the graph/work tests, so prefer `npm test`.
+
+Other entry points:
 
 ```sh
-node ./scripts/test-unit.mjs    # legacy partial unit subset
+node ./test/integration/cli.mjs      # BDD feature tests — launch the CLI as an external process
+npm run test:integration:ps          # PowerShell integration parity (Windows; skips elsewhere)
+npm run test:smoke:cli               # focused process-boundary smoke test
+npm run ui:build                     # build the setup UI / board front-end (cross-platform wrapper)
+npm run check                        # full closeout check
 ```
 
-Integration tests are BDD-style feature tests that launch the CLI as an external process in isolated temp projects:
-
-```sh
-node ./test/integration/cli.mjs
-```
-
-Run the PowerShell integration parity suite separately on Windows:
-
-```powershell
-npm run test:integration:ps
-```
-
-The PowerShell command consumes the same split feature files and exits successfully with a skip message outside Windows. It is intentionally not part of `npm test`.
-
-The feature files live in `test/integration/features/`. They are intentionally black-box so they can be reused if the CLI implementation later moves from Node to Rust.
-
-All new user-facing functionality should include BDD coverage in the relevant domain feature file under `test/integration/features/`. Unit tests can supplement those scenarios, but do not replace them.
-
-Run everything through the main test entrypoint:
-
-```sh
-node ./scripts/test.mjs
-```
-
-Run the focused real process-boundary smoke test:
-
-```sh
-npm run test:smoke:cli
-```
-
-Build the setup UI through the cross-platform wrapper:
-
-```sh
-npm run ui:build
-```
-
-The wrapper runs TypeScript and Vite through Node entry points from the UI
-workspace, avoiding platform-specific npm shell shims. For troubleshooting, the
-direct equivalent commands are:
-
-```powershell
-cd ui
-node ..\node_modules\typescript\bin\tsc -b
-node ..\node_modules\vite\bin\vite.js build
-```
-
-Run the full closeout check:
-
-```sh
-npm run check
-```
+Integration feature files live in `test/integration/features/` and are intentionally black-box (reusable if the CLI ever moves off Node). New user-facing functionality should include BDD coverage in the relevant domain feature file.
