@@ -12,6 +12,7 @@
 //   work/NN_uat_slug/SESSION.md          (an acceptance session over a span of delivery)
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { findProjectConfig } from "./workspace.mjs";
 import { readJson } from "./fs.mjs";
 
@@ -86,8 +87,17 @@ export async function listItems(workDir) {
   return items;
 }
 
+// Resolve an item's record doc — the single file whose frontmatter carries the
+// item's identity/status. For a milestone the flow is AOF.md-first: a milestone
+// CONVERTED into aof (its pre-aof SPEC.md left untouched) is represented by an
+// `AOF.md` digest, and that digest IS its record doc. A native milestone (no
+// AOF.md) keeps SPEC.md. Stories/uat are unaffected — only milestones mint a
+// digest. The validate schema is then chosen dynamically off the resolved doc
+// (digest vs native — see validateWork).
 function recordDoc(item) {
-  if (item.type === "milestone") return "SPEC.md";
+  if (item.type === "milestone") {
+    return existsSync(path.join(item.dir, "AOF.md")) ? "AOF.md" : "SPEC.md";
+  }
   if (item.type === "story") return "STORY.md";
   if (item.type === "uat") return "SESSION.md";
   return null;
@@ -339,12 +349,24 @@ export async function validateWork(workDir, config, scopeRef) {
 
     if (!inScope(item)) continue;
 
-    // 1. folder ↔ frontmatter
+    // 1. folder ↔ frontmatter — the schema is chosen DYNAMICALLY off the doc
+    //    type. A `doc: digest` record doc (an AOF.md for a converted milestone)
+    //    carries digest-shaped frontmatter (`milestone`/`slug`/`status`, the
+    //    legacy SPEC left untouched), NOT the native record shape — so it is
+    //    held to the digest schema, not the SPEC/STORY/SESSION one.
     const doc = recordDoc(item);
     if (doc) {
       const docPath = path.join(item.dir, doc);
       if (Object.keys(meta).length === 0) {
         add(docPath, `missing or empty record doc (${doc})`);
+      } else if (meta.doc === "digest") {
+        // Imported/converted milestone digest (AOF.md). Identity comes from
+        // `milestone` (the number) + `slug`; status from the closed vocabulary.
+        // No `type`/`created`/`updated`/`parent` — those are native-only.
+        if (item.type !== "milestone") add(docPath, `digest record doc (doc: digest) is only valid for a milestone, not a "${item.type}"`);
+        if (!sameNum(meta.milestone ?? "", item.number)) add(docPath, `digest milestone "${meta.milestone ?? ""}" ≠ folder "${item.number}"`);
+        if (meta.slug !== item.slug) add(docPath, `digest slug "${meta.slug ?? ""}" ≠ folder "${item.slug}"`);
+        if (!VALID_STATUS.has(meta.status)) add(docPath, `invalid status "${meta.status ?? ""}"`);
       } else {
         if (meta.type !== item.type) add(docPath, `frontmatter type "${meta.type ?? ""}" ≠ folder type "${item.type}"`);
         if (!sameNum(meta.number ?? "", item.number)) add(docPath, `frontmatter number "${meta.number ?? ""}" ≠ folder "${item.number}"`);

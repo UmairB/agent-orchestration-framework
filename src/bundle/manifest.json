@@ -299,7 +299,7 @@
         "id": "validate",
         "kind": "command"
       },
-      "hash": "sha256:c35e3e920ea07e0753843e0ca3dbd87622769c30b687d5cf22b5ad2950a8336b"
+      "hash": "sha256:bbb9714ed4c6eb08cdb3b2ef47a4af1d2ae47f1ba26c448d416847f9cd1ec992"
     },
     {
       "path": ".claude/commands/aof/verify.md",

@@ -219,6 +219,11 @@ import { importRecoveryTests } from "../test/import-recovery.test.mjs";
 // memory` verbs, ADR-003/001/005; @executable traceability — the @manual
 // graphify-backend recall row is deferred, it needs the live binary)
 import { importIntoMemoryTests } from "../test/import-into-memory.test.mjs";
+// milestone 13 — external milestone import (story 04: the AOF.md digest-on-import
+// follow-up — an intent-only import (no decisions/outcomes) also emits an AOF.md
+// digest indexed via the EXISTING parseAof, so a zero-record import gains a recallable
+// `summary` presence; ADR-006, the deferred 13×14 follow-up)
+import { importDigestTests } from "../test/import-digest.test.mjs";
 // milestone 13 — external milestone import (story 03: the SIX enforcing fitness
 // functions of ADR-001..005 — artifact-shape (reuse the 05 doc shapes, no new
 // parser/record shape, SPEC.md never indexed), read-only-source (registered command +
@@ -234,6 +239,87 @@ import { archTests as acdImportIndexerExtendsScanTests } from "../test/arch/acd-
 import { archTests as acdImportNoGraphifySpawnTests } from "../test/arch/acd-import-no-graphify-spawn.test.mjs";
 import { archTests as acdImportNotAWorkItemTests } from "../test/arch/acd-import-not-a-work-item.test.mjs";
 import { archTests as acdImportDerivedIndexTests } from "../test/arch/acd-import-derived-index.test.mjs";
+// milestone 13 / story 04 — the AOF.md digest-on-import fitness (ADR-006): an
+// intent-only import emits a recallable AOF.md digest indexed via the EXISTING
+// parseAof; an ADR/retro import emits none; no new parser/record shape.
+import { archTests as acdImportDigestRecallableTests } from "../test/arch/acd-import-digest-recallable.test.mjs";
+// milestone 15 — work doctor core (story 00: the spine — work:doctor registered on
+// the command core with the { code, severity, path, message } envelope, the
+// snapshot-once doctorWork engine + pure check-group registry + injectable clock,
+// the CLI face with the --strict advisory exit policy, the /api/work/doctor board
+// route, the two seeded folder-only groups (orphan-folder warn / duplicate-driver-
+// number error), and the registry-derived bijection generalisation; @executable
+// traceability + the FOUR cross-cutting fitness functions — envelope contract,
+// engine determinism, --strict exit matrix, and the two generalised bijections)
+import { doctorCommandCoreTests } from "../test/doctor-command-core.test.mjs";
+// milestone 15 — work doctor core (story 01: coherence & completeness — the
+// status-coherence + lifecycle-completeness check-groups appended to the registry;
+// story 02: freshness/date-sanity + structural-integrity — the injected-clock date
+// group and the folder-first numbering/orphan/duplicate group with the opt-in
+// roadmap-folder-mismatch cross-reference; @executable traceability)
+import { doctorCoherenceCompletenessTests } from "../test/doctor-coherence-completeness.test.mjs";
+import { doctorFreshnessStructuralTests } from "../test/doctor-freshness-structural.test.mjs";
+import { archTests as acdDoctorFindingEnvelopeTests } from "../test/arch/acd-doctor-finding-envelope.test.mjs";
+import { archTests as acdDoctorEngineDeterminismTests } from "../test/arch/acd-doctor-engine-determinism.test.mjs";
+import { archTests as acdDoctorStrictExitTests } from "../test/arch/acd-doctor-strict-exit.test.mjs";
+// milestone 15 — work doctor core (story 03: validate keystone wiring — the
+// /aof:validate skill runs `aof work doctor $ARGUMENTS` AFTER `aof work validate
+// $ARGUMENTS`, lane-grouped (validity / health), health beneath the agent-only
+// layer; validate stays the hard gate, doctor is the advisory floor, added not
+// substituted; @executable doc-content + ordering guard over the bundled skill)
+import { archTests as acdDoctorValidateKeystoneTests } from "../test/arch/acd-doctor-validate-keystone.test.mjs";
+// milestone 16 — context-budget lint (story 00: the doc-bloat check-group — the
+// budgetGroup appended to CHECK_GROUPS, fed by the additive docSizes snapshot metric
+// and the config-sourced budgetsFromConfig resolver; emits doc-over-budget warn at the
+// over-budget FILE; @executable traceability across both task features + the two new
+// fitness functions — finding-envelope conformance and config-sourced/no-baked-literal)
+import { doctorContextBudgetTests } from "../test/doctor-context-budget.test.mjs";
+import { archTests as acdContextBudgetFindingTests } from "../test/arch/acd-context-budget-finding.test.mjs";
+import { archTests as acdContextBudgetConfigSourcedTests } from "../test/arch/acd-context-budget-config-sourced.test.mjs";
+// cross-cutting — the CLI entry-point contract: a direct `node src/cli.mjs …` must
+// dispatch like the bin (not a silent exit-0 no-op), and importing the module must
+// stay inert. Guards the main-module guard in src/cli.mjs against regression.
+import { archTests as acdCliEntryExecutesTests } from "../test/arch/acd-cli-entry-executes.test.mjs";
+// milestone 17 — Notion work-board sync (story 00: the spine — notion:sync-work
+// registered on the command core + `aof work integrations notion sync-work`
+// dispatch (ADR-002); the opt-in no-op gate when work.integrations.notion is absent
+// (ADR-004); the `.aof/notion.work-map.json` mapping sidecar round-trip (ADR-001);
+// @executable traceability — the projection/apply + arch-tests are later stories)
+import { notionSpineCommandTests } from "../test/notion-spine-command.test.mjs";
+import { notionSpineOptinNoopTests } from "../test/notion-spine-optin-noop.test.mjs";
+import { notionMappingSidecarTests } from "../test/notion-mapping-sidecar.test.mjs";
+// milestone 17 — Notion work-board sync (story 01: the projection + one-way sync —
+// the PURE projectMilestone plan (00_projection-plan), the --dry-run zero-call
+// preview (02_dry-run-zero-calls), and the statusMap projection + honest skip
+// (03_status-map-and-honest-skip); ADR-003. @executable traceability — the
+// live-Notion create/resync/one-way rows (01/04) are @manual, deferred to verify.)
+import { notionProjectionPlanTests } from "../test/notion-projection-plan.test.mjs";
+import { notionApplyIdempotentTests } from "../test/notion-apply-idempotent.test.mjs";
+import { notionDryRunTests } from "../test/notion-dry-run.test.mjs";
+import { notionStatusMapSkipTests } from "../test/notion-status-map-skip.test.mjs";
+// milestone 17 — Notion work-board sync (story 02: the managed Notion CLI + opt-in
+// config + doctor — the work.integrations.notion schema block (00_config-block-validates),
+// the npx-lane NOTION_DESCRIPTOR (01_descriptor-registered), the env-var-reference
+// auth spawn (02_auth-env-reference), and the project-doctor surface
+// (03_doctor-surfaces-notion); ADR-004. @executable traceability — the live `ntn`
+// install / auth round-trip rows are @manual, deferred to verify.)
+import { notionConfigSchemaTests } from "../test/notion-config-schema.test.mjs";
+import { notionDescriptorTests } from "../test/notion-descriptor.test.mjs";
+import { notionAuthEnvTests } from "../test/notion-auth-env.test.mjs";
+import { notionDoctorTests } from "../test/notion-doctor.test.mjs";
+// milestone 17 — Notion work-board sync (story 03: the SEVEN fitness functions —
+// ADR-005's structural invariants, each a test/arch/acd-notion-*.test.mjs arch-test,
+// now GREEN over the as-built stories 00/01/02 modules: mapping-sidecar-only (ADR-001),
+// one-way / Notion-never-authoritative (ADR-003), opt-in-no-op (ADR-004), auth-env-ref /
+// no-committed-secret (ADR-004), never-touch-board-schema (ADR-003), CLI-not-MCP
+// (ADR-004), fail-honestly / never-half-write (ADR-003/004).)
+import { archTests as acdNotionMappingSidecarTests } from "../test/arch/acd-notion-mapping-sidecar.test.mjs";
+import { archTests as acdNotionOneWayTests } from "../test/arch/acd-notion-one-way.test.mjs";
+import { archTests as acdNotionOptInNoopTests } from "../test/arch/acd-notion-opt-in-noop.test.mjs";
+import { archTests as acdNotionAuthEnvRefTests } from "../test/arch/acd-notion-auth-env-ref.test.mjs";
+import { archTests as acdNotionNoSchemaWriteTests } from "../test/arch/acd-notion-no-schema-write.test.mjs";
+import { archTests as acdNotionCliNotMcpTests } from "../test/arch/acd-notion-cli-not-mcp.test.mjs";
+import { archTests as acdNotionFailHonestlyTests } from "../test/arch/acd-notion-fail-honestly.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -352,12 +438,43 @@ export const tests = [
   ...importCommandCoreTests,
   ...importRecoveryTests,
   ...importIntoMemoryTests,
+  ...importDigestTests,
   ...acdImportArtifactShapeTests,
   ...acdImportReadOnlySourceTests,
   ...acdImportIndexerExtendsScanTests,
   ...acdImportNoGraphifySpawnTests,
   ...acdImportNotAWorkItemTests,
   ...acdImportDerivedIndexTests,
+  ...acdImportDigestRecallableTests,
+  ...doctorCommandCoreTests,
+  ...doctorCoherenceCompletenessTests,
+  ...doctorFreshnessStructuralTests,
+  ...acdDoctorFindingEnvelopeTests,
+  ...acdDoctorEngineDeterminismTests,
+  ...acdDoctorStrictExitTests,
+  ...acdDoctorValidateKeystoneTests,
+  ...doctorContextBudgetTests,
+  ...acdContextBudgetFindingTests,
+  ...acdContextBudgetConfigSourcedTests,
+  ...acdCliEntryExecutesTests,
+  ...notionSpineCommandTests,
+  ...notionSpineOptinNoopTests,
+  ...notionMappingSidecarTests,
+  ...notionProjectionPlanTests,
+  ...notionApplyIdempotentTests,
+  ...notionDryRunTests,
+  ...notionStatusMapSkipTests,
+  ...notionConfigSchemaTests,
+  ...notionDescriptorTests,
+  ...notionAuthEnvTests,
+  ...notionDoctorTests,
+  ...acdNotionMappingSidecarTests,
+  ...acdNotionOneWayTests,
+  ...acdNotionOptInNoopTests,
+  ...acdNotionAuthEnvRefTests,
+  ...acdNotionNoSchemaWriteTests,
+  ...acdNotionCliNotMcpTests,
+  ...acdNotionFailHonestlyTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

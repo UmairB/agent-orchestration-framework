@@ -78,6 +78,25 @@ export async function handleWorkApi(request, response, options = {}) {
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/api/work/doctor") {
+      // The health lane's board face (15/ADR-001/ADR-002): a thin pass-through —
+      // invoke work:doctor through the registry, then project each finding's
+      // raw-absolute path to projectRoot-relative + forward-slashed (the board
+      // displayPath wire). The board NEVER gates: there is no --strict here (a
+      // board cannot fail CI), so `?strict` is inert and the envelope carries no
+      // exit/gate field — just the advisory finding set.
+      const result = await invoke("work:doctor", { scope: scopeParam(params) }, ctx);
+      sendJson(response, 200, {
+        findings: result.findings.map((finding) => ({
+          code: finding.code,
+          severity: finding.severity,
+          path: displayPath(workspace.projectRoot, finding.path),
+          message: finding.message,
+        })),
+      });
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/api/work/next") {
       const result = await invoke("work:next", { scope: scopeParam(params) }, ctx);
       // Project the next item's raw-absolute path (when present) to

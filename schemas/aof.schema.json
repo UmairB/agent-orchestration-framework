@@ -405,6 +405,74 @@
             "providers": { "type": "array", "items": { "enum": ["claude", "codex"] }, "description": "OPTIONAL subset of routable providers to front; absent ⇒ both [\"claude\",\"codex\"]. gemini is never a valid member (ADR-003 — not OpenAI-compatible, never routable)." }
           },
           "additionalProperties": false
+        },
+        "doctor": {
+          "type": "object",
+          "description": "OPTIONAL work-doctor health-lane config (milestone 15, ADR-003). Tunes the deterministic `work:doctor` cross-item checks. Absent ≡ defaults. Closed (additionalProperties:false), peer to work.headroom.",
+          "properties": {
+            "staleWindowDays": { "type": "integer", "minimum": 1, "description": "The freshness window in days: an in-progress item whose `updated` date is older than `now` by more than this is a `stale-updated` finding (milestone 15 story 02). Injected into the engine as a duration so freshness findings are deterministic in CI. Absent ⇒ 30 days." },
+            "budgets": {
+              "type": "object",
+              "description": "OPTIONAL per-artifact line budgets for the work-doctor doc-bloat check (milestone 16). Each is the max line count before a `doc-over-budget` warn finding fires for that artifact kind. Absent keys ⇒ documented defaults (spec 300, architecture 700, story 150). Closed (additionalProperties:false).",
+              "properties": {
+                "spec": { "type": "integer", "minimum": 1, "description": "Max lines for a milestone SPEC.md before doc-over-budget. Absent ⇒ 300." },
+                "architecture": { "type": "integer", "minimum": 1, "description": "Max lines for a milestone ARCHITECTURE.md before doc-over-budget. Absent ⇒ 700 (ADR logs legitimately grow)." },
+                "story": { "type": "integer", "minimum": 1, "description": "Max lines for a story STORY.md before doc-over-budget. Absent ⇒ 150." }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "roadmap": {
+          "type": "object",
+          "description": "OPTIONAL structured milestone-index ROADMAP (milestone 15, ADR-004). When present and machine-parseable, the work-doctor `roadmap-folder-mismatch` cross-reference activates and diffs the indexed milestones against the on-disk folders. Absent ≡ honest no-op (a prose/backlog ROADMAP is NOT a structured index and never triggers the check). Closed (additionalProperties:false), peer to work.doctor.",
+          "properties": {
+            "index": {
+              "type": "array",
+              "description": "The structured milestone index: one entry per milestone the ROADMAP declares.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "number": { "type": "string", "description": "The milestone driver number (e.g. \"07\")." },
+                  "slug": { "type": "string", "description": "OPTIONAL milestone slug." }
+                },
+                "additionalProperties": true
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "integrations": {
+          "type": "object",
+          "description": "OPTIONAL external-integration config (milestone 17). Absent ≡ off — every aof work command behaves exactly as before; a present `notion` block opts the project into Notion work-board sync. Closed (additionalProperties:false), peer to work.doctor.",
+          "properties": {
+            "notion": {
+              "type": "object",
+              "description": "OPTIONAL Notion work-board sync config (milestone 17, ADR-004). PRESENT ⇒ all binding lives here; ABSENT ⇒ `notion:sync-work` is an honest no-op. The token is NEVER committed here — only `tokenEnv`, the env-var NAME (RESEARCH §A2). Closed (additionalProperties:false), so an unknown field (e.g. a `token`/`databaseId` field) is rejected.",
+              "properties": {
+                "dataSourceId": { "type": "string", "description": "The Notion data_source_id the milestone + its story sub-tasks live in (RESEARCH §A7 — NOT a bare database_id; the 2025-09-03 API routes query/create through the data source)." },
+                "tokenEnv": { "type": "string", "default": "NOTION_API_TOKEN", "description": "The NAME of the env var the integration token is read from at run time (RESEARCH §A2). The token itself is NEVER stored in config — this is the env-var reference only." },
+                "statusProperty": { "type": "string", "description": "The board's status/select property name the aof status maps onto (the property TYPE is read at run time, §A4)." },
+                "statusMap": {
+                  "type": "object",
+                  "description": "MANDATORY map (RESEARCH §A4): each of the four aof statuses → an EXISTING board option NAME. All four entries are required — `in-review` has no Notion default, so the operator MUST supply it. Closed (additionalProperties:false).",
+                  "properties": {
+                    "not-started": { "type": "string", "description": "The board option name for the aof `not-started` status." },
+                    "in-progress": { "type": "string", "description": "The board option name for the aof `in-progress` status." },
+                    "in-review": { "type": "string", "description": "The board option name for the aof `in-review` status (no Notion default — must be supplied)." },
+                    "done": { "type": "string", "description": "The board option name for the aof `done` status." }
+                  },
+                  "required": ["not-started", "in-progress", "in-review", "done"],
+                  "additionalProperties": false
+                },
+                "relationProperty": { "type": "string", "description": "The board's self-relation property name a story sub-task is linked to its milestone page through (RESEARCH §A3)." }
+              },
+              "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

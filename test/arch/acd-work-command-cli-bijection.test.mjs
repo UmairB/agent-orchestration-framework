@@ -1,17 +1,21 @@
-// Fitness function for milestone 08 / ADR-004 inv. 2 (command → CLI injection):
-// "Every command in the registry has a non-null `cli` adapter (`cli.argv`/
-//  `cli.render` are functions) AND a reachable `aof work <sub>` dispatch branch —
-//  no command the CLI cannot run."
+// Fitness function for milestone 08 / ADR-004 inv. 2, GENERALISED by milestone 15
+// / ADR-005 from "exactly six" to REGISTRY-DERIVED (command → CLI injection):
+// "Every registry work:* command has a non-null `cli` adapter (`cli.argv`/
+//  `cli.render` are functions) AND a reachable `aof work <sub>` dispatch branch,
+//  AND `aof work <sub> --json` runs cleanly + emits parseable JSON. The sub set is
+//  DERIVED from listCommands() (NOT the hard-coded SUBCOMMANDS), so work:doctor /
+//  any future work:* is covered with no edit ('no new door')."
 //
-// Three proofs, generalising the acd-work-list-contract spawn idiom to all six:
-//   (a) import the registry; assert each command's `cli` adapter is present with
-//       `argv`/`render` functions;
+// Three proofs, over the registry-derived work:* sub set:
+//   (a) import the registry; assert each work:* command's `cli` adapter is present
+//       with `argv`/`render` functions;
 //   (b) source-grep `workCommand` in `cli.mjs` for a reachable dispatch branch per
 //       subcommand (`subcommand === "<sub>"`, comments discounted);
-//   (c) CLI spawn-and-parse: build a fixture stream and `spawnSync` each of
-//       `aof work {list,doc,tasks,validate,next,feedback} --json` with sensible
-//       args, asserting a clean run + parseable JSON. feedback WRITES, so its args
-//       target a real fixture item and it must succeed + append.
+//   (c) CLI spawn-and-parse: build a fixture stream and `spawnSync` each
+//       `aof work <sub> --json` with sensible args, asserting a clean run +
+//       parseable JSON. feedback WRITES, so its args target a real fixture item and
+//       it must succeed + append. doctor (like validate) may exit 0 OR non-zero
+//       cleanly (a warn/error finding can gate) — accept [0,1] for both.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -24,8 +28,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 const CLI_MJS = path.join(repoRoot, "src", "cli.mjs");
 
-// The six work-surface subcommands, each backed by a work:<op> command.
-const SUBCOMMANDS = ["list", "doc", "tasks", "validate", "next", "feedback"];
+// The work-surface subcommands DERIVED from the registry — every work:* command's
+// op segment. (NOT a hard-coded literal: a new work:* command is covered with no
+// edit. graph:*/project:*/import:* are non-work and correctly excluded.)
+const subcommands = () =>
+  listCommands()
+    .filter((command) => command.id.startsWith("work:"))
+    .map((command) => command.id.slice("work:".length))
+    .sort();
 
 function stripComments(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -97,6 +107,7 @@ function argsFor(sub) {
     case "doc": return ["work", "doc", "03", "SPEC", "--json"];
     case "tasks": return ["work", "tasks", "03/01", "--json"];
     case "validate": return ["work", "validate", "--json"];
+    case "doctor": return ["work", "doctor", "--json"];
     case "next": return ["work", "next", "--json"];
     case "feedback": return ["work", "feedback", "03/01", "--note", "bijection probe", "--actor", "arch-test", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
@@ -114,7 +125,7 @@ function runCli(root, args) {
 
 export const archTests = [
   {
-    name: "arch/ADR-004 inv.2: every registered command carries a non-null cli adapter (argv + render functions)",
+    name: "arch/15 ADR-005: every registered work:* command carries a non-null cli adapter (argv + render functions)",
     run: async () => {
       const commands = listCommands();
       assert.ok(commands.length > 0, "the registry is non-empty");
@@ -126,11 +137,11 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-004 inv.2: workCommand in cli.mjs has a reachable dispatch branch per subcommand",
+    name: "arch/15 ADR-005: workCommand in cli.mjs has a reachable dispatch branch per registry-derived work:* subcommand",
     run: async () => {
       const body = workCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       assert.ok(body.length > 0, "workCommand is defined in cli.mjs");
-      for (const sub of SUBCOMMANDS) {
+      for (const sub of subcommands()) {
         assert.ok(
           new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body),
           `workCommand dispatches \`subcommand === "${sub}"\` (no command the CLI cannot run)`
@@ -139,16 +150,17 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-004 inv.2: aof work <sub> --json runs cleanly and emits parseable JSON for every subcommand",
+    name: "arch/15 ADR-005: aof work <sub> --json runs cleanly and emits parseable JSON for every registry-derived work:* subcommand",
     run: async () => {
       const root = await buildFixture();
       try {
-        for (const sub of SUBCOMMANDS) {
+        for (const sub of subcommands()) {
           const result = runCli(root, argsFor(sub));
-          // `validate` is the one read that DESIGNS to exit 1 when findings exist
-          // (cli.mjs:615) — both 0 and 1 are clean runs for it; every other op
-          // exits 0. None may crash (>1 or a null status from a thrown error).
-          const acceptable = sub === "validate" ? [0, 1] : [0];
+          // `validate` and `doctor` are the reads that DESIGN to exit 1 when
+          // findings exist (validate on any finding; doctor on an error or a
+          // warn-under-strict) — both 0 and 1 are clean runs for them; every other
+          // op exits 0. None may crash (>1 or a null status from a thrown error).
+          const acceptable = sub === "validate" || sub === "doctor" ? [0, 1] : [0];
           assert.ok(
             acceptable.includes(result.status),
             `aof ${argsFor(sub).join(" ")} exits ${acceptable.join("/")} (got ${result.status}; stderr: ${result.stderr})`

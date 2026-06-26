@@ -39,6 +39,9 @@ export const importMilestoneCommand = {
       repo: { type: "string" },
       selector: { type: "string" },
       dryRun: { type: "boolean" },
+      // Optional injected provenance date for the digest frontmatter (ADR-007);
+      // defaults to today. Injectable so tests are deterministic.
+      importedAt: { type: "string" },
     },
     required: ["repo"],
     additionalProperties: false,
@@ -103,12 +106,17 @@ export const importMilestoneCommand = {
 
     const sourceSlug = sourceSlugFor(repo);
     const milestoneRef = String(selector);
+    // The digest's `importedAt` provenance stamp (ADR-007). Injectable via input for
+    // deterministic tests; defaults to today's date (YYYY-MM-DD). It lands ONLY in the
+    // digest's frontmatter, which is never an index record source (parseAof ignores
+    // frontmatter), so it changes no record and breaks no `source:line` (ADR-005).
+    const importedAt = input.importedAt ?? new Date().toISOString().slice(0, 10);
 
     // Materialize the frozen artifact pair (ADR-001/004) — or PREVIEW on a dry-run
     // (ADR-002): the preview computes the artifacts + record count it WOULD write
     // and writes / indexes / networks NOTHING.
     const materialized = await materializeImport(
-      { projectRoot, sourceSlug, milestoneRef, recovered },
+      { projectRoot, sourceSlug, milestoneRef, recovered, importedAt },
       { preview: dryRun }
     );
 

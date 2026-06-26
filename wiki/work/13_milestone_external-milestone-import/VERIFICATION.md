@@ -1,6 +1,6 @@
 ---
 doc: verification
-updated: 2026-06-23
+updated: 2026-06-25
 ---
 <!--
   Milestone VERIFICATION.md — answers ONE question: is it truly done, and what is the evidence?
@@ -88,6 +88,39 @@ external repo** (a local clone of `github.com/octocat/Spoon-Knife`, an arbitrary
   completes in a practical window. This is the extraction backend's runtime cost functioning as designed,
   **not** a finding.
 
+### Re-open 2026-06-25 — story 04 · import-digest (the deferred 13×14 follow-up; ADR-006/007)
+
+The milestone was re-opened to take the intent-only-import digest gap. No new `@uat` and no UI surface
+(CLI/knowledge tooling) — so still no human-acceptance or design-conformance lane. Story 04's `.feature`
+is entirely `@executable`; the agent-run lane below exercises the REAL command path the `@executable`
+tests deliberately skip.
+
+- **`@executable` suite + all seven fitness functions green** — `node scripts/test.mjs` → **1247 ok / 0
+  not-ok** (exit 0), re-run at verify 2026-06-25. The count grew from the 2026-06-23 baseline because
+  milestones 15–17 are in flight in the working tree; every milestone-13 test is green within it. _verifies →_
+  the six story-03 arch-tests (unchanged) + story 04: `test/import-digest.test.mjs` (6/6 — digest emitted
+  for the zero-record case, sections index as `summary` records resolving in the store, recall-able through
+  the unchanged verb, NO digest when adr/lesson records exist, no fabrication on absent intent, byte-identical
+  re-import) and the seventh fitness arch-test `test/arch/acd-import-digest-recallable.test.mjs` (4 cases —
+  intent-only `AOF.md` → frozen `summary` records, rich import emits none, indexed via the EXISTING `parseAof`
+  with no new parser/shape, canonical identity+provenance frontmatter with `importedAt` off the record-bearing
+  artifacts).
+- **Intent-only import → recallable digest, through the REAL `import:milestone` command + recovery engine**
+  _(story-04 dogfood proof, agent-run; ADR-006/007)_. Procedure: built an isolated local-backend project
+  (empty work stream) + a pay-guard-shaped aof source milestone (`SPEC.md` with `## Goal` + `## Scope`, **no
+  `ARCHITECTURE.md`/`RETROSPECTIVE.md`** → the zero-record case); ran `invoke("import:milestone", { repo, selector:
+  "07", importedAt: "2026-06-25" })` (which runs the recovery engine + triggers the backend `reindex`), then
+  `aof work memory recall` for an intent phrase. Result: **PASS** — the import materialized `SPEC.md` **+ an
+  `AOF.md` digest** (`recordCount: 2`); the digest carried the canonical frontmatter with **recovered**
+  `slug: paywall-guard` / `title` / `status: in-progress` (status mapped from the source SPEC frontmatter,
+  never fabricated) + `importedAt: 2026-06-25`; `## Intent` ← the recovered `## Goal` prose and `## Scope` ←
+  the recovered scope, verbatim; the sibling `SPEC.md` stayed timestamp-free (ADR-007). `recall` returned the
+  **two imported `summary` records** (`source: …/import-07/AOF.md:15` and `:19`) through the UNCHANGED verb —
+  the work stream was empty, so these were the *sole* recallable presence. This closes the gap end-to-end: the
+  same import contributed **zero** records (invisible to recall) before story 04. _verifies →_ 04/00 "an
+  intent-only import materializes an `AOF.md` digest … the imported intent becomes recall-able", through the
+  real command + recovery path the `@executable` lane stubs with a fixed `recovered`.
+
 ## Findings
 
 | id | observed | type | severity | triage | routed-to | status |
@@ -101,6 +134,12 @@ scratch-fetch as a known seam), not a regression: the load-bearing "import an ex
 recall-able knowledge" ships via the local-path lane, proven end-to-end on a real external repo above.
 No blocker and no design-gap finding is open.
 
+The **re-open (2026-06-25, story 04)** surfaced **no new finding**: the only dogfooding observation — the
+digest's first-cut `doc: digest`-only frontmatter being too thin — was folded into the design as **ADR-007**
+during the build (the canonical identity+provenance block), so it graduated to an ADR rather than a
+verification gap. F13-1/F13-2 are unchanged by the re-open (story 04 touches neither the remote transport
+leg nor the `02/01` test prose).
+
 ## Accept decision
 
 **ACCEPTED — 2026-06-23.** The `@executable` suite (**1151/0**, exit 0) and all six story-03 fitness
@@ -112,3 +151,18 @@ either a documented non-blocker deferral (remote-URL transport, F13-1) or enviro
 extraction window), neither a defect; no `@uat` scenarios exist (no human gate); no blocker or design-gap
 finding is open. The `aof:validate 13` gate PASSES (recorded below). All three production stories (00/01/02)
 plus the fitness story (03) are accepted → **the milestone is accepted.**
+
+**RE-ACCEPTED — 2026-06-25 (re-open, story 04 · import-digest).** The `@executable` suite + all **seven**
+fitness functions are green (`node scripts/test.mjs` → **1247/0**, exit 0; the higher count vs the 1151
+baseline is milestones 15–17 in flight, every milestone-13 test green within it). The story-04 agent-run
+`@manual` dogfood proof PASSES through the **real** `import:milestone` command + recovery engine: an
+intent-only source (pay-guard shape — `## Goal`+`## Scope`, no ARCHITECTURE/RETROSPECTIVE) materializes an
+`AOF.md` digest with recovered identity+provenance frontmatter, and its two `## ` sections become
+recall-able `summary` records through the unchanged verb — where the same import contributed **zero**
+records before story 04. No new finding (the digest-frontmatter observation graduated to ADR-007 during the
+build); F13-1/F13-2 unchanged and still non-blocker; no `@uat` and no UI surface (no human/design lane).
+The `aof:validate 13` gate **PASSES** (`PASS — 13 is well-formed`; whole stream also PASS) and story-04
+test-traceability is 1:1 (the feature's 6 scenarios ↔ `test/import-digest.test.mjs` `import-digest/00`–`05`).
+Story **04 → done**; with **00/01/02/03** already done, **all stories are done → the milestone is
+re-accepted (done).** Lessons distilled to RETROSPECTIVE **R8–R9**; `aof work memory ingest` run (no-op —
+backend `none`).

@@ -411,6 +411,52 @@ function stripFrontmatterAndComments(text) {
   return body.trim();
 }
 
+// ───────────────────────────────────────────── milestone identity (ADR-007) ──
+
+// Map a source's free-text status (an aof-vocab token, or a STATE.md `**Status:**`
+// word like "In progress"/"Done") to the closed aof status vocabulary; defaults to
+// `not-started` when the source records none (absence is information — ADR-005).
+function normalizeStatus(raw) {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (/in[\s-]*review/.test(s)) return "in-review";
+  if (/in[\s-]*progress/.test(s)) return "in-progress";
+  if (/block/.test(s)) return "blocked";
+  if (/\b(done|complete|completed|accepted)\b/.test(s)) return "done";
+  return "not-started";
+}
+
+// Recover the milestone IDENTITY for the digest frontmatter (ADR-007) from an
+// aof-structured source: slug (the folder slug), title (SPEC frontmatter `title:`
+// or its `# ` heading, stripping a leading "NN ·" and a trailing "— Spec"), and
+// status (SPEC frontmatter `status:`, else STATE.md `**Status:**`, normalised).
+async function recoverAofMeta(milestoneDir, picked) {
+  const spec = await readFileSafe(path.join(milestoneDir, "SPEC.md"));
+  const fmTitle = (spec.match(/^title:\s*["']?(.+?)["']?\s*$/m) ?? [])[1];
+  const h1 = (spec.split(/\r?\n/).find((line) => /^#\s+/.test(line)) ?? "")
+    .replace(/^#\s+/, "")
+    .replace(/^\d+\s*[·•]\s*/, "")
+    .replace(/\s*[—–-]\s*spec(ification)?\s*$/i, "")
+    .trim();
+  const title = (fmTitle ?? h1).trim();
+  const fmStatus = (spec.match(/^status:\s*(.+?)\s*$/m) ?? [])[1];
+  let stateStatus = "";
+  if (!fmStatus) {
+    const state = await readFileSafe(path.join(milestoneDir, "STATE.md"));
+    stateStatus = (state.match(/\*\*Status:\*\*\s*([A-Za-z -]+)/) ?? [])[1] ?? "";
+  }
+  return { slug: picked.slug, title, status: normalizeStatus(fmStatus ?? stateStatus) };
+}
+
+// Recover the milestone identity for an ARBITRARY source: slug (the synthetic ref),
+// title (README first heading, else the repo dir name), status (unknown → not-started).
+async function recoverArbitraryMeta(sourceDir, picked) {
+  const entries = await readDirSafe(sourceDir);
+  const readme = entries.find((e) => e.isFile() && /^readme(\.md|\.markdown|\.txt)?$/i.test(e.name));
+  let title = readme ? firstHeading(await readFileSafe(path.join(sourceDir, readme.name))) : "";
+  if (!title) title = path.basename(sourceDir).replace(/[-_]+/g, " ").trim();
+  return { slug: picked.slug, title, status: "not-started" };
+}
+
 // ─────────────────────────────────────────────────────── the seam entry ──
 
 // Recover one milestone's `recovered` shape from a source (the FROZEN seam). Detects
@@ -424,7 +470,9 @@ export async function recoverMilestone(sourceDir, selector) {
   const picked =
     findMilestone(milestones, selector) ?? (milestones.length === 1 ? milestones[0] : null);
 
-  const recovered = { intent: null, decisions: [], outcomes: [] };
+  // `meta` carries the recovered milestone IDENTITY for the digest frontmatter
+  // (ADR-007): slug, title, status. Populated per-lane below; `{}` when unrecovered.
+  const recovered = { intent: null, decisions: [], outcomes: [], meta: {} };
   if (!picked) return recovered;
 
   if (picked.arbitrary) {
@@ -432,6 +480,7 @@ export async function recoverMilestone(sourceDir, selector) {
     recovered.intent = await recoverArbitraryIntent(picked.dir);
     recovered.decisions = await recoverArbitraryDecisions(picked.dir);
     recovered.outcomes = recoverArbitraryOutcomes(picked.dir);
+    recovered.meta = await recoverArbitraryMeta(picked.dir, picked);
     return recovered;
   }
 
@@ -439,5 +488,6 @@ export async function recoverMilestone(sourceDir, selector) {
   recovered.intent = await recoverAofIntent(picked.dir);
   recovered.decisions = await recoverAofDecisions(picked.dir);
   recovered.outcomes = await recoverAofOutcomes(picked.dir);
+  recovered.meta = await recoverAofMeta(picked.dir, picked);
   return recovered;
 }

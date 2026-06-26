@@ -6,8 +6,8 @@ title: "External Milestone Import — ingest existing milestones as agent knowle
 status: done
 owner: product-owner
 created: 2026-06-22
-updated: 2026-06-23
-depends: [05, 10]
+updated: 2026-06-25
+depends: [05, 10, 14]
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
@@ -100,9 +100,26 @@ load-bearing slice (the SPEC's "import reaching memory") is `00 → 02` over an 
   (artifact-shape, read-only-source, indexer-extends-scan, no-graphify-spawn, not-a-work-item,
   derived-index); the contract is the ARCHITECTURE.md fitness table (no `.feature`, mirrors 05/03 & 10/03).
 
+**Re-opened `2026-06-25`** to take the deferred 13×14 follow-up (surfaced dogfooding the import on the
+voice-vox **pay-guard** testbed, whose milestones are intent-only). An import that recovered only intent —
+no `ARCHITECTURE.md`/`RETROSPECTIVE.md` to recover — contributed **zero** records (its `SPEC.md` is legible
+but not indexed, ADR-001), so its intent was invisible to recall. Story 04 closes it by ALSO emitting an
+`AOF.md` digest (milestone 14's doc type) for exactly that zero-record case, indexed via the EXISTING
+`parseAof` → `summary` records. See **ADR-006** + the seventh fitness row.
+
+- [x] **04 · [import-digest](stories/04_story_import-digest/STORY.md)** — *(added on re-open)* an intent-only
+  import (no decisions/outcomes) ALSO materializes an `AOF.md` digest, each `## ` section indexed by the
+  EXISTING `parseAof` as a `summary` record — so a zero-record import gains a recallable presence (ADR-006;
+  reuses milestone 14's `parseAof`/`summary` contract, no new parser/shape). **done** — `@executable` scenarios
+  green (`test/import-digest.test.mjs`) + the `acd-import-digest-recallable` arch-test; the intent-only→recallable
+  digest proven end-to-end through the real command path at verify (`aof:verify 13`, 2026-06-25).
+
 ## Dependencies
 
 - **05 · work-memory** — the memory store the recovered knowledge lands in; import is a producer for
   it.
 - **10 · graphify-memory-backend** — the graph-grounded recall seam the agents reach imported
   precedent through; import feeds this backend rather than a bespoke side-channel.
+- **14 · aof-digest** *(added on re-open for story 04)* — the `AOF.md` digest doc type + its `parseAof`
+  (`## ` section → `summary` record). Story 04 reuses it verbatim so an intent-only import gains a
+  recallable presence with no new parser (ADR-006).

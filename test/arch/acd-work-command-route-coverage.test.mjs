@@ -1,29 +1,40 @@
-// Fitness function for milestone 08 / ADR-004 inv. 1 (route → command surjection):
-// "Every `/api/work*` route the board serves resolves to a registered command id
-//  (`getCommand(id)` exists) — no UI route without a command. `board-ui.mjs`
-//  enumerates EXACTLY the six operations {list, doc, tasks, validate, next,
-//  feedback}, each backed by a `work:<op>` command in the registry."
+// Fitness function for milestone 08 / ADR-004 inv. 1, GENERALISED by milestone 15
+// / ADR-005 from "exactly six" to REGISTRY-DERIVED (route ↔ command BIJECTION):
+// "The /api/work/<op> set served by board-ui.mjs is in BIJECTION with the
+//  registry's work:* commands — every served route maps to a registered work:<op>
+//  command, AND every registered work:* command has a served route. The set is
+//  DERIVED from listCommands() (NOT hard-coded), so adding work:doctor (the 7th) —
+//  or any future work:* — is covered with no edit ('no new door')."
 //
 // Structural proof: source-grep `board-ui.mjs` for the `pathname === "/api/work/<op>"`
-// route literals, extract the op set, assert it is EXACTLY the six, and assert each
-// maps to a registered command id `work:<op>` for which `getCommand(id)` is defined.
+// route literals, and derive the command op set from
+// `listCommands().filter(c=>c.id.startsWith("work:")).map(c=>c.id.slice(5))`. Assert
+// the two-way map: (a) every served route maps to a registered work:<op> command;
+// (b) every registered work:* command has a served route. (graph:*/project:*/
+// import:* are NOT served on /api/work and are correctly excluded by the prefix.)
 // Behavioural proof (the acd-board-single-server stand-up idiom): build a temp
-// fixture stream, stand up `serveSetupUi(null,{projectDir,port:0})`, hit each
-// `/api/work/<op>` route, and assert it answers a JSON envelope (200/4xx) — i.e.
-// each route is served via the registry, not 404-unrouted.
+// fixture stream, stand up `serveSetupUi(null,{projectDir,port:0})`, loop the
+// DERIVED op set hitting each `/api/work/<op>` route, asserting a JSON envelope
+// (200/4xx) — i.e. each route is served via the registry, not 404-unrouted.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCommand } from "../../src/command-core.mjs";
+import { getCommand, listCommands } from "../../src/command-core.mjs";
 import { serveSetupUi } from "../../src/setup-ui.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BOARD_UI = path.join(repoRoot, "src", "board-ui.mjs");
 
-// The frozen op set ADR-003's migration mapping names — exactly these six.
-const EXPECTED_OPS = ["doc", "feedback", "list", "next", "tasks", "validate"];
+// The op set DERIVED from the registry — every work:* command's op segment. This
+// is the canonical set the bijection is asserted over (NOT a hard-coded literal),
+// so a new work:* command (15's doctor, or any future one) is covered with no edit.
+const commandOps = () =>
+  listCommands()
+    .filter((command) => command.id.startsWith("work:"))
+    .map((command) => command.id.slice("work:".length))
+    .sort();
 
 // Discount comments so a comment naming a route literal is not counted as a route.
 function stripComments(source) {
@@ -79,24 +90,29 @@ async function hitRoute(url, op) {
     op === "doc" ? "?ref=03&doc=SPEC"
     : op === "tasks" ? "?ref=03/01"
     : "";
+  // doctor is a read like list/validate — a bare GET answers the advisory envelope.
   return fetch(new URL(`/api/work/${op}${query}`, url));
 }
 
 export const archTests = [
   {
-    name: "arch/ADR-004 inv.1: board-ui.mjs enumerates EXACTLY the six /api/work routes",
+    name: "arch/15 ADR-005: the served /api/work routes are in BIJECTION with the registry's work:* commands (registry-derived, not hard-coded)",
     run: async () => {
       const source = stripComments(await readFile(BOARD_UI, "utf8"));
-      const ops = routeOps(source);
+      const served = routeOps(source);
+      const commands = commandOps();
+      // The two-way bijection: the served-route set equals the registry-derived
+      // work:* op set. Adding work:doctor (the 7th) is covered with no edit — the
+      // expectation is DERIVED from listCommands(), not a literal six.
       assert.deepEqual(
-        ops,
-        EXPECTED_OPS,
-        `board-ui.mjs serves exactly {${EXPECTED_OPS.join(", ")}} — got {${ops.join(", ")}}`
+        served,
+        commands,
+        `board-ui.mjs serves exactly the registry's work:* ops {${commands.join(", ")}} — got {${served.join(", ")}}`
       );
     },
   },
   {
-    name: "arch/ADR-004 inv.1: every served route maps to a registered work:<op> command (no UI route without a command)",
+    name: "arch/15 ADR-005: every served route maps to a registered work:<op> command (no UI route without a command)",
     run: async () => {
       const source = stripComments(await readFile(BOARD_UI, "utf8"));
       for (const op of routeOps(source)) {
@@ -108,12 +124,21 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-004 inv.1 (behavioural): each /api/work route answers a JSON envelope via the registry",
+    name: "arch/15 ADR-005: every registered work:* command has a served /api/work route (no command without a door)",
+    run: async () => {
+      const served = new Set(routeOps(stripComments(await readFile(BOARD_UI, "utf8"))));
+      for (const op of commandOps()) {
+        assert.ok(served.has(op), `registered command work:${op} has a served /api/work/${op} route (no command without a door)`);
+      }
+    },
+  },
+  {
+    name: "arch/15 ADR-005 (behavioural): each /api/work route answers a JSON envelope via the registry (looped over the derived set)",
     run: async () => {
       const repo = await buildFixture();
       const { server, url } = await serveSetupUi(null, { projectDir: repo, port: 0 });
       try {
-        for (const op of EXPECTED_OPS) {
+        for (const op of commandOps()) {
           const response = await hitRoute(url, op);
           // Served via the registry → a JSON envelope (2xx success or 4xx error),
           // NEVER an unrouted 404-not-found or a 5xx crash.

@@ -21,7 +21,13 @@ import path from "node:path";
 import { loadWorkspace, listStream } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
 
+// The milestone-08 SIX work operations. Milestone 15 (ADR-001) registers a 7th
+// work command — work:doctor, the health lane — into the SAME registry; it is a
+// sanctioned extension of the work:* namespace (like graph:* is for the broader
+// registry), tracked here so the "exactly these work commands" contract stays
+// honest as the namespace grows.
 const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:next", "work:feedback"];
+const WORK_IDS = [...SIX_IDS, "work:doctor"];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------
 
@@ -161,7 +167,7 @@ async function assertRejectsWithCode(fn, code) {
 export const commandCoreContractTests = [
   // ════════════════════════ 00_registry-contract.feature ════════════════════
   {
-    name: "command-core/00 the registry exposes exactly the six work commands",
+    name: "command-core/00 the registry exposes exactly the known work commands",
     async run() {
       const ids = listCommands().map((command) => command.id);
       // The milestone-08 contract: exactly the six work:* operations are re-homed
@@ -170,9 +176,12 @@ export const commandCoreContractTests = [
       // "no other registered commands" clause is scoped to the work:* namespace
       // (the operations this milestone owns) — graph:* commands are a sanctioned
       // extension, not an 08 regression. See 09 STATE.md §Feedback (for retro).
+      // Milestone 15 (ADR-001) adds the 7th work:* command — work:doctor, the
+      // health lane — a sanctioned in-namespace extension (WORK_IDS), not a
+      // regression: the registry stays the single door for every work operation.
       const workIds = ids.filter((id) => id.startsWith("work:"));
-      assert.deepEqual([...workIds].sort(), [...SIX_IDS].sort(), "exactly the six work ids, no more, no fewer");
-      assert.equal(workIds.length, SIX_IDS.length, "there are no other registered work commands");
+      assert.deepEqual([...workIds].sort(), [...WORK_IDS].sort(), "exactly the known work ids, no more, no fewer");
+      assert.equal(workIds.length, WORK_IDS.length, "there are no other registered work commands");
     },
   },
   {
