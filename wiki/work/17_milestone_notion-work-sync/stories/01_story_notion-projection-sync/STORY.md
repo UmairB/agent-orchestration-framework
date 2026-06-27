@@ -4,10 +4,10 @@ number: 01
 slug: notion-projection-sync
 title: "The aof → Notion projection + one-way sync — milestone→page, story→sub-task, status-map, --dry-run, idempotent update-in-place"
 parent: 17
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-25
-updated: 2026-06-26
+updated: 2026-06-27
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

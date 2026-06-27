@@ -4,10 +4,10 @@ number: 02
 slug: notion-cli-provisioning-doctor
 title: "The managed Notion CLI + opt-in config + doctor — the NOTION_DESCRIPTOR, the work.integrations.notion schema block, env-var auth, and the project-doctor surface"
 parent: 17
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-25
-updated: 2026-06-26
+updated: 2026-06-27
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

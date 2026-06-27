@@ -3,10 +3,10 @@ type: milestone
 number: 17
 slug: notion-work-sync
 title: "Notion Work-Board Sync — push milestone + story status to a Notion board, one-way, opt-in"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-25
-updated: 2026-06-26
+updated: 2026-06-27
 depends: [08, 12]
 ---
 <!--
@@ -107,19 +107,19 @@ git-ignored **`.aof/` sidecar** keyed by aof ref (ADR-001) — NOT an external-i
 extending it), auth via the **`NOTION_API_TOKEN`** env-var reference (`RESEARCH §A2`, never committed). Dependency
 edges: **00 → {01, 02} → 03**.
 
-- [ ] **00 · [notion-sync-spine](stories/00_story_notion-sync-spine/STORY.md)** — the registered
+- [x] **00 · [notion-sync-spine](stories/00_story_notion-sync-spine/STORY.md)** — the registered
   `notion:sync-work` command + `aof work integrations notion sync-work` CLI + the frozen per-item envelope
   (ADR-002), the `.aof/notion.work-map.json` mapping sidecar (ADR-001), and the config-load + opt-in-no-op
   gate (ADR-004). **The spine / critical path** — freezes the three contracts the siblings consume.
-- [ ] **01 · [notion-projection-sync](stories/01_story_notion-projection-sync/STORY.md)** — the pure
+- [x] **01 · [notion-projection-sync](stories/01_story_notion-projection-sync/STORY.md)** — the pure
   projection (milestone→page, story→same-database sub-task, status→board option via the mandatory `statusMap`,
   `data_source_id` addressing) + the one-way apply layer (create-on-first-run / update-in-place) + `--dry-run`
   zero-call preview (ADR-003). **The milestone's core behaviour** (critical path with 00; parallel with 02).
-- [ ] **02 · [notion-cli-provisioning-doctor](stories/02_story_notion-cli-provisioning-doctor/STORY.md)** —
+- [x] **02 · [notion-cli-provisioning-doctor](stories/02_story_notion-cli-provisioning-doctor/STORY.md)** —
   the `NOTION_DESCRIPTOR` (`provider:"npx"`), the `work.integrations.notion` schema block + validator, the
   env-var-reference auth read, and the `aof project doctor` surface (ADR-004). _Parallel with 01; off the
   critical path — only the `@manual` live binary round-trip needs it._
-- [ ] **03 · [notion-fitness](stories/03_story_notion-fitness/STORY.md)** — the seven enforcing arch-tests
+- [x] **03 · [notion-fitness](stories/03_story_notion-fitness/STORY.md)** — the seven enforcing arch-tests
   (mapping-sidecar-only, one-way, opt-in-no-op, auth-env-ref, never-touch-schema, CLI-not-MCP, fail-honestly);
   the contract IS the ARCHITECTURE.md fitness table (no `.feature`, mirrors 08/03, 12/04, 13/03). **The
   parallel tail** — RED until 00/01/02 land, then green.

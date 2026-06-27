@@ -4,10 +4,10 @@ number: 00
 slug: notion-sync-spine
 title: "The notion-sync spine — the registered notion:sync-work command + frozen envelope, the .aof/ mapping sidecar, and the opt-in no-op gate"
 parent: 17
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-25
-updated: 2026-06-26
+updated: 2026-06-27
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

@@ -4,10 +4,10 @@ number: 03
 slug: notion-fitness
 title: "The notion-sync fitness functions — the seven structural arch-tests that make the integration's invariants load-bearing"
 parent: 17
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-25
-updated: 2026-06-26
+updated: 2026-06-27
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
