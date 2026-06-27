@@ -4,10 +4,19 @@
 //    Notion page and no code issues a resolve-by-query to find a page (the sidecar is
 //    the sole resolver)."
 //
+// RE-POINTED (18/ADR-005, story 01) to the v2 multi-board per-data-source sidecar
+// shape: the invariant ("a binding under one data-source does not resolve under another")
+// now holds at the BUCKET boundary (separate per-data-source buckets in one file), not
+// because the file is single-scope. The round-trip arm additionally proves the v2
+// no-clobber guarantee (recording board B leaves board A's bucket intact) and that the
+// persisted file is v2 shape.
+//
 // Two legs, both CI-able offline (no Notion, no spawn):
 //   (a) ROUND-TRIP: import readMapping/resolvePageId/recordPageId and prove, over an
-//       injected temp project root, a MISS → null then a HIT → the recorded pageId.
-//       The sidecar is the SOLE identity store: the recorded id resolves back.
+//       injected temp project root, a MISS → null then a HIT → the recorded pageId; the
+//       per-board scoping holds (a ds-A binding misses under ds-B); and recording a
+//       SECOND board's binding leaves the FIRST board's bucket intact (the v2 coexistence
+//       fix) — the persisted file is v2 shape. The sidecar is the SOLE identity store.
 //   (b) SOURCE-GREP src/notion/*: (i) the sidecar file name is in AOF_GITIGNORE_ENTRIES
 //       (the mapping is git-ignored, ADR-001); (ii) no Notion `filter`-by-id resolve
 //       query appears (no resolve-by-query to FIND a page); (iii) no aof-identity
@@ -74,7 +83,7 @@ async function notionSourceFiles() {
 
 export const archTests = [
   {
-    name: "arch/notion-mapping-sidecar: the sidecar is the SOLE identity store — a MISS resolves null, a recorded HIT resolves the pageId (round-trip over an injected temp root)",
+    name: "arch/notion-mapping-sidecar: the sidecar is the SOLE identity store — a MISS resolves null, a recorded HIT resolves the pageId, per-board buckets coexist (v2 round-trip over an injected temp root)",
     async run() {
       const root = await mkdtemp(path.join(os.tmpdir(), "aof-arch-notion-map-"));
       const dataSourceId = "ds-fixture";
@@ -88,10 +97,31 @@ export const archTests = [
         const after = await readMapping(root, dataSourceId);
         assert.equal(resolvePageId(after, "17"), "page-abc", "the recorded page id round-trips (HIT → pageId)");
 
-        // Per-board scoping: the same ref under a DIFFERENT data-source resolves null
-        // (a binding under ds-A must not resolve under ds-B — two boards never collide).
+        // Per-board scoping (now at the v2 BUCKET boundary): the same ref under a
+        // DIFFERENT data-source resolves null (a binding under ds-A must not resolve
+        // under ds-B — two boards never collide).
         const other = await readMapping(root, "ds-other");
         assert.equal(resolvePageId(other, "17"), null, "a binding under one data-source does not resolve under another");
+
+        // v2 NO-CLOBBER (18/ADR-005): recording a SECOND board's binding leaves the
+        // FIRST board's bucket intact (the m17 clobber, where a record under a new
+        // data-source replaced the whole scope, is gone).
+        await recordPageId(root, "ds-other", "18", "page-xyz", { lastStatus: "Done" });
+        assert.equal(
+          resolvePageId(await readMapping(root, dataSourceId), "17"),
+          "page-abc",
+          "the first board's bucket survives a record into a second board (no clobber)"
+        );
+        assert.equal(
+          resolvePageId(await readMapping(root, "ds-other"), "18"),
+          "page-xyz",
+          "the second board's binding coexists in the same sidecar"
+        );
+
+        // The persisted file is the v2 multi-board per-data-source shape.
+        const raw = JSON.parse(await readFile(path.join(root, ".aof", "notion.work-map.json"), "utf8"));
+        assert.equal(raw.version, 2, "the persisted sidecar is the v2 shape (version 2)");
+        assert.ok(raw.boards && raw.boards[dataSourceId] && raw.boards["ds-other"], "both per-data-source buckets are persisted under boards");
       } finally {
         await rm(root, { recursive: true, force: true });
       }
@@ -131,31 +161,29 @@ export const archTests = [
   {
     name: "arch/notion-mapping-sidecar: the only page-property writes name title/status/relation — no aof-identity property is written onto a Notion page",
     async run() {
-      // The page-write argv builders (createPageArgv/patchPageArgv) carry property
-      // FLAGS; the only ones that may appear are the title / status / relation property
-      // flags. An aof-identity property write would name an `--external-id` / a
-      // `--property aof` / a ref-bearing identity flag — none may appear.
+      // The page body (pageProperties in sync.mjs) assigns Notion properties via
+      // `props[<keyExpr>] = …`. The ONLY key expressions allowed are the CONFIG-DRIVEN
+      // title / status / relation property names — an aof-identity property write (the
+      // ref keyed onto the page) would surface as a `props[<aof-ref>] = …` and is
+      // forbidden: identity lives in the sidecar, never on the Notion page.
       const sync = stripCommentsOnly(await readFile(path.join(SRC_NOTION_DIR, "sync.mjs"), "utf8"));
-      // The accepted property flags the apply layer constructs.
-      const ALLOWED_FLAGS = new Set([
-        "--data-source-id", "--title", "--status-property", "--status-option",
-        "--relation-property", "--relation-parent", "--page-id",
-      ]);
-      const flags = [...sync.matchAll(/["'](--[a-z][a-z0-9-]*)["']/g)].map((m) => m[1]);
-      assert.ok(flags.length > 0, "the apply layer constructs page-write flags (the grep is not vacuous)");
-      for (const flag of flags) {
+      const propKeyExprs = [...sync.matchAll(/props\[\s*([^\]]+?)\s*\]\s*=/g)].map((m) => m[1].trim());
+      assert.ok(propKeyExprs.length > 0, "the apply layer assigns page-body properties (the grep is not vacuous)");
+      // The accepted property-key expressions (config-driven: title/status/relation).
+      const ALLOWED_KEY_EXPRS = new Set(["titleProperty", "config.statusProperty", "op.relation.property"]);
+      for (const expr of propKeyExprs) {
         assert.ok(
-          ALLOWED_FLAGS.has(flag),
-          `${path.relative(repoRoot, path.join(SRC_NOTION_DIR, "sync.mjs"))} writes only title/status/relation page properties (found unexpected flag "${flag}")`
+          ALLOWED_KEY_EXPRS.has(expr),
+          `${path.relative(repoRoot, path.join(SRC_NOTION_DIR, "sync.mjs"))} writes only title/status/relation page properties (found props[${expr}])`
         );
       }
-      // None of the allowed flags names an aof-identity / external-id property.
-      for (const flag of ALLOWED_FLAGS) {
-        assert.ok(
-          !/external|aof-?ref|identity/i.test(flag),
-          `no allowed page-write flag names an aof-identity property (checked "${flag}")`
-        );
-      }
+      // No page-body property key names an aof-identity / external-id property.
+      assert.ok(
+        !/external|aof-?ref|identity/i.test(propKeyExprs.join(" ")),
+        "no page-body property key names an aof-identity / external-id property (identity lives in the sidecar)"
+      );
+      // Self-check (non-vacuous): an aof-identity property key is NOT in the allowed set.
+      assert.ok(!ALLOWED_KEY_EXPRS.has('"aof-ref"') && !ALLOWED_KEY_EXPRS.has("op.ref"), "an aof-identity property key is not accepted");
     },
   },
 ];

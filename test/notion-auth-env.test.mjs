@@ -2,9 +2,11 @@
 // tasks/02_auth-env-reference.feature (@executable rows; the @manual live `ntn api`
 // row is deferred to verify).
 //
-// The Notion CLI spawn reads process.env[<tokenEnv>] at run time and passes the
-// token (plus NOTION_KEYRING=0) through the spawned CLI's ENVIRONMENT, never the
-// argv; an absent/empty token is an honest configured-but-unreachable failure. The
+// The Notion CLI spawn reads process.env[<tokenEnv>] at run time. With a token set
+// (TOKEN mode) it passes the token (plus NOTION_KEYRING=0) through the spawned CLI's
+// ENVIRONMENT, never the argv. With NO token (KEYCHAIN mode) it injects nothing and
+// leaves the keyring enabled — ntn authenticates from its own `ntn login` session, so
+// an absent env token is NOT unreachable (the env token is only an override). The
 // spawn seam is injected (resolveBinary + spawn) so each row captures the constructed
 // env + argv hermetically — no live binary, no live token.
 import assert from "node:assert/strict";
@@ -12,9 +14,10 @@ import { makeNotionSpawn, resolveNotionAuth, buildSpawnEnv } from "../src/notion
 
 const FIXTURE_TOKEN = "ntn_fixture_secret_value_123";
 
-// An injected resolver that reports the `ntn` binary present on PATH (the npx-lane
-// reality) so the spawn proceeds without a live install.
-const RESOLVE_PRESENT = () => ({ found: true, source: "path", binary: "ntn", path: "/usr/local/bin/ntn", version: "0.17.0" });
+// An injected resolver that reports the `ntn` bin/ntn JS launcher present (the npx-lane
+// reality) so the spawn proceeds hermetically without a live install. makeNotionSpawn
+// runs it as `node <launcher> <argv>`.
+const FAKE_LAUNCHER = () => "/usr/local/lib/node_modules/ntn/bin/ntn";
 
 // A spawn spy that captures the (file, argv, options) it was called with and returns
 // a benign success result.
@@ -30,7 +33,7 @@ function spawnSpy() {
 // Build a spawn seam over a fixed config + env, returning { spawn, spy }.
 function makeWith({ config = { tokenEnv: "NOTION_API_TOKEN" }, env }) {
   const spy = spawnSpy();
-  const spawn = makeNotionSpawn({ config, env, resolveBinary: RESOLVE_PRESENT, spawn: spy.fn });
+  const spawn = makeNotionSpawn({ config, env, resolveLauncher: FAKE_LAUNCHER, node: "/usr/bin/node", spawn: spy.fn });
   return { spawn, spy };
 }
 
@@ -80,40 +83,45 @@ export const notionAuthEnvTests = [
   },
 
   {
-    // Scenario Outline: an absent or empty token fails honestly, never half-writes or
-    // silently succeeds. (token set → reachable/proceeds; unset/empty → honest fail.)
-    name: "notion-auth/02 an absent or empty token fails honestly (matrix)",
+    // Scenario Outline: the env token is an OPTIONAL OVERRIDE of ntn's keychain (per
+    // ntn: NOTION_API_TOKEN "overrides keychain"). token set → TOKEN mode (inject token
+    // + keyring off); token unset/empty → KEYCHAIN mode (ntn authenticates from its own
+    // `ntn login` session — reachable, no token injected, keyring NOT disabled, spawn
+    // PROCEEDS). An absent env token is NOT "unreachable".
+    name: "notion-auth/02 the env token is an optional override; absent ⇒ keychain mode (ntn login), not unreachable",
     async run() {
       const config = { tokenEnv: "NOTION_API_TOKEN" };
 
-      // Row: a fixture token → reachable, proceeds to the spawn with the token in env.
+      // Row: a fixture token → TOKEN mode, reachable, token injected + keyring off.
       const setAuth = resolveNotionAuth({ config, env: { NOTION_API_TOKEN: FIXTURE_TOKEN } });
       assert.equal(setAuth.reachable, true, "a set token is reachable");
+      assert.equal(setAuth.mode, "token", "a set token is TOKEN mode");
       assert.equal(setAuth.token, FIXTURE_TOKEN, "the resolved token is the env value");
-      const proceedEnv = buildSpawnEnv({ token: setAuth.token, tokenEnv: setAuth.tokenEnv, baseEnv: {} });
-      assert.equal(proceedEnv.NOTION_API_TOKEN, FIXTURE_TOKEN, "proceeds with the token in the env");
+      const tokenEnv = buildSpawnEnv({ token: setAuth.token, tokenEnv: setAuth.tokenEnv, baseEnv: {} });
+      assert.equal(tokenEnv.NOTION_API_TOKEN, FIXTURE_TOKEN, "token mode injects the token into the env");
+      assert.equal(tokenEnv.NOTION_KEYRING, "0", "token mode forces the keyring off (use the injected token)");
 
-      // Row: unset → unreachable, a structured honest failure, no page written.
+      // Row: unset → KEYCHAIN mode, reachable, no token, keyring NOT disabled.
       const unsetAuth = resolveNotionAuth({ config, env: {} });
-      assert.equal(unsetAuth.reachable, false, "an unset token is unreachable");
+      assert.equal(unsetAuth.reachable, true, "an unset token is NOT unreachable — ntn uses its own keychain session");
+      assert.equal(unsetAuth.mode, "keychain", "an unset token is KEYCHAIN mode");
       assert.equal(unsetAuth.token, null, "no token is fabricated");
-      assert.ok(/unset or empty/i.test(unsetAuth.reason), "the unreachable verdict is structured (carries a reason)");
+      const keychainEnv = buildSpawnEnv({ token: unsetAuth.token, tokenEnv: unsetAuth.tokenEnv, baseEnv: { PATH: "/x" } });
+      assert.ok(!("NOTION_API_TOKEN" in keychainEnv), "keychain mode injects NO token");
+      assert.notEqual(keychainEnv.NOTION_KEYRING, "0", "keychain mode does NOT disable the OS keychain");
 
-      // Row: set to empty → unreachable, a structured honest failure.
+      // Row: set to empty → KEYCHAIN mode too (an empty string is not a token).
       const emptyAuth = resolveNotionAuth({ config, env: { NOTION_API_TOKEN: "" } });
-      assert.equal(emptyAuth.reachable, false, "an empty token is unreachable");
-      assert.equal(emptyAuth.token, null, "no token is fabricated for an empty value");
+      assert.equal(emptyAuth.reachable, true, "an empty token falls back to keychain mode (reachable)");
+      assert.equal(emptyAuth.mode, "keychain", "an empty token is KEYCHAIN mode");
 
-      // And: an unreachable token never reaches the spawn — the spawn throws a
-      // STRUCTURED error BEFORE any page write (no silent success).
+      // And: in keychain mode the spawn PROCEEDS (ntn authenticates from its own session)
+      // — it is NOT blocked on an absent env token, and injects no token into the env.
       const spy = spawnSpy();
-      const spawn = makeNotionSpawn({ config, env: {}, resolveBinary: RESOLVE_PRESENT, spawn: spy.fn });
-      await assert.rejects(
-        () => spawn(["api", "pages", "create"]),
-        (e) => e.code === "notion-unreachable",
-        "an absent token throws a structured notion-unreachable error"
-      );
-      assert.equal(spy.calls.length, 0, "no page was written (the spawn was never invoked) — never half-writes");
+      const spawn = makeNotionSpawn({ config, env: {}, resolveLauncher: FAKE_LAUNCHER, node: "/usr/bin/node", spawn: spy.fn });
+      await spawn(["api", "pages", "create"]);
+      assert.equal(spy.calls.length, 1, "keychain mode reaches the spawn (not blocked on an absent env token)");
+      assert.ok(!("NOTION_API_TOKEN" in spy.calls[0].options.env), "no token is injected into the keychain-mode spawn env");
     },
   },
 ];

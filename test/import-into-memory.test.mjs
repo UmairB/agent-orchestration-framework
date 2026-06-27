@@ -217,6 +217,10 @@ async function makeSourceRepo(milestoneRef = "00") {
   const src = await mkdtemp(path.join(os.tmpdir(), "aof-import-mem-src-"));
   const dir = path.join(src, "wiki", "work", `${milestoneRef}_milestone_teleport-beacon`);
   await mkdir(dir, { recursive: true });
+  // The source is also a self-contained aof workspace, so the co-located AOF.md the
+  // import writes here is indexed IN PLACE by this repo's own work-stream scan.
+  await mkdir(path.join(src, ".aof"), { recursive: true });
+  await writeFile(path.join(src, ".aof", "aof.config.json"), `${JSON.stringify(CONFIG, null, 2)}\n`, "utf8");
   await writeFile(
     path.join(dir, "SPEC.md"),
     `# ${milestoneRef} Teleport beacon\n\n## Objective\n\nDeliver the teleport beacon.\n\n## Scope\n\nIn: the beacon. Out: live sync.\n`,
@@ -538,21 +542,27 @@ export const importIntoMemoryTests = [
 
   // ═════════════ 02_import-triggers-reindex.feature (@executable rows) ════════
   {
-    name: "import-mem/02 import leaves the imported precedent immediately recall-able with no separate reindex step",
+    name: "import-mem/02 import co-locates the AOF.md digest into the source milestone folder, recall-able in place (no separate reindex)",
     async run() {
-      const { repo } = await makeCliRepo();
+      // Run the import FROM the source workspace: the digest co-locates into the
+      // milestone's OWN folder (the rule), and the import's reindex indexes it in place.
       const src = await makeSourceRepo("00");
       try {
-        const imp = runCli(repo, ["import", "milestone", src, "00"]);
+        const imp = runCli(src, ["import", "milestone", src, "00"]);
         assert.equal(imp.status, 0, `import exits 0 (stderr: ${imp.stderr.slice(0, 200)})`);
-        // No manual reindex: a recall right after the import surfaces the import.
-        const records = cliRecall(repo, TELEPORT_QUERY);
         assert.ok(
-          records.some(isImportRecord),
-          "the recalled records include a record sourced from the import store (the import triggered the reindex)"
+          existsSync(path.join(src, "wiki", "work", "00_milestone_teleport-beacon", "AOF.md")),
+          "the AOF.md is co-located IN the source milestone folder"
+        );
+        assert.ok(!existsSync(importStoreRoot(src)), "no separate .aof/imports store is created");
+        // No manual reindex: a recall right after the import surfaces the co-located
+        // digest. It is a normal work-stream `summary` record (in place), not an import-leg record.
+        const records = cliRecall(src, TELEPORT_QUERY);
+        assert.ok(
+          records.some((r) => r.recordType === "summary"),
+          "the co-located AOF.md digest is recall-able in place (a summary record)"
         );
       } finally {
-        await rm(repo, { recursive: true, force: true });
         await rm(src, { recursive: true, force: true });
       }
     },
@@ -580,31 +590,28 @@ export const importIntoMemoryTests = [
     },
   },
   {
-    name: "import-mem/02 a re-import over the same source yields the same recall-able record set with no growth",
+    name: "import-mem/02 a re-import overwrites the co-located AOF.md in place — the same recall-able digest set, no growth",
     async run() {
-      const { repo } = await makeCliRepo();
       const src = await makeSourceRepo("00");
+      const digestSet = () =>
+        cliRecall(src, TELEPORT_QUERY, ["--limit", "50"])
+          .filter((r) => r.recordType === "summary")
+          .map((r) => `${r.id}|${r.source}`)
+          .sort();
       try {
-        const first = runCli(repo, ["import", "milestone", src, "00"]);
+        const first = runCli(src, ["import", "milestone", src, "00"]);
         assert.equal(first.status, 0, `first import exits 0 (stderr: ${first.stderr.slice(0, 200)})`);
-        const firstSet = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"])
-          .filter(isImportRecord)
-          .map((r) => `${r.item}|${r.id}|${r.source}`)
-          .sort();
-        assert.ok(firstSet.length >= 1, "the first import is recall-able");
+        const firstSet = digestSet();
+        assert.ok(firstSet.length >= 1, "the co-located digest is recall-able");
 
-        // Re-import over the UNCHANGED source — a clean one-time snapshot (ADR-005).
-        const second = runCli(repo, ["import", "milestone", src, "00"]);
+        // Re-import over the UNCHANGED source — overwrites the SAME AOF.md in place.
+        const second = runCli(src, ["import", "milestone", src, "00"]);
         assert.equal(second.status, 0, `re-import exits 0 (stderr: ${second.stderr.slice(0, 200)})`);
-        const secondSet = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"])
-          .filter(isImportRecord)
-          .map((r) => `${r.item}|${r.id}|${r.source}`)
-          .sort();
+        const secondSet = digestSet();
 
-        assert.deepEqual(secondSet, firstSet, "the re-import recall-able set is the SAME set (no new records, no drift)");
-        assert.equal(secondSet.length, firstSet.length, "the imported record count is unchanged (no growth)");
+        assert.deepEqual(secondSet, firstSet, "the re-import digest set is the SAME set (no new records, no drift)");
+        assert.equal(secondSet.length, firstSet.length, "the digest record count is unchanged (no growth)");
       } finally {
-        await rm(repo, { recursive: true, force: true });
         await rm(src, { recursive: true, force: true });
       }
     },
@@ -612,45 +619,41 @@ export const importIntoMemoryTests = [
   {
     name: "import-mem/02 the import mode decides whether the imported records become recall-able (Scenario Outline, folded)",
     async run() {
-      // Row 1: a real import (no flag) → recall-able, the imported set.
+      // The co-located digest's `summary` records are the import's contribution in place.
+      const digestCount = (src) =>
+        cliRecall(src, TELEPORT_QUERY, ["--limit", "50"]).filter((r) => r.recordType === "summary").length;
+      // Row 1: a real import (no flag) → the co-located digest is recall-able.
       {
-        const { repo } = await makeCliRepo();
         const src = await makeSourceRepo("00");
         try {
-          assert.equal(runCli(repo, ["import", "milestone", src, "00"]).status, 0, "real import exits 0");
-          const set = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"]).filter(isImportRecord);
-          assert.ok(set.length >= 1, "a real import is recall-able (the imported set)");
+          assert.equal(runCli(src, ["import", "milestone", src, "00"]).status, 0, "real import exits 0");
+          assert.ok(digestCount(src) >= 1, "a real import co-locates a recall-able digest");
         } finally {
-          await rm(repo, { recursive: true, force: true });
           await rm(src, { recursive: true, force: true });
         }
       }
-      // Row 2: a --dry-run → absent, zero (nothing indexed).
+      // Row 2: a --dry-run → no AOF.md written, so no digest record is recall-able.
       {
-        const { repo } = await makeCliRepo();
         const src = await makeSourceRepo("00");
         try {
-          assert.equal(runCli(repo, ["import", "milestone", src, "00", "--dry-run"]).status, 0, "--dry-run exits 0");
-          const set = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"]).filter(isImportRecord);
-          assert.equal(set.length, 0, "a --dry-run reaches nothing (zero imported records recall-able)");
+          assert.equal(runCli(src, ["import", "milestone", src, "00", "--dry-run"]).status, 0, "--dry-run exits 0");
+          assert.ok(!existsSync(path.join(src, "wiki", "work", "00_milestone_teleport-beacon", "AOF.md")), "a --dry-run writes no co-located AOF.md");
+          assert.equal(digestCount(src), 0, "a --dry-run reaches nothing (zero digest records recall-able)");
         } finally {
-          await rm(repo, { recursive: true, force: true });
           await rm(src, { recursive: true, force: true });
         }
       }
       // Row 3: a re-run (no flag) → recall-able, unchanged from the first import.
       {
-        const { repo } = await makeCliRepo();
         const src = await makeSourceRepo("00");
         try {
-          assert.equal(runCli(repo, ["import", "milestone", src, "00"]).status, 0, "first import exits 0");
-          const firstCount = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"]).filter(isImportRecord).length;
-          assert.equal(runCli(repo, ["import", "milestone", src, "00"]).status, 0, "re-import exits 0");
-          const secondCount = cliRecall(repo, TELEPORT_QUERY, ["--limit", "50"]).filter(isImportRecord).length;
+          assert.equal(runCli(src, ["import", "milestone", src, "00"]).status, 0, "first import exits 0");
+          const firstCount = digestCount(src);
+          assert.equal(runCli(src, ["import", "milestone", src, "00"]).status, 0, "re-import exits 0");
+          const secondCount = digestCount(src);
           assert.ok(firstCount >= 1, "the first import is recall-able");
           assert.equal(secondCount, firstCount, "a re-import is recall-able with the count unchanged from the first import");
         } finally {
-          await rm(repo, { recursive: true, force: true });
           await rm(src, { recursive: true, force: true });
         }
       }

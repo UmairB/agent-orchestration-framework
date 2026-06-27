@@ -498,8 +498,13 @@ async function notionIntegrationCommand(args) {
     return;
   }
 
+  if (verb === "associate") {
+    await notionAssociateCli(rest);
+    return;
+  }
+
   console.error(
-    `Unknown notion integration verb "${verb ?? ""}". Usage: aof work integrations notion sync-work <milestone> [--dry-run] [--json]`
+    `Unknown notion integration verb "${verb ?? ""}". Usage: aof work integrations notion <sync-work <milestone> [--dry-run] | associate <ref> --board <key|none> --parent <id|key|none>> [--json]`
   );
   process.exitCode = 1;
 }
@@ -541,6 +546,42 @@ async function notionSyncWorkCli(args) {
 
   // Non-json: render the result; a command error propagates to bin/aof.mjs (stderr +
   // non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]`
+// — the thin face over the registered notion:associate command (18/ADR-004), routing
+// through invoke (the registry door). Mirrors notionSyncWorkCli: getCommand →
+// loadWorkspace → invoke → cli.json/render. A MISSING <ref>, or neither --board nor
+// --parent, exits non-zero with a usage message BEFORE any workspace load (and writes
+// nothing). In --json mode a command error is emitted as a SINGLE structured envelope
+// { ok:false, error, code } on stdout (+ non-zero exit), like the sync-work verb.
+async function notionAssociateCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("notion:associate");
+
+  if (options._[0] == null || (options.board == null && options.parent == null)) {
+    console.error(
+      "Usage: aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]"
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
   console.log(command.cli.render(result));
 }

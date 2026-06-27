@@ -27,20 +27,18 @@ function stripCommentsOnly(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-// The Notion-CLI verb pairs the apply layer is ALLOWED to construct: a `pages create`
-// / `pages update` — both disk→Notion page writes (the as-built `ntn api pages …`
-// egress). A `pages retrieve` / `pages query` / `search` / `databases query` (a READ
-// whose result could feed disk) is forbidden.
-const NOTION_WRITE_NOUN_VERBS = [
-  ["pages", "create"],
-  ["pages", "update"],
-];
-// Notion noun-verb read forms that, if present, could feed Notion state back to disk.
-const NOTION_READ_VERBS = ["retrieve", "query", "search", "list", "get"];
+// The HTTP methods the apply layer is ALLOWED to construct against `v1/pages`: POST
+// (create) / PATCH (update) — both disk→Notion page WRITES (the real `ntn api -X
+// <method> v1/pages …` egress). A GET (a READ whose result could feed disk) is
+// forbidden, as is any non-page path (a query/search/schema endpoint).
+const WRITE_METHODS = new Set(["POST", "PATCH", "PUT"]);
+// The ntn `pages <verb>` convenience verbs the apply layer may use: page-content
+// WRITES (disk→Notion). A `pages get` (read) / `pages trash` (delete) is forbidden.
+const PAGE_WRITE_VERBS = new Set(["create", "edit"]);
+const PAGE_READ_VERBS = new Set(["get", "retrieve", "trash"]);
 
 // Pull the ordered string-literal tokens out of every array literal in the source —
-// the apply layer builds its argv as `["api", "pages", "create", …]`, so the noun-verb
-// pair is two adjacent literal tokens inside an array.
+// the apply layer builds its argv as `["api", "-X", "POST", "v1/pages", "-d", …]`.
 function arrayLiteralTokenLists(codeWithStrings) {
   const lists = [];
   for (const m of codeWithStrings.matchAll(/\[([^\]]*)\]/g)) {
@@ -50,11 +48,15 @@ function arrayLiteralTokenLists(codeWithStrings) {
   return lists;
 }
 
-// The noun-verb pairs an array's tokens express: each adjacent (tok[i], tok[i+1]).
-function nounVerbPairs(tokens) {
-  const pairs = [];
-  for (let i = 0; i < tokens.length - 1; i += 1) pairs.push([tokens[i], tokens[i + 1]]);
-  return pairs;
+// From an `api` spawn argv's tokens, extract { method, path }: the method is the token
+// after `-X` (ntn infers GET when absent — a READ); the path is the first `v1/…` token.
+// Returns null for a non-`api` array literal (e.g. the ACTION_BY_OP map).
+function apiCall(tokens) {
+  if (tokens[0] !== "api") return null;
+  const xi = tokens.indexOf("-X");
+  const method = xi >= 0 && tokens[xi + 1] ? tokens[xi + 1] : "GET";
+  const apiPath = tokens.find((t) => /^v1\//.test(t)) ?? null;
+  return { method, path: apiPath };
 }
 
 // A fs-write of a record doc (STORY.md / SPEC.md / a frontmatter file) — the forbidden
@@ -65,43 +67,56 @@ const RECORD_DOC_WRITE =
 
 export const archTests = [
   {
-    name: "arch/notion-one-way: every Notion-CLI spawn argv names a PAGE create/update (disk→Notion) — no Notion READ verb whose result could feed disk",
+    name: "arch/notion-one-way: every Notion-CLI spawn argv is a PAGE write (POST/PATCH v1/pages) — no GET read whose result could feed disk, no non-page path",
     async run() {
       const code = stripCommentsOnly(await readFile(SYNC, "utf8"));
       const lists = arrayLiteralTokenLists(code);
       let sawPageWrite = false;
       for (const tokens of lists) {
-        for (const [noun, verb] of nounVerbPairs(tokens)) {
-          if (noun === "pages") {
-            const allowed = NOTION_WRITE_NOUN_VERBS.some(([n, v]) => n === noun && v === verb);
-            assert.ok(
-              allowed,
-              `${path.relative(repoRoot, SYNC)} names only a PAGE create/update (found "pages ${verb}", a non-write page verb)`
-            );
-            sawPageWrite = true;
-          }
-          // A read verb following ANY noun (databases/data_sources/search) is the
-          // forbidden read-as-truth form.
+        // Form 1: a raw `api -X <method> v1/…` call.
+        const call = apiCall(tokens);
+        if (call && call.path) {
+          // The path must address a PAGE (v1/pages or v1/pages/<id>), never a read/query/
+          // search/schema endpoint whose result could feed disk.
           assert.ok(
-            !NOTION_READ_VERBS.includes(verb),
-            `${path.relative(repoRoot, SYNC)} issues no Notion READ verb whose result feeds disk (found "${noun} ${verb}")`
+            /^v1\/pages(\/|$)/.test(call.path),
+            `${path.relative(repoRoot, SYNC)} addresses only v1/pages (found path "${call.path}")`
           );
+          // The method must be a WRITE (disk→Notion). A GET read is the forbidden
+          // read-as-truth form.
+          assert.ok(
+            WRITE_METHODS.has(call.method),
+            `${path.relative(repoRoot, SYNC)} issues only write methods to v1/pages (found "${call.method} ${call.path}")`
+          );
+          sawPageWrite = true;
+          continue;
+        }
+        // Form 2: a ntn `pages <verb>` convenience command (e.g. `pages edit` sets the
+        // page BODY). Only page-content WRITES are allowed; a `pages get` (read) /
+        // `pages trash` (delete) is the forbidden read-as-truth / destructive form.
+        if (tokens[0] === "pages" && tokens[1]) {
+          const verb = tokens[1];
+          assert.ok(
+            !PAGE_READ_VERBS.has(verb),
+            `${path.relative(repoRoot, SYNC)} issues no Notion page READ/delete verb (found "pages ${verb}")`
+          );
+          assert.ok(
+            PAGE_WRITE_VERBS.has(verb),
+            `${path.relative(repoRoot, SYNC)} uses only page-content writes via \`pages <verb>\` (found "pages ${verb}")`
+          );
+          sawPageWrite = true;
         }
       }
       assert.ok(sawPageWrite, "the apply layer DOES spawn a page write (the one-way egress is real, not absent)");
 
-      // Self-check (non-vacuous): the extractor sees a planted forbidden read verb and
-      // the allowed-pair check would reject it.
-      const planted = arrayLiteralTokenLists('["api", "pages", "retrieve", "--page-id", id]');
-      const plantedPairs = planted.flatMap(nounVerbPairs);
-      assert.ok(
-        plantedPairs.some(([n, v]) => n === "pages" && NOTION_READ_VERBS.includes(v)),
-        "the verb extractor fires on a planted forbidden `pages retrieve` read form"
-      );
-      assert.ok(
-        !NOTION_WRITE_NOUN_VERBS.some(([n, v]) => n === "pages" && v === "retrieve"),
-        "`pages retrieve` is NOT in the allowed write-pair set"
-      );
+      // Self-check (non-vacuous): a planted GET read of a page is caught (not a write
+      // method); a planted POST to a non-page (schema) path is caught (path guard); and a
+      // planted `pages get` read verb is caught (not a page-content write).
+      const read = apiCall(arrayLiteralTokenLists('["api", "-X", "GET", "v1/pages/" + id]')[0]);
+      assert.ok(read && read.method === "GET" && !WRITE_METHODS.has(read.method), "the guard flags a planted `-X GET v1/pages` read");
+      const schema = apiCall(arrayLiteralTokenLists('["api", "-X", "POST", "v1/databases", "-d", body]')[0]);
+      assert.ok(schema && !/^v1\/pages(\/|$)/.test(schema.path), "the guard flags a planted POST to a non-page (v1/databases) path");
+      assert.ok(PAGE_READ_VERBS.has("get") && !PAGE_WRITE_VERBS.has("get"), "the guard flags a planted `pages get` read verb");
     },
   },
   {

@@ -19,7 +19,10 @@
 // resolver), and `spawn` (the child-process spawn). The live `ntn api` round-trip
 // is the @manual row (no token on the dev host).
 import { spawnSync } from "node:child_process";
-import { resolveManagedBinary, descriptorFor } from "../tool-store.mjs";
+import path from "node:path";
+import os from "node:os";
+import { existsSync, readdirSync } from "node:fs";
+import { descriptorFor } from "../tool-store.mjs";
 
 // The default env-var NAME the token is read from when the config omits `tokenEnv`
 // (RESEARCH §A2 — Notion's own NOTION_API_TOKEN convention). The config's
@@ -44,55 +47,92 @@ export function resolveNotionAuth({ config = {}, env = process.env } = {}) {
     : DEFAULT_TOKEN_ENV;
   const raw = env?.[tokenEnv];
   const token = typeof raw === "string" ? raw : "";
-  if (token.length === 0) {
-    return {
-      reachable: false,
-      token: null,
-      tokenEnv,
-      reason: `Notion auth is configured but the ${tokenEnv} environment variable is unset or empty — export it to reach Notion.`,
-    };
+  if (token.length > 0) {
+    // TOKEN mode: an explicit env token OVERRIDES ntn's keychain (per ntn's own docs,
+    // NOTION_API_TOKEN "overrides keychain"). The headless / CI lane.
+    return { reachable: true, token, tokenEnv, mode: "token" };
   }
-  return { reachable: true, token, tokenEnv };
+  // KEYCHAIN mode: no env token → ntn authenticates from its OWN session (`ntn login`
+  // → OS keychain). The env var is ONLY an override, so its ABSENCE is NOT
+  // "unreachable" — a browser-logged-in ntn reaches Notion with no env token at all.
+  // Reachability is the keychain session's to prove (the spawn / `ntn whoami`), never
+  // the env var's presence. We inject NO token and do NOT disable the keyring.
+  return { reachable: true, token: null, tokenEnv, mode: "keychain" };
 }
 
 // buildSpawnEnv({ token, tokenEnv, baseEnv }) → the environment the spawned CLI
-// runs under. It carries the token under its NAMED env var plus NOTION_KEYRING=0
-// (the head-less opt-out). The secret lives ONLY here — never in the argv.
+// runs under. TWO modes (mirrors resolveNotionAuth):
+//   - TOKEN mode (a non-empty token): carry the token under its NAMED env var + force
+//     NOTION_KEYRING=0 so ntn uses the injected token, never the OS keychain. The
+//     secret lives ONLY here — never in the argv.
+//   - KEYCHAIN mode (no token): inject NOTHING and DO NOT disable the keyring — ntn
+//     authenticates from its own `ntn login` session (the OS keychain). Pass the base
+//     env through unchanged.
 export function buildSpawnEnv({ token, tokenEnv = DEFAULT_TOKEN_ENV, baseEnv = process.env } = {}) {
-  return {
-    ...baseEnv,
-    [tokenEnv]: token,
-    NOTION_KEYRING: NOTION_KEYRING_OFF,
-  };
+  if (typeof token === "string" && token.length > 0) {
+    return {
+      ...baseEnv,
+      [tokenEnv]: token,
+      NOTION_KEYRING: NOTION_KEYRING_OFF,
+    };
+  }
+  return { ...baseEnv };
 }
 
-// The Notion CLI binary name (the NOTION_DESCRIPTOR's sole binary). Resolved via
-// the m12 store-then-PATH resolver — for an npx-lane tool that means the PATH
-// fallback (it is never in the version-keyed store; 12/ADR-002, 17/ADR-004).
+// The Notion CLI descriptor identity (package name + pinned version), for hints.
 function notionBinary() {
   const descriptor = descriptorFor("notion");
   return { name: descriptor.name, version: descriptor.version, binary: descriptor.binaries[0] };
 }
 
-// makeNotionSpawn({ config, env, resolveBinary, spawn }) → the spawn SEAM the apply
-// layer (src/notion/sync.mjs) calls as `notionSpawn(argv)`. It:
-//   1. resolves auth honestly — an unreachable token throws a STRUCTURED error
-//      (code "notion-unreachable") BEFORE any spawn, so no page is half-written;
-//   2. resolves the `ntn` binary via the m12 resolver (store-then-PATH); an absent
-//      binary is a STRUCTURED error (code "notion-cli-absent"), never a silent pass;
-//   3. spawns `<ntn> <...argv>` with the token in the ENVIRONMENT (NOTION_KEYRING=0),
-//      NEVER in the argv;
+// Resolve the `ntn` package's `bin/ntn` JS LAUNCHER (NOT the PATH `.cmd`/`.ps1` shim).
+// `ntn` is distributed as a Node launcher that selects the platform-native `.exe`
+// (`dist/ntn-<platform>-<arch>/ntn.exe`); the npm-created PATH shim is a `.cmd`/`.ps1`
+// that cannot be spawned directly on Windows without a shell — and a shell mangles the
+// JSON `-d` body. So we run the launcher with `node` (always spawnable, no shell, JSON
+// intact). Searches: every PATH dir's `node_modules/ntn/bin/ntn` (the global-install
+// layout) + the npx cache (`<npm-cache>/_npx/*/node_modules/ntn/bin/ntn`). Returns the
+// launcher path or null. (12-style store→PATH resolution, corrected for the npx lane.)
+export function resolveNtnLauncher(env = process.env) {
+  const candidates = [];
+  const pathValue = env.PATH ?? env.Path ?? env.path ?? "";
+  for (const dir of pathValue.split(path.delimiter).filter(Boolean)) {
+    candidates.push(path.join(dir, "node_modules", "ntn", "bin", "ntn"));
+  }
+  // The npx cache lane: <npm-cache>/_npx/<hash>/node_modules/ntn/bin/ntn.
+  const npmCache = env.npm_config_cache || path.join(env.LOCALAPPDATA || os.homedir(), "npm-cache");
+  const npxRoot = path.join(npmCache, "_npx");
+  try {
+    for (const hash of readdirSync(npxRoot)) {
+      candidates.push(path.join(npxRoot, hash, "node_modules", "ntn", "bin", "ntn"));
+    }
+  } catch {
+    // No npx cache — fine, the PATH lane may still resolve.
+  }
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+// makeNotionSpawn({ config, env, resolveLauncher, node, spawn }) → the spawn SEAM the
+// apply layer (src/notion/sync.mjs) calls as `notionSpawn(argv)`. It:
+//   1. resolves auth honestly — keychain mode (ntn login) reaches Notion with no env
+//      token; an explicit-but-unreachable token throws a STRUCTURED error before any spawn;
+//   2. resolves the `ntn` bin/ntn JS launcher; an absent install is a STRUCTURED error
+//      (code "notion-cli-absent"), never a silent pass;
+//   3. spawns `node <bin/ntn> <...argv>` with the token (TOKEN mode) or nothing
+//      (KEYCHAIN mode) in the ENVIRONMENT, NEVER in the argv;
 //   4. returns the parsed stdout JSON (the created/updated page) to the apply layer.
-// The token is NEVER appended to argv — only the operation argv the apply layer
-// constructed is passed through.
 export function makeNotionSpawn({
   config = {},
   env = process.env,
-  resolveBinary = resolveManagedBinary,
+  resolveLauncher = resolveNtnLauncher,
+  node = process.execPath,
   spawn = spawnSync,
 } = {}) {
   return async function notionSpawn(argv) {
-    // 1. AUTH — honest, before any spawn. An unreachable token never half-writes.
+    // 1. AUTH — honest, before any spawn. An unreachable explicit token never half-writes.
     const auth = resolveNotionAuth({ config, env });
     if (!auth.reachable) {
       const error = new Error(auth.reason);
@@ -101,22 +141,22 @@ export function makeNotionSpawn({
       throw error;
     }
 
-    // 2. BINARY — the m12 store-then-PATH resolver (npx-lane ⇒ the PATH leg).
-    const { name, version, binary } = notionBinary();
-    const cli = resolveBinary({ name, version, binary, env });
-    if (!cli || !cli.found) {
+    // 2. BINARY — the ntn bin/ntn JS launcher (run via node; the npx-lane reality).
+    const { version } = notionBinary();
+    const launcher = resolveLauncher(env);
+    if (!launcher) {
       const error = new Error(
-        cli?.hint ?? `The Notion CLI (${binary}) is not installed. Run \`aof project provision notion\`.`
+        `The Notion CLI (ntn) is not installed. Install it with \`npm i -g ntn@${version}\` (or run \`npx ntn login\` once), then re-run.`
       );
       error.code = "notion-cli-absent";
       error.status = 502;
       throw error;
     }
 
-    // 3. SPAWN — the token lives in the env (+ NOTION_KEYRING=0), NEVER in the argv.
+    // 3. SPAWN — `node <bin/ntn> <...argv>`. The token (TOKEN mode) lives in the env
+    // (+ NOTION_KEYRING=0), NEVER in the argv; KEYCHAIN mode injects nothing.
     const spawnEnv = buildSpawnEnv({ token: auth.token, tokenEnv: auth.tokenEnv, baseEnv: env });
-    const ntnPath = cli.path;
-    const result = spawn(ntnPath, argv, { env: spawnEnv, encoding: "utf8" });
+    const result = spawn(node, [launcher, ...argv], { env: spawnEnv, encoding: "utf8" });
 
     if (!result || result.status !== 0) {
       const error = new Error(

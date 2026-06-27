@@ -35,32 +35,22 @@ function arrayLiteralTokenLists(codeWithStrings) {
   return lists;
 }
 
-// Schema-object NOUNS — a `create` against any of these (or a property mutation verb)
-// is the forbidden never-touch-schema form. The only noun the sync may `create` is
-// `pages`.
-const SCHEMA_NOUNS = new Set(["databases", "database", "data-sources", "data_sources", "properties", "property", "views", "view"]);
-// A standalone schema-mutation verb token (a property/schema mutation the CLI exposes).
-const SCHEMA_MUTATION_TOKENS = new Set([
-  "update-data-source-properties",
-  "create-database",
-  "create-data-source",
-  "create-property",
-]);
+// The HTTP methods that WRITE. A write to a SCHEMA path is the forbidden
+// never-touch-schema form; the only path the sync may write is `v1/pages`.
+const WRITE_METHODS = new Set(["POST", "PATCH", "PUT"]);
+// Schema-object API paths — a write (POST/PATCH) to any of these is forbidden. The
+// page create addresses the data source via the BODY (`parent.data_source_id`), NOT a
+// write to `v1/data_sources` — that addressing is legitimate and is NOT a schema write.
+const SCHEMA_PATH_RE = /^v1\/(databases|data_sources|data-sources)(\/|$)|\/properties(\/|$)/;
 
-// A schema-create / schema-mutation appearing as adjacent argv tokens (a `<schema-noun>
-// create`) OR a standalone schema-mutation token. Used over the joined token stream so
-// a noun-then-create pair is caught regardless of intervening flags placement.
-function schemaWriteTokens(tokens) {
-  const hits = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const t = tokens[i];
-    if (SCHEMA_MUTATION_TOKENS.has(t)) hits.push(t);
-    if (SCHEMA_NOUNS.has(t)) {
-      const next = tokens[i + 1];
-      if (next === "create" || next === "update") hits.push(`${t} ${next}`);
-    }
-  }
-  return hits;
+// From an `api` spawn argv's tokens, extract { method, path }: the method follows `-X`
+// (ntn infers GET when absent); the path is the first `v1/…` token.
+function apiCall(tokens) {
+  if (tokens[0] !== "api") return null;
+  const xi = tokens.indexOf("-X");
+  const method = xi >= 0 && tokens[xi + 1] ? tokens[xi + 1] : "GET";
+  const apiPath = tokens.find((t) => /^v1\//.test(t)) ?? null;
+  return { method, path: apiPath };
 }
 
 async function notionSourceFiles() {
@@ -73,43 +63,31 @@ async function notionSourceFiles() {
 
 export const archTests = [
   {
-    name: "arch/notion-no-schema-write: no src/notion/* spawn argv creates a database/data-source/property/view — the only create is a PAGE create",
+    name: "arch/notion-no-schema-write: no src/notion/* spawn argv writes a database/data-source/property/view — the only write is a PAGE create/patch",
     async run() {
       let sawPageCreate = false;
       for (const file of await notionSourceFiles()) {
         const code = stripCommentsOnly(await readFile(file, "utf8"));
         for (const tokens of arrayLiteralTokenLists(code)) {
-          const hits = schemaWriteTokens(tokens);
-          assert.deepEqual(
-            hits,
-            [],
-            `${path.relative(repoRoot, file)} constructs no schema-create/mutation argv (found: ${hits.join(", ")})`
+          const call = apiCall(tokens);
+          if (!call || !call.path) continue;
+          const isWrite = WRITE_METHODS.has(call.method);
+          // A WRITE to a schema path (databases/data_sources/properties/views) is forbidden.
+          assert.ok(
+            !(isWrite && SCHEMA_PATH_RE.test(call.path)),
+            `${path.relative(repoRoot, file)} constructs no schema write (found: ${call.method} ${call.path})`
           );
-          // Track that a PAGE create IS present (so the guard is over a real create surface).
-          for (let i = 0; i < tokens.length - 1; i += 1) {
-            if (tokens[i] === "pages" && tokens[i + 1] === "create") sawPageCreate = true;
-          }
+          if (call.method === "POST" && /^v1\/pages$/.test(call.path)) sawPageCreate = true;
         }
       }
-      assert.ok(sawPageCreate, "the apply layer DOES create a PAGE (the create surface is real, not absent)");
+      assert.ok(sawPageCreate, "the apply layer DOES create a PAGE (POST v1/pages) — the create surface is real, not absent");
 
-      // Self-check (non-vacuous): the matcher FIRES on planted schema-create forms and
-      // does NOT fire on the accepted page-create / addressing-flag forms.
-      assert.deepEqual(
-        schemaWriteTokens(["api", "databases", "create", "--title", "x"]),
-        ["databases create"],
-        "the schema-write matcher fires on a planted `databases create` form"
-      );
-      assert.deepEqual(
-        schemaWriteTokens(["api", "update-data-source-properties", "--id", "x"]),
-        ["update-data-source-properties"],
-        "the schema-write matcher fires on a planted property-mutation token"
-      );
-      assert.deepEqual(
-        schemaWriteTokens(["api", "pages", "create", "--data-source-id", "ds"]),
-        [],
-        "the schema-write matcher does NOT fire on `pages create` with a `--data-source-id` addressing flag"
-      );
+      // Self-check (non-vacuous): the guard FIRES on a planted schema write and does NOT
+      // fire on the accepted page create (which addresses the data source via the body).
+      const dbWrite = apiCall(arrayLiteralTokenLists('["api", "-X", "POST", "v1/databases", "-d", body]')[0]);
+      assert.ok(WRITE_METHODS.has(dbWrite.method) && SCHEMA_PATH_RE.test(dbWrite.path), "the guard fires on a planted POST to v1/databases");
+      const pageWrite = apiCall(arrayLiteralTokenLists('["api", "-X", "POST", "v1/pages", "-d", body]')[0]);
+      assert.ok(!SCHEMA_PATH_RE.test(pageWrite.path), "the guard does NOT fire on a page create (POST v1/pages, data source named in the body)");
     },
   },
 ];

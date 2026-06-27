@@ -449,27 +449,98 @@
           "properties": {
             "notion": {
               "type": "object",
-              "description": "OPTIONAL Notion work-board sync config (milestone 17, ADR-004). PRESENT ⇒ all binding lives here; ABSENT ⇒ `notion:sync-work` is an honest no-op. The token is NEVER committed here — only `tokenEnv`, the env-var NAME (RESEARCH §A2). Closed (additionalProperties:false), so an unknown field (e.g. a `token`/`databaseId` field) is rejected.",
+              "description": "OPTIONAL Notion work-board sync config (milestone 17, ADR-004; promoted to a multi-board registry in milestone 18, ADR-002). PRESENT ⇒ all binding lives here; ABSENT ⇒ `notion:sync-work` is an honest no-op. The token is NEVER committed here — only `tokenEnv`, the env-var NAME (RESEARCH §A2). The block is CLOSED (additionalProperties:false), so an unknown field (e.g. a `token`/`databaseId` field) is rejected. A `oneOf` of two MUTUALLY-EXCLUSIVE arms enforces the real shape: the FLAT m17 back-compat block (a top-level `dataSourceId` + connection fields, the implicit default board) OR the m18 `boards` registry (`{ default, boards }`). You cannot have both a top-level `dataSourceId` and a `boards` key. The `properties` below enumerate EVERY key either arm may carry (so the closed outer block admits both flat-arm and registry-arm keys); the AUTHORITATIVE per-arm validation (each arm's required fields, per-arm closedness, mutual exclusion) is the `oneOf`. The cross-check that `default` names a real board is NOT expressible in plain JSON-Schema — it lives in the resolver (src/integrations/routing.mjs), which fails with `unknown-default-board`.",
               "properties": {
-                "dataSourceId": { "type": "string", "description": "The Notion data_source_id the milestone + its story sub-tasks live in (RESEARCH §A7 — NOT a bare database_id; the 2025-09-03 API routes query/create through the data source)." },
-                "tokenEnv": { "type": "string", "default": "NOTION_API_TOKEN", "description": "The NAME of the env var the integration token is read from at run time (RESEARCH §A2). The token itself is NEVER stored in config — this is the env-var reference only." },
-                "statusProperty": { "type": "string", "description": "The board's status/select property name the aof status maps onto (the property TYPE is read at run time, §A4)." },
-                "statusMap": {
+                "dataSourceId": { "type": "string", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The Notion data_source_id the milestone + its story sub-tasks live in." },
+                "tokenEnv": { "type": "string", "default": "NOTION_API_TOKEN", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The NAME of the env var the integration token is read from at run time. The token itself is NEVER stored in config — this is the env-var reference only." },
+                "statusProperty": { "type": "string", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The board's status/select property name the aof status maps onto." },
+                "statusType": { "type": "string", "enum": ["status", "select"], "default": "status", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The Notion TYPE of `statusProperty` — `status` (default) or `select` — so the egress writes the right property body shape." },
+                "statusMap": { "type": "object", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The closed four-status map." },
+                "titleProperty": { "type": "string", "default": "Name", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The NAME of the data-source's title property the milestone/story title is written to (Notion's default is \"Name\"; a board may name it e.g. \"Objective\")." },
+                "relationProperty": { "type": "string", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The board's self-relation property name." },
+                "parents": { "type": "object", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The optional milestone→parent map.", "additionalProperties": { "type": "string" } },
+                "default": { "type": "string", "description": "(Registry-arm key — authoritative shape in `oneOf[1]`.) The STRING key naming the default board." },
+                "boards": { "type": "object", "description": "(Registry-arm key — authoritative shape in `oneOf[1]`.) The per-board registry." }
+              },
+              "additionalProperties": false,
+              "oneOf": [
+                {
                   "type": "object",
-                  "description": "MANDATORY map (RESEARCH §A4): each of the four aof statuses → an EXISTING board option NAME. All four entries are required — `in-review` has no Notion default, so the operator MUST supply it. Closed (additionalProperties:false).",
+                  "description": "The FLAT milestone-17 back-compat arm: a single board's connection at the top level (the implicit default board, ADR-002). Closed (additionalProperties:false), so an unknown field (e.g. a `token`/`databaseId` field) is rejected. m17 configs validate byte-for-byte against this arm.",
                   "properties": {
-                    "not-started": { "type": "string", "description": "The board option name for the aof `not-started` status." },
-                    "in-progress": { "type": "string", "description": "The board option name for the aof `in-progress` status." },
-                    "in-review": { "type": "string", "description": "The board option name for the aof `in-review` status (no Notion default — must be supplied)." },
-                    "done": { "type": "string", "description": "The board option name for the aof `done` status." }
+                    "dataSourceId": { "type": "string", "description": "The Notion data_source_id the milestone + its story sub-tasks live in (RESEARCH §A7 — NOT a bare database_id; the 2025-09-03 API routes query/create through the data source)." },
+                    "tokenEnv": { "type": "string", "default": "NOTION_API_TOKEN", "description": "The NAME of the env var the integration token is read from at run time (RESEARCH §A2). The token itself is NEVER stored in config — this is the env-var reference only." },
+                    "statusProperty": { "type": "string", "description": "The board's status/select property name the aof status maps onto." },
+                    "statusType": { "type": "string", "enum": ["status", "select"], "default": "status", "description": "The Notion TYPE of `statusProperty` — `status` (default) or `select` — so the egress writes the right property body (`{ status: { name } }` vs `{ select: { name } }`). aof never reads it from Notion (one-way), so it is configured here." },
+                    "titleProperty": { "type": "string", "default": "Name", "description": "The NAME of the data-source's title property the milestone/story title is written to. Notion's default title property is \"Name\"; a board may name it anything (e.g. \"Objective\"). Optional — defaults to \"Name\"." },
+                    "statusMap": {
+                      "type": "object",
+                      "description": "MANDATORY map (RESEARCH §A4): each of the four aof statuses → an EXISTING board option NAME. All four entries are required — `in-review` has no Notion default, so the operator MUST supply it. Closed (additionalProperties:false).",
+                      "properties": {
+                        "not-started": { "type": "string", "description": "The board option name for the aof `not-started` status." },
+                        "in-progress": { "type": "string", "description": "The board option name for the aof `in-progress` status." },
+                        "in-review": { "type": "string", "description": "The board option name for the aof `in-review` status (no Notion default — must be supplied)." },
+                        "done": { "type": "string", "description": "The board option name for the aof `done` status." }
+                      },
+                      "required": ["not-started", "in-progress", "in-review", "done"],
+                      "additionalProperties": false
+                    },
+                    "relationProperty": { "type": "string", "description": "The board's self-relation property name a story sub-task is linked to its milestone page through (RESEARCH §A3)." },
+                    "parents": {
+                      "type": "object",
+                      "description": "OPTIONAL milestone→parent map (milestone 18, ADR-001). Each entry maps a human-readable parent KEY (the value of a descriptor's `notion.parent`) to an EXISTING Notion parent page id aof binds by id (never creates — 17/ADR-003). The key is authored intent; the page id is the operator-supplied binding (ADR-006 — no name resolution).",
+                      "additionalProperties": { "type": "string" }
+                    }
                   },
-                  "required": ["not-started", "in-progress", "in-review", "done"],
+                  "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
                   "additionalProperties": false
                 },
-                "relationProperty": { "type": "string", "description": "The board's self-relation property name a story sub-task is linked to its milestone page through (RESEARCH §A3)." }
-              },
-              "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
-              "additionalProperties": false
+                {
+                  "type": "object",
+                  "description": "The m18 `boards` REGISTRY arm: a closed per-board map with a designated default (ADR-002). Multiple boards are addressable by key so two milestones can route to different boards. Closed (additionalProperties:false); there is NO top-level `parents` peer to `boards` in this arm (`parents` is per board).",
+                  "properties": {
+                    "default": { "type": "string", "description": "REQUIRED when `boards` is present: a STRING key naming the default board (NOT a board literally keyed `default`). Must name a key present in `boards` — an Ajv-level cross-check is not expressible in plain JSON-Schema, so the runtime resolver treats an unknown `default` as the `unknown-default-board` config error; the schema only requires `default` to be a string." },
+                    "boards": {
+                      "type": "object",
+                      "description": "The per-board registry: each entry keyed by a board key carries that board's m17 connection fields. Closed per entry. At least one board.",
+                      "minProperties": 1,
+                      "additionalProperties": {
+                        "type": "object",
+                        "description": "A single board's connection (the m17 shape, per board). Closed (additionalProperties:false).",
+                        "properties": {
+                          "dataSourceId": { "type": "string", "description": "The Notion data_source_id this board's milestone + story sub-tasks live in." },
+                          "tokenEnv": { "type": "string", "default": "NOTION_API_TOKEN", "description": "The NAME of the env var this board's integration token is read from (the token itself is never stored)." },
+                          "statusProperty": { "type": "string", "description": "This board's status/select property name." },
+                          "statusType": { "type": "string", "enum": ["status", "select"], "default": "status", "description": "The Notion TYPE of this board's `statusProperty` — `status` (default) or `select`." },
+                          "titleProperty": { "type": "string", "default": "Name", "description": "This board's title property name (Notion default \"Name\"; e.g. \"Objective\"). Optional." },
+                          "statusMap": {
+                            "type": "object",
+                            "description": "MANDATORY map: each of the four aof statuses → an EXISTING board option NAME. Closed (additionalProperties:false).",
+                            "properties": {
+                              "not-started": { "type": "string", "description": "The board option name for the aof `not-started` status." },
+                              "in-progress": { "type": "string", "description": "The board option name for the aof `in-progress` status." },
+                              "in-review": { "type": "string", "description": "The board option name for the aof `in-review` status." },
+                              "done": { "type": "string", "description": "The board option name for the aof `done` status." }
+                            },
+                            "required": ["not-started", "in-progress", "in-review", "done"],
+                            "additionalProperties": false
+                          },
+                          "relationProperty": { "type": "string", "description": "This board's self-relation property name a story sub-task nests through." },
+                          "parents": {
+                            "type": "object",
+                            "description": "OPTIONAL per-board parent map (milestone 18, ADR-001): a closed `{ <key>: <page-id> }` map binding a parent KEY to an EXISTING Notion page id, scoped to THIS board (a relation cannot cross databases).",
+                            "additionalProperties": { "type": "string" }
+                          }
+                        },
+                        "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["default", "boards"],
+                  "additionalProperties": false
+                }
+              ]
             }
           },
           "additionalProperties": false

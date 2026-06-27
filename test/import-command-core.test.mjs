@@ -205,7 +205,9 @@ export const importCommandCoreTests = [
         const json = parseJsonStdout(result.stdout);
         assert.ok(Array.isArray(json.artifacts), "the JSON result lists the materialized artifact paths");
         assert.ok(json.artifacts.length >= 1, "at least one artifact path is listed");
-        assert.ok(json.artifacts.some((p) => /SPEC\.md$/.test(p)), "SPEC.md is among the artifact paths");
+        // The import writes a single co-located AOF.md digest INTO the source folder.
+        assert.ok(json.artifacts.some((p) => /AOF\.md$/.test(p)), "AOF.md is among the artifact paths");
+        assert.ok(/[\\/]00_milestone_demo-00[\\/]AOF\.md$/.test(json.artifacts[0]), "the AOF.md sits in the SOURCE milestone folder, not a separate store");
         assert.equal(typeof json.recordCount, "number", "the JSON result reports a record-count summary");
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -590,9 +592,9 @@ export const importCommandCoreTests = [
     },
   },
 
-  // ═════════════ 03_source-repo-untouched.feature ═════════════════════════════
+  // ═════════════ 03 source repo — co-located AOF.md, no commit, nothing else ═══
   {
-    name: "import-core/03 after importing from a local fixture repo the source tree and git state are unchanged",
+    name: "import-core/03 importing writes the co-located AOF.md into the source milestone folder and makes NO commit (HEAD unchanged)",
     async run() {
       const { repo } = await makeRepo();
       const src = await makeGitFixtureRepo(["00"]);
@@ -601,8 +603,19 @@ export const importCommandCoreTests = [
         const result = runImport(repo, src, ["00"]);
         assert.equal(result.status, 0, `exits 0 (stderr: ${result.stderr.slice(0, 200)})`);
         const after = treeStateOf(src);
-        assert.equal(after.head, before.head, "the source repo's HEAD sha after the import equals the one before");
-        assert.equal(after.porcelain, before.porcelain, "the source repo's `git status --porcelain` after equals before");
+        assert.equal(after.head, before.head, "the import makes NO commit — the source HEAD sha is unchanged");
+        // The ONLY NEW working-tree change (vs. before) is the co-located AOF.md.
+        const beforeLines = new Set(before.porcelain.split(/\r?\n/).filter((l) => l.trim().length > 0));
+        const newChanges = after.porcelain.split(/\r?\n/).filter((l) => l.trim().length > 0 && !beforeLines.has(l));
+        assert.equal(newChanges.length, 1, `exactly one NEW working-tree change (before: ${JSON.stringify(before.porcelain)}, after: ${JSON.stringify(after.porcelain)})`);
+        assert.ok(
+          /00_milestone_demo-00\/AOF\.md"?$/.test(newChanges[0]),
+          `the sole new change is the co-located AOF.md in the source milestone folder (got: ${newChanges[0]})`
+        );
+        assert.ok(
+          existsSync(path.join(src, "wiki", "work", "00_milestone_demo-00", "AOF.md")),
+          "the AOF.md exists IN the source milestone folder (co-located, not a separate store)"
+        );
       } finally {
         await rm(repo, { recursive: true, force: true });
         await rm(src, { recursive: true, force: true });
@@ -610,7 +623,7 @@ export const importCommandCoreTests = [
     },
   },
   {
-    name: "import-core/03 importing creates, deletes, or modifies no file in the source repo",
+    name: "import-core/03 importing adds ONLY the co-located AOF.md to the source — no other file is created, deleted, or modified",
     async run() {
       const { repo } = await makeRepo();
       const src = await makeGitFixtureRepo(["00"]);
@@ -620,11 +633,92 @@ export const importCommandCoreTests = [
         const result = runImport(repo, src, ["00"]);
         assert.equal(result.status, 0, `exits 0 (stderr: ${result.stderr.slice(0, 200)})`);
         const after = await snapshotTree(src);
-        assert.deepEqual(
-          after,
-          before,
-          "no file in the source repo is created, deleted, or modified"
-        );
+        const aofRel = "wiki/work/00_milestone_demo-00/AOF.md";
+        // The ONLY new key is the co-located AOF.md…
+        const newKeys = Object.keys(after).filter((k) => !(k in before));
+        assert.deepEqual(newKeys, [aofRel], `the only file added to the source is the co-located AOF.md (added: ${newKeys.join(", ")})`);
+        // …and every PRE-EXISTING source file is byte-for-byte unchanged.
+        for (const k of Object.keys(before)) {
+          assert.equal(after[k], before[k], `pre-existing source file "${k}" is not modified by the import`);
+        }
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+        await rm(src, { recursive: true, force: true });
+      }
+    },
+  },
+
+  // ═══ tolerant folder addressing — GSD `NN-slug` + direct path + no-match ════════
+  //
+  // A source may name its milestone folders in the GSD `NN-slug` form (e.g.
+  // `323-realtime-…`), not aof's `NN_milestone_slug`. The folder NAME is not a
+  // contract: import addresses by the number/slug a human already gave the folder,
+  // and an explicit selector that matches nothing is an honest error — NEVER a silent
+  // fall-through to "the only milestone" (which used to mis-import a GSD repo).
+  {
+    name: "import-core/00 a GSD-style `NN-slug` milestone folder imports by its number (no `_milestone_` convention)",
+    async run() {
+      const { repo } = await makeRepo();
+      const src = await makeGsdSourceRepo([
+        { ref: "323", slug: "realtime-compliance-sidecar-providers", goal: "Close the provider gap on the realtime sidecar." },
+      ]);
+      try {
+        const result = runImport(repo, src, ["323", "--json"]);
+        assert.equal(result.status, 0, `exits 0 (stderr: ${result.stderr.slice(0, 200)})`);
+        const json = parseJsonStdout(result.stdout);
+        assert.equal(json.milestoneRef, "323", "the imported ref is the GSD folder's number, not a fallback");
+        // The digest is co-located INTO the GSD source folder, not a separate store.
+        const aofPath = json.artifacts.find((p) => /AOF\.md$/.test(p));
+        assert.ok(aofPath, "a co-located AOF.md is written");
+        assert.ok(/323-realtime-compliance-sidecar-providers[\\/]AOF\.md$/.test(aofPath), "the AOF.md sits in the GSD `NN-slug` source folder");
+        assert.ok(!existsSync(importStoreRoot(repo)), "no separate .aof/imports store is created");
+        const body = await readFile(path.join(repo, aofPath), "utf8");
+        assert.ok(/Close the provider gap/.test(body), "the recovered intent is THIS folder's `## Goal`, not another milestone's");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+        await rm(src, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "import-core/00 pointing import DIRECTLY at a milestone folder imports it (point-at-the-folder, basename identity)",
+    async run() {
+      const { repo } = await makeRepo();
+      const src = await makeGsdSourceRepo([
+        { ref: "330", slug: "realtime-sidecar-productionisation", goal: "Productionise the realtime sidecar." },
+      ]);
+      try {
+        const folder = path.join(src, "wiki", "work", "330-realtime-sidecar-productionisation");
+        const result = runImport(repo, folder, ["--json"]);
+        assert.equal(result.status, 0, `exits 0 (stderr: ${result.stderr.slice(0, 200)})`);
+        const json = parseJsonStdout(result.stdout);
+        assert.equal(json.milestoneRef, "330", "the ref is derived from the folder basename");
+        // The AOF.md is co-located in the directly-addressed folder itself.
+        const aofPath = json.artifacts.find((p) => /AOF\.md$/.test(p));
+        assert.ok(/330-realtime-sidecar-productionisation[\\/]AOF\.md$/.test(aofPath), "the AOF.md is co-located in the directly-addressed folder");
+        assert.ok(existsSync(path.join(folder, "AOF.md")), "the AOF.md exists in the source folder");
+        const body = await readFile(path.join(folder, "AOF.md"), "utf8");
+        assert.ok(/Productionise the realtime sidecar/.test(body), "the directly-addressed folder's intent is recovered");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+        await rm(src, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "import-core/00 an explicit selector that matches no milestone is an honest error, not a silent mis-import",
+    async run() {
+      const { repo } = await makeRepo();
+      // A source with exactly one (aof-form) milestone — the old fallback would have
+      // mis-resolved ANY selector to it. The hardened resolver must refuse.
+      const src = await makeSourceRepo(["333"]);
+      try {
+        const result = runImport(repo, src, ["323", "--json"]);
+        assert.notEqual(result.status, 0, "a non-matching explicit selector exits non-zero");
+        const json = parseJsonStdout(result.stdout);
+        assert.equal(json.ok, false, "the --json envelope reports failure");
+        assert.ok(/323/.test(json.error) && /333/.test(json.error), "the error names the unmatched selector and the available ref(s)");
+        assert.ok(!existsSync(importStoreRoot(repo)), "nothing is materialized for a no-match selector");
       } finally {
         await rm(repo, { recursive: true, force: true });
         await rm(src, { recursive: true, force: true });
@@ -632,6 +726,25 @@ export const importCommandCoreTests = [
     },
   },
 ];
+
+// A GSD-style SOURCE fixture repo: milestone folders named `NN-slug` (NOT aof's
+// `NN_milestone_slug`), each with a SPEC.md headed `## Goal` (the GSD convention the
+// recovery synonym-matches). `milestones` is an array of { ref, slug, goal }.
+async function makeGsdSourceRepo(milestones) {
+  const src = await mkdtemp(path.join(os.tmpdir(), "aof-import-gsd-src-"));
+  const workDir = path.join(src, "wiki", "work");
+  for (const m of milestones) {
+    const dir = path.join(workDir, `${m.ref}-${m.slug}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(dir, "SPEC.md"),
+      `# ${m.ref} · ${m.slug} — Spec\n\n## Goal\n\n${m.goal}\n\n## Scope\n\nIn scope: ${m.slug}.\n`,
+      "utf8"
+    );
+    await writeFile(path.join(dir, "STATE.md"), `# ${m.ref} State\n\n**Status:** Done\n`, "utf8");
+  }
+  return src;
+}
 
 // Snapshot every file under a dir (excluding .git) as path → "size:mtimeMs", for a
 // byte-level created/deleted/modified comparison (the tree-enumeration fallback QA

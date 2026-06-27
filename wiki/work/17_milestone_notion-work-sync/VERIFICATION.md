@@ -58,3 +58,32 @@ exported, record their results + sign-off here, then re-run `aof:verify 17` to f
 
 `aof work validate 17` → **PASS — 17 is well-formed** (folder↔frontmatter, closed-vocab tags, depends
 graph). Test-traceability + litmus carried by the green `@executable` suite and the build-review QA pass.
+
+## Live verification + UAT sign-off (`2026-06-27`)
+
+The NTN-V1 live lanes were finally run against a **real Notion board** (the operator's "Product Roadmap &
+Objectives" data source) with a browser-logged-in `ntn`. **Outcome: UAT APPROVED — "all working"** (operator,
+`2026-06-27`). But the live run exposed that the as-built apply layer was **non-functional** — every test had
+stubbed the spawn, so a green `@executable` suite never touched real `ntn`. NTN-V1 is therefore **resolved
+via a ground-up rebuild**, not a clean as-built confirmation. New finding **NTN-V2** captures the rebuild.
+
+- **Evidence (live, observed on the board).** `323` / `326` / `330` (imported milestones) created as rows
+  under the "VoiceVox Regulatory Judge MVP" objective via the `Parent objective` relation; `333` +
+  its 6 stories created as a nested tree (MVP → 333 → stories) in ONE sync run. Each row carries the mapped
+  `Status` + a body rendered from the record-doc (`## Intent` / `## Scope`). A re-sync of byte-identical
+  disk is a true noop (content-hash idempotency) — no duplicates.
+
+| id | observed | type | severity | triage | routed-to | status |
+|----|----------|------|----------|--------|-----------|--------|
+| NTN-V1 | (see above) the four live-Notion `@manual` lanes were deferred for want of a token. | environmental | non-blocker | **RESOLVED** `2026-06-27` — live-verified + UAT-approved (after the NTN-V2 rebuild). | this section | **closed** |
+| NTN-V2 | The live run found the milestone-17 apply layer built against a **fictional `ntn` CLI surface**: it spawned `ntn api pages create --data-source-id … --status-option … --relation-property …` (no such flags exist); the auth model **required** `NOTION_API_TOKEN` (wrong — `ntn` uses keychain `ntn login`, the env var is an optional override); and the Windows binary resolution spawned the `.cmd` shim (unspawnable; `shell:true` mangles the JSON body). Every `@executable` test stubbed the spawn, so the green suite proved nothing about the real egress. | defect (integration — never tested live) | **blocker** (the milestone's headline capability did not work) | **fix** (done `2026-06-27`) — rebuilt to the real `ntn api -X POST/PATCH v1/pages -d <json>` egress; keychain auth (TOKEN/KEYCHAIN modes); `node <pkg>/bin/ntn` launcher spawn; configurable `titleProperty`/`statusType`; page-body sync via `ntn pages edit`; in-run story nesting. The four `acd-notion-*` arch-tests rewritten to assert the REAL egress. Suite green (1387/0). | `src/notion/{cli,sync,projection,mapping}.mjs`, `notion-sync-work.mjs`, schema | **closed (fixed + live-verified)** |
+
+**Process lesson (ADR-grade):** a green `@executable` suite that **stubs the one external seam** proves the
+internal wiring and nothing about the integration. "No token → defer the live lane (@manual)" let the single
+test that mattered — does this match the real tool? — never run, and the milestone shipped hollow. The
+live/`@manual` integration check must be a **build-gate blocker**, not a deferrable lane, for any milestone
+whose headline capability IS the external egress. (Folded to memory: [[notion-sync-rebuilt]].)
+
+**Accept update (`2026-06-27`):** the NTN-V1 gate that held m17 `in-review` is resolved (live-verified +
+UAT-approved). m17 is acceptable on the REBUILT apply layer — flip stories → `done` / SPEC → `done` at the
+operator's word (the formal `aof:verify 17` accept + retrospective + `aof work memory ingest`).

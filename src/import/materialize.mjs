@@ -245,6 +245,109 @@ export function renderDigest({ milestoneRef, slug, title, status, intent, import
   return lines.join("\n");
 }
 
+// ─────────────────────────────────────────── CO-LOCATED digest (the rule) ──
+//
+// HARD RULE (operator, repeated): `aof import` writes the recovered digest as a
+// single `AOF.md` INTO the source milestone folder it imported from — co-located,
+// next to that milestone's own SPEC/STATE — NEVER a separate git-ignored
+// `.aof/imports/` store. This supersedes the milestone-13 separate-store model
+// (ADR-001/004/005) and its read-only-source stance (ADR-002): import now adds
+// exactly one file (`AOF.md`) to the source folder and overwrites nothing else there.
+//
+//   writeColocatedDigest({ targetDir, sourceSlug, milestoneRef, recovered, importedAt }, { preview })
+//     → { dir: targetDir, artifacts: [<targetDir>/AOF.md], recordCount }
+//
+// The digest is SELF-CONTAINED: every recovered half folds into one `## ` section so
+// nothing is lost (Intent + Scope from the recovered intent; a `## Decisions` list
+// when ADRs were recovered; a `## Lessons` list when retro entries were). Each `## `
+// section is one `summary` record via the existing parseAof. A re-import overwrites
+// the SAME AOF.md in place (idempotent) and NEVER removes the source folder.
+
+// The co-located digest's `## ` sections, in order — Intent/Scope from the recovered
+// intent, then a folded Decisions / Lessons section when those halves were recovered,
+// so a source's ADRs/retro are not lost when only one file is written. Each section is
+// one summary record. Absent halves yield no section (absence is information, ADR-005).
+function colocatedSections(normalized) {
+  const sections = digestSections(normalized.intent);
+  if (normalized.decisions.length > 0) {
+    sections.push({
+      heading: "Decisions",
+      body: normalized.decisions
+        .map((d) => `- **${d.id ?? "ADR"}** ${String(d.title ?? "").trim()}${d.status ? ` _(${String(d.status).trim()})_` : ""}`)
+        .join("\n"),
+    });
+  }
+  if (normalized.outcomes.length > 0) {
+    sections.push({
+      heading: "Lessons",
+      body: normalized.outcomes
+        .map((o) => `- **${o.id ?? "R"}** ${String(o.title ?? "").trim()}`)
+        .join("\n"),
+    });
+  }
+  return sections;
+}
+
+// Render the co-located AOF.md — the digest frontmatter (identity + provenance) plus
+// every recovered section. `source: <sourceSlug>` records WHERE it was imported from.
+function renderColocatedDigest({ milestoneRef, meta, sections, importedAt, sourceSlug }) {
+  const title = meta.title ?? "";
+  const fm = [
+    "---",
+    "doc: digest",
+    `milestone: ${milestoneRef}`,
+    `slug: ${meta.slug ?? milestoneRef}`,
+    `title: ${JSON.stringify(title)}`,
+    `status: ${meta.status ?? "not-started"}`,
+    "imported: true",
+    "importedBy: aof",
+  ];
+  if (sourceSlug) fm.push(`source: ${sourceSlug}`);
+  if (importedAt) fm.push(`importedAt: ${importedAt}`);
+  fm.push("---");
+  const heading = title
+    ? `# ${milestoneRef} · ${title} — Digest`
+    : `# Imported milestone ${milestoneRef} — Digest`;
+  const lines = [
+    ...fm,
+    heading,
+    "",
+    "<!-- Recovered digest, co-located in the source milestone folder. Each `## ` section → one `summary` record via the EXISTING parseAof. -->",
+    "",
+  ];
+  for (const section of sections) {
+    lines.push(`## ${section.heading}`, "", section.body, "");
+  }
+  return lines.join("\n");
+}
+
+// Write the co-located AOF.md digest into the SOURCE milestone folder (the rule). A
+// `preview` (dry-run) computes the path + record count but writes nothing. NEVER
+// removes or rebuilds the target dir — it is the user's source folder; only the one
+// AOF.md is (over)written.
+export async function writeColocatedDigest({ targetDir, sourceSlug, milestoneRef, recovered, importedAt }, opts = {}) {
+  const normalized = normalizeRecovered(recovered);
+  const sections = colocatedSections(normalized);
+  const filePath = path.join(targetDir, AOF_FILE);
+  const artifacts = [filePath];
+  const recordCount = sections.length;
+
+  if (opts.preview === true) {
+    return { dir: targetDir, artifacts, recordCount };
+  }
+
+  const content = renderColocatedDigest({
+    milestoneRef,
+    meta: normalized.meta,
+    sections,
+    importedAt,
+    sourceSlug,
+  });
+  await mkdir(targetDir, { recursive: true });
+  await writeFile(filePath, `${content.replace(/\n+$/, "\n")}`, "utf8");
+  return { dir: targetDir, artifacts, recordCount };
+}
+
 // Compute the artifact plan WITHOUT touching disk — the shared core of both the
 // real write and the --dry-run preview. Returns the per-import dir + the ordered
 // artifact specs (filename + content) + the record count the indexer WOULD derive

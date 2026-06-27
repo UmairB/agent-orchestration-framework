@@ -320,6 +320,48 @@ import { archTests as acdNotionAuthEnvRefTests } from "../test/arch/acd-notion-a
 import { archTests as acdNotionNoSchemaWriteTests } from "../test/arch/acd-notion-no-schema-write.test.mjs";
 import { archTests as acdNotionCliNotMcpTests } from "../test/arch/acd-notion-cli-not-mcp.test.mjs";
 import { archTests as acdNotionFailHonestlyTests } from "../test/arch/acd-notion-fail-honestly.test.mjs";
+// milestone 18 — per-folder integration descriptor (story 00: the AUTHORING SPINE —
+// the new src/integrations/routing.mjs reader/resolver (ADR-001/002/003), the boards
+// registry schema oneOf with the flat m17 back-compat arm at the Ajv-2020 seam
+// (ADR-002), and the notion:associate rewrite writing/clearing the per-folder
+// .integrations.json descriptor as its ONLY mutation (ADR-004/006); all @executable).
+// NOTE: the prior frontmatter-mechanism tests (notion-associate*, notion-parents-schema)
+// were superseded here and the arch-test FFs (FF-A..F) are authored in story 02.
+import { integrationsRoutingReaderTests } from "../test/integrations-routing-reader.test.mjs";
+import { integrationsBoardsRegistryTests } from "../test/integrations-boards-registry.test.mjs";
+import { integrationsAssociateTests } from "../test/integrations-associate.test.mjs";
+// milestone 18 — per-folder integration descriptor (story 01: the CONSUMPTION side —
+// the projection reads routing via story 00's resolver and addresses the chosen board's
+// dataSourceId, nesting the milestone under its resolved parent via that board's
+// relationProperty (ADR-003); no descriptor/parent ⇒ byte-for-byte the m17 projection
+// (the no-regression invariant); the v2 multi-board per-data-source sidecar (ADR-005),
+// with v1 migration; all @executable. The STRUCTURAL invariants (FF-A/FF-C/FF-D) are
+// arch-tests authored in story 02 — the frontmatter-projection tests they supersede
+// (notion-parent-projection, acd-notion-parent-projection, acd-notion-association-committed)
+// are deleted+unwired HERE as their mechanism is removed by the projection rewrite.)
+import { integrationsProjectionBoardRoutingTests } from "../test/integrations-projection-board-routing.test.mjs";
+import { integrationsProjectionParentNestingTests } from "../test/integrations-projection-parent-nesting.test.mjs";
+import { integrationsMultiboardSidecarTests } from "../test/integrations-multiboard-sidecar.test.mjs";
+// milestone 18 — per-folder integration descriptor (story 02: the CLEANUP + FITNESS
+// story — the src/work.mjs parseScalarOrCollection revert (drop the `{}` inline-flow-map
+// branch, ADR-007) + the notion-top-level `parents` removal, locked by the two task
+// feature tests; and the SIX milestone fitness invariants FF-A..F authored here, atomically
+// with deleting the five superseded arch-tests (acd-notion-associate-frontmatter-only,
+// -association-committed, -parent-no-read, -parent-projection, -parents-schema) and their
+// behavioural tests. FF-A descriptor-committed (supersedes -association-committed); FF-B
+// reader-is-JSON + the revert (new); FF-C board-resolution + the m17 no-regression arm
+// (subsumes -parent-projection); FF-D no-Notion-read + the one-way snapshot (supersedes
+// -parent-no-read); FF-E descriptor-extensible (supersedes -parents-schema's extensibility);
+// FF-F boards-registry schema at the Ajv-2020 seam (supersedes -parents-schema). KEPT:
+// acd-notion-one-way (reaffirmed by FF-D) + acd-notion-mapping-sidecar (re-pointed by story 01).
+import { integrationsParserRevertedTests } from "../test/integrations-parser-reverted.test.mjs";
+import { integrationsLegacyRemovedTests } from "../test/integrations-legacy-removed.test.mjs";
+import { archTests as acdIntegrationsDescriptorCommittedTests } from "../test/arch/acd-integrations-descriptor-committed.test.mjs";
+import { archTests as acdIntegrationsReaderIsJsonTests } from "../test/arch/acd-integrations-reader-is-json.test.mjs";
+import { archTests as acdIntegrationsBoardResolutionTests } from "../test/arch/acd-integrations-board-resolution.test.mjs";
+import { archTests as acdIntegrationsNoNotionReadTests } from "../test/arch/acd-integrations-no-notion-read.test.mjs";
+import { archTests as acdIntegrationsDescriptorExtensibleTests } from "../test/arch/acd-integrations-descriptor-extensible.test.mjs";
+import { archTests as acdIntegrationsBoardsSchemaTests } from "../test/arch/acd-integrations-boards-schema.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -475,6 +517,20 @@ export const tests = [
   ...acdNotionNoSchemaWriteTests,
   ...acdNotionCliNotMcpTests,
   ...acdNotionFailHonestlyTests,
+  ...integrationsRoutingReaderTests,
+  ...integrationsBoardsRegistryTests,
+  ...integrationsAssociateTests,
+  ...integrationsProjectionBoardRoutingTests,
+  ...integrationsProjectionParentNestingTests,
+  ...integrationsMultiboardSidecarTests,
+  ...integrationsParserRevertedTests,
+  ...integrationsLegacyRemovedTests,
+  ...acdIntegrationsDescriptorCommittedTests,
+  ...acdIntegrationsReaderIsJsonTests,
+  ...acdIntegrationsBoardResolutionTests,
+  ...acdIntegrationsNoNotionReadTests,
+  ...acdIntegrationsDescriptorExtensibleTests,
+  ...acdIntegrationsBoardsSchemaTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

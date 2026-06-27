@@ -60,6 +60,13 @@ import { importMilestoneCommand } from "./commands/import-milestone.mjs";
 // honest no-op). Takes the `notion:*` prefix, so it is EXCLUDED from the /api/work
 // bijection but inherits the generic command-cli bijection (08/ADR-004).
 import { notionSyncWorkCommand } from "./commands/notion-sync-work.mjs";
+// milestone 18 — integration descriptor (notion:associate registers into the SAME
+// core; 18/ADR-003/004). Records (or clears) a milestone's board + parent routing in
+// its committed `.integrations.json` descriptor; PURE/no-read (ADR-006) — the
+// descriptor write is the only mutation (neither the sidecar nor Notion). Takes the
+// `notion:*` prefix, so EXCLUDED from the /api/work bijection but inheriting the
+// generic command-cli bijection (08/ADR-004).
+import { notionAssociateCommand } from "./commands/notion-associate.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -85,6 +92,7 @@ const COMMANDS = [
   projectProvisionCommand,
   importMilestoneCommand,
   notionSyncWorkCommand,
+  notionAssociateCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

@@ -79,16 +79,19 @@ export const archTests = [
     },
   },
   {
-    name: "arch/notion-cli-not-mcp: the sole Notion egress is a CLI spawn whose argv[0] is the m12-provisioned binary (resolved via the store-then-PATH resolver), spawned with an argv ARRAY",
+    name: "arch/notion-cli-not-mcp: the sole Notion egress is a CLI spawn (node running the ntn bin/ntn launcher) with an argv ARRAY — never an MCP transport",
     async run() {
       const cli = stripComments(await readFile(path.join(SRC_NOTION_DIR, "cli.mjs"), "utf8"));
-      // The binary is resolved via the m12 resolver (resolveManagedBinary), not a hard
-      // path / a constructed MCP transport — argv[0] is the PROVISIONED binary.
-      assert.ok(/resolveManagedBinary/.test(cli), "cli.mjs resolves the binary via the m12 store-then-PATH resolver (resolveManagedBinary)");
-      assert.ok(/descriptorFor\(\s*["']notion["']\s*\)/.test(cli), "cli.mjs reads the provisioned NOTION descriptor (the argv[0] binary)");
-      // The egress is a child-process spawn of that resolved path with an argv ARRAY —
-      // `spawn(ntnPath, argv, …)` — never an MCP transport client.
-      assert.ok(/\bspawn\s*\(\s*\w+\s*,\s*argv\b/.test(cli), "cli.mjs spawns the resolved binary with the operation argv ARRAY (a CLI spawn, not an MCP transport)");
+      // The ntn launcher is resolved via the npx-lane resolver (resolveNtnLauncher) and
+      // run through node — not a constructed MCP transport.
+      assert.ok(/resolveNtnLauncher/.test(cli), "cli.mjs resolves the ntn bin/ntn launcher (the npx-lane resolver)");
+      assert.ok(/descriptorFor\(\s*["']notion["']\s*\)/.test(cli), "cli.mjs reads the provisioned NOTION descriptor (pinned identity/version)");
+      // The egress is a child-process spawn of `node` with an argv ARRAY carrying the
+      // launcher + the operation argv — a CLI spawn, never an MCP transport client.
+      assert.ok(
+        /\bspawn\s*\(\s*node\s*,\s*\[\s*launcher\s*,\s*\.\.\.argv\s*\]/.test(cli),
+        "cli.mjs spawns `node [launcher, ...argv]` (a CLI spawn with an argv array, not an MCP transport)"
+      );
     },
   },
 ];

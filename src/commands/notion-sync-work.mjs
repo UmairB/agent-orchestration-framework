@@ -14,21 +14,22 @@
 // Notion calls. An unconfigured project is HEALTHY; the no-op is success, not an
 // error, and names the config block the operator must add.
 //
-// The CONFIGURED path is a STORY-00 STUB: when configured, it walks the milestone +
-// stories and returns `configured:true` with an EMPTY items list. The real
-// projection (story 01, ADR-003) fills the create/patch plan; it reaches Notion ONLY
-// through the INJECTABLE spawn seam below (`ctx.notionSpawn` / `deps.notionSpawn`),
-// so a test can inject a spy and assert it is NEVER called on a story-00 path.
+// The CONFIGURED path resolves the milestone's ROUTING (board + parent) from its
+// committed `.integrations.json` descriptor + the `boards` registry (18/ADR-003),
+// computes the PURE projection plan, and applies it. It reaches Notion ONLY through
+// the INJECTABLE spawn seam below (`ctx.notionSpawn` / `deps.notionSpawn`), so a test
+// can inject a spy and assert it is NEVER called on a dry-run / no-op / skip path.
 //
 // CLI face: `aof work integrations notion sync-work <milestone> [--json] [--dry-run]`
 // (the new `integrations` sub-noun on workCommand; ADR-002). Refs are not paths, so
 // `json` returns the envelope verbatim — no relativise step.
 import { commandError } from "./errors.mjs";
-import { listItems, parseFrontmatter } from "../work.mjs";
+import { listItems, parseFrontmatter, recordDoc } from "../work.mjs";
 import { readMapping } from "../notion/mapping.mjs";
 import { projectMilestone } from "../notion/projection.mjs";
 import { applyPlan } from "../notion/sync.mjs";
 import { makeNotionSpawn } from "../notion/cli.mjs";
+import { resolveNotionRouting, RoutingError, resolveMilestoneFolderByRef } from "../integrations/routing.mjs";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 
@@ -55,13 +56,38 @@ export function defaultNotionSpawnFor(notionConfig, env = process.env) {
 // status, and the traversal contract is `listItems` + `parseFrontmatter` (both
 // exported). Returns {} on any read failure (an absent/partial doc is not fatal).
 async function readItemMeta(item) {
-  const doc = item.type === "milestone" ? "SPEC.md" : item.type === "story" ? "STORY.md" : null;
+  // Read the item's RESOLVED record doc (AOF.md-first for a converted milestone —
+  // work.mjs recordDoc), NOT a hardcoded SPEC.md, so a converted milestone's AOF.md
+  // frontmatter (title/status) is read back here. Routing (board/parent) is NOT read
+  // from frontmatter — it lives in the per-folder .integrations.json descriptor
+  // (18/ADR-003); this reader only needs title/status.
+  const doc = recordDoc(item);
   if (!doc) return {};
   try {
     return parseFrontmatter(await readFile(path.join(item.dir, doc), "utf8"));
   } catch {
     return {};
   }
+}
+
+// Read the item's RESOLVED record-doc BODY (the markdown after the frontmatter) — the
+// page CONTENT the sync writes into the Notion page body (disk → Notion). Strips the
+// YAML frontmatter, HTML comments, and a leading H1 (the title is a page PROPERTY, so
+// a duplicate H1 in the body is noise). Returns "" when absent — an empty body just
+// means the page carries its properties and no content.
+async function readItemBody(item) {
+  const doc = recordDoc(item);
+  if (!doc) return "";
+  let text;
+  try {
+    text = await readFile(path.join(item.dir, doc), "utf8");
+  } catch {
+    return "";
+  }
+  let body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, ""); // drop frontmatter
+  body = body.replace(/<!--[\s\S]*?-->/g, ""); // drop HTML comments
+  body = body.replace(/^\s*#\s+.*(?:\r?\n)+/, ""); // drop a leading H1 (title is a property)
+  return body.trim();
 }
 
 export const notionSyncWorkCommand = {
@@ -115,9 +141,14 @@ export const notionSyncWorkCommand = {
     const notionSpawn = ctx?.notionSpawn ?? deps.notionSpawn ?? defaultNotionSpawnFor(notionConfig);
 
     const all = await listItems(ctx.workspace.workDir);
-    const milestoneItem = all.find(
+    let milestoneItem = all.find(
       (item) => item.type === "milestone" && item.parent == null && item.ref === String(milestone)
     );
+    // Fallback: a GSD `NN-slug` milestone folder (not the aof `NN_milestone_slug` form)
+    // is not in listItems; resolve it tolerantly so a GSD-managed repo is syncable
+    // without a rename ([[aof-import-milestone-naming]]). It has no aof child stories
+    // (its sub-work is a GSD `tasks/` dir), so the scope is the milestone row alone.
+    if (!milestoneItem) milestoneItem = resolveMilestoneFolderByRef(ctx.workspace.workDir, milestone);
     if (!milestoneItem) {
       throw commandError(
         `No milestone "${milestone}" found in the work stream.`,
@@ -132,28 +163,68 @@ export const notionSyncWorkCommand = {
     const scope = all.filter(
       (item) => item.ref === milestoneItem.ref || item.parent === milestoneItem.number
     );
+    // A tolerantly-resolved GSD milestone is not in `all`; include it explicitly.
+    if (!scope.some((item) => item.ref === milestoneItem.ref)) scope.unshift(milestoneItem);
     const items = await Promise.all(
       scope.map(async (item) => ({
         ref: item.ref,
         type: item.type,
         slug: item.slug,
         meta: await readItemMeta(item),
+        content: await readItemBody(item),
       }))
     );
 
-    // Read the sidecar mapping for the configured data-source (ADR-001) — the SOLE
-    // identity store; a HIT decides patch, a MISS decides create. NO Notion call.
-    const projectRoot = ctx.workspace.projectRoot;
-    const mapping = await readMapping(projectRoot, notionConfig.dataSourceId);
+    // Resolve the milestone's ROUTING ONCE (18/ADR-003): which board it addresses + the
+    // parent page id it nests under, read PURELY from the committed `.integrations.json`
+    // descriptor + the `boards` registry (no Notion call). The milestone + its stories
+    // share ONE board within a sync-work (a relation cannot cross databases). A config
+    // defect (an unknown board key / a dangling `default`) is an honest command error.
+    let routing;
+    try {
+      routing = resolveNotionRouting(milestoneItem, notionConfig);
+    } catch (err) {
+      if (err instanceof RoutingError) {
+        throw commandError(err.message, err.code, 400);
+      }
+      throw err;
+    }
 
-    // The PURE projection (ADR-003): one Op per item, decided from local facts only.
-    const plan = projectMilestone({ items, config: notionConfig, mapping });
+    // A present-but-malformed config that resolves to NO board (e.g. a `boards`
+    // registry with no `default`, or an empty `notion` block) is an HONEST command
+    // error naming the defect — never a raw `TypeError` on the next deref (fail
+    // honestly, never half-write — 17/ADR-004). The opt-in gate above only rules out
+    // an ABSENT block; a hand-edited present-but-shapeless block reaches here.
+    if (routing.board == null || routing.board.dataSourceId == null) {
+      throw commandError(
+        `work.integrations.notion is present but resolves to no board for milestone "${milestone}". ` +
+          "Check the boards registry has a valid `default` (or a flat block with a dataSourceId).",
+        "no-board-resolved",
+        400
+      );
+    }
+
+    // Read the sidecar mapping for the ROUTED board's data-source (ADR-001/005) — the
+    // SOLE identity store, scoped to this board's per-data-source bucket; a HIT decides
+    // patch, a MISS decides create. NO Notion call.
+    const projectRoot = ctx.workspace.projectRoot;
+    const mapping = await readMapping(projectRoot, routing.board.dataSourceId);
+
+    // The PURE projection (ADR-003): one Op per item, decided from local facts only,
+    // addressing the routed board and nesting the milestone under its resolved parent.
+    const plan = projectMilestone({
+      items,
+      config: routing.board,
+      mapping,
+      parentPageId: routing.parentPageId,
+      reason: routing.reason,
+    });
 
     // --dry-run: apply NOTHING (zero spawns) — the plan IS the preview (ADR-003).
     // A non-dry-run applies the plan through the spawn seam, recording new page ids.
     const { items: results } = await applyPlan({
       plan,
-      config: notionConfig,
+      config: routing.board,
       projectRoot,
       notionSpawn,
       dryRun,
@@ -175,7 +246,7 @@ export const notionSyncWorkCommand = {
     }),
 
     // Human render: the no-op prints the setup hint naming the config block; a
-    // configured run prints a per-item summary (empty on the story-00 stub).
+    // configured run prints a per-item summary (one line per applied op).
     render(result) {
       if (!result.configured) {
         return `Notion sync: no-op for milestone ${result.milestone} (not configured).\n  ${result.hint}`;

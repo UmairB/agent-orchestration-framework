@@ -94,7 +94,7 @@ export async function listItems(workDir) {
 // AOF.md) keeps SPEC.md. Stories/uat are unaffected — only milestones mint a
 // digest. The validate schema is then chosen dynamically off the resolved doc
 // (digest vs native — see validateWork).
-function recordDoc(item) {
+export function recordDoc(item) {
   if (item.type === "milestone") {
     return existsSync(path.join(item.dir, "AOF.md")) ? "AOF.md" : "SPEC.md";
   }
@@ -108,7 +108,11 @@ function recordDoc(item) {
 const isDriver = (item) => item.type === "milestone" || item.type === "uat";
 
 // Minimal frontmatter reader: `key: value`, inline lists `[a, b]`, quoted
-// scalars. Block lists are not needed — `depends` is authored inline.
+// scalars. Block lists/maps are not needed — the only collection any record doc
+// authors is `depends: [a, b]`. Inline FLOW MAPS `{ … }` are deliberately NOT
+// parsed (18/ADR-007): routing intent lives in the per-folder `.integrations.json`
+// descriptor, never milestone frontmatter, so this shared seam (the 14-importer
+// god-node's parser) parses nothing brace-wrapped into an object.
 export function parseFrontmatter(text) {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!block) return {};
@@ -116,19 +120,27 @@ export function parseFrontmatter(text) {
   for (const line of block[1].split(/\r?\n/)) {
     const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
     if (!kv) continue;
-    let value = kv[2].trim();
-    if (value.startsWith("[") && value.endsWith("]")) {
-      value = value
-        .slice(1, -1)
-        .split(",")
-        .map((part) => part.trim().replace(/^["']|["']$/g, ""))
-        .filter(Boolean);
-    } else {
-      value = value.replace(/^["']|["']$/g, "");
-    }
-    out[kv[1]] = value;
+    out[kv[1]] = parseScalarOrCollection(kv[2].trim());
   }
   return out;
+}
+
+// One frontmatter value: an inline list `[a, b]` or a quoted scalar. Nested
+// collections are not parsed — one level of inline list is all the work stream
+// authors. Inline FLOW MAPS `{ … }` are NOT parsed into an object (18/ADR-007 —
+// the prior milestone-18 `notion: { parent: <key> }` extension was REVERTED): a
+// brace-wrapped value is not a list, so it falls straight to the final
+// quote-strip return and round-trips as its VERBATIM string (braces retained),
+// routing nothing. This keeps the shared 14-importer seam minimal and de-risked.
+function parseScalarOrCollection(value) {
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return value
+      .slice(1, -1)
+      .split(",")
+      .map((part) => part.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean);
+  }
+  return value.replace(/^["']|["']$/g, "");
 }
 
 async function readMeta(item) {

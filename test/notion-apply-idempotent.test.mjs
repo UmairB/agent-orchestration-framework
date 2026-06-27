@@ -20,6 +20,7 @@ import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { readMapping, resolvePageId } from "../src/notion/mapping.mjs";
+import { applyPlan } from "../src/notion/sync.mjs";
 
 const DATA_SOURCE_ID = "ds-fixture";
 
@@ -72,11 +73,17 @@ function makeRecordingSpy(pageId = "page-new") {
   return { spy, calls };
 }
 
-// Pull the page id off a `pages update --page-id <id>` argv (the patch carries the
-// recorded id, never a fresh create).
+// Pull the page id off a real `api -X PATCH v1/pages/<id>` argv (the patch targets the
+// recorded id in the path, never a fresh create).
 function pageIdInArgv(argv) {
-  const i = argv.indexOf("--page-id");
-  return i >= 0 ? argv[i + 1] : null;
+  const seg = argv.find((a) => typeof a === "string" && a.startsWith("v1/pages/"));
+  return seg ? seg.slice("v1/pages/".length) : null;
+}
+
+// Parse the JSON request body off a `-d <json>` argv element (the real Notion API call).
+function bodyInArgv(argv) {
+  const i = argv.indexOf("-d");
+  return i >= 0 ? JSON.parse(argv[i + 1]) : null;
 }
 
 export const notionApplyIdempotentTests = [
@@ -96,14 +103,18 @@ export const notionApplyIdempotentTests = [
           { workspace, notionSpawn: spy }
         );
 
-        // The seam was called with a `pages create` argv (a PAGE create — never schema).
+        // The seam was called with a real `api -X POST v1/pages` argv (a PAGE create —
+        // the path is v1/pages, never a v1/databases/v1/data_sources schema object).
         assert.equal(calls.length, 1, "the apply path issues exactly one Notion call");
         const argv = calls[0];
         assert.deepEqual(
-          argv.slice(0, 3),
-          ["api", "pages", "create"],
+          argv.slice(0, 4),
+          ["api", "-X", "POST", "v1/pages"],
           `the create argv POSTs a page — got: ${JSON.stringify(argv)}`
         );
+        const body = bodyInArgv(argv);
+        assert.equal(body.parent.data_source_id, DATA_SOURCE_ID, "the create body parents the page in the data-source");
+        assert.ok(body.properties && typeof body.properties === "object", "the create body carries a properties object");
 
         // The ItemResult maps to created + carries the returned page id (ADR-002).
         const item = result.items.find((i) => i.ref === "17");
@@ -191,14 +202,16 @@ export const notionApplyIdempotentTests = [
           { workspace, notionSpawn: spy }
         );
 
-        // Exactly one call, a PAGE update carrying the SAME recorded page id (not a create).
+        // Exactly one call, a PAGE patch (PATCH v1/pages/<id>) carrying the SAME recorded
+        // page id in the path (update-in-place, never a create).
         assert.equal(calls.length, 1, "the moved item issues exactly one Notion call");
         const argv = calls[0];
         assert.deepEqual(
           argv.slice(0, 3),
-          ["api", "pages", "update"],
-          `the patch argv UPDATEs a page (not a create) — got: ${JSON.stringify(argv)}`
+          ["api", "-X", "PATCH"],
+          `the patch argv PATCHes a page (not a create) — got: ${JSON.stringify(argv)}`
         );
+        assert.equal(argv[3], "v1/pages/page-existing", "the patch path targets the recorded page id");
         assert.equal(
           pageIdInArgv(argv),
           "page-existing",
@@ -213,6 +226,44 @@ export const notionApplyIdempotentTests = [
         const mapping = await readMapping(workspace.projectRoot, DATA_SOURCE_ID);
         assert.equal(resolvePageId(mapping, "17"), "page-existing", "no new page id was recorded (in-place patch)");
         assert.equal(mapping.entries["17"].lastStatus, "Done", "the patch re-records the new mapped lastStatus");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // §A3: a FRESH milestone+story sync (empty sidecar) — the milestone is created
+    // first, so its page id is NOT in the sidecar when the projection ran (the story's
+    // self-relation parent is null). The apply layer threads the milestone's NEW page
+    // id into the story's relation IN THE SAME RUN, so the story nests under the
+    // milestone (not top-level) on the first sync — no second sync needed.
+    name: "notion-apply/01 a fresh milestone+story sync nests the story under the just-created milestone page in ONE run",
+    async run() {
+      const repo = await mkdtemp(path.join(os.tmpdir(), "aof-apply-nest-"));
+      const config = { dataSourceId: "ds-x", statusProperty: "Status", relationProperty: "Parent objective" };
+      const plan = {
+        dataSourceId: "ds-x",
+        ops: [
+          { ref: "33", type: "milestone", status: "in-progress", op: "create", pageId: null, properties: { title: "M", statusOption: "In progress" } },
+          { ref: "33/01", type: "story", status: "in-review", op: "create", pageId: null, properties: { title: "S", statusOption: "In review" }, relation: { property: "Parent objective", parentPageId: null } },
+        ],
+      };
+      let n = 0;
+      const calls = [];
+      const spy = (argv) => { calls.push(argv); n += 1; return { id: n === 1 ? "MILESTONE-PAGE" : "STORY-PAGE" }; };
+      try {
+        await applyPlan({ plan, config, projectRoot: repo, notionSpawn: spy, dryRun: false });
+        // Two creates (content-less ⇒ no body-edit calls): [milestone POST, story POST].
+        assert.equal(calls.length, 2, `exactly two create calls (got ${calls.length})`);
+        const body = (argv) => JSON.parse(argv[argv.indexOf("-d") + 1]);
+        // The story's create body carries the relation to the milestone's NEW page id —
+        // it nested in this run, not top-level (parentPageId was null at projection time).
+        const storyBody = body(calls[1]);
+        assert.equal(
+          storyBody.properties["Parent objective"].relation[0].id,
+          "MILESTONE-PAGE",
+          "the story's self-relation resolves to the milestone's new page id (nested in one run)"
+        );
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

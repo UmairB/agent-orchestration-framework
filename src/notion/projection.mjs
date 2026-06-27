@@ -1,11 +1,22 @@
-// src/notion/projection.mjs — the PURE aof→Notion projection (17/ADR-003).
+// src/notion/projection.mjs — the PURE aof→Notion projection (17/ADR-003,
+// routing-aware in 18/ADR-003).
 //
-// projectMilestone({ items, config, mapping }) → SyncPlan computes, with ZERO
-// Notion calls, exactly what the sync would push: one Op per aof item in traversal
-// order (the milestone first, then its stories). The create/patch/noop/skip
-// decision is taken ENTIRELY from local facts — the sidecar lookup (ADR-001) + the
-// status-map resolution + the recorded lastStatus — never a Notion read, so the
-// plan is EXACT (the basis of the --dry-run zero-call preview, ADR-003).
+// projectMilestone({ items, config, mapping, parentPageId, reason }) → SyncPlan
+// computes, with ZERO Notion calls, exactly what the sync would push: one Op per aof
+// item in traversal order (the milestone first, then its stories). The
+// create/patch/noop/skip decision is taken ENTIRELY from local facts — the sidecar
+// lookup (ADR-001) + the status-map resolution + the recorded lastStatus — never a
+// Notion read, so the plan is EXACT (the basis of the --dry-run zero-call preview,
+// ADR-003).
+//
+// ROUTING (18/ADR-003): `config` is the RESOLVED board connection (story 00's
+// `resolveNotionRouting(item, notionConfig).board`) — the chosen board's
+// `dataSourceId`/`statusMap`/`relationProperty`/etc. `parentPageId`/`reason` are the
+// resolver's `parentPageId`/`reason`: the parent page id the milestone nests under
+// (a raw page-id verbatim OR a key resolved in the board's `parents`), or `null` + an
+// honest `reason` when the parent is absent/unresolvable. The projection does NOT
+// re-derive the key lookup — that is the resolver's job; here the page id arrives
+// PRE-RESOLVED and the reason is threaded onto the op verbatim.
 //
 //   SyncPlan { dataSourceId, ops: [ Op, … ] }   // ops in traversal order
 //   Op {
@@ -13,8 +24,9 @@
 //     op: "create" | "patch" | "noop" | "skip",
 //     pageId: string | null,                       // null on a create
 //     properties: { title, statusOption?, relation? },  // statusOption absent on a skip
-//     relation?: { property, parentPageId },       // story → milestone page id (§A3)
-//     reason?: string,                             // skip explanation
+//     relation?: { property, parentPageId },       // story → milestone page id (§A3);
+//                                                  // milestone → parent page id (routing)
+//     reason?: string,                             // skip explanation / honest top-level reason
 //   }
 //
 // The decision precedence (local facts only, ADR-003):
@@ -25,7 +37,7 @@
 //
 // A skip emits NO create/patch op for that item AND carries no statusOption value —
 // never-half-write at the projection level (the skip is decided BEFORE any write).
-import { resolvePageId } from "./mapping.mjs";
+import { resolvePageId, hashContent } from "./mapping.mjs";
 
 // The aof item's on-disk title, with sensible fallbacks so a thin fixture (no
 // `title` frontmatter) still projects a stable, non-empty page title.
@@ -40,21 +52,41 @@ function itemStatus(item) {
 }
 
 // Project ONE aof item into its Op. `mapping` is the already-read sidecar for the
-// configured data-source; `milestonePageId` is the milestone's sidecar page id (the
-// §A3 self-relation parent), present iff the milestone has been synced.
-function projectItem(item, config, mapping, milestonePageId) {
+// routed data-source; `milestonePageId` is the milestone's sidecar page id (the §A3
+// self-relation parent), present iff the milestone has been synced. `parentPageId` /
+// `parentReason` are the resolver's PRE-RESOLVED routing (the parent page id the
+// milestone nests under, or null + a reason — both ignored for a story).
+function projectItem(item, config, mapping, milestonePageId, parentPageId, parentReason) {
   const status = itemStatus(item);
   const statusMap = config?.statusMap ?? {};
   const title = itemTitle(item);
+  // The page BODY content (the record-doc markdown, disk → Notion). Threaded onto the
+  // create/patch op so the apply layer sets the Notion page body. Gated on presence:
+  // an item with no body adds NO `content` field, so a content-less item projects
+  // byte-for-byte as the m17 op (the no-regression invariant holds).
+  const content = typeof item.content === "string" && item.content.trim().length > 0 ? item.content : undefined;
+  const withContent = (op) => (content ? { ...op, content } : op);
 
   // A story carries the §A3 self-relation to the milestone page id in the SAME
   // data-source (the relation cannot cross databases). The parent page id comes
   // from the milestone's sidecar entry; if the milestone is not yet recorded it is
   // null (the apply layer creates the milestone first, so on a real run it is set).
+  //
+  // A MILESTONE nests under its ROUTING parent (18/ADR-003) — the resolver's
+  // `parentPageId` via the SAME `relationProperty` (no new relation property), so the
+  // board nests `parent → milestone → story`. A null/unresolvable parent ⇒ relation
+  // undefined (byte-for-byte the m17 milestone op), with `phaseReason` set ONLY when the
+  // resolver returned a reason (honest top-level — the projection threads it verbatim).
+  const isMilestone = item.type === "milestone";
+  const milestoneRelation =
+    isMilestone && parentPageId != null
+      ? { property: config?.relationProperty, parentPageId }
+      : undefined;
   const relation =
     item.type === "story"
       ? { property: config?.relationProperty, parentPageId: milestonePageId ?? null }
-      : undefined;
+      : milestoneRelation;
+  const phaseReason = isMilestone ? parentReason : undefined;
 
   // (1) No statusMap entry for this aof status ⇒ an honest skip. NO statusOption is
   // written, NO create/patch op is emitted — never-half-write (ADR-003 §A4).
@@ -70,7 +102,9 @@ function projectItem(item, config, mapping, milestonePageId) {
       pageId: null,
       properties: relation ? { title, relation } : { title },
       ...(relation ? { relation } : {}),
-      reason: `no statusMap entry for ${status}`,
+      reason: phaseReason
+        ? `no statusMap entry for ${status}; ${phaseReason}`
+        : `no statusMap entry for ${status}`,
     };
   }
 
@@ -82,7 +116,7 @@ function projectItem(item, config, mapping, milestonePageId) {
 
   // (2) No sidecar page id ⇒ create (the apply layer POSTs, then records the id).
   if (pageId == null) {
-    return {
+    return withContent({
       ref: item.ref,
       type: item.type,
       status,
@@ -90,13 +124,18 @@ function projectItem(item, config, mapping, milestonePageId) {
       pageId: null,
       properties,
       ...(relation ? { relation } : {}),
-    };
+      ...(phaseReason ? { reason: phaseReason } : {}),
+    });
   }
 
-  // (3) The mapped option already equals the sidecar's recorded lastStatus ⇒ noop
-  // (the board option already matches what disk would write — no Notion call).
-  if (entry?.lastStatus != null && entry.lastStatus === mappedOption) {
-    return {
+  // (3) The mapped option already equals the sidecar's recorded lastStatus AND the body
+  // content is unchanged (same hash) ⇒ noop (board + body already match disk — no Notion
+  // call). A CHANGED body (or a first-ever body, e.g. a page created before content sync
+  // existed → no recorded hash) falls through to patch so the body is (re)written. A
+  // content-less item ignores the content check (byte-for-byte m17).
+  const contentChanged = content != null && hashContent(content) !== (entry?.lastContentHash ?? null);
+  if (entry?.lastStatus != null && entry.lastStatus === mappedOption && !contentChanged) {
+    return withContent({
       ref: item.ref,
       type: item.type,
       status,
@@ -104,11 +143,12 @@ function projectItem(item, config, mapping, milestonePageId) {
       pageId,
       properties,
       ...(relation ? { relation } : {}),
-    };
+      ...(phaseReason ? { reason: phaseReason } : {}),
+    });
   }
 
   // (4) Else patch the known page in place (disk overwrites Notion, one-way).
-  return {
+  return withContent({
     ref: item.ref,
     type: item.type,
     status,
@@ -116,15 +156,23 @@ function projectItem(item, config, mapping, milestonePageId) {
     pageId,
     properties,
     ...(relation ? { relation } : {}),
-  };
+    ...(phaseReason ? { reason: phaseReason } : {}),
+  });
 }
 
-// The pure projection: turn the on-disk traversal + config + sidecar into a
+// The pure projection: turn the on-disk traversal + RESOLVED routing + sidecar into a
 // per-item SyncPlan. NO Notion call. `items` is the milestone + its stories in
 // traversal order (milestone FIRST), each `{ ref, type, slug, meta }` where `meta`
-// is the readMeta frontmatter ({ title, status, … }). `config` is the resolved
-// `work.integrations.notion` block; `mapping` is readMapping(projectRoot, dsId).
-export function projectMilestone({ items, config, mapping } = {}) {
+// is the readMeta frontmatter ({ title, status, … }). `config` is the RESOLVED board
+// connection (story 00's `resolveNotionRouting().board`); `mapping` is
+// readMapping(projectRoot, config.dataSourceId) for that board's data-source.
+// `parentPageId`/`reason` are the resolver's parent page id + honest reason — the
+// milestone nests under `parentPageId` (or stays top-level + carries `reason`).
+//
+// NO-REGRESSION (18, the load-bearing invariant): with `parentPageId` defaulting to
+// `null` and no `reason`, the plan is byte-for-byte identical to the m17 projection for
+// an unrouted milestone+stories — the milestone carries no relation and no reason.
+export function projectMilestone({ items, config, mapping, parentPageId = null, reason } = {}) {
   const dataSourceId = config?.dataSourceId ?? mapping?.dataSourceId ?? null;
   const list = Array.isArray(items) ? items : [];
 
@@ -133,7 +181,9 @@ export function projectMilestone({ items, config, mapping } = {}) {
   const milestoneItem = list.find((item) => item.type === "milestone");
   const milestonePageId = milestoneItem ? resolvePageId(mapping, milestoneItem.ref) : null;
 
-  const ops = list.map((item) => projectItem(item, config, mapping, milestonePageId));
+  const ops = list.map((item) =>
+    projectItem(item, config, mapping, milestonePageId, parentPageId, reason)
+  );
 
   return { dataSourceId, ops };
 }
