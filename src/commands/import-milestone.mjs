@@ -17,17 +17,26 @@
 import path from "node:path";
 import { commandError } from "./errors.mjs";
 import { resolveImportSource } from "../import/source.mjs";
-import { recoverMilestone, listRecoverableMilestones } from "../import/recovery.mjs";
-import { materializeImport } from "../import/materialize.mjs";
+import { recoverMilestone, listRecoverableMilestones, resolveCandidate } from "../import/recovery.mjs";
+import { writeColocatedDigest } from "../import/materialize.mjs";
 import { slugifySource } from "../import/store.mjs";
 import { resolveConfiguredBackend } from "../work-memory.mjs";
 
 // Derive a stable source slug from the `<repo>` token (a local path's basename or
 // a remote URL's last path segment), so a re-import of the same source lands in
-// the same per-import folder (ADR-005 one-time snapshot).
+// the same per-import folder (ADR-005 one-time snapshot). When `<repo>` points
+// DIRECTLY at a `…/wiki/work/<milestone-folder>` (point-at-the-folder addressing),
+// the SOURCE is the repo that OWNS the folder, not the folder itself — so the slug
+// is the repo-root basename, keeping every milestone imported from one repo under
+// one `<sourceSlug>/` bucket regardless of how it was addressed.
 function sourceSlugFor(repo) {
   if (typeof repo !== "string" || repo.length === 0) return "source";
-  const tail = repo.replace(/[/\\]+$/, "").split(/[/\\]/).pop() ?? repo;
+  const parts = repo.replace(/[/\\]+$/, "").split(/[/\\]/);
+  const n = parts.length;
+  if (n >= 4 && parts[n - 2] === "work" && parts[n - 3] === "wiki") {
+    return slugifySource((parts[n - 4] ?? parts[n - 1]).replace(/\.git$/i, ""));
+  }
+  const tail = parts[n - 1] ?? repo;
   return slugifySource(tail.replace(/\.git$/i, ""));
 }
 
@@ -39,6 +48,9 @@ export const importMilestoneCommand = {
       repo: { type: "string" },
       selector: { type: "string" },
       dryRun: { type: "boolean" },
+      // Optional injected provenance date for the digest frontmatter (ADR-007);
+      // defaults to today. Injectable so tests are deterministic.
+      importedAt: { type: "string" },
     },
     required: ["repo"],
     additionalProperties: false,
@@ -73,12 +85,16 @@ export const importMilestoneCommand = {
       );
     }
 
-    // Resolve which milestone to import. A MISSING <selector> is NOT a usage error
-    // (Three-Amigos decision): exactly one recoverable milestone ⇒ import it;
-    // ambiguous (>1) ⇒ a structured error asking which (ADR-002 surface).
-    let selector = input.selector;
-    if (selector == null || selector === "") {
-      const candidates = await listRecoverableMilestones(sourceDir);
+    // Resolve which milestone to import, the SAME way recovery picks it (one
+    // resolver, no drift). A MISSING <selector> is NOT a usage error (Three-Amigos
+    // decision): exactly one recoverable milestone ⇒ import it; ambiguous (>1) ⇒ a
+    // structured error asking which (ADR-002 surface). An EXPLICIT selector that
+    // matches NOTHING is an honest no-match error — never a silent fall-through to
+    // "the only milestone" (the GSD `NN-slug`-by-number mis-import that used to slip
+    // through). `<repo>` may be a repo root to scan OR a milestone folder directly.
+    const candidates = await listRecoverableMilestones(sourceDir);
+    let picked;
+    if (input.selector == null || input.selector === "") {
       if (candidates.length === 0) {
         throw commandError(
           `No recoverable milestone found in the source "${repo}".`,
@@ -94,31 +110,46 @@ export const importMilestoneCommand = {
           400
         );
       }
-      selector = candidates[0].ref;
+      picked = candidates[0];
+    } else {
+      picked = resolveCandidate(candidates, input.selector);
+      if (!picked) {
+        const refs = candidates.map((c) => c.ref).join(", ") || "(none)";
+        throw commandError(
+          `No milestone matching "${input.selector}" in the source "${repo}". Available: ${refs}.`,
+          "no-milestone-match",
+          404
+        );
+      }
     }
+    const selector = picked.ref;
 
     // Recover the milestone (the story-01 seam — a STUB for now; story 00 freezes
     // the signature + the `recovered` shape it returns).
     const recovered = await recoverMilestone(sourceDir, selector);
 
     const sourceSlug = sourceSlugFor(repo);
-    const milestoneRef = String(selector);
+    const milestoneRef = String(recovered.meta?.ref ?? selector);
+    // The digest's `importedAt` provenance stamp (ADR-007). Injectable via input for
+    // deterministic tests; defaults to today's date (YYYY-MM-DD). It lands ONLY in the
+    // digest's frontmatter, which is never an index record source (parseAof ignores
+    // frontmatter), so it changes no record and breaks no `source:line` (ADR-005).
+    const importedAt = input.importedAt ?? new Date().toISOString().slice(0, 10);
 
-    // Materialize the frozen artifact pair (ADR-001/004) — or PREVIEW on a dry-run
-    // (ADR-002): the preview computes the artifacts + record count it WOULD write
-    // and writes / indexes / networks NOTHING.
-    const materialized = await materializeImport(
-      { projectRoot, sourceSlug, milestoneRef, recovered },
+    // HARD RULE (operator): the recovered digest is written as a single `AOF.md`
+    // INTO the source milestone folder it was imported from (`picked.dir`) — co-located
+    // beside that milestone's own docs, NEVER a separate `.aof/imports/` store. A
+    // --dry-run PREVIEWS the path + record count and writes nothing.
+    const materialized = await writeColocatedDigest(
+      { targetDir: picked.dir, sourceSlug, milestoneRef, recovered, importedAt },
       { preview: dryRun }
     );
 
-    // SEAM (story 02): after a real materialize, the import triggers the backend's
-    // `reindex` so import REACHES memory (ADR-003 — the load-bearing "wire the seam
-    // into the loop" deliverable). Story 00 deliberately does NOT reindex; story 02
-    // adds `import → backend.reindex` HERE (only when !dryRun). The import never
-    // writes the index JSON directly and never spawns graphify (ADR-003): it reaches
-    // the CONFIGURED backend (`none` no-ops; `local`/`graphify` rebuild from the
-    // `.md`, now including the import store via the EXTENDED buildRecords scan).
+    // After a real write, trigger the backend's `reindex` so the digest REACHES memory
+    // (ADR-003 — "wire the seam into the loop"). Best-effort: the co-located AOF.md is
+    // indexed in place by the OWNING repo's work-stream scan (a foreign source's own
+    // aof picks it up); reindexing this project is a no-op when the source is elsewhere.
+    // The import never writes the index JSON directly and never spawns graphify (ADR-003).
     if (!dryRun) {
       // Resilient: a binary-absent graphify backend already degrades (milestone 10);
       // never let a reindex failure fail the import that materialized successfully.

@@ -395,6 +395,138 @@ holds no imported fact absent from that `.md`, and recovery emits no record not 
 source content (no fabricated SPEC/decision/lesson). (Enforced by `acd-import-derived-index`, mirroring
 `05/ADR-005`'s `acd-memory-derived-index`.)
 
+## ADR-006: An intent-only import (no decisions/outcomes) ALSO materializes an `AOF.md` digest, indexed via the EXISTING `parseAof` into `summary` records — so a zero-record import gains a recallable presence with NO new parser
+
+**Status:** Accepted
+**Date:** 2026-06-25 (re-opened — the deferred 13×14 follow-up)
+
+**Context.** ADR-001 split the materialized artifacts into a legible `SPEC.md` (recovered intent, NOT a
+record source) + the `ARCHITECTURE.md`/`RETROSPECTIVE.md`-shaped knowledge that the existing parsers index.
+That is correct for an aof-shaped source — but it leaves a real gap proven on the **voice-vox pay-guard**
+testbed: a milestone whose source carried only **intent** (a `## Goal` + `## Scope`, no `ARCHITECTURE.md`
+and no `RETROSPECTIVE.md` to recover) materializes ONLY `SPEC.md` and therefore contributes **zero**
+records — its recovered intent is legible on disk but invisible to `aof work memory recall`. This is
+exactly the case milestone **14** built the `AOF.md` **digest** doc type for ("give a milestone whose
+SPEC/STATE carry no ADR/retro records a recallable presence"; `14/parseAof`: each `## ` section → one
+`summary` record). Milestone 14 explicitly scoped the digest to the **work stream** and deferred *"having
+the import materialize writer (milestone 13) also emit an `AOF.md` … a deferred follow-up."* This ADR
+takes that follow-up. It does NOT re-open ADR-001/003: it is the same localised-additive move (`05/ADR-007`)
+applied once more — reuse an EXISTING doc shape + its EXISTING parser; add no new parser, no new record shape.
+
+**Decision.**
+- **The import emits an `AOF.md` digest ONLY for the zero-record case** — when recovery yields intent but
+  **no decisions and no outcomes**. A milestone that recovered ADR/retro records already grounds recall, so
+  it needs no digest, and its materialized set + record count stay exactly as ADR-001 froze them (the change
+  is strictly additive to the intent-only case — no existing artifact set changes).
+- **The digest reuses milestone-14's doc shape verbatim** — one `## ` section per recovered intent half
+  (`## Intent` ← objective, `## Scope` ← scope), so the EXISTING `parseAof` turns each into one frozen
+  `summary` `MemoryRecord`. No new parser, no new record shape (ADR-001's invariant holds: the import is a
+  PRODUCER of `.md` the existing parsers read).
+- **The import-store scan gains the digest as a third recognised artifact** — `scanImportStore`
+  (ADR-003's extended scan) reads `AOF.md` alongside `ARCHITECTURE.md`/`RETROSPECTIVE.md` and runs
+  `parseAof`, with the same leg-aware `source` base (records resolve within the import store) and the same
+  namespaced `import:<source>/<ref>` item. ADR-003's "extend the existing scan, one existing parser" model
+  is unchanged — this is a third existing parser on the same scan root, not a new store or index path.
+- **Absence is information (ADR-005) holds** — a digest section is emitted ONLY for an intent half the
+  source actually carried; an absent/empty objective or scope yields no section and so no record. An
+  unrecoverable intent (`intent: null`) emits no digest at all. The digest fabricates nothing.
+
+**Locked contract this ADR satisfies (the digest as a third existing-parser source — no new parser/shape):**
+
+```js
+// src/import/materialize.mjs — planMaterialize emits AOF.md IFF (intent recoverable && decisions==0 && outcomes==0):
+//   specs += { file: "AOF.md", content: renderDigest(intent) }   // ## Intent / ## Scope sections
+//   recordCount = decisions + outcomes + digestSections           // SPEC.md still yields 0
+// src/memory/local-indexing.mjs — scanImportStore reads AOF.md and runs the EXISTING parseAof:
+//   records += parseAof(text, { item: import:<source>/<ref>, workRelPath: rel(importStoreRoot, AOF.md) })
+// UNCHANGED: the MemoryRecord shape, the index path, the parser set's membership (parseAof already exists),
+//   ADR-004's store geometry, ADR-002's read-only source. FORBIDDEN (still): a new parser, a new record
+//   shape, a bespoke store, a direct index-JSON write, importing src/graphify.mjs.
+```
+
+**Alternatives considered.**
+- *Always emit the digest (even when ADR/retro records exist)* — REJECTED: it duplicates a recallable
+  presence the adr/lesson records already give, and it would change the materialized set + record count of
+  EVERY import (re-opening ADR-001's frozen artifact-set fixtures for no recall gain). The digest is the
+  *fallback* for the zero-record case, exactly as milestone 14 framed it.
+- *Index `SPEC.md` directly instead of adding `AOF.md`* — REJECTED: it re-opens ADR-001 (SPEC.md is legible
+  intent, deliberately NOT a record source — a SPEC has no `## `-section-as-record contract). The `AOF.md`
+  digest is the doc type milestone 14 already built and parses; reusing it adds nothing new.
+- *A new "imported-intent" record type / parser* — REJECTED by `05/ADR-007` + ADR-001: `summary` via the
+  existing `parseAof` already fits; a new parser/shape is the non-localised change both forbid.
+
+**Consequences.** The materialize story (00) gains a conditional `renderDigest` + the zero-record predicate;
+the indexing story (02) gains one line in `scanImportStore` (read `AOF.md` → `parseAof`). The pay-guard
+testbed's intent-only imports now recall (each `## Goal`/`## Scope` → a `summary` record) instead of
+contributing zero. Story **04 · import-digest** owns this slice; it couples to 00 (the materialize writer)
+and 02 (the scan) through their existing seams only.
+
+**Invariant.** An imported milestone that recovers intent but no decisions and no outcomes materializes an
+`AOF.md` digest whose every `## ` section is indexed by the EXISTING `parseAof` into a frozen `summary`
+`MemoryRecord` resolving within the import store; an import that recovered ADR/retro records emits no
+digest (its artifact set is unchanged); the digest introduces no new parser and no new record shape, and
+fabricates no section the recovered intent lacks. (Enforced by `acd-import-digest-recallable` + the existing
+`acd-import-derived-index` over the digest's `summary` records.)
+
+## ADR-007: The digest carries milestone-identity + provenance frontmatter (`milestone`/`slug`/`title`/`status`/`imported`/`importedBy`/`importedAt`); `importedAt` is the ONE permitted provenance timestamp because the digest frontmatter is never an index record source
+
+**Status:** Accepted
+**Date:** 2026-06-25
+
+**Context.** ADR-006's first cut emitted a digest with only `doc: digest` frontmatter. Dogfooding showed
+that is too thin: a digest read by a human (or a future tool) carries no identity — which milestone, what
+title, what status, when it was produced. The milestone-14 digest convention already established the head
+of this shape (`doc`/`milestone`/`slug`/`imported: true`/`importedBy: aof`, per its `parseAof` fixture);
+the gap is `title`, `status`, and a `importedAt` provenance date. The one tension is ADR-005 / the
+`provenanceLines` discipline, which deliberately keeps the materialized SPEC/ARCHITECTURE/RETROSPECTIVE
+**timestamp-free** so those record-bearing artifacts re-import byte-identically (`acd-import-derived-index`).
+A timestamp on THOSE would change a record-bearing `.md` and break the derived-index invariant.
+
+**Decision.**
+- **The digest frontmatter is the canonical identity + provenance block:** `doc: digest`, `milestone: <ref>`,
+  `slug: <slug>`, `title: "<title>"` (quoted — it carries spaces/punctuation), `status: <aof-vocab>`,
+  `imported: true`, `importedBy: aof`, and `importedAt: <YYYY-MM-DD>`. `slug`/`title`/`status` are the
+  RECOVERED milestone identity (ADR-005: recovered, never fabricated — an absent title/status falls back to
+  the ref/`not-started`, it does not invent one). Status is mapped to the closed aof vocabulary.
+- **`importedAt` is the ONE permitted provenance timestamp, and ONLY on the digest** — because the digest
+  frontmatter is **never an index record source**: `parseAof` reads only `## ` sections and ignores
+  frontmatter, so `importedAt` changes no `summary` record and breaks no `source:line`. The derived-index
+  invariant (records reproduce identically; every `source:line` resolves) is over RECORDS, and it is
+  untouched. The SPEC/ARCHITECTURE/RETROSPECTIVE artifacts stay timestamp-free (ADR-005) — `importedAt`
+  does NOT spread to them. It is **injectable** (default: today) so `@executable` tests are deterministic
+  and a same-day re-import stays byte-identical; only the calendar day, not the record set, can differ.
+- **`renderDigest` is the single canonical renderer** the import path uses, and that an in-place
+  (work-stream) digest generation reuses verbatim — so a co-located `wiki/work/NN_milestone_slug/AOF.md`
+  (the [[import-store-vs-colocated-digest]] model) and an import-store digest share one frontmatter shape.
+
+**Locked contract this ADR satisfies:**
+
+```js
+// src/import/materialize.mjs — renderDigest emits the canonical frontmatter; recovery (recovery.mjs)
+//   supplies recovered.meta = { slug, title, status } (mapped to the aof status vocab; recovered, never
+//   fabricated). importedAt is threaded materializeImport → planMaterialize → renderDigest, injectable
+//   via the import:milestone command input (default: today).
+// INVARIANT: importedAt appears ONLY in AOF.md frontmatter (never SPEC/ARCHITECTURE/RETROSPECTIVE), and
+//   the digest frontmatter is never parsed into a record (parseAof reads only `## ` sections).
+```
+
+**Alternatives considered.**
+- *Put `importedAt` on every materialized artifact* — REJECTED: it breaks `acd-import-derived-index`
+  byte-identity for the record-bearing SPEC/ARCHITECTURE/RETROSPECTIVE (ADR-005). The digest is the only
+  non-record-source artifact, so it is the only safe home for a provenance timestamp.
+- *Omit `importedAt` to preserve strict byte-identity everywhere* — REJECTED: provenance ("when was this
+  digest produced") is the point of the dogfooding feedback; scoping it to the frontmatter keeps the
+  records invariant intact while still answering it.
+- *A new digest record carrying the identity* — REJECTED: the identity is frontmatter, not a `## ` section;
+  making it a record would re-open the `summary`-from-`## `-section contract (milestone 14) for no gain.
+
+**Invariant.** Every materialized digest carries the canonical identity + provenance frontmatter
+(`doc`/`milestone`/`slug`/`title`/`status`/`imported`/`importedBy`/`importedAt`), with `slug`/`title`/`status`
+recovered (never fabricated) and `importedAt` the only timestamp — present ONLY in the digest frontmatter,
+which `parseAof` never reads into a record, so the derived-index records invariant (ADR-005) is untouched.
+(Enforced by `acd-import-digest-recallable`, extended to assert the frontmatter shape + that `importedAt`
+appears on no record-bearing artifact.)
+
 ## Fitness functions
 
 <!-- Each structural invariant from an ADR, paired with the arch-test that enforces it in CI.
@@ -410,7 +542,8 @@ source content (no fabricated SPEC/decision/lesson). (Enforced by `acd-import-de
 | **Registered command + read-only source.** `import:milestone` is registered in the frozen Command core (`{id, input, run, cli}`) and dispatched via `invoke`; source access is read-only — a local repo read in place, a remote fetched via the `planning-init` `git`-argv-spawn idiom (no shell string), and NO git write verb / mutation is ever constructed against the source. | `test/arch/acd-import-read-only-source.test.mjs` (assert `getCommand("import:milestone")` returns the frozen-shape command with a `cli` adapter; source-grep the import module: no `git` write verb (`commit`/`push`/`checkout`/`clone <repo> <repo>`/write-into-source), no shell-string spawn; assert the only external-fetch form is the read-only `git ls-remote`/fetch argv idiom — the `acd-planning-install-commands`/network-boundary idiom applied to import) | RED until the `import:milestone` command exists | ADR-002 |
 | **Index via the existing store + scan extension; never graphify directly.** Imported knowledge is indexed only by extending the existing indexer scan to the import store (existing parsers, existing `.aof/aof.memory.*.index.json` path); the import never writes the index JSON directly, creates no bespoke store, and imports no `src/graphify.mjs` / spawns no graphify. | `test/arch/acd-import-indexer-extends-scan.test.mjs` + `test/arch/acd-import-no-graphify-spawn.test.mjs` (assert the indexer extension reuses `buildRecords`/the existing parsers into the existing index path — no new index file written under `.aof/`; source-grep the import command + materialize module: no direct write of `aof.memory.index.json`, no `import "../graphify.mjs"`, no `node:child_process` spawn of graphify — the `acd-memory-index-location` + `10/acd-graphify-backend-via-command` idioms) | RED until the indexer extension + import command exist | ADR-003 |
 | **An import is never a managed work item.** Nothing the import materializes is a top-level `NN_type_slug` folder under `workDir`; the import store lives outside `workDir` (under `.aof/`) and is git-ignored, so `listItems`/`findWork`/`listStream`/`nextWork`/`validateWork` never enumerate it as a milestone/story/task/uat. | `test/arch/acd-import-not-a-work-item.test.mjs` (materialize a fixture import into a temp project; run `listItems(workDir)` / `findWork` / `nextWork` over the work stream and assert the import NEVER appears as a resolvable item; assert the import store is OUTSIDE `workDir`, uses no `NN_type_slug` name, and is git-ignored via the nested-`.gitignore` baseline — never the repo-root `.gitignore`) | RED until the materialize store wiring exists | ADR-004 |
-| **Derived-index invariant for imports (+ no fabrication, clean snapshot).** A fresh re-import + `reindex` reproduces the identical imported record set, every imported record's `source:line` resolves to live text in the git-ignored re-derivable import store, the index holds no imported fact absent from that `.md`, and no record is produced that the materialized `.md` does not contain (no fabricated SPEC/decision/lesson). | `test/arch/acd-import-derived-index.test.mjs` (materialize a fixture import; for each derived record split `source` into `path:line`, read the file in the import store, assert the line resolves; assert a second import over the same fixture source yields the identical artifact + record set; assert the import store is git-ignored — the `05/acd-memory-derived-index` idiom, extended to the import store as a new derived source) | RED until the materialize + indexer-extension code exist | ADR-001, ADR-005 |
+| **Derived-index invariant for imports (+ no fabrication, clean snapshot).** A fresh re-import + `reindex` reproduces the identical imported record set, every imported record's `source:line` resolves to live text in the git-ignored re-derivable import store, the index holds no imported fact absent from that `.md`, and no record is produced that the materialized `.md` does not contain (no fabricated SPEC/decision/lesson). | `test/arch/acd-import-derived-index.test.mjs` (materialize a fixture import; for each derived record split `source` into `path:line`, read the file in the import store, assert the line resolves; assert a second import over the same fixture source yields the identical artifact + record set; assert the import store is git-ignored — the `05/acd-memory-derived-index` idiom, extended to the import store as a new derived source) | GREEN | ADR-001, ADR-005 |
+| **Intent-only import gets a recallable `AOF.md` digest (with identity+provenance frontmatter) via the EXISTING parser — no new parser/shape.** An import that recovers intent but no decisions and no outcomes materializes an `AOF.md` digest whose every `## ` section indexes (via the EXISTING `parseAof`) as a frozen `summary` `MemoryRecord` resolving within the import store; the digest carries the canonical `doc`/`milestone`/`slug`/`title`/`status`/`imported`/`importedBy`/`importedAt` frontmatter (recovered, never fabricated); `importedAt` appears ONLY on the digest (never on the record-bearing SPEC/ARCHITECTURE/RETROSPECTIVE); an import that recovered ADR/retro records emits NO digest. | `test/arch/acd-import-digest-recallable.test.mjs` (intent-only fixture: `AOF.md` exists, `parseAof` yields `summary` records matching `MEMORY_RECORD_FIELDS` each resolving in the store, AND the frontmatter carries every canonical field incl. `importedAt` while SPEC.md stays timestamp-free; intent+decisions+outcomes fixture: NO `AOF.md`; source-grep that `scanImportStore` reuses `parseAof` and the import side adds no new parser/record shape) | GREEN | ADR-006, ADR-007 |
 
 <!-- Note on what is an arch-test vs a behavioural task scenario (mirrors 05/10's split):
      - ARTIFACT-SHAPE, READ-ONLY-SOURCE, INDEXER-EXTENDS-SCAN/NO-GRAPHIFY-SPAWN, NOT-A-WORK-ITEM,

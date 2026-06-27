@@ -12,6 +12,7 @@
       "domains": ["@work-stream", "@validate", "@scaffold", "@planning", "@board", "@distribution", "@round-trip", "@memory", "@design"]
     }
   },
+  "memory": { "backend": "graphify" },
   "resources": [],
   "packages": [],
   "runtimes": [

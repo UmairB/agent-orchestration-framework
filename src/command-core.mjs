@@ -31,6 +31,10 @@ import { tasksCommand } from "./commands/tasks.mjs";
 import { validateCommand } from "./commands/validate.mjs";
 import { nextCommand } from "./commands/next.mjs";
 import { feedbackCommand } from "./commands/feedback.mjs";
+// milestone 15 — work doctor core (work:doctor registers into the SAME core;
+// 15/ADR-001). The 7th work command: the deterministic, cross-item HEALTH lane —
+// validate's sibling with a richer { code, severity, path, message } envelope.
+import { doctorCommand } from "./commands/doctor.mjs";
 // milestone 09 — graphify command core (graph:build/query/triage register into
 // the SAME core; ADR-001). The driver (src/graphify.mjs) is the sole spawn site.
 import { graphBuildCommand } from "./commands/graph-build.mjs";
@@ -50,6 +54,19 @@ import { projectProvisionCommand } from "./commands/project-provision.mjs";
 // SAME core; 13/ADR-002). It reads a source repo READ-ONLY and materializes a
 // recovered milestone as a frozen artifact pair in the .aof/ import store.
 import { importMilestoneCommand } from "./commands/import-milestone.mjs";
+// milestone 17 — Notion work-board sync (notion:sync-work registers into the SAME
+// core; 17/ADR-002). The PO's terminal command that pushes a milestone + its
+// stories to a Notion board; opt-in via `work.integrations.notion` (absent ⇒ an
+// honest no-op). Takes the `notion:*` prefix, so it is EXCLUDED from the /api/work
+// bijection but inherits the generic command-cli bijection (08/ADR-004).
+import { notionSyncWorkCommand } from "./commands/notion-sync-work.mjs";
+// milestone 18 — integration descriptor (notion:associate registers into the SAME
+// core; 18/ADR-003/004). Records (or clears) a milestone's board + parent routing in
+// its committed `.integrations.json` descriptor; PURE/no-read (ADR-006) — the
+// descriptor write is the only mutation (neither the sidecar nor Notion). Takes the
+// `notion:*` prefix, so EXCLUDED from the /api/work bijection but inheriting the
+// generic command-cli bijection (08/ADR-004).
+import { notionAssociateCommand } from "./commands/notion-associate.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -67,12 +84,15 @@ const COMMANDS = [
   validateCommand,
   nextCommand,
   feedbackCommand,
+  doctorCommand,
   graphBuildCommand,
   graphQueryCommand,
   graphTriageCommand,
   graphImpactCommand,
   projectProvisionCommand,
   importMilestoneCommand,
+  notionSyncWorkCommand,
+  notionAssociateCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

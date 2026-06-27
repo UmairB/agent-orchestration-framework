@@ -18,7 +18,7 @@ import { listItems } from "../work.mjs";
 import { readJson, writeText } from "../fs.mjs";
 import { ensureAofGitignore } from "../aof-gitignore.mjs";
 import { importStoreRoot } from "../import/store.mjs";
-import { ARCHITECTURE_FILE, RETROSPECTIVE_FILE } from "../import/materialize.mjs";
+import { ARCHITECTURE_FILE, RETROSPECTIVE_FILE, AOF_FILE } from "../import/materialize.mjs";
 
 // The index-format version (ADR-005). Bump on a breaking record-shape change.
 export const INDEX_VERSION = 1;
@@ -298,6 +298,7 @@ async function scanImportStore(projectRoot) {
 
       const retroPath = path.join(dir, RETROSPECTIVE_FILE);
       const archPath = path.join(dir, ARCHITECTURE_FILE);
+      const aofPath = path.join(dir, AOF_FILE);
       if (existsSync(retroPath)) {
         const text = await readFile(retroPath, "utf8");
         records.push(...parseRetrospective(text, { ...meta, workRelPath: toWorkRel(root, retroPath) }));
@@ -305,6 +306,14 @@ async function scanImportStore(projectRoot) {
       if (existsSync(archPath)) {
         const text = await readFile(archPath, "utf8");
         records.push(...parseArchitecture(text, { ...meta, workRelPath: toWorkRel(root, archPath) }));
+      }
+      // ADR-006: an imported `AOF.md` digest → `summary` records via the EXISTING
+      // parseAof (the same parser the work-stream scan runs over a milestone's AOF.md).
+      // The import writer emits one only for the zero-record (intent-only) case, so a
+      // milestone with ADR/retro records indexes exactly as before.
+      if (existsSync(aofPath)) {
+        const text = await readFile(aofPath, "utf8");
+        records.push(...parseAof(text, { ...meta, workRelPath: toWorkRel(root, aofPath) }));
       }
     }
   }

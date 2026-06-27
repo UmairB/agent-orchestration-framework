@@ -21,8 +21,11 @@ import { workspacePaths } from "./workspace.mjs";
 // Both memory backends keep their derived record store here: the local backend's
 // `aof.memory.index.json` (05/ADR-005) and the graphify backend's
 // `aof.memory.graphify.index.json` (10/ADR-005) — each rebuilt from the `.md` stream,
-// never an authoritative second copy, so each is git-ignored by this baseline.
-export const AOF_GITIGNORE_ENTRIES = ["aof.memory.index.json", "aof.memory.graphify.index.json"];
+// never an authoritative second copy, so each is git-ignored by this baseline. The
+// Notion work-board sync's identity sidecar `notion.work-map.json` (17/ADR-001) joins
+// them: a derived, aof-owned mapping of aof ref → Notion page id, rebuildable by a
+// re-sync, never a committed authoritative source — so it is git-ignored here too.
+export const AOF_GITIGNORE_ENTRIES = ["aof.memory.index.json", "aof.memory.graphify.index.json", "notion.work-map.json"];
 
 const HEADER = "# aof — derived/regenerable artifacts; never commit (the tracked install is committed).\n";
 

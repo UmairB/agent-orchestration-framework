@@ -31,10 +31,64 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { slugifySource } from "./store.mjs";
 
 // The aof work-item milestone-folder pattern (mirrors src/work.mjs ITEM_RE, scoped
-// to milestones) — the aof-STRUCTURED lane's detector.
-const MILESTONE_RE = /^(\d+)_milestone_([a-z0-9-]+)$/;
+// to milestones) — the aof-STRUCTURED form.
+const AOF_MILESTONE_RE = /^(\d+)_milestone_([a-z0-9-]+)$/;
+// A tolerant numbered-folder form: `<NN><sep><slug>` — the GSD `323-realtime-…`
+// convention (and `NN_slug`). Tried AFTER the aof form so `333_milestone_calls-…`
+// keeps its aof slug rather than capturing `milestone_calls-…`. The folder NAME is
+// not a contract: import addresses a milestone by the number/slug a human already
+// gave the folder, NOT by an aof-only naming convention (a source it didn't run
+// won't use `_milestone_`).
+const NUMBERED_FOLDER_RE = /^(\d+)[-_]+(.+)$/;
+
+// The record docs whose mere presence marks a folder as a milestone folder (for
+// DIRECT point-at-the-folder addressing). recordDoc-class first (SPEC/AOF), then the
+// satellites — any one is enough to say "this dir IS a milestone, not a repo root".
+const RECORD_DOC_NAMES = ["SPEC.md", "AOF.md", "STATE.md", "ARCHITECTURE.md", "RETROSPECTIVE.md", "STORY.md"];
+
+// Parse a NUMBERED milestone folder name → { ref, slug }, tolerant of the aof
+// `NN_milestone_slug` and the loose `NN-slug` / `NN_slug` forms. Returns null when
+// the name carries no leading number (used by the repo SCAN, which only treats
+// numbered folders as milestones — a bare-slug dir under wiki/work is not assumed
+// to be one). The slug is normalised to the `[a-z0-9-]` vocabulary.
+function parseNumberedMilestoneFolder(name) {
+  const aof = name.match(AOF_MILESTONE_RE);
+  if (aof) return { ref: aof[1], slug: aof[2] };
+  const numbered = name.match(NUMBERED_FOLDER_RE);
+  if (numbered) return { ref: numbered[1], slug: slugifySource(numbered[2]) };
+  return null;
+}
+
+// Derive a milestone IDENTITY from a folder basename for DIRECT addressing (the user
+// pointed import straight at the folder). Tolerant of every form: numbered (aof or
+// GSD) OR a bare slug — a numberless folder's slug doubles as its ref so the import
+// store path is still self-describing (`import-<slug>`). Never null.
+function identityFromFolder(name) {
+  const numbered = parseNumberedMilestoneFolder(name);
+  if (numbered) return numbered;
+  const slug = slugifySource(name);
+  return slug.length > 0 ? { ref: slug, slug } : { ref: "milestone", slug: "milestone" };
+}
+
+// Is `dir` itself a milestone folder (it directly carries a record/satellite doc)?
+// Distinguishes "point import at the milestone folder" from "point it at a repo root
+// to scan" — a repo root holds its milestones under `wiki/work/`, not a SPEC.md at
+// its own root.
+function isMilestoneFolder(dir) {
+  return RECORD_DOC_NAMES.some((name) => existsSync(path.join(dir, name)));
+}
+
+// Sort recoverable candidates by ref — numerically when both refs are numbers (the
+// common NN case), lexically otherwise (a bare-slug ref).
+function byRef(a, b) {
+  const na = Number.parseInt(a.ref, 10);
+  const nb = Number.parseInt(b.ref, 10);
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return String(a.ref).localeCompare(String(b.ref));
+}
 
 // The synthetic ref an ARBITRARY (non-aof) source recovers under, so the
 // missing-`<selector>` default in the command still resolves (story 00's flow keys
@@ -72,26 +126,36 @@ async function readFileSafe(file) {
 // [{ ref, slug, dir }] sorted by ref. The synthetic candidate carries the repo root
 // as `dir` so recoverMilestone can read its arbitrary signals.
 export async function listRecoverableMilestones(sourceDir) {
+  // DIRECT addressing (point-at-the-folder): `sourceDir` IS a milestone folder (it
+  // carries a record doc directly). Its identity comes from the basename — tolerant
+  // of the aof `NN_milestone_slug`, the GSD `NN-slug`, or a bare slug. No naming
+  // convention is required: the human already named the folder.
+  if (isMilestoneFolder(sourceDir)) {
+    return [{ ...identityFromFolder(path.basename(sourceDir)), dir: sourceDir, direct: true }];
+  }
+  // STRUCTURED scan: a repo root's `wiki/work/<folder>` milestones — the aof
+  // `NN_milestone_slug` form OR the loose `NN-slug` GSD form, so a numeric selector
+  // resolves either. (Only NUMBERED folders are treated as milestones in a scan.)
   const workDir = sourceWorkDir(sourceDir);
   const milestones = [];
   for (const entry of await readDirSafe(workDir)) {
     if (!entry.isDirectory()) continue;
-    const match = entry.name.match(MILESTONE_RE);
-    if (!match) continue;
-    milestones.push({ ref: match[1], slug: match[2], dir: path.join(workDir, entry.name) });
+    const parsed = parseNumberedMilestoneFolder(entry.name);
+    if (!parsed) continue;
+    milestones.push({ ...parsed, dir: path.join(workDir, entry.name) });
   }
-  if (milestones.length > 0) {
-    return milestones.sort((a, b) => Number.parseInt(a.ref, 10) - Number.parseInt(b.ref, 10));
-  }
-  // ARBITRARY lane: no aof milestones — the repo IS the single recoverable unit.
+  if (milestones.length > 0) return milestones.sort(byRef);
+  // ARBITRARY lane: no milestone folders — the repo IS the single recoverable unit.
   return [{ ref: ARBITRARY_REF, slug: ARBITRARY_SLUG, dir: sourceDir, arbitrary: true }];
 }
 
 // Pick the milestone the selector names. A numeric/slug selector matches an aof
 // milestone; for an arbitrary source the lone synthetic candidate is the default
 // (any selector resolves to it, since the repo is the one recoverable unit).
-// Returns the candidate or null.
-function findMilestone(milestones, selector) {
+// Returns the candidate or null. Exported so the command resolves the SAME way it
+// recovers — and so an explicit selector that matches NOTHING is an honest command
+// error, never a silent fall-through to "the only milestone".
+export function resolveCandidate(milestones, selector) {
   if (selector == null) return null;
   const wantNum = Number.parseInt(selector, 10);
   return (
@@ -411,6 +475,52 @@ function stripFrontmatterAndComments(text) {
   return body.trim();
 }
 
+// ───────────────────────────────────────────── milestone identity (ADR-007) ──
+
+// Map a source's free-text status (an aof-vocab token, or a STATE.md `**Status:**`
+// word like "In progress"/"Done") to the closed aof status vocabulary; defaults to
+// `not-started` when the source records none (absence is information — ADR-005).
+function normalizeStatus(raw) {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (/in[\s-]*review/.test(s)) return "in-review";
+  if (/in[\s-]*progress/.test(s)) return "in-progress";
+  if (/block/.test(s)) return "blocked";
+  if (/\b(done|complete|completed|accepted)\b/.test(s)) return "done";
+  return "not-started";
+}
+
+// Recover the milestone IDENTITY for the digest frontmatter (ADR-007) from an
+// aof-structured source: slug (the folder slug), title (SPEC frontmatter `title:`
+// or its `# ` heading, stripping a leading "NN ·" and a trailing "— Spec"), and
+// status (SPEC frontmatter `status:`, else STATE.md `**Status:**`, normalised).
+async function recoverAofMeta(milestoneDir, picked) {
+  const spec = await readFileSafe(path.join(milestoneDir, "SPEC.md"));
+  const fmTitle = (spec.match(/^title:\s*["']?(.+?)["']?\s*$/m) ?? [])[1];
+  const h1 = (spec.split(/\r?\n/).find((line) => /^#\s+/.test(line)) ?? "")
+    .replace(/^#\s+/, "")
+    .replace(/^\d+\s*[·•]\s*/, "")
+    .replace(/\s*[—–-]\s*spec(ification)?\s*$/i, "")
+    .trim();
+  const title = (fmTitle ?? h1).trim();
+  const fmStatus = (spec.match(/^status:\s*(.+?)\s*$/m) ?? [])[1];
+  let stateStatus = "";
+  if (!fmStatus) {
+    const state = await readFileSafe(path.join(milestoneDir, "STATE.md"));
+    stateStatus = (state.match(/\*\*Status:\*\*\s*([A-Za-z -]+)/) ?? [])[1] ?? "";
+  }
+  return { ref: picked.ref, slug: picked.slug, title, status: normalizeStatus(fmStatus ?? stateStatus) };
+}
+
+// Recover the milestone identity for an ARBITRARY source: slug (the synthetic ref),
+// title (README first heading, else the repo dir name), status (unknown → not-started).
+async function recoverArbitraryMeta(sourceDir, picked) {
+  const entries = await readDirSafe(sourceDir);
+  const readme = entries.find((e) => e.isFile() && /^readme(\.md|\.markdown|\.txt)?$/i.test(e.name));
+  let title = readme ? firstHeading(await readFileSafe(path.join(sourceDir, readme.name))) : "";
+  if (!title) title = path.basename(sourceDir).replace(/[-_]+/g, " ").trim();
+  return { ref: picked.ref, slug: picked.slug, title, status: "not-started" };
+}
+
 // ─────────────────────────────────────────────────────── the seam entry ──
 
 // Recover one milestone's `recovered` shape from a source (the FROZEN seam). Detects
@@ -421,10 +531,17 @@ function stripFrontmatterAndComments(text) {
 // the not-recoverable marker / omits the absent artifact (ADR-005: NEVER fabricates).
 export async function recoverMilestone(sourceDir, selector) {
   const milestones = await listRecoverableMilestones(sourceDir);
+  // An EXPLICIT selector that matches nothing recovers NOTHING (the command turns the
+  // empty shape into an honest no-match error) — it must NEVER fall through to "the
+  // only milestone" (the silent mis-import that addressing a GSD `NN-slug` repo by a
+  // number used to trigger). Only a MISSING selector defaults to the sole candidate.
   const picked =
-    findMilestone(milestones, selector) ?? (milestones.length === 1 ? milestones[0] : null);
+    resolveCandidate(milestones, selector) ??
+    (selector == null && milestones.length === 1 ? milestones[0] : null);
 
-  const recovered = { intent: null, decisions: [], outcomes: [] };
+  // `meta` carries the recovered milestone IDENTITY for the digest frontmatter
+  // (ADR-007): slug, title, status. Populated per-lane below; `{}` when unrecovered.
+  const recovered = { intent: null, decisions: [], outcomes: [], meta: {} };
   if (!picked) return recovered;
 
   if (picked.arbitrary) {
@@ -432,6 +549,7 @@ export async function recoverMilestone(sourceDir, selector) {
     recovered.intent = await recoverArbitraryIntent(picked.dir);
     recovered.decisions = await recoverArbitraryDecisions(picked.dir);
     recovered.outcomes = recoverArbitraryOutcomes(picked.dir);
+    recovered.meta = await recoverArbitraryMeta(picked.dir, picked);
     return recovered;
   }
 
@@ -439,5 +557,6 @@ export async function recoverMilestone(sourceDir, selector) {
   recovered.intent = await recoverAofIntent(picked.dir);
   recovered.decisions = await recoverAofDecisions(picked.dir);
   recovered.outcomes = await recoverAofOutcomes(picked.dir);
+  recovered.meta = await recoverAofMeta(picked.dir, picked);
   return recovered;
 }

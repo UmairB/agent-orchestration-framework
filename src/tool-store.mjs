@@ -353,10 +353,27 @@ export const HEADROOM_DESCRIPTOR = {
   },
 };
 
+// notion — the npx-lane CLI `ntn` (binary `ntn`), pinned at 0.17.0 (milestone 17 /
+// ADR-004; RESEARCH §A1). provider:"npx" means the m12 npx lane provisions it as a
+// node framework (12/ADR-002), NOT the version-keyed store — the npx-lane decision
+// is HONOURED, not extended. The platform matrix marks win32 supported with the
+// x64-only / Node-22+ / npm-10+ note the tool-platform doctor check surfaces.
+export const NOTION_DESCRIPTOR = {
+  name: "notion",
+  provider: "npx",
+  packageSpec: "ntn",
+  version: "0.17.0",
+  binaries: ["ntn"],
+  platforms: {
+    win32: { supported: true, prereqs: ["node>=22", "npm>=10"], note: "x64 only (no win32-arm64)" },
+  },
+};
+
 // The descriptor map — the single enumerable source story 01/04 consult.
 export const TOOL_DESCRIPTORS = {
   graphify: GRAPHIFY_DESCRIPTOR,
   headroom: HEADROOM_DESCRIPTOR,
+  notion: NOTION_DESCRIPTOR,
 };
 
 // toolDescriptors() → the descriptor list (a stable array for enumeration).

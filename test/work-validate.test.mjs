@@ -62,6 +62,32 @@ function milestoneFields(overrides = {}) {
   };
 }
 
+// A converted/imported milestone's record doc is an AOF.md DIGEST, not a native
+// SPEC.md — its frontmatter is digest-shaped (`doc: digest`, `milestone` for the
+// number, `slug`, `status`; no type/created/updated). `legacySpec`, if given, is
+// the untouched pre-aof SPEC.md written alongside (and must NOT be demanded).
+async function writeAofMilestone(work, { folderNumber, folderSlug, fields, legacySpec }) {
+  const dir = path.join(work, `${folderNumber}_milestone_${folderSlug}`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, "AOF.md"), `${frontmatter(fields)}# Digest\n\n## Intent\n\nRecovered intent.\n`);
+  if (legacySpec != null) await writeFile(path.join(dir, "SPEC.md"), legacySpec);
+  return dir;
+}
+
+// A complete, valid AOF.md digest field set — tests override one field to
+// isolate a defect against the digest schema.
+function digestFields(overrides = {}) {
+  return {
+    doc: "digest",
+    milestone: "00",
+    slug: "foundation",
+    title: "Foundation",
+    status: "done",
+    imported: "true",
+    ...overrides,
+  };
+}
+
 // Write a story under a milestone, plus an optional single task feature. The
 // `feature` string, if given, is written to tasks/00_thing.feature verbatim.
 async function writeStory(milestoneDir, { folderNumber = "00", folderSlug = "alpha", fields, feature } = {}) {
@@ -792,6 +818,116 @@ export const validateStreamTests = [
         assert.ok(!has(findings, "depends cycle"), `story depends must not cycle: ${JSON.stringify(findings)}`);
         // And the whole stream is otherwise clean.
         assert.deepEqual(findings, [], "story-level depends is invisible to the graph");
+      }),
+  },
+
+  // ===================================================================
+  // Converted/imported milestone — the record doc is an AOF.md digest.
+  // The pre-aof SPEC.md is left untouched; validate resolves AOF.md as the
+  // record doc and applies the DIGEST schema (doc: digest), not the native one.
+  // ===================================================================
+
+  // Scenario: a milestone backed by a valid AOF.md digest passes clean — no
+  // "missing or empty record doc", no native-only field demands.
+  {
+    name: "work/validate: a milestone backed by a valid AOF.md digest passes with [] (no missing-record-doc)",
+    run: () =>
+      withWork(async (work) => {
+        await writeAofMilestone(work, { folderNumber: "00", folderSlug: "foundation", fields: digestFields() });
+        const findings = await validateWork(work, CONFIG);
+        assert.deepEqual(findings, [], `a digest-backed milestone should validate clean: ${JSON.stringify(findings)}`);
+      }),
+  },
+
+  // Scenario: AOF.md wins over a frontmatter-less legacy SPEC.md sitting beside
+  // it — the digest is the record doc, so the untouched legacy SPEC is never run
+  // through the native schema (the "leave the existing artifacts alone" promise).
+  {
+    name: "work/validate: AOF.md resolves as the record doc even when a frontmatter-less SPEC.md sits beside it",
+    run: () =>
+      withWork(async (work) => {
+        await writeAofMilestone(work, {
+          folderNumber: "00",
+          folderSlug: "foundation",
+          fields: digestFields(),
+          legacySpec: "# 00 · Foundation — Spec\n\n## Goal\n\nLegacy prose, no frontmatter.\n",
+        });
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(!has(findings, "missing or empty record doc"), `the legacy SPEC must not be demanded: ${JSON.stringify(findings)}`);
+        assert.ok(!has(findings, "missing created date"), "the digest schema does not require created");
+        assert.ok(!has(findings, "missing updated date"), "the digest schema does not require updated");
+        assert.deepEqual(findings, [], "an AOF.md-backed converted milestone is valid");
+      }),
+  },
+
+  // Scenario: the digest schema catches a slug that differs from the folder.
+  {
+    name: "work/validate: a digest slug differing from the folder slug is flagged (digest slug ≠ folder)",
+    run: () =>
+      withWork(async (work) => {
+        await writeAofMilestone(work, {
+          folderNumber: "00",
+          folderSlug: "foundation",
+          fields: digestFields({ slug: "wrong-slug" }),
+        });
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(
+          has(findings, 'digest slug "wrong-slug" ≠ folder "foundation"'),
+          `missing digest slug finding: ${JSON.stringify(findings)}`,
+        );
+      }),
+  },
+
+  // Scenario: the digest schema catches a milestone number differing from the
+  // folder (the digest carries the number under `milestone`, not `number`).
+  {
+    name: "work/validate: a digest milestone number differing from the folder is flagged (digest milestone ≠ folder)",
+    run: () =>
+      withWork(async (work) => {
+        await writeAofMilestone(work, {
+          folderNumber: "00",
+          folderSlug: "foundation",
+          fields: digestFields({ milestone: "07" }),
+        });
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(
+          findings.some((f) => /digest milestone .* ≠ folder/.test(f.problem)),
+          `missing digest number finding: ${JSON.stringify(findings)}`,
+        );
+      }),
+  },
+
+  // Scenario: the digest schema still enforces the closed status vocabulary.
+  {
+    name: "work/validate: an invalid status in an AOF.md digest is flagged (invalid status)",
+    run: () =>
+      withWork(async (work) => {
+        await writeAofMilestone(work, {
+          folderNumber: "00",
+          folderSlug: "foundation",
+          fields: digestFields({ status: "almost-there" }),
+        });
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(has(findings, "invalid status"), `missing invalid-status finding: ${JSON.stringify(findings)}`);
+      }),
+  },
+
+  // Scenario: a digest record doc is only valid for a milestone — a story folder
+  // carrying a doc:digest record is flagged (defends the milestone-only rule).
+  {
+    name: "work/validate: a doc:digest record under a non-milestone folder is flagged (digest only valid for a milestone)",
+    run: () =>
+      withWork(async (work) => {
+        const m = await writeMilestone(work, { folderNumber: "00", folderSlug: "foundation", fields: milestoneFields() });
+        // A story folder whose STORY.md is (wrongly) a digest record.
+        const storyDir = path.join(m, "stories", "00_story_alpha");
+        await mkdir(path.join(storyDir, "tasks"), { recursive: true });
+        await writeFile(path.join(storyDir, "STORY.md"), frontmatter({ doc: "digest", milestone: "00", slug: "alpha", status: "done" }));
+        const findings = await validateWork(work, CONFIG);
+        assert.ok(
+          has(findings, "digest record doc (doc: digest) is only valid for a milestone"),
+          `missing milestone-only finding: ${JSON.stringify(findings)}`,
+        );
       }),
   },
 ];

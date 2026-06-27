@@ -1,7 +1,7 @@
 import path from "node:path";
 import { access, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
 import { applyConfig, supportedRuntimes } from "./adapters.mjs";
 import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
@@ -263,6 +263,11 @@ async function workCommand(args) {
     return;
   }
 
+  if (subcommand === "doctor") {
+    await workDoctorCommand(rest);
+    return;
+  }
+
   if (subcommand === "next") {
     await workNextCommand(rest);
     return;
@@ -303,6 +308,11 @@ async function workCommand(args) {
     return;
   }
 
+  if (subcommand === "integrations") {
+    await workIntegrationsCommand(rest);
+    return;
+  }
+
   if (subcommand === "use-headroom") {
     await workUseHeadroomCommand(rest);
     return;
@@ -313,7 +323,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -454,6 +464,124 @@ async function importMilestoneCommandCli(args) {
 
   // Non-json: render the result; a command error (missing-repo / ambiguous /
   // unsupported) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof work integrations <provider> …` — the namespace seam for board/issue-tracker
+// integrations (17/ADR-002). `integrations notion` is the only provider in this
+// milestone; a future provider (Linear, Jira, …) is a sibling branch, NOT a built
+// abstraction. An unknown provider exits non-zero citing the supported provider
+// "notion" (stderr + non-zero exit; nothing is pushed to Notion in this path).
+async function workIntegrationsCommand(args) {
+  const [provider, ...rest] = args;
+
+  if (provider === "notion") {
+    await notionIntegrationCommand(rest);
+    return;
+  }
+
+  console.error(
+    `Unknown integrations provider "${provider ?? ""}". The supported integrations provider is "notion".\n\nUsage: aof work integrations notion sync-work <milestone> [--dry-run] [--json]`
+  );
+  process.exitCode = 1;
+}
+
+// `aof work integrations notion <verb> …` — the Notion provider's verb dispatch.
+// `sync-work` is the only verb (17/ADR-002). An unknown verb exits non-zero with a
+// usage message; nothing is pushed to Notion.
+async function notionIntegrationCommand(args) {
+  const [verb, ...rest] = args;
+
+  if (verb === "sync-work") {
+    await notionSyncWorkCli(rest);
+    return;
+  }
+
+  if (verb === "associate") {
+    await notionAssociateCli(rest);
+    return;
+  }
+
+  console.error(
+    `Unknown notion integration verb "${verb ?? ""}". Usage: aof work integrations notion <sync-work <milestone> [--dry-run] | associate <ref> --board <key|none> --parent <id|key|none>> [--json]`
+  );
+  process.exitCode = 1;
+}
+
+// `aof work integrations notion sync-work <milestone> [--dry-run] [--json]` — the
+// thin face over the registered notion:sync-work command (17/ADR-002), routing
+// through invoke (the registry door, never a direct path). Mirrors the import /
+// graph-verb idiom: getCommand → loadWorkspace → invoke → cli.json/render. A MISSING
+// <milestone> exits non-zero with a usage message for `integrations notion sync-work
+// <milestone>` (and pushes nothing to Notion). In --json mode a command error is
+// emitted as a SINGLE structured envelope { ok:false, error, code } on stdout (+
+// non-zero exit), exactly like the import/graph verbs.
+async function notionSyncWorkCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("notion:sync-work");
+
+  // A missing <milestone> is a usage error caught BEFORE any workspace load /
+  // invoke, so the error path constructs no Notion egress at all.
+  if (options._[0] == null) {
+    console.error(
+      "Usage: aof work integrations notion sync-work <milestone> [--dry-run] [--json]"
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error propagates to bin/aof.mjs (stderr +
+  // non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]`
+// — the thin face over the registered notion:associate command (18/ADR-004), routing
+// through invoke (the registry door). Mirrors notionSyncWorkCli: getCommand →
+// loadWorkspace → invoke → cli.json/render. A MISSING <ref>, or neither --board nor
+// --parent, exits non-zero with a usage message BEFORE any workspace load (and writes
+// nothing). In --json mode a command error is emitted as a SINGLE structured envelope
+// { ok:false, error, code } on stdout (+ non-zero exit), like the sync-work verb.
+async function notionAssociateCli(args) {
+  const options = parseOptions(args);
+  const command = getCommand("notion:associate");
+
+  if (options._[0] == null || (options.board == null && options.parent == null)) {
+    console.error(
+      "Usage: aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]"
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
   console.log(command.cli.render(result));
 }
@@ -793,6 +921,37 @@ async function workValidateCommand(args) {
   console.log(command.cli.render(result, { scope }));
   // A non-empty findings list is a non-zero exit (today's CLI behaviour).
   if (result.findings.length > 0) process.exitCode = 1;
+}
+
+// `aof work doctor [scope] [--json] [--strict]` — the FACE over work:doctor
+// (15/ADR-002), the validate sibling with the ADVISORY exit policy. The command's
+// `run` returns the basis-neutral { findings } envelope with RAW absolute paths;
+// the CLI --json adapter (cli.json) re-bases each path to cwd and carries the
+// { healthy, strict, errors, warnings, findings } summary. The --strict EXIT GATE
+// lives HERE (not in run): an `error` ALWAYS exits non-zero; a `warn` exits
+// non-zero ONLY under --strict — mirroring `configCommand`'s
+// `failed = errors.length > 0 || (strict && warns.length > 0)` form verbatim, with
+// `warn` in place of config's `warning`. `run`'s findings are identical across
+// --strict (the gate is the face, not the run).
+async function workDoctorCommand(args) {
+  const options = parseOptions(args);
+  const scope = options._[0];
+  const strict = Boolean(options.strict);
+  const command = getCommand("work:doctor");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+
+  const errors = result.findings.filter((finding) => finding.severity === "error");
+  const warns = result.findings.filter((finding) => finding.severity === "warn");
+  const failed = errors.length > 0 || (strict && warns.length > 0);
+
+  if (options.json) {
+    console.log(JSON.stringify(command.cli.json(result, { strict }), null, 2));
+  } else {
+    console.log(command.cli.render(result, { scope }));
+  }
+
+  if (failed) process.exitCode = 1;
 }
 
 async function workNextCommand(args) {
@@ -1983,4 +2142,17 @@ function strictAdapterWarningsFailed(options, warnings = []) {
   console.log(`strict: ${warnings.length} adapter warning(s) treated as failure`);
   process.exitCode = 1;
   return true;
+}
+
+// Main-module guard. `bin/aof.mjs` is the canonical entry, and importers (tests,
+// other modules) only ever call the exported `run`. But if this file is executed
+// DIRECTLY (`node src/cli.mjs <args>`), the module would otherwise just define
+// run() and exit 0 — a silent no-op that defeats `… || fallback` guards (the bad
+// command "succeeds", so the fallback never fires). Mirror bin/aof.mjs here so a
+// direct run actually dispatches. Importing never matches (argv[1] is the caller).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run(process.argv.slice(2)).catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
 }

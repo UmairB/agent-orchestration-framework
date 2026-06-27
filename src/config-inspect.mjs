@@ -312,11 +312,113 @@ export async function doctorConfig(projectDir = process.cwd(), options = {}) {
   checks.push(providerPrereqCheck(options));
   for (const check of toolPlatformChecks(options)) checks.push(check);
 
+  // milestone 17 / ADR-004 — the Notion auth-reachability advisory, a SIBLING of
+  // the m12 managed-tool / tool-platform checks (NOT in work:doctor, the work-stream
+  // lane, 15/ADR-001). It rides ONLY when the project opts into Notion (the config
+  // block is present); an unconfigured project is healthy and emits no Notion check.
+  // ALWAYS advisory — ok / warning, never an error, never throws.
+  let notionConfigRoot = null;
+  if (options.notionAuthState == null) {
+    try {
+      const cfg = await loadProjectConfig(inspection.configPath, options);
+      notionConfigRoot = cfg;
+    } catch {
+      notionConfigRoot = null;
+    }
+  }
+  const notionAuth = notionAuthCheck(notionConfigRoot, options);
+  if (notionAuth) checks.push(notionAuth);
+
   return {
     ...inspection,
     checks,
     suggestions: suggestionsFor(inspection, checks)
   };
+}
+
+// ----------------------------------------------------------- notion-auth ------
+// notionAuthCheck(rawConfig, options) → the Notion auth-reachability advisory
+// (17/ADR-004). It is added as a SIBLING to the m12 managed-tool / tool-platform
+// checks the Notion descriptor rides (those surface present-and-versioned + platform
+// for free once NOTION_DESCRIPTOR is registered). This check maps the AUTH state to
+// severity, honestly:
+//   - token set AND a reachability probe succeeds → ok (auth reachable);
+//   - token env var unset/empty                   → warning (set-the-token guidance);
+//   - token set but the probe fails               → warning (Notion unreachable, retry).
+// It is ALWAYS advisory — never an error, never throws (a project may be mid-setup).
+// Returns null when the project does NOT opt into Notion (no config block) — an
+// unconfigured project emits no Notion check at all.
+//
+// SEAMS (hermetic @executable rows): `options.notionAuthState` short-circuits to a
+// state string ("reachable"|"unset"|"unreachable") so the severity matrix is driven
+// without a live token; otherwise `options.notionTokenEnv` (the env), and
+// `options.notionReachable` (an injectable probe; default: a no-op that treats a
+// set token as NOT independently probed → ok, since the live probe is @manual)
+// drive the verdict. `options.env` supplies the env vars (default process.env).
+export function notionAuthCheck(rawConfig, options = {}) {
+  const notionConfig = rawConfig?.work?.integrations?.notion;
+  // An explicit notionAuthState forces the row (the hermetic matrix) even without a
+  // config block — so the @executable severity rows run without a fixture config.
+  if (notionConfig == null && options.notionAuthState == null) return null;
+
+  let state;
+  try {
+    state = options.notionAuthState ?? resolveNotionAuthState(notionConfig, options);
+  } catch (error) {
+    // The advisory must NEVER crash the doctor — degrade to a warning.
+    return {
+      id: "notion-auth",
+      severity: "warning",
+      message: "Notion auth reachability could not be determined — verify the token env var and try again.",
+      details: { error: error?.message ?? String(error) },
+    };
+  }
+
+  if (state === "reachable") {
+    return {
+      id: "notion-auth",
+      severity: "ok",
+      message: "Notion auth is reachable (the token is set and the probe succeeded).",
+      details: { state: "reachable" },
+    };
+  }
+  if (state === "unset") {
+    const tokenEnv = (typeof notionConfig?.tokenEnv === "string" && notionConfig.tokenEnv) || "NOTION_API_TOKEN";
+    return {
+      id: "notion-auth",
+      severity: "warning",
+      message: `Notion auth: set the ${tokenEnv} environment variable to the integration token to reach Notion.`,
+      details: { state: "unset", tokenEnv },
+    };
+  }
+  // "unreachable" — token set but the probe failed.
+  return {
+    id: "notion-auth",
+    severity: "warning",
+    message: "Notion auth: the token is set but Notion is unreachable — check the token / network and retry.",
+    details: { state: "unreachable" },
+  };
+}
+
+// resolveNotionAuthState(notionConfig, options) → "reachable" | "unset" | "unreachable".
+// Reads the token from the named env var; an unset/empty token is "unset"; a set
+// token is then run through the injectable reachability probe (default: assume
+// reachable — the LIVE probe is @manual, no token on the dev host). NEVER throws to
+// the caller's matrix here — the caller wraps it.
+function resolveNotionAuthState(notionConfig, options = {}) {
+  const env = options.env ?? process.env;
+  const tokenEnv = (typeof notionConfig?.tokenEnv === "string" && notionConfig.tokenEnv) || "NOTION_API_TOKEN";
+  const raw = env?.[tokenEnv];
+  const token = typeof raw === "string" ? raw : "";
+  if (token.length === 0) return "unset";
+  // Token present — probe reachability. The probe is injectable (the @manual live
+  // `ntn api` round-trip is the real probe); absent ⇒ assume reachable (the token is
+  // set; we do not fabricate an unreachable verdict without evidence).
+  const probe = options.notionReachable;
+  if (typeof probe === "function") {
+    return probe({ token, tokenEnv, env }) ? "reachable" : "unreachable";
+  }
+  return "reachable";
 }
 
 // ---------------------------------------------------------- managed-tool ------
@@ -378,10 +480,11 @@ function managedToolCheckFor(descriptor, resolve, options) {
   // Present on PATH only (a store miss fell back to PATH) — ok, but flagged as
   // the operator's own binary, NOT an aof-managed install.
   if (resolved.source === "path") {
+    const versionSuffix = resolved.version ? ` (version ${resolved.version})` : "";
     return {
       id: "managed-tool",
       severity: "ok",
-      message: `${tool} is present on PATH, not managed.`,
+      message: `${tool} is present on PATH, not managed${versionSuffix}.`,
       details: { tool, found: true, source: "path", version: resolved.version ?? null, path: resolved.path },
     };
   }

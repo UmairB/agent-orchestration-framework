@@ -38,6 +38,16 @@ import { importMilestoneDir, ensureImportStoreGitignore } from "./store.mjs";
 export const SPEC_FILE = "SPEC.md";
 export const ARCHITECTURE_FILE = "ARCHITECTURE.md";
 export const RETROSPECTIVE_FILE = "RETROSPECTIVE.md";
+// ADR-006: the recallable DIGEST. An imported milestone whose source carried no
+// decisions/outcomes (no `ARCHITECTURE.md`/`RETROSPECTIVE.md` to recover) would
+// otherwise contribute ZERO records — its recovered intent lands only in the
+// legible-but-unindexed `SPEC.md` (ADR-001). For exactly that zero-record case the
+// import also emits an `AOF.md` digest (the milestone-14 doc type): each `## `
+// section indexes as one `summary` record via the EXISTING `parseAof`, so the
+// imported milestone gains a recallable presence with NO new parser. The digest is
+// the milestone-14 "give a no-ADR/retro milestone a recallable presence" mechanism,
+// now also emitted by the import writer (the deferred 13×14 follow-up).
+export const AOF_FILE = "AOF.md";
 
 // The canonical "absence is information" marker (ADR-005). When the source has no
 // recoverable intent, `renderSpec` writes THIS string into the SPEC.md Objective /
@@ -66,6 +76,10 @@ function normalizeRecovered(recovered = {}) {
     intent: recovered.intent ?? null,
     decisions: Array.isArray(recovered.decisions) ? recovered.decisions : [],
     outcomes: Array.isArray(recovered.outcomes) ? recovered.outcomes : [],
+    // ADR-007: the recovered milestone IDENTITY for the digest frontmatter — slug,
+    // title, status. A partial/absent meta is tolerated (the digest frontmatter
+    // falls back to the ref/slug, never fabricating a title the source lacked).
+    meta: recovered.meta && typeof recovered.meta === "object" ? recovered.meta : {},
   };
 }
 
@@ -153,11 +167,193 @@ export function renderRetrospective({ milestoneRef, outcomes, sourceSlug }) {
   return lines.join("\n");
 }
 
+// The recoverable `## ` sections of a digest, in order — one `summary` record each
+// (mirrors the milestone-14 `parseAof` section model: only `## Intent`/`## Scope`
+// halves that the source actually carried). NEVER fabricates a half the recovered
+// intent lacks (ADR-005, "absence is information"): an absent/empty objective or
+// scope yields no section, so it yields no record.
+function digestSections(intent) {
+  const sections = [];
+  if (intent && typeof intent.objective === "string" && intent.objective.trim().length > 0) {
+    sections.push({ heading: "Intent", body: intent.objective.trim() });
+  }
+  if (intent && typeof intent.scope === "string" && intent.scope.trim().length > 0) {
+    sections.push({ heading: "Scope", body: intent.scope.trim() });
+  }
+  return sections;
+}
+
+// True when the import should emit an `AOF.md` digest (ADR-006): the source carried
+// recoverable INTENT but NO decisions and NO outcomes — the zero-record case the
+// digest exists to give a recallable presence. A milestone WITH ADR/retro records
+// already grounds recall, so it needs no digest (and we keep the materialized set —
+// and every existing fixture's record count — unchanged for that case).
+function emitsDigest(normalized) {
+  return (
+    normalized.decisions.length === 0 &&
+    normalized.outcomes.length === 0 &&
+    digestSections(normalized.intent).length > 0
+  );
+}
+
+// The digest's frontmatter (ADR-007) — the milestone-14 digest convention
+// (`doc`/`milestone`/`slug`/`imported`/`importedBy`), enriched with `title`,
+// `status`, and an `importedAt` provenance stamp. UNLIKE the SPEC/ARCHITECTURE/
+// RETROSPECTIVE provenance (`provenanceLines`, deliberately timestamp-free so those
+// record-bearing artifacts re-import byte-identically — ADR-005), the digest
+// frontmatter is NEVER an index record source: `parseAof` reads only `## ` sections
+// and ignores frontmatter, so an `importedAt` here changes no record and breaks no
+// `source:line`. `title` is quoted (it may carry spaces/punctuation); the numeric
+// `milestone`, the `slug`, and the `status` are bare tokens. A missing title/status
+// falls back without fabricating (absence is information — ADR-005).
+function digestFrontmatter({ milestoneRef, slug, title, status, importedAt, importedBy = "aof" }) {
+  const fm = [
+    "---",
+    "doc: digest",
+    `milestone: ${milestoneRef}`,
+    `slug: ${slug ?? milestoneRef}`,
+    `title: ${JSON.stringify(title ?? "")}`,
+    `status: ${status ?? "not-started"}`,
+    "imported: true",
+    `importedBy: ${importedBy}`,
+  ];
+  if (importedAt) fm.push(`importedAt: ${importedAt}`);
+  fm.push("---");
+  return fm;
+}
+
+// Render AOF.md — the recallable digest (ADR-006/007). Reuses the EXACT milestone-14
+// digest convention `parseAof` reads: each `## ` section is one `summary` record
+// (h1 title + HTML comments are not section roots). The sections come verbatim from
+// the recovered intent, so every record traces to live text in the materialized
+// `.md` (the derived-index invariant, ADR-005). The frontmatter carries the
+// recovered milestone identity + provenance (ADR-007).
+export function renderDigest({ milestoneRef, slug, title, status, intent, importedAt, importedBy = "aof" }) {
+  const heading = title
+    ? `# ${milestoneRef} · ${title} — Digest`
+    : `# Imported milestone ${milestoneRef} — Digest`;
+  const lines = [
+    ...digestFrontmatter({ milestoneRef, slug, title, status, importedAt, importedBy }),
+    heading,
+    "",
+    "<!-- Recovered intent as a recallable digest (ADR-006/007). Each `## ` section → one `summary` record via the EXISTING parseAof. -->",
+    "",
+  ];
+  for (const section of digestSections(intent)) {
+    lines.push(`## ${section.heading}`, "", section.body, "");
+  }
+  return lines.join("\n");
+}
+
+// ─────────────────────────────────────────── CO-LOCATED digest (the rule) ──
+//
+// HARD RULE (operator, repeated): `aof import` writes the recovered digest as a
+// single `AOF.md` INTO the source milestone folder it imported from — co-located,
+// next to that milestone's own SPEC/STATE — NEVER a separate git-ignored
+// `.aof/imports/` store. This supersedes the milestone-13 separate-store model
+// (ADR-001/004/005) and its read-only-source stance (ADR-002): import now adds
+// exactly one file (`AOF.md`) to the source folder and overwrites nothing else there.
+//
+//   writeColocatedDigest({ targetDir, sourceSlug, milestoneRef, recovered, importedAt }, { preview })
+//     → { dir: targetDir, artifacts: [<targetDir>/AOF.md], recordCount }
+//
+// The digest is SELF-CONTAINED: every recovered half folds into one `## ` section so
+// nothing is lost (Intent + Scope from the recovered intent; a `## Decisions` list
+// when ADRs were recovered; a `## Lessons` list when retro entries were). Each `## `
+// section is one `summary` record via the existing parseAof. A re-import overwrites
+// the SAME AOF.md in place (idempotent) and NEVER removes the source folder.
+
+// The co-located digest's `## ` sections, in order — Intent/Scope from the recovered
+// intent, then a folded Decisions / Lessons section when those halves were recovered,
+// so a source's ADRs/retro are not lost when only one file is written. Each section is
+// one summary record. Absent halves yield no section (absence is information, ADR-005).
+function colocatedSections(normalized) {
+  const sections = digestSections(normalized.intent);
+  if (normalized.decisions.length > 0) {
+    sections.push({
+      heading: "Decisions",
+      body: normalized.decisions
+        .map((d) => `- **${d.id ?? "ADR"}** ${String(d.title ?? "").trim()}${d.status ? ` _(${String(d.status).trim()})_` : ""}`)
+        .join("\n"),
+    });
+  }
+  if (normalized.outcomes.length > 0) {
+    sections.push({
+      heading: "Lessons",
+      body: normalized.outcomes
+        .map((o) => `- **${o.id ?? "R"}** ${String(o.title ?? "").trim()}`)
+        .join("\n"),
+    });
+  }
+  return sections;
+}
+
+// Render the co-located AOF.md — the digest frontmatter (identity + provenance) plus
+// every recovered section. `source: <sourceSlug>` records WHERE it was imported from.
+function renderColocatedDigest({ milestoneRef, meta, sections, importedAt, sourceSlug }) {
+  const title = meta.title ?? "";
+  const fm = [
+    "---",
+    "doc: digest",
+    `milestone: ${milestoneRef}`,
+    `slug: ${meta.slug ?? milestoneRef}`,
+    `title: ${JSON.stringify(title)}`,
+    `status: ${meta.status ?? "not-started"}`,
+    "imported: true",
+    "importedBy: aof",
+  ];
+  if (sourceSlug) fm.push(`source: ${sourceSlug}`);
+  if (importedAt) fm.push(`importedAt: ${importedAt}`);
+  fm.push("---");
+  const heading = title
+    ? `# ${milestoneRef} · ${title} — Digest`
+    : `# Imported milestone ${milestoneRef} — Digest`;
+  const lines = [
+    ...fm,
+    heading,
+    "",
+    "<!-- Recovered digest, co-located in the source milestone folder. Each `## ` section → one `summary` record via the EXISTING parseAof. -->",
+    "",
+  ];
+  for (const section of sections) {
+    lines.push(`## ${section.heading}`, "", section.body, "");
+  }
+  return lines.join("\n");
+}
+
+// Write the co-located AOF.md digest into the SOURCE milestone folder (the rule). A
+// `preview` (dry-run) computes the path + record count but writes nothing. NEVER
+// removes or rebuilds the target dir — it is the user's source folder; only the one
+// AOF.md is (over)written.
+export async function writeColocatedDigest({ targetDir, sourceSlug, milestoneRef, recovered, importedAt }, opts = {}) {
+  const normalized = normalizeRecovered(recovered);
+  const sections = colocatedSections(normalized);
+  const filePath = path.join(targetDir, AOF_FILE);
+  const artifacts = [filePath];
+  const recordCount = sections.length;
+
+  if (opts.preview === true) {
+    return { dir: targetDir, artifacts, recordCount };
+  }
+
+  const content = renderColocatedDigest({
+    milestoneRef,
+    meta: normalized.meta,
+    sections,
+    importedAt,
+    sourceSlug,
+  });
+  await mkdir(targetDir, { recursive: true });
+  await writeFile(filePath, `${content.replace(/\n+$/, "\n")}`, "utf8");
+  return { dir: targetDir, artifacts, recordCount };
+}
+
 // Compute the artifact plan WITHOUT touching disk — the shared core of both the
 // real write and the --dry-run preview. Returns the per-import dir + the ordered
 // artifact specs (filename + content) + the record count the indexer WOULD derive
-// (one adr per decision, one lesson per outcome; SPEC.md yields no records).
-export function planMaterialize({ projectRoot, sourceSlug, milestoneRef, recovered }) {
+// (one adr per decision, one lesson per outcome, one summary per digest section;
+// SPEC.md yields no records).
+export function planMaterialize({ projectRoot, sourceSlug, milestoneRef, recovered, importedAt }) {
   const normalized = normalizeRecovered(recovered);
   const dir = importMilestoneDir(projectRoot, sourceSlug, milestoneRef);
 
@@ -176,10 +372,26 @@ export function planMaterialize({ projectRoot, sourceSlug, milestoneRef, recover
       content: renderRetrospective({ milestoneRef, outcomes: normalized.outcomes, sourceSlug }),
     });
   }
+  // ADR-006: the zero-record (intent-only) case also emits a recallable AOF.md digest.
+  const digest = emitsDigest(normalized) ? digestSections(normalized.intent) : [];
+  if (digest.length > 0) {
+    specs.push({
+      file: AOF_FILE,
+      content: renderDigest({
+        milestoneRef,
+        slug: normalized.meta.slug ?? milestoneRef,
+        title: normalized.meta.title ?? "",
+        status: normalized.meta.status ?? "not-started",
+        intent: normalized.intent,
+        importedAt,
+      }),
+    });
+  }
 
-  // The indexer (story 02) derives one adr per decision + one lesson per outcome;
-  // SPEC.md is legible intent and contributes NO records (ADR-001).
-  const recordCount = normalized.decisions.length + normalized.outcomes.length;
+  // The indexer (story 02) derives one adr per decision + one lesson per outcome +
+  // one summary per digest section; SPEC.md is legible intent, contributing NO
+  // records (ADR-001).
+  const recordCount = normalized.decisions.length + normalized.outcomes.length + digest.length;
 
   return {
     dir,
@@ -194,8 +406,8 @@ export function planMaterialize({ projectRoot, sourceSlug, milestoneRef, recover
 // no accretion (ADR-005). The store is git-ignored via the nested-`.gitignore`
 // idiom. `opts.preview === true` returns the SAME plan but writes nothing (the
 // --dry-run leg). Returns { dir, artifacts:[absPath], recordCount }.
-export async function materializeImport({ projectRoot, sourceSlug, milestoneRef, recovered }, opts = {}) {
-  const plan = planMaterialize({ projectRoot, sourceSlug, milestoneRef, recovered });
+export async function materializeImport({ projectRoot, sourceSlug, milestoneRef, recovered, importedAt }, opts = {}) {
+  const plan = planMaterialize({ projectRoot, sourceSlug, milestoneRef, recovered, importedAt });
 
   if (opts.preview === true) {
     // PREVIEW: compute the plan + record count, write NOTHING (ADR-002 dry-run).

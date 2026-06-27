@@ -1,6 +1,6 @@
 ---
 doc: retrospective
-updated: 2026-06-23
+updated: 2026-06-25
 ---
 <!--
   Milestone RETROSPECTIVE.md — the distilled lessons from how execution actually went.
@@ -114,3 +114,41 @@ updated: 2026-06-23
   survives a rename. `acd-import-not-a-work-item` proves it with a decoy `ITEM_RE`-shaped slug.
 - **Refs:** ADR-004; `src/import/store.mjs` (`slugifySource`, `importMilestoneDir`); fitness
   `acd-import-not-a-work-item`; STATE §Feedback "the ADR-004 naming guarantee rests on slugifySource + store-outside-workDir".
+
+## R8 — Happy-path fixtures hide whole input classes; dogfood a new ingestion seam on a real, deliberately-thin source
+
+- **Kind:** near-miss · **Area:** process · **Stage:** post-accept (re-open) · **Owner:** developer/product-owner · **Raised by:** dogfooding (voice-vox pay-guard testbed)
+- **What happened.** The milestone shipped accepted on 2026-06-23 with the recovery + index path proven on
+  aof-shaped fixtures, aof's own repo, and `octocat/Spoon-Knife`. ALL of those carry decisions/outcomes
+  (ADRs, commit history) and therefore contributed records. Only when the import was dogfooded on the
+  **pay-guard** testbed — milestones that are **intent-only** (`## Goal` + `## Scope`, no
+  `ARCHITECTURE.md`/`RETROSPECTIVE.md`) — did the zero-record gap surface: ADR-001 deliberately keeps
+  `SPEC.md` legible-but-unindexed, so an intent-only import contributed **zero** records and was invisible
+  to recall. It re-opened the milestone (story 04, ADR-006).
+- **Why.** Every fixture and every in-repo milestone happened to be record-bearing, so the "intent-only"
+  input class was never exercised — the gap was a property of a real-world shape no fixture represented.
+  Directly extends **R5** (real-shape validation lands late) into a concrete class-of-input miss.
+- **Lesson.** When a seam INGESTS heterogeneous external input, dogfood it on a real, deliberately-MINIMAL
+  source (here: intent-only, no decisions/outcomes) before declaring done — not just the rich/happy shape.
+  The thin shape is where "absence is information" either holds or collapses to silence. Milestone 14 had
+  even NAMED this follow-up and deferred it; dogfooding is what forced the deferral to be paid.
+- **Refs:** ADR-006; SPEC §Stories re-open note; story 04; the agent-run dogfood proof in VERIFICATION
+  (Re-open 2026-06-25); `test/import-digest.test.mjs`; relates to **R5**.
+
+## R9 — A derived artifact a human or tool will read needs its identity + provenance frontmatter from the first cut
+
+- **Kind:** mistake · **Area:** design · **Stage:** build (re-open, caught by dogfooding) · **Owner:** developer/architect · **Raised by:** dogfooding (ADR-007)
+- **What happened.** ADR-006's first cut emitted the `AOF.md` digest with only `doc: digest` frontmatter.
+  Reading one back showed it carried no identity — which milestone, what title/status, when produced — so it
+  was enriched (ADR-007) to the canonical `doc`/`milestone`/`slug`/`title`/`status`/`imported`/`importedBy`/`importedAt`
+  block, with `slug`/`title`/`status` RECOVERED (never fabricated) and `importedAt` confined to the digest
+  frontmatter (which `parseAof` never reads into a record), so the derived-index records invariant (ADR-005)
+  stayed intact.
+- **Why.** The first cut optimised for "what does the parser need" (`## ` sections) and forgot "what does a
+  reader need" (identity/provenance) — a legible artifact was treated purely as parser input.
+- **Lesson.** When you materialize a derived `.md` that a human or a future tool will OPEN, give it
+  identity + provenance frontmatter up front. Where a provenance timestamp risks a re-derivability invariant,
+  confine it to the one artifact that is NOT a record source (here the digest, not SPEC/ARCHITECTURE/RETROSPECTIVE),
+  so byte-identity of the record-bearing artifacts is preserved.
+- **Refs:** ADR-007; `src/import/materialize.mjs` (`renderDigest`); `src/import/recovery.mjs`
+  (`recoverAofMeta`/`normalizeStatus`); fitness `acd-import-digest-recallable` (frontmatter + `importedAt`-off-SPEC).

@@ -50,6 +50,27 @@ doc: state
   remote-URL transport leg (`remote-source-unsupported` 501 — F13-1) and the graphify-extraction window
   (environment-bound). `aof:validate 13` **PASS**. All four stories → `done`; the milestone → `done`.
   Lessons distilled to `RETROSPECTIVE.md` (R1–R7). Evidence + findings in `VERIFICATION.md`.
+- **Re-opened `2026-06-25` → `in-progress`.** Dogfooding the import on the voice-vox **pay-guard** testbed
+  surfaced the gap milestone 14 had named + deferred: pay-guard's milestones are **intent-only** (a `## Goal`
+  + `## Scope`, no `ARCHITECTURE.md`/`RETROSPECTIVE.md`), so each import materialized only `SPEC.md` (legible,
+  not indexed — ADR-001) and contributed **zero** records — its intent was invisible to recall. Added one
+  story to take the deferred 13×14 follow-up.
+  - **04 · import-digest** — `done`. **ADR-006**: an import that recovers intent but no decisions/outcomes
+    ALSO emits an `AOF.md` digest (milestone-14's doc type), each `## ` section indexed by the EXISTING
+    `parseAof` → one `summary` record (zero-record case only; absence is information; byte-identical re-import).
+    **ADR-007** enriched the digest to the canonical identity+provenance frontmatter (`importedAt` confined to
+    the non-record-source digest, so ADR-005 byte-identity holds). Touches `src/import/materialize.mjs`
+    (`renderDigest`) + recovery's `recovered.meta` + one line in `scanImportStore`. **No new parser/record
+    shape/store.** Built + reviewed `2026-06-25`; `@executable` (`test/import-digest.test.mjs`, 6/6) + the
+    seventh fitness arch-test (`acd-import-digest-recallable`) green. See ARCHITECTURE **ADR-006/007**.
+- **Re-accepted `2026-06-25` (`aof:verify 13`).** `@executable` suite + all **seven** fitness functions green
+  (`npm test`: **1247 ok / 0 not-ok**; the count grew from milestones 15–17 in flight — every milestone-13 test
+  green within it). The story-04 agent-run `@manual` dogfood proof PASSES through the **real** `import:milestone`
+  command + recovery engine: an intent-only source (pay-guard shape) materializes an `AOF.md` digest whose
+  `## ` sections recall through the unchanged verb — zero records before story 04. `aof:validate 13` **PASS**.
+  Story 04 → `done`; all stories done → the milestone → `done`. Lessons distilled to `RETROSPECTIVE.md`
+  **R8–R9** (dogfood a thin source; identity+provenance frontmatter from the first cut); `aof work memory
+  ingest` run (no-op, backend `none`). Evidence + the re-accept decision in `VERIFICATION.md`.
 
 ## Notes & decisions in flight
 
@@ -98,9 +119,9 @@ doc: state
 
 ## Feedback (for retro)
 
-<!-- Archived at Accept (`aof:verify 13`, 2026-06-23): the raw build/review notes graduated into
-     RETROSPECTIVE.md (R1–R7), exactly as durable decisions graduate into ADRs. Kept as a pointer here,
-     never restated — the lessons live in RETROSPECTIVE.md. -->
+<!-- Archived at Accept (`aof:verify 13`, 2026-06-23 → R1–R7; re-open re-accept 2026-06-25 → R8–R9): the
+     raw build/review notes graduated into RETROSPECTIVE.md, exactly as durable decisions graduate into ADRs.
+     Kept as a pointer here, never restated — the lessons live in RETROSPECTIVE.md. -->
 
 - Distilled into `RETROSPECTIVE.md` **R1–R7**: R1 user-controlled-URL must not inherit the constant-URL
   `shell:true` git idiom (security); R2 win32 `git` `shell:true` word-splits a multi-word arg + silent
@@ -110,12 +131,20 @@ doc: state
   R6 a deferred transport leg should narrow its advertised surface, not 501 on the URL the help promises
   (→ VERIFICATION F13-1); R7 the ADR-004 category boundary rests on TWO independent facts (store geometry +
   `slugifySource`), not the folder prefix alone.
+- Re-open (story 04) distilled into **R8–R9**: R8 happy-path fixtures hide whole input classes — the
+  intent-only zero-record gap was invisible until dogfooding on a real spec-only source (pay-guard), extending
+  R5; R9 a derived `.md` a human/tool will read needs identity+provenance frontmatter from the first cut
+  (→ ADR-007).
 
 ## Verification
 
 <!-- Pointers, not restatements. -->
-- [x] `@executable` suite green — `npm test`: 1151 ok, 0 not-ok (re-run at verify `2026-06-23`)
-- [x] Fitness functions green — the six `test/arch/acd-import-*.test.mjs` registered + green
+- [x] `@executable` suite green — `npm test`: 1151 ok / 0 not-ok at verify `2026-06-23`; **1247 / 0** at the
+  re-open re-accept `2026-06-25` (higher count = milestones 15–17 in flight; every milestone-13 test green)
+- [x] Fitness functions green — the **seven** `test/arch/acd-import-*.test.mjs` registered + green (the six +
+  `acd-import-digest-recallable`)
 - [x] `@manual` assessed at verify (`VERIFICATION.md`): real-world arbitrary recovery (Spoon-Knife),
   source-untouched, and import-reaches-memory recall **PASS** on a real external repo; remote-URL transport
   deferred (F13-1) + graphify-extraction window environment-bound — neither a blocker (no `@uat` lane exists).
+- [x] Re-open story 04 `@manual` (`VERIFICATION.md`, 2026-06-25): intent-only import → recallable `AOF.md`
+  digest proven end-to-end through the **real** `import:milestone` command + recovery engine.
