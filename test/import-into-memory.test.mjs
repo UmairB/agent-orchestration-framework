@@ -660,6 +660,80 @@ export const importIntoMemoryTests = [
     },
   },
 
+  // ═════════════ co-located digest in a FOREIGN-named folder (the fix) ════════
+  // Import exists to ingest EXISTING/foreign knowledge. A digest co-located into a
+  // source folder that does NOT follow aof's NN_milestone_<slug> shape must STILL be
+  // indexed — keyed off its own `imported: true` marker, never the folder name. Before
+  // the fix this yielded 0 records: listItems/ITEM_RE skipped the bare-slug folder, and
+  // the `.aof` import-store scan never covered the co-located file either. Reproduces
+  // the whisper-guard-portal case (GSD-style `wiki/work/<bare-slug>/` planning folders).
+  {
+    name: "import-mem/colocated a co-located AOF.md digest in a NON-ITEM_RE (bare-slug) folder is indexed by its imported:true marker, on the work-stream leg",
+    async run() {
+      const { ctx, repo, workDir } = await makeFixture({ withImport: false });
+      try {
+        // A foreign (GSD-style) bare-slug folder — NOT NN_milestone_<slug> — carrying a
+        // co-located imported digest with two `## ` sections.
+        const dir = path.join(workDir, "officer-dashboard");
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          path.join(dir, "AOF.md"),
+          [
+            "---", "doc: digest", "milestone: repo", "slug: repo",
+            'title: "Milestone · Officer dashboard"', "status: not-started",
+            "imported: true", "importedBy: aof", "source: whisper-guard-portal",
+            "importedAt: 2026-06-28", "---",
+            "# repo · Milestone · Officer dashboard — Digest", "",
+            "<!-- recovered digest, co-located in the source folder -->", "",
+            "## Intent", "", "Workspace surface for compliance officers.", "",
+            "## Scope", "", "Covers the eight moments of the officer journey.", "",
+          ].join("\n"),
+          "utf8"
+        );
+
+        const records = await buildRecords(null, ctx);
+        const digest = records.filter((r) => /officer-dashboard[\\/]AOF\.md:/.test(r.source));
+        assert.equal(digest.length, 2, "both `## ` sections of the foreign-folder digest are indexed (Intent + Scope) — 0 before the fix");
+        assert.ok(digest.every((r) => r.recordType === "summary"), "each co-located digest record is a `summary`");
+        assert.ok(digest.every((r) => !isImportRecord(r)), "the co-located digest sits on the WORK-STREAM leg (non-import item; its source resolves under workDir)");
+        assert.ok(digest.every((r) => r.item === "officer-dashboard"), "the digest's item identity is the folder basename (there is no NN number to use)");
+        // The load-bearing invariant: each record's source:line resolves to live text.
+        for (const record of digest) {
+          await assertSourceResolves(record, ctx, `colocated ${record.id}`);
+        }
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "import-mem/colocated a recognised milestone's own AOF.md is indexed ONCE (the marker scan does not double-count it)",
+    async run() {
+      const { ctx, repo, workDir } = await makeFixture({ withImport: false });
+      try {
+        // A PROPERLY-named milestone whose own AOF.md carries the imported marker: the
+        // work-stream milestone loop indexes it, and the marker scan must SKIP it.
+        const dir = path.join(workDir, "02_milestone_teleport-beacon");
+        await mkdir(dir, { recursive: true });
+        await writeFile(
+          path.join(dir, "AOF.md"),
+          [
+            "---", "doc: digest", "imported: true", "source: elsewhere", "---",
+            "# 02 · Teleport beacon — Digest", "",
+            "## Intent", "", "Deliver the teleport beacon.", "",
+          ].join("\n"),
+          "utf8"
+        );
+        const records = await buildRecords(null, ctx);
+        const fromThisAof = records.filter((r) => /02_milestone_teleport-beacon[\\/]AOF\.md:/.test(r.source));
+        assert.equal(fromThisAof.length, 1, "the recognised milestone's AOF.md yields exactly ONE record (no duplicate from the marker scan)");
+        assert.equal(fromThisAof[0].item, "02", "indexed on the work-stream leg with the milestone NUMBER as item (the milestone loop, not the marker scan)");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+
   // Cross-check: a milestone-scoped rebuild stays work-stream-only (the import scan
   // is composed ONLY on a whole-stream rebuild — 13/ADR-003 scan-seam decision).
   {

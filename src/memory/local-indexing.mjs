@@ -320,6 +320,60 @@ async function scanImportStore(projectRoot) {
   return records;
 }
 
+// Scan the work dir for CO-LOCATED imported `AOF.md` digests and index them by their
+// own `imported: true` marker — regardless of folder naming. The point of import is to
+// ingest FOREIGN knowledge; requiring the source to already follow aof's
+// `NN_milestone_<slug>` shape (which `listItems`/ITEM_RE enforce for the work-stream
+// proper) before its digest can be recalled defeats that. This is the co-located
+// counterpart to `scanImportStore`: the import write co-locates the digest INTO the
+// source folder (the hard rule), so the structure-independent scan must look THERE, not
+// only in the (for this model, abandoned) `.aof` import store.
+//
+// `alreadyIndexed` is the set of AOF.md absolute paths the work-stream milestone loop
+// already read (ITEM_RE-named milestones) — skipped here so a recognised milestone's
+// digest is never double-counted. A co-located digest's records resolve against
+// `workDir` (the file genuinely lives there), so they carry a NON-`import:` item (the
+// folder basename) — keeping `resolveRecordSourcePath` on the work-stream leg.
+async function scanColocatedDigests(workDir, alreadyIndexed) {
+  if (!workDir || !existsSync(workDir)) return [];
+  const records = [];
+  for (const aofPath of await collectAofDigests(workDir)) {
+    if (alreadyIndexed.has(path.resolve(aofPath))) continue; // handled by the milestone loop
+    const text = await readFile(aofPath, "utf8");
+    if (!hasImportedMarker(text)) continue; // only co-located IMPORT digests, keyed by marker
+    const folder = path.basename(path.dirname(aofPath));
+    const meta = { item: folder, itemSlug: folder, workRelPath: toWorkRel(workDir, aofPath) };
+    records.push(...parseAof(text, meta));
+  }
+  return records;
+}
+
+// Depth-bounded recursive walk collecting every `AOF.md` under `root`. The work dir is
+// shallow (milestone / story / task, plus an archive folder like `.previous/`), so a
+// small bound keeps the scan cheap and immune to a pathological tree.
+async function collectAofDigests(root, depth = 0) {
+  if (depth > 4) return [];
+  const found = [];
+  for (const entry of await readDirSafe(root)) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...(await collectAofDigests(full, depth + 1)));
+    } else if (entry.isFile() && entry.name === AOF_FILE) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+// True when a digest's YAML frontmatter carries `imported: true` — the marker the import
+// writer stamps (13/ADR-007) and the ONLY gate this scan uses, so folder naming is
+// irrelevant. Restricted to the frontmatter block so a body mention never false-triggers.
+function hasImportedMarker(text) {
+  const fm = String(text).replace(/^﻿/, "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fm) return false;
+  return /(^|\n)\s*imported:\s*true\b/i.test(fm[1]);
+}
+
 // Build the record set from the live `.md` files. `only` (e.g. "01") scopes the
 // rebuild to one milestone; null/undefined scans the whole stream. Reused by
 // both `reindex` and the derived-index fitness function.
@@ -336,6 +390,9 @@ export async function buildRecords(only, ctx) {
     .filter((item) => !only || Number.parseInt(item.number, 10) === Number.parseInt(only, 10));
 
   const records = [];
+  // AOF.md paths the work-stream loop indexes (ITEM_RE milestones) — excluded from the
+  // co-located-digest scan below so a recognised milestone's digest is never doubled.
+  const indexedAof = new Set();
   for (const item of milestones) {
     const meta = { item: item.number, itemSlug: item.slug };
     const retroPath = path.join(item.dir, "RETROSPECTIVE.md");
@@ -352,15 +409,20 @@ export async function buildRecords(only, ctx) {
     // AOF.md digest → `summary` records (05/ADR-007 localised additive source). A
     // milestone without one indexes exactly as before — the scan is conditional.
     if (existsSync(aofPath)) {
+      indexedAof.add(path.resolve(aofPath));
       const text = await readFile(aofPath, "utf8");
       records.push(...parseAof(text, { ...meta, workRelPath: toWorkRel(workDir, aofPath) }));
     }
   }
 
-  // Compose the import-store scan onto the work-stream records on a whole-stream
-  // rebuild (13/ADR-003). A milestone-scoped rebuild stays work-stream-only.
+  // Compose the import-store scan AND the co-located-digest scan onto the work-stream
+  // records on a whole-stream rebuild (13/ADR-003). A milestone-scoped rebuild stays
+  // work-stream-only. The co-located scan indexes imported digests by their
+  // `imported: true` marker regardless of folder naming — so import ingests foreign
+  // knowledge AS-IS, never demanding the source follow aof's NN_milestone_slug shape.
   if (!only) {
     records.push(...(await scanImportStore(projectRoot)));
+    records.push(...(await scanColocatedDigests(workDir, indexedAof)));
   }
   return records;
 }
