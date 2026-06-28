@@ -120,6 +120,21 @@ aof graph triage                   # graphify's PR-impact ranking
 
 `graphify-out/` is a derived, git-ignored build artifact (rebuild on demand, never committed). `aof graph impact` is the **deterministic, edge-based** coupling lookup the review/refine agents consume; `aof graph query` is the fuzzier NL hint.
 
+### Notion work-board sync (milestones 17 · 18)
+
+The on-disk stream is the source of truth, but a team that runs its day on a **Notion board** has no view of it without manual double-entry. `aof work integrations notion sync-work` is an **opt-in, one-way bridge** that projects a milestone and its stories onto an **already-existing** Notion board — milestone → its board row/page, stories → that page's sub-tasks — pushing status so Notion reflects aof without anyone retyping it. It is **aof → Notion only**: aof never reads Notion state as authoritative; on any divergence it overwrites Notion from disk.
+
+```sh
+aof project provision notion                                  # install the managed `ntn` CLI into the tool store
+aof work integrations notion sync-work 17 [--dry-run] [--json]   # push milestone 17 + its stories' status
+aof work integrations notion associate 17 --board ops --parent <page-id|key|none> [--json]  # route an item
+```
+
+- **CLI, not MCP.** The sync reaches Notion through the official **`ntn`** CLI **provisioned into aof's managed tool store** (milestone 12, the npx lane) — never the Notion MCP server — so it runs head-less wherever `aof work` runs. `aof project doctor` reports its presence + version and auth reachability. Auth is an **env-var reference** (`NOTION_API_TOKEN`, the headless/CI lane) **or** a browser `ntn login` keychain session; the token never lives in config or argv.
+- **Opt-in.** With no `work.integrations.notion` config the command is an **honest no-op + setup hint** — nothing about the existing work stream changes. The config is a **`boards` registry** (each board keyed, with a `default`): `dataSourceId`, `statusProperty`, the mandatory `statusMap` (aof `not-started`/`in-progress`/`in-review`/`done` → the board's options), and the `relationProperty` that nests stories as sub-tasks. aof binds to the board's **existing** schema — it never creates databases, properties, or views.
+- **Per-folder routing (milestone 18).** Each item's folder can carry a committed, co-located **`.integrations.json`** declaring *which* board and *which* parent page it belongs to — so a repo whose milestones land on different boards/parents is self-describing. `… notion associate` writes/clears that descriptor (the only mutation); absent ⇒ default board, top-level, exactly as milestone 17.
+- **Idempotent.** A git-ignored **`.aof/notion.work-map.json`** sidecar records the aof-item ↔ Notion-page binding (scoped per board), so re-syncs **update in place** rather than duplicating. `--dry-run` computes and prints the projected diff **without calling Notion**.
+
 ---
 
 ## Built by these milestones
@@ -143,6 +158,10 @@ The `aof work` system was itself built with `aof work` — dogfooded milestone b
 | 12 | Managed Tool Provisioning | `aof project provision` — aof owns its external tools in the `~/.aof` home |
 | 13 | External Milestone Import | `aof import milestone <repo> <selector>` — recover a milestone from another repo as recallable knowledge |
 | 14 | AOF.md Digest | a recallable per-milestone summary as a memory source |
+| 15 | Work Doctor | `aof work doctor` — health checks over the work stream |
+| 16 | Context-Budget Lint | a `work doctor` group that flags record docs exceeding their context budget |
+| 17 | Notion Work-Board Sync | `aof work integrations notion sync-work` — opt-in, one-way push of milestone + story status to a Notion board (via the managed `ntn` CLI) |
+| 18 | Integration Descriptor | per-folder `.integrations.json` routes each item to its board + parent; `… notion associate` writes it |
 
 ---
 
