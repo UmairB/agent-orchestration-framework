@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%}
+    body{font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+    .lane::-webkit-scrollbar,.scrl::-webkit-scrollbar{width:7px}
+    .lane::-webkit-scrollbar-thumb,.scrl::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:9px}
+    @keyframes barber{0%{background-position:0 0}100%{background-position:24px 0}}
+    @keyframes rpulse{0%,100%{box-shadow:0 0 0 0 rgba(20,184,166,.45);opacity:1}50%{box-shadow:0 0 0 4px rgba(20,184,166,0);opacity:.65}}
+  </style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;background:#f6f7f8;color:#1a2230;overflow:hidden">
+
+  <!-- ===== TOP BAR ===== -->
+  <div style="height:48px;flex:none;background:#fff;border-bottom:1px solid #e4e7ec;display:flex;align-items:center;gap:11px;padding:0 16px;z-index:5">
+    <div style="width:24px;height:24px;border-radius:6px;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">✦</div>
+    <span style="font-size:14px;font-weight:700;letter-spacing:-0.01em">aof</span>
+    <span style="font-size:14px;color:#94a3b8">Work Board</span>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:16px">
+      <span style="font-size:12px;color:#667085;display:flex;align-items:center;gap:6px">◷ status legend</span>
+      <span style="font-size:12px;color:#667085;display:flex;align-items:center;gap:6px">⟳ sync</span>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- VIEW: OVERVIEW (work items)                                            -->
+  <!-- ===================================================================== -->
+  <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+    <div class="scrl" style="flex:1;min-height:0;overflow-y:auto;padding:28px 32px 40px">
+      <div style="max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px">
+
+        <div style="display:flex;align-items:flex-end;gap:14px">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="font-size:20px;font-weight:700;letter-spacing:-0.01em">Work items</div>
+            <div style="font-size:13px;color:#667085">6 milestones · derived from project state. Open one to work its board.</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <span style="font-size:12px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:5px 11px;border-radius:7px;font-weight:600">✓ 4 done</span>
+            <span style="font-size:12px;color:#0f766e;background:#f0fdfa;border:1px solid #5eead4;padding:5px 11px;border-radius:7px;font-weight:600">◐ 1 active</span>
+            <span style="font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:5px 11px;border-radius:7px;font-weight:600">! 1 blocked gate</span>
+          </div>
+        </div>
+
+        <!-- milestone grid -->
+        <div onClick="{{ onOverviewClick }}" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+          <sc-for list="{{ milestones }}" as="m" hint-placeholder-count="6">
+            <div data-open="{{ m.ref }}" style="{{ m.cardStyle }}" style-hover="box-shadow:0 8px 24px rgba(16,24,40,.10);border-color:#cbd5e1;transform:translateY(-2px)">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="{{ m.ringStyle }}">{{ m.glyph }}</span>
+                <span class="mono" style="font-size:12px;font-weight:700;color:#475467">{{ m.refMono }}</span>
+                <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">milestone</span>
+                <span style="margin-left:auto;{{ m.statusChip }}">{{ m.statusLabel }}</span>
+              </div>
+              <div style="font-size:16px;font-weight:700;letter-spacing:-0.01em;margin-top:11px">{{ m.title }}</div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:13px">
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:#667085"><span>{{ m.progressLabel }}</span><span class="mono" style="color:#475467">{{ m.ratio }}</span></div>
+                <div style="height:6px;border-radius:99px;background:#eef2f6;overflow:hidden"><div style="{{ m.barStyle }}"></div></div>
+              </div>
+              <div style="display:flex;align-items:center;gap:5px;margin-top:13px;min-height:9px">
+                <sc-for list="{{ m.dots }}" as="d" hint-placeholder-count="3">
+                  <span style="{{ d.style }}"></span>
+                </sc-for>
+                <span style="font-size:10px;color:#94a3b8;margin-left:3px">{{ m.dotsLabel }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:13px;padding-top:11px;border-top:1px solid #f1f5f9;font-size:11px;color:#667085">
+                <span>{{ m.countsLabel }}</span>
+                <span style="{{ m.attnStyle }}">{{ m.attnLabel }}</span>
+                <span style="margin-left:auto;font-size:11px;color:#0f766e;font-weight:600">Open board →</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- UAT gate, cross-cutting -->
+        <div onClick="{{ onOverviewClick }}" style="margin-top:2px">
+          <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px">Acceptance gates</div>
+          <div data-open="03" style="border:1.5px solid #fca5a5;border-radius:10px;padding:15px 18px;background:#fffafa;display:flex;align-items:center;gap:13px;cursor:pointer" style-hover="box-shadow:0 6px 18px rgba(220,38,38,.12)">
+            <span style="width:30px;height:30px;border-radius:50%;background:#dc2626;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex:none">!</span>
+            <div style="display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;align-items:center;gap:8px"><span class="mono" style="font-size:12px;font-weight:700;color:#b91c1c">U1</span><span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#b91c1c">uat gate · blocked</span></div>
+              <div style="font-size:14px;font-weight:600">Acceptance — Work Board</div>
+            </div>
+            <span style="margin-left:auto;font-size:12px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:5px 11px;border-radius:7px;font-weight:500">waiting on 03 →</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===================================================================== -->
+  <!-- VIEW: BOARD                                                            -->
+  <!-- ===================================================================== -->
+  <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;display:flex;flex-direction:column;min-height:0">
+
+      <!-- breadcrumb + milestone switcher -->
+      <div style="flex:none;height:46px;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid #eef0f3;background:#fff;position:relative;z-index:4">
+        <span onClick="{{ goOverview }}" style="font-size:12px;color:#667085;cursor:pointer;display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:6px" style-hover="background:#f1f5f9;color:#1a2230">‹ Work items</span>
+        <span style="color:#cbd5e1;font-size:12px">/</span>
+
+        <!-- switcher -->
+        <div style="position:relative">
+          <span onClick="{{ toggleSwitch }}" style="font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 11px;border:1px solid #e4e7ec;border-radius:7px;background:#fff" style-hover="border-color:#cbd5e1">
+            <span style="{{ focusDotStyle }}"></span>{{ focusLabel }} <span style="color:#94a3b8;font-size:10px">▾</span>
+          </span>
+          <sc-if value="{{ switchOpen }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ onSwitchClick }}" style="position:absolute;top:40px;left:0;width:268px;background:#fff;border:1px solid #e4e7ec;border-radius:10px;box-shadow:0 12px 32px rgba(16,24,40,.14);padding:6px;z-index:20;display:flex;flex-direction:column;gap:1px">
+              <div data-focus="all" style="{{ allRowStyle }}" style-hover="background:#f6f7f8">
+                <span style="width:14px;height:14px;border-radius:4px;background:#eef2f6;display:flex;align-items:center;justify-content:center;font-size:9px;color:#64748b">▦</span>
+                <span style="font-size:13px;font-weight:600">All milestones</span>
+                <span style="margin-left:auto;font-size:11px;color:#94a3b8">full stream</span>
+              </div>
+              <div style="height:1px;background:#f1f5f9;margin:4px 0"></div>
+              <sc-for list="{{ switchItems }}" as="s" hint-placeholder-count="6">
+                <div data-focus="{{ s.ref }}" style="{{ s.rowStyle }}" style-hover="background:#f6f7f8">
+                  <span style="{{ s.dotStyle }}"></span>
+                  <span class="mono" style="font-size:11px;font-weight:600;color:#475467">{{ s.refMono }}</span>
+                  <span style="font-size:13px;font-weight:500">{{ s.title }}</span>
+                  <span style="margin-left:auto;font-size:10px;{{ s.tone }}">{{ s.statusShort }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <span class="mono" style="font-size:11px;color:#94a3b8">{{ focusCountLabel }}</span>
+          <span style="font-size:11px;color:#9f1239;background:#fff1f2;border:1px solid #fecdd3;padding:3px 9px;border-radius:6px;font-weight:500">◔ {{ cRev }} review</span>
+          <span style="font-size:11px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:3px 9px;border-radius:6px;font-weight:500">! {{ cBlk }} blocked</span>
+        </div>
+      </div>
+
+      <!-- board + detail -->
+      <div style="flex:1;display:flex;min-height:0">
+
+        <!-- status lanes -->
+        <div style="flex:1;min-width:0;position:relative">
+          <div onClick="{{ onBoardClick }}" style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:#eef0f3">
+
+            <!-- not-started -->
+            <div class="lane" style="background:#f9fafb;overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid #eef0f3;position:sticky;top:-12px;background:#f9fafb">
+                <span style="width:16px;height:16px;border-radius:50%;border:2px dashed #cbd5e1;flex:none"></span>
+                <span style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.03em">not-started</span>
+                <span style="margin-left:auto;font-size:11px;color:#94a3b8;background:#fff;border:1px solid #e4e7ec;border-radius:99px;padding:0 7px;font-weight:600">{{ cNot }}</span>
+              </div>
+              <sc-for list="{{ notStarted }}" as="it" hint-placeholder-count="1">
+                <div data-ref="{{ it.ref }}" style="{{ it.cardStyle }}">
+                  <div style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border-radius:50%;border:2px dashed #cbd5e1;flex:none"></span><span class="mono" style="font-size:10px;font-weight:600;color:#94a3b8">{{ it.refMono }}</span><span style="margin-left:auto;font-size:9px;color:#94a3b8">{{ it.tag }}</span></div>
+                  <div style="font-size:12px;font-weight:600;color:#64748b;margin-top:6px;line-height:1.25">{{ it.title }}</div>
+                  <div style="font-size:10px;color:#94a3b8;margin-top:5px">{{ it.meta }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- in-progress -->
+            <div class="lane" style="background:#f9fafb;overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid #eef0f3;position:sticky;top:-12px;background:#f9fafb">
+                <span style="width:16px;height:16px;border-radius:50%;background:conic-gradient(#14b8a6 0 55%,#e2e8f0 55% 100%);flex:none"></span>
+                <span style="font-size:11px;font-weight:600;color:#0f766e;text-transform:uppercase;letter-spacing:.03em">in-progress</span>
+                <span style="margin-left:auto;font-size:11px;color:#0f766e;background:#fff;border:1px solid #99f6e4;border-radius:99px;padding:0 7px;font-weight:600">{{ cProg }}</span>
+              </div>
+              <sc-for list="{{ inProgress }}" as="it" hint-placeholder-count="1">
+                <div data-ref="{{ it.ref }}" style="{{ it.cardStyle }}">
+                  <div style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border-radius:50%;background:conic-gradient(#14b8a6 0 55%,#e2e8f0 55% 100%);flex:none"></span><span class="mono" style="font-size:10px;font-weight:700;color:#0f766e">{{ it.refMono }}</span><span style="margin-left:auto;font-size:9px;color:#94a3b8">{{ it.tag }}</span></div>
+                  <div style="font-size:12px;font-weight:600;margin-top:6px;line-height:1.25">{{ it.title }}</div>
+                  <div style="height:5px;border-radius:99px;background:#eef2f6;margin-top:7px;overflow:hidden"><div style="width:62%;height:100%;background:repeating-linear-gradient(135deg,#2dd4bf 0 6px,#14b8a6 6px 12px);background-size:24px 5px;animation:barber .9s linear infinite"></div></div>
+                  <div style="font-size:10px;color:#0f766e;margin-top:5px">{{ it.meta }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- in-review -->
+            <div class="lane" style="background:#f9fafb;overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid #eef0f3;position:sticky;top:-12px;background:#f9fafb">
+                <span style="width:16px;height:16px;border-radius:50%;border:2px solid #e11d48;display:flex;align-items:center;justify-content:center;color:#e11d48;font-size:8px;flex:none">◔</span>
+                <span style="font-size:11px;font-weight:600;color:#9f1239;text-transform:uppercase;letter-spacing:.03em">in-review</span>
+                <span style="margin-left:auto;font-size:11px;color:#9f1239;background:#fff;border:1px solid #fecdd3;border-radius:99px;padding:0 7px;font-weight:600">{{ cRev }}</span>
+              </div>
+              <sc-for list="{{ inReview }}" as="it" hint-placeholder-count="3">
+                <div data-ref="{{ it.ref }}" style="{{ it.cardStyle }}">
+                  <span style="{{ it.inflightStyle }}" title="agent run in progress"></span>
+                  <div style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border-radius:50%;border:2px solid #e11d48;display:flex;align-items:center;justify-content:center;color:#e11d48;font-size:8px;flex:none">◔</span><span class="mono" style="font-size:10px;font-weight:600;color:#9f1239">{{ it.refMono }}</span><span style="margin-left:auto;font-size:9px;color:#94a3b8">{{ it.tag }}</span></div>
+                  <div style="font-size:12px;font-weight:600;margin-top:6px;line-height:1.25">{{ it.title }}</div>
+                  <div style="font-size:10px;color:#9f1239;margin-top:5px">{{ it.meta }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- blocked -->
+            <div class="lane" style="background:#fdfafa;overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid #f6e7e7;position:sticky;top:-12px;background:#fdfafa">
+                <span style="width:16px;height:16px;border-radius:50%;background:#dc2626;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:none">!</span>
+                <span style="font-size:11px;font-weight:600;color:#b91c1c;text-transform:uppercase;letter-spacing:.03em">blocked</span>
+                <span style="margin-left:auto;font-size:11px;color:#b91c1c;background:#fff;border:1px solid #fecaca;border-radius:99px;padding:0 7px;font-weight:600">{{ cBlk }}</span>
+              </div>
+              <sc-for list="{{ blocked }}" as="it" hint-placeholder-count="1">
+                <div data-ref="{{ it.ref }}" style="{{ it.cardStyle }}">
+                  <div style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border-radius:50%;background:#dc2626;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:none">!</span><span class="mono" style="font-size:10px;font-weight:600;color:#b91c1c">{{ it.refMono }}</span><span style="margin-left:auto;font-size:9px;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:1px 5px;border-radius:4px">{{ it.tag }}</span></div>
+                  <div style="font-size:12px;font-weight:600;margin-top:6px;line-height:1.25">{{ it.title }}</div>
+                  <div style="font-size:10px;color:#b91c1c;margin-top:5px;font-weight:500">{{ it.meta }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <!-- done -->
+            <div class="lane" style="background:#f9fafb;overflow-y:auto;padding:12px 11px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:1px solid #eef0f3;position:sticky;top:-12px;background:#f9fafb">
+                <span style="width:16px;height:16px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:none">✓</span>
+                <span style="font-size:11px;font-weight:600;color:#0f766e;text-transform:uppercase;letter-spacing:.03em">done</span>
+                <span style="margin-left:auto;font-size:11px;color:#0f766e;background:#fff;border:1px solid #99f6e4;border-radius:99px;padding:0 7px;font-weight:600">{{ cDone }}</span>
+              </div>
+              <sc-for list="{{ done }}" as="it" hint-placeholder-count="4">
+                <div data-ref="{{ it.ref }}" style="{{ it.cardStyle }}">
+                  <div style="display:flex;align-items:center;gap:7px"><span style="width:15px;height:15px;border-radius:50%;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:none">✓</span><span class="mono" style="font-size:10px;font-weight:600;color:#0f766e">{{ it.refMono }}</span><span style="margin-left:auto;font-size:9px;color:#94a3b8">{{ it.tag }}</span></div>
+                  <div style="font-size:12px;font-weight:600;margin-top:6px;line-height:1.25">{{ it.title }}</div>
+                  <div style="font-size:10px;color:#94a3b8;margin-top:5px">{{ it.meta }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- empty scoped milestone -->
+          <sc-if value="{{ boardEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;background:rgba(249,250,251,.86);pointer-events:none">
+              <div style="width:46px;height:46px;border-radius:12px;border:2px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:20px">○</div>
+              <div style="font-size:14px;font-weight:600;color:#64748b">No stories in this milestone yet</div>
+              <div style="font-size:12px;color:#94a3b8">It’s scaffolded but not started — nothing to review or run.</div>
+            </div>
+          </sc-if>
+
+          <!-- inset: RUNS empty state (illustrative) -->
+          <div style="position:absolute;left:14px;bottom:14px;width:208px;background:#fff;border:1px solid #e4e7ec;border-radius:10px;box-shadow:0 10px 30px rgba(16,24,40,.12);padding:11px 12px;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="mono" style="font-size:9px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em">RUNS · empty state</span>
+              <span class="mono" style="margin-left:auto;font-size:9px;color:#cbd5e1">04/00</span>
+            </div>
+            <div style="border:1.5px dashed #d8dee6;border-radius:8px;padding:15px 12px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;background:#fbfcfd">
+              <span style="width:22px;height:22px;border-radius:50%;border:2px dashed #cbd5e1;display:inline-block"></span>
+              <div style="font-size:11.5px;font-weight:600;color:#64748b">No runs yet</div>
+              <div style="font-size:10.5px;color:#94a3b8;line-height:1.4">This item hasn’t been run.</div>
+            </div>
+          </div>
+        </div>
+        <div style="width:382px;flex:none;background:#fff;border-left:1px solid #e4e7ec;display:flex;flex-direction:column;min-height:0">
+          <div style="flex:none;padding:14px 16px;border-bottom:1px solid #eef0f3;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="{{ selRingStyle }}">{{ selRingGlyph }}</span>
+              <span class="mono" style="font-size:13px;font-weight:700;color:#475467">{{ selRefMono }}</span>
+              <span style="{{ selTypeStyle }}">{{ selType }}</span>
+              <span style="margin-left:auto;{{ selStatusStyle }}">{{ selStatusLabel }}</span>
+            </div>
+            <div style="font-size:16px;font-weight:700;letter-spacing:-0.01em">{{ selTitle }}</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="mono" style="font-size:11px;color:#94a3b8">{{ selSlug }}</span>
+              <button style="margin-left:auto;font-size:12px;color:#fff;background:#0d9488;border:none;padding:6px 13px;border-radius:7px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px" style-hover="background:#0f766e">▸ Run agent</button>
+            </div>
+          </div>
+          <div onClick="{{ onTabClick }}" style="flex:none;display:flex;gap:2px;padding:0 14px;border-bottom:1px solid #eef0f3">
+            <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+              <span data-tab="{{ t.key }}" style="{{ t.style }}">{{ t.label }}</span>
+            </sc-for>
+          </div>
+          <div class="scrl" style="flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+
+            <!-- ===== STORY ===== -->
+            <sc-if value="{{ tabStory }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Objective</div>
+              <div style="font-size:13px;line-height:1.55;color:#344054">{{ selObjective }}</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px">
+              <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Acceptance</div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#344054;line-height:1.4"><span style="color:#0d9488;font-weight:700">✓</span> Renders the derived work tree without manual status.</div>
+                <div style="display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#344054;line-height:1.4"><span style="color:#0d9488;font-weight:700">✓</span> Selecting an item drives this detail panel.</div>
+                <div style="display:flex;gap:9px;align-items:flex-start;font-size:12.5px;color:#344054;line-height:1.4"><span style="color:#e11d48;font-weight:700">◔</span> Agent runs against the selected item in the dock.</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;margin-top:9px">
+              <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Records</div>
+              <div style="display:flex;flex-direction:column;border:1px solid #eef0f3;border-radius:8px;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid #f4f5f7;font-size:12px"><span style="color:#0d9488">✓</span> Spec / objective <span style="margin-left:auto;font-size:10px;color:#94a3b8">present</span></div>
+                <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid #f4f5f7;font-size:12px"><span style="color:#e11d48">◔</span> Verification <span style="margin-left:auto;font-size:10px;color:#9f1239">in review</span></div>
+                <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid #f4f5f7;font-size:12px"><span style="color:#cbd5e1">○</span> Retrospective <span style="margin-left:auto;font-size:10px;color:#94a3b8">pending</span></div>
+                <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;font-size:12px"><span style="{{ selFindingsDot }}"></span> Findings <span style="margin-left:auto;font-size:10px;{{ selFindingsTone }}">{{ selFindingsLabel }}</span></div>
+              </div>
+            </div>
+            </sc-if>
+
+            <!-- ===== TASKS ===== -->
+            <sc-if value="{{ tabTasks }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Tasks · feature files</div>
+              <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:9px;border:1px solid #eef0f3;border-radius:8px;padding:9px 11px;background:#fff">
+                  <span style="{{ t.dot }}"></span>
+                  <span class="mono" style="font-size:10.5px;color:#94a3b8;flex:none">{{ t.ref }}</span>
+                  <span style="font-size:12px;color:#344054">{{ t.title }}</span>
+                  <span style="margin-left:auto;font-size:10px;{{ t.tone }}">{{ t.status }}</span>
+                </div>
+              </sc-for>
+            </div>
+            </sc-if>
+
+            <!-- ===== RUNS ===== -->
+            <sc-if value="{{ tabRuns }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:14px">
+
+              <!-- Current run strip -->
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <div style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">Current run</div>
+                <div style="border:1px solid #99f6e4;border-radius:9px;padding:11px 12px;background:#f7fffe;display:flex;flex-direction:column;gap:11px">
+                  <div style="display:flex;align-items:center;gap:9px">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;color:#0f766e;background:#f0fdfa;border:1px solid #5eead4"><span style="width:9px;height:9px;border-radius:50%;background:#14b8a6;animation:rpulse 1.4s ease-in-out infinite;flex:none"></span>running</span>
+                    <span class="mono" style="font-size:12px;font-weight:700;color:#475467">#5</span>
+                    <span class="mono" style="font-size:11px;color:#94a3b8">sess·9f2e…</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+                    <button style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;background:#f4f5f7;border:1px solid #e4e7ec;padding:7px 12px;border-radius:7px;font-weight:600;cursor:not-allowed" disabled>↻ Rerun</button>
+                    <span style="font-size:11px;color:#94a3b8">a run is in progress</span>
+                    <span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#667085;cursor:pointer" title="Observability is poll/refresh"><span style="font-size:13px">⟳</span> refreshed 8s ago</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- History -->
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:10px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em">History</span>
+                  <span class="mono" style="margin-left:auto;font-size:10px;color:#cbd5e1">{{ runCount }} prior runs · newest first</span>
+                </div>
+                <sc-for list="{{ runs }}" as="r" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:10px;border:1px solid #eef0f3;border-radius:8px;padding:9px 11px;background:#fff">
+                    <span class="mono" style="font-size:11px;font-weight:700;color:#475467;flex:none">{{ r.attempt }}</span>
+                    <span style="{{ r.chipStyle }}"><span style="{{ r.dotStyle }}">{{ r.dotGlyph }}</span>{{ r.stateLabel }}</span>
+                    <span class="mono" style="font-size:10.5px;color:#94a3b8">{{ r.session }}</span>
+                    <span style="margin-left:auto;font-size:10.5px;color:#94a3b8;flex:none">{{ r.when }}</span>
+                  </div>
+                </sc-for>
+              </div>
+
+            </div>
+            </sc-if>
+
+          </div>
+          <div style="flex:none;border-top:1px solid #eef0f3;padding:11px 14px;display:flex;flex-direction:column;gap:9px">
+            <div style="display:flex;gap:8px">
+              <button style="flex:1;font-size:12px;color:#475467;background:#fff;border:1px solid #e4e7ec;padding:8px 10px;border-radius:7px;font-weight:500;cursor:pointer">+ Add feedback</button>
+              <button style="flex:1;font-size:12px;color:#0f766e;background:#f0fdfa;border:1px solid #5eead4;padding:8px 10px;border-radius:7px;font-weight:600;cursor:pointer">✓ Validate</button>
+              <button style="flex:1;font-size:12px;color:#475467;background:#fff;border:1px solid #e4e7ec;padding:8px 10px;border-radius:7px;font-weight:500;cursor:pointer">→ Next</button>
+            </div>
+            <div style="font-size:11px;color:#94a3b8;background:#f9fafb;border:1px solid #eef0f3;border-radius:6px;padding:7px 10px" class="mono">› validate {{ selRefMono }} — features passing, awaiting accept</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- terminal dock (collapsed — a run is live) -->
+      <div style="flex:none;background:#0f1629;border-top:1px solid #1e293b">
+        <div style="display:flex;align-items:center;gap:12px;padding:9px 16px">
+          <span style="font-size:12px;color:#cbd5e1;font-weight:600">▣ TERMINAL</span>
+          <span style="font-size:11px;color:#64748b">provider:</span>
+          <span style="display:flex;align-items:center;gap:10px"><span style="font-size:11px;color:#2dd4bf">● claude</span><span style="font-size:11px;color:#475569">○ codex</span><span style="font-size:11px;color:#475569">○ gemini</span></span>
+          <span class="mono" style="font-size:11px;color:#64748b">item <span style="color:#94a3b8">{{ selRefMono }}</span></span>
+          <span style="font-size:11px;color:#fb7185;display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:#fb7185;animation:rpulse 1.4s ease-in-out infinite"></span>running</span>
+          <span class="mono" style="font-size:11px;color:#475569;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">› running feature suite … <span style="color:#2dd4bf">3 passing</span></span>
+          <span style="margin-left:auto;display:flex;gap:12px;color:#475569;font-size:12px"><span style="cursor:pointer" title="Expand dock">⌃</span><span style="cursor:pointer">✕</span></span>
+        </div>
+      </div>
+
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  state = { view:'board', focus:'all', sel:'03/02', switchOpen:false, tab:'runs' };
+
+  data() {
+    const M = (ref,title,status,stories,tasks)=>({ref,refMono:ref,title,status,slug:title.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''),type:'milestone',stories,tasks});
+    const S = (ref,slug,title,status)=>({ref,refMono:ref,title,status,slug,type:'story',parent:ref.split('/')[0]});
+    return {
+      milestones: [
+        M('00','Work CLI','done',[S('00/00','cli-scaffold','CLI scaffold','done'),S('00/01','work-verbs','Work verbs','done'),S('00/02','output-format','Output formatting','done')],9),
+        M('01','ACD Asset Bundle','done',[S('01/00','bundle-format','Asset bundle format','done'),S('01/01','work-init','work init command','done'),S('01/02','record-templates','Record templates','done')],8),
+        M('02','Planning Init','done',[S('02/00','plan-parse','Plan parsing','done'),S('02/01','derive-tree','Derive work tree','done'),S('02/02','seed-records','Seed records','done')],7),
+        M('03','Work Board UI','in-progress',[S('03/00','board-tree','Board tree render','in-review'),S('03/01','item-detail','Item detail panel','in-review'),S('03/02','agent-terminal','The agent terminal','in-review')],8),
+        M('04','Round-trip Proof','not-started',[],0),
+        M('05','Work Memory','done',[S('05/00','memory-seam','Memory seam — verbs + backend','done'),S('05/01','local-parsers','Local backend — parsers','done'),S('05/02','recall-ranking','Recall / brief ranking','done'),S('05/03','memory-hooks','Memory hooks','done')],11),
+      ],
+      uat: { ref:'U1', refMono:'U1', title:'Acceptance — Work Board', status:'blocked', slug:'uat-work-board', type:'uat', dep:'03', meta:'waiting on 03' },
+    };
+  }
+
+  laneKey(s){ return ({'not-started':'notStarted','in-progress':'inProgress','in-review':'inReview','blocked':'blocked','done':'done'})[s]; }
+
+  statusMeta(status){
+    return ({
+      'not-started':{label:'○ not-started',short:'not started',color:'#cbd5e1',dot:'#cbd5e1',ringStyle:'width:18px;height:18px;border-radius:50%;border:2px dashed #cbd5e1;display:inline-block;flex:none',glyph:'',chip:'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;border-radius:6px',tone:'color:#94a3b8'},
+      'in-progress':{label:'◐ in-progress',short:'in progress',color:'#14b8a6',dot:'#14b8a6',ringStyle:'width:18px;height:18px;border-radius:50%;background:conic-gradient(#14b8a6 0 55%,#e2e8f0 55% 100%);display:inline-block;flex:none',glyph:'',chip:'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#0f766e;background:#f0fdfa;border:1px solid #5eead4;padding:3px 8px;border-radius:6px',tone:'color:#0f766e'},
+      'in-review':{label:'◔ in-review',short:'in review',color:'#e11d48',dot:'#e11d48',ringStyle:'width:18px;height:18px;border-radius:50%;border:2px solid #e11d48;display:inline-flex;align-items:center;justify-content:center;color:#e11d48;font-size:9px;flex:none',glyph:'◔',chip:'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#9f1239;background:#fff1f2;border:1px solid #fecdd3;padding:3px 8px;border-radius:6px',tone:'color:#9f1239'},
+      'blocked':{label:'! blocked',short:'blocked',color:'#dc2626',dot:'#dc2626',ringStyle:'width:18px;height:18px;border-radius:50%;background:#dc2626;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none',glyph:'!',chip:'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:3px 8px;border-radius:6px',tone:'color:#b91c1c'},
+      'done':{label:'✓ done',short:'done',color:'#0d9488',dot:'#0d9488',ringStyle:'width:18px;height:18px;border-radius:50%;background:#0d9488;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none',glyph:'✓',chip:'display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#fff;background:#0d9488;border:1px solid #0d9488;padding:3px 8px;border-radius:6px',tone:'color:#0f766e'},
+    })[status];
+  }
+
+  runState(state){
+    const map={
+      queued:   {label:'queued',    color:'#64748b', bg:'#f1f5f9', bd:'#e2e8f0', dot:'#94a3b8', glyph:'', pulse:false},
+      running:  {label:'running',   color:'#0f766e', bg:'#f0fdfa', bd:'#5eead4', dot:'#14b8a6', glyph:'', pulse:true},
+      done:     {label:'done',      color:'#0f766e', bg:'#f0fdfa', bd:'#99f6e4', dot:'#0d9488', glyph:'✓', pulse:false},
+      failed:   {label:'failed',    color:'#b91c1c', bg:'#fef2f2', bd:'#fecaca', dot:'#dc2626', glyph:'', pulse:false},
+      cancelled:{label:'cancelled', color:'#64748b', bg:'#f1f5f9', bd:'#e2e8f0', dot:'#94a3b8', glyph:'', pulse:false},
+    };
+    const s=map[state];
+    const dim = s.glyph ? '13px' : '9px';
+    return {
+      stateLabel:s.label,
+      chipStyle:'display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;flex:none;color:'+s.color+';background:'+s.bg+';border:1px solid '+s.bd,
+      dotStyle:'width:'+dim+';height:'+dim+';border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;flex:none;background:'+s.dot+(s.pulse?';animation:rpulse 1.4s ease-in-out infinite':''),
+      dotGlyph:s.glyph,
+    };
+  }
+
+  runRow(attempt,state,session,when){ return Object.assign({attempt,session,when}, this.runState(state)); }
+
+  cardStyle(isSel,color,shadow){
+    const base='position:relative;border-radius:7px;padding:9px 10px;background:#fff;cursor:pointer;transition:box-shadow .12s,border-color .12s;';
+    return isSel ? base+'border:1.5px solid '+color+';box-shadow:0 2px 12px '+shadow+';background:#fcfffe;' : base+'border:1px solid #e4e7ec;';
+  }
+
+  flatten(d){
+    const all=[];
+    d.milestones.forEach(m=>{ all.push(m); m.stories.forEach(s=>all.push(s)); });
+    all.push(d.uat);
+    return all;
+  }
+
+  buildLanes(focus,d,sel){
+    const buckets={notStarted:[],inProgress:[],inReview:[],blocked:[],done:[]};
+    const shadow={'#cbd5e1':'rgba(100,116,139,.12)','#14b8a6':'rgba(20,184,166,.16)','#e11d48':'rgba(225,29,72,.16)','#dc2626':'rgba(220,38,38,.16)','#0d9488':'rgba(13,148,136,.14)'};
+    const add=(item,tag,meta)=>{ const sm=this.statusMeta(item.status); buckets[this.laneKey(item.status)].push({ref:item.ref,refMono:item.refMono,title:item.title,tag,meta,cardStyle:this.cardStyle(item.ref===sel,sm.color,shadow[sm.color]),inflightStyle: item.ref==='03/02' ? 'position:absolute;top:7px;right:7px;width:8px;height:8px;border-radius:50%;background:#14b8a6;animation:rpulse 1.4s ease-in-out infinite' : 'display:none'}); };
+    if(focus==='all'){
+      d.milestones.forEach(m=>add(m,'milestone', m.stories.length?(m.stories.filter(s=>s.status==='done').length+' / '+m.stories.length+' stories'):'no stories yet'));
+      d.milestones.forEach(m=>m.stories.forEach(s=>{ if(s.status==='in-review'||s.status==='blocked') add(s,'in '+m.ref,'story'); }));
+      add(d.uat,'uat',d.uat.meta);
+    } else {
+      const m=d.milestones.find(x=>x.ref===focus);
+      m.stories.forEach(s=>add(s,'in '+m.ref, this.statusMeta(s.status).short));
+      if(d.uat.dep===focus) add(d.uat,'uat',d.uat.meta);
+    }
+    return buckets;
+  }
+
+  msCard(m){
+    const sm=this.statusMeta(m.status);
+    const total=m.stories.length, doneN=m.stories.filter(s=>s.status==='done').length, revN=m.stories.filter(s=>s.status==='in-review').length;
+    const pct= total? Math.round((doneN + revN*0.66)/total*100) : 0;
+    const barStyle='width:'+pct+'%;height:100%;'+(m.status==='done'?'background:#0d9488;':pct>0?'background:repeating-linear-gradient(135deg,#2dd4bf 0 6px,#14b8a6 6px 12px);background-size:24px 5px;':'');
+    const dots=m.stories.map(s=>({style:'width:8px;height:8px;border-radius:50%;flex:none;'+(s.status==='done'?'background:#0d9488;':s.status==='in-review'?'background:#e11d48;':s.status==='in-progress'?'background:#14b8a6;':s.status==='blocked'?'background:#dc2626;':'border:1.5px solid #cbd5e1;')}));
+    const attn = revN>0;
+    return {
+      ref:m.ref, refMono:m.refMono, title:m.title,
+      ringStyle:sm.ringStyle, glyph:sm.glyph, statusChip:sm.chip, statusLabel:sm.label,
+      cardStyle:'border:1px solid #e4e7ec;border-radius:10px;padding:16px 17px;background:#fff;cursor:pointer;transition:box-shadow .14s,transform .14s,border-color .14s;',
+      progressLabel: total?'stories done':'not started',
+      ratio: total?(doneN+' / '+total):'0 / 0',
+      barStyle,
+      dots, dotsLabel: total?(m.stories.length+(m.stories.length===1?' story':' stories')):'—',
+      countsLabel: m.tasks+' tasks',
+      attnStyle: attn?'color:#9f1239;font-weight:600':'color:#94a3b8',
+      attnLabel: attn?('◔ '+revN+' in review'):(m.status==='done'?'✓ accepted':'·'),
+    };
+  }
+
+  defaultSel(focus,d){
+    if(focus==='all') return '03/02';
+    const m=d.milestones.find(x=>x.ref===focus);
+    if(m && m.stories.length) return m.stories[0].ref;
+    return focus;
+  }
+
+  renderVals(){
+    const d=this.data();
+    const { view, focus, sel, switchOpen } = this.state;
+    const all=this.flatten(d);
+    const selItem=all.find(i=>i.ref===sel) || d.milestones[3];
+    const sm=this.statusMeta(selItem.status);
+
+    const typeStyles={
+      milestone:'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;padding:2px 7px;border-radius:5px',
+      story:'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#9f1239;background:#fff1f2;border:1px solid #fecdd3;padding:2px 7px;border-radius:5px',
+      uat:'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:2px 7px;border-radius:5px',
+      task:'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 7px;border-radius:5px',
+    };
+    const objectives={
+      milestone:'A chunk of product, complete only when all its stories are accepted. Status here is rolled up from its children — never set by hand.',
+      story:'An independent slice delivering user-visible value. Built when all its task .feature files pass; this card reflects that derived state.',
+      uat:'A cross-cutting human-acceptance gate. It blocks whatever depends on it until the referenced work is accepted.',
+      task:'A single testable behaviour expressed as a Gherkin .feature file.',
+    };
+    const findings = sel==='03/02'?2:0;
+
+    const lanes=this.buildLanes(focus,d,sel);
+
+    // ---- run observability ----
+    const tab=this.state.tab;
+    const tabDef = selItem.type==='milestone'
+      ? [{key:'story',label:'SPEC'},{key:'verification',label:'VERIFICATION'},{key:'retro',label:'RETROSPECTIVE'},{key:'runs',label:'RUNS'},{key:'findings',label:'Findings ('+findings+')'}]
+      : [{key:'story',label:'STORY'},{key:'tasks',label:'TASKS'},{key:'runs',label:'RUNS'}];
+    const tabStyle=(active,crimson)=>'font-size:11px;font-weight:'+(active?'600':'500')+';padding:10px 8px;cursor:pointer;'+(active?'border-bottom:2px solid #0d9488;color:#0f766e':(crimson?'color:#9f1239':'color:#94a3b8'));
+    const tabs=tabDef.map(t=>({key:t.key,label:t.label,style:tabStyle(tab===t.key,t.key==='findings')}));
+    const runs=[
+      this.runRow('#4','failed','sess·a1c9…','12m ago'),
+      this.runRow('#3','done','sess·77b3…','1h ago'),
+      this.runRow('#2','cancelled','sess·4de0…','yesterday'),
+      this.runRow('#1','done','sess·1a08…','2d ago'),
+    ];
+    const tasks=[
+      {ref:'t·00', title:'Spawns the agent subprocess on the item', status:'passing', tone:'color:#0f766e;font-weight:600', dot:'width:9px;height:9px;border-radius:50%;background:#0d9488;flex:none'},
+      {ref:'t·01', title:'Streams stdout into the terminal dock', status:'passing', tone:'color:#0f766e;font-weight:600', dot:'width:9px;height:9px;border-radius:50%;background:#0d9488;flex:none'},
+      {ref:'t·02', title:'Records run state + session id', status:'in review', tone:'color:#9f1239;font-weight:600', dot:'width:9px;height:9px;border-radius:50%;background:#e11d48;flex:none'},
+      {ref:'t·03', title:'Surfaces exit outcome in run history', status:'pending', tone:'color:#94a3b8', dot:'width:9px;height:9px;border-radius:50%;border:1.5px solid #cbd5e1;flex:none'},
+    ];
+
+    // switcher
+    const switchItems=d.milestones.map(m=>{ const s=this.statusMeta(m.status); return {
+      ref:m.ref, refMono:m.refMono, title:m.title, statusShort:s.short, tone:s.tone,
+      dotStyle:'width:9px;height:9px;border-radius:50%;flex:none;'+(m.status==='done'?'background:#0d9488':m.status==='in-progress'?'background:#14b8a6':m.status==='not-started'?'border:1.5px solid #cbd5e1':'background:#e11d48'),
+      rowStyle:'display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer'+(m.ref===focus?';background:#f0fdfa':''),
+    };});
+    const focusM = focus==='all'?null:d.milestones.find(x=>x.ref===focus);
+    const focusSm = focusM?this.statusMeta(focusM.status):null;
+
+    return {
+      isOverview: view==='overview',
+      isBoard: view==='board',
+
+      milestones: d.milestones.map(m=>this.msCard(m)),
+
+      // lanes
+      notStarted:lanes.notStarted, inProgress:lanes.inProgress, inReview:lanes.inReview, blocked:lanes.blocked, done:lanes.done,
+      cNot:lanes.notStarted.length, cProg:lanes.inProgress.length, cRev:lanes.inReview.length, cBlk:lanes.blocked.length, cDone:lanes.done.length,
+      boardEmpty: lanes.notStarted.length+lanes.inProgress.length+lanes.inReview.length+lanes.blocked.length+lanes.done.length===0,
+
+      // switcher
+      switchOpen, switchItems,
+      focusLabel: focus==='all'?'All milestones':(focusM.refMono+' · '+focusM.title),
+      focusDotStyle: 'width:9px;height:9px;border-radius:50%;flex:none;'+(focus==='all'?'background:#94a3b8':focusM.status==='done'?'background:#0d9488':focusM.status==='in-progress'?'background:#14b8a6':focusM.status==='not-started'?'border:1.5px solid #cbd5e1':'background:#e11d48'),
+      focusCountLabel: focus==='all'?(d.milestones.length+' milestones · full stream'):(focusM.stories.length+' stories'),
+      allRowStyle:'display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer'+(focus==='all'?';background:#f0fdfa':''),
+
+      // handlers
+      onOverviewClick:(e)=>{ const el=e.target.closest('[data-open]'); if(!el)return; const ref=el.getAttribute('data-open'); this.setState({view:'board',focus:ref,sel:this.defaultSel(ref,d),switchOpen:false}); },
+      goOverview:()=>this.setState({view:'overview',switchOpen:false}),
+      toggleSwitch:()=>this.setState(s=>({switchOpen:!s.switchOpen})),
+      onSwitchClick:(e)=>{ const el=e.target.closest('[data-focus]'); if(!el)return; const ref=el.getAttribute('data-focus'); this.setState({focus:ref,sel:this.defaultSel(ref,d),switchOpen:false}); },
+      onBoardClick:(e)=>{ const el=e.target.closest('[data-ref]'); if(el) this.setState({sel:el.getAttribute('data-ref')}); },
+      onTabClick:(e)=>{ const el=e.target.closest('[data-tab]'); if(!el)return; this.setState({tab:el.getAttribute('data-tab')}); },
+
+      // tabs + runs
+      tabs,
+      tabRuns: tab==='runs', tabTasks: tab==='tasks', tabStory: tab!=='runs'&&tab!=='tasks',
+      runs, runCount: runs.length, tasks,
+
+      // detail
+      selRefMono:selItem.refMono, selTitle:selItem.title, selSlug:selItem.slug, selType:selItem.type,
+      selTypeStyle:typeStyles[selItem.type], selStatusLabel:sm.label, selStatusStyle:sm.chip,
+      selRingStyle:sm.ringStyle, selRingGlyph:sm.glyph, selObjective:objectives[selItem.type],
+      selFindings:findings, selFindingsLabel: findings?(findings+' open'):'none',
+      selFindingsTone: findings?'color:#9f1239;font-weight:600':'color:#94a3b8',
+      selFindingsDot: findings?'width:10px;height:10px;border-radius:50%;background:#e11d48;display:inline-block;flex:none':'width:10px;height:10px;border-radius:50%;border:1.5px solid #cbd5e1;display:inline-block;flex:none',
+    };
+  }
+}
+</script>
+</body>
+</html>

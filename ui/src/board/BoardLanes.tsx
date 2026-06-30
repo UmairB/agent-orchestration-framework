@@ -18,6 +18,7 @@ export function BoardLanes({
   derived,
   focus,
   selectedRef,
+  runningRefs,
   switchOpen,
   onToggleSwitch,
   onCloseSwitch,
@@ -29,6 +30,9 @@ export function BoardLanes({
   derived: Derived;
   focus: "all" | string;
   selectedRef: string | null;
+  // Refs with a live `running` run — drives the in-flight pulse dot (DESIGN
+  // surface 2b). Empty set ⇒ no dots.
+  runningRefs: Set<string>;
   switchOpen: boolean;
   onToggleSwitch: () => void;
   onCloseSwitch: () => void;
@@ -103,6 +107,7 @@ export function BoardLanes({
               status={status}
               cards={lanes[status]}
               selectedRef={selectedRef}
+              runningRefs={runningRefs}
               onSelect={onSelect}
             />
           ))}
@@ -145,11 +150,13 @@ function Lane({
   status,
   cards,
   selectedRef,
+  runningRefs,
   onSelect,
 }: {
   status: StatusKind;
   cards: LaneCard[];
   selectedRef: string | null;
+  runningRefs: Set<string>;
   onSelect: (ref: string) => void;
 }) {
   const meta = statusMeta(status);
@@ -176,6 +183,7 @@ function Lane({
             item={item}
             tag={tag}
             selected={item.ref === selectedRef}
+            running={runningRefs.has(item.ref)}
             onSelect={() => onSelect(item.ref)}
           />
         ))}
@@ -188,11 +196,14 @@ function LaneCardView({
   item,
   tag,
   selected,
+  running,
   onSelect,
 }: {
   item: WorkItem;
   tag: string;
   selected: boolean;
+  // The item has a live `running` run → carry the in-flight pulse dot.
+  running: boolean;
   onSelect: () => void;
 }) {
   const meta = statusMeta(item.status);
@@ -201,13 +212,23 @@ function LaneCardView({
       type="button"
       data-card
       onClick={onSelect}
-      className={`w-full rounded-lg border bg-card p-2.5 text-left transition ${
+      className={`relative w-full rounded-lg border bg-card p-2.5 text-left transition ${
         selected
           ? "border-[1.5px] shadow-md"
           : "border-border hover:border-primary/40"
       }`}
       style={selected ? { borderColor: tone(meta.tone), background: `color-mix(in srgb, ${tone(meta.tone)} 6%, var(--color-card))` } : undefined}
     >
+      {/* In-flight pulse dot (DESIGN surface 2b): an 8px teal pulse dot, distinct
+          in position + primitive from the item-status glyph-ring, shown for a
+          `running` run only — so active runs are visible from the board. */}
+      {running ? (
+        <span
+          className="absolute right-1.5 top-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-primary"
+          title="agent run in progress"
+          aria-hidden="true"
+        />
+      ) : null}
       <div className="flex items-center gap-1.5">
         <StatusRing status={item.status} size={15} />
         <span className="mono text-xs text-muted-foreground">{item.ref}</span>
