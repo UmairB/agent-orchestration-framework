@@ -12,11 +12,11 @@
 // identical with/without --strict. The warn fixture uses the seeded `orphan-folder`
 // group; the error fixture uses the seeded `duplicate-driver-number` group.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -83,7 +83,7 @@ async function errorFixture() {
 }
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

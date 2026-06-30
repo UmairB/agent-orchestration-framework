@@ -19,7 +19,7 @@
 //        the seed validates clean, byte-identical determinism, identical refs
 //        across seedings
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "./support/cli-spawn.mjs";
 import { access, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -95,7 +95,7 @@ export const roundtripHarnessTests = [
     run: async () => {
       const repo = await createRoundTripRepo();
       try {
-        const status = spawnSync("git", ["status"], { cwd: repo.dir, encoding: "utf8" });
+        const status = spawnSyncHardened("git", ["status"], { cwd: repo.dir, encoding: "utf8" });
         assert.equal(status.status, 0, "git status exits successfully");
 
         await writeFile(path.join(repo.dir, "hello.txt"), "hi\n", "utf8");
@@ -106,9 +106,9 @@ export const roundtripHarnessTests = [
           GIT_COMMITTER_NAME: "Proof",
           GIT_COMMITTER_EMAIL: "proof@example.com"
         };
-        const add = spawnSync("git", ["add", "hello.txt"], { cwd: repo.dir, encoding: "utf8", env });
+        const add = spawnSyncHardened("git", ["add", "hello.txt"], { cwd: repo.dir, encoding: "utf8", env });
         assert.equal(add.status, 0, "git add succeeds");
-        const commit = spawnSync("git", ["commit", "-m", "seed", "--no-gpg-sign"], { cwd: repo.dir, encoding: "utf8", env });
+        const commit = spawnSyncHardened("git", ["commit", "-m", "seed", "--no-gpg-sign"], { cwd: repo.dir, encoding: "utf8", env });
         assert.equal(commit.status, 0, `git commit succeeds: ${commit.stderr ?? ""}`);
       } finally {
         await repo.cleanup();

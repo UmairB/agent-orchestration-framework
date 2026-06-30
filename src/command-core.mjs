@@ -83,6 +83,24 @@ import { runStatusCommand } from "./commands/run-status.mjs";
 // m09–m19 door); it takes the precedented BOARD_DEFERRED carve-out (board = m21) but
 // inherits the generic command-cli bijection (08/ADR-004).
 import { runRetryCommand } from "./commands/run-retry.mjs";
+// milestone 22 — mesh-foundation (story 01: node-identity — mesh:identity / mesh:status
+// register into the SAME core; ADR-001/003). Thin over story 00's src/mesh-store.mjs
+// (the partition seam + opaque per-node persist/read) and story 01's
+// src/node-identity.mjs (id derivation + descriptor assembly): mesh:identity publishes/
+// reads THIS node's record, mesh:status lists the synced roster. Additive — exactly the
+// 08 move (one import + one COMMANDS entry each). They take the `mesh:` prefix, so they
+// are EXCLUDED from the `work:`-filtered bijection but inherit the NEW registry-derived
+// acd-mesh-command-cli-bijection gate (story 00, fitness #3).
+import { meshIdentityCommand, meshStatusCommand } from "./commands/mesh-identity.mjs";
+// milestone 22 — mesh-foundation (story 02: git-sync engine — mesh:sync registers into
+// the SAME core; ADR-004). Thin over story 02's src/mesh-sync.mjs syncMesh (the
+// PAYLOAD-AGNOSTIC git transport): it stages + commits this node's records under the
+// partition root, pulls peers', pushes — moving FILES, never parsing record content.
+// The one-shot testable transport unit; the background loop is a thin timer over it.
+// Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is
+// EXCLUDED from the `work:`-filtered bijection but inherits the acd-mesh-command-cli-
+// bijection gate (now covering identity+status+sync).
+import { meshSyncCommand } from "./commands/mesh-sync.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -113,6 +131,9 @@ const COMMANDS = [
   runCompleteCommand,
   runStatusCommand,
   runRetryCommand,
+  meshIdentityCommand,
+  meshStatusCommand,
+  meshSyncCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

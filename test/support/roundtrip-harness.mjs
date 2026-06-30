@@ -18,7 +18,7 @@
 //   — and re-exports the verbs so consumers resolve refs through the same code the
 //   product ships. It hand-rolls NO install copy-loop, NO render/lock, and carries
 //   NO scripted stand-in for the agent-driven refine/continue/verify loop.
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "./cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -39,7 +39,7 @@ export async function createRoundTripRepo() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "aof-roundtrip-"));
 
   // A REAL git repo — the loop expects one (ADR-001). `git init -q` in the dir.
-  const result = spawnSync("git", ["init", "-q"], { cwd: dir, encoding: "utf8" });
+  const result = spawnSyncHardened("git", ["init", "-q"], { cwd: dir, encoding: "utf8" });
   if (result.error) {
     throw result.error;
   }

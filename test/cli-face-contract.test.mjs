@@ -22,7 +22,7 @@
 // work-stream (`.aof/aof.config.json` + `wiki/work/...`), `spawnSync` the real CLI
 // (`bin/aof.mjs`) with cwd = the fixture root, and assert exit code + stdout/stderr.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -132,7 +132,7 @@ async function writeUat(root, { number, slug, status = "not-started", title = "A
 // Spawn the real CLI against the fixture root (cwd = root so loadWorkspace finds
 // .aof/aof.config.json). Returns { status, stdout, stderr }.
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

@@ -10,7 +10,7 @@
 // The registry-shape scenario imports getCommand; the CLI scenarios run the bin
 // against the configured fixture.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -93,7 +93,7 @@ async function makeConfiguredProject() {
 }
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 

@@ -362,6 +362,109 @@ import { archTests as acdIntegrationsBoardResolutionTests } from "../test/arch/a
 import { archTests as acdIntegrationsNoNotionReadTests } from "../test/arch/acd-integrations-no-notion-read.test.mjs";
 import { archTests as acdIntegrationsDescriptorExtensibleTests } from "../test/arch/acd-integrations-descriptor-extensible.test.mjs";
 import { archTests as acdIntegrationsBoardsSchemaTests } from "../test/arch/acd-integrations-boards-schema.test.mjs";
+// milestone 19 — work-run-lifecycle (story 00: run-store — the SPINE src/run-store.mjs:
+// the per-run JSON store under runs/ (ADR-002 path seam runsDir/runRecordPath), the frozen
+// run-record schema (ADR-003), and the state-machine transition table (ADR-001). The three
+// task features (00_run-record-store / 01_state-machine / 02_derived-log-lifecycle) +
+// the three fitness arch-tests — derived-record invariant (FF#1, prune AND rebuild),
+// write-scope guard (FF#2), partition-ready layout (FF#3).
+import { runStoreRecordTests } from "../test/run-store-record.test.mjs";
+import { runStoreStateMachineTests } from "../test/run-store-state-machine.test.mjs";
+import { runStoreDerivedLogTests } from "../test/run-store-derived-log.test.mjs";
+import { archTests as acdRunRecordDerivedTests } from "../test/arch/acd-run-record-derived.test.mjs";
+import { archTests as acdRunWriteScopeTests } from "../test/arch/acd-run-write-scope.test.mjs";
+import { archTests as acdRunPartitionReadyTests } from "../test/arch/acd-run-partition-ready.test.mjs";
+// milestone 19 — work-run-lifecycle (story 01: run-commands — the three work:run-*
+// commands (run-start/run-complete/run-status, ADR-003) registered into the SAME
+// core + the CLI `work run-*` dispatch/--json face; each a thin wrapper over story
+// 00's src/run-store.mjs. The three task features (00_run-commands in-process via
+// invoke / 01_cli-face via real CLI spawn / 02_lifecycle-survives-restart via fresh
+// CLI processes); the bijection extension (fitness #4) is the EXTENDED
+// acd-work-command-cli-bijection arch-test already wired above.
+import { runCommandsTests } from "../test/run-commands.test.mjs";
+import { runCliFaceTests } from "../test/run-cli-face.test.mjs";
+import { runLifecycleRestartTests } from "../test/run-lifecycle-restart.test.mjs";
+// milestone 20 — autonomous-run-resilience (story 00: resilience-core — the run-store
+// resilience spine: the four additive record keys (ADR-001), the closed classification
+// table + attempt ceiling (ADR-002), the retry-lineage mint (ADR-003 store side), the
+// heartbeat + path-walking orphan-reclaim scan (ADR-004), the dedup guard +
+// collision-safe mint (ADR-006), and the atomic persist (ADR-007). Five @executable
+// behavioural test files + five fitness-function arch-tests.
+import { runResilienceRecordKeysTests } from "../test/run-resilience-record-keys.test.mjs";
+import { runFailureClassificationTests } from "../test/run-failure-classification.test.mjs";
+import { runRetryLineageTests } from "../test/run-retry-lineage.test.mjs";
+import { runHeartbeatReclaimTests } from "../test/run-heartbeat-reclaim.test.mjs";
+import { runDedupAtomicPersistTests } from "../test/run-dedup-atomic-persist.test.mjs";
+import { archTests as acdRunRetryClassificationTests } from "../test/arch/acd-run-retry-classification.test.mjs";
+import { archTests as acdRunRetryResumesLineageTests } from "../test/arch/acd-run-retry-resumes-lineage.test.mjs";
+import { archTests as acdRunReclaimStaleOnlyTests } from "../test/arch/acd-run-reclaim-stale-only.test.mjs";
+import { archTests as acdRunPersistAtomicTests } from "../test/arch/acd-run-persist-atomic.test.mjs";
+import { archTests as acdRunDedupNoDuplicateTests } from "../test/arch/acd-run-dedup-no-duplicate.test.mjs";
+// milestone 20 — autonomous-run-resilience (story 01: resilience-commands — work:run-retry
+// (command + CLI face, ADR-003), the --reason producer half on work:run-complete (ADR-001/002),
+// rollbackItemStatus the first item-status writer (ADR-005), and the outsider-verifiable
+// CLI acceptance. Five @executable behavioural test files + one new bounding fitness function
+// (acd-status-rollback-bounded); the acd-run-retry-resumes-lineage arch-test (imported above)
+// gains a command-path test object riding the same import.
+import { runRetryCommandTests } from "../test/run-retry-command.test.mjs";
+import { runRetryCliFaceTests } from "../test/run-retry-cli-face.test.mjs";
+import { runStatusRollbackTests } from "../test/run-status-rollback.test.mjs";
+import { runResilienceAcceptanceTests } from "../test/run-resilience-acceptance.test.mjs";
+import { runCompleteReasonTests } from "../test/run-complete-reason.test.mjs";
+import { archTests as acdStatusRollbackBoundedTests } from "../test/arch/acd-status-rollback-bounded.test.mjs";
+// milestone 21 — board-run-observability. story 00 (run-observability): the
+// additive /api/work/run-status read route (the server-side @executable scenarios)
+// + the PURE run-observability helpers (relative-time formatter, current-run
+// selection, the run-state chip ramp) shared headlessly. story 01
+// (rerun-affordance): the pure rerun verb-resolution + the in-flight disabled
+// predicate. The read-path fitness functions are EXTENSIONS of existing m08/m15
+// guards (acd-work-command-route-coverage drops run-status from BOARD_DEFERRED;
+// acd-board-write-isolation extended to the run/rerun surface) — already wired
+// above; milestone 21 adds NO new arch-test file (21/ADR-003).
+import { boardRunStatusRouteTests } from "../test/board-run-status-route.test.mjs";
+import { boardRunsPureTests } from "../test/board-runs-pure.test.mjs";
+// milestone 22 — mesh-foundation (story 00: mesh-store spine + face skeleton — the
+// SPINE src/mesh-store.mjs: the partition path seam meshDir/nodeRecordPath (ADR-002),
+// the frozen node-record schema's OPAQUE per-node persist/read (ADR-003) through the
+// atomic writeText seam (19/R2), plus the greenfield `aof mesh` CLI dispatcher
+// SKELETON (meshCommand in cli.mjs, ADR-001). Three task features (00_mesh-record-store
+// / 01_path-partition-convention / 02_aof-mesh-face-skeleton) + the three fitness
+// arch-tests — partition-write (FF#1), write-scope guard (FF#2), and the NEW
+// registry-derived mesh-namespace bijection gate (FF#3, RED-until-commands, vacuous now).
+import { meshRecordStoreTests } from "../test/mesh-record-store.test.mjs";
+import { meshPartitionConventionTests } from "../test/mesh-partition-convention.test.mjs";
+import { meshFaceSkeletonTests } from "../test/mesh-face-skeleton.test.mjs";
+import { archTests as acdMeshPartitionWriteTests } from "../test/arch/acd-mesh-partition-write.test.mjs";
+import { archTests as acdMeshWriteScopeTests } from "../test/arch/acd-mesh-write-scope.test.mjs";
+import { archTests as acdMeshCommandCliBijectionTests } from "../test/arch/acd-mesh-command-cli-bijection.test.mjs";
+// milestone 22 — mesh-foundation (story 01: node-identity + commands — src/node-identity.mjs
+// derives the stable, human-readable node id + assembles the frozen 7-key capability
+// descriptor (ADR-003); src/commands/mesh-identity.mjs registers mesh:identity (publish/
+// read this node) + mesh:status (the synced roster) into the SAME core (ADR-001), thin
+// over story 00's mesh-store; the aof mesh identity/status dispatch branches + meshVerbCli
+// face in cli.mjs. Three task features: 00_node-identity-descriptor (in-process node
+// identity, injected hostname/salt), 01_mesh-identity-status-commands (invoke the commands
+// against a temp fixture), 02_mesh-identity-cli-face (spawn the real CLI — render + --json
+// single envelope + the error-code matrix). The acd-mesh-command-cli-bijection gate now
+// covers identity+status (extended above).
+import { meshNodeIdentityTests } from "../test/mesh-node-identity.test.mjs";
+import { meshIdentityStatusCommandsTests } from "../test/mesh-identity-status-commands.test.mjs";
+import { meshIdentityCliFaceTests } from "../test/mesh-identity-cli-face.test.mjs";
+// milestone 22 — mesh-foundation (story 02: git-sync engine — src/mesh-sync.mjs is the
+// PAYLOAD-AGNOSTIC git transport (syncMesh) + the background-loop runner (startSyncLoop,
+// a thin timer over the one-shot transport); src/commands/mesh-sync.mjs registers
+// mesh:sync into the SAME core (ADR-004), thin over the transport; the aof mesh sync
+// dispatch branch + argsFor case in cli.mjs. Two @executable task features:
+// 00_git-sync-transport (the transport over a REAL local bare-remote git fixture —
+// commit+push, the clean no-op, pull a peer, the payload-agnostic outline, the add-only
+// merge), 01_sync-cadence-loop (the loop over an INJECTED ticker — once-per-tick, the
+// valid/malformed cadence outlines, batching, cadence read-at-start). The @manual
+// 02_two-node-render-over-remote feature gets NO executable test (verified at aof:verify).
+// Fitness #4 acd-mesh-sync-record-neutral asserts the engine moves files not fields. The
+// acd-mesh-command-cli-bijection gate now covers identity+status+sync.
+import { meshGitSyncTransportTests } from "../test/mesh-git-sync-transport.test.mjs";
+import { meshSyncCadenceLoopTests } from "../test/mesh-sync-cadence-loop.test.mjs";
+import { archTests as acdMeshSyncRecordNeutralTests } from "../test/arch/acd-mesh-sync-record-neutral.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -531,6 +634,54 @@ export const tests = [
   ...acdIntegrationsNoNotionReadTests,
   ...acdIntegrationsDescriptorExtensibleTests,
   ...acdIntegrationsBoardsSchemaTests,
+  // milestone 19 — work-run-lifecycle (story 00: run-store)
+  ...runStoreRecordTests,
+  ...runStoreStateMachineTests,
+  ...runStoreDerivedLogTests,
+  ...acdRunRecordDerivedTests,
+  ...acdRunWriteScopeTests,
+  ...acdRunPartitionReadyTests,
+  // milestone 19 — work-run-lifecycle (story 01: run-commands)
+  ...runCommandsTests,
+  ...runCliFaceTests,
+  ...runLifecycleRestartTests,
+  // milestone 20 — autonomous-run-resilience (story 00: resilience-core)
+  ...runResilienceRecordKeysTests,
+  ...runFailureClassificationTests,
+  ...runRetryLineageTests,
+  ...runHeartbeatReclaimTests,
+  ...runDedupAtomicPersistTests,
+  ...acdRunRetryClassificationTests,
+  ...acdRunRetryResumesLineageTests,
+  ...acdRunReclaimStaleOnlyTests,
+  ...acdRunPersistAtomicTests,
+  ...acdRunDedupNoDuplicateTests,
+  // milestone 20 — autonomous-run-resilience (story 01: resilience-commands)
+  ...runRetryCommandTests,
+  ...runRetryCliFaceTests,
+  ...runStatusRollbackTests,
+  ...runResilienceAcceptanceTests,
+  ...runCompleteReasonTests,
+  ...acdStatusRollbackBoundedTests,
+  // milestone 21 — board-run-observability (story 00: run-observability route +
+  // pure helpers; story 01: rerun verb + in-flight predicate)
+  ...boardRunStatusRouteTests,
+  ...boardRunsPureTests,
+  // milestone 22 — mesh-foundation (story 00: mesh-store spine + face skeleton)
+  ...meshRecordStoreTests,
+  ...meshPartitionConventionTests,
+  ...meshFaceSkeletonTests,
+  ...acdMeshPartitionWriteTests,
+  ...acdMeshWriteScopeTests,
+  ...acdMeshCommandCliBijectionTests,
+  // milestone 22 — mesh-foundation (story 01: node-identity + commands)
+  ...meshNodeIdentityTests,
+  ...meshIdentityStatusCommandsTests,
+  ...meshIdentityCliFaceTests,
+  // milestone 22 — mesh-foundation (story 02: git-sync engine)
+  ...meshGitSyncTransportTests,
+  ...meshSyncCadenceLoopTests,
+  ...acdMeshSyncRecordNeutralTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

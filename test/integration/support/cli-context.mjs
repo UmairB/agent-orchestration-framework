@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnCliSync } from "../../support/cli-spawn.mjs";
 
 export const integrationDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const repoRoot = path.resolve(integrationDir, "..", "..");
@@ -31,7 +31,7 @@ export function runCli(context, command, input = "", options = {}) {
 
   const args = splitCommand(command);
   const promptEnv = promptInputEnv(input);
-  const result = spawnSync(process.execPath, ["--no-warnings", cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, ["--no-warnings", cliPath, ...args], {
     cwd: context.projectDir,
     env: {
       ...process.env,

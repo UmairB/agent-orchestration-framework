@@ -28,7 +28,7 @@
 // harness's seedSampleMilestone return value — never a hard-coded milestone
 // number (ADR-005). Each scenario uses a FRESH repo and always tears it down.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -50,7 +50,7 @@ const cliPath = fileURLToPath(new URL("../bin/aof.mjs", import.meta.url));
 // repo has no .aof/aof.config.json, so the CLI resolves workDir to
 // <dir>/wiki/work by default, which is where seedSampleMilestone writes.
 function runCli(dir, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: dir,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" }

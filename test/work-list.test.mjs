@@ -18,7 +18,7 @@
 // fixture work folder. The fixture matches the feature Backgrounds: milestone 03
 // (+ stories 03/00, 03/01) and the top-level uat session 04.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -115,7 +115,7 @@ async function buildFixture(items, prefix = "aof-work-list-") {
 // Invoke the real CLI against the fixture repo (cwd = repo root so loadWorkspace
 // finds .aof/aof.config.json).
 function runList(root, args = []) {
-  const result = spawnSync(process.execPath, [cliPath, "work", "list", ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, "work", "list", ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" }

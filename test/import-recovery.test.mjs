@@ -30,7 +30,7 @@
 // src/memory/local-indexing.mjs) and assert record counts/types/titles + the
 // frozen MemoryRecord field set.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -172,7 +172,7 @@ async function makeArbitrarySource({
     // No shell: a shell would word-split a multi-word commit subject on Windows
     // (it silently leaves zero commits), and the recovered outcome titles ARE the
     // commit subjects — they must survive verbatim.
-    const git = (args) => spawnSync("git", args, { cwd: src, encoding: "utf8" });
+    const git = (args) => spawnSyncHardened("git", args, { cwd: src, encoding: "utf8" });
     git(["init", "-q"]);
     git(["config", "user.email", "fixture@aof.local"]);
     git(["config", "user.name", "aof fixture"]);

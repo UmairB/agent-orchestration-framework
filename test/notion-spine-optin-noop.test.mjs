@@ -10,7 +10,7 @@
 // The in-process invoke passes the spy via ctx.notionSpawn so the zero-spawn promise
 // is observable; the CLI-render scenarios run the bin against the fixture.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -58,7 +58,7 @@ async function makeUnconfiguredProject() {
 
 // Spawn `aof <args>` with cwd at the project root.
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 

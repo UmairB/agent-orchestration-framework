@@ -29,7 +29,7 @@
 // @manual; the read-only boundary they assert is pinned structurally by the
 // story-03 arch-test acd-import-read-only-source.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -111,7 +111,7 @@ async function makeSourceRepo(milestones = ["00"]) {
 // is already a CI dependency.
 async function makeGitFixtureRepo(milestones = ["00"]) {
   const src = await makeSourceRepo(milestones);
-  const git = (args) => spawnSync("git", args, { cwd: src, encoding: "utf8", shell: process.platform === "win32" });
+  const git = (args) => spawnSyncHardened("git", args, { cwd: src, encoding: "utf8", shell: process.platform === "win32" });
   git(["init", "-q"]);
   git(["config", "user.email", "fixture@aof.local"]);
   git(["config", "user.name", "aof fixture"]);
@@ -125,7 +125,7 @@ async function makeGitFixtureRepo(milestones = ["00"]) {
 // `treeStateOf` harness helper). Byte-for-byte equality of both before/after is the
 // source-untouched assertion (03).
 function treeStateOf(repoDir) {
-  const git = (args) => spawnSync("git", args, { cwd: repoDir, encoding: "utf8", shell: process.platform === "win32" });
+  const git = (args) => spawnSyncHardened("git", args, { cwd: repoDir, encoding: "utf8", shell: process.platform === "win32" });
   const head = git(["rev-parse", "HEAD"]).stdout.trim();
   const porcelain = git(["status", "--porcelain"]).stdout;
   return { head, porcelain };
@@ -135,7 +135,7 @@ const ctxFor = async (repo) => ({ workspace: await loadWorkspace(repo) });
 
 // Spawn `aof <args>` with cwd at the project root; returns { status, stdout, stderr }.
 function runCli(root, args, env = {}) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnSyncHardened(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1", ...env },
@@ -439,7 +439,7 @@ export const importCommandCoreTests = [
     async run() {
       const { repo } = await makeRepo();
       // Make the project a real git repo so `git status --porcelain` is meaningful.
-      const git = (args) => spawnSync("git", args, { cwd: repo, encoding: "utf8", shell: process.platform === "win32" });
+      const git = (args) => spawnSyncHardened("git", args, { cwd: repo, encoding: "utf8", shell: process.platform === "win32" });
       git(["init", "-q"]);
       git(["config", "user.email", "fixture@aof.local"]);
       git(["config", "user.name", "aof fixture"]);

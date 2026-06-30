@@ -13,7 +13,7 @@
 // invariant is FF-B (an arch-test authored in this story), NOT asserted here — these
 // Thens assert the observable PARSE RESULT, not the source.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -99,7 +99,7 @@ export const integrationsParserRevertedTests = [
     async run() {
       const { root } = await buildFixture();
       try {
-        const result = spawnSync(process.execPath, [cliPath, "work", "list", "--json"], {
+        const result = spawnCliSync(process.execPath, [cliPath, "work", "list", "--json"], {
           cwd: root,
           encoding: "utf8",
         });

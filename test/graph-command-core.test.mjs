@@ -14,7 +14,7 @@
 //   03_query-triage-results.feature      — missing-graph build-first error (the only
 //        @executable rows; the query/triage SUCCESS rows are @manual)
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -55,7 +55,7 @@ async function readFixtureGraph() {
 }
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

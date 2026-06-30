@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -84,7 +84,7 @@ try {
 }
 
 function run(args) {
-  return spawnSync(process.execPath, ["--no-warnings", cliPath, ...args], {
+  return spawnCliSync(process.execPath, ["--no-warnings", cliPath, ...args], {
     cwd: projectDir,
     env: {
       ...process.env,

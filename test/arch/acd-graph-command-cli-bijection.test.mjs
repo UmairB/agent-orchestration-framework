@@ -19,12 +19,12 @@
 //       structured `{ ok:false, error, code }` error envelope (both parse). This
 //       proves the verb is dispatched even when its live preconditions are absent.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -86,7 +86,7 @@ function argsFor(verb) {
 function runCli(root, args) {
   // A scrubbed PATH so the fixture run cannot accidentally find a real graphify
   // binary on the developer machine — the error envelope must be deterministic.
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1", PATH: "", Path: "" },
