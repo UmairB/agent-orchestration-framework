@@ -51,8 +51,8 @@ export const archTests = [
       assert.ok(marketplace, "the plan contains a marketplace add step");
       assert.equal(
         marketplace.command,
-        `claude plugin marketplace add https://github.com/phuryn/pm-skills.git#${MARKETPLACE_TAG}`,
-        "marketplace add pins the clonable release tag `#v2.0.0` on the HTTPS git URL (= MARKETPLACE_VERSION)"
+        `claude plugin marketplace add --scope project https://github.com/phuryn/pm-skills.git#${MARKETPLACE_TAG}`,
+        "marketplace add declares at PROJECT scope (ADR-010) and pins the clonable release tag `#v2.0.0` on the HTTPS git URL (= MARKETPLACE_VERSION)"
       );
       assert.ok(
         marketplace.command.endsWith(`#${MARKETPLACE_TAG}`),
@@ -118,8 +118,8 @@ export const archTests = [
         const item = installs.find((entry) => entry.plugin === plugin);
         assert.equal(
           item.command,
-          `claude plugin install ${plugin}@pm-skills`,
-          `${plugin} install uses verb \`install\` and marketplace token \`pm-skills\``
+          `claude plugin install --scope project ${plugin}@pm-skills`,
+          `${plugin} install declares at PROJECT scope (ADR-010), uses verb \`install\` and marketplace token \`pm-skills\``
         );
       }
     }
@@ -145,6 +145,43 @@ export const archTests = [
         assert.ok(Array.isArray(item.argv) && item.argv.length > 0, "each item carries an argv");
         assert.equal(item.command, item.argv.join(" "), "command is the argv joined (spawn discipline is argv-based)");
       }
+    }
+  },
+  {
+    // ADR-010: the claude declarations default to PROJECT scope so the planner travels
+    // with the repo (.claude/settings.json), never the user's global settings (the
+    // runtime CLI's own `--scope user` default — the bug this guards against). The
+    // `--scope` flag rides every claude command (marketplace + install), and the
+    // positional token (`<url>` / `<plugin>@pm-skills`) stays LAST so the clone-smoke
+    // guard (acd-planning-clonable-ref) can still read the source off the argv tail.
+    name: "arch/ADR-010: claude commands declare at PROJECT scope by default; the positional stays the argv tail",
+    run: async () => {
+      const plan = planPlanningInstall({ runtime: "claude", sha: FIXTURE_SHA, withOptional: true });
+      for (const item of plan) {
+        const scopeIdx = item.argv.indexOf("--scope");
+        assert.ok(scopeIdx !== -1, `claude ${item.kind} command carries a --scope flag: ${item.command}`);
+        assert.equal(item.argv[scopeIdx + 1], "project", "the default scope is `project`");
+        assert.ok(scopeIdx < item.argv.length - 1, "the --scope flag precedes the positional (token stays last)");
+        // The positional (source URL / plugin token) must remain the final argv token.
+        assert.ok(!item.argv[item.argv.length - 1].startsWith("--"), "the argv tail is the positional, not a flag");
+      }
+    }
+  },
+  {
+    // ADR-010: an explicit scope flows through to every claude command; codex
+    // marketplace-add stays UNSCOPED (`--scope` is a claude-settings concept, and
+    // codex registration is its own mechanism — emitting the flag there would be wrong).
+    name: "arch/ADR-010: an explicit --scope flows to claude commands; codex marketplace-add carries no scope flag",
+    run: async () => {
+      for (const scope of ["user", "project", "local"]) {
+        const claudePlan = planPlanningInstall({ runtime: "claude", sha: FIXTURE_SHA, scope });
+        for (const item of claudePlan) {
+          assert.ok(item.command.includes(`--scope ${scope}`), `claude ${item.kind} honours --scope ${scope}`);
+        }
+      }
+      const codexPlan = planPlanningInstall({ runtime: "codex", sha: FIXTURE_SHA, scope: "project" });
+      const codexMarketplace = codexPlan.find((item) => item.kind === "marketplace");
+      assert.ok(!codexMarketplace.command.includes("--scope"), "codex marketplace-add carries no --scope flag");
     }
   },
   {
