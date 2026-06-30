@@ -227,7 +227,7 @@
         "id": "autonomous",
         "kind": "command"
       },
-      "hash": "sha256:734c282303e9e78d5fe89e62576da0cc384a661f5232e9e11f52e61dfbf8ab29"
+      "hash": "sha256:874d9f47a4f12df91c307ef4bd43202645678bd3317e860a1487c4c622aa0279"
     },
     {
       "path": ".claude/commands/aof/code-review.md",

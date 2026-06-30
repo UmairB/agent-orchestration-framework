@@ -76,6 +76,13 @@ import { notionAssociateCommand } from "./commands/notion-associate.mjs";
 import { runStartCommand } from "./commands/run-start.mjs";
 import { runCompleteCommand } from "./commands/run-complete.mjs";
 import { runStatusCommand } from "./commands/run-status.mjs";
+// milestone 20 — autonomous-run-resilience (story 01: resilience-commands — work:run-retry
+// registers into the SAME core; ADR-003). A thin WRITE wrapper over story 00's retryRun:
+// it RESUMES a retryable failed run's lineage (carries the prior sessionId, attempt + 1,
+// retryOf), the resume-vs-fresh verb distinction (run-start stays fresh). Additive (the
+// m09–m19 door); it takes the precedented BOARD_DEFERRED carve-out (board = m21) but
+// inherits the generic command-cli bijection (08/ADR-004).
+import { runRetryCommand } from "./commands/run-retry.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -105,6 +112,7 @@ const COMMANDS = [
   runStartCommand,
   runCompleteCommand,
   runStatusCommand,
+  runRetryCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

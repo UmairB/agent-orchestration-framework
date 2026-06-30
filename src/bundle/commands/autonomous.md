@@ -12,6 +12,7 @@ back only when a human is genuinely required or an item can't be safely advanced
 
 <config>
 Read `.aof/aof.config.json` → `work.agents`, `work.autonomous.maxAttempts` (default `3`),
+`work.autonomous.heartbeatStaleMs` (the restart-reclaim staleness threshold, default 15 min),
 `work.codeReview.autoComplete`. Parse "$ARGUMENTS":
 
 - **range** — `NN-MM` (inclusive) or a single `NN`, passed straight to `aof work next <range>`.
@@ -24,6 +25,14 @@ or hand-glob the stream.
 </config>
 
 <process>
+**Reclaim orphaned runs first (restart-time backstop).** Before anything else, recover any run a previous
+crash left wedged. Over the range's items, a stale `running` run — one whose `heartbeatAt` is older than
+`work.autonomous.heartbeatStaleMs` (seen via `aof work run-status <ref>`) — is an orphan. The
+**`work:run-start` path performs the reclaim**: it force-fails a stale orphan (`runtime_offline`, so the
+recovered run stays *retryable*) and rolls its item back `in-progress → not-started` before minting the
+resumed run — so a crashed item re-enters the ready pool and is offered again by `aof work next`. This is
+a backstop SCAN at loop start, never a daemon, poll, or network sweep.
+
 **Print the plan first** — run `aof work next <range> --json` and list the range's milestones (and
 their stories) with current `status`. Then **loop**: ask the CLI for the next item, act on it, repeat.
 
@@ -55,6 +64,29 @@ Loop until `aof work next <range> --json` returns `state: "done"`:
    - **uat session (ready)** → it's a cross-milestone human acceptance gate. Run `aof:verify NN` to
      drive the automated lanes (the integrated regression sweep + agent-runnable `@manual` across the
      accepted milestones), then **stop** for the human `@uat` sign-off — never self-sign a session.
+
+   **Track each item's processing as a run, and recover infra failures (resilience).** Wrap the work on a
+   ready item in a run so a crash is detectable and recoverable: `aof work run-start <ref>` when you begin
+   the attempt, `aof work run-complete <ref> --outcome done` on success, or `--outcome failed --reason
+   <runtime_offline|timeout|agent_error>` when it fails. On a **failed** run, let the store DECIDE
+   resume-vs-fresh — do **not** re-reason the failure table in prose; ask the verb and follow its coded result:
+   - try `aof work run-retry <ref>` — on success it **resumed** the prior session on the same lineage (an
+     infra failure: `runtime_offline`/`timeout`), and the retry counts against `work.autonomous.maxAttempts`;
+   - if it returns **`not-retryable`** (an `agent_error` — you judged the output bad), start **fresh** with
+     `aof work run-start <ref>` instead, so a poisoned session is never replayed;
+   - if it returns **`attempts-exhausted`**, the ceiling is hit — hand back on the EXISTING **`maxAttempts`
+     exhausted** stop (a genuinely-failing item halts instead of looping).
+   A reclaim, an infra resume, a status rollback, and a `duplicate-run` rejection are all handled **in-loop**
+   — they recover the cascade; none is a new hand-back (the `<stop_conditions>` set below is unchanged).
+
+   **Anti-loop — skip self-triggering hand-offs.** The cascade's multi-agent hand-offs must never re-trigger
+   their own work. The store records the FACTS (each run's `retryOf` lineage + `brief.initiator`); you apply
+   the POLICY: before a hand-off, read the candidate's `brief.initiator` and run lineage from the run records
+   and **decline** a hand-off whose initiator is the agent it would trigger, or that would re-trigger its own
+   lineage. A genuine hand-off to a *different* agent / a fresh lineage proceeds normally — skip only
+   self-triggers, never the legitimate cascade. If a slipped self-trigger still reaches the store, its
+   `duplicate-run` guard refuses the second non-terminal run — treat that rejection as an in-loop event
+   (continue), not a hand-back.
 
 3. **Loop.** Confirm the working tree is committed, then go back to step 1. Re-running
    `aof:autonomous <range>` resumes — `aof work next` skips `done` work and returns the first open item.
