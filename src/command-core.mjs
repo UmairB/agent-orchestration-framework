@@ -67,6 +67,15 @@ import { notionSyncWorkCommand } from "./commands/notion-sync-work.mjs";
 // `notion:*` prefix, so EXCLUDED from the /api/work bijection but inheriting the
 // generic command-cli bijection (08/ADR-004).
 import { notionAssociateCommand } from "./commands/notion-associate.mjs";
+// milestone 19 — work-run-lifecycle (story 01: run-commands — the three work:run-*
+// commands register into the SAME core; ADR-003). Each is a thin wrapper over
+// story 00's src/run-store.mjs (the next.mjs-over-nextWork idiom): run-start /
+// run-complete are WRITES (resolveItemExact — a typo never writes to the wrong
+// item), run-status is the READ (resolveItem slug-fallback tolerated). Additive,
+// exactly the 08 move — the registry-derived bijection auto-covers their presence.
+import { runStartCommand } from "./commands/run-start.mjs";
+import { runCompleteCommand } from "./commands/run-complete.mjs";
+import { runStatusCommand } from "./commands/run-status.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -93,6 +102,9 @@ const COMMANDS = [
   importMilestoneCommand,
   notionSyncWorkCommand,
   notionAssociateCommand,
+  runStartCommand,
+  runCompleteCommand,
+  runStatusCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().
