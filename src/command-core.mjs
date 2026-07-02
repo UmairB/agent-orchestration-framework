@@ -54,6 +54,14 @@ import { projectProvisionCommand } from "./commands/project-provision.mjs";
 // SAME core; 13/ADR-002). It reads a source repo READ-ONLY and materializes a
 // recovered milestone as a frozen artifact pair in the .aof/ import store.
 import { importMilestoneCommand } from "./commands/import-milestone.mjs";
+// story 29 — migrate-command (migrate:folder registers into the SAME core). The
+// CONTRAST with import:milestone: import SUMMARISES a foreign folder into a
+// read-only AOF.md digest; migrate CONVERTS it INTO a managed milestone under
+// work.dir (refinable/continuable/verifiable). It reuses import's read-only
+// source-access + recovery seam, then SCAFFOLDS a native managed milestone at the
+// next free slot. Takes the `migrate:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but inherits the generic command-cli bijection.
+import { migrateFolderCommand } from "./commands/migrate-folder.mjs";
 // milestone 17 — Notion work-board sync (notion:sync-work registers into the SAME
 // core; 17/ADR-002). The PO's terminal command that pushes a milestone + its
 // stories to a Notion board; opt-in via `work.integrations.notion` (absent ⇒ an
@@ -101,6 +109,51 @@ import { meshIdentityCommand, meshStatusCommand } from "./commands/mesh-identity
 // EXCLUDED from the `work:`-filtered bijection but inherits the acd-mesh-command-cli-
 // bijection gate (now covering identity+status+sync).
 import { meshSyncCommand } from "./commands/mesh-sync.mjs";
+// milestone 23 — control-node-relay (story 00: presence-heartbeat — mesh:heartbeat
+// registers into the SAME core; ADR-002). Thin over story 00's src/mesh-presence.mjs
+// (the presence-record assembly + the activeRuns read of the run records + the atomic
+// publish via the m22-reserved presenceRecordPath); it publishes THIS node's presence
+// git-only (no relay — story 02 adds the push). mesh:status is EXTENDED in place
+// (mesh-identity.mjs) to render presence + the stale flag. Additive — one import + one
+// COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat).
+import { meshHeartbeatCommand } from "./commands/mesh-heartbeat.mjs";
+// milestone 23 — control-node-relay (story 01: thin relay — mesh:relay registers into
+// the SAME core; ADR-001). Thin over story 01's src/mesh-relay.mjs: `aof mesh relay` is
+// the relay-mode serve verb, but the registered run is the NON-BLOCKING status probe
+// (the configured control-node + url + nominated-or-not) so the bijection gate runs clean
+// + returns (the actual long-lived serve is serveRelay/relayMode, the launcher's job).
+// The relay carries OPAQUE envelopes and imports the record side NOTHING (file-disjoint
+// from story 00). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
+// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+relay).
+import { meshRelayCommand } from "./commands/mesh-relay.mjs";
+// milestone 24 — group-enrollment (story 01: device-code enrollment — mesh:invite /
+// mesh:join register into the SAME core; ADR-002/003/005). mesh:invite is the
+// control-node-guarded MINT (a 6-digit code, recorded HASHED as a pending invite
+// through story 00's writeRegistry seam, the plaintext returned ONCE in the result);
+// mesh:join PRESENTS a code to the control node's device-flow HTTP endpoint (the
+// POST /enroll route on serveRelay's ONE http server), stores the issued credential at
+// config.mesh.credential (read-merge-write of the free-form mesh subtree — the
+// resolveInstallSalt precedent), and provisions the granted git remote via the
+// shell-less spawnSync("git", [ … ]) argv idiom (13/ADR-002). Additive — one import +
+// one COMMANDS entry each. They take the `mesh:` prefix, so they are EXCLUDED from the
+// `work:`-filtered bijection but RIDE the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat+relay+invite+join).
+import { meshInviteCommand } from "./commands/mesh-invite.mjs";
+import { meshJoinCommand } from "./commands/mesh-join.mjs";
+// milestone 24 — group-enrollment (story 02: the enforceable trust boundary — ADR-004).
+// mesh:revoke is the control-node-guarded REVOKE: it removes the node from the registry
+// roster + appends an explicit-deny revocation { nodeId, revokedAt, reason } through
+// story 00's writeRegistry seam (ONE atomic write), and de-provisions git-remote on the
+// control node's OWN clone via the shell-less spawnSync("git", ["remote","remove",…])
+// argv idiom (13/ADR-002). After it the relay auth-gate (in mesh-relay.mjs's upgrade
+// handler) rejects the revoked node's credential on its next connect (T6). Additive —
+// one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from
+// the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
+// gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
+import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -125,6 +178,7 @@ const COMMANDS = [
   graphImpactCommand,
   projectProvisionCommand,
   importMilestoneCommand,
+  migrateFolderCommand,
   notionSyncWorkCommand,
   notionAssociateCommand,
   runStartCommand,
@@ -134,6 +188,11 @@ const COMMANDS = [
   meshIdentityCommand,
   meshStatusCommand,
   meshSyncCommand,
+  meshHeartbeatCommand,
+  meshRelayCommand,
+  meshInviteCommand,
+  meshJoinCommand,
+  meshRevokeCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

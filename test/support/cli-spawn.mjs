@@ -19,7 +19,7 @@
 // is unchanged — no async cascade into the callers. The inter-attempt sleep is a real
 // thread block via Atomics.wait (Node permits this on the main thread); it only happens
 // on the rare transient failure, never on the success path.
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 
 const MAX_ATTEMPTS = 6;
 
@@ -45,3 +45,47 @@ export function spawnSyncHardened(command, args, options = {}) {
 // Alias: the CLI-spawn call sites (the bulk of the suite) read clearer as `spawnCliSync`.
 // Same function — both names are the one shared hardened spawn.
 export const spawnCliSync = spawnSyncHardened;
+
+// The ASYNC counterpart — a Promise<{ status, signal, stdout, stderr, error }> mirroring
+// spawnSyncHardened's result shape (same never-ran retry). Use this — NOT spawnCliSync —
+// whenever the SAME process that spawns the CLI is ALSO serving the endpoint the CLI
+// talks to (an in-process serveRelay / board-serve): spawnSync BLOCKS the parent event
+// loop for the child's whole lifetime, so the parent can never run its loop to accept the
+// child's request → the child's fetch hangs → a spawnSync deadlock (empty stdout, SIGTERM
+// on timeout). An async spawn keeps the parent loop live, so the in-process server serves
+// the child while it runs. Stdout/stderr are decoded utf8 (matching encoding:"utf8").
+export function spawnCliAsync(command, args, options = {}) {
+  const attempt = () =>
+    new Promise((resolve) => {
+      const child = spawn(command, args, options);
+      let stdout = "";
+      let stderr = "";
+      let spawnError = null;
+      if (child.stdout) {
+        child.stdout.setEncoding("utf8");
+        child.stdout.on("data", (chunk) => { stdout += chunk; });
+      }
+      if (child.stderr) {
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk) => { stderr += chunk; });
+      }
+      // 'error' (CreateProcess/ENOENT) may fire with no 'close'; settle once, either way.
+      let settled = false;
+      const settle = (value) => { if (!settled) { settled = true; resolve(value); } };
+      child.on("error", (error) => { spawnError = error; settle({ status: null, signal: null, stdout, stderr, error }); });
+      child.on("close", (status, signal) => settle({ status, signal, stdout, stderr, error: spawnError }));
+    });
+  const run = async () => {
+    let result;
+    for (let n = 0; n < MAX_ATTEMPTS; n += 1) {
+      result = await attempt();
+      // A numeric exit code OR a signal-kill is a genuine outcome — return it. Only a
+      // never-ran spawn (no status, no signal — the Windows CreateProcess flake) retries.
+      if (result.status !== null || result.signal != null) break;
+      if (n === MAX_ATTEMPTS - 1) break;
+      await new Promise((r) => setTimeout(r, 25 * (n + 1)));
+    }
+    return result;
+  };
+  return run();
+}

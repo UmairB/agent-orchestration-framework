@@ -23,6 +23,7 @@ import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
+import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 import { initPlanning } from "./planning-init.mjs";
 
 export async function run(argv) {
@@ -78,7 +79,15 @@ export async function run(argv) {
     return;
   }
 
-  if (["add", "apply", "sync", "clean", "global", "install", "migrate", "validate", "doctor", "config", "catalog"].includes(command)) {
+  // story 29 — reclaim the top-level `migrate` verb: convert a source folder INTO a
+  // managed milestone under work.dir (the import contrast). A thin argv → invoke(
+  // "migrate:folder") → render/--json face, mirroring importMilestoneCommandCli.
+  if (command === "migrate") {
+    await migrateCommand(rest);
+    return;
+  }
+
+  if (["add", "apply", "sync", "clean", "global", "install", "validate", "doctor", "config", "catalog"].includes(command)) {
     throw removedCommandError(command);
   }
 
@@ -196,7 +205,7 @@ async function projectCommand(args) {
   }
 
   if (subcommand === "migrate") {
-    await migrateCommand(rest);
+    await projectMigrateCommand(rest);
     return;
   }
 
@@ -328,8 +337,8 @@ async function workCommand(args) {
     return;
   }
 
-  if (subcommand === "board") {
-    await workBoardCommand(rest);
+  if (subcommand === "ui") {
+    await workUiCommand(rest);
     return;
   }
 
@@ -348,7 +357,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work board [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -481,6 +490,57 @@ async function meshCommand(args) {
   // mesh:sync takes no positional (it syncs THIS node's records, not a named ref).
   if (subcommand === "sync") {
     await meshVerbCli("mesh:sync", rest, { positionalAllowed: false });
+    return;
+  }
+  // milestone 23 / story 00 — the additive presence-publish dispatch branch, ABOVE the
+  // unknown-sub fallthrough. The EXACT `subcommand === "heartbeat"` form the
+  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
+  // mesh:heartbeat takes no positional (it publishes THIS node's presence, not a ref).
+  if (subcommand === "heartbeat") {
+    await meshVerbCli("mesh:heartbeat", rest, { positionalAllowed: false });
+    return;
+  }
+  // milestone 23 / story 01 — the additive relay-mode dispatch branch, ABOVE the
+  // unknown-sub fallthrough. The EXACT `subcommand === "relay"` form the
+  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
+  // `aof mesh relay` is the relay-mode serve verb; its registered run is the NON-BLOCKING
+  // status probe (so `aof mesh relay --json` runs clean + returns, never hanging on a
+  // listen). mesh:relay takes no positional (the role is config-driven, not a named ref).
+  if (subcommand === "relay") {
+    await meshVerbCli("mesh:relay", rest, { positionalAllowed: false });
+    return;
+  }
+  // milestone 24 / story 01 — the two additive device-code-enrollment dispatch
+  // branches, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "<sub>"`
+  // form the acd-mesh-command-cli-bijection grep requires; reuse the shared
+  // meshVerbCli face. mesh:invite takes no positional (the control node MINTS — the
+  // code is RETURNED once, never supplied); mesh:join takes ONE positional — the
+  // presented 6-digit code the operator read off `aof mesh invite`.
+  if (subcommand === "invite") {
+    await meshVerbCli("mesh:invite", rest, { positionalAllowed: false });
+    return;
+  }
+  if (subcommand === "join") {
+    await meshVerbCli("mesh:join", rest, { positionalAllowed: true });
+    return;
+  }
+  // milestone 24 / story 02 — the additive revoke dispatch branch, ABOVE the unknown-sub
+  // fallthrough. The EXACT `subcommand === "revoke"` form the acd-mesh-command-cli-bijection
+  // grep requires; reuses the shared meshVerbCli face. mesh:revoke takes ONE positional —
+  // the nodeId to revoke (the control node removes it from the roster + records a revocation
+  // + de-provisions its git-remote).
+  if (subcommand === "revoke") {
+    await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
+    return;
+  }
+  // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
+  // the unknown-sub fallthrough (the m22 additive-branch idiom). `aof mesh ui` is a
+  // CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
+  // command — it does NOT route through meshVerbCli and does NOT enter the mesh
+  // bijection (ADR-002 §note). It stands up the OWN thin fleet serve-face
+  // (src/mesh-ui-serve.mjs), reaching fleet data only through invoke("mesh:status").
+  if (subcommand === "ui") {
+    await meshUiCommand(rest);
     return;
   }
 
@@ -682,6 +742,36 @@ async function importMilestoneCommandCli(args) {
   console.log(command.cli.render(result));
 }
 
+// `aof migrate <folder> [--dry-run] [--json]` — the thin face over the registered
+// migrate:folder command (story 29). Mirrors importMilestoneCommandCli EXACTLY:
+// parseOptions → getCommand("migrate:folder") → loadWorkspace → invoke →
+// cli.render/cli.json. A missing <folder> throws the command's missing-folder usage
+// error (propagated to bin/aof.mjs: stderr + non-zero exit); a nonexistent /
+// unreadable path throws the distinct source-read error resolveImportSource raises.
+// In --json mode a command error is emitted as a SINGLE structured envelope
+// { ok:false, error, code } on stdout (+ non-zero exit), like the import/graph verbs.
+async function migrateCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("migrate:folder");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error (missing-folder / nothing-
+  // recoverable / source-read) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
 // `aof work integrations <provider> …` — the namespace seam for board/issue-tracker
 // integrations (17/ADR-002). `integrations notion` is the only provider in this
 // milestone; a future provider (Linear, Jira, …) is a sibling branch, NOT a built
@@ -800,7 +890,7 @@ async function notionAssociateCli(args) {
   console.log(command.cli.render(result));
 }
 
-async function workBoardCommand(args) {
+async function workUiCommand(args) {
   const options = parseOptions(args);
   // Default to 4180 so it does not collide with `aof assets ui` (4177 frontend /
   // 4178 API); the board serves on this single port.
@@ -825,10 +915,57 @@ async function workBoardCommand(args) {
   }
 
   const { server, boardUrl } = session;
-  console.log("AOF work board is running locally.");
+  console.log("AOF work ui is running locally.");
   console.log(`Open this URL in your browser: ${boardUrl}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the board.");
+
+  await new Promise((resolve) => {
+    const shutdown = () => {
+      server.close(() => {
+        resolve();
+      });
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
+}
+
+// `aof mesh ui [--port 4181]` — the read-only fleet mission-control web surface
+// (milestone 25 / story 02; ADR-003). A CLI-ONLY serve verb (a sibling to
+// `aof work ui`), NOT a registered mesh:* command. It stands up its OWN thin fleet
+// serve-face (serveMeshUi) — one 127.0.0.1 server serving the ui/dist bundle with
+// ?mode=fleet + the single GET /api/mesh/status route (invoke("mesh:status")) —
+// and mirrors the board's ui-build-missing + EADDRINUSE friendly refusals (never a
+// stack trace). Default port 4181 clears assets-ui 4177/4178 + board 4180, so the
+// fleet view runs ON TOP of a board on one machine.
+async function meshUiCommand(args) {
+  const options = parseOptions(args);
+  const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_UI_PORT), 10);
+  const projectDir = path.resolve(options.target ?? process.cwd());
+
+  let session;
+  try {
+    session = await serveMeshUi({ projectDir, port });
+  } catch (error) {
+    if (error.code === "ui-build-missing") {
+      console.error(error.message);
+      process.exitCode = 1;
+      return;
+    }
+    if (error.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+
+  const { server, fleetUrl } = session;
+  console.log("AOF mesh ui is running locally.");
+  console.log(`Open this URL in your browser: ${fleetUrl}`);
+  console.log(`Project: ${projectDir}`);
+  console.log("Press Ctrl+C to stop the fleet view.");
 
   await new Promise((resolve) => {
     const shutdown = () => {
@@ -1867,7 +2004,11 @@ async function packagesInstallCommand(args) {
   }
 }
 
-async function migrateCommand(args) {
+// `aof project migrate [dir]` — the LEGACY config-format migration (root
+// aof.config.json → .aof/aof.config.json). Renamed from `migrateCommand` when the
+// top-level `migrate` verb was reclaimed for folder→managed-milestone migration
+// (story 29); this is the project-config migrator, reached only via `project migrate`.
+async function projectMigrateCommand(args) {
   const options = parseOptions(args);
   const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
   const paths = workspacePaths(targetDir);
@@ -2292,7 +2433,6 @@ function removedCommandError(command) {
     clean: ["aof assets clean", "aof assets clean --dry-run"],
     global: ["aof assets add --global skill", "aof assets list --global", "aof assets use --global skill <id>"],
     install: ["aof assets ui", "aof packages add gsd", "aof packages install gsd", "aof packages install --from-lock"],
-    migrate: ["aof project migrate"],
     validate: ["aof project validate", "aof assets validate", "aof packages validate"],
     doctor: ["aof project doctor"],
     config: ["aof project show", "aof project validate", "aof project doctor"]
@@ -2361,7 +2501,8 @@ Work (ACD work stream):
   aof work memory <verb> [args] [--json]   recall/brief/ingest/reindex/status via the configured backend
   aof work validate [ref] [--json]       folder↔frontmatter, tag vocabulary, depends graph
   aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
-  aof work board [--port]                serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
+  aof work ui [--port]                   serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
+  aof migrate <folder> [--dry-run] [--json]   convert an existing folder INTO a managed milestone under work.dir (the import contrast)
   aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]   install the bought planner (pm-skills), record pinned-sha provenance
 
 Defaults:

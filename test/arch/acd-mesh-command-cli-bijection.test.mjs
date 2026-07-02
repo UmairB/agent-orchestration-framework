@@ -103,6 +103,31 @@ function argsFor(sub) {
     // parseable JSON, keeping the gate honest in a no-repo/no-remote fixture (the
     // realistic degraded path the ADR-004 transport handles).
     case "sync": return ["mesh", "sync", "--json"];
+    // milestone 23 / story 00 — the presence-publish verb. `heartbeat` assembles +
+    // publishes THIS node's presence record git-only against the local fixture (no
+    // remote needed) — exit 0 + a parseable JSON document (the bare presence record).
+    case "heartbeat": return ["mesh", "heartbeat", "--json"];
+    // milestone 23 / story 01 — the relay-mode verb. `aof mesh relay` is a long-lived
+    // serve verb, but its registered run is the NON-BLOCKING status probe: `aof mesh relay
+    // --json` reports the configured control-node + url + nominated-or-not and RETURNS
+    // (it never calls listen/blocks) — exit 0 + a parseable JSON document (the bare relay
+    // status). This keeps the gate honest without the bijection probe hanging on a serve.
+    case "relay": return ["mesh", "relay", "--json"];
+    // milestone 24 / story 01 — the device-code enrollment verbs. The fixture is NOT a
+    // control node (no config.mesh block), so `invite` refuses with ONE structured
+    // { ok:false, code:"not-control-node" } envelope — exit 1 + parseable (the gate
+    // accepts [0,1]); `join` with a code but NO configured relay url rejects with
+    // { ok:false, code:"no-relay-url" } — exit 1 + parseable. Both prove the
+    // single-envelope --json discipline without a live relay. story 02 adds:
+    // case "revoke": …
+    case "invite": return ["mesh", "invite", "--json"];
+    case "join": return ["mesh", "join", "123456", "--json"];
+    // milestone 24 / story 02 — the revoke verb. The fixture is NOT a control node (no
+    // config.mesh block), so `revoke <node>` refuses with ONE structured
+    // { ok:false, code:"not-control-node" } envelope — exit 1 + parseable (the gate
+    // accepts [0,1]), proving the single-envelope --json discipline without a live
+    // control node.
+    case "revoke": return ["mesh", "revoke", "node-x", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

@@ -80,7 +80,7 @@ Feature: AOF CLI
 
   Scenario: Explicitly migrate a legacy root config into .aof
     Given a project initialized with legacy AOF config
-    When I run `migrate`
+    When I run `project migrate`
     Then the command should succeed
     And stdout should contain `.aof`
     And stdout should contain `is now authoritative`

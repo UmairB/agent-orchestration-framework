@@ -61,6 +61,11 @@ import { terminalSessionsTests } from "../test/terminal-sessions.test.mjs";
 import { archTests as acdTerminalServerOnlyTests } from "../test/arch/acd-terminal-server-only.test.mjs";
 import { archTests as acdVibeyardAttributionTests } from "../test/arch/acd-vibeyard-attribution.test.mjs";
 import { archTests as acdBoardSingleServerTests } from "../test/arch/acd-board-single-server.test.mjs";
+// milestone 25 / story 00 — the `aof work board` → `aof work ui` serve-verb rename
+// (task 00: the verb surface; task 01: the board serves the frozen /api/work envelope
+// unchanged under the renamed verb). ADR-001.
+import { workUiVerbRenameTests } from "../test/work-ui-verb-rename.test.mjs";
+import { workUiBoardServesUnchangedTests } from "../test/work-ui-board-serves-unchanged.test.mjs";
 // milestone 04 — round-trip proof (story 00: the frozen harness)
 import { roundtripHarnessTests } from "../test/roundtrip-harness.test.mjs";
 import { archTests as acdRoundtripIsolationTests } from "../test/arch/acd-roundtrip-isolation.test.mjs";
@@ -243,6 +248,15 @@ import { archTests as acdImportDerivedIndexTests } from "../test/arch/acd-import
 // intent-only import emits a recallable AOF.md digest indexed via the EXISTING
 // parseAof; an ADR/retro import emits none; no new parser/record shape.
 import { archTests as acdImportDigestRecallableTests } from "../test/arch/acd-import-digest-recallable.test.mjs";
+// story 29 — migrate-command (the migrate:folder command — convert a source folder
+// INTO a managed milestone under work.dir; @executable traceability across the four
+// task features, the @manual architect-judgement / real-world-folder rows deferred)
+// PLUS the two story arch-tests: the migrate:* command-cli bijection and the
+// read-only-source boundary (no git write verb / no fs write into the source; the
+// source tree byte-for-byte unchanged after a run).
+import { migrateCommandCoreTests } from "../test/migrate-command-core.test.mjs";
+import { archTests as acdMigrateCommandCliBijectionTests } from "../test/arch/acd-migrate-command-cli-bijection.test.mjs";
+import { archTests as acdMigrateReadOnlySourceTests } from "../test/arch/acd-migrate-read-only-source.test.mjs";
 // milestone 15 — work doctor core (story 00: the spine — work:doctor registered on
 // the command core with the { code, severity, path, message } envelope, the
 // snapshot-once doctorWork engine + pure check-group registry + injectable clock,
@@ -437,6 +451,50 @@ import { meshFaceSkeletonTests } from "../test/mesh-face-skeleton.test.mjs";
 import { archTests as acdMeshPartitionWriteTests } from "../test/arch/acd-mesh-partition-write.test.mjs";
 import { archTests as acdMeshWriteScopeTests } from "../test/arch/acd-mesh-write-scope.test.mjs";
 import { archTests as acdMeshCommandCliBijectionTests } from "../test/arch/acd-mesh-command-cli-bijection.test.mjs";
+// milestone 25 — mesh-ui (Decide-stage arch tests, ADR-001/002/003): the board→ui
+// rename-complete XOR gate + the single-fleet-data-command gate. Both are vacuous-safe
+// (green on the current tree) and tighten as milestone 25's code lands.
+import { archTests as acdWorkUiRenameCompleteTests } from "../test/arch/acd-work-ui-rename-complete.test.mjs";
+import { archTests as acdMeshUiSingleDataCommandTests } from "../test/arch/acd-mesh-ui-single-data-command.test.mjs";
+// milestone 25 — mesh-ui (story 01: the fleet data model + the `aof mesh status` CLI
+// mirror — mesh:status EXTENDED with a boards projection joining the m24 registry to
+// each board's active runs). Three @executable task features: 00_boards-projection
+// (the aggregate shape + the joins + the pure read), 01_mesh-status-render (the human
+// text + the boards section + --json purity), 02_graceful-degradation (absent / torn /
+// foreign-shaped / empty registry + stale + ownerless + non-local). The
+// acd-mesh-ui-single-data-command gate tightens: mesh-identity.mjs is now the SOLE
+// fleet-data joiner (readRegistry + readNodeRecords).
+import { meshFleetBoardsProjectionTests } from "../test/mesh-fleet-boards-projection.test.mjs";
+import { meshStatusFleetRenderTests } from "../test/mesh-status-fleet-render.test.mjs";
+import { meshFleetGracefulDegradationTests } from "../test/mesh-fleet-graceful-degradation.test.mjs";
+// milestone 25 — mesh-ui (story 02: the read-only fleet web surface — the NEW
+// src/mesh-ui-serve.mjs thin serve-face (a board-serve.mjs sibling) behind the
+// CLI-only `aof mesh ui` verb; one 127.0.0.1 server on default port 4181 serving
+// ui/dist with ?mode=fleet + the single GET /api/mesh/status route
+// (invoke("mesh:status")). One @executable task feature (00_mesh-ui-serve): the verb
+// stands up ONE server, /api/mesh/status deep-equals `aof mesh status --json`, the
+// /api/mesh namespace is disjoint from /api/work, unknown-route + missing-bundle +
+// occupied-port are friendly refusals. The three SPECIFY'd face guards now activate
+// against the as-built module: acd-mesh-ui-no-core-import (only ./command-core.mjs +
+// no fs write), acd-mesh-ui-single-server (one http.createServer on 127.0.0.1;
+// /api/mesh* never /api/work*), acd-mesh-ui-write-isolation (zero fs write / no
+// shell-out / no /ws/terminal / no write route). The phase-2 half of
+// acd-mesh-ui-single-data-command activates now the module exists (it invoke's
+// mesh:status, imports no mesh-core module).
+import { meshUiServeTests } from "../test/mesh-ui-serve.test.mjs";
+// Spawn-level coverage for the `aof mesh ui` CLI verb (meshUiCommand, cli.mjs) — the
+// verb-face the in-process serveMeshUi tests don't reach: the human announce line, the
+// default-port (4181) bind, --port override, and the exact EADDRINUSE refusal + exit 1.
+import { meshUiCliFaceTests } from "../test/mesh-ui-cli-face.test.mjs";
+// The server-observable @executable halves of tasks 03/04/05 (the fleet face issues
+// no /api/work on a drill-in; the client opens no event stream / a ws upgrade is
+// refused; a write-method is a clean method-rejection with no state change; serving
+// mutates no file). The rendered-view @manual halves + the Playwright browser lane
+// are QA-owned, judged at Review.
+import { meshUiReadOnlyContractTests } from "../test/mesh-ui-read-only-contract.test.mjs";
+import { archTests as acdMeshUiNoCoreImportTests } from "../test/arch/acd-mesh-ui-no-core-import.test.mjs";
+import { archTests as acdMeshUiSingleServerTests } from "../test/arch/acd-mesh-ui-single-server.test.mjs";
+import { archTests as acdMeshUiWriteIsolationTests } from "../test/arch/acd-mesh-ui-write-isolation.test.mjs";
 // milestone 22 — mesh-foundation (story 01: node-identity + commands — src/node-identity.mjs
 // derives the stable, human-readable node id + assembles the frozen 7-key capability
 // descriptor (ADR-003); src/commands/mesh-identity.mjs registers mesh:identity (publish/
@@ -465,6 +523,204 @@ import { meshIdentityCliFaceTests } from "../test/mesh-identity-cli-face.test.mj
 import { meshGitSyncTransportTests } from "../test/mesh-git-sync-transport.test.mjs";
 import { meshSyncCadenceLoopTests } from "../test/mesh-sync-cadence-loop.test.mjs";
 import { archTests as acdMeshSyncRecordNeutralTests } from "../test/arch/acd-mesh-sync-record-neutral.test.mjs";
+// milestone 23 — control-node-relay (story 00: presence-heartbeat — src/mesh-presence.mjs
+// is the presence-record assembly + the node-staleness predicate (reusing m20's isStale
+// shape) + the activeRuns read of the run records; src/commands/mesh-heartbeat.mjs
+// publishes THIS node's presence git-only via the m22-reserved presenceRecordPath;
+// mesh:status is EXTENDED in mesh-identity.mjs to render presence + a stale flag. Two
+// @executable task features: 00_presence-record (the publish + the frozen schema +
+// byte-equivalence + rebuildability + republish-untouched-peer), 01_node-staleness-and-
+// status (the strict-`>` staleness boundary + the documented-default threshold + the
+// never-beat no-presence rule + the stable --json shape). The @manual 02_presence-over-git
+// feature gets NO executable test (verified at aof:verify). Fitness #3
+// acd-presence-write-scope (every presence write joins the reserved seam + routes through
+// writeText + references zero record-doc) + fitness #6 acd-mesh-eol-pinned (the .mesh/**
+// eol=lf pin, the 22/R5 carry-forward). The acd-mesh-command-cli-bijection gate now covers
+// identity+status+sync+heartbeat.
+import { meshPresenceRecordTests } from "../test/mesh-presence-record.test.mjs";
+import { meshNodeStalenessStatusTests } from "../test/mesh-node-staleness-status.test.mjs";
+import { archTests as acdPresenceWriteScopeTests } from "../test/arch/acd-presence-write-scope.test.mjs";
+import { archTests as acdMeshEolPinnedTests } from "../test/arch/acd-mesh-eol-pinned.test.mjs";
+// milestone 23 — control-node-relay (story 01: thin relay — src/mesh-relay.mjs is the
+// stateless ws@8 broker shipped as a `relay` mode (serveRelay → { server, url, stop }),
+// carrying the FROZEN, payload-agnostic envelope { kind, nodeId, signal } fanned out to
+// the OTHER peers (no self-echo) in memory only; the never-crash { type:'error' }
+// control-frame on a malformed/oversized frame (the hand-rolled maxFrameBytes check); and
+// relayMode, the in-process config gate (serves only when controlNode === nodeId). The
+// `aof mesh relay` verb is registered with a NON-BLOCKING status probe (--json returns).
+// Three @executable task features: 00_relay-broker-fanout (the serve-unit + fan-out +
+// in-memory-only + late-joiner + clean stop()), 01_relay-envelope-and-resilience (the
+// payload-agnostic forwarding outline + the bad-frame resilience matrix + peer-disconnect),
+// 02_control-node-role (the config gate + re-nomination-by-config + lose-liveness-not-data).
+// Fitness #1 acd-relay-stateless (no record write / no record-schema import / no on-disk
+// store) + fitness #2 acd-relay-envelope-neutral (no presence/node schema import, no
+// signal-content branch, the frozen error control-frame never a throw). The
+// acd-mesh-command-cli-bijection gate now also covers mesh:relay.
+import { meshRelayBrokerFanoutTests } from "../test/mesh-relay-broker-fanout.test.mjs";
+import { meshRelayEnvelopeResilienceTests } from "../test/mesh-relay-envelope-resilience.test.mjs";
+import { meshRelayControlNodeTests } from "../test/mesh-relay-control-node.test.mjs";
+import { archTests as acdRelayStatelessTests } from "../test/arch/acd-relay-stateless.test.mjs";
+import { archTests as acdRelayEnvelopeNeutralTests } from "../test/arch/acd-relay-envelope-neutral.test.mjs";
+// milestone 23 — control-node-relay (story 02: presence-over-relay — the INTEGRATION
+// story / ADR-003: the node-side relay client (src/mesh-relay-client.mjs — the { connect,
+// push } seam + the best-effort pushPresenceSignal + the frozen { kind:"presence", nodeId,
+// signal } envelope), the TWO-PUBLISH path added to src/commands/mesh-heartbeat.mjs (git
+// UNCONDITIONALLY first, the relay BEST-EFFORT second, a failure caught-never-thrown), and
+// the cadence loop (src/mesh-presence-loop.mjs — a thin timer over the one-shot publish,
+// the m22 startSyncLoop split, config.mesh.presence.cadenceSeconds + the documented
+// default). Two @executable task features: 00_dual-bus-publish (the byte-identical
+// invariant matrix across the four relay states + the happy-path push + the unconfigured
+// skip + the caught push-throw, over an INJECTED relay client), 01_graceful-degradation
+// (presence-reaches-a-peer-over-git over a local bare-remote fixture + relay-restored
+// record-unchanged + the cadence loop over an INJECTED ticker). The @manual
+// 02_relay-liveness-fleet-spike feature gets NO executable test (the latency + live
+// degradation spike is verified at aof:verify). Fitness #4 acd-presence-relay-independent
+// asserts the two-publish control flow (git unconditional, relay caught). The
+// acd-mesh-command-cli-bijection gate already covers mesh:heartbeat (the extension rides it).
+import { meshPresenceDualBusTests } from "../test/mesh-presence-dual-bus.test.mjs";
+import { meshPresenceDegradationLoopTests } from "../test/mesh-presence-degradation-loop.test.mjs";
+import { archTests as acdPresenceRelayIndependentTests } from "../test/arch/acd-presence-relay-independent.test.mjs";
+// milestone 23 — control-node-relay (story 02: presence-over-relay — task 03, finding F1:
+// the node-side PERSISTENT relay SUBSCRIBER — the missing CONSUMER hop). src/mesh-presence-
+// cache.mjs (the in-memory liveness cache, latest-wins keyed by nodeId), src/mesh-presence-
+// subscriber.mjs (the persistent subscriber + parseInboundFrame + the production ws@8
+// transport), mergePresence added to src/mesh-presence.mjs (the read-side merge — latest
+// wins, git-durable breaks ties), and mesh:status extended to read an injected ctx
+// .presenceCache (a peer's pushed change surfaces ≤5s over the relay without a git sync).
+// One @executable task feature: 03_relay-receive-and-apply (a delivered signal surfaces
+// without a git sync + latest-wins + the liveness-cache-not-authority reconcile + the
+// bad-frame resilience outline + relay-down degrades to git + the persistent connection),
+// over an INJECTED fake transport. The @manual ≤5s fleet re-measurement gets NO executable
+// test (it is an aof:verify deliverable). Fitness acd-presence-cache-not-authority asserts
+// the consumer modules never become a second system of record (no record-schema write
+// import, no durable write, no fs seam — the read-side mirror of acd-relay-stateless).
+import { meshRelayReceiveApplyTests } from "../test/mesh-relay-receive-apply.test.mjs";
+// (The consumer-is-a-cache-only invariant is enforced by fitness #7
+// acd-presence-subscriber-cache-only — ADR-004, imported below — so the earlier
+// standalone acd-presence-cache-not-authority draft was dropped as redundant.)
+// milestone 23 — control-node-relay (story 02 / F1 close-out, ADR-004): the node-side
+// receive-and-apply consumer — a PERSISTENT relay subscriber (src/mesh-presence-subscriber.mjs,
+// distinct from the one-shot push client) that applies each fanned-out { kind:"presence" }
+// frame into an IN-MEMORY liveness cache (src/mesh-presence-cache.mjs, keyed by nodeId,
+// latest-wins), overlaid by mesh:status as `readPresenceRecord(...) ?? ctx.presenceCache?.get(...)`
+// (git wins). Fitness #7 acd-presence-subscriber-cache-only asserts the receive side is a
+// liveness cache, never a second system of record (no durable write, no write/persist-seam
+// import, no presenceRecordPath reference) — the invariant fitness #3 does NOT cover.
+// RED until src/mesh-presence-subscriber.mjs + src/mesh-presence-cache.mjs land.
+import { archTests as acdPresenceSubscriberCacheOnlyTests } from "../test/arch/acd-presence-subscriber-cache-only.test.mjs";
+// milestone 24 — device-code group-enrollment (SECURITY.md / the threat model's security
+// fitness functions — RED-until-built, the enrollment/registry/relay-auth modules do not
+// exist yet). The trust boundary IS this milestone (23/ADR-001 §Security-posture deferred
+// it here). Three security invariants: (T3) the pending device code is stored HASHED at
+// rest — never plaintext committed to the git-of-record registry; (T4/T2) the code match
+// is SINGLE-USE (consumed) + CONSTANT-TIME (timingSafeEqual, no `===` timing oracle on the
+// 10^6 space); (T1/T6) the relay ws auth-gate REJECTS an absent/invalid/revoked credential,
+// reading the LIVE roster/revocation BEFORE a signal is brokered (the 22/R6 'the credential
+// is actually used' guard + the pre-auth→authenticated relay transition). Each carries the
+// m03 non-vacuous self-check. From: story 00 (registry) / 01 (device-code flow) / 02
+// (relay-auth + revocation) — see SECURITY.md's fitness table for the per-story ownership.
+import { archTests as acdEnrollmentCodeHashedAtRestTests } from "../test/arch/acd-enrollment-code-hashed-at-rest.test.mjs";
+import { archTests as acdEnrollmentCodeSingleUseConstantTimeTests } from "../test/arch/acd-enrollment-code-single-use-constant-time.test.mjs";
+import { archTests as acdRelayAuthGateCheckedTests } from "../test/arch/acd-relay-auth-gate-checked.test.mjs";
+// milestone 24 — device-code group-enrollment (ARCHITECTURE.md / the STRUCTURAL fitness
+// functions — the architect's, disjoint from the SECURITY.md crypto/enforcement fitness
+// above). RED-until-built (src/mesh-registry.mjs + src/commands/mesh-{invite,join,revoke}.mjs
+// do not exist yet), EXCEPT acd-enroll-endpoint-http-not-ws, which runs GREEN today against
+// m23's src/mesh-relay.mjs (the ws envelope is neutral) and stays GREEN when the HTTP
+// enrollment route lands — it guards against the WRONG shape (enrollment on a ws kind), not
+// the absence of the right one. Three STRUCTURAL invariants: (ADR-1) the group registry has
+// EXACTLY ONE control-node-guarded write seam (registry write-scope + single-writer,
+// resolving 22/ADR-002's no-aggregate-roster tension); (ADR-2) enrollment is an HTTP route on
+// serveRelay's http.createServer, NOT a ws kind (the ws { kind, nodeId, signal } envelope
+// stays payload-agnostic); (ADR-3/ADR-4) every git-remote provision/de-provision spawn is the
+// shell-less spawnSync("git", [ … ]) argv form (the 13/ADR-002 read-only-source idiom). Each
+// carries the m03 non-vacuous self-check. From: story 00 (registry) / 01 (enrollment flow) /
+// 02 (trust boundary). SECURITY fitness (hashed-code-at-rest, single-use/constant-time,
+// auth-gate enforcement) is authored separately by aof-security above — NOT here.
+import { archTests as acdRegistryWriteScopeTests } from "../test/arch/acd-registry-write-scope.test.mjs";
+import { archTests as acdEnrollEndpointHttpNotWsTests } from "../test/arch/acd-enroll-endpoint-http-not-ws.test.mjs";
+import { archTests as acdEnrollGitArgvNoShellTests } from "../test/arch/acd-enroll-git-argv-no-shell.test.mjs";
+// milestone 24 — device-code group-enrollment (story 00: the group registry —
+// src/mesh-registry.mjs is the group-level, control-node-owned SINGLE-WRITER second
+// git-of-record (ADR-001): registryDir/registryPath under meshDir/registry/, the ONE
+// control-node-guarded write seam writeRegistry (atomic writeText, opaque persist —
+// a non-authority invocation is a structured no-op), the absence-tolerant
+// readRegistry → empty registry, and the PURE add-only aggregate + pending-invite
+// accessors (roster append / boards set-add / revocation append / pending append +
+// single-use consume + the strict-> TTL read — time always INJECTED, 22/R2). Three
+// @executable task features: 00_registry-store-and-seam (round-trip + futureField +
+// ENOENT→empty + the control-node truth table + write-scope confinement + the atomic
+// interrupted write), 01_roster-boards-revocations (order-preserving admit + board
+// set semantics + explicit-deny revocation + add-only byte-unchanged), and
+// 02_pending-invite-lifecycle (the codeHash-never-plaintext durable shape +
+// single-use consumedAt + the strict-> expiresAt boundary). The @manual
+// 03_registry-over-git feature gets NO executable test (verified at aof:verify).
+// Fitness acd-registry-write-scope (imported above) turns GREEN with this story.
+import { meshRegistryStoreSeamTests } from "../test/mesh-registry-store-seam.test.mjs";
+import { meshRegistryAggregateMutationsTests } from "../test/mesh-registry-aggregate-mutations.test.mjs";
+import { meshRegistryPendingLifecycleTests } from "../test/mesh-registry-pending-lifecycle.test.mjs";
+// milestone 24 — device-code group-enrollment (story 01: device-code enrollment — the
+// join flow end-to-end, ADR-002/003/005). src/commands/mesh-invite.mjs registers
+// mesh:invite (control-node-guarded MINT: a 6-digit code, hashed through the ONE
+// sha256Hex seam, recorded { codeHash, issuedAt, expiresAt, consumedAt:null } via story
+// 00's writeRegistry, the plaintext returned ONCE); src/mesh-relay.mjs's
+// http.createServer gains the ONE device-flow route POST /enroll ABOVE the 426 fallback
+// (match via timingSafeEqual, single-use consume-then-admit in ONE atomic registry
+// write, the strict-> TTL check, the EPHEMERAL per-source attempt-cap — ADR-005's
+// resolveCodeTtlSeconds/resolveMaxAttempts resolvers, malformed→documented default,
+// 300s/5) and issues { relayAuth, nodeId, gitRemote } while the roster stores ONLY
+// relayAuthHash (story 02's auth-gate data source); src/commands/mesh-join.mjs registers
+// mesh:join <code> (reads config.mesh.relay.url, POSTs, stores config.mesh.credential
+// merge-not-clobber, provisions the granted remote via the shell-less
+// spawnSync("git", ["remote","add",…]) argv idiom — a rejection stores NOTHING). Three
+// @executable task features: 00_mesh-invite-mint (the mint truth table + hashed-at-rest
+// shape + TTL arithmetic + the non-control refusal + 6 digits + --json),
+// 01_device-code-flow (good code admits+issues+consumes; the expired/consumed/unknown/
+// malformed reject matrix; the attempt-cap N-boundary 5-answered/6-refused; resolver
+// malformed→default; control-node-offline; ws-envelope-untouched), and
+// 02_mesh-join-and-provision (credential merge-not-clobber; the space-url argv-form
+// provision; rejection-stores-nothing; --json). The @manual 03_join-end-to-end feature
+// gets NO executable test (verified at aof:verify). Fitness: turns
+// acd-enrollment-code-hashed-at-rest + acd-enrollment-code-single-use-constant-time
+// GREEN; keeps acd-enroll-endpoint-http-not-ws GREEN; the new verbs ride
+// acd-mesh-command-cli-bijection; acd-enroll-git-argv-no-shell stays RED until story
+// 02 lands src/commands/mesh-revoke.mjs (the gate reads both files).
+import { meshInviteMintTests } from "../test/mesh-invite-mint.test.mjs";
+import { meshEnrollDeviceFlowTests } from "../test/mesh-enroll-device-flow.test.mjs";
+import { meshJoinProvisionTests } from "../test/mesh-join-provision.test.mjs";
+// milestone 24 — device-code group-enrollment (story 02: the enforceable trust boundary —
+// ADR-003/004). src/mesh-registry.mjs gains the PURE credential-verify seam
+// verifyCredential(registry, token) (hash the presented relayAuth, constant-time compare
+// against a roster entry's relayAuthHash, AND reject a nodeId in the revocation list — the
+// T6 live-read); src/mesh-relay.mjs's server.on("upgrade") handler gains the ADDITIVE ws
+// auth-gate ABOVE the pathname router — for a GROUP (non-loopback) connection it reads the
+// Authorization-header relayAuth token, verifies it against the LIVE roster/revocation
+// (readRegistry(workspace) → verifyCredential) and socket.destroy()s a missing / invalid /
+// not-in-roster / REVOKED credential upstream of clients.add, while LOOPBACK stays the m23
+// local default (the injectable isGroupConnection seam makes the branch deterministic
+// in-process — the STORY.md build note); src/commands/mesh-revoke.mjs registers mesh:revoke
+// <node> (control-node-guarded: roster removal + explicit-deny revocation append in ONE
+// atomic writeRegistry + git-remote de-provision via the shell-less
+// spawnSync("git", ["remote","remove",…]) argv idiom). Two @executable task features:
+// 00_relay-auth-gate (the admit/reject matrix + the live-revocation read + loopback default
+// + the gate persists nothing) and 01_mesh-revoke (roster removal + revocation append + the
+// argv-form de-provision + the auth-gate rejects after revoke + the non-control refusal +
+// --json + add-only targeted removal). The @manual 02_revocation-completeness feature gets
+// NO executable test (the real-remote push-access half is verified at aof:verify). Fitness:
+// turns acd-relay-auth-gate-checked GREEN (the security-owned enforcement gate) +
+// acd-enroll-git-argv-no-shell GREEN (mesh-revoke.mjs's de-provision argv form); keeps
+// acd-relay-stateless + acd-relay-envelope-neutral + acd-enroll-endpoint-http-not-ws GREEN
+// (the gate is a READ + a decision, never a write); the new verb rides
+// acd-mesh-command-cli-bijection.
+import { meshRelayAuthGateTests } from "../test/mesh-relay-auth-gate.test.mjs";
+import { meshRevokeTests } from "../test/mesh-revoke.test.mjs";
+// story 30 — per-agent model selection (task 01: bundle default map; task 02:
+// per-project config override wins + validation; task 03: solo-mode inert map)
+import { bundleModelMapTests } from "../test/bundle-model-map.test.mjs";
+import { agentModelOverrideTests } from "../test/agent-model-override.test.mjs";
+import { agentModelSoloInertTests } from "../test/agent-model-solo-inert.test.mjs";
+import { archTests as acdAgentModelSourceMapTests } from "../test/arch/acd-agent-model-source-map.test.mjs";
+import { archTests as acdAgentModelRoleDerivationTests } from "../test/arch/acd-agent-model-role-derivation.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -514,6 +770,8 @@ export const tests = [
   ...acdTerminalServerOnlyTests,
   ...acdVibeyardAttributionTests,
   ...acdBoardSingleServerTests,
+  ...workUiVerbRenameTests,
+  ...workUiBoardServesUnchangedTests,
   ...roundtripHarnessTests,
   ...acdRoundtripIsolationTests,
   ...acdRoundtripReusesShippedCodeTests,
@@ -591,6 +849,10 @@ export const tests = [
   ...acdImportNotAWorkItemTests,
   ...acdImportDerivedIndexTests,
   ...acdImportDigestRecallableTests,
+  // story 29 — migrate-command (the command + its two story arch-tests)
+  ...migrateCommandCoreTests,
+  ...acdMigrateCommandCliBijectionTests,
+  ...acdMigrateReadOnlySourceTests,
   ...doctorCommandCoreTests,
   ...doctorCoherenceCompletenessTests,
   ...doctorFreshnessStructuralTests,
@@ -674,6 +936,20 @@ export const tests = [
   ...acdMeshPartitionWriteTests,
   ...acdMeshWriteScopeTests,
   ...acdMeshCommandCliBijectionTests,
+  // milestone 25 — mesh-ui (Decide-stage arch tests: board→ui rename XOR + single fleet-data command)
+  ...acdWorkUiRenameCompleteTests,
+  ...acdMeshUiSingleDataCommandTests,
+  // milestone 25 — mesh-ui (story 01: the fleet data model + the `aof mesh status` CLI mirror)
+  ...meshFleetBoardsProjectionTests,
+  ...meshStatusFleetRenderTests,
+  ...meshFleetGracefulDegradationTests,
+  // milestone 25 — mesh-ui (story 02: the read-only fleet web serve-face + its 3 face guards)
+  ...meshUiServeTests,
+  ...meshUiCliFaceTests,
+  ...meshUiReadOnlyContractTests,
+  ...acdMeshUiNoCoreImportTests,
+  ...acdMeshUiSingleServerTests,
+  ...acdMeshUiWriteIsolationTests,
   // milestone 22 — mesh-foundation (story 01: node-identity + commands)
   ...meshNodeIdentityTests,
   ...meshIdentityStatusCommandsTests,
@@ -682,6 +958,51 @@ export const tests = [
   ...meshGitSyncTransportTests,
   ...meshSyncCadenceLoopTests,
   ...acdMeshSyncRecordNeutralTests,
+  // milestone 23 — control-node-relay (story 00: presence-heartbeat)
+  ...meshPresenceRecordTests,
+  ...meshNodeStalenessStatusTests,
+  ...acdPresenceWriteScopeTests,
+  ...acdMeshEolPinnedTests,
+  // milestone 23 — control-node-relay (story 01: thin relay)
+  ...meshRelayBrokerFanoutTests,
+  ...meshRelayEnvelopeResilienceTests,
+  ...meshRelayControlNodeTests,
+  ...acdRelayStatelessTests,
+  ...acdRelayEnvelopeNeutralTests,
+  // milestone 23 — control-node-relay (story 02: presence-over-relay — the integration)
+  ...meshPresenceDualBusTests,
+  ...meshPresenceDegradationLoopTests,
+  ...acdPresenceRelayIndependentTests,
+  ...meshRelayReceiveApplyTests,
+  // milestone 23 — control-node-relay (story 02 / F1 close-out: receive-and-apply consumer)
+  ...acdPresenceSubscriberCacheOnlyTests,
+  // milestone 24 — device-code group-enrollment (SECURITY.md fitness functions — RED-until-built)
+  ...acdEnrollmentCodeHashedAtRestTests,
+  ...acdEnrollmentCodeSingleUseConstantTimeTests,
+  ...acdRelayAuthGateCheckedTests,
+  // milestone 24 — device-code group-enrollment (ARCHITECTURE.md STRUCTURAL fitness — the
+  // architect's, disjoint from the SECURITY.md fitness above)
+  ...acdRegistryWriteScopeTests,
+  ...acdEnrollEndpointHttpNotWsTests,
+  ...acdEnrollGitArgvNoShellTests,
+  // milestone 24 — device-code group-enrollment (story 00: the group registry)
+  ...meshRegistryStoreSeamTests,
+  ...meshRegistryAggregateMutationsTests,
+  ...meshRegistryPendingLifecycleTests,
+  // milestone 24 — device-code group-enrollment (story 01: device-code enrollment)
+  ...meshInviteMintTests,
+  ...meshEnrollDeviceFlowTests,
+  ...meshJoinProvisionTests,
+  // milestone 24 — device-code group-enrollment (story 02: the enforceable trust boundary —
+  // the relay ws auth-gate + mesh:revoke)
+  ...meshRelayAuthGateTests,
+  ...meshRevokeTests,
+  // story 30 — per-agent model selection
+  ...bundleModelMapTests,
+  ...agentModelOverrideTests,
+  ...agentModelSoloInertTests,
+  ...acdAgentModelSourceMapTests,
+  ...acdAgentModelRoleDerivationTests,
   ...adapterTests,
   ...renderPlanTests,
   ...configInspectTests,

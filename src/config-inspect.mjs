@@ -28,6 +28,11 @@ import {
 } from "./model.mjs";
 import { findProjectConfig, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { globalWorkspacePaths } from "./workspace.mjs";
+// story 30 — the per-role model-map validator derives its valid-key set (the 8
+// frozen ACD roles) from the bundle descriptor rather than a 4th hardcoded copy,
+// and reads the override map through the shared accessor so validate + render
+// never diverge on the config path.
+import { readDescriptor, agentModelMap, AGENT_MODEL_MAP_PATH } from "./work-bundle.mjs";
 // milestone 12 (ADR-003) — the store-first managed-tool resolver + the frozen
 // tool descriptors the three new doctor checks consult (SUPERSEDING the 09
 // graphify-binary check in place with the store-aware managed-tool check).
@@ -229,6 +234,7 @@ async function validateConfigFile(configPath, options = {}) {
   validateHooks(Array.isArray(raw.hooks) ? raw.hooks : [], diagnostics);
   await validateProjectDocs(Array.isArray(raw.projectDocs) ? raw.projectDocs : [], baseDir, diagnostics);
   validateSettings(raw.settings, diagnostics);
+  validateWork(raw.work, diagnostics);
 
   return diagnostics;
 }
@@ -1164,6 +1170,95 @@ function validateSettings(settings, diagnostics) {
     diagnostics.push(diagnostic("error", "settings.autoCompact", "settings.autoCompact must be a boolean when provided."));
   }
   validateRuntimeExtensionObjects(settings, "settings", diagnostics);
+}
+
+// --- work.agents per-role model map (story 30, tasks 02b + 03) ---------------
+// The frozen ACD role set the override keys must belong to, DERIVED from the
+// bundle descriptor's agent members (readDescriptor) — not a 4th hardcoded copy
+// of the list. Matched case-sensitively and untrimmed: only an exact member id
+// is a valid override key.
+function acdRoleSet() {
+  return new Set(
+    readDescriptor().members
+      .filter((member) => member.kind === "agent")
+      .map((member) => member.id)
+  );
+}
+
+// raw.work is otherwise unvalidated today; this hook validates only the net-new
+// per-role model map (story 30). It stays permissive about the rest of `work`.
+function validateWork(work, diagnostics) {
+  if (work === undefined) return;
+  if (!work || typeof work !== "object" || Array.isArray(work)) {
+    diagnostics.push(diagnostic("error", "work", "work must be an object when provided."));
+    return;
+  }
+  validateWorkAgents(work.agents, diagnostics);
+}
+
+function validateWorkAgents(agents, diagnostics) {
+  if (agents === undefined) return;
+  if (!agents || typeof agents !== "object" || Array.isArray(agents)) {
+    diagnostics.push(diagnostic("error", "work.agents", "work.agents must be an object when provided."));
+    return;
+  }
+
+  const rawMap = agents.models;
+  if (rawMap === undefined) return;
+  if (!rawMap || typeof rawMap !== "object" || Array.isArray(rawMap)) {
+    diagnostics.push(diagnostic(
+      "error",
+      AGENT_MODEL_MAP_PATH,
+      `${AGENT_MODEL_MAP_PATH} must be an object mapping an ACD role to a model when provided.`
+    ));
+    return;
+  }
+
+  const validRoles = acdRoleSet();
+  for (const [key, value] of Object.entries(rawMap)) {
+    const keyPath = `${AGENT_MODEL_MAP_PATH}.${key}`;
+    // Key check: must be one of the 8 ACD roles, matched exactly (case-sensitive,
+    // untrimmed) — a typo, wrong casing, missing prefix, or padded key is an error.
+    if (!validRoles.has(key)) {
+      diagnostics.push(diagnostic(
+        "error",
+        keyPath,
+        `"${key}" is not an ACD role. A per-role model override key must be one of the 8 ACD roles: ${[...validRoles].sort().join(", ")}.`,
+        "model-map-unknown-role"
+      ));
+    }
+    // Value check: reject empty / whitespace-only / non-string; accept ANY
+    // non-empty string (family alias OR pinned id, including an alias aof does
+    // not use). Do NOT enumerate known aliases as an error.
+    if (typeof value !== "string") {
+      diagnostics.push(diagnostic(
+        "error",
+        keyPath,
+        `The model override for "${key}" must be a non-empty string.`,
+        "model-map-bad-value"
+      ));
+    } else if (value.trim() === "") {
+      diagnostics.push(diagnostic(
+        "error",
+        keyPath,
+        `The model override for "${key}" must not be empty or whitespace-only.`,
+        "model-map-bad-value"
+      ));
+    }
+  }
+
+  // Solo-mode inert map (task 03): a per-role map cannot bind when the main
+  // session plays every role. Conditional on BOTH mode=solo AND a non-empty map;
+  // surfaced as a NON-BLOCKING notice ("info"), so the config stays valid.
+  const hasMap = Object.keys(rawMap).length > 0;
+  if (agents.mode === "solo" && hasMap) {
+    diagnostics.push(diagnostic(
+      "info",
+      AGENT_MODEL_MAP_PATH,
+      "Per-role model selection has no effect under work.agents.mode \"solo\": the main session plays every role inline, so no sub-agent is spawned to carry a per-role model. The map is ignored under solo mode.",
+      "model-map-inert-under-solo"
+    ));
+  }
 }
 
 function validatePackage(pkg, index, diagnostics) {

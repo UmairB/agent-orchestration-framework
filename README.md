@@ -20,7 +20,7 @@ aof project doctor
 
 `npm link` makes the `aof` command available from any directory, always pointing at **this working copy** (`which aof` resolves to the global node bin, which symlinks to `./bin/aof.mjs` here). Because it is a symlink, edits under `src/` take effect immediately — there is no build/rebuild step for the CLI. To use it inside another repo, just run `aof …` there; the same global `aof` resolves. To remove the link later: `npm rm -g aof`.
 
-The setup UI (`aof assets ui`) and the work board (`aof work board`) serve a built front-end — build it once with `npm run ui:build` (see [Tests](#tests)).
+The setup UI (`aof assets ui`) and the work board (`aof work ui`) serve a built front-end — build it once with `npm run ui:build` (see [Tests](#tests)).
 
 ---
 
@@ -81,7 +81,7 @@ aof work doc <ref> <DOC> [--json]    # read a record doc (SPEC / STATE / ARCHITE
 aof work tasks <ref> [--json]        # an item's task list
 aof work feedback <ref> --note "…" [--actor …]   # append an attributed feedback bullet (the only CLI write)
 aof work memory <verb> [args] [--json]           # recall / brief / ingest / reindex / status
-aof work board [--port 4180]         # serve the local board UI (built ui/dist) — one origin
+aof work ui [--port 4180]            # serve the local board UI (built ui/dist) — one origin
 aof work use-headroom | unuse-headroom           # toggle the headroom context-compression plugin
 ```
 
@@ -146,7 +146,7 @@ The `aof work` system was itself built with `aof work` — dogfooded milestone b
 | 00 | Work CLI | the `aof work` command surface over `wiki/work/` |
 | 01 | ACD Asset Bundle | the bundled subagents + slash-commands; `aof work init` / `update` |
 | 02 | Planning Init | `aof planning init` — installs the bought planner (pm-skills) with pinned-sha provenance |
-| 03 | Work Board UI | `aof work board` — a local board over the stream |
+| 03 | Work Board UI | `aof work ui` — a local board over the stream |
 | 04 | Round-trip Proof | end-to-end proof of the loop: `aof work init` → refine → continue → verify in a fresh repo |
 | 05 | Work Memory | `aof work memory` — recall over prior decisions (local backend) |
 | 06 | Headroom Plugin | optional, config-gated **headroom** context-compression over the board terminal's `claude`/`codex` |
