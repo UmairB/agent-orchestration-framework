@@ -79,7 +79,7 @@ Feature: migrate tolerates any source shape, reusing import's recovery, never de
 
     Examples: a foreign-tool-shaped source migrates as-is, never reshaped first
       | shape                                    | outcome                                                       |
-      | a GSD/.planning-style tree               | a managed item recovered from its plan docs, source unreshaped|
+      | a README + docs/ tree, non-aof naming    | a managed item recovered from its README + docs, source unreshaped|
       | a docs/ + ADR-style decision tree        | a managed item recovering those decisions, source unreshaped  |
 
     Examples: a bare README+code source recovers the README as intent

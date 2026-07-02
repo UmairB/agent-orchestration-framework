@@ -13,7 +13,7 @@ Feature: migrate's outcome is managed work, not a read-only import digest
   # into import: migrate writes a managed milestone (SPEC.md + STATE.md) under work.dir, writes NO AOF.md
   # digest, writes NOTHING under .aof/imports/, and leaves import's own behaviour untouched. Whether the
   # source folder is relocated under work.dir or its work is re-expressed into a fresh scaffold is an
-  # open architectural question (see STATE.md) — these scenarios assert the end-state, not the mechanism.
+  # open architectural question (see STORY.md Notes) — these scenarios assert the end-state, not the mechanism.
   #
   # All rows run OFFLINE against local fixture folders read in place behind import's read-only
   # source-access seam. "migrate registers exactly one new command and import is not modified" is a

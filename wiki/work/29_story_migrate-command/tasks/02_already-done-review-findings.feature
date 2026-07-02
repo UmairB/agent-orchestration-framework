@@ -6,7 +6,8 @@ Feature: migrate reconciles already-delivered work into an honest starting state
   # STORY.md hint 3: already-done work is RECONCILED, not re-run. When the source carries delivered work
   # (code, tests, "done" markers), migrate must (a) detect it so the produced item's status / its stories'
   # status reflect what is actually done rather than a uniform "not-started", and (b) run the architect
-  # over what was delivered and record the issues a developer can then pick up as findings.
+  # over what was delivered and record the issues a developer can then pick up as findings. migrate NEVER
+  # stamps "done" — "done" is earned only via aof:verify, so the honest ceiling it records is "in-review".
   #
   # This feature MIXES lanes, so the verification tag is per-scenario (no feature-level lane to inherit):
   #   @executable -> the OBSERVABLE skeleton of reconciliation: a source with delivered work produces an
@@ -51,10 +52,11 @@ Feature: migrate reconciles already-delivered work into an honest starting state
   # The rows walk the delivery axis from nothing -> partial-with-gaps -> fully delivered, and pin the two
   # observables a tester reads off the produced item without inspecting source: its status, and whether a
   # findings record exists. The rule the matrix encodes: status tracks how much was delivered; findings
-  # are present IFF the delivered work has gaps. Fully-and-cleanly delivered is a done-ish status with NO
-  # findings (nothing to act on); fully delivered but with gaps still carries findings. "status" is the
-  # produced item's recorded status; "findings" is none (no findings record) or present (a developer-
-  # actionable findings record exists).
+  # are present IFF the delivered work has gaps. migrate NEVER stamps "done" — "done" is earned only via
+  # aof:verify, so the honest ceiling migrate can record is "in-review" (ready for the verify gate) when
+  # work is fully and cleanly delivered with no findings; fully delivered but with gaps stays in-progress
+  # and carries findings. "status" is the produced item's recorded status; "findings" is none (no
+  # findings record) or present (a developer-actionable findings record exists).
   @executable
   Scenario Outline: what the source has delivered determines the produced status and whether findings exist
     Given the fixture folder presents <delivered>
@@ -70,10 +72,13 @@ Feature: migrate reconciles already-delivered work into an honest starting state
       | some work delivered with gaps      | in-progress   | present   |
       | most work delivered, a few gaps    | in-progress   | present   |
 
-    Examples: fully delivered -> a done-ish status; findings present IFF gaps remain
+    Examples: fully delivered, gaps remain -> in-progress, findings present (never "done" — verify earns that)
       | delivered                          | status        | findings  |
-      | all work delivered, no gaps        | done          | none      |
-      | all work delivered but with gaps   | done          | present   |
+      | all work delivered but with gaps   | in-progress   | present   |
+
+    Examples: fully delivered, no gaps -> in-review (ready for the verify gate), no findings
+      | delivered                          | status        | findings  |
+      | all work delivered, no gaps        | in-review     | none      |
 
   # The architect's review is agent behaviour: @manual, verified by procedure in the milestone UAT.md.
   @manual
