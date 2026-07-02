@@ -3,10 +3,10 @@ type: milestone
 number: 25
 slug: mesh-ui
 title: "Mesh UI — aof work ui rename + the aof mesh ui fleet surface"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-02
 depends: [03, 21, 23, 24]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
 ---
@@ -66,7 +66,54 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-_To be broken down — `aof:refine 25`._
+Broken down `2026-07-01` by `aof:refine 25`. The partition follows the codebase-graph coupling
+([ARCHITECTURE.md §Recommended story partition](ARCHITECTURE.md); graph freshly built — 1174 nodes / 3162
+edges) — the three moves fall on **three near-disjoint seams** (`aof graph impact`): the board serve-face
+(`board-serve.mjs ← cli.mjs` only, isolated from all mesh code), the fleet data seam (`mesh-identity.mjs` /
+`mesh:status` ← `command-core` → `mesh-store`, `mesh-presence`), and a greenfield fleet web face. **00** is the
+isolated **serve-verb rename** (the drill-in target the fleet view links into); **01** is the **fleet data
+model** — `mesh:status` extended to the whole-fleet aggregate + the `aof mesh status` CLI mirror (the ONE
+registered command both faces consume, ADR-002); **02** is the **`aof mesh ui`** web surface — a thin
+serve-face over that command, closing over both. **Parallelism:** 00 ∥ 01 (fully parallel — disjoint
+functions, even in the one shared file `cli.mjs`), then 02 sequences after both (it needs 00's renamed drill
+target + 01's fleet aggregate). Contracts (task `.feature` files) are authored per story via Three Amigos at
+`aof:refine 25/SS`.
+
+**Contracts authored `2026-07-02`** (`aof:refine 25 --autonomous` cascade — the full Three Amigos fanned out
+per story): **12 task features** (00 → 3, 01 → 3, 02 → 6), all 15 QA feasibility flags resolved with
+source-checked developer verdicts; `aof work validate` PASS. All three stories → `in-progress`. (Every m25
+arch-test is green; the suite's only 3 reds are pre-existing milestone-24 WIP — see [STATE.md](STATE.md).)
+Key dev-locked decisions: the `mesh:status` boards entry is `{ ref, owner, activeRuns }` (union enumeration,
+first-wins owner, owner omitted when ownerless); the fleet face is a new `src/mesh-ui-serve.mjs` on port **4181**
+reusing `ui/dist` `?mode=fleet`; the board→ui rename is FAITHFUL (per-surface usage shapes preserved). Two build
+constraints pinned: the boards projection must own its own `readRegistry` try/catch + shape-guard (readRegistry
+tolerates only ENOENT today); the stale `src/terminal-ws.mjs:52` comment rides the rename diff.
+
+- [x] **00 · [the `aof work board` → `aof work ui` rename](stories/00_story_work-ui-rename/STORY.md)** — the
+  deliberate ACD serve-verb rename (PRD §8): `cli.mjs`'s `subcommand === "board"` → `"ui"` +
+  `workBoardCommand` → `workUiCommand` + the usage/log lines. The board is a **CLI-only serve verb**, so the
+  frozen `/api/work` envelope + `board-ui.mjs` stay **byte-identical** and m03's board guards carry forward
+  green (ADR-001). Contract authored `2026-07-02` (3 task features). **Reconciliation (dev feasibility read):
+  the frozen envelope is EIGHT `/api/work` routes, not six** — 7 GET (list/doc/tasks/run-status/validate/doctor/**next**)
+  + POST **feedback**; ADR-001's "six" undercounts `next` + `feedback` (see [STATE.md](STATE.md) §Notes). Owns
+  `acd-work-ui-rename-complete`; carries `acd-board-single-server` /
+  `acd-board-write-isolation` / `acd-work-ui-no-core-import` / `acd-work-command-route-coverage` unchanged.
+  **Independent — parallel with 01.**
+- [x] **01 · [the fleet data model + `aof mesh status` CLI mirror](stories/01_story_fleet-status/STORY.md)** —
+  EXTEND `mesh:status` (`src/commands/mesh-identity.mjs`) to aggregate the whole fleet: nodes
+  (`readNodeRecords`) + presence/staleness (`readPresenceRecord`/`isNodeStale`) + registered boards
+  (`readRegistry`, the m24 roster, absence-tolerant) + per-board active runs (m21's `work:run-status` READ),
+  rendered as the `aof mesh status` CLI mirror. The ONE registered data command both faces consume — no second
+  data path (ADR-002); degrades to the node roster when the m24 seam is absent. Owns
+  `acd-mesh-ui-single-data-command` (phase 1). **Independent — parallel with 00** (consumes the m24 story-00
+  `readRegistry` seam via `depends: 24`, but not hard-blocked on it).
+- [x] **02 · [the `aof mesh ui` fleet web surface](stories/02_story_fleet-ui/STORY.md)** — NEW
+  `src/mesh-ui-serve.mjs` (the `board-serve.mjs` sibling) + the `meshCommand` `subcommand === "ui"` branch +
+  `meshUiCommand` + the `GET /api/mesh/status` route (`invoke("mesh:status")`) + the fleet web bundle (Nodes
+  cards + Boards tiles, drill-in to `aof work ui`). Its OWN thin serve-face over the registry, read-only
+  (ADR-003/004). Owns `acd-mesh-ui-no-core-import` / `acd-mesh-ui-single-server` / `acd-mesh-ui-write-isolation`
+  + phase 2 of `acd-mesh-ui-single-data-command`. **Depends on 00 + 01** (the renamed drill target + the fleet
+  aggregate) — sequences after both. Mock owed at `mocks/mesh-ui.png` (user-generated from DESIGN Appendix A).
 
 ## Dependencies
 

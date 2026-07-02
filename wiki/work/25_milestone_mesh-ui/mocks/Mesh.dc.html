@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%}
+    body{font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+    .scrl::-webkit-scrollbar{width:7px}
+    .scrl::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:9px}
+    @keyframes rpulse{0%,100%{box-shadow:0 0 0 0 rgba(20,184,166,.45);opacity:1}50%{box-shadow:0 0 0 4px rgba(20,184,166,0);opacity:.62}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</helmet>
+
+<div class="scrl" style="height:100vh;overflow-y:auto;background:#eef0f3;color:#1a2230">
+
+  <!-- ============================ MAIN WINDOW ============================ -->
+  <div data-screen-label="Mesh" style="min-height:100vh;display:flex;flex-direction:column;background:#f6f7f8">
+
+    <!-- ===== TOP BAR (slim) ===== -->
+    <div style="height:48px;flex:none;background:#fff;border-bottom:1px solid #e4e7ec;display:flex;align-items:center;gap:11px;padding:0 16px;position:sticky;top:0;z-index:5">
+      <div style="width:24px;height:24px;border-radius:6px;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700">✦</div>
+      <span style="font-size:14px;font-weight:700;letter-spacing:-0.01em">aof</span>
+      <span style="font-size:14px;color:#94a3b8">Mesh</span>
+      <span style="width:1px;height:16px;background:#e4e7ec"></span>
+      <span class="mono" style="font-size:12px;color:#475467;background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 8px;border-radius:6px">{{ group }}</span>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:16px">
+        <span style="font-size:12px;color:#667085;display:flex;align-items:center;gap:6px;cursor:default">◷ legend</span>
+        <span onClick="{{ onRefresh }}" style="font-size:12px;color:#667085;display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 9px;border-radius:6px" style-hover="background:#f1f5f9;color:#1a2230"><span style="font-size:13px">⟳</span> {{ refreshedLabel }}</span>
+      </div>
+    </div>
+
+    <!-- ===== POPULATED ===== -->
+    <sc-if value="{{ isPopulated }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;padding:26px 32px 44px">
+        <div style="max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:30px">
+
+          <!-- NODES region -->
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:12px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#94a3b8">Nodes</span>
+              <span style="font-size:12px;color:#667085">{{ nodeSummary }}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">
+              <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="5">
+                <div style="{{ n.cardStyle }}">
+                  <!-- header: presence dot + id + this-node + version -->
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="{{ n.headStyle }}"></span>
+                    <span class="mono" style="font-size:13px;font-weight:700;color:#334155">{{ n.id }}</span>
+                    <span style="margin-left:auto;display:flex;align-items:center;gap:7px">
+                      <span style="{{ n.thisStyle }}">{{ n.thisLabel }}</span>
+                      <span class="mono" style="font-size:10px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 6px;border-radius:5px">{{ n.version }}</span>
+                    </span>
+                  </div>
+                  <!-- presence line -->
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:11px">
+                    <span style="{{ n.presenceDot }}"></span>
+                    <span class="mono" style="font-size:11.5px;font-weight:500;color:{{ n.presenceColor }}">{{ n.presenceLabel }}</span>
+                  </div>
+                  <!-- running -->
+                  <div style="font-size:13px;font-weight:{{ n.runWeight }};color:{{ n.runColor }};margin-top:9px">{{ n.runLabel }}</div>
+                  <!-- capability footer -->
+                  <div style="display:flex;align-items:center;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid #f1f5f9">
+                    <span class="mono" style="font-size:10.5px;color:#94a3b8">{{ n.capLabel }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- BOARDS region -->
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:12px">
+              <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#94a3b8">Boards</span>
+              <span style="font-size:12px;color:#667085">{{ boardSummary }}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:14px">
+              <sc-for list="{{ boards }}" as="b" hint-placeholder-count="6">
+                <div style="border:1px solid #e4e7ec;border-radius:8px;padding:15px 16px;background:#fff;display:flex;flex-direction:column;gap:14px;transition:box-shadow .13s,border-color .13s" style-hover="box-shadow:0 6px 20px rgba(16,24,40,.08);border-color:#cbd5e1">
+                  <div style="display:flex;flex-direction:column;gap:4px">
+                    <span class="mono" style="font-size:15px;font-weight:600;color:#1e293b;letter-spacing:-0.01em">{{ b.name }}</span>
+                    <span class="mono" style="font-size:11px;color:#94a3b8">on {{ b.owner }}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="{{ b.chipStyle }}"><span style="{{ b.dotStyle }}">{{ b.dotGlyph }}</span>{{ b.stateLabel }}</span>
+                    <a href="#" style="margin-left:auto;font-size:12px;color:#0f766e;font-weight:600;text-decoration:none;display:flex;align-items:center;gap:4px" style-hover="text-decoration:underline">Open board →</a>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== EMPTY FLEET ===== -->
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:40px">
+        <div style="max-width:440px;border:1.5px dashed #d8dee6;border-radius:12px;padding:36px 30px;background:#fbfcfd;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center">
+          <div style="width:46px;height:46px;border-radius:12px;border:2px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:20px">✦</div>
+          <div style="font-size:15px;font-weight:600;color:#475467">No nodes in the group yet</div>
+          <div style="font-size:12.5px;color:#94a3b8;line-height:1.6">Enrol a machine to bring it onto the mesh — run one of these on the box you want to add:</div>
+          <div style="display:flex;flex-direction:column;gap:7px;width:100%;margin-top:2px">
+            <div class="mono" style="font-size:11.5px;color:#475467;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px;padding:8px 11px;text-align:left">aof mesh invite</div>
+            <div class="mono" style="font-size:11.5px;color:#475467;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px;padding:8px 11px;text-align:left">aof mesh join</div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== LOADING ===== -->
+    <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:40px">
+        <div style="display:flex;align-items:center;gap:11px;color:#667085;font-size:13px">
+          <span style="width:14px;height:14px;border-radius:50%;border:2px solid #cbd5e1;border-top-color:#0d9488;animation:spin .7s linear infinite;flex:none"></span>
+          Loading fleet…
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ===== ERROR ===== -->
+    <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:40px">
+        <div style="max-width:440px;display:flex;flex-direction:column;align-items:center;gap:13px;text-align:center">
+          <div style="display:flex;align-items:center;gap:9px;color:#9f1239;font-size:13px;font-weight:500;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:11px 15px">
+            <span style="width:18px;height:18px;border-radius:50%;background:#e11d48;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none">!</span>
+            Could not load the mesh: connection refused
+          </div>
+          <span onClick="{{ onRefresh }}" style="font-size:12px;color:#0f766e;font-weight:600;cursor:pointer;background:#f0fdfa;border:1px solid #5eead4;border-radius:7px;padding:7px 15px;display:inline-flex;align-items:center;gap:6px" style-hover="background:#ccfbf1">⟳ Retry</span>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <!-- ============================ REFERENCE ============================ -->
+  <sc-if value="{{ showReference }}" hint-placeholder-val="{{ true }}">
+  <div style="border-top:1px solid #e0e3e8;padding:34px 32px 56px">
+    <div style="max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:30px">
+
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#94a3b8">Reference · card anatomy & states</span>
+        <span style="font-size:12px;color:#8a94a3">Read-only. The two live interactions are drill-into-board and refresh — nothing on this screen mutates state.</span>
+      </div>
+
+      <!-- Node card presence states -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <span class="mono" style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Node card · presence states (node liveness — teal live · grey stale · faint no-presence; stale is degraded, never red)</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">
+          <sc-for list="{{ nodeVariants }}" as="n" hint-placeholder-count="3">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font-size:10px;color:#8a94a3">{{ n.caption }}</span>
+              <div style="{{ n.cardStyle }}">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="{{ n.headStyle }}"></span>
+                  <span class="mono" style="font-size:13px;font-weight:700;color:#334155">{{ n.id }}</span>
+                  <span style="margin-left:auto;display:flex;align-items:center;gap:7px">
+                    <span style="{{ n.thisStyle }}">{{ n.thisLabel }}</span>
+                    <span class="mono" style="font-size:10px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;padding:2px 6px;border-radius:5px">{{ n.version }}</span>
+                  </span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:11px">
+                  <span style="{{ n.presenceDot }}"></span>
+                  <span class="mono" style="font-size:11.5px;font-weight:500;color:{{ n.presenceColor }}">{{ n.presenceLabel }}</span>
+                </div>
+                <div style="font-size:13px;font-weight:{{ n.runWeight }};color:{{ n.runColor }};margin-top:9px">{{ n.runLabel }}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid #f1f5f9">
+                  <span class="mono" style="font-size:10.5px;color:#94a3b8">{{ n.capLabel }}</span>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- Board tile run states -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <span class="mono" style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Board tile · run states (run vocabulary — red appears only on failed; running carries the pulsing teal dot)</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px">
+          <sc-for list="{{ boardVariants }}" as="b" hint-placeholder-count="5">
+            <div style="border:1px solid #e4e7ec;border-radius:8px;padding:15px 16px;background:#fff;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <span class="mono" style="font-size:15px;font-weight:600;color:#1e293b;letter-spacing:-0.01em">{{ b.name }}</span>
+                <span class="mono" style="font-size:11px;color:#94a3b8">on {{ b.owner }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="{{ b.chipStyle }}"><span style="{{ b.dotStyle }}">{{ b.dotGlyph }}</span>{{ b.stateLabel }}</span>
+                <a href="#" style="margin-left:auto;font-size:12px;color:#0f766e;font-weight:600;text-decoration:none" style-hover="text-decoration:underline">Open board →</a>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- Fleet states -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <span class="mono" style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Fleet states · empty / loading / error (switch the live window above with the fleetState tweak)</span>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+
+          <!-- empty inset -->
+          <div style="border:1px solid #e4e7ec;border-radius:9px;background:#fff;overflow:hidden;display:flex;flex-direction:column">
+            <div style="height:30px;flex:none;background:#fafbfc;border-bottom:1px solid #eef0f3;display:flex;align-items:center;gap:6px;padding:0 11px">
+              <span style="width:12px;height:12px;border-radius:4px;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:7px">✦</span>
+              <span style="font-size:10px;font-weight:600;color:#94a3b8">empty fleet</span>
+            </div>
+            <div style="padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center">
+              <div style="width:32px;height:32px;border-radius:9px;border:2px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:14px">✦</div>
+              <div style="font-size:12px;font-weight:600;color:#475467">No nodes in the group yet</div>
+              <div class="mono" style="font-size:10px;color:#94a3b8;line-height:1.5">aof mesh invite<br>aof mesh join</div>
+            </div>
+          </div>
+
+          <!-- loading inset -->
+          <div style="border:1px solid #e4e7ec;border-radius:9px;background:#fff;overflow:hidden;display:flex;flex-direction:column">
+            <div style="height:30px;flex:none;background:#fafbfc;border-bottom:1px solid #eef0f3;display:flex;align-items:center;gap:6px;padding:0 11px">
+              <span style="width:12px;height:12px;border-radius:4px;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:7px">✦</span>
+              <span style="font-size:10px;font-weight:600;color:#94a3b8">loading</span>
+            </div>
+            <div style="padding:20px 16px;display:flex;align-items:center;justify-content:center;gap:9px;min-height:118px">
+              <span style="width:13px;height:13px;border-radius:50%;border:2px solid #cbd5e1;border-top-color:#0d9488;animation:spin .7s linear infinite;flex:none"></span>
+              <span style="font-size:12px;color:#667085">Loading fleet…</span>
+            </div>
+          </div>
+
+          <!-- error inset -->
+          <div style="border:1px solid #e4e7ec;border-radius:9px;background:#fff;overflow:hidden;display:flex;flex-direction:column">
+            <div style="height:30px;flex:none;background:#fafbfc;border-bottom:1px solid #eef0f3;display:flex;align-items:center;gap:6px;padding:0 11px">
+              <span style="width:12px;height:12px;border-radius:4px;background:#0d9488;color:#fff;display:flex;align-items:center;justify-content:center;font-size:7px">✦</span>
+              <span style="font-size:10px;font-weight:600;color:#94a3b8">error</span>
+            </div>
+            <div style="padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:11px;min-height:118px;justify-content:center">
+              <div style="display:flex;align-items:center;gap:8px;color:#9f1239;font-size:11px;font-weight:500;background:#fff1f2;border:1px solid #fecdd3;border-radius:7px;padding:8px 11px;text-align:left">
+                <span style="width:15px;height:15px;border-radius:50%;background:#e11d48;color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex:none">!</span>
+                Could not load the mesh: connection refused
+              </div>
+              <span style="font-size:11px;color:#0f766e;font-weight:600;background:#f0fdfa;border:1px solid #5eead4;border-radius:6px;padding:5px 12px">⟳ Retry</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+</body>
+</html>

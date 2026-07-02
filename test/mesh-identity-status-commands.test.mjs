@@ -197,7 +197,15 @@ export const meshIdentityStatusCommandsTests = [
           threw = true;
         }
         assert.equal(threw, false, "no error is raised on an empty roster");
-        assert.deepEqual(result, { nodes: [] }, "the stable { nodes: [] } shape");
+        // The feature asserts "an empty node list" + "the stable { nodes: [] } shape".
+        // milestone 25 / story 01 (ADR-002) EXTENDS mesh:status additively with a top-
+        // level `boards` projection (the boards half sits ALONGSIDE the nodes half, never
+        // reshaping it), so the empty-fleet aggregate is { nodes: [], boards: [] }. The
+        // nodes half stays the stable empty node list this scenario pins — asserted
+        // directly (nodes === []) so the additive boards key is compatible, not a
+        // whole-object equality that the sanctioned extension would break.
+        assert.deepEqual(result.nodes, [], "the stable empty node list (the { nodes: [] } half)");
+        assert.deepEqual(result.boards, [], "the additive boards projection is the empty list on an empty fleet");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

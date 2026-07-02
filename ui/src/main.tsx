@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Board } from "@/board/Board";
+import { Fleet } from "@/fleet/Fleet";
 
 type RuntimeId = "claude" | "codex";
 type ResourceKind = "skill" | "command" | "agent" | "rule";
@@ -1261,6 +1262,6 @@ const uiMode = new URLSearchParams(location.search).get("mode") ?? import.meta.e
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {uiMode === "board" ? <Board /> : <App />}
+    {uiMode === "fleet" ? <Fleet /> : uiMode === "board" ? <Board /> : <App />}
   </StrictMode>
 );
