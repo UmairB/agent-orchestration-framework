@@ -3,10 +3,10 @@ type: milestone
 number: 23
 slug: control-node-relay
 title: "Control Node + Thin Relay — live presence over a stateless broker"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-01
 depends: [20, 22]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
 ---
@@ -70,7 +70,19 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-_To be broken down — `aof:refine 23`._
+Broken down `2026-06-30` by `aof:refine 23 --autonomous`. The partition follows the codebase-graph coupling
+([ARCHITECTURE.md §Story break-down rationale](ARCHITECTURE.md)): the presence record extends two existing
+low-fan-out spines (`mesh-store.mjs`'s reserved `presenceRecordPath` + `run-store.mjs`'s `isStale`) over **git
+alone**; the relay is a **file-disjoint** serve subtree (the `board-serve`/`terminal-ws` `ws@8` neighbourhood)
+importing **no** record schema; and the dual-bus integration is the **single** cross-story edge. So {00, 01}
+are independent parallel siblings and 02 is the lone integration dependent — touching only the additive
+co-touched door (`command-core.mjs`'s `COMMANDS` array + `cli.mjs`'s `meshCommand` dispatcher — the 07/ADR-006
+discipline). Unlike m22, the spine does **not** bootstrap a face or author a gate: the `aof mesh` face + the
+`mesh:`-bijection gate already exist (the inverse-22/R1 dividend).
+
+- [x] **00 · [presence / heartbeat — the durable git-side substrate](stories/00_story_presence-heartbeat/STORY.md)** — `src/mesh-presence.mjs` (the `presence/<node>.json` record on the m22-reserved seam; node-staleness reusing milestone 20's `isStale` shape; the `activeRuns` read of the run records) + `mesh:heartbeat` (git-only publish) + the `mesh:status` presence/stale render + the two m22 carry-forwards (the `.gitattributes` EOL pin F1/R5 + the self-host `.mesh` ignore R4). Works over **git alone**. The dependency root for presence; **parallel with 01**.
+- [x] **01 · [the thin stateless relay](stories/01_story_thin-relay/STORY.md)** — `src/mesh-relay.mjs` (`serveRelay` — the `ws@8` broker shipping as the same binary in a `relay` mode, the frozen payload-agnostic envelope, statelessness) + the control-node nomination role/config (`config.mesh.relay.*`), **pre-auth in m23** (enrollment is m24). A file-disjoint serve subtree; **parallel with 00**.
+- [x] **02 · [push-for-liveness, poll-for-durability](stories/02_story_presence-over-relay/STORY.md)** — the node-side two-publish path (git **unconditional** + relay **best-effort**, caught-never-thrown) + the cadence loop + the KR1 (≤5s/≤30s) + liveness-half-of-KR5 integration + the A1 3-node `@manual` spike + **the F1 receive-and-apply consumer** (the persistent relay subscriber + in-memory liveness cache + the `mesh:status` overlay, ADR-004). The single cross-story edge; **depends on 00 + 01**. _Accepted `2026-07-01` (`aof:verify 23`): all `@executable` green + fitness #7 green; the `@manual` ≤5s re-measurement PASSES on a real 3-node ws@8 fleet (worst-case both-nodes reflection 11.9/4.8 ms across two runs, over the relay, no git sync), the ≤30s git floor + clean degradation + re-nomination all PASS — **F1 resolved**, story `done`._
 
 ## Dependencies
 

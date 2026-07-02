@@ -379,7 +379,15 @@ export async function heartbeat(item, runId, { now } = {}) {
 // NEVER beat (heartbeatAt null) falls back to now - updatedAt (20/ADR-004). Pure over
 // the passed-in values — the store reads no clock/config. Strict `>` so a run exactly
 // AT the threshold is still live.
-function isStale(run, nowMs, stalenessThreshold) {
+//
+// EXPORTED (milestone 23 / story 00, ADR-002): the node-staleness predicate in
+// src/mesh-presence.mjs REUSES this exact shape rather than re-deriving it, so the
+// run layer (m20) and the node layer (m23) PROVABLY share ONE staleness definition
+// (the genuine 23 → 20 seam — never a parallel heartbeat, the SPEC §Dependencies
+// constraint). The presence record carries a heartbeatAt but no updatedAt, so its
+// caller passes a presence-shaped { heartbeatAt } object (the `?? updatedAt` fallback
+// is inert there — presence always has a heartbeatAt when staleness is computed).
+export function isStale(run, nowMs, stalenessThreshold) {
   const liveness = run.heartbeatAt ?? run.updatedAt;
   const age = nowMs - Date.parse(liveness);
   return age > stalenessThreshold;

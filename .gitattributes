@@ -9,3 +9,14 @@ test/integration/**/*.feature text eol=lf
 # function re-renders from these bytes).
 src/bundle/** text eol=lf
 
+# The git-tracked mesh records (milestone 22 / story 00 partition; milestone 23 /
+# story 00 presence, ADR-002 / fitness #6, the 22/R5 carry-forward): pin LF so a
+# mixed-OS / autocrlf=true fleet sees BYTE-STABLE record files. A node writes its
+# presence/<id>.json (and nodes/<id>.json) with LF, and a peer checks it out with
+# LF regardless of core.autocrlf — so the "byte-for-byte as the writer wrote it"
+# poll-for-durability assertions hold across the git seam (acd-mesh-eol-pinned).
+# The `**/` prefix anchors the rule at ANY depth: a node's .mesh/ lives under its
+# work stream (e.g. wiki/work/.mesh/), so the pin must match a NESTED .mesh/, not
+# only one at the repo root (the m03 whole-surface-scope lesson).
+**/.mesh/** text eol=lf
+
