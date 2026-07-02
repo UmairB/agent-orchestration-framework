@@ -1,5 +1,6 @@
 ---
 name: aof-developer
+model: sonnet
 description: ACD developer. Spawned (typically one per story) to implement a story's tasks — the code and the @executable step definitions that make each task's feature scenarios green, and to run the agent-runnable @manual verification (recording evidence in VERIFICATION.md). Implements against the locked contract and the ADRs; does not author outcomes or own the test-case design.
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---
