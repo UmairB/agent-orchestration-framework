@@ -3,10 +3,10 @@ type: milestone
 number: 24
 slug: group-enrollment
 title: "Device-Code Group Enrollment — join the fleet with a 6-digit code"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-02
 depends: [23]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
 ---
@@ -65,7 +65,37 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-_To be broken down — `aof:refine 24`._
+Broken down `2026-07-01` by `aof:refine 24`. The partition follows the codebase-graph coupling
+([ARCHITECTURE.md §Story break-down rationale](ARCHITECTURE.md); graph freshly built — 1174 nodes / 3143
+edges): **00** is the durable **group registry** — the single-writer group-level git-of-record every other
+story couples through (the spine, the role `mesh-store.mjs` plays for the per-node dimension); **01** is the
+end-to-end **join flow** (mint → present → match/admit/issue → store + provision), delivering "a fresh machine
+joins with a 6-digit code and is fully set up"; **02** is the **enforcement** — the relay actually CHECKS the
+credential (paying m23's `23/ADR-001` pre-auth deferral) and makes it REVOCABLE, closing the 22/R6 "the
+credential is actually used" loop 01 opens. The cut is a **user-outcome** split (substrate → join → enforce)
+that keeps each command file single-owner (`mesh-invite`/`mesh-join` in 01; `mesh-revoke` in 02). Stories 01
+and 02 both additively co-touch `src/mesh-relay.mjs` on **file-disjoint surfaces** (01 the HTTP request-handler
+enrollment route; 02 the ws upgrade-handler auth-gate) — the accepted `07/ADR-006` additive co-touch, not a
+shared-line edit. Contracts (task `.feature` files) are authored per story via Three Amigos at
+`aof:refine 24/SS`.
+
+- [x] **00 · [the group registry](stories/00_story_group-registry/STORY.md)** — `src/mesh-registry.mjs`: the
+  group's own **single-writer** (control-node-owned) durable git stream of record — the roster of admitted
+  nodes + the set of registered boards + the pending invites (hashed codes) + the revocations (PRD §7.3 "two
+  levels of git-of-record"). The **dependency root**; buildable/testable standalone over git. Owns
+  `acd-registry-write-scope` (+ `acd-enrollment-code-hashed-at-rest`, shared with 01).
+- [x] **01 · [device-code enrollment (the join)](stories/01_story_device-code-enrollment/STORY.md)** —
+  `aof mesh invite` (mint a short-lived, hashed, single-use 6-digit code) + the relay **device-flow HTTP
+  endpoint** on `serveRelay`'s existing `http.createServer` (match/consume/admit/issue, with the attempt-cap
+  ADR-005) + `aof mesh join <code>` (present, receive + store the credential, provision git-remote). A machine
+  can **join** and is fully set up. **Depends on 00.** Owns `acd-enroll-endpoint-http-not-ws`,
+  `acd-enroll-git-argv-no-shell` (provision half), `acd-enrollment-code-single-use-constant-time`.
+- [x] **02 · [the enforceable trust boundary](stories/02_story_trust-boundary-enforcement/STORY.md)** — the
+  relay **ws auth-gate** (verify a connecting node's credential against the live roster/revocation before
+  brokering — pays the `23/ADR-001` pre-auth deferral) + `aof mesh revoke <node>` (remove from roster +
+  de-provision git-remote + record a revocation). The group is **enforced** and revocable; the 22/R6 loop
+  closes. **Depends on 00 + 01.** Owns `acd-relay-auth-gate-checked` (+ `acd-enroll-git-argv-no-shell`,
+  de-provision half).
 
 ## Dependencies
 
