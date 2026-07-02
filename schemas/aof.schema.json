@@ -366,6 +366,15 @@
             "productOwner": {
               "enum": ["inline", "agent"],
               "description": "inline = the main session authors SPEC/story/acceptance; agent = delegate authoring to the aof-product-owner sub-agent."
+            },
+            "models": {
+              "type": "object",
+              "description": "Per-role model override map: an ACD role id (one of the 8 frozen roles, e.g. aof-architect) -> a model string (a moving family alias like \"opus\"/\"sonnet\", or a pinned id). Wins over the bundle's shipped default in the rendered agent file under orchestrated mode; inert (surfaced, not enforced) under mode \"solo\". Authoritative validation is `aof project validate` (no Ajv runs at validate time, so this schema is advisory): keys are checked against the live 8-role set derived from the bundle descriptor, and values must be non-empty and non-whitespace.",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
             }
           },
           "additionalProperties": false

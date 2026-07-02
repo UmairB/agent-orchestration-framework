@@ -8,7 +8,7 @@
 // proves the spy is never called on a dry-run; one row also runs the bin for the
 // exit-0 / --json contract.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -80,7 +80,7 @@ async function makeProject() {
 }
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], { cwd: root, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 

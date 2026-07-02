@@ -14,16 +14,16 @@
 //   4. IMPORTING the module stays inert (no dispatch, no output) — the design that
 //      lets the bin and the harness import `run` without side effects.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const srcCli = path.join(repoRoot, "src", "cli.mjs");
 const binCli = path.join(repoRoot, "bin", "aof.mjs");
 
 function runNode(args) {
-  const result = spawnSync(process.execPath, ["--no-warnings", ...args], {
+  const result = spawnCliSync(process.execPath, ["--no-warnings", ...args], {
     cwd: repoRoot,
     env: { ...process.env, NODE_NO_WARNINGS: "1" },
     encoding: "utf8",

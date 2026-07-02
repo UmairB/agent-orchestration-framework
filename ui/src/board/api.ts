@@ -49,6 +49,33 @@ export type TaskFeature = {
 
 export type TasksResponse = { ref: string; tasks: TaskFeature[] };
 
+// A run record (milestone 19/ADR-003, extended to the 13-key schema by 20/ADR-001).
+// The board renders these fields and WRITES none of them; `brief` is OPAQUE (never
+// read), and `runId`/`itemRef`/`updatedAt` are available but unshown (DESIGN
+// surface 1; ARCHITECTURE 21/ADR-001). The wire shape mirrors src/run-store.mjs.
+export type RunState = "queued" | "running" | "done" | "failed" | "cancelled";
+
+export type RunRecord = {
+  runId: string;
+  itemRef: string;
+  state: RunState;
+  attempt: number;
+  outcome: RunState | null;
+  sessionId: string | null;
+  brief: unknown;
+  createdAt: string;
+  updatedAt: string;
+  failureReason: string | null;
+  heartbeatAt: string | null;
+  retryOf: string | null;
+  reclaimedAt: string | null;
+};
+
+// The /api/work/run-status wire shape: the registered work:run-status command's
+// `{ ref, runs[] }` envelope, unchanged (ARCHITECTURE 21/ADR-001 — no path
+// projection; the records carry refs). An item with no runs reports `runs: []`.
+export type RunStatusResponse = { ref: string; runs: RunRecord[] };
+
 async function getJson<T>(route: string): Promise<T> {
   const response = await fetch(route);
   if (!response.ok) {
@@ -76,6 +103,11 @@ export const workApi = {
   },
   tasks(ref: string): Promise<TasksResponse> {
     return getJson<TasksResponse>(`/api/work/tasks?ref=${encodeURIComponent(ref)}`);
+  },
+  // The run read path (ARCHITECTURE 21/ADR-001): one read serves both history and
+  // current-run state — the UI selects the current run from the same runs[].
+  runStatus(ref: string): Promise<RunStatusResponse> {
+    return getJson<RunStatusResponse>(`/api/work/run-status?ref=${encodeURIComponent(ref)}`);
   },
   validate(scope?: string): Promise<ValidateResponse> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";

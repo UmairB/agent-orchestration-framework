@@ -65,6 +65,20 @@ export async function handleWorkApi(request, response, options = {}) {
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/api/work/run-status") {
+      // The run read path (milestone 21, ADR-001): the thinnest route of the
+      // family. `work:run-status` returns `{ ref, runs: RunRecord[] }` and the run
+      // records carry REFS, not absolute paths (19/ADR-003) — so, unlike
+      // validate/next/doctor, there is NO `displayPath` projection to perform. It
+      // reads the query param, invokes the already-registered command through the
+      // one registry door, and serialises the result UNCHANGED (zero operation
+      // logic, no run-store import). Current-run state is the latest/in-flight
+      // element of the SAME `runs[]` — the UI selects it; there is no second route.
+      const result = await invoke("work:run-status", { ref: (params.get("ref") ?? "").trim() }, ctx);
+      sendJson(response, 200, result);
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/api/work/validate") {
       const result = await invoke("work:validate", { scope: scopeParam(params) }, ctx);
       // Project each finding's raw-absolute path to projectRoot-relative +

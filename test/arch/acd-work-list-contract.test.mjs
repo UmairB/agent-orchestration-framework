@@ -13,7 +13,7 @@
 //   - depth-0 items (milestones, uat) have `parent` null/absent, and every
 //     nested item carries a `parent` ref that resolves to another element's `ref`.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -82,7 +82,7 @@ async function buildFixture(items) {
 }
 
 function runListJson(root) {
-  const result = spawnSync(process.execPath, [cliPath, "work", "list", "--json"], {
+  const result = spawnCliSync(process.execPath, [cliPath, "work", "list", "--json"], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" }

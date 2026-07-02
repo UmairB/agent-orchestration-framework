@@ -27,13 +27,33 @@ import { serveSetupUi } from "../../src/setup-ui.mjs";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BOARD_UI = path.join(repoRoot, "src", "board-ui.mjs");
 
-// The op set DERIVED from the registry — every work:* command's op segment. This
-// is the canonical set the bijection is asserted over (NOT a hard-coded literal),
-// so a new work:* command (15's doctor, or any future one) is covered with no edit.
+// Commands whose BOARD face is deliberately deferred — registered into the core
+// (so the CLI bijection covers them, acd-work-command-cli-bijection) but NOT
+// served on /api/work. They are excluded from the /api/work bijection here exactly
+// as the notion:* prefix excludes the milestone-17/18 commands — a sanctioned,
+// documented carve-out, not a regression.
+//
+// Milestone 21 (ADR-001/ADR-003) wires the run READ path: it surfaces
+// `work:run-status` on the new `/api/work/run-status` route, so `run-status`
+// LEAVES this carve-out and the route↔command bijection re-tightens to require it
+// (honouring 19/R1 — surfacing a command-core command trips the route-coverage
+// guard, not just the CLI bijection; m19's RETROSPECTIVE foretold this entry
+// coming out with no further edit). `run-start` + `run-complete` STAY deferred:
+// they are NOT board read routes — the rerun reaches the agent via the m03 ADR-006
+// terminal launch (typed PTY input), never a `/api/work` route (21/ADR-002).
+// `run-retry` (m20/ADR-003) likewise stays deferred — m21 ships the FRESH path;
+// m20's resume is a later additive delta on the same affordance.
+const BOARD_DEFERRED = new Set(["run-start", "run-complete", "run-retry"]);
+
+// The op set DERIVED from the registry — every work:* command's op segment, minus
+// the board-deferred family. This is the canonical set the /api/work bijection is
+// asserted over (NOT a hard-coded literal), so a new board-served work:* command
+// (15's doctor, or any future one) is covered with no edit.
 const commandOps = () =>
   listCommands()
     .filter((command) => command.id.startsWith("work:"))
     .map((command) => command.id.slice("work:".length))
+    .filter((op) => !BOARD_DEFERRED.has(op))
     .sort();
 
 // Discount comments so a comment naming a route literal is not counted as a route.
@@ -89,8 +109,10 @@ async function hitRoute(url, op) {
   const query =
     op === "doc" ? "?ref=03&doc=SPEC"
     : op === "tasks" ? "?ref=03/01"
+    : op === "run-status" ? "?ref=03/01"
     : "";
-  // doctor is a read like list/validate — a bare GET answers the advisory envelope.
+  // doctor is a read like list/validate — a bare GET answers the advisory
+  // envelope. run-status reads 03/01's runs/ (absent ⇒ an empty { ref, runs: [] }).
   return fetch(new URL(`/api/work/${op}${query}`, url));
 }
 

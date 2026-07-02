@@ -15,7 +15,7 @@
 // store paths are DERIVED via toolStoreRoot/toolVersionDir with that SAME temp
 // AOF_GLOBAL_HOME, never hardcoded.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -34,7 +34,7 @@ const GRAPHIFY_VERSION = "0.8.44";
 // deterministic + isolated. cwd is the temp dir too (the --json face relativises
 // storePath to cwd; we re-derive the expected relative path the same way).
 function runCli(args, { globalHome, cwd }) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: cwd ?? globalHome,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1", AOF_GLOBAL_HOME: globalHome },

@@ -504,10 +504,13 @@ Feature: AOF CLI lifecycle
     Then the command should fail
     And stderr should contain `Removed command "doctor"`
     And stderr should contain `aof project doctor`
+    # story 29 reclaimed the top-level `migrate` verb for folder→managed-milestone
+    # migration; it is no longer a removed command. A bare `migrate` (no <folder>) is
+    # now the new verb's usage error, NOT a removed-command stub. Legacy config
+    # migration moved to `aof project migrate` (covered above).
     When I run `migrate`
     Then the command should fail
-    And stderr should contain `Removed command "migrate"`
-    And stderr should contain `aof project migrate`
+    And stderr should contain `aof migrate <folder>`
     When I run `config show`
     Then the command should fail
     And stderr should contain `Removed command "config"`

@@ -22,7 +22,7 @@
 // scripts/test-unit.mjs) and loud-skips when the network is unreachable, so a green
 // run offline is honest (skip), not a false pass.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "../support/cli-spawn.mjs";
 import { planPlanningInstall, MARKETPLACE_GIT_URL } from "../../src/planning-init.mjs";
 
 const FIXTURE_SHA = "d384f0c9eb81fe74656a4f6da168587836939edb";
@@ -47,7 +47,7 @@ export const archTests = [
       const plan = planPlanningInstall({ runtime: "claude", sha: FIXTURE_SHA });
       const ref = emittedMarketplaceRef(plan);
 
-      const result = spawnSync(
+      const result = spawnSyncHardened(
         "git",
         ["ls-remote", "--exit-code", MARKETPLACE_GIT_URL, `refs/tags/${ref}`, `refs/heads/${ref}`],
         { encoding: "utf8", shell: process.platform === "win32" }

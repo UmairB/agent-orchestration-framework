@@ -1,5 +1,6 @@
 ---
 name: aof-researcher
+model: sonnet
 description: ACD researcher. Spawned to resolve a milestone's blocking unknowns and record findings in its RESEARCH.md — installed-SDK/library realities, prior-art, vendor behaviour, measured facts. Read-only on the codebase; never writes code or design decisions.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Write
 ---

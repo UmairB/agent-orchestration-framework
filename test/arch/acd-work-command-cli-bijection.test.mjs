@@ -17,12 +17,13 @@
 //       it must succeed + append. doctor (like validate) may exit 0 OR non-zero
 //       cleanly (a warn/error finding can gate) — accept [0,1] for both.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "../support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+import { startRun } from "../../src/run-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -96,6 +97,25 @@ async function buildFixture() {
     "Feature: Probe\n\n  @executable\n  Scenario: it runs\n    Given a thing\n    When it happens\n    Then it works\n",
     "utf8"
   );
+  // milestone 19 — seed ONE running run under 03/01 (a discrete runs/<id>.json,
+  // the ADR-002 layout) so `aof work run-complete 03/01 --outcome done` finds
+  // exactly one in-flight run and exits 0. The subs run alphabetically, so
+  // run-complete runs BEFORE run-start while only this seed exists; run-start then
+  // mints a second running run (exit 0). Without this seed run-complete would hit
+  // no-running-run → exit 1 → the smoke would RED (Build note, LOAD-BEARING).
+  await startRun({ ref: "03/01", dir: storyDir }, { sessionId: null, brief: {} });
+  // milestone 20 — seed a retryable FAILED run under MILESTONE 03 directly so
+  // `aof work run-retry 03` resolves a retryable prior and resumes it (exit 0). It
+  // lives on the milestone (not 03/01) so the alphabetical run-complete/run-start on
+  // 03/01 leave it untouched. 20/ADR-006 dedup forbids minting a second non-terminal
+  // run via the store, so this failed precondition is written directly as a fixture.
+  const milestoneRuns = path.join(milestoneDir, "runs");
+  await mkdir(milestoneRuns, { recursive: true });
+  await writeFile(
+    path.join(milestoneRuns, "20260629T000000000Z-0000.json"),
+    `${JSON.stringify({ runId: "20260629T000000000Z-0000", itemRef: "03", state: "failed", attempt: 1, outcome: "failed", sessionId: "sess-bij", brief: {}, createdAt: "2026-06-29T00:00:00.000Z", updatedAt: "2026-06-29T00:00:00.000Z", failureReason: "timeout", heartbeatAt: null, retryOf: null, reclaimedAt: null }, null, 2)}\n`,
+    "utf8"
+  );
   return root;
 }
 
@@ -110,12 +130,22 @@ function argsFor(sub) {
     case "doctor": return ["work", "doctor", "--json"];
     case "next": return ["work", "next", "--json"];
     case "feedback": return ["work", "feedback", "03/01", "--note", "bijection probe", "--actor", "arch-test", "--json"];
+    // milestone 19 — the three work:run-* verbs. Subs run alphabetically, so
+    // run-complete runs BEFORE run-start: it completes buildFixture()'s seeded
+    // running run on 03/01 (exit 0), then run-start mints a fresh running run on
+    // 03/01 (exit 0). run-status reads the milestone 03 (empty history → exit 0).
+    case "run-complete": return ["work", "run-complete", "03/01", "--outcome", "done", "--json"];
+    case "run-start": return ["work", "run-start", "03/01", "--json"];
+    case "run-status": return ["work", "run-status", "03", "--json"];
+    // milestone 20 — run-retry resumes the seeded retryable failed run on milestone 03
+    // (exit 0). The switch THROWS on an unmapped sub (19/R1), so this case is required.
+    case "run-retry": return ["work", "run-retry", "03", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

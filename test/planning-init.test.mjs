@@ -171,7 +171,7 @@ export const planningInitTests = [
         const firstInstallIndex = items.findIndex((item) => item.kind === "install");
         assert.ok(marketplaceIndex >= 0, "the plan registers the pm-skills marketplace");
         assert.ok(marketplaceIndex < firstInstallIndex, "marketplace registration precedes any install");
-        assert.match(items[marketplaceIndex].command, /marketplace add https:\/\/github\.com\/phuryn\/pm-skills\.git#/);
+        assert.match(items[marketplaceIndex].command, /marketplace add --scope project https:\/\/github\.com\/phuryn\/pm-skills\.git#/);
         for (const plugin of ["pm-execution", "pm-product-discovery", "pm-product-strategy"]) {
           assert.ok(
             items.some((item) => item.kind === "install" && item.plugin === plugin && /@pm-skills$/.test(item.command)),
@@ -491,10 +491,11 @@ export const planningInitTests = [
         const { result, output } = await runInit(repo, { runtime: "codex" });
         assert.ok(!/plugins (were )?installed\b(?!.*not)/i.test(output), "does not claim plugins were installed");
         assert.ok(/NOT installed/i.test(output), "states plugins were NOT installed");
-        // The exact manual fallback commands the user must run.
+        // The exact manual fallback commands the user must run — carrying the project
+        // scope (ADR-010), since the user runs them through the claude CLI.
         for (const plugin of CORE_PLUGINS) {
-          assert.ok(output.includes(`claude plugin install ${plugin}@pm-skills`), `emits manual fallback for ${plugin}`);
-          assert.ok(result.manualFallback.includes(`claude plugin install ${plugin}@pm-skills`), `manualFallback includes ${plugin}`);
+          assert.ok(output.includes(`claude plugin install --scope project ${plugin}@pm-skills`), `emits manual fallback for ${plugin}`);
+          assert.ok(result.manualFallback.includes(`claude plugin install --scope project ${plugin}@pm-skills`), `manualFallback includes ${plugin}`);
         }
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -683,8 +684,8 @@ export const planningInitTests = [
         // the clone ref is the release TAG, decoupled from the provenance sha.
         assert.equal(
           marketplace.command,
-          `claude plugin marketplace add ${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`,
-          "marketplace add uses the HTTPS git URL with the immutable tag pinned as the #<ref>"
+          `claude plugin marketplace add --scope project ${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`,
+          "marketplace add declares at PROJECT scope (ADR-010) and uses the HTTPS git URL with the immutable tag pinned as the #<ref>"
         );
 
         // The source token (the argv tail) is an `https://` URL for phuryn/pm-skills,
@@ -746,8 +747,8 @@ export const planningInitTests = [
         // The command that produced it pinned the clonable tag, not this sha.
         assert.equal(
           result.plan[0].command,
-          `claude plugin marketplace add ${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`,
-          "the clone ref is the tag, decoupled from the recorded provenance sha"
+          `claude plugin marketplace add --scope project ${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`,
+          "the clone ref is the tag, decoupled from the recorded provenance sha (declared at project scope, ADR-010)"
         );
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -805,8 +806,8 @@ export const planningInitTests = [
           // HTTPS clone source — only the marketplace-add source needed to change.
           assert.equal(
             item.command,
-            `claude plugin install ${item.plugin}@pm-skills`,
-            `${item.plugin} install still targets the marketplace by its manifest name @pm-skills`
+            `claude plugin install --scope project ${item.plugin}@pm-skills`,
+            `${item.plugin} install still targets the marketplace by its manifest name @pm-skills (at project scope, ADR-010)`
           );
           // The install token is `<plugin>@pm-skills` — ends with the manifest name.
           assert.match(item.command, new RegExp(`${item.plugin}@pm-skills$`), "install command is <plugin>@pm-skills");

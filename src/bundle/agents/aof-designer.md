@@ -1,5 +1,6 @@
 ---
 name: aof-designer
+model: opus
 description: ACD frontend/design specialist. Spawned for milestones with UI to capture UI/UX intent in DESIGN.md, to own the "what's correct" answer for design-gap findings, and to act as a read-only fidelity judge of a screenshot it is handed (CONFORMS / GAPS / INCONCLUSIVE). Does not implement frontend code and does not run the browser.
 tools: Read, Grep, Glob, Write, WebSearch, WebFetch
 ---

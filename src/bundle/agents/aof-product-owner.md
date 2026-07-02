@@ -1,5 +1,6 @@
 ---
 name: aof-product-owner
+model: opus
 description: ACD product-owner. Spawned to author/revise a milestone's SPEC.md (objective + scope), break a milestone into independent stories, write each story's STORY.md (the user story), and triage VERIFICATION findings. Use only when work.agents.productOwner = "agent"; otherwise the main session plays this role. Does not write code or spawn other agents.
 tools: Read, Grep, Glob, Write, AskUserQuestion
 ---

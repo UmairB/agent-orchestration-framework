@@ -22,6 +22,12 @@ import { serveSetupUi } from "../../src/setup-ui.mjs";
 
 const BOARD_UI = new URL("../../src/board-ui.mjs", import.meta.url);
 const FEEDBACK_COMMAND = new URL("../../src/commands/feedback.mjs", import.meta.url);
+// Milestone 21 EXTENDS this guard to the run/rerun surface (ADR-003 — the explicit
+// EXTEND-not-sibling decision): the board face's run READ route + the rerun
+// affordance's UI wiring. The rerun's launch is the m03 ADR-006 typed-PTY-input
+// path (runAgent → TerminalDock), never a board write/route/shell-out.
+const RERUN_UI = new URL("../../ui/src/board/runs.mjs", import.meta.url);
+const DETAIL_PANEL = new URL("../../ui/src/board/DetailPanel.tsx", import.meta.url);
 
 async function snapshotDir(dir) {
   const snap = new Map();
@@ -119,6 +125,67 @@ export const archTests = [
       }
       // No CLI invocation strings.
       assert.ok(!/aof\s+work\s+(validate|next)/.test(source), "no 'aof work validate/next' CLI invocation");
+    },
+  },
+  {
+    name: "arch/board-write-isolation: the run READ route + the rerun affordance add no new board write and no command-CLI shell-out (milestone 21, ADR-002/ADR-003 — EXTENDED)",
+    async run() {
+      // (a) The run READ route LANDED on the board face (presence — the route
+      // half; RED until story 00 wires it, R5 "assert what should exist").
+      const board = stripComments(await readFile(BOARD_UI, "utf8"));
+      assert.ok(
+        /pathname\s*===\s*["']\/api\/work\/run-status["']/.test(board),
+        "board-ui.mjs serves the additive GET /api/work/run-status read route"
+      );
+      // (b) …and it remains a READ. The board face introduces NO new write call
+      // site and NO command-CLI shell-out even with the run route present
+      // (whole-surface negative — the existing assertions re-asserted with the new
+      // route in scope).
+      for (const verb of ["writeFile", "appendFile"]) {
+        assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(board), `the run route adds no ${verb}( to board-ui.mjs`);
+      }
+      assert.ok(!/child_process/.test(board), "the run route adds no child_process import to board-ui.mjs");
+      for (const verb of ["spawn", "spawnSync", "exec", "execSync", "execFile"]) {
+        assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(board), `the run route adds no ${verb}( shell-out to board-ui.mjs`);
+      }
+      // (c) The rerun is NOT a board WRITE route: run-start/run-complete/run-retry
+      // are never served on /api/work (they reach the agent via the terminal
+      // launch, 21/ADR-002), and the board's only POST stays feedback.
+      for (const op of ["run-start", "run-complete", "run-retry"]) {
+        assert.ok(
+          !new RegExp(`pathname\\s*===\\s*["']/api/work/${op}["']`).test(board),
+          `board-ui.mjs serves NO /api/work/${op} route (the rerun is a terminal launch, not a board write)`
+        );
+      }
+      const posts = [...board.matchAll(/method\s*===\s*["']POST["']/g)];
+      assert.ok(posts.length <= 1, "the board face has at most ONE POST route (the feedback write) — the rerun adds none");
+
+      // (d) The rerun UI surface (the pure verb module + the DetailPanel affordance)
+      // reaches the launch via the runAgent → TerminalDock path and adds NO new
+      // write and NO command-CLI shell-out: no fs write verb, no child_process /
+      // spawn / exec, and no board run-* write route POSTed from the client. The
+      // verb is delivered as typed PTY input, never executed by the board server.
+      const rerunUi = stripComments(await readFile(RERUN_UI, "utf8"));
+      const panel = stripComments(await readFile(DETAIL_PANEL, "utf8"));
+      for (const [label, source] of [["runs.mjs", rerunUi], ["DetailPanel.tsx", panel]]) {
+        for (const verb of ["writeFile", "appendFile"]) {
+          assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(source), `${label} performs no ${verb}( — the board writes nothing for the rerun`);
+        }
+        assert.ok(!/child_process/.test(source), `${label} imports no child_process for the rerun`);
+        for (const verb of ["spawn", "spawnSync", "exec", "execSync", "execFile"]) {
+          assert.ok(!new RegExp(`\\b${verb}\\s*\\(`).test(source), `${label} performs no ${verb}( shell-out for the rerun`);
+        }
+        // No client-side POST to a board run-* route (that would make the board
+        // server mint the run — the read-mostly violation 21/ADR-002 forbids).
+        assert.ok(
+          !/\/api\/work\/run-(start|complete|retry)/.test(source),
+          `${label} posts to NO /api/work/run-* board route (the rerun is a typed-PTY-input terminal launch)`
+        );
+      }
+      // The rerun affordance reuses the EXISTING launch path (a new caller, not a
+      // new mechanism): the DetailPanel hands the verb to onRunAgent (the m03
+      // runAgent → TerminalDock launch), never to a fresh transport.
+      assert.ok(/onRunAgent\s*\(/.test(panel), "the rerun hands its verb to the existing onRunAgent launch path (no new mechanism)");
     },
   },
   {

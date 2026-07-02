@@ -14,7 +14,16 @@ import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { findProjectConfig } from "./workspace.mjs";
-import { readJson } from "./fs.mjs";
+import { readJson, writeText } from "./fs.mjs";
+
+// Work errors carry `.code`/`.status` (the command error contract) so a face maps
+// them uniformly — matching src/commands/errors.mjs.
+function workError(message, code, status = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
 
 // `uat` is a top-level acceptance session: like a milestone it sits in the
 // stream, carries `depends`, and gates downstream work — but it groups no
@@ -154,6 +163,58 @@ async function readMeta(item) {
 }
 
 const asList = (value) => (Array.isArray(value) ? value : value == null || value === "" ? [] : [value]);
+
+// ------------------------------------------------------- status rollback ----
+
+// The legal rollback TARGETS (20/ADR-005): from in-progress, a transient reclaim
+// rolls to not-started (the PRD's `in_progress → todo` map — re-offered by next); a
+// genuine blocker rolls to blocked. Rolling FORWARD (→ in-review / → done) is the one
+// move a failure/blocker rollback must never make (it would falsely accept un-done work).
+const ROLLBACK_TARGETS = new Set(["not-started", "blocked"]);
+
+// The FIRST programmatic item-frontmatter writer in the codebase (20/ADR-005) —
+// work.mjs exported only READERS before this. A bounded status rollback the failed-run
+// (work:run-complete --outcome failed) and reclaim (run-store:reclaimStaleRuns) paths
+// CALL to leave the stream honest. Bounded HARD: it sets status ONLY from `in-progress`
+// to not-started|blocked, NEVER to done/in-review; it touches ONLY the frontmatter
+// `status` field (the record-doc body and every other frontmatter key — including
+// `updated` — stay byte-identical); and it writes via the atomic fs.mjs:writeText
+// temp+rename seam. It lives HERE, not in run-store — the 19/ADR-002 write-scope guard
+// forbids the store writing any frontmatter; work.mjs is the item-frontmatter authority.
+// `now` is accepted for caller-API symmetry but deliberately NOT written (bumping
+// `updated` would violate the "only the status field changes" bound).
+export async function rollbackItemStatus(item, toStatus, { now } = {}) { // eslint-disable-line no-unused-vars
+  if (!ROLLBACK_TARGETS.has(toStatus)) {
+    throw workError(`status rollback target must be not-started|blocked (got "${toStatus}")`, "forbidden-rollback", 400);
+  }
+  const doc = recordDoc(item);
+  if (!doc) {
+    throw workError(`item ${item.ref} has no record doc to roll back`, "rollback-not-applicable", 409);
+  }
+  const docPath = path.join(item.dir, doc);
+  let text;
+  try {
+    text = await readFile(docPath, "utf8");
+  } catch {
+    throw workError(`item ${item.ref} record doc is unreadable`, "rollback-not-applicable", 409);
+  }
+  const block = text.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
+  if (!block) {
+    throw workError(`item ${item.ref} record doc has no frontmatter`, "rollback-not-applicable", 409);
+  }
+  // Rollback fires ONLY from in-progress — the narrow reclaim/failure seam, not a
+  // general status mutator. Any other from-state is left byte-unchanged.
+  const meta = parseFrontmatter(text);
+  if (meta.status !== "in-progress") {
+    throw workError(`status rollback applies only from in-progress (item is "${meta.status ?? "none"}")`, "rollback-not-applicable", 409);
+  }
+  // Replace ONLY the status line WITHIN the frontmatter block — the body and every
+  // other key are reassembled byte-for-byte around it.
+  const rewrittenFrontmatter = block[2].replace(/^(status:[ \t]*).*$/m, `$1${toStatus}`);
+  const updated = block[1] + rewrittenFrontmatter + block[3] + text.slice(block[0].length);
+  await writeText(docPath, updated);
+  return { ref: item.ref, status: toStatus };
+}
 
 // ----------------------------------------------------------------- find ----
 

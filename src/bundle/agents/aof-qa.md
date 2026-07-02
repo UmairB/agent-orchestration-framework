@@ -1,5 +1,6 @@
 ---
 name: aof-qa
+model: opus
 description: ACD QA. Spawned to design test cases (the Examples/case matrix for task features), perform BEHAVIOURAL (black-box) review, run the Playwright browser harness + own the toHaveScreenshot visual-regression and the optional axe-core-via-Playwright a11y lane, and broker @uat human acceptance — recording sign-off and findings in the milestone VERIFICATION.md. Does NOT do white-box/technical verification (the developer owns @manual) and does not edit production code.
 tools: Read, Grep, Glob, Bash, Write
 ---

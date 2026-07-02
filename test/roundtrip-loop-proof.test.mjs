@@ -18,7 +18,7 @@
 // (`aof work validate --json`) for exit-code fidelity. Black-box: the result is a
 // function of files-on-disk, not validator/traversal internals.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { readFile, writeFile, rename, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,7 +101,7 @@ A throwaway driver the proof adds to perturb the depends graph.
 // Run the REAL CLI `aof work validate --json` against the seeded repo (cwd =
 // repo root; the repo has no config, so workDir defaults to <repo>/wiki/work).
 function runValidate(repo, args = []) {
-  const result = spawnSync(process.execPath, [cliPath, "work", "validate", ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, "work", "validate", ...args], {
     cwd: repo.dir,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

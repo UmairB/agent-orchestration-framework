@@ -19,7 +19,7 @@
 //        two groups both contribute / de-dupe / distinct-by-path / injected clock /
 //        scope-as-filter
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, utimes } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -123,7 +123,7 @@ async function seedDuplicate(workDir) {
 const ctxFor = async (repo) => ({ workspace: await loadWorkspace(repo) });
 
 function runCli(root, args) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1" },

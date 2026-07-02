@@ -25,9 +25,15 @@ import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
 // work command — work:doctor, the health lane — into the SAME registry; it is a
 // sanctioned extension of the work:* namespace (like graph:* is for the broader
 // registry), tracked here so the "exactly these work commands" contract stays
-// honest as the namespace grows.
+// honest as the namespace grows. Milestone 19 (ADR-003) registers the three
+// work:run-* run-lifecycle commands into the SAME core — another sanctioned
+// in-namespace extension (the run lifecycle driven through the one registry door);
+// only their CLI face is wired here, the board face is milestone 21.
 const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:next", "work:feedback"];
-const WORK_IDS = [...SIX_IDS, "work:doctor"];
+// Milestone 20 (ADR-003) registers a 4th run verb — work:run-retry, the resume-vs-fresh
+// command — into the SAME core; another sanctioned in-namespace extension (its CLI face
+// is wired; the board face is milestone 21, the BOARD_DEFERRED carve-out).
+const WORK_IDS = [...SIX_IDS, "work:doctor", "work:run-start", "work:run-complete", "work:run-status", "work:run-retry"];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------
 

@@ -49,7 +49,7 @@ export function attachTerminalWebSocket(server, options = {}) {
   const which = options.which;
   // Persist running sessions to .aof/terminal-sessions.json? Default OFF so the
   // test suite's serveSetupUi servers never touch .aof (no temp-dir teardown
-  // race); the real `aof work board` (serveBoard) turns it ON.
+  // race); the real `aof work ui` (serveBoard) turns it ON.
   const recordSessions = options.recordSessions ?? false;
 
   const wss = new WebSocketServer({ noServer: true });

@@ -157,3 +157,42 @@ export function renderBundleOutputs(bundle, options = {}) {
   const templateOutputs = renderBundleTemplateOutputs(bundle, options);
   return [...resourceOutputs, ...templateOutputs];
 }
+
+// --- per-role model override map (story 30) ---------------------------------
+// The single config path a project's per-role model override lives under. Both
+// the config-aware render pass (below) and the config-inspect validator read
+// THIS constant, so the read/merge/validate surfaces never drift (retrospective
+// R2/m06: two surfaces on the same config subtree share one accessor). The map
+// is `role -> model string`; keys must be one of the 8 frozen ACD roles and are
+// validated at `aof project validate` time — the render pass here is permissive
+// and applies whatever role→model pairs it is handed.
+export const AGENT_MODEL_MAP_PATH = "work.agents.models";
+
+// Extract the raw per-role model override object from a project config, or an
+// empty object when `work.agents.models` is absent / not a plain object. This is
+// the ONE accessor both render and validation call — do not re-walk the path.
+export function agentModelMap(projectConfig) {
+  const map = projectConfig?.work?.agents?.models;
+  if (!map || typeof map !== "object" || Array.isArray(map)) return {};
+  return map;
+}
+
+// --- config-aware bundle render (story 30, task 02a) ------------------------
+// renderBundleOutputs is bundle-only: it ignores the project's aof.config.json,
+// so the shipped default (task 01) always wins. This variant layers a project's
+// `work.agents.models` per-role override ONTO the matching bundle resource's
+// `.model` BEFORE the (unchanged) render engine runs, so the override — not the
+// shipped default — drives the rendered `model:` line. An un-overridden role is
+// passed through untouched and keeps its shipped default. A degenerate override
+// equal to the default simply sets the same value, so the render still emits a
+// single clean `model:` line (renderResource emits exactly one). The override
+// value is rendered VERBATIM (an "inherit" or a pinned id is not reinterpreted).
+export function renderBundleOutputsWithConfig(bundle, projectConfig, options = {}) {
+  const overrides = agentModelMap(projectConfig);
+  const resources = bundle.resources.map((resource) => {
+    if (resource.kind !== "agent") return resource;
+    if (!Object.prototype.hasOwnProperty.call(overrides, resource.id)) return resource;
+    return { ...resource, model: overrides[resource.id] };
+  });
+  return renderBundleOutputs({ ...bundle, resources }, options);
+}

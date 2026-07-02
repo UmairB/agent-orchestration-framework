@@ -30,7 +30,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSyncHardened } from "../support/cli-spawn.mjs";
 import { fileURLToPath } from "node:url";
 import { listItems, findWork, nextWork, validateWork } from "../../src/work.mjs";
 import { materializeImport } from "../../src/import/materialize.mjs";
@@ -73,7 +73,7 @@ async function tempProjectWithImport() {
 }
 
 function git(cwd, args) {
-  return spawnSync("git", args, { cwd, encoding: "utf8", shell: process.platform === "win32" });
+  return spawnSyncHardened("git", args, { cwd, encoding: "utf8", shell: process.platform === "win32" });
 }
 
 export const archTests = [

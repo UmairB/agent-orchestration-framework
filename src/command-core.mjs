@@ -54,6 +54,14 @@ import { projectProvisionCommand } from "./commands/project-provision.mjs";
 // SAME core; 13/ADR-002). It reads a source repo READ-ONLY and materializes a
 // recovered milestone as a frozen artifact pair in the .aof/ import store.
 import { importMilestoneCommand } from "./commands/import-milestone.mjs";
+// story 29 — migrate-command (migrate:folder registers into the SAME core). The
+// CONTRAST with import:milestone: import SUMMARISES a foreign folder into a
+// read-only AOF.md digest; migrate CONVERTS it INTO a managed milestone under
+// work.dir (refinable/continuable/verifiable). It reuses import's read-only
+// source-access + recovery seam, then SCAFFOLDS a native managed milestone at the
+// next free slot. Takes the `migrate:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but inherits the generic command-cli bijection.
+import { migrateFolderCommand } from "./commands/migrate-folder.mjs";
 // milestone 17 — Notion work-board sync (notion:sync-work registers into the SAME
 // core; 17/ADR-002). The PO's terminal command that pushes a milestone + its
 // stories to a Notion board; opt-in via `work.integrations.notion` (absent ⇒ an
@@ -67,6 +75,85 @@ import { notionSyncWorkCommand } from "./commands/notion-sync-work.mjs";
 // `notion:*` prefix, so EXCLUDED from the /api/work bijection but inheriting the
 // generic command-cli bijection (08/ADR-004).
 import { notionAssociateCommand } from "./commands/notion-associate.mjs";
+// milestone 19 — work-run-lifecycle (story 01: run-commands — the three work:run-*
+// commands register into the SAME core; ADR-003). Each is a thin wrapper over
+// story 00's src/run-store.mjs (the next.mjs-over-nextWork idiom): run-start /
+// run-complete are WRITES (resolveItemExact — a typo never writes to the wrong
+// item), run-status is the READ (resolveItem slug-fallback tolerated). Additive,
+// exactly the 08 move — the registry-derived bijection auto-covers their presence.
+import { runStartCommand } from "./commands/run-start.mjs";
+import { runCompleteCommand } from "./commands/run-complete.mjs";
+import { runStatusCommand } from "./commands/run-status.mjs";
+// milestone 20 — autonomous-run-resilience (story 01: resilience-commands — work:run-retry
+// registers into the SAME core; ADR-003). A thin WRITE wrapper over story 00's retryRun:
+// it RESUMES a retryable failed run's lineage (carries the prior sessionId, attempt + 1,
+// retryOf), the resume-vs-fresh verb distinction (run-start stays fresh). Additive (the
+// m09–m19 door); it takes the precedented BOARD_DEFERRED carve-out (board = m21) but
+// inherits the generic command-cli bijection (08/ADR-004).
+import { runRetryCommand } from "./commands/run-retry.mjs";
+// milestone 22 — mesh-foundation (story 01: node-identity — mesh:identity / mesh:status
+// register into the SAME core; ADR-001/003). Thin over story 00's src/mesh-store.mjs
+// (the partition seam + opaque per-node persist/read) and story 01's
+// src/node-identity.mjs (id derivation + descriptor assembly): mesh:identity publishes/
+// reads THIS node's record, mesh:status lists the synced roster. Additive — exactly the
+// 08 move (one import + one COMMANDS entry each). They take the `mesh:` prefix, so they
+// are EXCLUDED from the `work:`-filtered bijection but inherit the NEW registry-derived
+// acd-mesh-command-cli-bijection gate (story 00, fitness #3).
+import { meshIdentityCommand, meshStatusCommand } from "./commands/mesh-identity.mjs";
+// milestone 22 — mesh-foundation (story 02: git-sync engine — mesh:sync registers into
+// the SAME core; ADR-004). Thin over story 02's src/mesh-sync.mjs syncMesh (the
+// PAYLOAD-AGNOSTIC git transport): it stages + commits this node's records under the
+// partition root, pulls peers', pushes — moving FILES, never parsing record content.
+// The one-shot testable transport unit; the background loop is a thin timer over it.
+// Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is
+// EXCLUDED from the `work:`-filtered bijection but inherits the acd-mesh-command-cli-
+// bijection gate (now covering identity+status+sync).
+import { meshSyncCommand } from "./commands/mesh-sync.mjs";
+// milestone 23 — control-node-relay (story 00: presence-heartbeat — mesh:heartbeat
+// registers into the SAME core; ADR-002). Thin over story 00's src/mesh-presence.mjs
+// (the presence-record assembly + the activeRuns read of the run records + the atomic
+// publish via the m22-reserved presenceRecordPath); it publishes THIS node's presence
+// git-only (no relay — story 02 adds the push). mesh:status is EXTENDED in place
+// (mesh-identity.mjs) to render presence + the stale flag. Additive — one import + one
+// COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat).
+import { meshHeartbeatCommand } from "./commands/mesh-heartbeat.mjs";
+// milestone 23 — control-node-relay (story 01: thin relay — mesh:relay registers into
+// the SAME core; ADR-001). Thin over story 01's src/mesh-relay.mjs: `aof mesh relay` is
+// the relay-mode serve verb, but the registered run is the NON-BLOCKING status probe
+// (the configured control-node + url + nominated-or-not) so the bijection gate runs clean
+// + returns (the actual long-lived serve is serveRelay/relayMode, the launcher's job).
+// The relay carries OPAQUE envelopes and imports the record side NOTHING (file-disjoint
+// from story 00). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
+// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+relay).
+import { meshRelayCommand } from "./commands/mesh-relay.mjs";
+// milestone 24 — group-enrollment (story 01: device-code enrollment — mesh:invite /
+// mesh:join register into the SAME core; ADR-002/003/005). mesh:invite is the
+// control-node-guarded MINT (a 6-digit code, recorded HASHED as a pending invite
+// through story 00's writeRegistry seam, the plaintext returned ONCE in the result);
+// mesh:join PRESENTS a code to the control node's device-flow HTTP endpoint (the
+// POST /enroll route on serveRelay's ONE http server), stores the issued credential at
+// config.mesh.credential (read-merge-write of the free-form mesh subtree — the
+// resolveInstallSalt precedent), and provisions the granted git remote via the
+// shell-less spawnSync("git", [ … ]) argv idiom (13/ADR-002). Additive — one import +
+// one COMMANDS entry each. They take the `mesh:` prefix, so they are EXCLUDED from the
+// `work:`-filtered bijection but RIDE the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat+relay+invite+join).
+import { meshInviteCommand } from "./commands/mesh-invite.mjs";
+import { meshJoinCommand } from "./commands/mesh-join.mjs";
+// milestone 24 — group-enrollment (story 02: the enforceable trust boundary — ADR-004).
+// mesh:revoke is the control-node-guarded REVOKE: it removes the node from the registry
+// roster + appends an explicit-deny revocation { nodeId, revokedAt, reason } through
+// story 00's writeRegistry seam (ONE atomic write), and de-provisions git-remote on the
+// control node's OWN clone via the shell-less spawnSync("git", ["remote","remove",…])
+// argv idiom (13/ADR-002). After it the relay auth-gate (in mesh-relay.mjs's upgrade
+// handler) rejects the revoked node's credential on its next connect (T6). Additive —
+// one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from
+// the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
+// gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
+import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -91,8 +178,21 @@ const COMMANDS = [
   graphImpactCommand,
   projectProvisionCommand,
   importMilestoneCommand,
+  migrateFolderCommand,
   notionSyncWorkCommand,
   notionAssociateCommand,
+  runStartCommand,
+  runCompleteCommand,
+  runStatusCommand,
+  runRetryCommand,
+  meshIdentityCommand,
+  meshStatusCommand,
+  meshSyncCommand,
+  meshHeartbeatCommand,
+  meshRelayCommand,
+  meshInviteCommand,
+  meshJoinCommand,
+  meshRevokeCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

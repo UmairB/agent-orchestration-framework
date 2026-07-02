@@ -16,6 +16,11 @@ import { StatusRing, statusMeta, LANE_ORDER } from "./status";
 // The data source is the flat /api/work/list contract (ADR-002) via api.ts.
 type View = "overview" | "board";
 
+// The lane-card in-flight-dot re-probe cadence (DESIGN documented-default 3 —
+// observability is poll/refresh), matching the RUNS-tab poll so the active-run
+// signal stays live everywhere it is surfaced.
+const RUNNING_PROBE_MS = 5000;
+
 export function Board() {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +38,10 @@ export function Board() {
   const [dockCommand, setDockCommand] = useState<string | null>(null);
   // Per-gate "waiting on" labels (DESIGN VIEW 1, preferred-if-cheap from /next).
   const [gateWaiting, setGateWaiting] = useState<Record<string, string[]>>({});
+  // Refs with a live `running` run — drives the lane-card in-flight pulse dot
+  // (DESIGN surface 2b). Probed read-only from /api/work/run-status, scoped to the
+  // focused board so the active runs are visible from the board itself.
+  const [runningRefs, setRunningRefs] = useState<Set<string>>(() => new Set());
 
   const load = useCallback(async ({ silent = false } = {}) => {
     // A SILENT refresh (the top-bar ⟳ sync) updates the stream IN PLACE — it must
@@ -103,6 +112,48 @@ export function Board() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [derived.uat.map((u) => u.ref).join(",")]);
+
+  // Lane-card in-flight dots (DESIGN surface 2b): probe run-status for the items
+  // shown as lane cards in the current scope and collect those with a `running`
+  // run. Read-only (run-status changes no files) and bounded to the focused
+  // scope; failures degrade to an omitted dot (mirrors the gateWaiting loop). The
+  // probe RE-POLLS on the observability cadence (DESIGN documented-default 3 —
+  // observability is poll/refresh) so a run that starts/finishes lights/clears its
+  // dot live, in parity with the RUNS-tab poll, with NO full board-list reload (the
+  // read-mostly list stays sync-gated; only this active-run signal re-fetches).
+  useEffect(() => {
+    if (view !== "board") return;
+    const refs =
+      focus === "all"
+        ? derived.milestones.map((m) => m.item.ref)
+        : derived.milestones.find((m) => m.num === focus)?.stories.map((s) => s.ref) ?? [];
+    if (refs.length === 0) {
+      setRunningRefs(new Set());
+      return;
+    }
+    let cancelled = false;
+    const probe = async () => {
+      const live = new Set<string>();
+      await Promise.all(
+        refs.map(async (ref) => {
+          try {
+            const { runs } = await workApi.runStatus(ref);
+            if (runs.some((run) => run.state === "running")) live.add(ref);
+          } catch {
+            /* omit on failure */
+          }
+        })
+      );
+      if (!cancelled) setRunningRefs(live);
+    };
+    void probe();
+    const poll = setInterval(() => void probe(), RUNNING_PROBE_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, focus, items]);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.ref === selectedRef) ?? null,
@@ -243,6 +294,7 @@ export function Board() {
                 derived={derived}
                 focus={focus}
                 selectedRef={selectedRef}
+                runningRefs={runningRefs}
                 switchOpen={switchOpen}
                 onToggleSwitch={() => setSwitchOpen((v) => !v)}
                 onCloseSwitch={() => setSwitchOpen(false)}

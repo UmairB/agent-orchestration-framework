@@ -31,7 +31,7 @@
 // POSITIVE exclusion). The local backend (memory.backend = "local") is driven so
 // reindex/recall actually run. Feature 02 drives the CLI (spawnSync) like story 00.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCliSync } from "./support/cli-spawn.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
@@ -202,7 +202,7 @@ const fromImportStore = (record) => isImportRecord(record);
 // --- CLI driver (feature 02) -----------------------------------------------------
 
 function runCli(root, args, env = {}) {
-  const result = spawnSync(process.execPath, [cliPath, ...args], {
+  const result = spawnCliSync(process.execPath, [cliPath, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NODE_NO_WARNINGS: "1", ...env },

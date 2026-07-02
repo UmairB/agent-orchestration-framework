@@ -45,6 +45,17 @@
 //     a manual fallback, never emit the absent Codex plugin-install verb. Guarded
 //     by acd-planning-no-codex-install.
 //   ADR-006: idempotent via a manifest guard with --force (mirrors `work init`).
+//   ADR-010: the claude marketplace/plugin declarations default to PROJECT scope
+//     (`--scope project`) so the bought planner travels with the repo's
+//     `.claude/settings.json`, NOT the user's global `~/.claude/settings.json`
+//     (the runtime CLI itself defaults to `--scope user`, which is the wrong default
+//     for a per-project planner). Overridable via
+//     `aof planning init --scope <user|project|local>`. `--scope` is a
+//     claude-settings concept, so the flag is emitted ONLY on claude commands; the
+//     codex marketplace-add carries no scope flag (codex registration is its own
+//     mechanism), while the codex MANUAL fallback (`claude plugin install …`) DOES
+//     carry `--scope <scope>` since the user runs it through claude. Guarded by
+//     acd-planning-install-commands.
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { readLock, writeLock } from "./lock.mjs";
@@ -78,6 +89,11 @@ export const OPTIONAL_PLUGINS = ["pm-market-research"];
 
 const VALID_RUNTIMES = ["claude", "codex"];
 const SHA_RE = /^[0-9a-f]{40}$/;
+// ADR-010: where the claude marketplace/plugin declarations are written. Defaults to
+// `project` (the repo's .claude/settings.json) so the planner travels with the repo,
+// never silently landing in the user's global settings (the runtime CLI's own default).
+export const VALID_SCOPES = ["user", "project", "local"];
+export const DEFAULT_SCOPE = "project";
 
 // The unified project lock path (ADR-009). planning init reads/merge-writes ONLY
 // the `planning` section of this one file — it is the SAME lock work init/update
@@ -96,11 +112,22 @@ export function recommendedPlugins({ withOptional = false } = {}) {
 // `install`). For codex: ONLY the marketplace add — zero per-plugin install items,
 // because that verb does not exist on Codex (ADR-004). The absent Codex per-plugin
 // verb is never constructed here (enforced by acd-planning-no-codex-install).
-export function planPlanningInstall({ runtime = "claude", sha, withOptional = false } = {}) {
+export function planPlanningInstall({ runtime = "claude", sha, withOptional = false, scope = DEFAULT_SCOPE } = {}) {
   if (!VALID_RUNTIMES.includes(runtime)) {
     throw new Error(`Unsupported runtime "${runtime}". Expected one of: ${VALID_RUNTIMES.join(", ")}.`);
   }
+  if (!VALID_SCOPES.includes(scope)) {
+    throw new Error(`Unsupported scope "${scope}". Expected one of: ${VALID_SCOPES.join(", ")}.`);
+  }
   const plan = [];
+
+  // ADR-010: emit `--scope <scope>` (default `project`) so the declarations land in
+  // the repo's .claude/settings.json, not the user's global settings. The flag is a
+  // claude-settings concept, so it rides ONLY claude commands; codex marketplace-add
+  // stays unscoped (its registration is a different mechanism). Placed right after
+  // the verb (before the positional) so the `<url>`/`<plugin>@pm-skills` token stays
+  // last — keeping the marketplace source as the argv tail for the clone-smoke guard.
+  const scopeArgs = runtime === "claude" ? ["--scope", scope] : [];
 
   // ADR-007: source is the HTTPS git URL (forces an HTTPS clone), NOT the
   // `owner/repo@<ref>` shorthand (SSH clone, F1).
@@ -109,7 +136,7 @@ export function planPlanningInstall({ runtime = "claude", sha, withOptional = fa
   // runs `git clone --branch <ref>`, which cannot resolve a bare commit sha (F2) —
   // only a clonable branch/tag name. The `sha` param is the recorded provenance
   // value only (ADR-002/003); it no longer feeds the command.
-  const marketplaceArgv = [runtime, "plugin", "marketplace", "add", `${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`];
+  const marketplaceArgv = [runtime, "plugin", "marketplace", "add", ...scopeArgs, `${MARKETPLACE_GIT_URL}#${MARKETPLACE_REF}`];
   plan.push({
     runtime,
     kind: "marketplace",
@@ -122,7 +149,7 @@ export function planPlanningInstall({ runtime = "claude", sha, withOptional = fa
   // the marketplace registration. Only Claude scripts the installs.
   if (runtime === "claude") {
     for (const plugin of recommendedPlugins({ withOptional })) {
-      const argv = [runtime, "plugin", "install", `${plugin}@${MARKETPLACE_NAME}`];
+      const argv = [runtime, "plugin", "install", ...scopeArgs, `${plugin}@${MARKETPLACE_NAME}`];
       plan.push({
         runtime,
         kind: "install",
@@ -139,9 +166,9 @@ export function planPlanningInstall({ runtime = "claude", sha, withOptional = fa
 // The documented manual fallback for Codex (ADR-004): the exact `claude plugin
 // install <plugin>@pm-skills` lines the user must run to enable the plugins,
 // since Codex cannot script them. Returned so the CLI/tests can assert + print it.
-export function codexManualFallback({ withOptional = false } = {}) {
+export function codexManualFallback({ withOptional = false, scope = DEFAULT_SCOPE } = {}) {
   return recommendedPlugins({ withOptional }).map(
-    (plugin) => `claude plugin install ${plugin}@${MARKETPLACE_NAME}`
+    (plugin) => `claude plugin install --scope ${scope} ${plugin}@${MARKETPLACE_NAME}`
   );
 }
 
@@ -299,6 +326,11 @@ export async function initPlanning(options = {}) {
   if (!VALID_RUNTIMES.includes(runtime)) {
     throw new Error(`Unsupported runtime "${runtime}". Expected one of: ${VALID_RUNTIMES.join(", ")}.`);
   }
+  // ADR-010: default to project scope (the repo's .claude/settings.json), overridable.
+  const scope = options.scope ?? DEFAULT_SCOPE;
+  if (!VALID_SCOPES.includes(scope)) {
+    throw new Error(`Unsupported scope "${scope}". Expected one of: ${VALID_SCOPES.join(", ")}.`);
+  }
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
   const withOptional = Boolean(options.withOptional);
@@ -341,7 +373,7 @@ export async function initPlanning(options = {}) {
   // pins the statically-known release TAG (`#v2.0.0`), not the sha, so the dry-run
   // preview shows the real, clonable tag with no network — `resolved` is the
   // provenance value only (a placeholder on a dry-run with no injected sha).
-  const plan = planPlanningInstall({ runtime, sha: resolved, withOptional });
+  const plan = planPlanningInstall({ runtime, sha: resolved, withOptional, scope });
   const planCommands = plan.map((item) => item.command);
 
   if (dryRun) {
@@ -353,7 +385,7 @@ export async function initPlanning(options = {}) {
       log(`note: the marketplace clones the immutable tag \`${MARKETPLACE_REF}\`; a dry-run resolves no commit, but the real run records the exact pm-skills commit that tag points at (via \`git ls-remote refs/tags/${MARKETPLACE_REF}\`) in the provenance manifest.`);
     }
 
-    const manualFallback = runtime === "codex" ? codexManualFallback({ withOptional }) : [];
+    const manualFallback = runtime === "codex" ? codexManualFallback({ withOptional, scope }) : [];
     if (runtime === "codex") {
       log("codex degrade: the marketplace would be registered, but plugins are NOT installed (no scriptable Codex install verb).");
       log("manual fallback — run these to enable the plugins:");
