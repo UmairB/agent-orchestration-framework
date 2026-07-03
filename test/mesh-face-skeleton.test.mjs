@@ -178,7 +178,7 @@ export const meshFaceSkeletonTests = [
         // no mesh record file was created, modified, or deleted on disk
         const after = await snapshotFiles(root);
         assert.deepEqual(after, before, "no file was created or deleted on disk");
-        assert.ok(!after.some((f) => f.split(path.sep).includes(".mesh")), "no .mesh file was created");
+        assert.ok(!after.some((f) => { const segs = f.split(path.sep); return segs.includes(".aof") && segs.includes("mesh"); }), "no mesh file was created (nothing under .aof/mesh/)");
         // no item record doc was edited
         assert.equal(await readFile(path.join(root, "wiki", "work", "03_milestone_board", "SPEC.md"), "utf8"), specBefore, "the milestone SPEC.md was not edited");
         assert.equal(await readFile(path.join(root, "wiki", "work", "03_milestone_board", "stories", "01_story_board-ui", "STORY.md"), "utf8"), storyBefore, "the story STORY.md was not edited");

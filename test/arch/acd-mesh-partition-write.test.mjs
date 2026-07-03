@@ -20,12 +20,14 @@ export const archTests = [
       const source = await readFile(MESH_STORE, "utf8");
       const code = stripComments(source);
 
-      // meshDir is the SINGLE partition-root seam — defined exactly once, the only
-      // place workspace.workDir is joined to the partition root.
+      // meshDir is the SINGLE partition-root seam — defined exactly once, joining the
+      // .aof config home (via aofHome) to the "mesh" leaf. (Location moved off workDir
+      // to .aof/mesh at 28/verify — mesh is aof config/runtime state, git-tracked
+      // beside aof's config/lock, superseding 22/ADR-002+003's work-stream anchor.)
       const meshDirDefs = [...code.matchAll(/function\s+meshDir\s*\(/g)];
       assert.equal(meshDirDefs.length, 1, "meshDir is defined exactly once (the single partition-root seam)");
-      assert.ok(/function\s+meshDir[\s\S]*?path\.join\s*\(\s*workspace\.workDir\s*,/.test(code), "meshDir joins workspace.workDir (the git-tracked partition root, not a .aof/ sidecar)");
-      assert.ok(!/\.aof/.test(code), "the partition root is NOT a .aof/ sidecar (it is git-tracked in the work stream)");
+      assert.ok(/function\s+meshDir[\s\S]*?path\.join\s*\(\s*aofHome\s*\(\s*workspace\s*\)\s*,\s*["']mesh["']/.test(code), "meshDir joins aofHome(workspace) to the \"mesh\" leaf (the .aof-anchored partition root)");
+      assert.ok(/function\s+aofHome[\s\S]*?["']\.aof["']/.test(code), "aofHome resolves the .aof config home (the git-tracked mesh anchor, beside aof's config/lock)");
 
       // nodeRecordPath is the ONE node-record path builder, built FROM meshDir.
       const recordPathDefs = [...code.matchAll(/function\s+nodeRecordPath\s*\(/g)];

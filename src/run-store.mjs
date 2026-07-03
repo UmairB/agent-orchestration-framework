@@ -7,15 +7,20 @@
 //
 // A RUN is a first-class, durably-recorded entity distinct from the durable work
 // ITEM (the PRD "Issue != Task" mechanic). Each run is its OWN JSON file, named by
-// its runId, under the item's runs/ directory (ARCHITECTURE 19/ADR-002):
+// its runId, under the item's runs/ directory (ARCHITECTURE 19/ADR-002; the
+// node-partitioned shape is 26/ADR-001 — the m22-frozen convention made real):
 //
-//   wiki/work/NN_type_slug/runs/<run-id>.json                       — a milestone's runs
+//   wiki/work/NN_type_slug/runs/<run-id>.json                       — a milestone's runs (flat / single-node)
 //   wiki/work/NN…/stories/SS_story_…/runs/<run-id>.json             — a story's runs (its OWN folder)
+//   wiki/work/NN…/runs/<node>/<run-id>.json                         — a node-partitioned run (26/ADR-001)
 //
 // The runs/ log is DERIVED (19/ADR-002): rebuildable (the dir is wholly
-// regenerable), prunable (delete a file ⇒ prune a run), partition-ready (per-run
-// files under a path-built dir, so milestone 26's <node>/ segment slots in as ONE
-// additive edit to runRecordPath, with zero schema/command/face change). Item
+// regenerable), prunable (delete a file ⇒ prune a run), and — as of milestone 26 —
+// node-PARTITIONED: 19's promised <node>/ segment landed as the additive
+// runNodeRecordPath builder, the record's one additive `node` key decides placement
+// (record → path, never path → record on write), and every reader sees the UNION of
+// flat entries + one level of node subdirs. The node id arrives as DATA (a mint
+// option / record key) — this store reads no config and imports no mesh module. Item
 // frontmatter status stays the single source of truth — this store NEVER writes a
 // record doc; every write joins runsDir(item) (the write-scope guard). That guard
 // is why this module references ZERO record-doc filename (SPEC.md/STORY.md/STATE.md/
@@ -53,11 +58,29 @@ export function runsDir(item) {
   return path.join(item.dir, "runs");
 }
 
-// The ONLY run-file path builder — built FROM runsDir so milestone 26's <node>/
-// dimension is a pure additive delta here (join(runsDir(item), node, runId + ".json"))
-// with no change to the schema, the store API, or any face.
+// The ONE run-file LEAF form — the runId stem is assembled in exactly one place so
+// the flat and node-partitioned builders can never diverge on the filename
+// (19/ADR-002's single-seam discipline; acd-run-partition-ready pins one stem site).
+function runFileLeaf(runId) {
+  return runId + ".json";
+}
+
+// The FLAT run-file path builder (19/ADR-002) — the single-node legacy shape,
+// unchanged: a run minted with no node id still lands here, byte-identical to today.
 export function runRecordPath(item, runId) {
-  return path.join(runsDir(item), runId + ".json");
+  return path.join(runsDir(item), runFileLeaf(runId));
+}
+
+// The NODE-PARTITIONED run-file path builder (26/ADR-001 — the m22-frozen convention
+// made real): EXACTLY runRecordPath with one <node>/ segment inserted before the
+// run-id leaf — join(runsDir(item), node, runId + ".json"), byte-identical to the
+// shape mesh-store.mjs froze in milestone 22. The builder's AUTHORITY lives HERE
+// (mesh-store.mjs RE-EXPORTS it — mesh-store imports run-store, so the reverse home
+// would be an import cycle). A PURE builder: it writes nothing by itself; the
+// persist derives placement FROM the record's `node` key (record → path, one
+// direction — never path → record on write).
+export function runNodeRecordPath(item, node, runId) {
+  return path.join(runsDir(item), node, runFileLeaf(runId));
 }
 
 // ----------------------------------------------------- the state machine ----
@@ -121,38 +144,64 @@ function mintRunId(createdAt, seq) {
   return `${compactStamp(createdAt)}-${String(seq).padStart(4, "0")}`;
 }
 
-// How many run files already live under runs/ — the positional seq SEED. Absence
-// tolerant (no runs/ dir ⇒ 0), the same ENOENT→[] discipline work.mjs:readDirSafe uses.
-// The mint path's write-if-absent retry (mintRun) makes the seq collision-safe under
-// concurrency (closing 19/R2b) — this count is only the seed.
+// How many run files already live under runs/ — the positional seq SEED, counted
+// over the UNION of flat entries + one level of node subdirs (26/ADR-001: the seq
+// seed counts the union, so two nodes minting at the same instant get distinct ids
+// even before their trees converge). Absence tolerant (no runs/ dir ⇒ 0; an
+// unreadable subdir counts 0), the same ENOENT→[] discipline work.mjs:readDirSafe
+// uses. The mint path's write-if-absent retry (mintRun) makes the seq
+// collision-safe under concurrency (closing 19/R2b) — this count is only the seed.
 async function countRunFiles(item) {
   let entries = [];
   try {
-    entries = await readdir(runsDir(item));
+    entries = await readdir(runsDir(item), { withFileTypes: true });
   } catch {
     return 0;
   }
-  return entries.filter((name) => name.endsWith(".json")).length;
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      try {
+        const nested = await readdir(path.join(runsDir(item), entry.name));
+        count += nested.filter((name) => name.endsWith(".json")).length;
+      } catch {
+        // An unreadable node subdir counts as empty (absence is benign).
+      }
+      continue;
+    }
+    if (entry.name.endsWith(".json")) count += 1;
+  }
+  return count;
 }
 
 // Persist a record AS-IS through the ATOMIC temp+rename seam (20/ADR-007): pretty
-// JSON, every write under runs/ (the write seam). A kill mid-write leaves the PRIOR
-// file intact (the rename is atomic), never a torn record. The mkdir stays
-// belt-and-braces (writeText also mkdir's its dirname) and is the store's only fs
+// JSON, every write under runs/ (the write seam). PLACEMENT DERIVES FROM THE RECORD
+// (26/ADR-001.3): record.node set ⇒ the node-partitioned runNodeRecordPath; null ⇒
+// the flat legacy runRecordPath — ONE direction (record → path), on EVERY write, so
+// completion / heartbeat / reclaim persist a node-partitioned run back AT its node
+// path, never relocated. A kill mid-write leaves the PRIOR file intact (the rename
+// is atomic), never a torn record. The mkdir stays belt-and-braces (writeText also
+// mkdir's its dirname, covering the <node>/ subdir) and is the store's only fs
 // write-verb call, joining the runs/ seam (the write-scope guard).
 async function persist(item, record) {
   await mkdir(runsDir(item), { recursive: true });
-  await writeText(runRecordPath(item, record.runId), JSON.stringify(record, null, 2));
+  await writeText(
+    record.node ? runNodeRecordPath(item, record.node, record.runId) : runRecordPath(item, record.runId),
+    JSON.stringify(record, null, 2)
+  );
 }
 
-// Build the frozen run-record object literal — EXACTLY these THIRTEEN keys, in this
-// order (20/ADR-001 SUPERSEDES 19/ADR-003's nine-key freeze): the original nine
-// (runId, itemRef, state, attempt, outcome, sessionId, brief, createdAt, updatedAt)
-// UNCHANGED in name/order/meaning, then the four additive resilience keys
-// (failureReason, heartbeatAt, retryOf, reclaimedAt), each scalar, defaulting null.
-// attempt + retryOf carry the retry lineage (20/ADR-003); a fresh start is attempt 1,
-// retryOf null. The brief is persisted OPAQUE/verbatim (never reshaped).
-function buildRecord({ runId, itemRef, sessionId, brief, createdAt, attempt = 1, retryOf = null }) {
+// Build the frozen run-record object literal — EXACTLY these FOURTEEN keys, in this
+// order (26/ADR-001 SUPERSEDES 20/ADR-001's thirteen-key freeze, by the same
+// discipline that freeze used to supersede 19/ADR-003's nine): the prior thirteen —
+// the original nine (runId, itemRef, state, attempt, outcome, sessionId, brief,
+// createdAt, updatedAt) plus the four resilience keys (failureReason, heartbeatAt,
+// retryOf, reclaimedAt) — UNCHANGED in name/order/meaning, then the ONE additive
+// partition-provenance key `node` (string | null, defaulting null): a run read in
+// isolation knows its owner without path archaeology. attempt + retryOf carry the
+// retry lineage (20/ADR-003); a fresh start is attempt 1, retryOf null. The brief is
+// persisted OPAQUE/verbatim (never reshaped).
+function buildRecord({ runId, itemRef, sessionId, brief, createdAt, attempt = 1, retryOf = null, node = null }) {
   return {
     runId,
     itemRef,
@@ -167,13 +216,16 @@ function buildRecord({ runId, itemRef, sessionId, brief, createdAt, attempt = 1,
     heartbeatAt: null,
     retryOf: retryOf ?? null,
     reclaimedAt: null,
+    node: node ?? null,
   };
 }
 
-// Normalise a record read off disk to the frozen thirteen keys, in order — a
-// milestone-19 nine-key record reads forward-compatibly, each missing resilience
-// key as null (20/ADR-001 + 19/ADR-002 "absence is benign"). The original keys are
-// preserved verbatim; the four resilience keys default null when absent.
+// Normalise a record read off disk to the frozen fourteen keys, in order — a
+// milestone-19 nine-key record and a milestone-20 thirteen-key record read
+// forward-compatibly, each missing resilience key — and the missing `node` — as
+// null (26/ADR-001 + 20/ADR-001 + 19/ADR-002 "absence is benign": every generation
+// of record is the SAME record through this one normalization, never a distinct
+// shape). The original keys are preserved verbatim.
 function normalizeRecord(raw) {
   return {
     runId: raw.runId,
@@ -189,6 +241,7 @@ function normalizeRecord(raw) {
     heartbeatAt: raw.heartbeatAt ?? null,
     retryOf: raw.retryOf ?? null,
     reclaimedAt: raw.reclaimedAt ?? null,
+    node: raw.node ?? null,
   };
 }
 
@@ -200,27 +253,32 @@ function normalizeRecord(raw) {
 // collision bumps seq and retries rather than the second mint silently overwriting
 // the first), and the ATOMIC persist (20/ADR-007). attempt/retryOf carry the retry
 // lineage (20/ADR-003); a fresh start passes the defaults (attempt 1, retryOf null).
-async function mintRun(item, { sessionId = null, brief = {}, now, attempt = 1, retryOf = null } = {}) {
-  // Dedup: an item must never have two NON-TERMINAL (queued|running) runs in flight.
-  // A second mint while one exists is rejected duplicate-run, minting nothing — the
-  // anti-loop BACKSTOP the skill leans on, and the producer guard for 19's queued.
+async function mintRun(item, { sessionId = null, brief = {}, now, attempt = 1, retryOf = null, node = null } = {}) {
+  // Dedup: an item must never have two NON-TERMINAL (queued|running) runs in flight —
+  // and readRuns is the UNION read (26/ADR-001.4), so a peer NODE's non-terminal run
+  // blocks a mint exactly like a local one: two nodes' records can never hide a
+  // duplicate from each other. A second mint while one exists is rejected
+  // duplicate-run, minting nothing — the anti-loop BACKSTOP the skill leans on, and
+  // the producer guard for 19's queued.
   const existing = await readRuns(item);
   if (existing.some((run) => run.state === "queued" || run.state === "running")) {
     throw runError("a non-terminal run already exists for this item", "duplicate-run", 409);
   }
 
   const createdAt = now ?? new Date().toISOString();
-  // Collision-safe mint: seed seq from the file count, but if the minted runId file
-  // already exists (an interleaved mint won the race), bump seq and retry so two
-  // mints at the identical instant get DISTINCT ids — never a silent overwrite.
+  // Collision-safe mint: seed seq from the UNION file count, and probe the UNION for
+  // the minted runId (26/ADR-001.4 — runId uniqueness is per-ITEM across ALL node
+  // subdirs): if the id exists ANYWHERE in the union (an interleaved mint — possibly
+  // a peer node's — won the race), bump seq and retry so two mints at the identical
+  // instant get DISTINCT ids — never a silent overwrite, even across partitions.
   let seq = await countRunFiles(item);
   for (;;) {
     const runId = mintRunId(createdAt, seq);
-    if (existsSync(runRecordPath(item, runId))) {
+    if (await findRunPath(item, runId)) {
       seq += 1;
       continue;
     }
-    const record = buildRecord({ runId, itemRef: item.ref, sessionId, brief, createdAt, attempt, retryOf });
+    const record = buildRecord({ runId, itemRef: item.ref, sessionId, brief, createdAt, attempt, retryOf, node });
     await persist(item, record);
     return record;
   }
@@ -229,42 +287,91 @@ async function mintRun(item, { sessionId = null, brief = {}, now, attempt = 1, r
 // Create + persist ONE FRESH run, ALREADY in `running` (19/ADR-001: work:run-start
 // creates-and-begins). attempt 1, retryOf null, sessionId as supplied (or null) —
 // it never carries a prior session (the contrast 20/ADR-003 turns on). Subject to
-// the dedup guard + collision-safe mint.
-export async function startRun(item, { sessionId = null, brief = {}, now } = {}) {
-  return mintRun(item, { sessionId, brief, now });
+// the dedup guard + collision-safe mint. The optional `node` (26/ADR-001) is
+// INJECTED DATA — the COMMAND layer passes config.mesh.nodeId when mesh is
+// configured (story 02's pass-through); the store never reads config, and the
+// no-node mint stays the flat single-node behaviour, byte-identical to today.
+export async function startRun(item, { sessionId = null, brief = {}, now, node = null } = {}) {
+  return mintRun(item, { sessionId, brief, now, node });
 }
 
-// Read an item's runs, NORMALISED to the frozen thirteen keys and ordered ASCENDING
-// by runId (the lexically-sortable id ⇒ creation order). Absence-tolerant: no runs/
-// dir OR an empty dir ⇒ [], never an ENOENT throw (19/ADR-002).
+// Read an item's runs — the UNION of flat entries + ONE level of node subdirs
+// (26/ADR-001.4: one item, one run history, whatever partition each record lives
+// in) — NORMALISED to the frozen fourteen keys and ordered ASCENDING by runId (the
+// lexically-sortable id ⇒ creation order, regardless of directory walk order).
+// Absence-tolerant: no runs/ dir OR an empty dir ⇒ [], never an ENOENT throw
+// (19/ADR-002). The torn-file tolerance is PER ENTRY and spans partitions: a
+// torn/unparseable file (a non-atomic write interrupted mid-flight, an external
+// edit) — flat OR inside a node subdir — is SKIPPED rather than blinding the rest
+// of the union. The runs/ log is derived + rebuildable, so a corrupt record
+// degrades to one MISSING run — the same "absence is benign" discipline as the
+// absent-dir read.
 export async function readRuns(item) {
   let entries = [];
   try {
-    entries = await readdir(runsDir(item));
+    entries = await readdir(runsDir(item), { withFileTypes: true });
   } catch {
     return [];
   }
   const records = [];
-  for (const name of entries) {
-    if (!name.endsWith(".json")) continue;
-    // Tolerate a torn/unparseable run file (a non-atomic write interrupted mid-flight,
-    // an external edit): SKIP it rather than letting one bad file blind the WHOLE item's
-    // history. The runs/ log is derived + rebuildable (19/ADR-002), so a corrupt record
-    // degrades to one MISSING run — the same "absence is benign" discipline as the
-    // absent-dir read above.
+  const readInto = async (filePath) => {
     try {
-      records.push(normalizeRecord(JSON.parse(await readFile(path.join(runsDir(item), name), "utf8"))));
+      records.push(normalizeRecord(JSON.parse(await readFile(filePath, "utf8"))));
     } catch {
+      // Torn-file tolerance: skip the one bad entry, keep the rest of the union.
+    }
+  };
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      // One level of node subdirs — each <sub>/<run-id>.json resolved through THE
+      // builder (runNodeRecordPath), the same normalization + torn-skip as flat.
+      let nested = [];
+      try {
+        nested = await readdir(path.join(runsDir(item), entry.name));
+      } catch {
+        continue;
+      }
+      for (const name of nested) {
+        if (!name.endsWith(".json")) continue;
+        await readInto(runNodeRecordPath(item, entry.name, name.slice(0, -".json".length)));
+      }
       continue;
     }
+    if (!entry.name.endsWith(".json")) continue;
+    await readInto(path.join(runsDir(item), entry.name));
   }
   records.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
   return records;
 }
 
-// Read one run record by runId (the runId is the filename stem), normalised forward.
+// Resolve a runId to its on-disk path across the UNION (26/ADR-001.4): the flat
+// legacy path first, else ONE level of node subdirs. ENOENT-tolerant (an absent
+// runs/ dir resolves null); returns null when the id lives nowhere in the union.
+// Consumers: readRun (so applyTransition/heartbeat/completeRun target a run in ANY
+// partition) and the mint's write-if-absent probe (union-spanning id uniqueness).
+async function findRunPath(item, runId) {
+  const flat = runRecordPath(item, runId);
+  if (existsSync(flat)) return flat;
+  let entries = [];
+  try {
+    entries = await readdir(runsDir(item), { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const nested = runNodeRecordPath(item, entry.name, runId);
+    if (existsSync(nested)) return nested;
+  }
+  return null;
+}
+
+// Read one run record by runId (the runId is the filename stem), resolved across
+// the union, normalised forward. An id found nowhere still reads (and throws) at
+// the flat path — the pre-partition ENOENT semantics, preserved.
 async function readRun(item, runId) {
-  const body = await readFile(runRecordPath(item, runId), "utf8");
+  const target = (await findRunPath(item, runId)) ?? runRecordPath(item, runId);
+  const body = await readFile(target, "utf8");
   return normalizeRecord(JSON.parse(body));
 }
 
@@ -330,7 +437,15 @@ export async function completeRun(item, { runId, outcome, failureReason = null, 
 // all → no-retryable-run. Each rejection mints NO run and leaves the prior
 // byte-unchanged. maxAttempts is the resolved ceiling passed in (the store reads no
 // config); a fresh start (startRun) stays untouched — it never carries a prior session.
-export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now } = {}) {
+// The optional `node` (26/ADR-001, the startRun idiom) is INJECTED DATA the COMMAND
+// layer passes when mesh is configured, so the lineage mint lands under the RETRIER's
+// node partition; the store still reads no config, and the no-node retry stays flat.
+// The optional `sessionId` OVERRIDE (26/ADR-006.4 — the same additive pattern): when
+// ABSENT (undefined) the retry carries the prior sessionId unchanged (today's
+// same-node resume semantics, byte-identical); when PASSED (a string or null) it
+// REPLACES the carry — the fleet-reclaim winner mints the reclaimed lineage under its
+// OWN session (or none), never the dead peer's (resume semantics do not cross hosts).
+export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now, node = null, sessionId } = {}) {
   const runs = await readRuns(item);
   let prior;
   if (runId) {
@@ -350,15 +465,18 @@ export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now
   if (prior.attempt >= maxAttempts) {
     throw runError(`run ${prior.runId} has exhausted its ${maxAttempts} attempt(s)`, "attempts-exhausted", 409);
   }
-  // Resume: a NEW run carrying the prior sessionId, attempt + 1, retryOf linking the
-  // lineage. The dedup guard in mintRun still applies (a self-retry while this item's
-  // own run is in flight is refused duplicate-run — the anti-loop backstop).
+  // Resume: a NEW run carrying the prior sessionId (unless the caller overrides —
+  // the cross-host reclaim never inherits a dead peer's session), attempt + 1,
+  // retryOf linking the lineage. The dedup guard in mintRun still applies (a
+  // self-retry while this item's own run is in flight is refused duplicate-run —
+  // the anti-loop backstop).
   return mintRun(item, {
-    sessionId: prior.sessionId,
+    sessionId: sessionId !== undefined ? sessionId : prior.sessionId,
     brief: brief ?? prior.brief ?? {},
     now,
     attempt: prior.attempt + 1,
     retryOf: prior.runId,
+    node,
   });
 }
 

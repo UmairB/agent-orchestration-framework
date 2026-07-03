@@ -3,13 +3,16 @@
 // plus the background-loop runner (a thin timer over the one-shot transport). The
 // mesh's ONLY transport — there is no relay/daemon channel (that is milestone 23).
 //
-// THE LOAD-BEARING INVARIANT (ADR-004): git stays the single SYSTEM OF RECORD. The
-// engine MOVES records — it stages/commits/pulls/pushes FILES under the partition
-// root — it NEVER interprets, parses-then-rewrites, or re-authors record CONTENT,
-// and it NEVER imports the node-record schema (node-identity.mjs). A record type it
-// has never seen (presence in m23, runs in m26, or any opaque .bin) syncs with ZERO
-// engine change, byte-for-byte. The transport is payload-agnostic: it moves bytes,
-// not JSON-it-can-parse.
+// THE LOAD-BEARING INVARIANT (ADR-004; scope honestly settled by 26/ADR-002): git
+// stays the single SYSTEM OF RECORD. The engine MOVES records — it stages/commits/
+// pulls/pushes FILES under its ROOT SET (defaulting to the partition root alone) —
+// it NEVER interprets, parses-then-rewrites, or re-authors record CONTENT, and it
+// NEVER imports the node-record schema (node-identity.mjs). The engine is
+// CONTENT-agnostic ALWAYS (a record type it has never seen — presence, runs, any
+// opaque .bin — moves byte-for-byte); its SCOPE is BY ARGUMENT (26/ADR-002): the
+// commit half stages only the injected roots, so a run record under wiki/work/**/
+// runs/ rides the tick exactly when the caller passes the runs pathspec. The
+// transport is payload-agnostic: it moves bytes, not JSON-it-can-parse.
 //
 // ADD-ONLY MERGE SAFETY rests on story 00's partition convention (ADR-002): every
 // record file is owned by exactly one node id at exactly one path, so two nodes
@@ -82,25 +85,56 @@ function headSha(repoRoot) {
 
 // ------------------------------------------------------- the transport ----
 
-// syncMesh(workspace) — the ONE-SHOT transport (the mesh:sync command is thin over
-// this). It is PAYLOAD-AGNOSTIC: it stages ONLY paths under the partition root
-// (`git add -- <meshDir>`), so a tick never sweeps unrelated working-tree changes,
-// and it moves files as bytes — it NEVER reads, parses, or rewrites record content.
+// The runs-tree pathspec — the ONE home of the glob literal (26/ADR-002: "resolved
+// by a small pure helper beside syncMesh, so the glob literal has ONE home"). It
+// covers every item's runs tree under the work stream — the flat legacy records AND
+// the node-partitioned runs/<node>/ records ("/**/" spans both). A caller building
+// the mesh-aware root set passes [meshDir(workspace), runsPathspec(workspace)];
+// nothing here writes or reads a record — it is a pure path/glob builder.
+export function runsPathspec(workspace) {
+  return path.join(workspace.workDir, "**", "runs", "**");
+}
+
+// Resolve one injected root to the pathspec git receives. A PLAIN root (the
+// partition root) passes through absolute, exactly as today. A GLOB-carrying root
+// (runsPathspec) is normalized to a repo-relative, forward-slash, glob-magic
+// pathspec — ":(glob)wiki/work/**/runs/**" — because git does not glob an absolute
+// Windows path with backslash separators (the real Windows trap the story build
+// notes pin).
+function asPathspec(repoRoot, root) {
+  if (!root.includes("*")) return root;
+  return ":(glob)" + path.relative(repoRoot, root).split(path.sep).join("/");
+}
+
+// syncMesh(workspace, { roots }) — the ONE-SHOT transport (the mesh:sync command is
+// thin over this). Its staged scope is the injected ROOT SET, defaulting to
+// [meshDir(workspace)] — today's behaviour byte-for-byte for every existing caller
+// (26/ADR-002: generalise by widening an argument, the reclaimStaleRuns
+// items-as-argument shape). It is CONTENT-AGNOSTIC: it stages ONLY paths under the
+// root set (`git add -- <root>` per root), so a tick never sweeps unrelated
+// working-tree changes — operator record-doc and source edits are in NO root set,
+// deliberately — and it moves files as bytes; it NEVER reads, parses, or rewrites
+// record content.
 //
 //   1. Resolve the repo root (the git repo containing the workspace). No repo / no
 //      remote ⇒ a clean, structured DEGRADED no-op (HEAD unmoved, tree untouched).
-//   2. `git add -- <meshDir>` — stage ONLY the partition root.
-//   3. IF there are staged mesh changes → ONE `git commit` (batching: one commit per
-//      tick that has staged changes, not one per record), then `git pull` (merge
-//      peers' add-only), then `git push`.
-//   4. IF there are NO staged mesh changes → a clean no-op: NO empty commit, HEAD
+//   2. `git add -- <root>` — one add per root in the set (a per-root add keeps the
+//      tolerated-non-zero absent-path semantics per root).
+//   3. IF there are staged root-set changes → ONE `git commit` (batching: one commit
+//      per tick that has staged changes, not one per record) carrying ONLY the roots
+//      that actually staged paths (an unmatched commit pathspec would abort the
+//      tick), then `git pull` (merge peers' add-only), then `git push`.
+//   4. IF there are NO staged root-set changes → a clean no-op: NO empty commit, HEAD
 //      unmoved, working tree byte-unchanged (but still `git pull` to read peers'
 //      records — reading-back is half the transport, and a fast-forward pull adds
 //      peer files without touching this node's own).
 //
-// Returns the stable sync-result envelope (the --json shape):
+// The PULL half is BRANCH-WIDE (a plain `git pull` — peers' commits arrive on disk
+// regardless of path, so durability never depends on the scope argument); only the
+// pulled-names REPORT iterates the root set (the envelope never claims scope it was
+// not given). Returns the stable sync-result envelope (the --json shape):
 //   { committed: bool, pushed: string[], pulled: string[], noop: bool, reason?: string }
-// `pushed`/`pulled` are the mesh-relative record paths this tick committed/received.
+// `pushed`/`pulled` are the root-set-relative record paths this tick committed/received.
 //
 // HONEST FAILURE (ADR-004's load-bearing invariant — git stays the system of record,
 // the engine HONESTLY moves records): a NON-zero git pull/push status is NOT swallowed.
@@ -111,8 +145,8 @@ function headSha(repoRoot) {
 // remote; the local commit object still exists, but the transport did not move them.)
 // The command FACE turns that failure envelope into one { ok:false, error, code } and
 // a non-zero exit. The no-git-repo degraded no-op is NOT a failure (nothing to push).
-export async function syncMesh(workspace, { } = {}) {
-  const root = meshDir(workspace);
+export async function syncMesh(workspace, { roots } = {}) {
+  const rootSet = roots ?? [meshDir(workspace)];
   const repoRoot = repoRootFor(workspace);
 
   // No git repo contains the workspace — a clean, structured degraded no-op (so the
@@ -122,17 +156,34 @@ export async function syncMesh(workspace, { } = {}) {
     return { committed: false, pushed: [], pulled: [], noop: true, reason: "no-git-repo" };
   }
 
-  // Stage ONLY the partition root. `--` ends option parsing so a path that looks like
-  // a flag is still treated as a path; the root may not exist yet (no records
-  // published) — git add of an absent path is benign, so we tolerate a non-zero here.
-  git(repoRoot, ["add", "--", root]);
+  // Every stage/diff/commit pathspec iterates the injected set. A glob root is
+  // normalized to git's glob-magic form; a plain root passes through absolute.
+  const rootSpecs = rootSet.map((root) => asPathspec(repoRoot, root));
 
-  // The staged mesh changes = `git diff --cached --name-only -- <root>`: the files
-  // staged under the partition root, as repo-relative paths. We never read their
-  // CONTENT (payload-agnostic) — only their NAMES, to report what moved + decide
-  // whether there is anything to commit.
-  const stagedOut = git(repoRoot, ["diff", "--cached", "--name-only", "--", root]).stdout;
-  const stagedPaths = stagedOut.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // Stage ONLY the root set — one add per root. `--` ends option parsing so a path
+  // that looks like a flag is still treated as a path; a root may not exist / match
+  // yet (no records published) — git add of an absent/unmatched path is benign, so
+  // we tolerate a non-zero here, per root.
+  for (const spec of rootSpecs) {
+    git(repoRoot, ["add", "--", spec]);
+  }
+
+  // The staged root-set changes = `git diff --cached --name-only -- <root>` PER
+  // ROOT: the files staged under each root, as repo-relative paths. We never read
+  // their CONTENT (content-agnostic) — only their NAMES, to report what moved,
+  // decide whether there is anything to commit, and keep the commit pathspec to the
+  // roots that actually staged something (an unmatched commit pathspec aborts).
+  const stagedPaths = [];
+  const commitRoots = [];
+  for (const spec of rootSpecs) {
+    const stagedOut = git(repoRoot, ["diff", "--cached", "--name-only", "--", spec]).stdout;
+    const names = stagedOut.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (names.length === 0) continue;
+    commitRoots.push(spec);
+    for (const name of names) {
+      if (!stagedPaths.includes(name)) stagedPaths.push(name);
+    }
+  }
 
   const remotePresent = hasRemote(repoRoot);
   const beforeHead = headSha(repoRoot);
@@ -142,12 +193,12 @@ export async function syncMesh(workspace, { } = {}) {
   if (stagedPaths.length > 0) {
     // ONE commit for the whole tick (batching). gpgsign off + an identity are the
     // repo's own config (the fixtures set them); we do not configure them here.
-    // The commit carries a `-- <root>` PATHSPEC so it commits ONLY paths under the
-    // partition root regardless of what else is in the index: startSyncLoop runs on a
-    // 15s background timer concurrent with operator git activity, so an unrelated
-    // pre-staged change must NEVER be folded into the mesh commit (a pathspec commit
-    // commits matching paths only).
-    const commit = git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records", "--", root]);
+    // The commit carries a `-- <root>…` PATHSPEC (the staged roots of the injected
+    // set) so it commits ONLY paths under the root set regardless of what else is in
+    // the index: startSyncLoop runs on a 15s background timer concurrent with
+    // operator git activity, so an unrelated pre-staged change must NEVER be folded
+    // into the mesh commit (a pathspec commit commits matching paths only).
+    const commit = git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records", "--", ...commitRoots]);
     if (commit.status === 0) {
       committed = true;
       for (const p of stagedPaths) pushed.push(p);
@@ -170,8 +221,10 @@ export async function syncMesh(workspace, { } = {}) {
     }
     const afterPull = headSha(repoRoot);
     if (beforePull && afterPull && beforePull !== afterPull) {
-      // The mesh-relative files the pull changed (names only — never content).
-      const diff = git(repoRoot, ["diff", "--name-only", `${beforePull}..${afterPull}`, "--", root]).stdout;
+      // The root-set files the pull changed (names only — never content). The pull
+      // itself was branch-wide; the REPORT iterates the injected set, so the
+      // envelope only claims the scope it was given.
+      const diff = git(repoRoot, ["diff", "--name-only", `${beforePull}..${afterPull}`, "--", ...rootSpecs]).stdout;
       for (const p of diff.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
         pulled.push(p);
       }

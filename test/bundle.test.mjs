@@ -50,6 +50,7 @@ const COMMAND_IDS = [
   "code-review",
   "continue",
   "feedback",
+  "migrate",
   "recent",
   "refine",
   "retrospective",
@@ -73,7 +74,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 14 commands, 4 templates)",
+    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 15 commands, 4 templates)",
     run: async () => {
       const ids = new Set(memberIds());
       for (const id of AGENT_IDS) assert.ok(ids.has(id), `missing agent ${id}`);
@@ -81,7 +82,7 @@ export const bundleTests = [
       for (const id of TEMPLATE_IDS) assert.ok(ids.has(id), `missing template ${id}`);
       const byKind = (kind) => descriptorMembers().filter((m) => m.kind === kind).length;
       assert.equal(byKind("agent"), 8, "8 agents");
-      assert.equal(byKind("command"), 14, "14 commands");
+      assert.equal(byKind("command"), 15, "15 commands");
       assert.equal(byKind("template"), 4, "milestone/story/task/uat templates");
     }
   },
@@ -152,7 +153,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 14 commands, 4 templates",
+    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 15 commands, 4 templates",
     run: async () => {
       const members = descriptorMembers();
       for (const member of members) {
@@ -167,7 +168,7 @@ export const bundleTests = [
       assert.deepEqual(
         members.filter((m) => m.kind === "command").map((m) => m.id).sort(),
         [...COMMAND_IDS].sort(),
-        "14 commands declared"
+        "15 commands declared"
       );
       assert.deepEqual(
         members.filter((m) => m.kind === "template").map((m) => m.id).sort(),
@@ -180,7 +181,7 @@ export const bundleTests = [
     name: "bundle/descriptor: every resource member (agent + command) names one or more target runtimes",
     run: async () => {
       const resourceMembers = descriptorMembers().filter((m) => m.kind === "agent" || m.kind === "command");
-      assert.equal(resourceMembers.length, 22, "22 resource members");
+      assert.equal(resourceMembers.length, 23, "23 resource members");
       for (const member of resourceMembers) {
         assert.ok(Array.isArray(member.runtimes) && member.runtimes.length >= 1, `${member.id} declares >=1 runtime`);
       }
@@ -246,7 +247,7 @@ export const bundleTests = [
     run: async () => {
       const bundle = loadBundle();
       const outputs = renderBundleOutputs(bundle, { runtimes: ["claude"] });
-      // Claude supports all agents (8) + all commands (14) + all template files (12) = 34.
+      // Claude supports all agents (8) + all commands (15) + all template files (12) = 35.
       const resourceOutputs = outputs.filter((o) => o.resource.kind === "agent" || o.resource.kind === "command");
       assert.equal(resourceOutputs.length, AGENT_IDS.length + COMMAND_IDS.length, "one output per claude resource member");
       for (const output of outputs) {

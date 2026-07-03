@@ -549,6 +549,201 @@ consumption (no release write), and arms fitness #12; the existing `acd-run-recl
 behaviour (a crashed peer's run is reclaimed + its item offered again; a live peer's stale-heartbeat run
 is left alone; the reclaimed lineage retries) is story-02 task `.feature` material.
 
+## ADR-007: Mesh-aware `next` binds only the STORY walk — the `uat` and zero-story-milestone driver ready-returns are lease-BLIND; the accepted fix is to apply the injected `leaseView` at EVERY ready-return in `nextWork`, deferred to verify triage / the first m27 item because it is a liveness gap, never a KR2 correctness one (a targeted supersede of ADR-005's decision)
+
+**Status:** Accepted
+**Date:** 2026-07-03
+
+**Context.** ADR-005 decided `nextWork` becomes mesh-aware by consulting an injected `leaseView` inside
+the candidate walk — but the implementation binds it to ONE of three ready-returns. Confirmed in code
+(`src/work.mjs:535` — `nextWork(workDir, scopeRef, { leaseView } = {})`): the `leaseView` is consulted
+ONLY inside the per-story loop (`work.mjs:580-591` — `leased-live` ⇒ skip, `leased-stale` ⇒ ready +
+`reclaimable`). The two DRIVER ready-returns bypass it entirely — `work.mjs:568`
+(`if (driver.type === "uat") return ready(driver, meta.status)`) and `work.mjs:574`
+(`if (stories.length === 0) return ready(driver, meta.status)` — the needs-break-down return). So a lease
+that a peer's `work:run-start` acquired on a `uat` ref or on a zero-story milestone ref is NEVER seen by
+another node's `next`: that node offers the already-leased ref as `ready`, both nodes drive it, and both
+CONTEND for the same lease. This is exactly the gap `aof:verify` surfaced as **F-26-05** and the architect
+flagged at both the story-01 and story-02 reviews (`STATE §Feedback` architect story-01 + PO story-02).
+
+**No KR2 exposure — this is why it is safe to carry.** The lease-of-record (ADR-003/ADR-004) still
+arbitrates the contended claim correctly at the git cadence: of the two nodes that both offered and drove
+the ref, exactly one wins the push race and the other stands down — no double-execution. What the gap
+costs is only that the loser did wasted work up to the stand-down (the acquire/sync round), i.e.
+claim-CHURN at the git cadence on the soak path, not a correctness violation. The `leaseView` skip is a
+LIVENESS optimisation (don't even try an item a live peer already holds); its absence at the driver
+ready-returns degrades efficiency, never safety. The `leaseView` remains a fail-safe read throughout: it
+can only cause `next` to offer an item LESS (skip), never to unlease one — so no bypass can manufacture a
+double-grant.
+
+**Decision.** The accepted fix DIRECTION — and it is a targeted supersede of ADR-005's "consult the
+`leaseView` inside the candidate walk", tightening "inside the story loop" to "at EVERY ready-return":
+**apply the `leaseView` lookup at each of `nextWork`'s ready-returns — the `uat` driver return, the
+zero-story (needs-break-down) driver return, and the story-loop returns — so a live-peer lease skips the
+driver ref exactly as it skips a story ref, and a stale-peer lease surfaces it `reclaimable`.** The
+milestone-accept fallthrough (`work.mjs:598`, all stories done) is deliberately left lease-blind: it fires
+only for a genuinely-done milestone, which is not a claimable work ref. The concurrency caveat is small
+here (a `uat`/zero-story ref is a single driver, no per-story fan-out), so the change is the same
+`leaseView?.get?.(ref)` branch already proven on the story path, lifted to the two driver returns.
+
+**Scope: deferred to verify triage or the FIRST m27 item, NOT re-opened in m26.** The reason the deferral
+is honest: cross-node issuance/routing is milestone 27's charter (`SPEC §Out of scope`), and m26's own
+invariant is that correctness never depends on `next`'s lease-awareness (it depends on the lease-of-record).
+`next` is a READ; its lease overlay is an efficiency hint. Deferring a liveness efficiency hint to the
+milestone that owns cross-node routing is the correct altitude — carrying it here as documented-and-routed
+(F-26-05) rather than force-fitting a code change into an accepted milestone.
+
+**Consequences.** Supersedes ADR-005 only on the SCOPE of the `leaseView` application (every ready-return,
+not just the story loop); ADR-005's shape (optional injected argument, `work.mjs` imports no mesh module,
+the command builds the view under its config gate, fitness #7) is unchanged and still governs. When the
+fix lands, fitness #7's signature/injection assertions still hold verbatim; a behavioural task feature
+(a peer's `next` skips a `uat`/zero-story ref a live peer leased; surfaces it reclaimable when the peer is
+stale) accompanies it in the owning m27 story. Until then the gap is bounded to claim-churn and recorded
+in `VERIFICATION.md` F-26-05.
+
+## ADR-008: Fleet reclaim — the ceiling-exhausted reclaim-lineage availability trade AND the run-record-propagation dependence of the cross-node force-fail; both are accepted m26 BOUNDARIES on cross-node reclaim FIDELITY (never on availability), the durability fix (wire a launched run-record mover) belongs to the serve-launcher / m27 (an addendum to ADR-006)
+
+**Status:** Accepted
+**Date:** 2026-07-03
+
+**Context.** The KR2 soak and the story-02 review surfaced two consequences of ADR-006's cross-node reclaim
+that ADR-006 did not settle. Neither breaks the milestone's invariant (an orphaned item is never left
+stuck); both bound the FIDELITY of the reclaim of an uncooperative crash. This ADR is an ADDENDUM to
+ADR-006 — it refines its consequences, it does not supersede its decision.
+
+**(a) The ceiling-exhausted reclaim lineage — an accepted availability-vs-bounded-retry trade (F-26-04).**
+ADR-006 mints the reclaim as a RETRY lineage: the winner rides `retryRun` so the new run carries
+`retryOf` → the reclaimed `runtime_offline` run (`run-start.mjs:251-254`, gated by
+`shouldRetry(reclaimedPrior, maxAttempts)`). A reclaim RESETS the attempt intent for that lineage: a
+poisoned item that crash-loops (each node picks it up, crashes, a peer reclaims and retries, crashes, …)
+can PING-PONG the fleet, because the reclaim's fresh retry lineage re-opens the attempt budget m20's
+bounded-intent (`maxAttempts`) exists to close. This is the DEFENSIBLE trade, recorded as the accepted
+posture: **availability (a genuinely-orphaned item is always re-offered and retried by a live peer)
+is chosen over a strict global attempt ceiling across reclaim boundaries.** Its BOUND: each individual
+node still honours `maxAttempts` within a lineage before it stops retrying locally
+(`shouldRetry`/`config.work.autonomous.maxAttempts`, default 3); the unbounded case is specifically a
+crash BEFORE the ceiling is reached on each host, ping-ponging across hosts. The mitigation direction if a
+real deployment hits it (deferred, not built): carry the cumulative cross-node attempt count on the
+lineage so the ceiling survives a reclaim — but that is a global-attempt-accounting design, out of m26's
+scope; documented as the m26 posture with its bound.
+
+**(b) The run-record-propagation dependence of the cross-node force-fail (F-26-02, verified in code).**
+ADR-006's cross-node reclaim (force-fail the orphan `running` run to `failed`/`runtime_offline` +
+`reclaimedAt`, then mint the `retryOf` lineage) can fire on a reclaiming peer ONLY IF the orphan's run
+record has PROPAGATED to that peer's disk — the scan reads run records by path (the ADR-001 union read),
+so a record the peer has never pulled is invisible to it. But NO launched mover propagates run records
+cross-node AFTER they are minted, confirmed in code:
+- `mesh:sync` syncs the DEFAULT root set `[meshDir]` only — no runs (`commands/mesh-sync.mjs:31` calls
+  `syncMesh(ctx.workspace)` with no `roots`, so ADR-002's default `[meshDir]` applies; runs live OUTSIDE
+  `meshDir`).
+- `run-start`'s widened `[meshDir, runsPathspec]` sync runs INSIDE `acquireLease`, BEFORE the mint
+  (`run-start.mjs:209-224` — `runSync` is passed into `acquireLease`, whose sync loop is steps c/d, and
+  the mint is `run-start.mjs:251-254`, strictly AFTER `acquireLease` returns). So run-start propagates the
+  CLAIM, never the run record it then mints.
+- `run-complete` performs NO sync at all (no `syncMesh`/`runsPathspec` reference in
+  `src/commands/run-complete.mjs`).
+- `startSyncLoop` (the 15s background mover, `mesh-sync.mjs:292`) is DEFINED but NEVER LAUNCHED by any CLI
+  or daemon — its only caller in the whole tree is `test/mesh-sync-cadence-loop.test.mjs:51`. No registered
+  `aof` verb starts it.
+
+So a minted run record reaches peers ONLY on that node's NEXT `run-start` (whose pre-mint sync pushes the
+prior run's now-committed record along with the new claim). A node that crashes silently after its FINAL
+run-start may never propagate that final run — its orphan is invisible to peers, so no peer can perform the
+ADR-006 cross-node force-fail on it. **The soak observed the reclaim chain only because `node-b` performed
+one extra `run-start` (which propagated the orphan) before it was killed** (`VERIFICATION.md` soak note +
+F-26-02).
+
+**Decision.** Record this as the accepted m26 BOUNDARY, with the forward fix owned elsewhere:
+
+1. **The item is still never left stuck — this bounds FIDELITY, not availability.** Even when the orphan
+   run record never propagates: (i) the dead node's CLAIM lapses by RULE (ADR-003 — live iff presence
+   fresh), so the item is re-leasable by any peer regardless of the run record's whereabouts — a live peer
+   acquires its own lease and works the item; (ii) the dead node's OWN restart scan force-fails its stale
+   `running` run on revival (m20's restart-time reclaim, `20/ADR-004`), so the record is reconciled locally
+   when the node returns. What is LOST in the never-propagated case is only the cross-node force-fail's
+   FIDELITY: the reclaiming peer cannot stamp `runtime_offline`/`reclaimedAt` on the orphan nor thread
+   `retryOf` → it, so the crash is not visible in the peer's lineage (the peer mints a fresh run, not a
+   retry). This is a lineage/observability fidelity gap on an UNCOOPERATIVE crash, never an availability or
+   a double-execution gap.
+
+2. **The durability fix belongs to the serve-launcher / m27.** The A5 poll-for-durability half wants a
+   LAUNCHED continuous run-record mover — either wire `startSyncLoop` (over the mesh-aware root set) into
+   a serve/daemon face, or add a post-mint durability sync at `run-complete` (or a run-start post-mint
+   sync). Both are a serve-launcher concern (there is today no registered verb that runs a long-lived
+   mover — the same absence F-26-01 records for the relay broker), and cross-node propagation of records
+   is the milestone-27 charter (`SPEC §Out of scope`). Recorded here so m27's SPEC inherits it.
+
+**Consequences.** Addendum to ADR-006, superseding nothing: ADR-006's dual-staleness guard, the
+sole-sanctioned foreign force-fail write, and the lease-lapse-by-rule all stand. The `retryRun`
+`sessionId` override (the sanctioned co-edit — a reclaim winner never inherits the dead peer's session,
+`run-start.mjs:247-253`) is unaffected. Fitness #12 (`acd-fleet-reclaim-guarded`) still governs the
+prefilter's shape. The two boundaries are the accepted m26 posture, both recorded in `VERIFICATION.md`
+(F-26-02, F-26-04) and routed to the retro + m27; the durability wiring is the one forward code change,
+owned outside m26.
+
+## ADR-009: The alive-owner orphaned claim — a crash between the durable claim write and the mint, followed by a quick restart (presence never lapses), wedges the item fleet-wide because `withdrawOwnLapsedClaims` fires only on STALE own presence; the accepted fix is a run-start step-0 reconciliation of the node's OWN claims against its OWN runs (a supersede DIRECTION for ADR-003.2's own-path hygiene), carried as a bounded liveness limitation, not a double-execution
+
+**Status:** Accepted
+**Date:** 2026-07-03
+
+**Context.** ADR-003.2 made the returning-owner's own-path hygiene depend on OWN PRESENCE STALENESS:
+`withdrawOwnLapsedClaims` (`src/mesh-lease.mjs:200-213`) reads this node's own presence and returns `[]`
+early unless `isNodeStale(ownPresence, …)` holds (`mesh-lease.mjs:203`); it is `acquireLease`'s step 0
+(`mesh-lease.mjs:303`). This is correct for the case it was built for — a node that went STALE and came
+back withdraws the claims the fleet has been reading as lapsed. But it leaves a window open: a crash
+between the durable claim WRITE (ADR-003 step b) and the MINT (or stand-down), followed by a QUICK restart
+where presence NEVER lapses. The own `"claimed"` file is live fleet-wide (its holder's presence is fresh),
+so every peer reads the item as leased and skips it (ADR-003.4) — AND the owner's OWN `next` skips it too,
+because a fresh-presence own claim is indistinguishable from a legitimately-held one. `withdrawOwnLapsedClaims`
+NEVER fires (own presence is fresh, so `mesh-lease.mjs:203` returns early), so nothing withdraws the ghost
+claim. The item is WEDGED for everyone, including its owner. This is F-26-06 and the architect's story-01 +
+story-02 review notes (`STATE §Feedback`).
+
+**This fails toward NOBODY-WORKS, not KR2 — why it is safe to carry.** The wedge is a LIVENESS limitation:
+an item nobody works, not an item two nodes execute. There is no double-execution direction here — the live
+`"claimed"` file makes every reader (including the owner) MORE conservative (skip), never less. Correctness
+(KR2) is untouched; availability of that ONE item is lost until the ghost claim is reconciled. It is bounded:
+it needs the precise interleave (crash in the claim-write→mint gap) AND a restart fast enough that presence
+never lapses; a restart slower than the staleness threshold self-heals through the existing
+`withdrawOwnLapsedClaims` path. Recorded as the KNOWN m26 limitation.
+
+**Decision (the fix DIRECTION — a supersede of ADR-003.2's own-path hygiene rule).** ADR-003.2 pins
+own-path hygiene to own-presence-staleness alone; this supersedes it to add a second, presence-independent
+reconciliation: **a `work:run-start` step-0 reconciliation of the node's OWN claims against its OWN runs —
+an own `"claimed"` file with NO matching run record (no run whose `runId` ties to that claim, and not a
+legitimately in-flight claim) is WITHDRAWN (own-path `state:"released"` write), regardless of own presence
+freshness.** The signal is not presence (which is fresh in this case) but the LOCAL DISCREPANCY between the
+node's own durable claims and its own durable runs: a live own claim that mints no run is a ghost of an
+interrupted acquire. This runs on the SAME node that wrote the claim (own-path only, no foreign write) and
+uses records already on its own disk (own runs via the ADR-001 union read, own claims via `readLeaseClaims`)
+— so it needs no propagation and no new clock.
+
+**The load-bearing concurrency caveat (must be settled when the fix is built).** A mid-protocol claim
+LEGITIMATELY has `runId: null` — ADR-003.1 freezes `runId` as "null at claim, set once the run is minted",
+and the FROZEN sequence writes the claim (step b) BEFORE it mints (ADR-004.3). So a `runId:null` /
+no-matching-run own claim is NOT prima-facie a ghost — it may be a claim whose mint is IN FLIGHT on this
+same node right now. The reconciliation must NOT false-withdraw a legitimately in-flight claim (withdrawing
+a claim mid-acquire would make the node stand down on itself, a self-inflicted liveness loss). The
+discriminator (to be settled at build time) is an in-process one — the reconciliation runs at run-start
+STEP 0, before this invocation writes its own claim, so any own `claimed`-with-no-run it finds belongs to a
+PRIOR, now-dead invocation (this process holds no in-flight acquire yet), not the current one. The caveat is
+called out here so the build does not naively withdraw every `runId:null` claim.
+
+**Scope: retro / next, NOT re-opened in m26.** It is a bounded liveness limitation (nobody-works on a
+narrow interleave, self-healing on a slow restart), not a correctness or double-execution bug, and the
+clean home is the run-start restart reconciliation the architect already identified — authored when
+run-start's restart path is next touched (retro-routed). Carrying it as documented-and-routed (F-26-06)
+is the correct posture for an accepted milestone whose KR2 invariant is intact.
+
+**Consequences.** Supersedes ADR-003.2 only on the TRIGGER for own-path hygiene (adds an own-claims-vs-own-runs
+reconciliation beside the own-presence-staleness one); ADR-003.2's mechanics (own-path `state:"released"`
+write, never a delete, never a foreign write) are unchanged and still govern the new withdrawal. Fitness #6
+(`acd-lease-write-scope`) already covers any such withdrawal (it is a `leaseClaimPath` own-path `writeText`).
+When the fix lands, a behavioural task feature (a crash in the claim-write→mint gap + quick restart ⇒ the
+owner's step-0 reconciliation withdraws the ghost and re-offers the item; a legitimately in-flight
+`runId:null` claim is NOT withdrawn) accompanies it. Until then the limitation is bounded and recorded in
+`VERIFICATION.md` F-26-06.
+
 ## Fitness functions
 
 <!-- Each structural invariant from an ADR, paired with the arch-test that enforces it in CI.

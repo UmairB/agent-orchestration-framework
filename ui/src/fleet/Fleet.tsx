@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PlusCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { fleetApi } from "./api";
 import type { FleetBoard, FleetNode, RunState, MeshStatus } from "./api";
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
@@ -95,7 +97,7 @@ export function Fleet() {
         <main className="flex-1 px-8 py-7">
           <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
             <NodesRegion nodes={nodes} />
-            <BoardsRegion boards={boards} />
+            <BoardsRegion boards={boards} nodes={nodes} isControlNode={status?.isControlNode === true} />
           </div>
         </main>
       )}
@@ -280,7 +282,7 @@ function PresenceLabel({ node, liveness }: { node: FleetNode; liveness: Liveness
 
 // ──────────────────────────────────────────────────────── BOARDS region ────────
 
-function BoardsRegion({ boards }: { boards: FleetBoard[] }) {
+function BoardsRegion({ boards, nodes, isControlNode }: { boards: FleetBoard[]; nodes: FleetNode[]; isControlNode: boolean }) {
   const running = boards.filter((b) => boardRunState(b) === "running").length;
   const summary = `${boards.length} ${plural(boards.length, "board")} · ${running} running`;
   return (
@@ -295,7 +297,7 @@ function BoardsRegion({ boards }: { boards: FleetBoard[] }) {
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3.5">
           {boards.map((board) => (
-            <BoardTile key={board.ref} board={board} />
+            <BoardTile key={board.ref} board={board} nodes={nodes} isControlNode={isControlNode} />
           ))}
         </div>
       )}
@@ -312,10 +314,13 @@ function boardRunState(board: FleetBoard): RunState | null {
   return null;
 }
 
-function BoardTile({ board }: { board: FleetBoard }) {
+function BoardTile({ board, nodes, isControlNode }: { board: FleetBoard; nodes: FleetNode[]; isControlNode: boolean }) {
   const state = boardRunState(board);
   return (
-    <div className="flex flex-col gap-3.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm transition hover:border-muted-foreground/40 hover:shadow-md">
+    // The TILE CARD is the picker's positioning context (review fix — the open
+    // popover is anchored to the TILE, not the trigger button): `relative` here,
+    // unchanged from before, is what `AssignPicker`'s `absolute` now targets.
+    <div className="relative flex flex-col gap-3.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm transition hover:border-muted-foreground/40 hover:shadow-md">
       {/* row 1: board name over its quiet "on <nodeId>" owner (stacked) */}
       <div className="flex flex-col gap-1">
         <span className="mono truncate text-[15px] font-semibold tracking-tight text-foreground">{board.ref}</span>
@@ -323,14 +328,253 @@ function BoardTile({ board }: { board: FleetBoard }) {
           <span className="mono text-[11px] text-muted-foreground">on {board.owner}</span>
         ) : null}
       </div>
-      {/* row 2: the m21 run-state chip (verbatim) + the Open board → drill-in */}
+      {/* row 2: the m21 run-state chip (verbatim) · the [⊕ assign] write control
+          (milestone 27 / story 02, ADR-006 — the FIRST write affordance on this
+          surface, control-node-gated TRUE ABSENCE, DESIGN default 3) · the Open
+          board → drill-in */}
       <div className="flex items-center gap-2">
         {state === null ? (
           <span className="text-xs font-medium text-muted-foreground">No runs yet</span>
         ) : (
           <RunStateChip state={state} />
         )}
+        {isControlNode ? <AssignAffordance board={board} nodes={nodes} /> : null}
         <BoardDrillIn board={board} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────── the [assign ▸] affordance ─
+
+// milestone 27 / story 02 (ADR-006 / DESIGN "the issue / assign affordance") —
+// the FIRST write control on the fleet face. Rendered IFF isControlNode is true
+// (a genuine conditional omission at the CALL SITE above — never a disabled
+// attribute here; DESIGN default 3's true-absence mandate). Six states: idle ·
+// (gated-hidden lives at the call site) · open/picking-target · submitting ·
+// success · error.
+type AssignPhase = "idle" | "open" | "submitting" | "success" | "error";
+
+function AssignAffordance({ board, nodes }: { board: FleetBoard; nodes: FleetNode[] }) {
+  const [phase, setPhase] = useState<AssignPhase>("idle");
+  const [target, setTarget] = useState<string>(""); // "" = Any node (the untargeted default)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const open = phase === "open" || phase === "submitting" || phase === "error";
+
+  const close = useCallback(() => {
+    setPhase("idle");
+    setTarget("");
+    setErrorMessage(null);
+  }, []);
+
+  // Escape / click-away dismisses with NO write (DESIGN: "the read-only default
+  // is always one keystroke away" — the picker only STAGES, Issue COMMITS).
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) close();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [open, close]);
+
+  const onIssue = useCallback(async () => {
+    setPhase("submitting");
+    setErrorMessage(null);
+    try {
+      const to = target.trim() === "" ? undefined : target.trim();
+      await fleetApi.issue(board.ref, to);
+      setPhase("success");
+      // A quiet, calm confirmation — then back to idle (DESIGN: not a loud
+      // toast/banner; a brief tile-scoped micro-acknowledgement).
+      setTimeout(() => setPhase((p) => (p === "success" ? "idle" : p)), 1800);
+    } catch (e) {
+      setErrorMessage(e instanceof Error ? e.message : "Could not issue.");
+      setPhase("error");
+    }
+  }, [board.ref, target]);
+
+  // review fix: `containerRef` now wraps the TRIGGER AND the picker together
+  // (a plain Fragment-scoped span, not `relative` itself — the tile card one
+  // level up is the positioning context the picker anchors to). Click-away
+  // detection still works identically (a click inside the relocated picker is
+  // still "inside" this ref); only WHERE the picker paints moved.
+  return (
+    <span ref={containerRef} className="contents">
+      <span className="relative inline-flex">
+        {/* the idle trigger — a quiet, small primary/teal button; NEVER disabled/
+            greyed on a non-control node (the gate is a true absence one level up) */}
+        <Button
+          type="button"
+          size="sm"
+          variant="default"
+          onClick={() => setPhase("open")}
+          aria-label={`Issue work into ${board.ref}`}
+          className="gap-1.5 px-2.5"
+        >
+          <PlusCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          assign
+        </Button>
+
+        {phase === "success" ? (
+          <span className="absolute left-0 top-full z-20 mt-1.5 whitespace-nowrap rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+            issued ✓ — an eligible node will pick it up
+          </span>
+        ) : null}
+      </span>
+
+      {open ? (
+        <AssignPicker
+          board={board}
+          nodes={nodes}
+          target={target}
+          onTargetChange={setTarget}
+          submitting={phase === "submitting"}
+          errorMessage={phase === "error" ? errorMessage : null}
+          onCancel={close}
+          onIssue={onIssue}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+// The target picker — a small anchored popover using EXISTING kit primitives
+// (a bordered/shadowed `bg-popover` panel, the same idiom the top bar's Legend
+// already uses — DESIGN: "NOT a full modal, no page dim"). ONE grouped picker:
+// Any node (default) · Nodes (nodeId + liveness dot, from status.nodes) ·
+// Capabilities (the union of node.runtimes + node.skills) — populated from data
+// already fetched, no new endpoint.
+function AssignPicker({
+  board,
+  nodes,
+  target,
+  onTargetChange,
+  submitting,
+  errorMessage,
+  onCancel,
+  onIssue,
+}: {
+  board: FleetBoard;
+  nodes: FleetNode[];
+  target: string;
+  onTargetChange: (value: string) => void;
+  submitting: boolean;
+  errorMessage: string | null;
+  onCancel: () => void;
+  onIssue: () => void;
+}) {
+  const capabilities = useMemo(() => {
+    const set = new Set<string>();
+    for (const node of nodes) {
+      for (const runtime of node.runtimes ?? []) set.add(runtime);
+      for (const skill of node.skills ?? []) set.add(skill);
+    }
+    return Array.from(set);
+  }, [nodes]);
+
+  return (
+    <div
+      role="dialog"
+      aria-label={`Issue into ${board.ref}`}
+      // Anchored to the TILE CARD (BoardTile's own `relative` root), NOT the
+      // trigger button (review fix, round 2): the picker is `w-72` (288px) —
+      // wider than the trigger's clearance to EITHER tile edge, so anchoring to
+      // the TRIGGER always overflows one side or the other (left-0 bled into
+      // the right neighbor tile; right-0 then clipped off the left viewport
+      // edge on the leftmost tile). The TILE CARD is itself ~w-72 in the
+      // auto-fill grid, so a `left-0 top-full` popover relative to the TILE
+      // drops straight below, flush with the tile's own left edge — on-screen
+      // for the leftmost tile, and never over a NEIGHBOUR tile (it only ever
+      // extends as wide as its own tile, downward, never sideways into the
+      // next column).
+      className="absolute left-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md"
+    >
+      <p className="mb-2 text-xs font-semibold text-foreground">Issue into {board.ref}</p>
+
+      <div className="mb-2.5 flex flex-col gap-1 text-xs">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name={`assign-target-${board.ref}`}
+            checked={target === ""}
+            disabled={submitting}
+            onChange={() => onTargetChange("")}
+          />
+          Any node <span className="text-muted-foreground">(default)</span>
+        </label>
+      </div>
+
+      {nodes.length > 0 ? (
+        <div className="mb-2.5">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Nodes</p>
+          <div className="flex flex-col gap-1 text-xs">
+            {nodes.map((node) => (
+              <label key={node.nodeId} className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name={`assign-target-${board.ref}`}
+                  checked={target === node.nodeId}
+                  disabled={submitting}
+                  onChange={() => onTargetChange(node.nodeId)}
+                />
+                <PresenceDot liveness={livenessOf(node)} size="sm" />
+                <span className="mono">{node.nodeId}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {capabilities.length > 0 ? (
+        <div className="mb-2.5">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Capabilities</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+            {capabilities.map((cap) => (
+              <label key={cap} className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name={`assign-target-${board.ref}`}
+                  checked={target === cap}
+                  disabled={submitting}
+                  onChange={() => onTargetChange(cap)}
+                />
+                <span className="mono">{cap}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="mb-2.5 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-medium text-accent">
+          <span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground" aria-hidden="true">!</span>
+          Could not issue: {errorMessage}
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </Button>
+        {errorMessage ? (
+          <Button type="button" size="sm" variant="default" onClick={onIssue} disabled={submitting}>
+            Retry
+          </Button>
+        ) : (
+          <Button type="button" size="sm" variant="default" onClick={onIssue} disabled={submitting}>
+            {submitting ? "Issuing…" : "Issue ▸"}
+          </Button>
+        )}
       </div>
     </div>
   );

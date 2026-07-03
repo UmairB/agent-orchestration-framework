@@ -80,12 +80,22 @@ export function parseInboundFrame(data, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES)
   return value;
 }
 
-// startPresenceSubscriber({ transport, cache, maxFrameBytes }) → { connected, stop() }.
+// startPresenceSubscriber({ transport, cache, leaseCache, maxFrameBytes }) →
+// { connected, stop() }.
 // Wire an injected transport { onMessage(fn), connect(), close?() } to the liveness cache so
 // EACH inbound frame is parsed + applied. The transport is INJECTED (the @executable
 // feasibility lever, mirroring the injected relay client of task 00): a fanned-out frame can
 // be delivered synchronously in CI with NO real ws server, NO wall-clock; the production
 // socket path (createSubscriberTransport) is exercised by the @manual fleet spike only.
+//
+// THE ADDITIVE LEASE BRANCH (m26 / ADR-004.2): the optional `leaseCache` (a
+// createLeaseCache instance) receives the SAME parsed frame — each cache's own apply()
+// decides what it stores (the presence cache ignores kind:"lease", the lease cache
+// ignores kind:"presence"), so the ONE handler applies BOTH kinds with no kind branch
+// here (the parse stays payload-agnostic). Backwards-compatible: callers that pass no
+// leaseCache behave exactly as before. Both applies stay IN MEMORY ONLY — this module
+// still performs no durable write and imports no persist seam (fitness #11,
+// acd-lease-cache-only, extending the fitness-#7 cache-only gate).
 //
 // GRACEFUL DEGRADATION (fitness #4, read-side): transport == null (the unconfigured relay) is
 // a CLEAN degrade — return { connected:false, stop(){} } with no crash, no throw. A
@@ -97,7 +107,7 @@ export function parseInboundFrame(data, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES)
 // EACH inbound frame; the connection is NOT torn down between frames. The handler is
 // registered BEFORE connect() so no early frame is missed, and it NEVER throws (a bad frame
 // is swallowed so the persistent connection is kept).
-export async function startPresenceSubscriber({ transport, cache, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES } = {}) {
+export async function startPresenceSubscriber({ transport, cache, leaseCache, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES } = {}) {
   // Unconfigured relay ⇒ clean degrade: no transport to subscribe over. No crash, no throw
   // — mesh:status simply reads git only (the floor).
   if (transport == null) {
@@ -106,11 +116,16 @@ export async function startPresenceSubscriber({ transport, cache, maxFrameBytes 
 
   // Register the message handler BEFORE connecting so an early fanned-out frame is not
   // missed. The handler NEVER throws: a bad frame is ignored (parseInboundFrame → null →
-  // cache.apply(null) → false) and the persistent connection is kept. The try/catch is the
+  // apply(null) → false) and the persistent connection is kept. The try/catch is the
   // never-crash belt (a truly odd transport delivery must not tear down the subscriber).
+  // ONE parse, BOTH applies (m26 / ADR-004.2): each cache's own apply() ignores the kind
+  // it does not store, so the handler stays kind-blind — and both applies are in-memory
+  // only (no durable write, fitness #11).
   transport.onMessage((data) => {
     try {
-      cache.apply(parseInboundFrame(data, maxFrameBytes));
+      const frame = parseInboundFrame(data, maxFrameBytes);
+      cache?.apply(frame);
+      leaseCache?.apply(frame);
     } catch {
       // never-crash: ignore a bad frame, keep the persistent connection.
     }

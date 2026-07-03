@@ -29,7 +29,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-"));
   const workDir = path.join(repo, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });
@@ -82,7 +82,7 @@ async function withFleet(body) {
   const seen = [];
   server.on("request", (request) => seen.push(request.url ?? "/"));
   try {
-    return await body({ url, server, seen, workDir });
+    return await body({ url, server, seen, workDir, repo });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(repo, { recursive: true, force: true });
@@ -195,7 +195,12 @@ export const meshUiReadOnlyContractTests = [
   // ═══ 05_fleet-view-is-read-only.feature @executable ════════════════════════
   // Scenario Outline: a write-method request to the fleet face is rejected without a
   // state change — a clean method-rejection, not a crash. (POST/PUT/PATCH/DELETE is
-  // the mutating set; the would-be m27 /api/mesh/issue|/assign must not exist early.)
+  // the mutating set on the READ route; milestone 27 / story 02 lands POST
+  // /api/mesh/issue as the ONE accepted write route — its refusal expectation
+  // INVERTS, so it is REMOVED from this refusal matrix (task 00/01's row for the
+  // accepted write lives in the new mesh-ui-issue-route tests instead); the would-be
+  // m27 /api/mesh/assign row stays — it is still genuinely refused, task 03's
+  // bounded-write matrix.)
   {
     name: "mesh-ui-read-only/05 a write-method request to the fleet face is a clean method-rejection, never a state change",
     async run() {
@@ -204,11 +209,10 @@ export const meshUiReadOnlyContractTests = [
         { method: "PUT", route: "/api/mesh/status" },
         { method: "PATCH", route: "/api/mesh/status" },
         { method: "DELETE", route: "/api/mesh/status" },
-        { method: "POST", route: "/api/mesh/issue" },
         { method: "POST", route: "/api/mesh/assign" },
       ];
-      await withFleet(async ({ url, workDir }) => {
-        const before = await snapshotDir(workDir);
+      await withFleet(async ({ url, repo }) => {
+        const before = await snapshotDir(repo);
         for (const { method, route } of rows) {
           const res = await fetch(new URL(route, url), { method });
           // A clean rejection: NOT a 2xx success, and the server did not crash
@@ -226,7 +230,7 @@ export const meshUiReadOnlyContractTests = [
         const survive = await fetch(new URL("/api/mesh/status", url));
         assert.equal(survive.status, 200, "the server survived every rejected write");
         // NO state change on disk from any write attempt
-        const after = await snapshotDir(workDir);
+        const after = await snapshotDir(repo);
         assert.deepEqual(diffSnapshots(before, after), [], "no write-method request changed any file");
       });
     },
@@ -237,11 +241,11 @@ export const meshUiReadOnlyContractTests = [
   {
     name: "mesh-ui-read-only/05 serving + reading the fleet view end-to-end changes no files",
     async run() {
-      await withFleet(async ({ url, workDir }) => {
-        const before = await snapshotDir(workDir);
+      await withFleet(async ({ url, repo }) => {
+        const before = await snapshotDir(repo);
         await fetch(new URL("/", url));
         for (let i = 0; i < 5; i += 1) await fetch(new URL("/api/mesh/status", url));
-        const after = await snapshotDir(workDir);
+        const after = await snapshotDir(repo);
         assert.deepEqual(diffSnapshots(before, after), [], "the workspace on-disk state is byte-unchanged");
       });
     },

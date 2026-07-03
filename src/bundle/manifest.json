@@ -257,6 +257,15 @@
       "hash": "sha256:a1126ed1db4def4f95f60ef0fdc6723eff11f378cead2cf6d08f0cd17c488ab8"
     },
     {
+      "path": ".claude/commands/aof/migrate.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "migrate",
+        "kind": "command"
+      },
+      "hash": "sha256:65e0a99b4d47e8b502548d660d3cea844ba3811f38d42c81a25e25ede49d0911"
+    },
+    {
       "path": ".claude/commands/aof/recent.md",
       "runtime": "claude",
       "resource": {

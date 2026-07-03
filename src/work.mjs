@@ -50,7 +50,12 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig) {
   const configDir = path.dirname(configPath);
   const projectRoot = path.basename(configDir) === ".aof" ? path.dirname(configDir) : configDir;
   const workDir = path.resolve(projectRoot, config.work?.dir ?? "./wiki/work");
-  return { configPath, config, projectRoot, workDir };
+  // The .aof config-home dir. The mesh substrate anchors HERE (not under workDir):
+  // mesh is aof config/runtime state — a cross-cutting, extensible concept (planning,
+  // not only work) — so it lives beside aof's config/lock, git-tracked (28/verify
+  // decision superseding 22/ADR-002+003's work-stream-co-location).
+  const aofDir = path.basename(configDir) === ".aof" ? configDir : path.join(projectRoot, ".aof");
+  return { configPath, config, projectRoot, workDir, aofDir };
 }
 
 async function readDirSafe(dir) {
@@ -519,7 +524,37 @@ const ready = (item, status) => ({
 // `done`. A milestone is drilled into its first not-`done` story; a uat
 // session is itself the actionable item (it groups no stories — running it
 // is the work). Returns { state: "ready" | "blocked" | "done", ... }.
-export async function nextWork(workDir, scopeRef) {
+//
+// The OPTIONAL third argument (milestone 26 / ADR-005, WIDENED milestone 27 /
+// ADR-004 — mesh-aware next, INJECTED): `candidacyView` is a pre-computed,
+// PLAIN-DATA view built OUTSIDE this module (the command layer composes it under
+// its config gate, unifying the m26 lease view with the m27 routing verdict; this
+// module imports NO mesh module) — a Map keyed by item ref, value
+// { state?: "leased-live" | "leased-stale", holder?, routed?: "elsewhere" }; a ref
+// absent from the map (or an absent map) is unleased/untargeted. ABSENT ⇒
+// behaviour is byte-identical to the two-argument call (the mergePresence(disk,
+// null) === disk idiom applied to next).
+//
+// THE PER-REF GUARD (ADR-004.2 — routing runs FIRST, the lease then arbitrates):
+//   routed === "elsewhere"  ⇒ skipped (another node's work — never surfaced
+//                              reclaimable here, short-circuits before the lease);
+//   state === "leased-live" ⇒ skipped exactly as not-actionable (being worked, not
+//                              here — the following candidate is offered);
+//   state === "leased-stale"⇒ returned ready + { reclaimable: true, leasedBy }
+//                              (next is a READ — the claim path reclaims, never next);
+//   otherwise                ⇒ offered in its normal walk position (byte-identical
+//                              to the pre-fold-in behaviour when no entry exists).
+// A milestone whose every not-done story is skipped (routed-elsewhere OR
+// lease-live) is NOT offered as ready-for-acceptance — the walk falls through to
+// the honest nothing-actionable shape.
+//
+// milestone 27 / ADR-004.3 (the m26/ADR-007 fold-in) — the SAME guard now applies
+// at EVERY ready-return: the uat driver return, the zero-story needs-break-down
+// driver return, AND the story-loop returns (already candidacy-aware in m26). The
+// milestone-ACCEPT fallthrough (all stories done) stays deliberately
+// candidacy-BLIND — a genuinely-done milestone is not a claimable work ref, so a
+// lease/directive entry for it is ignored (the carve-out).
+export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
   const items = await listItems(workDir);
   const drivers = items
     .filter(isDriver)
@@ -552,18 +587,69 @@ export async function nextWork(workDir, scopeRef) {
       continue;
     }
 
-    if (driver.type === "uat") return ready(driver, meta.status); // run the session
+    if (driver.type === "uat") {
+      // milestone 27 / ADR-004.3 — the uat driver return is now candidacy-aware
+      // (before m27 this return was candidacy-BLIND — a peer's next double-offered
+      // a live-leased/targeted-elsewhere uat ref).
+      const uatCandidacy = candidacyView?.get?.(driver.ref);
+      if (uatCandidacy?.routed === "elsewhere" || uatCandidacy?.state === "leased-live") {
+        continue; // another node's work, or being worked live — pass over, keep walking
+      }
+      if (uatCandidacy?.state === "leased-stale") {
+        return { ...ready(driver, meta.status), reclaimable: true, leasedBy: uatCandidacy.holder };
+      }
+      return ready(driver, meta.status); // run the session
+    }
 
     const stories = items
       .filter((item) => item.type === "story" && item.parent === driver.number)
       .sort((a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10));
 
-    if (stories.length === 0) return ready(driver, meta.status); // needs break-down
+    if (stories.length === 0) {
+      // milestone 27 / ADR-004.3 — the zero-story (needs-break-down) driver return
+      // is now candidacy-aware (the SAME guard, applied at the SAME driver.ref key).
+      const zeroStoryCandidacy = candidacyView?.get?.(driver.ref);
+      if (zeroStoryCandidacy?.routed === "elsewhere" || zeroStoryCandidacy?.state === "leased-live") {
+        continue;
+      }
+      if (zeroStoryCandidacy?.state === "leased-stale") {
+        return { ...ready(driver, meta.status), reclaimable: true, leasedBy: zeroStoryCandidacy.holder };
+      }
+      return ready(driver, meta.status); // needs break-down
+    }
 
+    let candidacySkipped = false;
     for (const story of stories) {
       const storyMeta = await readMeta(story);
-      if (storyMeta.status !== "done") return ready(story, storyMeta.status);
+      if (storyMeta.status !== "done") {
+        const candidacy = candidacyView?.get?.(story.ref);
+        if (candidacy?.routed === "elsewhere") {
+          // Targeted at (or claimed to advertise) another node's capability — not
+          // this node's work at all; short-circuits BEFORE the lease is even
+          // consulted (never surfaced reclaimable here).
+          candidacySkipped = true;
+          continue;
+        }
+        if (candidacy?.state === "leased-live") {
+          // Leased by a live peer — being worked, just not here: passed over exactly
+          // as not-actionable; the flag guards the milestone-accept fallthrough below.
+          candidacySkipped = true;
+          continue;
+        }
+        if (candidacy?.state === "leased-stale") {
+          // A stale peer's item is OFFERED in its normal walk position, annotated so
+          // the caller knows a claim-path reclaim stands between it and the work.
+          return { ...ready(story, storyMeta.status), reclaimable: true, leasedBy: candidacy.holder };
+        }
+        return ready(story, storyMeta.status);
+      }
     }
+    // The false-accept guard: a candidacy-skipped story is NOT done — a milestone
+    // whose remaining stories are all skipped (routed-elsewhere or leased) must not
+    // be offered for acceptance.
+    if (candidacySkipped) continue;
+    // The milestone-ACCEPT fallthrough (ADR-004.3 carve-out) stays candidacy-BLIND —
+    // a genuinely-done milestone is not a claimable work ref; no lookup here.
     return ready(driver, meta.status); // all stories done -- milestone needs accepting
   }
 

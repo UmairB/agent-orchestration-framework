@@ -200,18 +200,28 @@ export const archTests = [
         /["'`]--["'`]/.test(commitArgs),
         `the commit argv carries a "--" pathspec separator (it is scoped, not unscoped) — got ${commitArgs}`
       );
-      // …and the pathspec after the `--` is the partition root (`root` = meshDir(...)),
-      // not some other path: the token following the "--" element is the `root` binding.
+      // …and the pathspec after the `--` is the engine's ROOT scope, not some other
+      // path: the token following the "--" element is either the single `root`
+      // binding (the m22 partition-root form) or the SPREAD of the staged roots of
+      // the injected root set (`...commitRoots`, the 26/ADR-002 root-set form —
+      // syncMesh(workspace, { roots }) defaulting [meshDir(workspace)], every
+      // pathspec iterating the set). Either way the commit is scoped, never unscoped.
+      const SCOPED_COMMIT = /["'`]--["'`]\s*,\s*(?:root\b|\.\.\.\s*commitRoots\b)/;
       assert.ok(
-        /["'`]--["'`]\s*,\s*root\b/.test(commitArgs),
-        `the commit pathspec scopes to the partition root (\`-- root\`, root = meshDir(...)) — got ${commitArgs}`
+        SCOPED_COMMIT.test(commitArgs),
+        `the commit pathspec scopes to the root set (\`-- root\` or \`-- ...commitRoots\`, defaulting meshDir(...)) — got ${commitArgs}`
       );
-      // Non-vacuous self-checks: the extractor FINDS a scoped commit and the assertion
-      // FAILS on the old unscoped form (no `--`), so the proof demonstrably fires.
+      // Non-vacuous self-checks: the extractor FINDS a scoped commit in BOTH forms and
+      // the assertion FAILS on the old unscoped form (no `--`), so the proof
+      // demonstrably fires.
       const scoped = commitCallArgsArray('git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records", "--", root]);');
-      assert.ok(scoped != null && /["'`]--["'`]\s*,\s*root\b/.test(scoped), "extractor finds a scoped `-- root` commit");
+      assert.ok(scoped != null && SCOPED_COMMIT.test(scoped), "extractor finds a scoped `-- root` commit (the m22 single-root form)");
+      const scopedSet = commitCallArgsArray('git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records", "--", ...commitRoots]);');
+      assert.ok(scopedSet != null && SCOPED_COMMIT.test(scopedSet), "extractor finds a scoped `-- ...commitRoots` commit (the m26 root-set form)");
       const unscoped = commitCallArgsArray('git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records"]);');
-      assert.ok(unscoped != null && !/["'`]--["'`]/.test(unscoped), "the proof would FAIL on the old unscoped commit (no `--` pathspec)");
+      assert.ok(unscoped != null && !SCOPED_COMMIT.test(unscoped), "the proof would FAIL on the old unscoped commit (no `--` pathspec)");
+      const wrongSpread = commitCallArgsArray('git(repoRoot, ["commit", "-q", "-m", "mesh: sync node records", "--", ...somethingElse]);');
+      assert.ok(wrongSpread != null && !SCOPED_COMMIT.test(wrongSpread), "the proof would FAIL on a spread that is not the staged root set");
     },
   },
 ];

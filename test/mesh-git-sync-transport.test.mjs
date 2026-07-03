@@ -64,7 +64,7 @@ function record(nodeId, extra = {}) {
 }
 
 // Build: a BARE remote + one working clone for THIS node. The clone is the git repo
-// root; wiki/work is inside it, and the partition root is wiki/work/.mesh. Returns the
+// root; wiki/work is inside it, and the partition root is .aof/mesh. Returns the
 // roots + a `workspace` shaped like loadWorkspace's result ({ workDir, projectRoot }).
 // `branch` is the default branch the clone publishes on (main).
 async function buildFixture() {
@@ -87,7 +87,8 @@ async function buildFixture() {
   // The work stream + partition root. An initial commit so HEAD exists (the no-op
   // scenario records HEAD; pull needs an upstream).
   const workDir = path.join(clone, "wiki", "work");
-  await mkdir(path.join(workDir, ".mesh", "nodes"), { recursive: true });
+  const workspace = { workDir, projectRoot: clone };
+  await mkdir(path.join(meshDir(workspace), "nodes"), { recursive: true });
   // Pin EVERY path as -text (no EOL conversion) so git moves record bytes verbatim
   // across commit/checkout/merge on Windows (the m01/R2 lesson) — the engine is
   // payload-agnostic; this stops the fixture's git from renormalizing line endings.
@@ -97,7 +98,6 @@ async function buildFixture() {
   git(clone, ["commit", "-q", "-m", "initial"]);
   git(clone, ["push", "-q", "-u", "origin", "main"]);
 
-  const workspace = { workDir, projectRoot: clone };
   return { tmp, bare, clone, workDir, workspace };
 }
 
@@ -110,8 +110,9 @@ async function clonePeer(fixture, name) {
   configIdentity(peer);
   git(peer, ["checkout", "-q", "main"]);
   const peerWorkDir = path.join(peer, "wiki", "work");
-  await mkdir(path.join(peerWorkDir, ".mesh", "nodes"), { recursive: true });
-  return { peer, peerWorkDir, workspace: { workDir: peerWorkDir, projectRoot: peer } };
+  const peerWorkspace = { workDir: peerWorkDir, projectRoot: peer };
+  await mkdir(path.join(meshDir(peerWorkspace), "nodes"), { recursive: true });
+  return { peer, peerWorkDir, workspace: peerWorkspace };
 }
 
 const headSha = (repo) => git(repo, ["rev-parse", "HEAD"]).stdout.trim();
@@ -165,11 +166,11 @@ export const meshGitSyncTransportTests = [
         // The --json result reports what was committed and pushed.
         const pushedRel = result.pushed.map((p) => p.replace(/\\/g, "/"));
         assert.ok(
-          pushedRel.some((p) => p.endsWith("wiki/work/.mesh/nodes/node-a.json")),
+          pushedRel.some((p) => p.endsWith(".aof/mesh/nodes/node-a.json")),
           `--json result reports the committed+pushed record (got ${JSON.stringify(result.pushed)})`
         );
         // The remote's branch tip now contains this node's record file (pushed).
-        const onRemote = remoteShow(fx.bare, path.join("wiki", "work", ".mesh", "nodes", "node-a.json"));
+        const onRemote = remoteShow(fx.bare, path.join(".aof", "mesh", "nodes", "node-a.json"));
         assert.ok(onRemote != null, "the remote's branch tip contains node-a.json");
         assert.equal(onRemote, record("node-a"), "the remote record is byte-identical to what this node wrote");
       } finally {
@@ -233,7 +234,7 @@ export const meshGitSyncTransportTests = [
         // The --json result reports the peer record was pulled.
         const pulledRel = result.pulled.map((p) => p.replace(/\\/g, "/"));
         assert.ok(
-          pulledRel.some((p) => p.endsWith("wiki/work/.mesh/nodes/umair-mbp.json")),
+          pulledRel.some((p) => p.endsWith(".aof/mesh/nodes/umair-mbp.json")),
           `--json result reports the peer record was pulled (got ${JSON.stringify(result.pulled)})`
         );
       } finally {
@@ -267,14 +268,14 @@ export const meshGitSyncTransportTests = [
           // The file is committed and pushed.
           assert.equal(result.committed, true, `${file} was committed`);
           const pushedRel = result.pushed.map((p) => p.replace(/\\/g, "/"));
-          assert.ok(pushedRel.some((p) => p.endsWith(`.mesh/${file}`)), `${file} appears in the pushed set`);
+          assert.ok(pushedRel.some((p) => p.endsWith(`mesh/${file}`)), `${file} appears in the pushed set`);
           // The on-disk file is byte-for-byte unchanged (the engine never rewrote it).
           const onDisk = await readFile(target);
           assert.equal(onDisk.equals(Buffer.from(bytes, "latin1")), true, `${file} on disk is byte-for-byte unchanged`);
           // The remote's branch tip contains the file with identical bytes. Capture
           // stdout as a raw Buffer (NO encoding) so binary bytes (\x00\xff…) are not
           // mangled by a utf8 decode — the byte-for-byte proof must compare raw bytes.
-          const r = spawnSyncHardened("git", ["show", `main:wiki/work/.mesh/${file}`], { cwd: fx.bare });
+          const r = spawnSyncHardened("git", ["show", `main:.aof/mesh/${file}`], { cwd: fx.bare });
           assert.equal(r.status, 0, `${file} is on the remote branch tip`);
           assert.equal(r.stdout.equals(Buffer.from(bytes, "latin1")), true, `the remote ${file} has identical bytes`);
         } finally {

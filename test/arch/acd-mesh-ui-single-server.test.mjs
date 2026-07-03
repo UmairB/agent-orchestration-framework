@@ -26,7 +26,7 @@ function stripComments(source) {
 
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-single-server-"));
-  const meshDir = path.join(repo, "wiki", "work", ".mesh");
+  const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });

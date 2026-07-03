@@ -128,6 +128,13 @@ function argsFor(sub) {
     // accepts [0,1]), proving the single-envelope --json discipline without a live
     // control node.
     case "revoke": return ["mesh", "revoke", "node-x", "--json"];
+    // milestone 27 / story 01 — the issuance verb. The fixture's milestone 03's
+    // board-ui story is a resolvable ref, but the fixture is NOT mesh-configured
+    // (no config.mesh block), so `issue` refuses with ONE structured
+    // { ok:false, code:"mesh-not-configured" } envelope — exit 1 + parseable (the
+    // gate accepts [0,1]), proving the single-envelope --json discipline without a
+    // live mesh install.
+    case "issue": return ["mesh", "issue", "03/01", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

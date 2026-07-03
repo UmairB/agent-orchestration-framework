@@ -4,3 +4,10 @@
 aof.memory.index.json
 aof.memory.graphify.index.json
 notion.work-map.json
+
+# The mesh record stream (nodes/presence/leases/issuance/registry) — per-node runtime
+# state. The aof self-host repo is NOT a live mesh node (22/R4), so a local `aof mesh *`
+# run's machine-specific records (this box's identity/presence) must NOT be committed
+# here. A REAL node where .aof/mesh/ IS the git-tracked bus is a DIFFERENT repo with no
+# such ignore. (Location moved from wiki/work/.mesh/ to .aof/mesh/ at 28/verify.)
+mesh/

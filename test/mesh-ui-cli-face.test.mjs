@@ -38,7 +38,7 @@ const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 async function makeFixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-cli-"));
   const workDir = path.join(root, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const meshDir = path.join(root, ".aof", "mesh");
   await mkdir(path.join(root, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });

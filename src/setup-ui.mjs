@@ -1,11 +1,15 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { addProjectGlobalRef, capabilitiesPayload, loadEditableConfig, removeProjectGlobalRef, saveEditableResource, saveEditableSections } from "./config-editor.mjs";
 import { supportedResourceKinds, supportedRuntimes } from "./model.mjs";
 import { handleWorkApi } from "./board-ui.mjs";
 import { attachTerminalWebSocket } from "./terminal-ws.mjs";
+// milestone 28 / story 00 (ADR-003): the default uiRoot routes through the ONE
+// SEA-safe asset-base seam instead of joining a path off a bare import.meta.url
+// — dev behaviour is byte-for-byte unchanged (an explicit options.uiRoot still
+// wins, exactly as before; only the DEFAULT resolution changes carrier).
+import { assetPath } from "./asset-base.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -14,8 +18,7 @@ const VALID_CATALOG_KINDS = new Set(["skill", "agent"]);
 
 export async function serveSetupUi(catalog, options = {}) {
   const port = Number.parseInt(options.port ?? "4177", 10);
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const uiRoot = options.uiRoot ? path.resolve(options.uiRoot) : path.join(repoRoot, "ui");
+  const uiRoot = options.uiRoot ? path.resolve(options.uiRoot) : assetPath("ui");
   const projectDir = path.resolve(options.projectDir ?? process.cwd());
 
   const server = http.createServer(async (request, response) => {

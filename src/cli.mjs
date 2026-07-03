@@ -1,4 +1,5 @@
 import path from "node:path";
+import os from "node:os";
 import { access, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -24,13 +25,31 @@ import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
+// The relay serve seam (m23 serveRelay + the m24 auth-gated group-reach). `aof mesh
+// relay --serve` is a foreground launcher over serveRelay — the long-lived serve the
+// registered mesh:relay probe deliberately does NOT run (command-core.mjs: "the actual
+// long-lived serve is serveRelay/relayMode, the launcher's job").
+import { serveRelay, relayStatus } from "./mesh-relay.mjs";
 import { initPlanning } from "./planning-init.mjs";
+// milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
+// (the dev-only vite re-exec route) + the version string for `aof --version`
+// (ADR-004's "node mode = everything else" — an argv branch of the SAME run()
+// dispatch, never a fork ahead of it, mirroring the existing `help` branch).
+import { assetBase, packageVersionString } from "./asset-base.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
     console.log(helpText());
+    return;
+  }
+
+  // milestone 28 / story 00 (ADR-004): node mode = "everything but mesh relay" —
+  // --version is an argv branch of the SAME run() dispatch, exactly like help
+  // above; NOT a registered command-core command and NOT a fork ahead of run().
+  if (command === "--version" || command === "-v") {
+    console.log(packageVersionString());
     return;
   }
 
@@ -507,6 +526,13 @@ async function meshCommand(args) {
   // status probe (so `aof mesh relay --json` runs clean + returns, never hanging on a
   // listen). mesh:relay takes no positional (the role is config-driven, not a named ref).
   if (subcommand === "relay") {
+    // `aof mesh relay --serve [--host <h>] [--port <n>]` — the FOREGROUND relay launcher
+    // (the deferred "launcher's job"). The bare `aof mesh relay` stays the non-blocking
+    // status probe (the bijection-gate face); --serve stands up the long-lived serve.
+    if (parseOptions(rest).serve) {
+      await meshRelayServeCommand(rest);
+      return;
+    }
     await meshVerbCli("mesh:relay", rest, { positionalAllowed: false });
     return;
   }
@@ -531,6 +557,17 @@ async function meshCommand(args) {
   // + de-provisions its git-remote).
   if (subcommand === "revoke") {
     await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
+    return;
+  }
+  // milestone 27 / story 01 — the additive issuance dispatch branch, ABOVE the
+  // unknown-sub fallthrough. The EXACT `subcommand === "issue"` form the
+  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
+  // face. `aof mesh issue <ref> [--to <node|cap>] [--withdraw]` takes ONE
+  // positional (the ref) plus the --to/--withdraw extra flags (mesh:issue is the
+  // FIRST mesh:* verb that needs flags beyond --json/--config — extraFlags names
+  // them so meshVerbCli's unknown-flag guard admits exactly these two).
+  if (subcommand === "issue") {
+    await meshVerbCli("mesh:issue", rest, { positionalAllowed: true, extraFlags: ["to", "withdraw"] });
     return;
   }
   // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
@@ -579,8 +616,9 @@ async function meshCommand(args) {
 //                     absent null the mesh:identity run returns).
 // opts.positionalAllowed: whether the sub accepts ONE id positional (identity yes,
 // status no). The recognised flags on the mesh face are --json and --config; any other
-// --flag is invalid-input.
-async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
+// --flag is invalid-input, UNLESS named in opts.extraFlags (milestone 27 — mesh:issue is
+// the FIRST mesh:* verb needing flags beyond --json/--config: --to/--withdraw).
+async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [] } = {}) {
   const command = getCommand(id);
 
   // Detect --json + an unknown flag from the RAW args, NOT from parseOptions's keys:
@@ -592,7 +630,7 @@ async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
     .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
     .map((arg) => arg.slice(2).split("=", 2)[0]);
   const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config");
+  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config" && !extraFlags.includes(flag));
 
   const options = parseOptions(args);
   // Force the resolved --json onto the parsed options so an unknown flag that
@@ -973,6 +1011,92 @@ async function meshUiCommand(args) {
         resolve();
       });
     };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
+}
+
+// The default relay port (distinct from the mesh-ui 4181). 0 ⇒ an ephemeral port.
+const DEFAULT_MESH_RELAY_PORT = 4180;
+
+// `aof mesh relay --serve [--host <h>] [--port <n>]` — the FOREGROUND relay launcher
+// (the "launcher's job" the registered mesh:relay probe deliberately defers). Stands up
+// the long-lived serveRelay on the NOMINATED control node and blocks until Ctrl+C.
+// --host defaults to 127.0.0.1 (the loopback pre-auth posture); pass --host 0.0.0.0 to
+// make the relay group-reachable — the m24 ws auth-gate treats every non-loopback remote
+// as a GROUP connection requiring a valid, non-revoked credential, which is the control
+// that makes an open bind safe.
+async function meshRelayServeCommand(args) {
+  const options = parseOptions(args);
+  const host = typeof options.host === "string" && options.host.length > 0 ? options.host : "127.0.0.1";
+  const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_RELAY_PORT), 10);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    console.error(`Invalid --port "${options.port}". Pass an integer 0–65535 (0 ⇒ an ephemeral port).`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const config = workspace.config ?? {};
+
+  // The control-node gate — only the nominated enrollment authority hosts the relay (the
+  // same predicate mesh:invite / relayMode serve under). An actionable refusal when this
+  // node is not nominated, never a silent no-op.
+  const status = relayStatus(config);
+  if (!status.nominated) {
+    const nodeId = status.nodeId ?? "(unset — run `aof mesh identity` first)";
+    console.error(
+      [
+        `This node (${nodeId}) is not the nominated control node, so it will not host the relay.`,
+        `Nominate it in .aof/aof.config.json under "mesh":`,
+        `  "relay": {`,
+        `    "controlNode": "${status.nodeId ?? "<this-node-id>"}",`,
+        `    "url": "ws://<reachable-host>:${port}/ws/relay"`,
+        `  }`,
+        `(url is what peers put in their own config.mesh.relay.url), then re-run \`aof mesh relay --serve\`.`,
+      ].join("\n")
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  let unit;
+  try {
+    unit = await serveRelay({ port, host, config, workspace });
+  } catch (error) {
+    if (error && error.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
+      process.exitCode = 1;
+      return;
+    }
+    if (error && (error.code === "EADDRNOTAVAIL" || error.code === "EACCES")) {
+      console.error(`Cannot bind host "${host}" port ${port} (${error.code}). Use 127.0.0.1, 0.0.0.0, or a local interface address, and a non-privileged port.`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+
+  const boundPort = unit.server.address().port;
+  console.log(`AOF mesh relay is running (control node ${status.nodeId}).`);
+  console.log(`Bound: ${unit.url}`);
+  if (host === "0.0.0.0") {
+    // ws://0.0.0.0:… is a bind spec, not a connect URL — surface the reachable addresses.
+    const lanAddrs = Object.values(os.networkInterfaces())
+      .flat()
+      .filter((nic) => nic && nic.family === "IPv4" && !nic.internal)
+      .map((nic) => `ws://${nic.address}:${boundPort}/ws/relay`);
+    if (lanAddrs.length > 0) {
+      console.log("Peers on your LAN connect via:");
+      for (const addr of lanAddrs) console.log(`  ${addr}`);
+    }
+    console.log(`Over the internet: front this port with a tunnel (ngrok http ${boundPort}  /  devtunnel host -p ${boundPort}) and give peers wss://<tunnel-host>/ws/relay as their config.mesh.relay.url.`);
+  }
+  console.log("Enrollment: peers POST /enroll on the same host:port (mint the code with `aof mesh invite`).");
+  console.log("Press Ctrl+C to stop the relay.");
+
+  await new Promise((resolve) => {
+    const shutdown = () => { unit.stop().then(resolve, resolve); };
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   });
@@ -2095,8 +2219,15 @@ async function setupUiCommand(options) {
   });
 }
 
+// DEV-ONLY: the vite UI dev server re-exec (RESEARCH §0; ADR-003 allow-list).
+// Never on the shipped path — a SEA never runs vite. Re-homed onto the ONE
+// asset-base seam for correctness (the same repoRoot-derivation every other
+// site used), but allow-listed from the "must serve packaged assets" assertion
+// (acd-sea-safe-asset-base fitness #1) since this line never executes in a SEA.
 function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  // "version" resolves to the repo root in dev (the same base package.json/
+  // work-bundle-manifest.mjs read); it never runs under a SEA (dev-only path).
+  const repoRoot = assetBase("version");
   const uiDir = path.join(repoRoot, "ui");
   const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
   return spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
@@ -2380,7 +2511,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve"].includes(key)) {
       options[key] = true;
       continue;
     }

@@ -49,7 +49,7 @@ function diffSnapshots(before, after) {
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-write-iso-"));
   const workDir = path.join(repo, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });
@@ -110,25 +110,124 @@ export const archTests = [
       }
     },
   },
+  // milestone 27 / story 02 (ADR-006.2) — SUPERSEDED IN PLACE: the m25 assertion
+  // "the fleet face writes NOTHING and serves no write route" moves to a BOUNDED-
+  // WRITE shape. XOR/consistency-phrased (the acd-mesh-issue-route-same-origin
+  // template): GREEN on the m25 zero-write tree (no /api/mesh/issue|assign|route|
+  // revoke route declared at all — vacuously satisfied) OR on the exactly-one-
+  // route tree (POST /api/mesh/issue declared, reaching the mutation ONLY via
+  // invoke("mesh:issue"), no direct mesh-issuance/operation import, no bare
+  // writeFile/child_process, and NO other write route / no /ws/terminal). RED
+  // only in the broken half: a write route that bypasses the door, a SECOND
+  // write route, or a /ws/terminal.
   {
-    name: "arch/25 ADR-003/004: mesh-ui-serve.mjs serves no /ws/terminal and no write route",
+    name: "arch/25-27 ADR-003/004/006.2: mesh-ui-serve.mjs serves no /ws/terminal, and is EITHER write-nothing (m25) OR bounded-write to exactly POST /api/mesh/issue via invoke(\"mesh:issue\") (m27, XOR/consistency)",
     run: async () => {
       const source = stripComments(await readFile(MESH_UI_SERVE, "utf8"));
-      // No terminal websocket route/path.
+
+      // No terminal websocket route/path — UNCHANGED on both trees.
       assert.ok(!/["']\/ws\/terminal["']/.test(source), "mesh-ui-serve.mjs serves no /ws/terminal path");
       assert.ok(!/["']\/ws\//.test(source) || !/pathname\s*===\s*["']\/ws\//.test(source), "mesh-ui-serve.mjs declares no /ws/ HTTP route");
-      // No write route: the one API route is a GET-only /api/mesh/status. A POST/PUT/
-      // PATCH/DELETE handler on any /api/mesh route would be a write surface — the face
-      // rejects those methods (a 405), it never routes them to a mutation.
+
+      const declaresIssueRoute = /pathname\s*===\s*["']\/api\/mesh\/issue["']/.test(source);
+      const declaresAnyOtherWriteRoute = /pathname\s*===\s*["']\/api\/mesh\/(assign|route|revoke)["']/.test(source);
+
+      if (!declaresIssueRoute) {
+        // The m25 zero-write tree: no /api/mesh/issue|assign|route|revoke route at
+        // all — vacuously satisfied (there is no write route to bound yet).
+        assert.ok(
+          !declaresAnyOtherWriteRoute,
+          "no /api/mesh/issue route yet, and no /api/mesh/assign|route|revoke route either (the m25 read-only state)"
+        );
+        // The face rejects non-GET methods on its one route (read-only) rather than
+        // dispatching them to a mutation — a method-guard is present.
+        assert.ok(
+          /request\.method\s*!==\s*["']GET["']/.test(source),
+          "mesh-ui-serve.mjs guards its one route to GET (read-only) — a write method is rejected, never dispatched"
+        );
+      } else {
+        // The m27 bounded-write tree: POST /api/mesh/issue is declared. It must be
+        // the ONLY write route — no assign/route/revoke sibling exists.
+        assert.ok(
+          !declaresAnyOtherWriteRoute,
+          "mesh-ui-serve.mjs declares NO /api/mesh/assign|route|revoke route — /api/mesh/issue is the ONLY write route"
+        );
+        // It reaches the mutation ONLY via invoke("mesh:issue") — never a direct
+        // mesh-issuance import (acd-mesh-ui-no-core-import's own concern, restated
+        // here as the bounded-write invariant).
+        assert.ok(
+          /invoke\s*\(\s*["']mesh:issue["']/.test(source),
+          "mesh-ui-serve.mjs reaches the mutation via invoke(\"mesh:issue\") — the ONE registry door"
+        );
+        assert.ok(
+          !/from\s*["']\.\/mesh-issuance\.mjs["']/.test(source) && !/require\(\s*["']\.\/mesh-issuance\.mjs["']\s*\)/.test(source),
+          "mesh-ui-serve.mjs imports NO ./mesh-issuance.mjs — the mutation reaches ONLY through invoke"
+        );
+      }
+
+      // No fs-write call form and no shell-out, on EITHER tree — the face itself
+      // performs no mutation of its own regardless of which half is satisfied.
+      for (const verb of ["writeFile", "appendFile", "writeFileSync", "appendFileSync", "mkdir", "rm", "rmdir", "unlink", "rename"]) {
+        assert.ok(
+          !new RegExp(`\\b${verb}\\s*\\(`).test(source),
+          `mesh-ui-serve.mjs makes no ${verb}( call — the face itself writes nothing (the mutation, if any, is behind invoke)`
+        );
+      }
+      assert.ok(!/child_process/.test(source), "mesh-ui-serve.mjs imports no child_process");
+      for (const verb of ["spawn", "spawnSync", "exec", "execSync", "execFile"]) {
+        assert.ok(
+          !new RegExp(`\\b${verb}\\s*\\(`).test(source),
+          `mesh-ui-serve.mjs makes no ${verb}( shell-out`
+        );
+      }
+
+      // --- m03 non-vacuous planted-violation self-check ---
+      // A broken-half fixture: a SECOND write route (/api/mesh/assign) declared
+      // alongside /api/mesh/issue — the detector must FIRE (fail the assertion) on
+      // this shape, proving it is not vacuously green on the guarded tree either.
+      const plantedSecondWriteRoute = stripComments(`
+        if (pathname === "/api/mesh/issue") {
+          const result = await invoke("mesh:issue", body, { workspace });
+          sendJson(response, 200, result);
+        }
+        if (pathname === "/api/mesh/assign") {
+          const result = await invoke("mesh:assign", body, { workspace });
+          sendJson(response, 200, result);
+        }
+      `);
+      const plantedDeclaresIssue = /pathname\s*===\s*["']\/api\/mesh\/issue["']/.test(plantedSecondWriteRoute);
+      const plantedDeclaresOther = /pathname\s*===\s*["']\/api\/mesh\/(assign|route|revoke)["']/.test(plantedSecondWriteRoute);
+      assert.ok(plantedDeclaresIssue, "self-check: the detector sees the planted /api/mesh/issue route");
+      assert.ok(plantedDeclaresOther, "self-check: the detector FIRES on a planted SECOND write route (/api/mesh/assign) — this is the broken half");
+
+      // A broken-half fixture: /api/mesh/issue reaching the mutation via a DIRECT
+      // mesh-issuance import, bypassing the registry door.
+      const plantedBypassDoor = stripComments(`
+        import { issueDirective } from "./mesh-issuance.mjs";
+        if (pathname === "/api/mesh/issue") {
+          await issueDirective(workspace, nodeId, ref, directive);
+        }
+      `);
       assert.ok(
-        !/pathname\s*===\s*["']\/api\/mesh\/(issue|assign|route|revoke)["']/.test(source),
-        "mesh-ui-serve.mjs declares no /api/mesh/issue|assign|route|revoke write route (m27 adds those)"
+        /from\s*["']\.\/mesh-issuance\.mjs["']/.test(plantedBypassDoor),
+        "self-check: the detector sees the planted direct mesh-issuance import (the broken half — bypassing the registry door)"
       );
-      // The face rejects non-GET methods on its one route (read-only) rather than
-      // dispatching them to a mutation — a method-guard is present.
+
+      // The accepted guarded form (the shape this story ships) stays quiet on both
+      // checks above.
+      const accepted = stripComments(`
+        if (pathname === "/api/mesh/issue") {
+          const result = await invoke("mesh:issue", { ref: body.ref, to: body.to }, { workspace });
+          sendJson(response, 200, result);
+        }
+      `);
       assert.ok(
-        /request\.method\s*!==\s*["']GET["']/.test(source),
-        "mesh-ui-serve.mjs guards its one route to GET (read-only) — a write method is rejected, never dispatched"
+        !/pathname\s*===\s*["']\/api\/mesh\/(assign|route|revoke)["']/.test(accepted),
+        "self-check: the accepted single-route form declares no second write route"
+      );
+      assert.ok(
+        /invoke\s*\(\s*["']mesh:issue["']/.test(accepted),
+        "self-check: the accepted form reaches the mutation via invoke(\"mesh:issue\")"
       );
     },
   },
@@ -140,7 +239,7 @@ export const archTests = [
       await writeDist(meshUiDist(root));
       let server;
       try {
-        const before = await snapshotDir(workDir);
+        const before = await snapshotDir(repo);
         let url;
         ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
         // Serve the page + read the aggregate several times.
@@ -149,7 +248,7 @@ export const archTests = [
           const res = await fetch(new URL("/api/mesh/status", url));
           assert.equal(res.status, 200, "the aggregate read answers");
         }
-        const after = await snapshotDir(workDir);
+        const after = await snapshotDir(repo);
         assert.deepEqual(
           diffSnapshots(before, after),
           [],

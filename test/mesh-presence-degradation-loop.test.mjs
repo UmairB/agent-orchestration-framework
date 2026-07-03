@@ -85,7 +85,7 @@ function configIdentity(repo) {
 
 // Build a bare remote + a working clone whose work stream carries an .aof config (so
 // loadWorkspace + invoke run against it). The clone is the git repo root; the partition
-// root is wiki/work/.mesh. Returns the roots + a real workspace (loaded via loadWorkspace
+// root is .aof/mesh. Returns the roots + a real workspace (loaded via loadWorkspace
 // so config.mesh.nodeId is pinned).
 async function buildGitFixture() {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-presence-degrade-"));
@@ -104,7 +104,7 @@ async function buildGitFixture() {
 
   const workDir = path.join(clone, "wiki", "work");
   const milestoneDir = path.join(workDir, "23_milestone_control-node-relay");
-  await mkdir(path.join(workDir, ".mesh", "presence"), { recursive: true });
+  await mkdir(path.join(meshDir({ workDir, projectRoot: clone }), "presence"), { recursive: true });
   await mkdir(milestoneDir, { recursive: true });
   // Pin -text so git moves record bytes verbatim (the m01/R2 lesson; the engine is
   // payload-agnostic — this stops the fixture's git renormalizing line endings).
@@ -138,7 +138,7 @@ async function clonePeer(fixture, name) {
   configIdentity(peer);
   git(peer, ["checkout", "-q", "main"]);
   const peerWorkDir = path.join(peer, "wiki", "work");
-  await mkdir(path.join(peerWorkDir, ".mesh", "presence"), { recursive: true });
+  await mkdir(path.join(meshDir({ workDir: peerWorkDir, projectRoot: peer }), "presence"), { recursive: true });
   return { peer, peerWorkDir, workspace: { workDir: peerWorkDir, projectRoot: peer } };
 }
 

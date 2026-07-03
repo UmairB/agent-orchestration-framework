@@ -68,7 +68,7 @@ export function partitionByCapability(resources, runtimes) {
 export function bundleVersion() {
   // The aof package version (ADR-002). Read package.json directly via the shared
   // packageVersion() helper — NOT by re-rendering the whole bundle manifest just
-  // to pull one string out of it (that would re-render all 34 members per call).
+  // to pull one string out of it (that would re-render all 35 members per call).
   return packageVersion();
 }
 

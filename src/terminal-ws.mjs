@@ -12,22 +12,67 @@
 //   - control    : client→server JSON { type:'resize', cols, rows } → pty.resize;
 //                  server→client JSON { type:'exit', exitCode }     (clean/failed exit)
 //                  server→client JSON { type:'error', message }     (spawn failure).
+import { createRequire } from "node:module";
 import { WebSocketServer } from "ws";
 import { loadWorkspace, findWork } from "./work.mjs";
 import { resolveProvider, PROVIDER_IDS } from "./terminal-providers.mjs";
 import { registerSession, unregisterSession } from "./terminal-sessions.mjs";
 import { resolveHeadroomLaunch } from "./headroom.mjs";
+// milestone 28 / story 00 (ADR-002): the SEA sentinel this module's node-pty
+// re-home branches on — the SAME sentinel src/asset-base.mjs's assetBase()
+// keys on, so a test flips ONE seam and both the asset base AND the node-pty
+// loader branch move in lock-step.
+import { isPackaged } from "./asset-base.mjs";
 
 // The single terminal pathname (ADR-001). Any other upgrade pathname is destroyed.
 const TERMINAL_PATH = "/ws/terminal";
 
-// The default PTY spawner: dynamically imports node-pty INSIDE the call so that
-// importing this module never requires the native addon at load time (CI tests
-// inject a stub spawn; only a real session touches node-pty). Returns the
-// node-pty process handle.
+// The node-pty LOADER — separated from defaultSpawn so an @executable test can
+// inject a stub loader (resolves / throws) and assert WHICH branch ran, with no
+// built binary and no real node-pty (the Build-notes developer-seat guidance).
+// Real behaviour, exactly as before the split:
+//   - SEA (isPackaged() true): createRequire(process.execPath)("node-pty") —
+//     a filesystem require resolved against the on-disk sidecar the build
+//     recipe ships beside the binary (a raw `await import("node-pty")` THROWS
+//     for an FS module inside a SEA main — RESEARCH §1/§2).
+//   - dev (isPackaged() false): the EXISTING `await import("node-pty")`,
+//     byte-for-byte unchanged.
+// Exported (F12 craft-review) so an @executable test can drive the REAL
+// branch-selection logic directly — flipping isPackaged() via
+// setSeaSentinelForTest and observing WHICH mechanism was actually attempted
+// (its distinct failure/success signature in a dev environment), rather than
+// only asserting on the source text. This does not change production
+// behaviour: defaultSpawn (below) still calls this exact function.
+export function loadNodePty() {
+  return isPackaged() ? createRequire(process.execPath)("node-pty") : import("node-pty");
+}
+
+// The default PTY spawner: loads node-pty INSIDE the call (via the injectable
+// ptyLoader) so that importing this module never requires the native addon at
+// load time (CI tests inject a stub spawn; only a real session touches
+// node-pty). Returns the node-pty process handle.
+//
+// The load stays INSIDE this function, never hoisted to a top-level import
+// (fitness #3 — a missing/unloadable sidecar must never crash startup;
+// importing terminal-ws.mjs must never need the addon).
 async function defaultSpawn(bin, args, options) {
-  const pty = await import("node-pty");
+  const pty = await loadNodePty();
   return pty.spawn(bin, args, options);
+}
+
+// A defaultSpawn FACTORY, parameterised on the ptyLoader — the injectable seam
+// an @executable test uses to model "sidecar resolves" / "ENOENT" / "throws on
+// require" / "wrong-arch dlopen failure" / "missing Windows companion" without
+// a built binary and without a real node-pty (mirrors the isPackaged/
+// setSeaSentinelForTest injection shape in src/asset-base.mjs). The real
+// defaultSpawn above is EXACTLY createTerminalSpawn(loadNodePty)'s behaviour —
+// this factory does not change the production default, it only exposes the
+// same shape for a test-supplied loader.
+export function createTerminalSpawn(ptyLoader) {
+  return async function spawnWithLoader(bin, args, options) {
+    const pty = await ptyLoader();
+    return pty.spawn(bin, args, options);
+  };
 }
 
 // Attach the terminal WebSocket to an existing http.Server (ADR-001: the SAME

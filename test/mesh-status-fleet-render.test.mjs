@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
+import { meshDir } from "../src/mesh-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -36,7 +37,7 @@ async function buildFixture() {
   return { root, workDir };
 }
 
-const meshRoot = (workDir) => path.join(workDir, ".mesh");
+const meshRoot = (workDir) => meshDir({ workDir });
 
 async function seedNode(workDir, id) {
   const nodesDir = path.join(meshRoot(workDir), "nodes");
@@ -221,7 +222,15 @@ export const meshStatusFleetRenderTests = [
         const result = runCli(root, ["mesh", "status", "--json"]);
         assert.equal(result.status, 0, `mesh status --json exits 0 on an empty fleet (stderr: ${result.stderr})`);
         const parsed = JSON.parse(result.stdout);
-        assert.deepEqual(parsed, { nodes: [], boards: [] }, "the empty aggregate is exactly { nodes: [], boards: [] }");
+        // milestone 27 / story 01 (ADR-004 consequences) — the RIPPLE: mesh:status
+        // gained the UNCONDITIONAL additive isControlNode marker (present even
+        // unconfigured, false — never absent). The empty aggregate is otherwise
+        // exactly { nodes: [], boards: [] }.
+        assert.deepEqual(
+          parsed,
+          { nodes: [], boards: [], isControlNode: false },
+          "the empty aggregate is exactly { nodes: [], boards: [], isControlNode: false }"
+        );
         assert.ok(!result.stdout.includes("No nodes in the mesh roster."), "the friendly line does not appear on stdout");
       } finally {
         await rm(root, { recursive: true, force: true });

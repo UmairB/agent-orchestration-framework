@@ -154,6 +154,16 @@ import { meshJoinCommand } from "./commands/mesh-join.mjs";
 // the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
 // gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
 import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
+// milestone 27 — work-issuance-routing (story 01: mesh:issue — ADR-002). Thin over
+// story 00/01's src/mesh-issuance.mjs (the frozen six-key directive assembly + the
+// own-path issueDirective/withdrawDirective writes): resolves the ref EXACTLY
+// (write-isolation), disambiguates --to DATA-DRIVEN against the synced roster,
+// writes ONE own-issuer-partition directive, and pushes ONE default-root sync
+// (KR3). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
+// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+
+// heartbeat+relay+invite+join+revoke+issue).
+import { meshIssueCommand } from "./commands/mesh-issue.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -193,6 +203,7 @@ const COMMANDS = [
   meshInviteCommand,
   meshJoinCommand,
   meshRevokeCommand,
+  meshIssueCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

@@ -26,6 +26,7 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { serveRelay, sha256Hex } from "../src/mesh-relay.mjs";
 import { writeRegistry, readRegistry } from "../src/mesh-registry.mjs";
+import { meshDir } from "../src/mesh-store.mjs";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -214,7 +215,7 @@ export const meshRevokeTests = [
         const nonControlWorkspace = { ...ctl.workspace, config: nonControlConfig };
 
         // Record the registry bytes on disk before the refused invocation.
-        const registryPath = path.join(ctl.workspace.workDir, ".mesh", "registry", "group.json");
+        const registryPath = path.join(meshDir(ctl.workspace), "registry", "group.json");
         const before = await readFile(registryPath, "utf8");
 
         let refused = null;

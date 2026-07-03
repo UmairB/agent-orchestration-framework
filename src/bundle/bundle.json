@@ -17,6 +17,7 @@
     { "id": "code-review", "kind": "command", "file": "commands/code-review.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "continue", "kind": "command", "file": "commands/continue.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "feedback", "kind": "command", "file": "commands/feedback.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "migrate", "kind": "command", "file": "commands/migrate.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "recent", "kind": "command", "file": "commands/recent.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "refine", "kind": "command", "file": "commands/refine.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "retrospective", "kind": "command", "file": "commands/retrospective.md", "runtimes": ["claude"], "commandNamespace": "aof" },

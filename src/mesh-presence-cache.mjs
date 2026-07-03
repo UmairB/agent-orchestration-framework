@@ -11,15 +11,16 @@
 // (mesh-store.mjs's publishPresenceRecord/presenceRecordPath) NOR mesh-presence.mjs's write
 // path NOR node:fs — it holds the in-flight liveness view in memory ONLY, exactly as the
 // relay holds the in-flight frame in memory only. It reuses ONLY the frozen
-// PRESENCE_SIGNAL_KIND literal (from the relay client) so the consumer and the producer
-// agree on the one wire `kind`. The arch-test acd-presence-subscriber-cache-only (fitness
-// #7, ADR-004) enforces this statelessness discipline over this module's source.
+// PRESENCE_SIGNAL_KIND / LEASE_SIGNAL_KIND literals (from the relay client) so the
+// consumer and the producer agree on the wire `kind`s. The arch-tests
+// acd-presence-subscriber-cache-only (fitness #7, m23/ADR-004) and acd-lease-cache-only
+// (m26 fitness #11) enforce this statelessness discipline over this module's source.
 //
 // LATEST-WINS, keyed by nodeId (the ADR-002 one-node-per-partition discipline applied in
 // memory): apply() supersedes a cached entry ONLY when the incoming heartbeatAt is strictly
 // newer (Date.parse compare) — an equal-or-older signal is dropped, so a re-broadcast /
 // out-of-order frame never regresses the view.
-import { PRESENCE_SIGNAL_KIND } from "./mesh-relay-client.mjs";
+import { PRESENCE_SIGNAL_KIND, LEASE_SIGNAL_KIND } from "./mesh-relay-client.mjs";
 
 // createPresenceCache() → the in-memory liveness cache. A plain closure over a Map keyed by
 // the PEER's nodeId; each value is the OPAQUE presence record (the signal blob) the
@@ -81,6 +82,57 @@ export function createPresenceCache() {
     // size → the count of cached peers.
     get size() {
       return byId.size;
+    },
+  };
+}
+
+// createLeaseCache() → the in-memory LEASE-INTENT cache (milestone 26 / ADR-004.2 — the
+// 23/ADR-004 receive-side mirror, verbatim discipline). The createPresenceCache closure
+// shape, keyed by the claim's ITEM REF: each value is the OPAQUE claim record (the
+// signal blob) the subscriber applied off a fanned-out { kind:"lease" } frame. IN
+// MEMORY ONLY — no fs handle, no durable write, never a second system of record
+// (fitness #11, acd-lease-cache-only): the cache can only feed the SKIP/DEFER hint slot
+// of buildLeaseView (the `disk ?? cache` overlay — add-a-skip-only, git wins), never a
+// HOLD. LATEST-SIGNAL-WINS per itemRef: a newer frame for the same item supersedes the
+// older entry (the intent is an advisory fast-path projection — claimedAt is NEVER
+// load-bearing, ADR-003, so arrival order IS the supersede order); applying one item's
+// intent never touches another item's entry. Validation-guarded: a non-lease kind, a
+// non-object signal, or a signal with no itemRef is ignored (returns false, never throws).
+export function createLeaseCache() {
+  // itemRef -> the latest applied claim record (the opaque signal blob).
+  const byItemRef = new Map();
+
+  return {
+    // apply(envelope) → boolean (true iff the envelope seeded / superseded an entry).
+    // IGNORES anything that is not a lease envelope carrying an itemRef-keyed record:
+    //   - envelope is a non-null object,
+    //   - envelope.kind === "lease" (a presence / unknown kind is ignored),
+    //   - envelope.signal is a non-null object,
+    //   - signal.itemRef is a non-empty string (the cache key).
+    apply(envelope) {
+      if (envelope == null || typeof envelope !== "object") return false;
+      if (envelope.kind !== LEASE_SIGNAL_KIND) return false;
+      const signal = envelope.signal;
+      if (signal == null || typeof signal !== "object") return false;
+      if (typeof signal.itemRef !== "string" || signal.itemRef.length === 0) return false;
+      byItemRef.set(signal.itemRef, signal);
+      return true;
+    },
+
+    // get(id) → the cached claim record for an item ref, or null when none is cached.
+    get(id) {
+      return byItemRef.has(id) ? byItemRef.get(id) : null;
+    },
+
+    // ids() → the cached item refs — the { ids(), get(id) } duck buildLeaseView's hint
+    // slot reads structurally (the view never imports this module — fitness #8).
+    ids() {
+      return [...byItemRef.keys()];
+    },
+
+    // size → the count of cached item refs.
+    get size() {
+      return byItemRef.size;
     },
   };
 }

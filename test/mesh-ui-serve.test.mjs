@@ -34,7 +34,7 @@ const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-serve-"));
   const workDir = path.join(repo, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });

@@ -4,9 +4,27 @@ AOF is a local CLI for **agent-driven delivery**. Its heart is **`aof work`**: a
 
 Everything is local Markdown + JSON — no service, no database.
 
+## Install
+
+A signed, self-contained `aof` binary — **no Node.js, no toolchain**. One line, per-user (no sudo/admin), installs to `$HOME/.aof/bin`:
+
+```sh
+# macOS / Linux
+curl -fsSL https://get.aof.dev/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://get.aof.dev/install.ps1 | iex
+```
+
+Each installer detects your OS/arch, downloads the matching signed release asset plus its node-pty sidecar, **verifies the checksum (and, on Linux, the GPG signature against the pinned release key) before placing anything on PATH**, and refuses on any mismatch — the signature is checked, never thrown away. Open a new shell afterwards and run `aof --version`.
+
+This is a separate, greenfield distribution path from the local dev setup below — it does not require cloning the repo or installing Node.
+
 ## Local setup
 
-There is **no published package or installer yet** — the CLI is wired up locally with `npm link`. Requires **Node ≥ 20**.
+There is **no published package or installer yet for local development** — the CLI is wired up locally with `npm link`. Requires **Node ≥ 20**.
 
 ```sh
 # from the repo root

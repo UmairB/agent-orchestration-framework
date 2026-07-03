@@ -4,7 +4,7 @@ number: 01
 slug: architect-refine-coupling-grounding
 title: "Architect + refine coupling grounding — the structural-review and story-boundary seams read real coupling"
 parent: 11
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23

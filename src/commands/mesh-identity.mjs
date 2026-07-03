@@ -21,14 +21,15 @@
 // This story WRITES only through the store's meshDir seam and NEVER calls the sync
 // engine (story 02 moves the records); it is parallel-with-02 by construction.
 import os from "node:os";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { readJson, writeText } from "../fs.mjs";
 import { publishNodeRecord, readNodeRecord, readNodeRecords } from "../mesh-store.mjs";
 import { deriveNodeId, assembleDescriptor } from "../node-identity.mjs";
 import { loadBundle } from "../work-bundle.mjs";
+// milestone 28 / story 00 (ADR-003): the version read routes through the ONE
+// SEA-safe asset-base seam instead of joining a path off a bare
+// import.meta.url — dev behaviour is byte-for-byte unchanged.
+import { packageVersionString } from "../asset-base.mjs";
 // milestone 23 / story 00 (ADR-002) — mesh:status is EXTENDED to render each node's
 // presence + a stale flag. The reads (presence + threshold + node-staleness) live in
 // the presence dimension; status stays a PURE READ (writes nothing).
@@ -47,7 +48,20 @@ import {
 // (a torn/unparseable registry THROWS, a wrong-shape one parses to a non-registry), so
 // the projection wraps the call in try/catch AND shape-guards the parsed value — a
 // missing/torn/foreign registry degrades to empty boards, NEVER blinding the roster.
-import { readRegistry } from "../mesh-registry.mjs";
+import { readRegistry, isControlNode } from "../mesh-registry.mjs";
+// milestone 26 / story 01 (ADR-005 consequences) — mesh:status is EXTENDED again,
+// additively, with the LEASE render: who holds what, per state:"claimed" record,
+// live|lapsed by the SAME presence clock the nodes half uses (task-01's predicate —
+// never a private re-derivation). The claim read carries the mesh-store discipline
+// (absence-tolerant, torn-file-skipping). A PURE READ: the render never flips a
+// lapsed claim (the lapse is a rule; withdrawal is the owner's alone).
+import { readLeaseClaims, claimLiveness } from "../mesh-lease.mjs";
+// milestone 27 / story 01 (ADR-004 consequences) — mesh:status is EXTENDED again,
+// additively, with the ISSUED render: who issued what, targeted at whom, riding
+// the EXISTING verb (no new gate re-armed — the 22/R1 inverse). readIssuanceDirectives
+// is the SAME absence-tolerant / torn-file-skipping union read the routing filter
+// consumes (src/mesh-issuance.mjs, stories 00/01) — a PURE read, it writes nothing.
+import { readIssuanceDirectives } from "../mesh-issuance.mjs";
 
 // The publishing install's aof version (ADR-003 provenance) — read from the package
 // manifest via the import.meta.url idiom (same posture as bundleRoot()): src/ ->
@@ -57,8 +71,7 @@ import { readRegistry } from "../mesh-registry.mjs";
 // provenance the node record carries — read it ONE way, not a second package.json read.
 export function aofVersion() {
   try {
-    const manifestPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
-    return JSON.parse(readFileSync(manifestPath, "utf8")).version ?? "";
+    return packageVersionString();
   } catch {
     return "";
   }
@@ -250,7 +263,63 @@ export const meshStatusCommand = {
     // active runs (the m21 run read against this node's local work stream). The read
     // is PURE — it writes nothing.
     const boards = await boardsProjection(ws, localId, presenceById);
-    return { nodes, boards };
+    const result = { nodes, boards };
+
+    // milestone 26 / story 01 (ADR-005 consequences) — the ADDITIVE lease section,
+    // gated on config.mesh.nodeId being a NON-EMPTY string (the SAME predicate
+    // commands/next.mjs gates its lease view on — the two m26 gates never diverge;
+    // an empty-string nodeId is unconfigured): ABSENT when mesh is unconfigured
+    // (byte-identical to today — the key never appears), [] when
+    // configured-but-empty. Per held ("claimed") record: { itemRef, holder, live } —
+    // itemRef/holder straight off the claim record's vocabulary (ADR-003.1), `live`
+    // a boolean by task-01's predicate over the holder's OWN presence and the SAME
+    // nowMs/thresholdMs the nodes half computed. A released file is a withdrawal,
+    // not a hold — filtered out. Two claims for one item (the transient race window)
+    // render as two entries, one per claimant — a third-party reader NEVER resolves
+    // the winner (ADR-003.4). A no-presence holder renders live (the never-beat ≠
+    // stale lock: not affirmatively stale, so never shown reclaimable/lapsed).
+    if (typeof localId === "string" && localId.length > 0) {
+      const claims = await readLeaseClaims(ws);
+      const leases = [];
+      for (const claim of claims) {
+        if (claim?.state !== "claimed") continue;
+        if (typeof claim.itemRef !== "string" || typeof claim.nodeId !== "string") continue;
+        const holderPresence = presenceById.get(claim.nodeId) ?? await readPresenceRecord(ws, claim.nodeId);
+        const liveness = claimLiveness(claim, holderPresence ?? null, nowMs, thresholdMs);
+        leases.push({ itemRef: claim.itemRef, holder: claim.nodeId, live: liveness !== "lapsed" });
+      }
+      result.leases = leases;
+    }
+
+    // milestone 27 / story 01 (ADR-004 consequences) — the ADDITIVE ISSUED section,
+    // gated on the SAME config.mesh.nodeId predicate the leases section gates on
+    // (the m26/m27 gates never diverge): ABSENT when mesh is unconfigured
+    // (byte-identical to today — the key never appears), [] when
+    // configured-but-empty. Per OPEN (non-withdrawn/non-fulfilled) directive:
+    // { issuer, itemRef, target } straight off the frozen six-key record's
+    // vocabulary (ADR-001.2) — a withdrawn/fulfilled directive is spent, filtered
+    // out exactly as a released lease is filtered from LEASES. A PURE read — the
+    // issuance partition tree is byte-unchanged after this render.
+    if (typeof localId === "string" && localId.length > 0) {
+      const directives = await readIssuanceDirectives(ws);
+      const issued = [];
+      for (const directive of directives) {
+        if (directive?.state === "withdrawn" || directive?.state === "fulfilled") continue;
+        if (typeof directive?.itemRef !== "string" || typeof directive?.issuer !== "string") continue;
+        issued.push({ issuer: directive.issuer, itemRef: directive.itemRef, target: directive.target });
+      }
+      result.issued = issued;
+    }
+
+    // milestone 27 / story 01 (25/ADR-002 one-data-command; SECURITY/ADR-006.3
+    // framing) — the UNCONDITIONAL additive isControlNode marker (a PURE read of
+    // isControlNode(config), 24/ADR-001): present EVEN unconfigured (false, NEVER
+    // absent — the feature-04 true-absence contract) so story 02's fleet UI gates
+    // the [assign ▸] affordance off this ONE data command. It never gates the
+    // render itself — a pure fact a face reads.
+    result.isControlNode = isControlNode(ws.config ?? {});
+
+    return result;
   },
 
   cli: {
@@ -273,18 +342,48 @@ export const meshStatusCommand = {
             .map((node) => `${node.nodeId} — ${node.presence ? (node.stale ? "stale" : "live") : "no presence"}`)
             .join("\n");
 
-      const boards = Array.isArray(result.boards) ? result.boards : [];
-      if (boards.length === 0) return nodesHalf;
+      const sections = [nodesHalf];
 
-      // One line per board: its ref, its owner ("on <nodeId>" — OMITTED for an
-      // ownerless board, no dangling suffix), and its running count (a zero-count
-      // board is LISTED, not dropped).
-      const boardLines = boards.map((board) => {
-        const ownerSuffix = typeof board.owner === "string" ? ` on ${board.owner}` : "";
-        const running = Array.isArray(board.activeRuns) ? board.activeRuns.length : 0;
-        return `${board.ref}${ownerSuffix} — running ${running}`;
-      });
-      return [nodesHalf, "BOARDS", ...boardLines].join("\n");
+      const boards = Array.isArray(result.boards) ? result.boards : [];
+      if (boards.length > 0) {
+        // One line per board: its ref, its owner ("on <nodeId>" — OMITTED for an
+        // ownerless board, no dangling suffix), and its running count (a zero-count
+        // board is LISTED, not dropped).
+        const boardLines = boards.map((board) => {
+          const ownerSuffix = typeof board.owner === "string" ? ` on ${board.owner}` : "";
+          const running = Array.isArray(board.activeRuns) ? board.activeRuns.length : 0;
+          return `${board.ref}${ownerSuffix} — running ${running}`;
+        });
+        sections.push("BOARDS", ...boardLines);
+      }
+
+      // milestone 26 / story 01 — the ADDITIVE lease section: appended ONLY when
+      // result.leases exists AND is non-empty (zero leases ⇒ an empty section, i.e.
+      // nothing appended; unconfigured mesh ⇒ the key is absent, so the render is
+      // byte-identical to today's). One line per held claim: item, holder,
+      // live|lapsed by the presence clock.
+      const leases = Array.isArray(result.leases) ? result.leases : [];
+      if (leases.length > 0) {
+        const leaseLines = leases.map(
+          (lease) => `${lease.itemRef} — held by ${lease.holder} (${lease.live ? "live" : "lapsed"})`
+        );
+        sections.push("LEASES", ...leaseLines);
+      }
+
+      // milestone 27 / story 01 — the ADDITIVE ISSUED section: appended ONLY when
+      // result.issued exists AND is non-empty (zero directives ⇒ nothing appended;
+      // unconfigured mesh ⇒ the key is absent, so the render is byte-identical to
+      // today's — no dangling ISSUED heading). One line per open directive: item,
+      // issuer, target.
+      const issued = Array.isArray(result.issued) ? result.issued : [];
+      if (issued.length > 0) {
+        const issuedLines = issued.map(
+          (entry) => `${entry.itemRef} — issued by ${entry.issuer} (${describeTarget(entry.target)})`
+        );
+        sections.push("ISSUED", ...issuedLines);
+      }
+
+      return sections.join("\n");
     },
 
     // The stable { nodes: [ { nodeId, presence?, stale } ], boards: [...] } shape
@@ -376,4 +475,13 @@ function describeCaps(node) {
   const skills = Array.isArray(node.skills) ? node.skills : [];
   const runtimePart = runtimes.length ? `runtimes: ${runtimes.join(", ")}` : "no runtimes";
   return `${runtimePart}; ${skills.length} skill(s)`;
+}
+
+// A one-line target summary for the ISSUED render (milestone 27 / story 01):
+// the discriminated union rendered as a short human phrase — an unknown/malformed
+// kind reads as "any" (fail-safe rendering, never a crash on a foreign shape).
+function describeTarget(target) {
+  if (target?.kind === "node") return `node ${target.nodeId}`;
+  if (target?.kind === "capability") return `capability ${target.value}`;
+  return "any";
 }

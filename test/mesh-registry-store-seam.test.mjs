@@ -191,7 +191,7 @@ export const meshRegistryStoreSeamTests = [
     },
   },
   {
-    name: "mesh-registry-seam/00 the registry write touches only meshDir/registry/ and writes no file outside .mesh/",
+    name: "mesh-registry-seam/00 the registry write touches only meshDir/registry/ and writes no file outside the mesh partition (.aof/mesh/)",
     async run() {
       const { repo, workspace } = await makeWorkspace();
       try {
@@ -205,8 +205,8 @@ export const meshRegistryStoreSeamTests = [
         await writeRegistry(workspace, sampleRegistry(), controlConfig());
 
         const after = await snapshotTree(repo);
-        const meshRegistryPrefix = path.join("wiki", "work", ".mesh", "registry") + path.sep;
-        const meshPrefix = path.join("wiki", "work", ".mesh") + path.sep;
+        const meshRegistryPrefix = path.join(".aof", "mesh", "registry") + path.sep;
+        const meshPrefix = path.join(".aof", "mesh") + path.sep;
 
         // the only file created or modified is under meshDir/registry/
         const changed = Object.keys(after).filter((rel) => before[rel] !== after[rel]);
@@ -214,14 +214,15 @@ export const meshRegistryStoreSeamTests = [
         for (const rel of changed) {
           assert.ok(rel.startsWith(meshRegistryPrefix), `the only created/modified path is under meshDir/registry/ — got: ${rel}`);
         }
-        // no file was written outside .mesh/ (no workDir-root file, no .aof/ sidecar)
+        // no file was written outside the mesh partition (.aof/mesh/) — no workDir-root
+        // file, and no stray .aof/ file outside the mesh partition
         const outsideBefore = Object.keys(before).filter((rel) => !rel.startsWith(meshPrefix)).sort();
         const outsideAfter = Object.keys(after).filter((rel) => !rel.startsWith(meshPrefix)).sort();
-        assert.deepEqual(outsideAfter, outsideBefore, "no file was created outside .mesh/");
+        assert.deepEqual(outsideAfter, outsideBefore, "no file was created outside the mesh partition (.aof/mesh/)");
         for (const rel of outsideBefore) {
           assert.equal(after[rel], before[rel], `the workspace state outside meshDir is byte-unchanged — ${rel}`);
         }
-        assert.ok(!outsideAfter.some((rel) => rel.startsWith(".aof" + path.sep) || rel === ".aof"), "no .aof/ sidecar was written (the registry rides the m22/R4 + m22/R5 .mesh/ pins, no new pin owed)");
+        assert.ok(!outsideAfter.some((rel) => rel.startsWith(".aof" + path.sep) || rel === ".aof"), "no .aof/ file was written outside the mesh partition (the registry writes ONLY under .aof/mesh/)");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

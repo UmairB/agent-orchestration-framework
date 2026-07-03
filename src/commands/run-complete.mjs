@@ -13,6 +13,14 @@ import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { completeRun } from "../run-store.mjs";
 import { rollbackItemStatus } from "../work.mjs";
+// m26/ADR-003.2 — the holder's lease release at completion: an OWN-PATH state write
+// (its own claim file flips state:"released" — never a delete, never a foreign write),
+// wired here on ALL THREE terminal outcomes (done|failed|cancelled: a failed or
+// cancelled run must hand the item back too, or a crash-free failure would wedge the
+// item exactly like a crash). Gated on config.mesh — an unconfigured install never
+// reads or writes a lease (byte-identical to today).
+import { releaseLease } from "../mesh-lease.mjs";
+import { meshNodeIdOf } from "./mesh-gate.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
 const VALID_OUTCOMES = new Set(["done", "failed", "cancelled"]);
@@ -31,6 +39,9 @@ export const runCompleteCommand = {
       // stays with the classifier failing closed (ADR-002), NOT a command rejection —
       // so an unrecognised reason is recorded, not rejected. Ignored on done/cancelled.
       reason: { type: "string" },
+      // `now` (ISO-8601 UTC-Z) is an INJECTED clock for timestamp-deterministic
+      // assertions (the 22/R2 white-box idiom — a test input, never a CLI flag).
+      now: { type: "string" },
     },
     required: ["ref", "outcome"],
     additionalProperties: false,
@@ -55,7 +66,21 @@ export const runCompleteCommand = {
     // ambiguous-run / illegal-transition errors (each carrying .code) propagate. The
     // reason is written onto failureReason only on a → failed transition (store-side).
     const reason = typeof input.reason === "string" ? input.reason : null;
-    const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason });
+    const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason, now: input.now });
+
+    // (3.5) THE LEASE RELEASE (m26/ADR-003.2 — the lifecycle behind the EXISTING verb,
+    // zero new commands): under the config.mesh gate, flip THIS node's OWN claim file
+    // for the item to state:"released" — on EVERY terminal outcome (the run above just
+    // reached done|failed|cancelled), so the item reads claimable again the moment its
+    // run terminates. An own-path STATE write (never a delete — releaseLease is
+    // absence-tolerant: no own claim ⇒ a clean no-op). Unconfigured mesh ⇒ the whole
+    // branch is skipped: no lease read, no lease write, byte-identical to today. The
+    // gate is the ONE shared predicate (mesh-gate.mjs) — it can never drift from the
+    // claim path's.
+    const meshNodeId = meshNodeIdOf(ctx.workspace.config);
+    if (meshNodeId) {
+      await releaseLease(ctx.workspace, item.ref, meshNodeId);
+    }
 
     // (4) Status rollback (20/ADR-005): a run completed as FAILED rolls its in-progress
     // item back to not-started so the stream is left honest — the failed path CALLS the

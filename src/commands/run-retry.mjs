@@ -13,6 +13,7 @@
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { retryRun } from "../run-store.mjs";
+import { meshNodeIdOf } from "./mesh-gate.mjs";
 
 export const runRetryCommand = {
   id: "work:run-retry",
@@ -22,6 +23,9 @@ export const runRetryCommand = {
       ref: { type: "string" },
       runId: { type: "string" },
       maxAttempts: { type: "number" },
+      // `now` (ISO-8601 UTC-Z) is an INJECTED clock for timestamp-deterministic
+      // assertions (the 22/R2 white-box idiom — a test input, never a CLI flag).
+      now: { type: "string" },
     },
     required: ["ref"],
     additionalProperties: false,
@@ -41,10 +45,18 @@ export const runRetryCommand = {
     // resolved ceiling is passed in (08/ADR-002 basis-neutral; 20/ADR-002).
     const maxAttempts = input.maxAttempts ?? ctx.workspace.config?.work?.autonomous?.maxAttempts ?? 3;
 
+    // The `node` pass-through (m26/ADR-001 + ADR-004 consequences): when mesh is
+    // configured, the retried run lands under THIS node's partition — the RETRIER
+    // owns the new run; the lineage links via retryOf (the record carries its own
+    // partition provenance). Unconfigured ⇒ null ⇒ the flat single-node mint,
+    // byte-identical to today. The store never reads config — the id arrives as data
+    // through the ONE shared gate predicate (mesh-gate.mjs).
+    const meshNodeId = meshNodeIdOf(ctx.workspace.config);
+
     // The store resolves the prior run, consults shouldRetry, and mints the
     // lineage-linked run — letting its no-retryable-run / not-retryable /
     // attempts-exhausted / duplicate-run errors (each carrying .code) propagate.
-    return await retryRun(item, { runId: input.runId, maxAttempts });
+    return await retryRun(item, { runId: input.runId, maxAttempts, now: input.now, node: meshNodeId });
   },
 
   cli: {

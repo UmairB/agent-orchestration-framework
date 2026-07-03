@@ -12,11 +12,14 @@ graphify-out/
 .DS_Store
 *.log
 
+# milestone 28 / story 00 — the SEA build recipe's local output (esbuild bundle,
+# sidecar assets, sea-config.json, blob, and the built binary). A generated
+# artifact, never committed; Story 01's CI matrix produces the signed release
+# artifacts separately.
+dist-sea/
+
 # Runtime: live agent-terminal session registry (operational, not committed)
 .aof/terminal-sessions.json
 
-# The aof self-host repo is NOT itself a mesh node (milestone 23 / story 00, R4):
-# a live `aof mesh *` run here persists a machine-specific record to the tracked
-# .mesh/ stream, but this repo must not commit a node's presence/identity. A REAL
-# node where .mesh/ IS the committed bus is a DIFFERENT repo with no such ignore.
-wiki/work/.mesh/
+# NOTE: the mesh record stream (.aof/mesh/) is ignored in .aof/.gitignore, alongside
+# the other .aof/ runtime/derived state — not here.

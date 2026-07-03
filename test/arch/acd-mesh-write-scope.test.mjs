@@ -74,13 +74,15 @@ export const archTests = [
       assert.ok(/function\s+nodeRecordPath\s*\(/.test(code), "nodeRecordPath is the single node-record path builder");
       assert.ok(/nodeRecordPath[\s\S]*?meshDir\s*\(/.test(code), "nodeRecordPath is built from meshDir (one seam)");
 
-      // The only path.join into workspace.workDir is meshDir's join — no write joins
-      // workspace.workDir directly with a non-.mesh segment.
-      const workDirJoins = [...code.matchAll(/path\.join\s*\(\s*workspace\.workDir\s*,([^)]*)\)/g)];
-      for (const match of workDirJoins) {
+      // The only path.join into the .aof config home (aofHome) is meshDir's "mesh"
+      // leaf — no write joins the config home directly with a non-mesh segment.
+      // (Location moved off workDir to .aof/mesh at 28/verify.)
+      const aofHomeJoins = [...code.matchAll(/path\.join\s*\(\s*aofHome\s*\(\s*workspace\s*\)\s*,([^)]*)\)/g)];
+      assert.ok(aofHomeJoins.length >= 1, "meshDir joins aofHome(workspace) — the partition root is anchored on the .aof config home");
+      for (const match of aofHomeJoins) {
         assert.ok(
-          /["']\.mesh["']/.test(match[1]),
-          `the only join into workspace.workDir is the .mesh partition root — got path.join(workspace.workDir, ${match[1].trim()})`
+          /["']mesh["']/.test(match[1]),
+          `the only join into aofHome(workspace) is the mesh partition root — got path.join(aofHome(workspace), ${match[1].trim()})`
         );
       }
     },

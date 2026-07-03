@@ -16,9 +16,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { meshDir } from "../src/mesh-store.mjs";
 
 // A workspace-shaped object: the store only needs workspace.workDir (where meshDir
-// — .mesh/ — sits inside the work stream).
+// — .aof/mesh/ — sits under the .aof home).
 async function makeWorkspace() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-meshstore-rec-"));
   const workDir = path.join(repo, "wiki", "work");
@@ -42,7 +43,7 @@ function nodeRecord(id, overrides = {}) {
 }
 
 function nodesDir(workspace) {
-  return path.join(workspace.workDir, ".mesh", "nodes");
+  return path.join(meshDir(workspace), "nodes");
 }
 
 async function listNodeFiles(workspace) {
@@ -63,7 +64,7 @@ export const meshRecordStoreTests = [
     async run() {
       const { repo, workspace } = await makeWorkspace();
       try {
-        const { publishNodeRecord, meshDir } = await import("../src/mesh-store.mjs");
+        const { publishNodeRecord } = await import("../src/mesh-store.mjs");
         // partition root has no nodes/ directory yet
         assert.deepEqual(await listNodeFiles(workspace), [], "no nodes/ files before the first publish");
 
@@ -73,8 +74,10 @@ export const meshRecordStoreTests = [
         const files = await listNodeFiles(workspace);
         assert.equal(files.length, 1, "the nodes/ dir contains exactly one file");
         assert.equal(files[0], "umair-desktop.json", "that file is named umair-desktop.json");
-        // it lives under the partition root meshDir (not a .aof/ sidecar)
+        // it lives under the partition root meshDir, which IS the .aof/mesh sidecar
         assert.equal(path.dirname(path.join(nodesDir(workspace), files[0])), path.join(meshDir(workspace), "nodes"), "the file is under meshDir/nodes");
+        const nodesSegments = path.join(meshDir(workspace), "nodes").split(path.sep);
+        assert.ok(nodesSegments.includes(".aof") && nodesSegments.includes("mesh"), "the partition root IS the .aof/mesh sidecar (nodes dir resolves under .aof and mesh)");
 
         const parsed = JSON.parse(await readBytes(workspace, files[0]));
         assert.deepEqual(parsed, record, "the file parses as JSON equal to the published node record");

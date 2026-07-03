@@ -1,7 +1,7 @@
 ---
 doc: retrospective
 milestone: 22
-updated: 2026-06-30
+updated: 2026-07-03
 ---
 <!--
   Milestone RETROSPECTIVE.md — the distilled, carryable lessons from how m22 actually ran.
@@ -92,3 +92,26 @@ updated: 2026-06-30
 <!-- Not retro entries (clean catches, no process lesson — already logged in STATE/VERIFICATION, carried to
      m23 triage): the three LATENT EDGES — readNodeRecord null-ambiguity (a), readNodeRecords silent skip of a
      torn file (b), flatLeaf's cosmetic trailing-dot leaf (c). Intentional scope deferrals, not lessons. -->
+
+## R7 — A rejection rationale built on a mischaracterised alternative is a latent design debt (the mesh `.aof` relocation)
+- **Kind:** correction · **Area:** architecture · **Stage:** later-milestone review (surfaced at `aof:verify 28`) · **Owner:** architect lane · **Raised by:** user
+- **What happened.** ADR-002/ADR-003 anchored the mesh partition root at `wiki/work/.mesh/` and *rejected* a
+  `.aof/` home on the stated ground "git IS the bus → records must be git-tracked → a `.aof/` sidecar would be
+  git-ignored." That rejection **conflated `.aof/` with "git-ignored,"** which is false: `.aof/` force-tracks
+  `aof.config.json` / `aof.lock.json` / `.aof/templates/**` (only two named derived files are ignored). So the
+  load-bearing constraint was only "git-tracked + node-id-keyed," which `.aof/mesh/` satisfies identically — the
+  work-stream anchor was a *choice* dressed as a constraint, and it scattered machine node-identity/presence
+  JSON through the human-authored planning tree. Relocated to `.aof/mesh/` at 28/verify ([ADR-005](ARCHITECTURE.md)).
+- **Why.** The alternative ("a `.aof/` sidecar") was rejected by its *default* property (ignored) without
+  checking that `.aof/` also supports force-tracked files — the rejected option was described, not tested.
+  A second frame was missed: mesh is aof config/runtime state (extensible to planning, not only `work`), so
+  the config home was always its more natural anchor.
+- **Lesson.** (1) When an ADR *rejects* an alternative, pin the property that actually disqualifies it and
+  confirm the alternative truly has it — a rejection resting on a mischaracterisation silently hardens into
+  "frozen." (2) A single-seam location is cheap to change in `src/` (one function) but the *pins* around it
+  are not: this move cost a ~20-file refactor (4 fitness functions + `.gitattributes`/`.gitignore` + ~15
+  behavioural tests hard-coding the literal path + on-disk migration). Fitness functions that assert a
+  *literal path/shape* (not just a routing invariant) are the tax on changing that shape later — worth it for
+  a genuine invariant, but count the cost, and prefer asserting "routes through the seam" over "the seam
+  equals this literal path" where the location itself is not the invariant. **Refs:** [ADR-005](ARCHITECTURE.md);
+  applied across the mesh cluster (22–27) + `src/mesh-store.mjs`/`src/work.mjs`.

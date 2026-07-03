@@ -6,7 +6,7 @@
 // Examples). node:assert/strict.
 //
 //   01_path-partition-convention.feature — the node-record path is the single
-//     node-id-keyed seam under the partition root (not a .aof/ sidecar); the id is
+//     node-id-keyed seam under the partition root (the .aof/mesh sidecar); the id is
 //     ONE flat leaf segment directly under nodes/, never escaping into a parent or
 //     nested dir; there is no aggregate nodes.json two nodes co-write; the
 //     run-dimension convention equals milestone 19's runRecordPath + one <node>/
@@ -39,10 +39,11 @@ export const meshPartitionConventionTests = [
       // the path ends with nodes/build-server.json
       assert.equal(path.basename(p), "build-server.json", "the path's leaf is build-server.json");
       assert.equal(path.basename(path.dirname(p)), "nodes", "the leaf sits directly under a nodes/ dir");
-      // rooted at the partition root inside the work stream (not a .aof/ sidecar)
+      // rooted at the partition root, which IS the .aof/mesh sidecar
       assert.equal(path.dirname(p), path.join(meshDir(workspace), "nodes"), "the path is rooted under meshDir/nodes");
       assert.ok(p.startsWith(meshDir(workspace) + path.sep), "the path is inside the partition root");
-      assert.ok(!p.split(path.sep).includes(".aof"), "the partition root is NOT a .aof/ sidecar (it is the git-tracked work stream)");
+      const segments = p.split(path.sep);
+      assert.ok(segments.includes(".aof") && segments.includes("mesh"), "the partition root IS the .aof/mesh sidecar (the node-record path resolves under .aof and mesh)");
     },
   },
   {

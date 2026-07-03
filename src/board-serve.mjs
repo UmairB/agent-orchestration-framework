@@ -8,21 +8,24 @@
 // at the BUILT bundle (ui/dist) — not the vite-only dev source — and refuses to
 // fall back to source when the build is missing.
 //
+// milestone 28 / story 00 (ADR-003): the default ui/dist location routes through
+// the ONE SEA-safe asset-base seam instead of joining a path off a bare
+// import.meta.url — dev behaviour is byte-for-byte unchanged (a caller-supplied
+// repoRoot still wins, exactly as before; only the DEFAULT resolution changes
+// carrier). A packaged binary reads the sidecar ui/dist tree instead.
+//
 // Original aof code (adapts nothing from vibeyard) — no attribution needed.
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { serveSetupUi } from "./setup-ui.mjs";
+import { assetPath } from "./asset-base.mjs";
 
 export function boardUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
 
 export async function serveBoard({ projectDir = process.cwd(), port = 4178, repoRoot, spawn, which, recordSessions = true } = {}) {
-  const resolvedRepoRoot = repoRoot
-    ? path.resolve(repoRoot)
-    : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const dist = boardUiDist(resolvedRepoRoot);
+  const dist = repoRoot ? boardUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
 
   if (!existsSync(path.join(dist, "index.html"))) {
     const error = new Error(

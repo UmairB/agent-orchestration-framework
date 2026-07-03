@@ -8,31 +8,34 @@
 // ADR-006: each member declares its target runtimes per the capability matrix.
 // ADR-007: command members carry `commandNamespace: "aof"`, a declared data
 // property the (general) adapter rule keys on — not a bundle branch in the engine.
-import { readFileSync, readdirSync } from "node:fs";
+//
+// milestone 28 / story 00 (ADR-003): the resolution root routes through the ONE
+// SEA-safe asset-base seam (src/asset-base.mjs) instead of joining a path off a
+// bare import.meta.url — dev behaviour is byte-for-byte unchanged (assetBase's
+// dev branch IS the prior import.meta.url resolution); a packaged binary reads
+// the sidecar `bundle/` tree instead. The per-file readdirSync/readFileSync
+// walkers below resolve through the seam's readAssetText/listAssetMembers.
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { hashContent } from "./lock.mjs";
 import { renderConfigOutputs } from "./adapters.mjs";
+import { assetBase, readAssetText, listAssetMembers } from "./asset-base.mjs";
 
 // ADR-005 comment-form stamp: every template-rendered file declares itself
 // aof-managed in-band (the comment family, since templates carry no resource
 // frontmatter of the renderer's own).
 export const TEMPLATE_STAMP = "<!-- aof-generated: bundle -->";
 
-// --- location (ADR-001) -----------------------------------------------------
-// Resolved from THIS module's URL. No cwd, no config. `acd-bundle-location`
-// greps this file for `process.cwd(` / config lookups on the resolution path.
+// --- location (ADR-001, re-homed through the ADR-003 seam) ------------------
+// Resolved through the ONE asset-base seam. `acd-bundle-location` asserts the
+// import.meta.url resolution now lives INSIDE src/asset-base.mjs and that
+// bundleRoot() routes through assetBase() (the planned m28 co-touch).
 export function bundleRoot() {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "bundle");
-}
-
-function descriptorPath() {
-  return path.join(bundleRoot(), "bundle.json");
+  return assetBase("bundle");
 }
 
 // --- descriptor -------------------------------------------------------------
 export function readDescriptor() {
-  return JSON.parse(readFileSync(descriptorPath(), "utf8"));
+  return JSON.parse(readAssetText("bundle", "bundle.json"));
 }
 
 // Minimal YAML-frontmatter reader for the migrated member files. The bundle's
@@ -66,14 +69,13 @@ function splitFrontmatter(raw) {
 // (consumed by renderConfigOutputs unchanged); `templates[]` are the template
 // members (rendered by renderBundleTemplateOutputs to a fixed bundle location).
 export function loadBundle() {
-  const root = bundleRoot();
   const descriptor = readDescriptor();
   const resources = [];
   const templates = [];
 
   for (const member of descriptor.members) {
     if (member.kind === "agent" || member.kind === "command") {
-      const raw = readFileSync(path.join(root, member.file), "utf8");
+      const raw = readAssetText("bundle", member.file);
       const { frontmatter, body } = splitFrontmatter(raw);
       const resource = {
         id: member.id,
@@ -98,7 +100,7 @@ export function loadBundle() {
         id: member.id,
         kind: "template",
         dir: member.dir,
-        files: readdirSync(path.join(root, member.dir)).sort()
+        files: listAssetMembers("bundle", member.dir)
       });
       continue;
     }
@@ -120,7 +122,6 @@ function templateOutputPath(member, file) {
 }
 
 export function renderBundleTemplateOutputs(bundle, options = {}) {
-  const root = bundleRoot();
   const runtimes = options.runtimes ?? null;
   // Templates are runtime-independent; emit once, tagged with the first selected
   // runtime (or "bundle") purely for manifest shape compatibility.
@@ -128,7 +129,7 @@ export function renderBundleTemplateOutputs(bundle, options = {}) {
   const outputs = [];
   for (const member of bundle.templates) {
     for (const file of member.files) {
-      const rawBody = readFileSync(path.join(root, member.dir, file), "utf8").replace(/^﻿/, "");
+      const rawBody = readAssetText("bundle", path.join(member.dir, file)).replace(/^﻿/, "");
       const content = `${TEMPLATE_STAMP}\n\n${rawBody}`;
       const relativePath = templateOutputPath(member, file);
       outputs.push({

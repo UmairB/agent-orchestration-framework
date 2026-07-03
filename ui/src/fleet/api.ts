@@ -57,17 +57,44 @@ export type FleetBoard = {
 
 // The one aggregate the fleet view renders — deep-equal to `aof mesh status --json`
 // for the same fixture (one command, two faces; task 00).
+//
+// milestone 27 / story 02 — `isControlNode` is an ADDITIVE fact (story 01's
+// mesh-status-issued-render.feature:131-149): a PURE, UNCONDITIONAL read of
+// isControlNode(config), present EVEN on an unconfigured node (false, never
+// absent). The fleet bundle gates the [assign ▸] affordance off this ONE
+// already-fetched fact — no second request, no new endpoint (ADR-002).
 export type MeshStatus = {
   nodes: FleetNode[];
   boards: FleetBoard[];
+  isControlNode?: boolean;
 };
 
-async function safeError(response: Response): Promise<string> {
+// The frozen six-key issuance directive (27/ADR-001.2), as `mesh:issue` /
+// `POST /api/mesh/issue` return it — the [assign ▸] affordance's write result.
+export type IssuanceTarget =
+  | { kind: "any" }
+  | { kind: "node"; nodeId: string }
+  | { kind: "capability"; value: string };
+
+export type IssuanceDirective = {
+  itemRef: string;
+  issuer: string;
+  target: IssuanceTarget;
+  state: "issued" | "withdrawn" | "fulfilled";
+  issuedAt: string;
+  aofVersion: string;
+};
+
+async function safeError(response: Response): Promise<Error> {
   try {
-    const body = (await response.json()) as { error?: string };
-    return body.error ?? `Request failed (${response.status})`;
+    const body = (await response.json()) as { error?: string; code?: string };
+    const message = body.error ?? `Request failed (${response.status})`;
+    const error = new Error(message) as Error & { code?: string; status?: number };
+    error.code = body.code;
+    error.status = response.status;
+    return error;
   } catch {
-    return `Request failed (${response.status})`;
+    return new Error(`Request failed (${response.status})`);
   }
 }
 
@@ -75,7 +102,23 @@ export const fleetApi = {
   // The SOLE fleet-data read (ADR-002/ADR-003): a same-origin GET of the one route.
   async status(): Promise<MeshStatus> {
     const response = await fetch("/api/mesh/status");
-    if (!response.ok) throw new Error(await safeError(response));
+    if (!response.ok) throw await safeError(response);
     return (await response.json()) as MeshStatus;
+  },
+
+  // milestone 27 / story 02 (ADR-006) — the [assign ▸] affordance's write: a
+  // same-origin, application/json POST of { ref, to? } to the ONE mutation route
+  // on the fleet face, mirroring `mesh:issue`'s own contract (ADR-002.3 — `to`
+  // absent/"any" ⇒ untargeted; a node id ⇒ node target; any other token ⇒
+  // capability target — the command disambiguates, this client never does).
+  // Returns the directive record on success or throws the coded error.
+  async issue(ref: string, to?: string): Promise<IssuanceDirective> {
+    const response = await fetch("/api/mesh/issue", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref, to }),
+    });
+    if (!response.ok) throw await safeError(response);
+    return (await response.json()) as IssuanceDirective;
   },
 };

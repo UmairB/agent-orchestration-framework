@@ -10,7 +10,7 @@
   "frameworks": [],
   "frameworkInstallAttempts": [],
   "work": {
-    "generatedAt": "2026-06-30T10:46:47.195Z",
+    "generatedAt": "2026-07-03T08:30:07.578Z",
     "bundle": {
       "version": "0.1.0"
     },
@@ -25,8 +25,8 @@
           "id": "aof-architect",
           "kind": "agent"
         },
-        "hash": "sha256:46f5d94fa996f1f67552153ad2392b26f9916f55e6b87dd1366167d128213447",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:07b56c67e1b6149d5dd55d81d6bd2ab977a95a8230bda37985a4ea564634dba8",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-compliance.md",
@@ -35,8 +35,8 @@
           "id": "aof-compliance",
           "kind": "agent"
         },
-        "hash": "sha256:5a408a27097196df3e2b4a17782052271e28da16122b7aa91bb3cca9ce6d28d3",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:670ab8abb1256fce68158098def586dff932033dc610b96f4b8003cbe78cf29a",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-designer.md",
@@ -45,8 +45,8 @@
           "id": "aof-designer",
           "kind": "agent"
         },
-        "hash": "sha256:7574987276540f99c9f55d7cf2e2ee6596b33b957fa250efd4aa75f3c33b62da",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:c8ca9c7641325550cbdb302f94c0395cd5ced662b4c5ce454afdba4878e8132f",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-developer.md",
@@ -55,8 +55,8 @@
           "id": "aof-developer",
           "kind": "agent"
         },
-        "hash": "sha256:5bfca79027ad00bf822c135c1499e8bd9ced79e149d3a92a80050b154a67a66e",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:0e16fb2cd6b439c392a93438275dafe0648f34a8a0bd003e14cafc545d6f6129",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-product-owner.md",
@@ -65,8 +65,8 @@
           "id": "aof-product-owner",
           "kind": "agent"
         },
-        "hash": "sha256:5f4bef91cf79cd21141c1a69715fa8435d9e643381a0ab9bd0f26657b9be8908",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:88457690032e454da23ecb5d7f7e5bde8a4d96efb9bae2077b1cf46df21eb2bf",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-qa.md",
@@ -75,8 +75,8 @@
           "id": "aof-qa",
           "kind": "agent"
         },
-        "hash": "sha256:352a4c333169140ea043efaff058074fdc47093c86c5d6efe8cf952735884bc7",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:4c58077f9a87f09fd668f7548fbab794f42474509ebd59b6bbce9d053d4f10e9",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-researcher.md",
@@ -85,8 +85,8 @@
           "id": "aof-researcher",
           "kind": "agent"
         },
-        "hash": "sha256:97e6246c240078523c390f1a8cea6ec582c9829a9738ccf58c588efdd8a0c0fe",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:01c00eff94f12d6070a2903d6746045d764558ab6ef615dbd4e1c1e333d9f1aa",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/agents/aof-security.md",
@@ -95,8 +95,8 @@
           "id": "aof-security",
           "kind": "agent"
         },
-        "hash": "sha256:7444fed824e28da177b80b915a685c890ef9b9562c8ccdfd5ac7c0af2c80b59b",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "hash": "sha256:21d4452f3bd3137a52fd769fbb88f5e4b95742711cdd6eb05504ab07143dae5b",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/add-milestone.md",
@@ -106,7 +106,7 @@
           "kind": "command"
         },
         "hash": "sha256:d8b80ea7d547f60c5f6f95eafdf7ddb3f9bc01afacd24e265a50e9abd47f3b0a",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/add-story.md",
@@ -116,7 +116,7 @@
           "kind": "command"
         },
         "hash": "sha256:8d36942b56d67affc36a90021f1711a63aadde846791684c2f4360e212174d61",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/add-task.md",
@@ -126,7 +126,7 @@
           "kind": "command"
         },
         "hash": "sha256:ec0657153ee5161423bc1cd4d994d978a06a0c9c4da58772c236005791f0135c",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/add-uat.md",
@@ -136,7 +136,7 @@
           "kind": "command"
         },
         "hash": "sha256:8adc05a690b2b38531e7f38a691dbb5fd84267517fa7a66dca00b075e9562857",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/autonomous.md",
@@ -146,7 +146,7 @@
           "kind": "command"
         },
         "hash": "sha256:874d9f47a4f12df91c307ef4bd43202645678bd3317e860a1487c4c622aa0279",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/code-review.md",
@@ -156,7 +156,7 @@
           "kind": "command"
         },
         "hash": "sha256:e820bd5aacd7f43ad17c8d32721710cd4ec3e8bd5b87cdd1c9230683bec342cc",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/continue.md",
@@ -166,7 +166,7 @@
           "kind": "command"
         },
         "hash": "sha256:195a6f74af8ee0100d04af0a70c16010942fe92587a9306b61c35bf0bc46b216",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/feedback.md",
@@ -176,7 +176,17 @@
           "kind": "command"
         },
         "hash": "sha256:a1126ed1db4def4f95f60ef0fdc6723eff11f378cead2cf6d08f0cd17c488ab8",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
+      },
+      {
+        "path": ".claude/commands/aof/migrate.md",
+        "runtime": "claude",
+        "resource": {
+          "id": "migrate",
+          "kind": "command"
+        },
+        "hash": "sha256:65e0a99b4d47e8b502548d660d3cea844ba3811f38d42c81a25e25ede49d0911",
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/recent.md",
@@ -186,7 +196,7 @@
           "kind": "command"
         },
         "hash": "sha256:2be5ef0ea969063bdb9a8daebe7645847b34dd67674ad73460a9d7fb0cce8604",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/refine.md",
@@ -196,7 +206,7 @@
           "kind": "command"
         },
         "hash": "sha256:3d1e958c6f6b90a032fc4a8845d06db40b7e68505b5aadbbf40b1ff8e6add8dc",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/retrospective.md",
@@ -206,7 +216,7 @@
           "kind": "command"
         },
         "hash": "sha256:5bc8acc543472790b60ef1e53828c91d019376c459d01a08da7cd86de9012f6a",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/shatter.md",
@@ -216,7 +226,7 @@
           "kind": "command"
         },
         "hash": "sha256:b5bc534e669d10d6d4a9917fd7eb3275617619f59439bf12e5bfaf36801041b8",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/validate.md",
@@ -226,7 +236,7 @@
           "kind": "command"
         },
         "hash": "sha256:bbb9714ed4c6eb08cdb3b2ef47a4af1d2ae47f1ba26c448d416847f9cd1ec992",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".claude/commands/aof/verify.md",
@@ -236,7 +246,7 @@
           "kind": "command"
         },
         "hash": "sha256:eefb58613782571a1fa455b721294b7d2df239d244937a494bec6674c920c131",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/ARCHITECTURE.md",
@@ -247,7 +257,7 @@
           "file": "ARCHITECTURE.md"
         },
         "hash": "sha256:9b3e85b4e484231a5f7ada2cb074e95c3a8b235326af9b40e1c2f127171075c9",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/COMPLIANCE.md",
@@ -258,7 +268,7 @@
           "file": "COMPLIANCE.md"
         },
         "hash": "sha256:81de7f819485c25039975065e2cbc9743cc8d3b801d29f851752e458bb4751e3",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/DESIGN.md",
@@ -269,7 +279,7 @@
           "file": "DESIGN.md"
         },
         "hash": "sha256:96f1b330e231cdb2c1677c72a9863b94856c9eb03ff42a23cfd01045f8bdb770",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/RESEARCH.md",
@@ -280,7 +290,7 @@
           "file": "RESEARCH.md"
         },
         "hash": "sha256:a76f56e561d6a52c14bd5f603c0826e4ecb69b937aae134ae08ed3432621b80a",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/SECURITY.md",
@@ -291,7 +301,7 @@
           "file": "SECURITY.md"
         },
         "hash": "sha256:98c5c2913643886c873a21bd1543f46595d7227638b2d1b261b2f34b6e747a14",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/SPEC.md",
@@ -302,7 +312,7 @@
           "file": "SPEC.md"
         },
         "hash": "sha256:4f84f971ed62e7f99981e39626dd2f9fe9ff1f12283c43b69de6ece973ddfe01",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/STATE.md",
@@ -313,7 +323,7 @@
           "file": "STATE.md"
         },
         "hash": "sha256:22aac55bccd5a8c78991bc5ad4b9c994c4bad304dffff214dca4fdc731051e15",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/milestone/UAT.md",
@@ -324,7 +334,7 @@
           "file": "UAT.md"
         },
         "hash": "sha256:526436fec432d377720696577b9f10597db1bfa7c79471be0b0c085698870d49",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/story/STORY.md",
@@ -335,7 +345,7 @@
           "file": "STORY.md"
         },
         "hash": "sha256:ab11aa5ff77cddd86b542c0a1e9785561cdf66f855b90cf491e4f4fa83d770d4",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/task/example.feature",
@@ -346,7 +356,7 @@
           "file": "example.feature"
         },
         "hash": "sha256:1e61fc947a0e21092cef9702e37d8afca9c3d683d00c9a1455b457114850b074",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/uat/SESSION.md",
@@ -357,7 +367,7 @@
           "file": "SESSION.md"
         },
         "hash": "sha256:e6533a6634a2d6f674a909133928461ddf420775ca7544ed9c84ee5d497cf908",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       },
       {
         "path": ".aof/templates/work/uat/STATE.md",
@@ -368,7 +378,7 @@
           "file": "STATE.md"
         },
         "hash": "sha256:a5f4217a4efbfaa97039fe1dbff14a98e8b9a84f21ca5c1a817f03960259e468",
-        "generatedAt": "2026-06-30T10:46:47.195Z"
+        "generatedAt": "2026-07-03T08:30:07.578Z"
       }
     ],
     "packages": [],

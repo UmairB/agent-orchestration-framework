@@ -3,10 +3,10 @@ type: milestone
 number: 26
 slug: distributed-runs-leasing
 title: "Distributed Runs + Leasing — node-dimensioned runs, no double-work"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-07-02
+updated: 2026-07-03
 depends: [19, 20, 23]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
 ---
@@ -66,15 +66,15 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-- [ ] `stories/00_story_node-dimensioned-run-records/` — the git substrate: the fourteen-key record +
+- [x] `stories/00_story_node-dimensioned-run-records/` — the git substrate: the fourteen-key record +
   `runs/<node>/` partition made real in `run-store`, the union readers, the sync root-set
   (`syncMesh(workspace, { roots })`), the RESERVED `leaseClaimPath`, and the R3 `.gitattributes` pin
   (ADR-001/ADR-002; fitness #1–#5). No lease, no relay — the dependency root the siblings build against.
-- [ ] `stories/01_story_lease-of-record/` — the lease mechanics, git-only: `src/mesh-lease.mjs`
+- [x] `stories/01_story_lease-of-record/` — the lease mechanics, git-only: `src/mesh-lease.mjs`
   (per-contender claim files, remote-history-order arbitration, presence as the lease clock,
   fail-closed stand-down) + mesh-aware `work:next` (the optional injected leaseView: live ⇒ skip,
   stale ⇒ reclaimable) + the additive `mesh:status` lease render (ADR-003/ADR-005; fitness #6–#8).
-- [ ] `stories/02_story_claim-integration-fleet-reclaim/` — the A2 join: the frozen claim sequence in
+- [x] `stories/02_story_claim-integration-fleet-reclaim/` — the A2 join: the frozen claim sequence in
   `work:run-start` (local claim → best-effort relay intent → authoritative git sync → hold/stand-down),
   the lease release at `work:run-complete`, the `kind:"lease"` wire overlay (zero relay change), the
   dual-staleness fleet orphan reclaim, and the KR2 `@manual` soak (ADR-004/ADR-006; fitness #9–#12).

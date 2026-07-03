@@ -343,6 +343,45 @@ fitness #4. It depends only on ADR-002's partition convention (add-only safety) 
 a shared remote each publish + render the other's records, merge-clean) is a story-02 task `.feature` (and
 the A1 fleet spike a verification deliverable), not a fitness function.
 
+## ADR-005: The mesh partition root anchors on the `.aof` config home (`.aof/mesh/`), superseding the location clause of ADR-002/ADR-003 (the git-tracked property is unchanged; only the anchor moves off the work stream)
+
+**Status:** Accepted `2026-07-03` (decided at `aof:verify 28`, applied across the mesh cluster). **Supersedes:
+the LOCATION clause of ADR-002 and ADR-003 only** — the partition/one-seam/node-id-keyed/add-only-merge and
+node-identity decisions stand unchanged; solely the *directory the seam anchors on* moves.
+
+**Context.** ADR-002/ADR-003 anchored the git-tracked partition root at `join(workspace.workDir, ".mesh")`
+(`wiki/work/.mesh/`), and both explicitly *rejected* a `.aof/` sidecar with the reasoning "git IS the bus, so
+the records must be git-**tracked**; a `.aof/` sidecar would be git-ignored." That reasoning **conflated
+`.aof/` with "git-ignored,"** which is false: `.aof/` is NOT wholesale ignored — it force-**tracks**
+`aof.config.json`, `aof.lock.json`, and all of `.aof/templates/**` (only a couple of *specific* derived files
+— `aof.memory.index.json`, `terminal-sessions.json` — are ignored line-by-line). So a git-tracked mesh dir can
+live perfectly well under `.aof/`, force-tracked exactly as `.aof/aof.lock.json` is. The only property the mesh
+records genuinely require is **git-tracked + node-id-keyed disjoint paths** — which `.aof/mesh/` satisfies
+identically. Anchoring under `workDir` was therefore a *choice*, not a constraint, and it placed machine
+node-identity/presence/lease/issuance JSON inside the human-authored work-stream tree (beside SPEC/STORY/STATE
+docs). The deciding reframe (user, 28/verify): **mesh is aof config/runtime state — a cross-cutting, extensible
+concept (it will serve planning, not only `work`)** — so it belongs in aof's config home, not scoped under the
+work stream.
+
+**Decision.** The single partition-root seam `meshDir(workspace)` now returns `join(aofHome(workspace),
+"mesh")` — i.e. **`.aof/mesh/`** — where `aofHome` resolves the `.aof` config dir (`loadWorkspace` supplies
+`aofDir`; a synthetic workspace derives it from `projectRoot`, else the conventional `<root>/wiki/work`
+workDir). `nodeRecordPath`/`presenceRecordPath`/`leaseRecordPath`/`issuanceRecordPath`/the registry all build
+FROM `meshDir`, so this is a **one-seam relocation**. Everything else in ADR-002/003 is preserved: still one
+join site, still node-id-keyed disjoint files, still add-only git merges, still git-tracked (the bus is
+unchanged — `.aof/mesh/**` is committed and synced exactly as `wiki/work/.mesh/**` was). The `.gitattributes`
+LF pin moves to `.aof/mesh/** text eol=lf` (also already covered by the line-1 `.aof/**/*.json` rule), and the
+self-host repo's `.gitignore` entry moves to `.aof/mesh/` (this repo is not a live node — 22/R4).
+
+**Consequences.** `src/mesh-store.mjs` gains `aofHome` and re-points `meshDir`; `src/work.mjs`'s
+`loadWorkspace` returns `aofDir`. The AC moved with it: `acd-mesh-partition-write` now asserts `meshDir` joins
+`aofHome(...)`+`"mesh"` and that `aofHome` resolves `.aof` (the old "NOT a `.aof/` sidecar" assertion is
+inverted); `acd-mesh-write-scope` guards the `aofHome` join; `acd-mesh-eol-pinned` pins `.aof/mesh/**`;
+`acd-issuance-record-frozen`/`acd-runs-eol-pinned` check the `.aof/mesh/...` record paths. ~15 behavioural test
+files that hard-coded `wiki/work/.mesh/...` were re-pointed through the seam. On-disk data migrated
+(`wiki/work/.mesh/` → `.aof/mesh/`). See [22/R7](RETROSPECTIVE.md) for the process lesson (a "frozen"
+fitness-pinned location still costs a ~20-file refactor to move — cheap seam, expensive pins).
+
 ## Fitness functions
 
 <!-- Each structural invariant from an ADR, paired with the arch-test that enforces it in CI.
