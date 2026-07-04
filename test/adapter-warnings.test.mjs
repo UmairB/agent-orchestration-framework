@@ -25,8 +25,12 @@ export const adapterWarningTests = [
     run: warnsForNeutralSettingGaps
   },
   {
-    name: "warns for lossy codex agent model fallback",
+    name: "warns when codex agent model metadata is omitted",
     run: warnsForLossyCodexAgentModel
+  },
+  {
+    name: "warns when codex agent Claude tool metadata is omitted",
+    run: warnsForLossyCodexAgentTools
   },
   {
     name: "ignores non-matching runtime extension objects",
@@ -131,8 +135,25 @@ async function warnsForLossyCodexAgentModel() {
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].code, ADAPTER_WARNING_CODES.lossyRuntimeMapping);
   assert.equal(warnings[0].kind, "agent");
+  assert.equal(warnings[0].path, "resources[0].model");
   assert.equal(warnings[0].generatedPath, ".codex/agents/reviewer.md");
-  assert.match(warnings[0].reason, /frontmatter metadata/);
+  assert.match(warnings[0].reason, /omitted/);
+}
+
+async function warnsForLossyCodexAgentTools() {
+  const config = await resolveConfig({
+    resources: [
+      { kind: "agent", id: "reviewer", tools: ["Read", "Grep"], instructions: "Review changes." }
+    ]
+  });
+  const warnings = collectAdapterWarnings(config, { runtimes: ["codex"] });
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].code, ADAPTER_WARNING_CODES.lossyRuntimeMapping);
+  assert.equal(warnings[0].kind, "agent");
+  assert.equal(warnings[0].path, "resources[0].tools");
+  assert.equal(warnings[0].generatedPath, ".codex/agents/reviewer.md");
+  assert.match(warnings[0].reason, /Claude tool allow-list is omitted/);
 }
 
 async function ignoresNonMatchingRuntimeExtensions() {

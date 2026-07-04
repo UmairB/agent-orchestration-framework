@@ -164,6 +164,16 @@ import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 // acd-mesh-command-cli-bijection gate (now covering identity+status+sync+
 // heartbeat+relay+invite+join+revoke+issue).
 import { meshIssueCommand } from "./commands/mesh-issue.mjs";
+// milestone 33 — mesh relay/transport redesign (story 01: fabric-native transport +
+// coordination launcher — mesh:serve registers into the SAME core; ADR-003). Thin over
+// story 01's src/mesh-launcher.mjs: `aof mesh serve` is the per-node presence+sync
+// daemon serve verb, but the registered run is the NON-BLOCKING probe (fabric state +
+// self-address + peer count + issuance authority) — the actual long-lived daemon is the
+// `--serve` CLI face's job (startLauncher), never the registered run. Additive — one
+// import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat+relay+invite+join+revoke+issue+serve).
+import { meshServeCommand } from "./commands/mesh-serve.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -204,6 +214,7 @@ const COMMANDS = [
   meshJoinCommand,
   meshRevokeCommand,
   meshIssueCommand,
+  meshServeCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

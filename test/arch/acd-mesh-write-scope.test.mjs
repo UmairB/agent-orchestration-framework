@@ -13,12 +13,22 @@ const MESH_STORE = new URL("../../src/mesh-store.mjs", import.meta.url);
 // The mesh:* command modules the write-scope guard ALSO scans (ARCHITECTURE.md fitness
 // #2 — "source-grep src/mesh-store.mjs (+ the mesh:* command modules)"): a mesh command
 // must not write a record doc and must route every write through the atomic writeText
-// seam. mesh-identity.mjs legitimately persists the config via writeText(configPath, …)
-// (the mesh.nodeId/mesh.salt persist) — that is allowed; the gate forbids record-doc
-// writes + bare writeFile/appendFile.
+// seam. mesh-identity.mjs legitimately persists per-install identity — that is allowed;
+// the gate forbids record-doc writes + bare writeFile/appendFile.
+//
+// milestone 33 / story 00 (ADR-004, F-3203, 22/R2 DRY consolidation): the actual
+// mesh.nodeId/mesh.salt persist moved from an inline writeText(configPath, …) in
+// mesh-identity.mjs to the ONE shared sidecar read-merge-write, writeSidecarPatch
+// (src/node-identity.mjs) — every sidecar writer (persistNodeId, migrateIdentity,
+// mesh-identity.mjs's resolveInstallSalt) now routes through it, so this is where the
+// write-scope guard's invariant (atomic seam, never a bare writeFile) actually lives
+// for the mesh:identity/mesh:heartbeat persist path. node-identity.mjs is added to the
+// scan so the guard tracks the write to its real location, not weakened — still no
+// record-doc reference, still writeText-only, still zero bare writeFile/appendFile.
 const MESH_COMMAND_MODULES = [
   new URL("../../src/commands/mesh-identity.mjs", import.meta.url),
   new URL("../../src/commands/mesh-sync.mjs", import.meta.url),
+  new URL("../../src/node-identity.mjs", import.meta.url),
 ];
 const RECORD_DOCS = ["SPEC.md", "STORY.md", "STATE.md", "SESSION.md"];
 // The fs write verbs the store could call directly. writeText is the atomic seam;

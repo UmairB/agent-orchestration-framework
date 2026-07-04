@@ -47,12 +47,5 @@
     "claude",
     "codex"
   ],
-  "mesh": {
-    "salt": "037f76dc-e508-40b0-8420-0e485ec003ab",
-    "nodeId": "umairs-msi",
-    "relay": {
-      "controlNode": "umairs-msi",
-      "url": "ws://100.90.249.80:4180/ws/relay"
-    }
-  }
+  "mesh": {}
 }

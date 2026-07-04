@@ -306,7 +306,7 @@ function parseEnvelope(text) {
 //               loopback-vs-group branch is not otherwise deterministic in-process).
 //               A predicate (request) => boolean. Absent ⇒ the default derives it from
 //               the socket's remote address (non-loopback ⇒ group).
-export async function serveRelay({ port = 0, host = "127.0.0.1", config, workspace = null, now = null, isGroupConnection = null } = {}) {
+export async function serveRelay({ port = 0, config, workspace = null, now = null, isGroupConnection = null } = {}) {
   const maxFrameBytes = resolveMaxFrameBytes(config);
   // The loopback-vs-group predicate the auth-gate reads — the injected override, else
   // the remote-address default (ADR-003 move 2; the STORY.md injectable seam).
@@ -604,23 +604,19 @@ export async function serveRelay({ port = 0, host = "127.0.0.1", config, workspa
     });
   });
 
-  // Bind the requested host — DEFAULT "127.0.0.1" (the pre-auth loopback posture,
-  // ADR-001). The launcher may pass host: "0.0.0.0" to make the relay group-reachable;
-  // the m24 ws auth-gate (defaultIsGroupConnection ⇒ any non-loopback remote is a GROUP
-  // connection requiring a valid, non-revoked credential) is exactly the control that
-  // makes a non-loopback bind safe. Reject (don't hang) on a bind error so a caller can
-  // degrade honestly. The url carries the ACTUAL assigned port (the setup-ui readback) —
-  // honest for the ephemeral-port (port: 0) case.
+  // Bind loopback (the pre-auth posture, ADR-001). Reject (don't hang) on a bind error so
+  // a caller can degrade honestly. The url carries the ACTUAL assigned port (the setup-ui
+  // readback) — honest for the ephemeral-port (port: 0) case.
   await new Promise((resolve, reject) => {
     const onError = (error) => reject(error);
     server.once("error", onError);
-    server.listen(port, host, () => {
+    server.listen(port, "127.0.0.1", () => {
       server.off("error", onError);
       resolve();
     });
   });
   const address = server.address();
-  const url = `ws://${host}:${address.port}${RELAY_PATH}`;
+  const url = `ws://127.0.0.1:${address.port}${RELAY_PATH}`;
 
   // stop() — the disposable serve-unit teardown: close every live socket (no dangling
   // connection against a dead server), then close the wss + the server.
@@ -648,7 +644,7 @@ export async function serveRelay({ port = 0, host = "127.0.0.1", config, workspa
 // no-op, no listener bound, no port taken (the not-nominated branch). Re-nomination is
 // purely re-pointing config.mesh.relay.controlNode + calling relayMode on the new node —
 // no election message is exchanged.
-export async function relayMode(config, { port = 0, host = "127.0.0.1", workspace = null, now = null } = {}) {
+export async function relayMode(config, { port = 0, workspace = null, now = null } = {}) {
   const nodeId = config?.mesh?.nodeId;
   const controlNode = config?.mesh?.relay?.controlNode;
   // This node hosts the relay ONLY when it is the nominated control node. A missing
@@ -657,9 +653,8 @@ export async function relayMode(config, { port = 0, host = "127.0.0.1", workspac
     return null;
   }
   // m24: the ADDITIVE workspace/now pass-through — the launcher wires the workspace so
-  // the device-flow route can reach the group registry (absent ⇒ the route 503s). host
-  // passes through to serveRelay (default loopback; the launcher may open it to 0.0.0.0).
-  return await serveRelay({ port, host, config, workspace, now });
+  // the device-flow route can reach the group registry (absent ⇒ the route 503s).
+  return await serveRelay({ port, config, workspace, now });
 }
 
 // relayStatus(config) → the NON-BLOCKING probe the `aof mesh relay --json` face reports

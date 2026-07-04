@@ -15,9 +15,9 @@ import { loadBundle, renderBundleOutputs, bundleRoot } from "./work-bundle.mjs";
 // import.meta.url — dev behaviour is byte-for-byte unchanged.
 import { packageVersionString, readAssetText } from "./asset-base.mjs";
 
-// The runtimes the shipped manifest is generated for. Claude is ACD's native
-// home where every member (agents, commands, templates) is supported (ADR-006).
-export const MANIFEST_RUNTIMES = ["claude"];
+// The runtimes the shipped manifest is generated for. Claude keeps native slash
+// commands; Codex receives the ACD command procedures as mapped skills.
+export const MANIFEST_RUNTIMES = ["claude", "codex"];
 
 // The aof package version (ADR-002 bundle version). Read through the asset-base
 // seam — exported so init/update can stamp the install manifest's

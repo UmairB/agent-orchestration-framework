@@ -12,7 +12,7 @@
 //  1. Forbidding-grep — none of the init/update/synthesis sources contain a
 //     `=== "codex"` / `=== "claude"` installability branch.
 //  2. Behavioural (shared module) — partitioning ["claude","codex"] through the
-//     shared synthesis reports command members unsupported-fail on codex while
+//     shared synthesis maps command members to skills on codex while
 //     agents stay installable, and every reported status is read STRAIGHT from
 //     CAPABILITIES — proving the matrix is the authority.
 //  3. Behavioural (end-to-end) — running initWork against a temp dir for
@@ -27,6 +27,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { initWork } from "../../src/work-init.mjs";
 import { partitionByCapability, synthesizeBundleConfig } from "../../src/work-bundle-synthesis.mjs";
+import { ACD_BUNDLE_CAPABILITIES } from "../../src/work-bundle-runtime.mjs";
 import { loadBundle } from "../../src/work-bundle.mjs";
 import { CAPABILITIES, CAPABILITY_STATUS } from "../../src/model.mjs";
 
@@ -55,21 +56,21 @@ export const archTests = [
   {
     name: "arch/ADR-006: the shared synthesis lets the CAPABILITIES matrix decide installability for [claude, codex]",
     run: async () => {
-      // The matrix is the source of truth: command+codex is unsupported-fail;
+      // The generic adapter keeps command+codex unsupported; the ACD bundle overlay maps it.
       // agent+codex is native. The behavioural proof must MATCH the matrix.
-      assert.equal(CAPABILITIES.command.codex, CAPABILITY_STATUS.unsupportedFail, "matrix: command+codex unsupported-fail");
+      assert.equal(CAPABILITIES.command.codex, CAPABILITY_STATUS.unsupportedFail, "generic matrix: command+codex unsupported-fail");
+      assert.equal(ACD_BUNDLE_CAPABILITIES.command.codex, CAPABILITY_STATUS.mapped, "ACD matrix: command+codex mapped");
       assert.equal(CAPABILITIES.agent.codex, CAPABILITY_STATUS.native, "matrix: agent+codex native");
 
       const bundle = loadBundle();
       const { installable, notInstallable } = partitionByCapability(bundle.resources, ["claude", "codex"]);
 
-      // Commands are reported not-installable for codex — and the reported status
-      // is EXACTLY the matrix's status, not a hand-coded string.
+      // Commands map to Codex skills, so they are installable and not reported as unsupported.
       const codexCommandReports = notInstallable.filter((n) => n.kind === "command" && n.runtime === "codex");
-      assert.ok(codexCommandReports.length > 0, "command members reported not-installable on codex");
-      for (const report of codexCommandReports) {
-        assert.equal(report.status, CAPABILITIES.command.codex, "reported status comes straight from the matrix");
-      }
+      assert.equal(codexCommandReports.length, 0, "command members are not reported unsupported on codex");
+      const codexCommandSkills = installable.filter((r) => r.kind === "skill" && r.runtimes.includes("codex") && r._aofMappedFrom?.kind === "command");
+      assert.ok(codexCommandSkills.length > 0, "command members map to codex skills");
+      assert.ok(codexCommandSkills.some((r) => r.id === "aof-refine"), "refine maps to aof-refine skill");
       // Commands are NOT reported for claude (native there) — the matrix differs
       // per runtime, proving the decision is a per-(kind,runtime) lookup.
       assert.equal(
@@ -83,21 +84,17 @@ export const archTests = [
     }
   },
   {
-    name: "arch/ADR-006: initWork for [claude, codex] reports codex commands unsupported-fail (matrix decides), agents render",
+    name: "arch/ADR-006: initWork for [claude, codex] maps codex commands to skills (matrix decides), agents render",
     run: async () => {
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-arch-cap-"));
       try {
         const result = await initWork({ targetDir: repo, runtimes: ["claude", "codex"] });
         const codexCommandReports = result.notInstallable.filter((n) => n.kind === "command" && n.runtime === "codex");
-        assert.ok(codexCommandReports.length > 0, "command members are reported on codex");
-        // The reported status is exactly the matrix's status — not a hand-coded string.
-        for (const report of codexCommandReports) {
-          assert.equal(report.status, CAPABILITIES.command.codex, "reported status comes straight from the matrix");
-          assert.equal(report.status, CAPABILITY_STATUS.unsupportedFail, "and that status is unsupported-fail");
-        }
-        // No codex command file written; codex agents (native) DO render; and
-        // claude commands (native) render — the matrix differs per runtime.
+        assert.equal(codexCommandReports.length, 0, "command members are not reported unsupported on codex");
+        // No codex command file written; codex agents (native) DO render; claude
+        // commands (native) render; and codex gets the mapped skill equivalent.
         assert.ok(!existsSync(path.join(repo, ".codex", "commands", "aof", "refine.md")), "codex command not written");
+        assert.ok(existsSync(path.join(repo, ".codex", "skills", "aof-refine", "SKILL.md")), "codex mapped skill rendered");
         assert.ok(existsSync(path.join(repo, ".codex", "agents", "aof-architect.md")), "codex agent rendered (native)");
         assert.ok(existsSync(path.join(repo, ".claude", "commands", "aof", "refine.md")), "claude command rendered (native)");
       } finally {

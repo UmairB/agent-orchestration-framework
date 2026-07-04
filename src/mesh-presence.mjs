@@ -162,6 +162,44 @@ export function mergePresence(diskPresence, cachedPresence) {
   return diskPresence;
 }
 
+// ------------------------------------------- fabric reachability (milestone 33) ----
+
+// resolvePeerReachability(online, dialAddress, options) → "reachable" | "unreachable
+// (check shields-up/ACL)" | "offline" (milestone 33 / story 01, ADR-002.3). `Online`
+// (resolvePeers' fast pre-filter, src/mesh-fabric.mjs) is necessary-but-not-sufficient
+// for dialable (RESEARCH §5) — a connect attempt against the peer's dialAddress is
+// GROUND TRUTH:
+//   - online:false      ⇒ "offline" — NO dial is attempted (an offline peer is not
+//                          worth a connect probe; RESEARCH §5's silent shields-up/ACL
+//                          failure only matters for a peer the fabric reports up).
+//   - online:true, dial resolves  ⇒ "reachable".
+//   - online:true, dial rejects   ⇒ "unreachable (check shields-up/ACL)" — a HANDLED,
+//                          DISTINCT outcome (shields-up / ACL-deny / a peer that
+//                          dropped between snapshot and dial, RESEARCH §5), NEVER a
+//                          crash — the dial's rejection is caught here, not propagated.
+// THE INJECTED DIALER (the createRelayClient.connect() precedent, mesh-relay-
+// client.mjs:121-214): `options.dial` is a `(dialAddress) => Promise<void>` closure a
+// test scripts to resolve/reject; production has no default (task 05's @manual soak
+// exercises a real socket probe) — an absent dialer with online:true is treated as
+// "reachable" is NOT assumed; callers that care about a real dial MUST inject one.
+// (review Fix 3): with NO injected dialer, "reachable" is NEVER returned — the code
+// must not silently ASSUME a probe that never ran. An online peer with no dialer
+// resolves to "online (undialed)", an honest distinct outcome from BOTH "reachable"
+// (a dialer actually resolved) and "unreachable (check shields-up/ACL)" (a dialer
+// actually rejected) — a caller that never injects a dialer sees exactly what it did:
+// no dial was attempted, so nothing beyond Online is known.
+export async function resolvePeerReachability(online, dialAddress, options = {}) {
+  if (online !== true) return "offline";
+  const dial = typeof options?.dial === "function" ? options.dial : null;
+  if (dial == null) return "online (undialed)";
+  try {
+    await dial(dialAddress);
+    return "reachable";
+  } catch {
+    return "unreachable (check shields-up/ACL)";
+  }
+}
+
 // ----------------------------------------------------- node staleness ----
 
 // A node is STALE when now − heartbeatAt > threshold — the EXACT milestone-20 isStale

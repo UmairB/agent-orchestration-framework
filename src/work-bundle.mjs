@@ -18,6 +18,7 @@
 import path from "node:path";
 import { hashContent } from "./lock.mjs";
 import { renderConfigOutputs } from "./adapters.mjs";
+import { installableBundleResources } from "./work-bundle-runtime.mjs";
 import { assetBase, readAssetText, listAssetMembers } from "./asset-base.mjs";
 
 // ADR-005 comment-form stamp: every template-rendered file declares itself
@@ -89,8 +90,9 @@ export function loadBundle() {
       if (member.kind === "agent" && frontmatter.tools) {
         resource.tools = frontmatter.tools.split(",").map((tool) => tool.trim()).filter(Boolean);
       }
-      if (member.kind === "command" && member.commandNamespace) {
-        resource.commandNamespace = member.commandNamespace;
+      if (member.kind === "command") {
+        if (frontmatter["argument-hint"]) resource.argumentHint = frontmatter["argument-hint"];
+        if (member.commandNamespace) resource.commandNamespace = member.commandNamespace;
       }
       resources.push(resource);
       continue;
@@ -149,7 +151,8 @@ export function renderBundleTemplateOutputs(bundle, options = {}) {
 // The canonical rendered set used by the manifest generator and the fitness
 // functions. Resource outputs come from the UNCHANGED render engine.
 export function renderBundleOutputs(bundle, options = {}) {
-  const config = { resources: bundle.resources, workflows: [], packages: [] };
+  const resources = installableBundleResources(bundle.resources, options.runtimes ?? ["claude"]);
+  const config = { resources, workflows: [], packages: [] };
   const memberKinds = new Set(["agent", "command", "skill"]);
   const resourceOutputs = renderConfigOutputs(config, {
     runtimes: options.runtimes,

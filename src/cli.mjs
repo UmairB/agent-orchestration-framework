@@ -1,5 +1,4 @@
 import path from "node:path";
-import os from "node:os";
 import { access, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,11 +24,11 @@ import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
-// The relay serve seam (m23 serveRelay + the m24 auth-gated group-reach). `aof mesh
-// relay --serve` is a foreground launcher over serveRelay — the long-lived serve the
-// registered mesh:relay probe deliberately does NOT run (command-core.mjs: "the actual
-// long-lived serve is serveRelay/relayMode, the launcher's job").
-import { serveRelay, relayStatus } from "./mesh-relay.mjs";
+// milestone 33 / story 01 (ADR-003) — the coordination-launcher serve seam:
+// `aof mesh serve --serve` is a foreground per-node presence+sync daemon over
+// src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
+// does NOT run it (command-core.mjs: the registered run is the non-blocking probe).
+import { startLauncher } from "./mesh-launcher.mjs";
 import { initPlanning } from "./planning-init.mjs";
 // milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
 // (the dev-only vite re-exec route) + the version string for `aof --version`
@@ -526,13 +525,6 @@ async function meshCommand(args) {
   // status probe (so `aof mesh relay --json` runs clean + returns, never hanging on a
   // listen). mesh:relay takes no positional (the role is config-driven, not a named ref).
   if (subcommand === "relay") {
-    // `aof mesh relay --serve [--host <h>] [--port <n>]` — the FOREGROUND relay launcher
-    // (the deferred "launcher's job"). The bare `aof mesh relay` stays the non-blocking
-    // status probe (the bijection-gate face); --serve stands up the long-lived serve.
-    if (parseOptions(rest).serve) {
-      await meshRelayServeCommand(rest);
-      return;
-    }
     await meshVerbCli("mesh:relay", rest, { positionalAllowed: false });
     return;
   }
@@ -578,6 +570,23 @@ async function meshCommand(args) {
   // (src/mesh-ui-serve.mjs), reaching fleet data only through invoke("mesh:status").
   if (subcommand === "ui") {
     await meshUiCommand(rest);
+    return;
+  }
+  // milestone 33 / story 01 (ADR-003) — the additive coordination-launcher dispatch
+  // branch, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "serve"` form
+  // the acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
+  // face for the bare (non-blocking probe) call. `aof mesh serve --serve` is the
+  // FOREGROUND presence+sync daemon (the long-lived face over the one-shot core, NEVER
+  // the bijection-probed run) — it preflights the fabric via probeFabric and
+  // refuses-with-guidance if degraded, publishes this node's presence, runs the reused
+  // startSyncLoop, and periodically re-reads resolvePeers; it binds NO listening
+  // broker socket. `aof mesh serve` (no --serve) stays the non-blocking probe.
+  if (subcommand === "serve") {
+    if (parseOptions(rest).serve) {
+      await meshServeDaemonCommand(rest);
+      return;
+    }
+    await meshVerbCli("mesh:serve", rest, { positionalAllowed: false });
     return;
   }
 
@@ -1016,87 +1025,34 @@ async function meshUiCommand(args) {
   });
 }
 
-// The default relay port (distinct from the mesh-ui 4181). 0 ⇒ an ephemeral port.
-const DEFAULT_MESH_RELAY_PORT = 4180;
-
-// `aof mesh relay --serve [--host <h>] [--port <n>]` — the FOREGROUND relay launcher
-// (the "launcher's job" the registered mesh:relay probe deliberately defers). Stands up
-// the long-lived serveRelay on the NOMINATED control node and blocks until Ctrl+C.
-// --host defaults to 127.0.0.1 (the loopback pre-auth posture); pass --host 0.0.0.0 to
-// make the relay group-reachable — the m24 ws auth-gate treats every non-loopback remote
-// as a GROUP connection requiring a valid, non-revoked credential, which is the control
-// that makes an open bind safe.
-async function meshRelayServeCommand(args) {
+// `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
+// 01, ADR-003.1/.3): the long-lived `--serve` face over the one-shot launcher core
+// (src/mesh-launcher.mjs's startLauncher). Preflights the fabric and refuses-with-
+// guidance if degraded (never starting a loop over a dead fabric); a healthy preflight
+// publishes this node's presence, starts the reused mesh:sync cadence loop, and
+// periodically re-reads the fabric peer-map — binding NO listening broker socket (the
+// "bind" is the fabric self-address). Traps SIGINT/SIGTERM to stop cleanly.
+async function meshServeDaemonCommand(args) {
   const options = parseOptions(args);
-  const host = typeof options.host === "string" && options.host.length > 0 ? options.host : "127.0.0.1";
-  const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_RELAY_PORT), 10);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    console.error(`Invalid --port "${options.port}". Pass an integer 0–65535 (0 ⇒ an ephemeral port).`);
-    process.exitCode = 1;
-    return;
-  }
-
   const workspace = await loadWorkspace(process.cwd(), options.config);
-  const config = workspace.config ?? {};
 
-  // The control-node gate — only the nominated enrollment authority hosts the relay (the
-  // same predicate mesh:invite / relayMode serve under). An actionable refusal when this
-  // node is not nominated, never a silent no-op.
-  const status = relayStatus(config);
-  if (!status.nominated) {
-    const nodeId = status.nodeId ?? "(unset — run `aof mesh identity` first)";
-    console.error(
-      [
-        `This node (${nodeId}) is not the nominated control node, so it will not host the relay.`,
-        `Nominate it in .aof/aof.config.json under "mesh":`,
-        `  "relay": {`,
-        `    "controlNode": "${status.nodeId ?? "<this-node-id>"}",`,
-        `    "url": "ws://<reachable-host>:${port}/ws/relay"`,
-        `  }`,
-        `(url is what peers put in their own config.mesh.relay.url), then re-run \`aof mesh relay --serve\`.`,
-      ].join("\n")
-    );
+  const handle = await startLauncher(workspace, {});
+  if (handle.refused) {
+    console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
+    for (const line of handle.guidance.lines) console.error(`  ${line}`);
     process.exitCode = 1;
     return;
   }
 
-  let unit;
-  try {
-    unit = await serveRelay({ port, host, config, workspace });
-  } catch (error) {
-    if (error && error.code === "EADDRINUSE") {
-      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
-      process.exitCode = 1;
-      return;
-    }
-    if (error && (error.code === "EADDRNOTAVAIL" || error.code === "EACCES")) {
-      console.error(`Cannot bind host "${host}" port ${port} (${error.code}). Use 127.0.0.1, 0.0.0.0, or a local interface address, and a non-privileged port.`);
-      process.exitCode = 1;
-      return;
-    }
-    throw error;
-  }
-
-  const boundPort = unit.server.address().port;
-  console.log(`AOF mesh relay is running (control node ${status.nodeId}).`);
-  console.log(`Bound: ${unit.url}`);
-  if (host === "0.0.0.0") {
-    // ws://0.0.0.0:… is a bind spec, not a connect URL — surface the reachable addresses.
-    const lanAddrs = Object.values(os.networkInterfaces())
-      .flat()
-      .filter((nic) => nic && nic.family === "IPv4" && !nic.internal)
-      .map((nic) => `ws://${nic.address}:${boundPort}/ws/relay`);
-    if (lanAddrs.length > 0) {
-      console.log("Peers on your LAN connect via:");
-      for (const addr of lanAddrs) console.log(`  ${addr}`);
-    }
-    console.log(`Over the internet: front this port with a tunnel (ngrok http ${boundPort}  /  devtunnel host -p ${boundPort}) and give peers wss://<tunnel-host>/ws/relay as their config.mesh.relay.url.`);
-  }
-  console.log("Enrollment: peers POST /enroll on the same host:port (mint the code with `aof mesh invite`).");
-  console.log("Press Ctrl+C to stop the relay.");
+  console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
+  console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
+  console.log("Press Ctrl+C to stop the launcher.");
 
   await new Promise((resolve) => {
-    const shutdown = () => { unit.stop().then(resolve, resolve); };
+    const shutdown = () => {
+      handle.stop();
+      resolve();
+    };
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   });

@@ -62,25 +62,25 @@ wiki/work/11_milestone_graphify-codebase-intelligence/
 
 The unit of independence is the **story** — boundaries follow real coupling so stories build in parallel. A `depends:` graph orders the work; `aof work next` walks it.
 
-### Claude commands (`/aof:*`)
+### Assistant commands and skills (`/aof:*`, `$aof-*`)
 
-`aof work init` renders the lifecycle as Claude slash-commands into `.claude/commands/aof/`. Drive a milestone from a planning PRD all the way to accepted:
+`aof work init --runtime claude` renders the lifecycle as Claude slash-commands into `.claude/commands/aof/`; `--runtime codex` renders the same ACD procedures as Codex skills under `.codex/skills/aof-*/`. Drive a milestone from a planning PRD all the way to accepted:
 
-| Command | What it does |
+| Claude command / Codex skill | What it does |
 |---|---|
-| `/aof:shatter` | a planning PRD → a series of framed milestone SPECs, with cross-milestone `depends` edges (the roadmap) |
-| `/aof:refine` | break a milestone into independent stories, or author a story's task contracts via Three Amigos (PO scenarios + QA examples + developer feasibility); produces ARCHITECTURE / DESIGN / RESEARCH as needed |
-| `/aof:continue` | execute/resume a work item — build its tasks to green, then structural + behavioural review; fans out a milestone's independent stories |
-| `/aof:code-review` | ship + review a branch — commit & push in per-story batches, open a PR, run architect review (with conditional security/compliance lenses), fix findings, optionally squash-merge |
-| `/aof:verify` | verify + accept — run the automated + agent-run checks, bring a human in only for `@uat`, log/triage findings, capture lessons in RETROSPECTIVE, sign off |
-| `/aof:validate` | validate the stream — `aof work validate` + the agent-only checks (test-traceability, litmus) |
-| `/aof:autonomous` | run a range of milestones end-to-end, unattended — refine → build → verify each in dependency order, gating on `aof work validate`; resumable |
-| `/aof:retrospective` | triage a milestone's mistakes/blockers into RETROSPECTIVE.md as carryable lessons |
-| `/aof:add-milestone` · `/aof:add-story` · `/aof:add-task` · `/aof:add-uat` | scaffold a milestone / story / task / cross-milestone UAT gate |
-| `/aof:feedback` | capture a mistake, blocker, or UAT observation the instant it's noticed (any actor) |
-| `/aof:recent` | scan the work stream chronologically (catch up / filter by type, status, milestone) |
+| `/aof:shatter` / `$aof-shatter` | a planning PRD → a series of framed milestone SPECs, with cross-milestone `depends` edges (the roadmap) |
+| `/aof:refine` / `$aof-refine` | break a milestone into independent stories, or author a story's task contracts via Three Amigos (PO scenarios + QA examples + developer feasibility); produces ARCHITECTURE / DESIGN / RESEARCH as needed |
+| `/aof:continue` / `$aof-continue` | execute/resume a work item — build its tasks to green, then structural + behavioural review; fans out a milestone's independent stories |
+| `/aof:code-review` / `$aof-code-review` | ship + review a branch — commit & push in per-story batches, open a PR, run architect review (with conditional security/compliance lenses), fix findings, optionally squash-merge |
+| `/aof:verify` / `$aof-verify` | verify + accept — run the automated + agent-run checks, bring a human in only for `@uat`, log/triage findings, capture lessons in RETROSPECTIVE, sign off |
+| `/aof:validate` / `$aof-validate` | validate the stream — `aof work validate` + the agent-only checks (test-traceability, litmus) |
+| `/aof:autonomous` / `$aof-autonomous` | run a range of milestones end-to-end, unattended — refine → build → verify each in dependency order, gating on `aof work validate`; resumable |
+| `/aof:retrospective` / `$aof-retrospective` | triage a milestone's mistakes/blockers into RETROSPECTIVE.md as carryable lessons |
+| `/aof:add-milestone` · `/aof:add-story` · `/aof:add-task` · `/aof:add-uat` / `$aof-add-milestone` · `$aof-add-story` · `$aof-add-task` · `$aof-add-uat` | scaffold a milestone / story / task / cross-milestone UAT gate |
+| `/aof:feedback` / `$aof-feedback` | capture a mistake, blocker, or UAT observation the instant it's noticed (any actor) |
+| `/aof:recent` / `$aof-recent` | scan the work stream chronologically (catch up / filter by type, status, milestone) |
 
-The commands spawn a team of read-/write-scoped **subagents** (also rendered into `.claude/agents/`):
+The commands/skills spawn a team of read-/write-scoped **subagents** (rendered into `.claude/agents/` and `.codex/agents/`):
 
 `aof-product-owner` (SPEC, stories, finding triage) · `aof-architect` (ADRs, fitness-function arch-tests, structural review) · `aof-developer` (implements a story's tasks) · `aof-qa` (test-case design, behavioural review, Playwright browser harness, `@uat` brokering) · `aof-designer` (DESIGN.md, read-only fidelity judge) · `aof-researcher` (RESEARCH.md) · `aof-security` / `aof-compliance` (conditional tiers).
 
@@ -89,7 +89,7 @@ The commands spawn a team of read-/write-scoped **subagents** (also rendered int
 The slash-commands, the board, and automation read/drive the stream through these:
 
 ```sh
-aof work init [dir]                  # render the ACD bundle (agents + commands) into a repo
+aof work init [dir]                  # render the ACD bundle (Claude agents+commands, Codex agents+skills) into a repo
 aof work update [dir]                # re-render the bundle, drift-checked against the install manifest
 aof work find <ref|query> [--json]   # resolve a milestone (11), story (11/02), or slug (auth)
 aof work list [scope] [--json]       # the whole stream (or a subtree); --json is the board's flat-array contract

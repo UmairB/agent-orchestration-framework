@@ -22,9 +22,8 @@
 // engine (story 02 moves the records); it is parallel-with-02 by construction.
 import os from "node:os";
 import crypto from "node:crypto";
-import { readJson, writeText } from "../fs.mjs";
 import { publishNodeRecord, readNodeRecord, readNodeRecords } from "../mesh-store.mjs";
-import { deriveNodeId, assembleDescriptor } from "../node-identity.mjs";
+import { deriveNodeId, assembleDescriptor, sidecarPathFor, writeSidecarPatch } from "../node-identity.mjs";
 import { loadBundle } from "../work-bundle.mjs";
 // milestone 28 / story 00 (ADR-003): the version read routes through the ONE
 // SEA-safe asset-base seam instead of joining a path off a bare
@@ -39,6 +38,11 @@ import {
   isNodeStale,
   mergePresence,
 } from "../mesh-presence.mjs";
+// milestone 33 / story 01 (ADR-002.1 cutover) — the read-side liveness accelerator's
+// fast SOURCE cuts over from the retired relay cache to the fabric peer-map
+// (src/mesh-fabric.mjs's resolvePeers). mergePresence itself is UNCHANGED (fitness
+// #1's byte-unchanged git assembly) — only this caller re-points its second argument.
+import { resolvePeers } from "../mesh-fabric.mjs";
 // milestone 25 / story 01 (ADR-002) — mesh:status is EXTENDED again to aggregate the
 // whole fleet: the m24 group registry (readRegistry — the roster of admitted nodes +
 // the set of registered boards) joined with each board's active runs. This is the
@@ -90,25 +94,20 @@ function installedSkills() {
 }
 
 // Resolve a STABLE per-install salt for the id-hash (the empty-stem fallback +
-// collision suffix). Read config.mesh.salt; mint + persist one (read-merge-write the
-// mesh subtree, NOT config-editor's whitelist) when absent so the install-hash is
-// stable across publishes. Returns the salt string.
+// collision suffix). Read config.mesh.salt (post milestone-33/ADR-004, this is the
+// HYDRATED value — the sidecar's, when one exists, via loadWorkspace's overlay); mint
+// + persist one to the git-ignored SIDECAR (never the committed config — the
+// re-point, ADR-004.2) when absent, so the install-hash is stable across publishes,
+// via the ONE sidecar read-merge-write (writeSidecarPatch, 22/R2 — one writer per
+// subtree, shared with persistNodeId/migrateIdentity). Returns the salt string.
 // EXPORTED so mesh:heartbeat (milestone 23 / story 00) resolves the SAME stable id the
 // node record carries via the SAME salt → deriveNodeId path — read the id ONE way.
-export async function resolveInstallSalt(configPath, config) {
+export async function resolveInstallSalt(sidecarPath, config) {
   const existing = config?.mesh?.salt;
   if (typeof existing === "string" && existing.length > 0) return existing;
   const salt = crypto.randomUUID();
-  if (configPath) {
-    let onDisk = {};
-    try {
-      onDisk = await readJson(configPath);
-    } catch {
-      onDisk = {};
-    }
-    if (!onDisk.mesh || typeof onDisk.mesh !== "object") onDisk.mesh = {};
-    onDisk.mesh.salt = salt;
-    await writeText(configPath, `${JSON.stringify(onDisk, null, 2)}\n`);
+  if (sidecarPath) {
+    await writeSidecarPatch(sidecarPath, { salt });
   }
   return salt;
 }
@@ -133,14 +132,17 @@ export const meshIdentityCommand = {
 
     // No ref → PUBLISH this node. Resolve a stable salt, derive (+ persist) the id,
     // assemble the descriptor, publish it through the store, and return the record.
+    // Both the salt + the id persist to the git-ignored PER-INSTALL SIDECAR
+    // (ADR-004.2, F-3203) — never the committed config.
     const config = ws.config ?? {};
-    const salt = await resolveInstallSalt(ws.configPath, config);
+    const sidecarPath = sidecarPathFor(ws.aofDir);
+    const salt = await resolveInstallSalt(sidecarPath, config);
     const hostname = os.hostname();
     const nodeId = await deriveNodeId({
       config,
       hostname,
       salt,
-      configPath: ws.configPath,
+      sidecarPath,
     });
     const descriptor = assembleDescriptor({
       nodeId,
@@ -204,27 +206,54 @@ export const meshStatusCommand = {
     // node" tag + the local drill-in link off this marker (task 03 two-case split).
     const localId = typeof ws.config?.mesh?.nodeId === "string" ? ws.config.mesh.nodeId : null;
 
-    // milestone 23 / story 02 (ADR-003, finding F1) — the read-side liveness accelerator.
-    // ctx.presenceCache is INJECTED (exactly as ctx.relayClient is injected for the
-    // heartbeat push): when present, it is the in-memory cache the relay subscriber applies
-    // fanned-out signals into, so a peer's pushed change surfaces ≤5s over the relay WITHOUT
-    // waiting for a ≤30s git sync. The CLI face (`aof mesh status`) injects NO cache, so it
-    // reads git only — byte-identical to today. Git stays the durable authority (mergePresence
-    // breaks a heartbeat tie in favour of the git-durable disk record).
-    const cache = ctx?.presenceCache ?? null;
+    // milestone 33 / story 01 (ADR-002.1 cutover) — the read-side liveness accelerator's
+    // fast SOURCE. ctx.fabricPeers is INJECTED (a test's fixture value; exactly as
+    // ctx.relayClient is injected for the heartbeat push) — a Map/array-like of
+    // resolvePeers() results a test scripts directly, so the reconcile is exercised with
+    // NO tailnet. Production (no injection) reads config.mesh.fabric: when declared, it
+    // calls resolvePeers(config, { roster }) for the live fabric peer-map; when absent, NO
+    // fabric read is attempted at all — the render is the git-only floor, byte-identical
+    // to the pre-cutover behaviour. Either way, an Online peer becomes a fabric-liveness
+    // pseudo-record (heartbeatAt: now) that mergePresence reconciles against disk — a tie
+    // (or a fresher disk record) still reconciles to the git-durable bytes (git wins).
+    const config = ws.config ?? {};
+    const fabricPeers = Array.isArray(ctx?.fabricPeers)
+      ? ctx.fabricPeers
+      : config?.mesh?.fabric != null
+        ? await resolvePeers(config, { roster: nodeRecords })
+        : [];
+    const fabricById = new Map();
+    for (const peer of fabricPeers) {
+      if (typeof peer?.nodeId === "string" && peer.nodeId.length > 0) fabricById.set(peer.nodeId, peer);
+    }
+    // A fabric-Online peer is the fast liveness pre-filter (ADR-002.1): surfaced as a
+    // pseudo presence record whose heartbeatAt is "now" (INJECTED — never wall-clock in
+    // the reconcile itself) so it reads as the freshest signal until git catches up.
+    // activeRuns/aofVersion carry the disk record's OWN values when one exists (the
+    // fabric only sharpens the LIVENESS timestamp — it never invents run/version data a
+    // peer's own git-durable record already reports); a peer with no disk record yet
+    // (heard over the fabric before its first sync) reads [] / "" — the honest unknown.
+    const fabricLivenessFor = (id, diskPresence) => {
+      const peer = fabricById.get(id);
+      if (peer == null || peer.online !== true) return null;
+      return {
+        nodeId: id,
+        heartbeatAt: nowIso,
+        activeRuns: Array.isArray(diskPresence?.activeRuns) ? diskPresence.activeRuns : [],
+        aofVersion: typeof diskPresence?.aofVersion === "string" ? diskPresence.aofVersion : "",
+      };
+    };
 
-    // The roster is the UNION of the git node-record ids and (when a cache is present) the
-    // cached peer ids — a peer whose presence arrived over the relay BEFORE its node record
-    // synced still surfaces. WITHOUT a cache the union is exactly the node-record ids in
+    // The roster is the UNION of the git node-record ids and the fabric-Online peer ids —
+    // a peer the fabric reports Online BEFORE its node record has synced still surfaces.
+    // With no fabric read (unconfigured mesh) the union is exactly the node-record ids in
     // insertion order (record always defined, mergePresence(disk, null) === disk) — the
-    // no-cache path is byte-identical to the story-00 render.
+    // no-fabric path is byte-identical to the story-00 render.
     const rosterById = new Map();
     for (const record of nodeRecords) rosterById.set(record.nodeId, record);
     const ids = [...rosterById.keys()];
-    if (cache) {
-      for (const id of cache.ids()) {
-        if (!rosterById.has(id)) ids.push(id);
-      }
+    for (const id of fabricById.keys()) {
+      if (!rosterById.has(id)) ids.push(id);
     }
 
     const nodes = [];
@@ -233,12 +262,12 @@ export const meshStatusCommand = {
     const presenceById = new Map();
     for (const id of ids) {
       const record = rosterById.get(id);
-      // The ≤30s git-durable presence off disk, reconciled with the ≤5s relay liveness
-      // cache. Applying a PEER's signal never touches THIS node's own presence: the cache is
-      // keyed by the peer's nodeId, and this node's own entry reads its disk presence. A tie
-      // reconciles to the git-durable bytes (git is the authority).
+      // The ≤30s git-durable presence off disk, reconciled with the fabric peer-map
+      // liveness. Applying a PEER's signal never touches THIS node's own presence: the
+      // fabric read is keyed by the peer's nodeId, and this node's own entry reads its
+      // disk presence. A tie reconciles to the git-durable bytes (git is the authority).
       const diskPresence = await readPresenceRecord(ws, id);
-      const presence = mergePresence(diskPresence, cache ? cache.get(id) : null);
+      const presence = mergePresence(diskPresence, fabricLivenessFor(id, diskPresence));
       if (presence) presenceById.set(id, presence);
       // The base fields: the git node record when it exists, else the bare peer id (a
       // relay-only peer that has no synced node record yet still surfaces by nodeId).

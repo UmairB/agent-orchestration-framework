@@ -373,6 +373,13 @@ function resourcePath(runtime, resource) {
 
 function renderResource(runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   if (resource.kind === "skill") {
+    if (runtime === "codex") {
+      return renderCodexMarkdownResource([
+        `name: ${resource.name ?? resource.id}`,
+        `description: ${resource.description ?? ""}`
+      ], contentFor(resource, runtime, workflowIndex, assetReferenceIndex));
+    }
+
     return [
       "---",
       "aof-generated: true",
@@ -407,6 +414,13 @@ function renderResource(runtime, adapter, resource, workflowIndex = new Map(), a
     return renderRule(runtime, resource, workflowIndex, assetReferenceIndex);
   }
 
+  if (runtime === "codex") {
+    return renderCodexMarkdownResource([
+      `name: ${resource.name ?? resource.id}`,
+      `description: ${resource.description ?? ""}`
+    ], contentFor(resource, runtime, workflowIndex, assetReferenceIndex));
+  }
+
   return [
     "---",
     "aof-generated: true",
@@ -420,6 +434,19 @@ function renderResource(runtime, adapter, resource, workflowIndex = new Map(), a
     contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
     ""
   ].filter(Boolean).join("\n");
+}
+
+function renderCodexMarkdownResource(frontmatterLines, body) {
+  return [
+    "---",
+    ...frontmatterLines,
+    "---",
+    "",
+    "<!-- aof-generated: true; aof-runtime: codex -->",
+    "",
+    body.trim(),
+    ""
+  ].join("\n");
 }
 
 function renderWorkflow(runtime, workflow, assetReferenceIndex = createAssetReferenceIndex()) {

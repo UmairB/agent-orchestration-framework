@@ -3,16 +3,22 @@
 // Covers EVERY @executable scenario in tasks/00_node-identity-descriptor.feature,
 // exercising src/node-identity.mjs IN-PROCESS with INJECTED hostname / salt / config
 // (the white-box Build-notes requirement — no real-machine coupling), plus a real temp
-// config file for the persist+reuse scenarios. One test object per @executable scenario
+// sidecar file for the persist+reuse scenarios. One test object per @executable scenario
 // (Scenario-Outline rows folded into one entry iterating the rows), each name tracing
 // to feature + scenario. node:assert/strict.
 //
 //   00_node-identity-descriptor.feature — id derivation is deterministic + stable
-//     (sanitized hostname, persisted to mesh.nodeId on first derive, reused thereafter;
-//     a collision appends a stable per-install hash; an empty stem falls back to
-//     node-<install-hash>; an operator-set id wins verbatim); the descriptor carries
-//     the complete frozen 7-key schema, correctly typed, rebuildable (reads, never
-//     writes); array fields empty to [] at the boundaries.
+//     (sanitized hostname, persisted on first derive, reused thereafter; a collision
+//     appends a stable per-install hash; an empty stem falls back to node-<install-
+//     hash>; an operator-set id wins verbatim); the descriptor carries the complete
+//     frozen 7-key schema, correctly typed, rebuildable (reads, never writes); array
+//     fields empty to [] at the boundaries.
+//
+// milestone 33 / story 00 (ADR-004, F-3203) RE-POINTED deriveNodeId's persist target
+// from the committed config.mesh.nodeId to the git-ignored PER-INSTALL SIDECAR
+// (.aof/mesh/identity.json) — this file's persist+reuse/operator-override scenarios
+// are updated to assert against a fixture sidecar (via the injected sidecarPath arg),
+// never a committed config file, matching the re-point.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
@@ -32,6 +38,13 @@ async function tempConfig(initial = { name: "fixture" }) {
   await mkdir(path.dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(initial, null, 2)}\n`, "utf8");
   return { dir, configPath };
+}
+
+// A fixture sidecar PATH (not yet created — persistNodeId creates it on first write),
+// under a temp dir this test owns. Mirrors tempConfig's shape for the sidecar target.
+async function tempSidecarPath() {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "aof-nodeid-sidecar-"));
+  return { dir, sidecarPath: path.join(dir, "mesh", "identity.json") };
 }
 
 export const meshNodeIdentityTests = [
@@ -85,22 +98,24 @@ export const meshNodeIdentityTests = [
 
   // ══ Scenario: first derivation persists the id; later derivations reuse it ════
   {
-    name: "mesh-node-identity/00 the first derivation persists the id to config and later derivations reuse it",
+    name: "mesh-node-identity/00 the first derivation persists the id to the sidecar and later derivations reuse it",
     async run() {
-      const { dir, configPath } = await tempConfig({ name: "fixture" });
+      const { dir, sidecarPath } = await tempSidecarPath();
       try {
-        // First derive (configPath supplied → persists mesh.nodeId).
-        const id1 = await deriveNodeId({ config: {}, hostname: "Umair-Desktop", salt: "s", configPath });
+        // First derive (sidecarPath supplied → persists { nodeId, salt } to the sidecar,
+        // NEVER a committed config — milestone 33 / ADR-004's re-point).
+        const id1 = await deriveNodeId({ config: {}, hostname: "Umair-Desktop", salt: "s", sidecarPath });
         assert.equal(id1, "umair-desktop");
-        // config mesh.nodeId is now pinned.
-        const afterFirst = JSON.parse(await readFile(configPath, "utf8"));
-        assert.equal(afterFirst.mesh.nodeId, "umair-desktop", "mesh.nodeId persisted");
+        // The sidecar's nodeId is now pinned.
+        const afterFirst = JSON.parse(await readFile(sidecarPath, "utf8"));
+        assert.equal(afterFirst.nodeId, "umair-desktop", "nodeId persisted to the sidecar");
         // The host later changes; deriving again reads the PINNED id (the rename is
-        // ignored once an id is pinned). Pass the persisted config back in.
-        const id2 = await deriveNodeId({ config: afterFirst, hostname: "Umair-Laptop", salt: "s", configPath });
+        // ignored once an id is pinned) — simulated here by feeding the sidecar's value
+        // back in as the (hydrated) config, mirroring loadWorkspace's overlay.
+        const id2 = await deriveNodeId({ config: { mesh: afterFirst }, hostname: "Umair-Laptop", salt: "s", sidecarPath });
         assert.equal(id2, "umair-desktop", "the persisted id, not the new hostname");
-        const afterRename = JSON.parse(await readFile(configPath, "utf8"));
-        assert.equal(afterRename.mesh.nodeId, "umair-desktop", "the rename did not rewrite the pinned id");
+        const afterRename = JSON.parse(await readFile(sidecarPath, "utf8"));
+        assert.equal(afterRename.nodeId, "umair-desktop", "the rename did not rewrite the pinned id");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -111,13 +126,15 @@ export const meshNodeIdentityTests = [
   {
     name: "mesh-node-identity/00 an operator-set mesh.nodeId overrides the derived default and is never rewritten",
     async run() {
-      const { dir, configPath } = await tempConfig({ name: "fixture", mesh: { nodeId: "build-server" } });
+      const { dir, sidecarPath } = await tempSidecarPath();
       try {
-        const config = JSON.parse(await readFile(configPath, "utf8"));
-        const id = await deriveNodeId({ config, hostname: "Umair-Desktop", salt: "s", configPath });
+        // The operator-pinned id is simulated as already-hydrated config (a sidecar
+        // written directly with pinned:true, never through deriveNodeId's own persist).
+        const config = { mesh: { nodeId: "build-server" } };
+        const id = await deriveNodeId({ config, hostname: "Umair-Desktop", salt: "s", sidecarPath });
         assert.equal(id, "build-server", "operator-set id wins verbatim");
-        const after = JSON.parse(await readFile(configPath, "utf8"));
-        assert.equal(after.mesh.nodeId, "build-server", "deriving did not overwrite the operator's value");
+        // A pinned id short-circuits BEFORE any persist — the sidecar is never created.
+        await assert.rejects(readFile(sidecarPath, "utf8"), "the sidecar was never written for a pinned id");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

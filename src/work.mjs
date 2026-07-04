@@ -11,10 +11,18 @@
 //   work/NN_milestone_slug/stories/SS_story_slug/tasks/*.feature
 //   work/NN_uat_slug/SESSION.md          (an acceptance session over a span of delivery)
 import path from "node:path";
+import os from "node:os";
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { findProjectConfig } from "./workspace.mjs";
 import { readJson, writeText } from "./fs.mjs";
+// milestone 33 / story 00 (ADR-004, F-3203) — the per-install identity hydration
+// seam. sidecarPathFor is the ONE sidecar-path builder (never re-derived here);
+// readSidecar is the ONE tolerant sidecar read (22/R2, shared with every other
+// sidecar reader/writer in node-identity.mjs); sanitizeHostname + deriveNodeId are
+// reused so the self-heal re-derive is the IDENTICAL precedence chain deriveNodeId
+// itself uses, not a private re-derivation.
+import { sidecarPathFor, readSidecar, sanitizeHostname, deriveNodeId } from "./node-identity.mjs";
 
 // Work errors carry `.code`/`.status` (the command error contract) so a face maps
 // them uniformly — matching src/commands/errors.mjs.
@@ -39,7 +47,64 @@ const sameNum = (a, b) => Number.parseInt(a, 10) === Number.parseInt(b, 10);
 
 // ---------------------------------------------------------------- config ----
 
-export async function loadWorkspace(cwd = process.cwd(), explicitConfig) {
+// milestone 33 / story 00 (ADR-004.5, F-3203) — the self-heal STEP, factored out of
+// loadWorkspace so it is directly unit-testable over an injected sidecar object +
+// current hostname (+ an optional takenIds roster for the collision-preserving
+// scenario) without needing a full fixture project. Returns the (possibly healed)
+// sidecar object; loadWorkspace calls this THEN persists+overlays. Fires ONLY when
+// the sidecar is hostname-DERIVED (sidecar.derivedFrom is a string, sidecar.pinned is
+// not true — an old pre-schema sidecar with NEITHER key is "unknown origin, never
+// churned") AND the CURRENT machine's sanitized hostname no longer matches the
+// RECORDED DERIVATION hostname, sidecar.derivedFrom (the copied-.aof symptom) — this
+// is compared against derivedFrom, NEVER the resolved nodeId: a collision-suffixed id
+// (e.g. nodeId:"shared-host-c4f8", derivedFrom:"shared-host") would never equal its
+// own bare sanitized stem, so comparing against nodeId would churn a stable,
+// collision-resolved id on EVERY load (craft/architect review finding). Re-derives via
+// deriveNodeId itself — the SAME precedence/collision chain, the sidecar's OWN salt
+// (so the install hash never churns) — and returns the sidecar merged with the healed
+// { nodeId, derivedFrom }; every other case returns the sidecar UNCHANGED (byte-
+// identical object reference is not guaranteed, but the persisted bytes are, because
+// persistNodeId's own idempotence check short-circuits the write).
+export async function healIdentitySidecar({ sidecar = {}, hostname, sidecarPath, takenIds = [] } = {}) {
+  const isHostnameDerived = sidecar.pinned !== true && typeof sidecar.derivedFrom === "string";
+  if (!isHostnameDerived || sanitizeHostname(hostname) === sanitizeHostname(sidecar.derivedFrom)) {
+    return sidecar; // no heal: pinned, unknown-origin, or still on the recorded derivation host.
+  }
+  const healedId = await deriveNodeId({
+    config: {}, // never a pinned config — a derived sidecar is re-derived fresh
+    hostname,
+    salt: sidecar.salt,
+    takenIds,
+    sidecarPath,
+  });
+  return { ...sidecar, nodeId: healedId, derivedFrom: hostname };
+}
+
+// milestone 33 / story 00 (ADR-004.3/.4/.5, F-3203) — loadWorkspace HYDRATES
+// config.mesh.nodeId/salt from the git-ignored PER-INSTALL SIDECAR
+// (.aof/mesh/identity.json) before returning, so every downstream config.mesh reader
+// (mesh-relay.mjs, mesh-presence.mjs, issuance, lease, the mesh-gate) sees the
+// per-install id with ZERO code change. PRECEDENCE: sidecar > committed-fallback >
+// hostname-derive (hydration OVERLAYS; it never derives — a workspace with neither
+// leaves config.mesh.nodeId absent, for a later deriveNodeId call to mint).
+//
+// THE ONE SANCTIONED LOAD-TIME WRITE (ADR-004.5 self-heal, task 03's carve-out): a
+// sidecar whose id was HOSTNAME-DERIVED (sidecar.derivedFrom is a string, sidecar.pinned
+// is not true) but whose CURRENT hostname no longer sanitizes to the same value as the
+// sidecar's RECORDED derivation hostname (sidecar.derivedFrom — never the resolved
+// nodeId, which may carry a collision suffix) — the copied-.aof symptom — re-derives
+// from THIS machine's CURRENT hostname (via deriveNodeId itself, so the heal reuses
+// the identical precedence/collision chain) and REWRITES the sidecar. Every OTHER load
+// (no sidecar, a sidecar still on its recorded derivation host — collision suffix and
+// all, an operator-PINNED sidecar, or an old pre-schema sidecar with neither
+// derivedFrom nor pinned — "unknown origin, never churned") is a PURE READ: this is
+// the ONLY exception to "loadWorkspace writes no file" (ADR-004.3), narrowly
+// discriminated by the sidecar schema, never the common overlay path.
+//
+// `hostname` is the injectable current-hostname override (mirrors deriveNodeId's own
+// injected-hostname seam) — production supplies os.hostname() when absent; tests drive
+// the mismatch deterministically with two fixture strings.
+export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostname } = {}) {
   const configPath = await findProjectConfig(cwd, explicitConfig);
   let config = {};
   try {
@@ -55,6 +120,34 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig) {
   // not only work) — so it lives beside aof's config/lock, git-tracked (28/verify
   // decision superseding 22/ADR-002+003's work-stream-co-location).
   const aofDir = path.basename(configDir) === ".aof" ? configDir : path.join(projectRoot, ".aof");
+
+  // The per-install sidecar — read via the ONE tolerant sidecar read (readSidecar,
+  // 22/R2), the SAME degrade-to-{} idiom the config read above uses inline (a torn/
+  // absent/malformed sidecar never crashes loadWorkspace).
+  const sidecarPath = sidecarPathFor(aofDir);
+  let sidecar = await readSidecar(sidecarPath);
+
+  // Self-heal (ADR-004.5) — see healIdentitySidecar's own header for the predicate;
+  // this is the ONE sanctioned load-time sidecar write (task 03's carve-out from
+  // "loadWorkspace writes no file"), narrowly discriminated by the sidecar schema.
+  const currentHostname = typeof hostname === "string" ? hostname : os.hostname();
+  sidecar = await healIdentitySidecar({ sidecar, hostname: currentHostname, sidecarPath });
+
+  // Overlay the sidecar's identity onto config.mesh in the RETURNED object ONLY — a
+  // pure in-memory merge, no further disk write here. Precedence: sidecar > committed
+  // (already read into config above) > absent (a later deriveNodeId call mints it).
+  // nodeId and salt are overlaid INDEPENDENTLY (craft/architect review finding): a
+  // nodeId-only sidecar must NOT clobber a present committed config.mesh.salt with
+  // undefined — each key's own precedence (sidecar > committed-fallback > absent)
+  // holds regardless of whether the OTHER key is present in the sidecar.
+  if (typeof sidecar.nodeId === "string" && sidecar.nodeId.length > 0) {
+    const meshOverlay = { ...config.mesh, nodeId: sidecar.nodeId };
+    if (typeof sidecar.salt === "string" && sidecar.salt.length > 0) {
+      meshOverlay.salt = sidecar.salt;
+    }
+    config = { ...config, mesh: meshOverlay };
+  }
+
   return { configPath, config, projectRoot, workDir, aofDir };
 }
 

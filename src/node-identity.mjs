@@ -1,5 +1,6 @@
 // src/node-identity.mjs — deterministic node-id derivation + capability-descriptor
-// assembly (milestone 22 / story 01 / ADR-003).
+// assembly (milestone 22 / story 01 / ADR-003; PERSIST TARGET RE-POINTED milestone 33
+// / story 00 / ADR-004, F-3203).
 //
 // A node advertises WHO it is and WHAT it can run as a DERIVED, REBUILDABLE record:
 // a projection of the install's config + environment, regenerable at any time (the
@@ -10,9 +11,12 @@
 //                     sanitized hostname; an empty sanitized stem falls back to a
 //                     deterministic node-<install-hash>; a collision against another
 //                     install's id appends a stable per-install hash suffix. The
-//                     resolved id is PERSISTED to config.mesh.nodeId on first
-//                     derivation so it is stable across publishes (a hostname rename
-//                     never churns the id) and operator-overridable.
+//                     resolved id is PERSISTED — as of ADR-004, to the git-ignored
+//                     PER-INSTALL SIDECAR `.aof/mesh/identity.json`, NEVER the
+//                     committed config — on first derivation, so it is stable across
+//                     publishes (a hostname rename never churns the id) and
+//                     operator-overridable (a sidecar-pinned id, set directly, wins
+//                     verbatim and is never auto-healed — node-identity.mjs:74-78).
 //
 //   assembleDescriptor — assembles the frozen 7-key capability descriptor. It READS
 //                     config + environment and NEVER writes (only deriveNodeId's
@@ -23,13 +27,72 @@
 // the collision-suffix scenarios are testable without touching the real machine (the
 // Build-notes injectability requirement). The id stays deterministic and [a-z0-9-]-only.
 //
-// Persisting mesh.nodeId uses the headroom read-merge-write idiom (work-headroom.mjs):
-// readJson(configPath) → mutate ONLY the mesh subtree → writeText (2-space + trailing
-// \n). It deliberately does NOT route through config-editor.mjs's baseConfig() /
-// saveEditableSections — that whitelist would DROP the unknown `mesh` block on rewrite
-// (the Build-notes hard constraint).
+// Persisting the sidecar routes through the ONE sidecar read-merge-write
+// (writeSidecarPatch, below — 22/R2: one writer per config subtree), re-pointed from
+// the committed config and widened to the { nodeId, salt, derivedFrom, pinned }
+// schema (the task-03 self-heal discriminator): readSidecar → shallow-merge a patch →
+// writeText (2-space + trailing \n), idempotent (a no-op patch never rewrites). Every
+// sidecar writer (persistNodeId, migrateIdentity, commands/mesh-identity.mjs's
+// resolveInstallSalt) shares this ONE function. The committed config is never touched
+// by the sidecar persist (ADR-004.2/.3) — a fresh derive leaves it byte-unchanged.
+import path from "node:path";
 import crypto from "node:crypto";
 import { readJson, writeText } from "./fs.mjs";
+
+// The ONE sidecar-path builder (ADR-004.1): `.aof/mesh/identity.json`, anchored on
+// the ALREADY-computed `aofDir` (work.mjs:57) — never a hard-coded machine path.
+// Every caller that needs the sidecar location (loadWorkspace's hydration, the
+// mesh:identity / mesh:heartbeat commands, the doctor migrate action) derives it
+// from `aofDir` through this ONE function, so the path is never duplicated/drifted.
+export function sidecarPathFor(aofDir) {
+  return path.join(aofDir, "mesh", "identity.json");
+}
+
+// The ONE sidecar read (22/R2 — one read-merge-write helper per config subtree,
+// applied to the sidecar too): tolerant, degrading a torn/absent/malformed sidecar to
+// {} rather than throwing. Every reader of the sidecar (persistNodeId, migrateIdentity,
+// resolveInstallSalt in commands/mesh-identity.mjs, loadWorkspace's hydration) goes
+// through this SAME function — no second hand-rolled readJson/catch idiom.
+export async function readSidecar(sidecarPath) {
+  try {
+    return await readJson(sidecarPath);
+  } catch {
+    return {};
+  }
+}
+
+// The ONE sidecar read-merge-write (22/R2): reads the current sidecar, shallow-merges
+// `patch` over it (a `undefined`-valued patch key DELETES that key — so a caller can
+// retire e.g. `pinned` on a re-derive, mirroring persistNodeId's own `delete
+// next.pinned`), and writes back ONLY if the resulting bytes actually differ
+// (idempotent — a no-op patch never rewrites the file, the SAME guarantee every
+// sidecar writer already promised individually). Returns the resulting (possibly
+// unwritten) sidecar object either way, so a caller can read the merged state without
+// a second disk round-trip. `persistNodeId`, `migrateIdentity`, and
+// `resolveInstallSalt` (commands/mesh-identity.mjs) all route through this ONE
+// function — a config subtree gets exactly one writer (22/R2 / 06/R2).
+export async function writeSidecarPatch(sidecarPath, patch) {
+  const sidecar = await readSidecar(sidecarPath);
+  const next = { ...sidecar };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete next[key];
+    } else {
+      next[key] = value;
+    }
+  }
+  const keys = new Set([...Object.keys(sidecar), ...Object.keys(next)]);
+  let unchanged = true;
+  for (const key of keys) {
+    if (sidecar[key] !== next[key]) {
+      unchanged = false;
+      break;
+    }
+  }
+  if (unchanged) return sidecar; // already matches — no rewrite.
+  await writeText(sidecarPath, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
 
 // Sanitize a raw hostname to a path-safe, human-readable stem (ADR-003): lowercase,
 // collapse every RUN of non-[a-z0-9-] characters to a SINGLE "-", trim leading /
@@ -60,17 +123,24 @@ export function installHash(salt) {
 // Derive THIS node's id under the ADR-003 documented-default rules, in precedence:
 //   1. An operator-set / previously-persisted config.mesh.nodeId wins VERBATIM —
 //      never re-derived, never overwritten (the derivation is a default, not a mandate;
-//      persistence is what makes the id stable across a hostname rename).
+//      persistence is what makes the id stable across a hostname rename). Post-ADR-004
+//      this pin is read off `config.mesh.nodeId` exactly as before — the CALLER
+//      (loadWorkspace's hydration) is what changes WHERE that value comes from (the
+//      sidecar overlay, not the committed file); deriveNodeId's own precedence chain
+//      is unchanged.
 //   2. Else the sanitized hostname stem.
 //   3. An empty sanitized stem → node-<install-hash> (the empty-stem fallback).
 //   4. A collision (the stem is already taken by a DIFFERENT install — supplied via
 //      takenIds) → <stem>-<install-hash>. Deterministic from salt, so it is stable.
-//   5. The resolved id is persisted to config.mesh.nodeId (read-merge-write) when a
-//      configPath is supplied AND no id was already pinned — so later derivations reuse
-//      it. (Persistence is skipped when no configPath is given — the in-memory derive.)
+//   5. The resolved id is persisted to the git-ignored PER-INSTALL SIDECAR (ADR-004.2),
+//      NEVER the committed config, when a sidecarPath is supplied AND no id was already
+//      pinned — so later derivations reuse it. (Persistence is skipped when no
+//      sidecarPath is given — the in-memory derive.) The sidecar also records the
+//      hostname the id was DERIVED from (derivedFrom) — the task-03 self-heal
+//      discriminator that distinguishes a derived id from an operator-pinned one.
 //
-// opts: { config, hostname, salt, takenIds?, configPath? }. Returns the resolved id.
-export async function deriveNodeId({ config = {}, hostname, salt, takenIds = [], configPath } = {}) {
+// opts: { config, hostname, salt, takenIds?, sidecarPath? }. Returns the resolved id.
+export async function deriveNodeId({ config = {}, hostname, salt, takenIds = [], sidecarPath } = {}) {
   // (1) A pinned id (operator-set or previously persisted) wins verbatim.
   const pinned = config?.mesh?.nodeId;
   if (typeof pinned === "string" && pinned.length > 0) {
@@ -93,35 +163,86 @@ export async function deriveNodeId({ config = {}, hostname, salt, takenIds = [],
     }
   }
 
-  // (5) Persist on first derivation so the id is stable across publishes (a later
-  // hostname rename never churns it). Read-merge-write ONLY the mesh subtree (the
-  // headroom idiom) — never config-editor.mjs's whitelist (it would drop `mesh`).
-  if (configPath) {
-    await persistNodeId(configPath, id);
+  // (5) Persist to the sidecar on first derivation so the id is stable across
+  // publishes (a later hostname rename never churns it — the self-heal in task 03 is
+  // the DELIBERATE exception, gated on a mismatch, not every load). Read-merge-write
+  // the WHOLE sidecar object (the headroom idiom, re-pointed) — the committed config
+  // is never touched here.
+  if (sidecarPath) {
+    await persistNodeId(sidecarPath, id, salt, { derivedFrom: hostname });
   }
   return id;
 }
 
-// Persist the resolved id to config.mesh.nodeId via the headroom read-merge-write
-// idiom: read the current config off disk, mutate ONLY the mesh subtree (preserving
-// every sibling key/value — the read-merge-write re-serialises the file in the
-// project's 2-space + trailing-newline style, so it preserves keys/values, NOT the
-// original file's byte formatting — the documented headroom idiom). Idempotent: an
-// already-pinned id is left untouched (so a re-derivation does not rewrite it).
-// Exported for white-box reuse / tests.
-export async function persistNodeId(configPath, id) {
+// Persist the resolved id + salt to the git-ignored sidecar via the ONE sidecar
+// read-merge-write (writeSidecarPatch, ADR-004.1/.2 — re-pointed from the committed
+// config, 22/R2 — one writer per subtree): mutates ONLY { nodeId, salt, derivedFrom }
+// (preserving no unrelated sibling — the sidecar carries ONLY per-install identity,
+// unlike the committed config's mesh subtree which also carries fleet-shared keys),
+// re-serialised in the project's 2-space + trailing-newline style. Idempotent (via
+// writeSidecarPatch): an already-matching { nodeId, salt, derivedFrom } is left
+// untouched (so a re-derivation does not rewrite the sidecar). `derivedFrom` records
+// the hostname FED to sanitizeHostname (not the resolved id) — task 03's self-heal
+// discriminator; when supplied, it also RETIRES a stale `pinned` flag (undefined
+// deletes the key via writeSidecarPatch) — a caller that pins an id directly (never
+// through this fn) is unaffected when derivedFrom is omitted. Exported for white-box
+// reuse / tests (mirrors persistNodeId's original injected-path precedent).
+export async function persistNodeId(sidecarPath, id, salt, { derivedFrom } = {}) {
+  await writeSidecarPatch(sidecarPath, {
+    nodeId: id,
+    salt,
+    ...(typeof derivedFrom === "string" ? { derivedFrom, pinned: undefined } : {}),
+  });
+}
+
+// migrateIdentity(configPath, sidecarPath) — milestone 33 / story 00 (ADR-004.4,
+// F-3203's Definition-of-Done). Moves a LEGACY committed mesh.nodeId/mesh.salt to the
+// git-ignored sidecar and STRIPS both keys from the committed config, turning the
+// acd-mesh-identity-not-committed fitness green. A plain exported unit taking BOTH
+// paths as injected args (mirrors persistNodeId's own injected-path precedent) — no
+// prompt dependency, hermetic, callable directly by a test or a thin `work doctor
+// --fix`-style CLI wrapper.
+//
+//   - COMMITTED-PRESENT (mesh.nodeId and/or mesh.salt on disk): merge them into the
+//     sidecar (read-merge-write, preserving any sidecar sibling — derivedFrom/pinned
+//     survive a migrate exactly as persistNodeId's read-merge-write would), then
+//     STRIP only nodeId/salt from the committed config's mesh block — every FLEET-
+//     SHARED sibling key (relay.controlNode, fabric, …) is preserved byte-equivalent
+//     (the config-editor-whitelist hazard this story flags).
+//   - ALREADY-MIGRATED (no committed identity, a sidecar already present) or ABSENT
+//     (neither committed identity nor a sidecar): a clean, byte-level NO-OP — neither
+//     file is rewritten (persistNodeId-style idempotence: only write when the
+//     resulting bytes actually change).
+//
+// Returns { migrated: boolean } — true iff a rewrite actually happened (so a caller,
+// e.g. a future `--fix` face, can report whether anything moved).
+export async function migrateIdentity(configPath, sidecarPath) {
   let config = {};
   try {
     config = await readJson(configPath);
   } catch {
     config = {};
   }
-  if (!config.mesh || typeof config.mesh !== "object") {
-    config.mesh = {};
+  const mesh = config.mesh && typeof config.mesh === "object" ? config.mesh : {};
+  const hasCommittedIdentity = "nodeId" in mesh || "salt" in mesh;
+  if (!hasCommittedIdentity) {
+    return { migrated: false }; // absence-tolerant: nothing to migrate, no-op.
   }
-  if (config.mesh.nodeId === id) return; // already pinned — no rewrite.
-  config.mesh.nodeId = id;
-  await writeText(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+  // Merge the committed identity into the sidecar via the ONE sidecar read-merge-write
+  // (writeSidecarPatch, 22/R2) — preserves any sidecar sibling (derivedFrom/pinned)
+  // already present; only the keys the committed config actually carries are patched.
+  const patch = {};
+  if ("nodeId" in mesh) patch.nodeId = mesh.nodeId;
+  if ("salt" in mesh) patch.salt = mesh.salt;
+  await writeSidecarPatch(sidecarPath, patch);
+
+  // Strip ONLY nodeId/salt from the committed config's mesh block — every fleet-
+  // shared sibling key survives byte-equivalent.
+  const { nodeId: _nodeId, salt: _salt, ...remainingMesh } = mesh;
+  const nextConfig = { ...config, mesh: remainingMesh };
+  await writeText(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  return { migrated: true };
 }
 
 // Assemble this node's capability descriptor — the frozen 7-key schema (ADR-003), in

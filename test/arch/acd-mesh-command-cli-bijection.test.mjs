@@ -135,6 +135,13 @@ function argsFor(sub) {
     // gate accepts [0,1]), proving the single-envelope --json discipline without a
     // live mesh install.
     case "issue": return ["mesh", "issue", "03/01", "--json"];
+    // milestone 33 / story 01 — the coordination-launcher verb. `serve` (no --serve
+    // flag) is the NON-BLOCKING probe: it reports fabric state + self-address + peer
+    // count + issuance-authority and RETURNS — exit 0 + a parseable JSON document (the
+    // bare launcher-probe shape). Never calls listen()/startSyncLoop; the long-lived
+    // `--serve` face is a SEPARATE CLI-only path (meshServeDaemonCommand), never routed
+    // through the registered bijection-probed run.
+    case "serve": return ["mesh", "serve", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

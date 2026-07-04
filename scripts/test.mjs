@@ -503,6 +503,59 @@ import { archTests as acdMeshUiWriteIsolationTests } from "../test/arch/acd-mesh
 // completeness, story 01 — existsSync-guarded until the routing filter lands).
 import { archTests as acdMeshIssueRouteSameOriginTests } from "../test/arch/acd-mesh-issue-route-same-origin.test.mjs";
 import { archTests as acdIssuanceRevokedIssuerFilteredTests } from "../test/arch/acd-issuance-revoked-issuer-filtered.test.mjs";
+// milestone 33 — mesh relay/transport redesign (Tailscale-first). Two Decide-stage
+// fitness functions. acd-mesh-identity-not-committed (F-3203 / ADR-004 — no per-install
+// nodeId/salt in committed config) is UN-SKIPPED + GREEN (story 00 / per-install-node-
+// identity migrated the committed .aof/aof.config.json's mesh.nodeId/mesh.salt to the
+// git-ignored sidecar .aof/mesh/identity.json via migrateIdentity — its Definition-of-Done).
+// acd-fabric-single-seam (F-3202/F-3204 / ADR-001/002 — the tailscale spawn + peer-address
+// resolution live only in src/mesh-fabric.mjs) is UN-SKIPPED + GREEN (story 01 / fabric-
+// native-transport built src/mesh-fabric.mjs as the sole seam and removed the broker's
+// liveness-path callers — its Definition-of-Done).
+import { archTests as acdMeshIdentityNotCommittedTests } from "../test/arch/acd-mesh-identity-not-committed.test.mjs";
+import { archTests as acdFabricSingleSeamTests } from "../test/arch/acd-fabric-single-seam.test.mjs";
+// milestone 33 (story 01) — fabric-native transport + coordination launcher. task 00
+// (00_fabric-seam.feature): src/mesh-fabric.mjs's probeFabric/selfAddress/resolvePeers
+// over an injected fabric-exec closure — the two-stage refusal-reason matrix, the Windows
+// install-path fallback, the HostName/DNSName join matrix, the non-tailscale/undeclared
+// clean refusals. task 01 (01_fabric-liveness-cutover.feature): mergePresence reconciling
+// disk vs the fabric peer-map liveness (git wins a tie), mesh:status sourcing a live
+// candidate off the fabric Online pre-filter via INJECTED ctx.fabricPeers, the
+// Online-≠-dialable handled outcomes (resolvePeerReachability, an injected dial closure),
+// the presence record assembly/read staying byte-unchanged, the unconfigured-mesh floor.
+import { meshFabricSeamTests } from "../test/mesh-fabric-seam.test.mjs";
+import { meshFabricLivenessCutoverTests } from "../test/mesh-fabric-liveness-cutover.test.mjs";
+// milestone 33 (story 01) — fabric-native transport + coordination launcher: task 02
+// (02_broker-retirement.feature, dedicated behavioural coverage, review Fix 5) — a
+// node's presence/liveness view fully populated with the broker never started (over
+// invoke("mesh:status", …, { fabricPeers }), no serveRelay/mesh-registry call anywhere
+// in the test's own control flow); a peer's liveness visible with NO device-code
+// enrollment / ws upgrade auth-gate; presence still renders from the reused git floor
+// with neither broker nor fabric configured; plus a structural confirmation that
+// mesh-identity.mjs imports no relay/broker module (a real source read).
+import { meshBrokerRetirementTests } from "../test/mesh-broker-retirement.test.mjs";
+// milestone 33 (story 01) — fabric-native transport + coordination launcher: task 03
+// (03_coordination-launcher.feature): src/mesh-launcher.mjs's launcherProbe (the
+// NON-BLOCKING mesh:serve registered-run shape) + startLauncher (the --serve daemon —
+// preflight-refuse-with-guidance, publish presence, the reused sync loop, the peer-poll
+// ticker, the observable stop() seam for SIGINT/SIGTERM) over an injected fabric-exec +
+// injected tickers — no tailnet, no wall-clock wait. task 04 (04_operator-guidance
+// .feature): src/mesh-fabric.mjs's fabricGuidance/remediationForReason/
+// macOsAppStoreSplitWarning — the healthy-tailscale guidance, the per-BackendState
+// remediation matrix, the macOS App-Store-CLI-split warn over an injected platform, and
+// work doctor (src/commands/doctor.mjs) surfacing the SAME remediation, silent when the
+// mesh fabric is unconfigured.
+import { meshCoordinationLauncherTests } from "../test/mesh-coordination-launcher.test.mjs";
+import { meshOperatorGuidanceTests } from "../test/mesh-operator-guidance.test.mjs";
+// milestone 33 (story 00) — per-install-node-identity: the four @executable task
+// features (00_identity-sidecar-persist / 01_loadworkspace-hydration /
+// 02_backcompat-migrate-doctor / 03_self-heal-hostname-mismatch). Task 04
+// (cross-os-distinct-identity) is @manual real-hardware — no test, verified at
+// aof:verify.
+import { identitySidecarPersistTests } from "../test/identity-sidecar-persist.test.mjs";
+import { loadworkspaceHydrationTests } from "../test/loadworkspace-hydration.test.mjs";
+import { backcompatMigrateDoctorTests } from "../test/backcompat-migrate-doctor.test.mjs";
+import { selfHealHostnameMismatchTests } from "../test/self-heal-hostname-mismatch.test.mjs";
 // milestone 22 — mesh-foundation (story 01: node-identity + commands — src/node-identity.mjs
 // derives the stable, human-readable node id + assembles the frozen 7-key capability
 // descriptor (ADR-003); src/commands/mesh-identity.mjs registers mesh:identity (publish/
@@ -560,62 +613,39 @@ import { archTests as acdMeshEolPinnedTests } from "../test/arch/acd-mesh-eol-pi
 // in-memory-only + late-joiner + clean stop()), 01_relay-envelope-and-resilience (the
 // payload-agnostic forwarding outline + the bad-frame resilience matrix + peer-disconnect),
 // 02_control-node-role (the config gate + re-nomination-by-config + lose-liveness-not-data).
-// Fitness #1 acd-relay-stateless (no record write / no record-schema import / no on-disk
-// store) + fitness #2 acd-relay-envelope-neutral (no presence/node schema import, no
-// signal-content branch, the frozen error control-frame never a throw). The
-// acd-mesh-command-cli-bijection gate now also covers mesh:relay.
+// milestone 33 / story 01 (ADR-002 — the broker is ELIMINATED as the presence/liveness
+// transport): fitness #1 acd-relay-stateless and fitness #2 acd-relay-envelope-neutral
+// (siblings of acd-relay-auth-gate-checked, ADR-002's fitness ledger) are RETIRED —
+// superseded by 33/ADR-002 — the broker is eliminated. The serve-unit discipline
+// (meshRelayBrokerFanoutTests / meshRelayEnvelopeResilienceTests / meshRelayControlNodeTests)
+// stays green — mesh-relay.mjs's serve-unit shape is REUSED by the ADR-003 launcher, only
+// its role as the liveness transport is retired.
 import { meshRelayBrokerFanoutTests } from "../test/mesh-relay-broker-fanout.test.mjs";
 import { meshRelayEnvelopeResilienceTests } from "../test/mesh-relay-envelope-resilience.test.mjs";
 import { meshRelayControlNodeTests } from "../test/mesh-relay-control-node.test.mjs";
-import { archTests as acdRelayStatelessTests } from "../test/arch/acd-relay-stateless.test.mjs";
-import { archTests as acdRelayEnvelopeNeutralTests } from "../test/arch/acd-relay-envelope-neutral.test.mjs";
-// milestone 23 — control-node-relay (story 02: presence-over-relay — the INTEGRATION
-// story / ADR-003: the node-side relay client (src/mesh-relay-client.mjs — the { connect,
-// push } seam + the best-effort pushPresenceSignal + the frozen { kind:"presence", nodeId,
-// signal } envelope), the TWO-PUBLISH path added to src/commands/mesh-heartbeat.mjs (git
-// UNCONDITIONALLY first, the relay BEST-EFFORT second, a failure caught-never-thrown), and
-// the cadence loop (src/mesh-presence-loop.mjs — a thin timer over the one-shot publish,
-// the m22 startSyncLoop split, config.mesh.presence.cadenceSeconds + the documented
-// default). Two @executable task features: 00_dual-bus-publish (the byte-identical
-// invariant matrix across the four relay states + the happy-path push + the unconfigured
-// skip + the caught push-throw, over an INJECTED relay client), 01_graceful-degradation
-// (presence-reaches-a-peer-over-git over a local bare-remote fixture + relay-restored
-// record-unchanged + the cadence loop over an INJECTED ticker). The @manual
-// 02_relay-liveness-fleet-spike feature gets NO executable test (the latency + live
-// degradation spike is verified at aof:verify). Fitness #4 acd-presence-relay-independent
-// asserts the two-publish control flow (git unconditional, relay caught). The
-// acd-mesh-command-cli-bijection gate already covers mesh:heartbeat (the extension rides it).
-import { meshPresenceDualBusTests } from "../test/mesh-presence-dual-bus.test.mjs";
+// milestone 23 — control-node-relay (story 02: presence-over-relay). The cadence loop
+// (src/mesh-presence-loop.mjs — a thin timer over the one-shot publish, the m22
+// startSyncLoop split, config.mesh.presence.cadenceSeconds + the documented default)
+// stays; the loop's git-durability half was never relay-dependent (ADR-002.4).
+// milestone 33 / story 01 (ADR-002.1 — F-3204): the TWO-PUBLISH path (git unconditional +
+// the relay best-effort push) is RETIRED from src/commands/mesh-heartbeat.mjs — superseded
+// by 33/ADR-002 — the broker is eliminated. meshPresenceDualBusTests (task
+// 00_dual-bus-publish's whole subject) and fitness #4 acd-presence-relay-independent (the
+// two-publish control-flow grep) are RETIRED with it; meshPresenceDegradationLoopTests is
+// TRIMMED to its cadence-loop-only scenarios (the relay-down/relay-restored rows retired
+// alongside the push).
 import { meshPresenceDegradationLoopTests } from "../test/mesh-presence-degradation-loop.test.mjs";
-import { archTests as acdPresenceRelayIndependentTests } from "../test/arch/acd-presence-relay-independent.test.mjs";
-// milestone 23 — control-node-relay (story 02: presence-over-relay — task 03, finding F1:
-// the node-side PERSISTENT relay SUBSCRIBER — the missing CONSUMER hop). src/mesh-presence-
-// cache.mjs (the in-memory liveness cache, latest-wins keyed by nodeId), src/mesh-presence-
-// subscriber.mjs (the persistent subscriber + parseInboundFrame + the production ws@8
-// transport), mergePresence added to src/mesh-presence.mjs (the read-side merge — latest
-// wins, git-durable breaks ties), and mesh:status extended to read an injected ctx
-// .presenceCache (a peer's pushed change surfaces ≤5s over the relay without a git sync).
-// One @executable task feature: 03_relay-receive-and-apply (a delivered signal surfaces
-// without a git sync + latest-wins + the liveness-cache-not-authority reconcile + the
-// bad-frame resilience outline + relay-down degrades to git + the persistent connection),
-// over an INJECTED fake transport. The @manual ≤5s fleet re-measurement gets NO executable
-// test (it is an aof:verify deliverable). Fitness acd-presence-cache-not-authority asserts
-// the consumer modules never become a second system of record (no record-schema write
-// import, no durable write, no fs seam — the read-side mirror of acd-relay-stateless).
-import { meshRelayReceiveApplyTests } from "../test/mesh-relay-receive-apply.test.mjs";
-// (The consumer-is-a-cache-only invariant is enforced by fitness #7
-// acd-presence-subscriber-cache-only — ADR-004, imported below — so the earlier
-// standalone acd-presence-cache-not-authority draft was dropped as redundant.)
-// milestone 23 — control-node-relay (story 02 / F1 close-out, ADR-004): the node-side
-// receive-and-apply consumer — a PERSISTENT relay subscriber (src/mesh-presence-subscriber.mjs,
-// distinct from the one-shot push client) that applies each fanned-out { kind:"presence" }
-// frame into an IN-MEMORY liveness cache (src/mesh-presence-cache.mjs, keyed by nodeId,
-// latest-wins), overlaid by mesh:status as `readPresenceRecord(...) ?? ctx.presenceCache?.get(...)`
-// (git wins). Fitness #7 acd-presence-subscriber-cache-only asserts the receive side is a
-// liveness cache, never a second system of record (no durable write, no write/persist-seam
-// import, no presenceRecordPath reference) — the invariant fitness #3 does NOT cover.
-// RED until src/mesh-presence-subscriber.mjs + src/mesh-presence-cache.mjs land.
-import { archTests as acdPresenceSubscriberCacheOnlyTests } from "../test/arch/acd-presence-subscriber-cache-only.test.mjs";
+// milestone 23 — control-node-relay (story 02: presence-over-relay — task 03, finding F1).
+// milestone 33 / story 01 (ADR-002.1 — F-3204): the node-side PERSISTENT relay SUBSCRIBER
+// (src/mesh-presence-subscriber.mjs) + the in-memory liveness cache
+// (src/mesh-presence-cache.mjs) are DELETED outright — no consumer remains once the fabric
+// peer-map (src/mesh-fabric.mjs's resolvePeers) is the fast liveness read mesh:status
+// consumes instead (src/commands/mesh-identity.mjs's ADR-002.1 cutover). mergePresence
+// itself (src/mesh-presence.mjs) is UNCHANGED — only its caller's second-argument SOURCE
+// re-points from the retired relay cache to the fabric peer-map liveness (see
+// test/mesh-fabric-liveness-cutover.test.mjs, task 01). meshRelayReceiveApplyTests (task
+// 03's whole subject) and fitness #7 acd-presence-subscriber-cache-only are RETIRED —
+// superseded by 33/ADR-002 — the broker is eliminated.
 // milestone 24 — device-code group-enrollment (SECURITY.md / the threat model's security
 // fitness functions — RED-until-built, the enrollment/registry/relay-auth modules do not
 // exist yet). The trust boundary IS this milestone (23/ADR-001 §Security-posture deferred
@@ -629,7 +659,11 @@ import { archTests as acdPresenceSubscriberCacheOnlyTests } from "../test/arch/a
 // (relay-auth + revocation) — see SECURITY.md's fitness table for the per-story ownership.
 import { archTests as acdEnrollmentCodeHashedAtRestTests } from "../test/arch/acd-enrollment-code-hashed-at-rest.test.mjs";
 import { archTests as acdEnrollmentCodeSingleUseConstantTimeTests } from "../test/arch/acd-enrollment-code-single-use-constant-time.test.mjs";
-import { archTests as acdRelayAuthGateCheckedTests } from "../test/arch/acd-relay-auth-gate-checked.test.mjs";
+// (T1/T6) the relay ws auth-gate — milestone 33 / story 01 (ADR-002.consequence):
+// acd-relay-auth-gate-checked is RETIRED. It guarded the ws upgrade auth-gate as the
+// admission boundary; ADR-002 makes "already on the tailnet" the admission boundary
+// instead, so this guard now asserts an enforcement mechanism that is no longer
+// load-bearing. superseded by 33/ADR-002 — the broker is eliminated.
 // milestone 24 — device-code group-enrollment (ARCHITECTURE.md / the STRUCTURAL fitness
 // functions — the architect's, disjoint from the SECURITY.md crypto/enforcement fitness
 // above). RED-until-built (src/mesh-registry.mjs + src/commands/mesh-{invite,join,revoke}.mjs
@@ -799,18 +833,26 @@ import { archTests as acdLeaseArbitrationGitObservedTests } from "../test/arch/a
 // transport; 03_fleet-orphan-reclaim — the dual-staleness decision table with
 // presence precedence under injected clocks). The @manual 04_kr2-contested-soak
 // gets NO executable test (measured at aof:verify on a real two-node fleet).
-// Fitness #9–#12: acd-claim-relay-independent, acd-relay-lease-blind (GREEN before,
-// MUST stay green over the untouched broker), acd-lease-cache-only (extends the
-// fitness-#7 gate over the lease additions), acd-fleet-reclaim-guarded (+ the
+// Fitness #9/#12: acd-claim-relay-independent, acd-fleet-reclaim-guarded (+ the
 // run-complete release-gate half; enumerates the re-armed acd-run-reclaim-stale-only
 // / acd-status-rollback-bounded).
+// milestone 33 / story 01 (ADR-002.1 — F-3204): task 02_relay-fast-path-defer's
+// RECEIVE-side rows (the persistent subscriber applying a lease frame into
+// createLeaseCache) are RETIRED with src/mesh-presence-subscriber.mjs +
+// src/mesh-presence-cache.mjs — superseded by 33/ADR-002 — the broker is eliminated
+// (relayLeaseFastPathTests is TRIMMED to its surviving SEND-side row; fitness
+// acd-lease-cache-only, the receive-side cache-only guard, is RETIRED outright — no
+// module remains for it to guard). REVIEW FIX (story-01 review): acd-relay-lease-blind
+// is ALSO RETIRED here — ADR-002's fitness ledger + STORY.md both name it a sibling of
+// the other three relay arch-tests sharing the broker's fate, and serveRelay/relayMode
+// are confirmed DEAD code (no live caller) once the broker is eliminated, so this guard
+// now protects a broker that no longer brokers — superseded by 33/ADR-002 — the broker
+// is eliminated.
 import { runStartClaimSequenceTests } from "../test/run-start-claim-sequence.test.mjs";
 import { runCompleteLeaseReleaseTests } from "../test/run-complete-lease-release.test.mjs";
 import { relayLeaseFastPathTests } from "../test/relay-lease-fast-path.test.mjs";
 import { fleetOrphanReclaimTests } from "../test/fleet-orphan-reclaim.test.mjs";
 import { archTests as acdClaimRelayIndependentTests } from "../test/arch/acd-claim-relay-independent.test.mjs";
-import { archTests as acdRelayLeaseBlindTests } from "../test/arch/acd-relay-lease-blind.test.mjs";
-import { archTests as acdLeaseCacheOnlyTests } from "../test/arch/acd-lease-cache-only.test.mjs";
 import { archTests as acdFleetReclaimGuardedTests } from "../test/arch/acd-fleet-reclaim-guarded.test.mjs";
 // milestone 27 (story 00) — work-issuance-routing: the issuance directive
 // substrate + the eligibility matcher. src/mesh-issuance.mjs (NEW): the frozen
@@ -1230,23 +1272,27 @@ export const tests = [
   ...meshNodeStalenessStatusTests,
   ...acdPresenceWriteScopeTests,
   ...acdMeshEolPinnedTests,
-  // milestone 23 — control-node-relay (story 01: thin relay)
+  // milestone 23 — control-node-relay (story 01: thin relay). milestone 33 / story 01
+  // (ADR-002): acd-relay-stateless / acd-relay-envelope-neutral RETIRED — superseded by
+  // 33/ADR-002 — the broker is eliminated.
   ...meshRelayBrokerFanoutTests,
   ...meshRelayEnvelopeResilienceTests,
   ...meshRelayControlNodeTests,
-  ...acdRelayStatelessTests,
-  ...acdRelayEnvelopeNeutralTests,
-  // milestone 23 — control-node-relay (story 02: presence-over-relay — the integration)
-  ...meshPresenceDualBusTests,
+  // milestone 23 — control-node-relay (story 02: presence-over-relay — the integration).
+  // milestone 33 / story 01 (ADR-002.1): meshPresenceDualBusTests + fitness
+  // acd-presence-relay-independent RETIRED — superseded by 33/ADR-002 — the broker is
+  // eliminated. meshPresenceDegradationLoopTests TRIMMED to its cadence-loop-only rows.
   ...meshPresenceDegradationLoopTests,
-  ...acdPresenceRelayIndependentTests,
-  ...meshRelayReceiveApplyTests,
-  // milestone 23 — control-node-relay (story 02 / F1 close-out: receive-and-apply consumer)
-  ...acdPresenceSubscriberCacheOnlyTests,
+  // milestone 23 — control-node-relay (story 02 / F1 close-out: receive-and-apply
+  // consumer). milestone 33 / story 01 (ADR-002.1): meshRelayReceiveApplyTests + fitness
+  // acd-presence-subscriber-cache-only RETIRED — superseded by 33/ADR-002 — the broker is
+  // eliminated (src/mesh-presence-subscriber.mjs + src/mesh-presence-cache.mjs deleted).
   // milestone 24 — device-code group-enrollment (SECURITY.md fitness functions — RED-until-built)
   ...acdEnrollmentCodeHashedAtRestTests,
   ...acdEnrollmentCodeSingleUseConstantTimeTests,
-  ...acdRelayAuthGateCheckedTests,
+  // milestone 33 / story 01 (ADR-002.consequence): acd-relay-auth-gate-checked RETIRED —
+  // superseded by 33/ADR-002 — the broker is eliminated (tailnet membership is the
+  // admission boundary now).
   // milestone 24 — device-code group-enrollment (ARCHITECTURE.md STRUCTURAL fitness — the
   // architect's, disjoint from the SECURITY.md fitness above)
   ...acdRegistryWriteScopeTests,
@@ -1285,14 +1331,17 @@ export const tests = [
   ...acdLeaseArbitrationGitObservedTests,
   // milestone 26 (story 02) — distributed-runs-leasing: claim integration + relay
   // fast-path + fleet reclaim — the A2 join (the four @executable task features +
-  // fitness #9–#12; the @manual KR2 soak is an aof:verify deliverable)
+  // fitness #9/#12; the @manual KR2 soak is an aof:verify deliverable)
   ...runStartClaimSequenceTests,
   ...runCompleteLeaseReleaseTests,
+  // milestone 33 / story 01 (ADR-002.1): relayLeaseFastPathTests TRIMMED to its surviving
+  // send-side row; fitness acd-lease-cache-only RETIRED — superseded by 33/ADR-002 — the
+  // broker is eliminated (src/mesh-presence-cache.mjs's createLeaseCache deleted with it).
+  // acd-relay-lease-blind is ALSO RETIRED (review Fix 2) — superseded by 33/ADR-002 —
+  // the broker is eliminated (serveRelay/relayMode are dead code, no live caller).
   ...relayLeaseFastPathTests,
   ...fleetOrphanReclaimTests,
   ...acdClaimRelayIndependentTests,
-  ...acdRelayLeaseBlindTests,
-  ...acdLeaseCacheOnlyTests,
   ...acdFleetReclaimGuardedTests,
   // milestone 27 (story 00) — work-issuance-routing: the issuance directive
   // substrate + the eligibility matcher
@@ -1318,6 +1367,23 @@ export const tests = [
   ...meshUiIssueRouteTests,
   ...meshIssueRouteSameOriginTests,
   ...meshUiWriteIsolationBoundedTests,
+  // milestone 33 — mesh relay/transport redesign: the two Decide-stage fitness
+  // functions (see the import comment; each is the DoD of its build story:
+  // F-3203 identity-not-committed — UN-SKIPPED + GREEN by story 00 below;
+  // F-3202/F-3204 fabric-single-seam — UN-SKIPPED + GREEN by story 01 below)
+  ...acdMeshIdentityNotCommittedTests,
+  ...acdFabricSingleSeamTests,
+  // milestone 33 (story 01) — fabric-native transport + coordination launcher: tasks 00–04
+  ...meshFabricSeamTests,
+  ...meshFabricLivenessCutoverTests,
+  ...meshBrokerRetirementTests,
+  ...meshCoordinationLauncherTests,
+  ...meshOperatorGuidanceTests,
+  // milestone 33 (story 00) — per-install-node-identity: tasks 00–03
+  ...identitySidecarPersistTests,
+  ...loadworkspaceHydrationTests,
+  ...backcompatMigrateDoctorTests,
+  ...selfHealHostnameMismatchTests,
   // story 30 — per-agent model selection
   ...bundleModelMapTests,
   ...agentModelOverrideTests,

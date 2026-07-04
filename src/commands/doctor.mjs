@@ -14,8 +14,26 @@
 //
 // `Date.now()` lives HERE, at the impure command boundary (ADR-003 step 4) — the
 // engine (work-doctor.mjs) reads no wall-clock; it receives `now`/`staleWindow`.
+//
+// milestone 33 / story 00 (ADR-004.4, F-3203) — the RAW committed config's mesh block
+// is ALSO read HERE, at this SAME impure edge, and handed to the engine as plain data
+// (`rawCommittedMesh`/`committedConfigPath`) so the mesh-identity-committed check-group
+// never trusts `ctx.workspace.config` (the loadWorkspace-HYDRATED object, which a
+// correctly-migrated repo still populates from the sidecar) for its committed-config
+// decision.
+//
+// milestone 33 / story 01 (ADR-001.4 / ADR-003.4, task 04) — the per-fabric operator
+// guidance is ADDITIVELY appended to `findings` at THIS SAME impure edge (the probe is
+// an async fabric read, the same class of impurity as Date.now()/the raw config read
+// above) — never inside work-doctor.mjs's pure CHECK_GROUPS registry, which stays a
+// synchronous (snapshot, ctx) => Finding[] pipeline. SILENT (no finding appended) when
+// config.mesh.fabric is undeclared, so a clean/unconfigured stream's doctor output is
+// byte-identical to before this task (no dangling finding on every install that never
+// opted into a fabric).
 import path from "node:path";
 import { doctorWork, staleWindowFromConfig } from "../work-doctor.mjs";
+import { readJson } from "../fs.mjs";
+import { probeFabric, remediationForReason } from "../mesh-fabric.mjs";
 
 export const doctorCommand = {
   id: "work:doctor",
@@ -27,10 +45,38 @@ export const doctorCommand = {
 
   async run(input, ctx) {
     const scope = scopeOf(input);
+    let rawCommittedMesh = {};
+    try {
+      const rawCommitted = await readJson(ctx.workspace.configPath);
+      if (rawCommitted?.mesh && typeof rawCommitted.mesh === "object") rawCommittedMesh = rawCommitted.mesh;
+    } catch {
+      rawCommittedMesh = {}; // an unreadable/torn committed config has no identity to warn about here.
+    }
     const findings = await doctorWork(ctx.workspace.workDir, ctx.workspace.config, scope, {
       now: Date.now(), // the impure edge — the engine stays wall-clock-free
       staleWindow: staleWindowFromConfig(ctx.workspace.config),
+      rawCommittedMesh,
+      committedConfigPath: ctx.workspace.configPath,
     });
+
+    // milestone 33 / story 01 (ADR-001.4 / ADR-003.4, task 04) — the fabric preflight
+    // check, ADDITIVE and SILENT unless config.mesh.fabric is declared (a wholly
+    // unconfigured mesh is byte-identical to before this task — no dangling finding).
+    // A degraded probe warns with the SAME remediation text the launcher preflight
+    // prints (ONE source, src/mesh-fabric.mjs) — this NEVER runs a remediation itself
+    // (ADR-001.consequence: report, never auto-fix).
+    if (ctx.workspace.config?.mesh?.fabric != null) {
+      const probe = ctx?.fabricProbe ?? (await probeFabric(ctx.workspace.config));
+      if (!probe.healthy) {
+        findings.push({
+          code: "mesh-fabric-degraded",
+          severity: "warn",
+          path: ctx.workspace.configPath,
+          message: `the mesh fabric is degraded (${probe.reason}) — ${remediationForReason(probe.reason)}`,
+        });
+      }
+    }
+
     // Raw absolute paths, OS-native, NO projection — the face relativises.
     return {
       findings: findings.map((finding) => ({
