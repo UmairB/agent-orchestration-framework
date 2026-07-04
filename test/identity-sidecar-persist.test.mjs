@@ -73,7 +73,11 @@ export const identitySidecarPersistTests = [
     async run() {
       const rows = [
         ["umairs-msi", "umairs-msi"],
-        ["MacBook-Pro.local", "macbook-pro-local"],
+        // F-3302: a macOS `os.hostname()` carries the mDNS `.local` suffix; it is STRIPPED
+        // so the derived id matches Tailscale's short HostName (`umairs-mac-mini`), not
+        // `umairs-mac-mini-local` (which would fail the ADR-002.2 fabric peer→nodeId join).
+        ["MacBook-Pro.local", "macbook-pro"],
+        ["Umairs-Mac-mini.local", "umairs-mac-mini"],
         ["Umair's MacBook", "umair-s-macbook"],
         ["umair--__--desktop", "umair-desktop"],
         ["---trim-me---", "trim-me"],

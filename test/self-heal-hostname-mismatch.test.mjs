@@ -21,7 +21,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { healIdentitySidecar, loadWorkspace } from "../src/work.mjs";
-import { installHash } from "../src/node-identity.mjs";
+import { installHash, readSidecar } from "../src/node-identity.mjs";
 
 async function tempSidecar(initial) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "aof-self-heal-"));
@@ -159,6 +159,36 @@ export const selfHealHostnameMismatchTests = [
         const bytesAfter = await readFile(sidecarPath, "utf8");
         assert.equal(bytesAfter, bytesBefore, "the sidecar is BYTE-UNCHANGED — no churn on a matching-host collision-suffixed id");
         assert.equal(ws.config.mesh.nodeId, suffixedId, "the returned config still carries the suffixed id, untouched");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
+
+  // ══ REGRESSION (F-3302, milestone 33 verify): a STALE-FORMAT id — one no longer
+  //    producible from its own recorded host under CURRENT rules (a pre-`.local`-strip
+  //    `umairs-mac-mini-local`) — self-migrates on load EVEN WITH THE HOSTNAME UNCHANGED,
+  //    and is self-terminating. Driven through loadWorkspace's REAL call site (which
+  //    passes NO takenIds), and isDerivationOf recognises the collision-suffixed form so
+  //    the regression above (a legitimate collision id) is NOT churned. ═══════════════
+  {
+    name: "self-heal-hostname-mismatch/03 REGRESSION (F-3302): a stale-format .local id self-migrates to the Tailscale-matching short id, self-terminating",
+    async run() {
+      const before = { nodeId: "umairs-mac-mini-local", salt: "8263411c", derivedFrom: "Umairs-Mac-mini.local" };
+      const { root, sidecarPath } = await fixtureProjectWithSidecar(before);
+      try {
+        const ws = await loadWorkspace(root, undefined, { hostname: "Umairs-Mac-mini.local" });
+        assert.equal(ws.config.mesh.nodeId, "umairs-mac-mini", "the stale `.local` id healed to the Tailscale-matching short id");
+        const healed = await readSidecar(sidecarPath);
+        assert.equal(healed.nodeId, "umairs-mac-mini", "the sidecar was rewritten with the short id");
+        assert.equal(healed.salt, "8263411c", "the sidecar's own salt is preserved (no fresh mint)");
+        const bytesAfterFirst = await readFile(sidecarPath, "utf8");
+
+        // Self-terminating: a second load on the same host is a KEEP (no re-churn) —
+        // after the heal the id IS a valid derivation, so trigger 2 no longer fires.
+        const ws2 = await loadWorkspace(root, undefined, { hostname: "Umairs-Mac-mini.local" });
+        assert.equal(ws2.config.mesh.nodeId, "umairs-mac-mini", "the id is stable on a second load");
+        assert.equal(await readFile(sidecarPath, "utf8"), bytesAfterFirst, "the sidecar is byte-unchanged on the second load (self-terminating)");
       } finally {
         await rm(root, { recursive: true, force: true });
       }

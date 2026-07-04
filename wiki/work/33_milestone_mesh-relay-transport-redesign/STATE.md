@@ -51,6 +51,20 @@ doc: state
   — fixed** (`resolveNodeIdentity` made read-only) + a latent dialer-contract defect (fixed). **Milestone
   33 both stories are now in-review — next: `aof:verify 33`.**
 
+- **Verified `2026-07-04` by `aof:verify 33` → NOT ACCEPTED (blocker F-3302 open); stays in-review.**
+  Automated + structural all green (suite 2235/0; both fitness DoDs `acd-mesh-identity-not-committed` +
+  `acd-fabric-single-seam` green; relay guards retired; `aof work validate` PASS). Live-fabric lanes run on
+  the real tailnet from `umairs-msi` (probe/self-address/launcher-probe all healthy, read-only). Operator
+  chose to run the cross-OS e2e on real hardware now (branch committed + pushed `f3a4283`; `umairs-mac-mini`
+  stood up). **Task 04 (cross-OS identity) PASSED** — the mac derives a distinct `umairs-mac-mini-local` off
+  committed config (F-3203 holds on real hardware) — **but the same run surfaced BLOCKER F-3302**: the macOS
+  `os.hostname()` `.local` suffix makes the aof nodeId (`umairs-mac-mini-local`) diverge from the Tailscale
+  hostname (`umairs-mac-mini`), so the ADR-002.2 fabric peer→nodeId join leaves the mac UNJOINED — "see every
+  node + assign cross-node" is broken for macOS nodes. The `mesh-fabric-seam` fixtures used idealized rosters
+  (nodeId == HostName, no `.local`) so CI was green over it. **Task 05 (fleet e2e) not reached** (F-3302 is
+  its precondition). Next: fix F-3302 (`@bug`, `aof:continue` story 01) → re-verify the live join + task 05.
+  Full finding + evidence in [VERIFICATION.md](VERIFICATION.md).
+
 ## Notes & decisions in flight
 
 - **Pin the fabric before the coordination layer.** UAT 32's retro lesson: the relay was designed

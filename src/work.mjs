@@ -22,7 +22,7 @@ import { readJson, writeText } from "./fs.mjs";
 // sidecar reader/writer in node-identity.mjs); sanitizeHostname + deriveNodeId are
 // reused so the self-heal re-derive is the IDENTICAL precedence chain deriveNodeId
 // itself uses, not a private re-derivation.
-import { sidecarPathFor, readSidecar, sanitizeHostname, deriveNodeId } from "./node-identity.mjs";
+import { sidecarPathFor, readSidecar, sanitizeHostname, deriveNodeId, isDerivationOf } from "./node-identity.mjs";
 
 // Work errors carry `.code`/`.status` (the command error contract) so a face maps
 // them uniformly — matching src/commands/errors.mjs.
@@ -51,15 +51,19 @@ const sameNum = (a, b) => Number.parseInt(a, 10) === Number.parseInt(b, 10);
 // loadWorkspace so it is directly unit-testable over an injected sidecar object +
 // current hostname (+ an optional takenIds roster for the collision-preserving
 // scenario) without needing a full fixture project. Returns the (possibly healed)
-// sidecar object; loadWorkspace calls this THEN persists+overlays. Fires ONLY when
-// the sidecar is hostname-DERIVED (sidecar.derivedFrom is a string, sidecar.pinned is
-// not true — an old pre-schema sidecar with NEITHER key is "unknown origin, never
-// churned") AND the CURRENT machine's sanitized hostname no longer matches the
-// RECORDED DERIVATION hostname, sidecar.derivedFrom (the copied-.aof symptom) — this
-// is compared against derivedFrom, NEVER the resolved nodeId: a collision-suffixed id
-// (e.g. nodeId:"shared-host-c4f8", derivedFrom:"shared-host") would never equal its
-// own bare sanitized stem, so comparing against nodeId would churn a stable,
-// collision-resolved id on EVERY load (craft/architect review finding). Re-derives via
+// sidecar object; loadWorkspace calls this THEN persists+overlays. Fires when the
+// sidecar is hostname-DERIVED (sidecar.derivedFrom is a string, sidecar.pinned is not
+// true — an old pre-schema sidecar with NEITHER key is "unknown origin, never churned")
+// AND EITHER (1) the CURRENT machine's sanitized hostname no longer matches the RECORDED
+// DERIVATION hostname, sidecar.derivedFrom (the copied-.aof symptom) — compared against
+// derivedFrom, NEVER the resolved nodeId: a collision-suffixed id (e.g.
+// nodeId:"shared-host-c4f8", derivedFrom:"shared-host") would never equal its own bare
+// sanitized stem, so comparing against nodeId would churn a stable, collision-resolved
+// id on EVERY load (craft/architect review finding) — OR (2) the stored id is no longer
+// a valid derivation of its own recorded host under CURRENT rules (F-3302: a
+// derivation-rule change like the `.local` strip self-migrates), detected via
+// isDerivationOf, which recognises the collision-suffixed form so a legitimate collision
+// id is never churned. Re-derives via
 // deriveNodeId itself — the SAME precedence/collision chain, the sidecar's OWN salt
 // (so the install hash never churns) — and returns the sidecar merged with the healed
 // { nodeId, derivedFrom }; every other case returns the sidecar UNCHANGED (byte-
@@ -67,8 +71,20 @@ const sameNum = (a, b) => Number.parseInt(a, 10) === Number.parseInt(b, 10);
 // persistNodeId's own idempotence check short-circuits the write).
 export async function healIdentitySidecar({ sidecar = {}, hostname, sidecarPath, takenIds = [] } = {}) {
   const isHostnameDerived = sidecar.pinned !== true && typeof sidecar.derivedFrom === "string";
-  if (!isHostnameDerived || sanitizeHostname(hostname) === sanitizeHostname(sidecar.derivedFrom)) {
-    return sidecar; // no heal: pinned, unknown-origin, or still on the recorded derivation host.
+  if (!isHostnameDerived) return sidecar; // pinned or unknown-origin — never churned.
+  // Trigger 1 (the copied-.aof symptom): the CURRENT machine's sanitized hostname no
+  // longer matches the RECORDED derivation host (compared derivedFrom-vs-hostname, never
+  // the resolved nodeId — a collision-suffixed id never equals its own bare stem).
+  const hostnameChanged = sanitizeHostname(hostname) !== sanitizeHostname(sidecar.derivedFrom);
+  // Trigger 2 (F-3302 — a derivation-RULE change self-migrates): the stored id is no
+  // longer a valid derivation of its OWN recorded host under current rules (e.g. a
+  // pre-`.local`-strip `umairs-mac-mini-local`). isDerivationOf recognises the
+  // collision-suffixed / empty-stem forms, so a legitimate collision id is NOT churned
+  // (the craft/architect regression). Self-terminating: after the heal the id IS a valid
+  // derivation, so a second load is a keep.
+  const staleFormat = !isDerivationOf(sidecar.nodeId, sidecar.derivedFrom, sidecar.salt);
+  if (!hostnameChanged && !staleFormat) {
+    return sidecar; // still on the recorded derivation host with a valid-format id.
   }
   const healedId = await deriveNodeId({
     config: {}, // never a pinned config — a derived sidecar is re-derived fresh

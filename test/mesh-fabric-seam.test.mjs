@@ -16,6 +16,7 @@
 //     spawn attempted; an absent config.mesh.fabric is fabric-undeclared.
 import assert from "node:assert/strict";
 import { probeFabric, selfAddress, resolvePeers } from "../src/mesh-fabric.mjs";
+import { sanitizeHostname } from "../src/node-identity.mjs";
 
 const STATUS_FIXTURE = {
   Version: "1.80.0",
@@ -235,6 +236,31 @@ export const meshFabricSeamTests = [
       const peers = await resolvePeers(CONFIG, { exec, platform: "linux", roster });
       assert.equal(peers.length, 1, "exactly one peer resolved");
       assert.equal(peers[0].nodeId, "umairs-mbp", "the peer joins on the trailing-dot-stripped DNSName label");
+    },
+  },
+
+  // ══ REGRESSION (F-3302, milestone 33 verify): a macOS node's DERIVED aof nodeId joins
+  //    its live Tailscale peer across the `.local` mDNS suffix ══
+  // The fixtured rows above used idealized rosters where the aof nodeId already equalled
+  // the Tailscale HostName. On real macOS `os.hostname()` is `Umairs-Mac-mini.local` while
+  // Tailscale reports `umairs-mac-mini`; here the roster nodeId is DERIVED from the real
+  // macOS hostname (via sanitizeHostname) so a revert of the `.local` strip makes it
+  // `umairs-mac-mini-local` and this join goes RED — the fixture gap that let F-3302 ship
+  // green over a real cross-OS integration break.
+  {
+    name: "mesh-fabric-seam/00 REGRESSION (F-3302): a macOS node's derived nodeId joins its Tailscale peer across the .local mDNS suffix",
+    async run() {
+      const macNodeId = sanitizeHostname("Umairs-Mac-mini.local");
+      assert.equal(macNodeId, "umairs-mac-mini", "the macOS `.local` hostname derives the Tailscale-matching short id");
+      const roster = [{ nodeId: macNodeId, host: macNodeId }];
+      const fixture = {
+        ...STATUS_FIXTURE,
+        Peer: { x: { HostName: "umairs-mac-mini", DNSName: "umairs-mac-mini.tail1a2b.ts.net.", TailscaleIPs: ["100.114.105.64"], Online: true } },
+      };
+      const exec = scriptedExec({ stdout: JSON.stringify(fixture) });
+      const peers = await resolvePeers(CONFIG, { exec, platform: "linux", roster });
+      assert.equal(peers.length, 1, "exactly one peer resolved");
+      assert.equal(peers[0].nodeId, macNodeId, "the macOS peer JOINS its derived aof nodeId (not unjoined)");
     },
   },
 

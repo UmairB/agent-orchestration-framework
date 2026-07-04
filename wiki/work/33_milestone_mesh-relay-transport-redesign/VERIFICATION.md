@@ -51,43 +51,79 @@ so the Windows-side + live-fabric-parse halves of both `@manual` lanes were disc
 - **`selfAddress` →** `100.90.249.80` (matches `Self` in the live status). **`launcherProbe` (fabric
   declared) →** `{"fabricState":"running","healthy":true,"selfAddress":"100.90.249.80","peerCount":5,
   "issuanceAuthority":false}`, hydrated `nodeId:"umairs-msi"` from the sidecar overlay, read-only.
-- **`resolvePeers` joined the macOS peer correctly across a HostName≠nodeId divergence.** The mac's
-  Tailscale `HostName` is the human-friendly `"Umair's Mac mini"` (spaces + apostrophe, ≠ any aof nodeId),
-  yet the peer joined to `nodeId:"umairs-mac-mini"` via the **DNSName leading-label fallback** — the exact
-  trailing-dot-tolerant ADR-002.2 join, now confirmed on real hardware. The mac is a **DISTINCT** node
-  (`100.114.105.64`, `online:true`), NOT `umairs-msi` — the F-3203 fix holding on a live cross-OS pair.
 - **Windows PATH reality (RESEARCH §3):** a bare `tailscale` resolves off PATH here
   (`C:\Program Files\Tailscale\tailscale.exe`) — the install-path fallback was not needed.
 
-**Mac-side lanes HELD at verify (operator decision `2026-07-04`) — currently BLOCKED on mac exec access.**
-The operator chose to run the two-machine cross-OS e2e on real hardware at this verify rather than defer
-it to the UAT 32 re-run. The irreducible mac-driven observations require a shell on `umairs-mac-mini`:
-story 00 task 04's mac-side `aof mesh identity` derive + the two nodes publishing to distinct
-`nodes/<id>.json` on a shared remote + the copied-`.aof` self-heal on the mac; story 01 task 05's launcher
-`--serve` on the mac + the full issue→run→watch e2e across both boxes + the real shields-up/ACL
-dial-refusal ground truth + the macOS App-Store-CLI-split symptom.
+**Story 00 / task 04 — cross-OS distinct identity: PASS on real hardware.** `umairs-mac-mini` ran
+`aof mesh identity` on `f3a4283` and returned its sidecar (via Taildrop): `nodeId:"umairs-mac-mini-local"`,
+its own `salt`, `derivedFrom:"Umairs-Mac-mini.local"`. **Distinct** from this box's `umairs-msi` (different
+nodeId AND salt); the mac did **not** inherit `umairs-msi` — the F-3203 fix confirmed on a live cross-OS
+pair (task 04 scenarios "distinct nodeId" + "own git-ignored sidecar"). BUT the same real observation
+surfaced a blocker in the story-01 fabric join — see **F-3302** below.
 
-**Blocker — no exec path to `umairs-mac-mini` from the verify host.** Probed `2026-07-04`: plain `ssh`
-reaches the mac (sshd up) but returns `Permission denied (publickey,password,keyboard-interactive)` — no
-key installed for `Umair@umairs-mac-mini`, no password held; `tailscale ssh` cannot authenticate because
-the mac advertises **no SSH host key** (`sshHostKeys: null` in `tailscale status --json`) — Tailscale SSH
-server is not enabled on the mac. To unblock, on the mac EITHER `tailscale up --ssh` (lowest friction —
-then tailnet ACLs admit `tailscale ssh` as the tailnet user), OR install the verify host's SSH pubkey.
-The mac also needs node + the aof CLI, and a shared bare remote (committed config free of `nodeId`/`salt`)
-both boxes clone. Until then tasks 04/05 stay unobserved and milestone 33 remains `in-review`.
+<!-- CORRECTION: an earlier draft of this section claimed the macOS peer "joined correctly via the DNSName
+     leading-label fallback." That was a FALSE POSITIVE — it used a hand-guessed roster (`umairs-mac-mini`,
+     without the `.local`), not the mac's REAL aof nodeId. With the real nodeId (`umairs-mac-mini-local`,
+     read off the mac's actual sidecar) resolvePeers surfaces the mac UNJOINED. See F-3302. -->
+
+**RESEARCH-gap facts measured (feed back to RESEARCH):** live `tailscale status` `BackendState` on Windows
+is `Running`; a bare `tailscale` resolves off PATH on Windows (no install-path fallback needed); macOS
+`os.hostname()` carries the mDNS `.local` suffix (`Umairs-Mac-mini.local`), which Tailscale does NOT
+(`umairs-mac-mini`) — the divergence behind F-3302.
+
+**Mac-side lanes run at verify (operator decision `2026-07-04`).** The operator chose to run the
+two-machine cross-OS e2e on real hardware rather than defer it to the UAT 32 re-run, and stood up
+`umairs-mac-mini` on the branch (`f3a4283`, committed + pushed to unblock). Task 04's identity lane was
+observed on the mac (sidecar returned via Taildrop) — **PASS on distinct identity, but it surfaced the
+BLOCKER F-3302** (the `.local` fabric-join break). **Task 05 (the `--serve` fleet issue→run→watch e2e,
+shields-up/ACL, App-Store-split) was NOT reached** — F-3302 halts it, because the mac cannot be seen as an
+identified node on the fabric, which is task 05's first precondition ("`mesh:status` shows EVERY node").
+Task 05 resumes after F-3302 is fixed.
 
 ## Accept decision
 
-**HELD — milestone 33 stays `in-review` (not accepted) `2026-07-04`.** Every automated + structural gate
-passed (suite 2235/0, both fitness DoDs green, `arch/mesh-partition-write` restored, relay guards retired,
-`aof work validate` PASS) and the Windows-side + live-fabric halves of both `@manual` lanes are confirmed
-on the live tailnet. Per the operator's decision the two-machine cross-OS e2e (tasks 00/04 + 01/05) will
-be observed on real hardware before acceptance; it is currently blocked on exec access to `umairs-mac-mini`
-(see above). No blocker *findings* are open (F-3301 is minor/deferred). Retrospective + memory-ingest +
-STATE compaction run at acceptance, once the mac-side lanes are green.
+**NOT ACCEPTED — milestone 33 stays `in-review` `2026-07-04`; a BLOCKER finding is open (F-3302).**
+Every automated + structural gate passed (suite 2235/0, both fitness DoDs green, `arch/mesh-partition-write`
+restored, relay guards retired, `aof work validate` PASS), and the cross-OS identity lane (task 04) PASSED
+on real hardware — the mac derives a distinct per-install id off committed config. **But the real-hardware
+run did its job and caught what the fixtures could not:** on macOS the `os.hostname()` `.local` suffix makes
+the aof nodeId (`umairs-mac-mini-local`) diverge from the Tailscale hostname (`umairs-mac-mini`), so the
+ADR-002.2 fabric peer→nodeId join leaves the mac **unjoined** — the milestone's "see every node + assign
+cross-node" objective is broken for macOS nodes (**F-3302, blocker**). The acceptance rule ("no blocker
+finding open") is not met. Route F-3302 to a fix (`@bug` task, `aof:continue` on story 01), then re-verify
+the live cross-OS join + run task 05. Retrospective + memory-ingest + STATE compaction run at acceptance,
+not now. F-3301 (fleet-shared config) remains minor/deferred.
 
 ## Findings
 
+- **F-3302 — macOS `.local` hostname suffix breaks the ADR-002.2 fabric peer→nodeId join (BLOCKER).**
+  Observed on the live cross-OS pair: macOS `os.hostname()` returns `Umairs-Mac-mini.local` (the mDNS
+  suffix), and `sanitizeHostname` (`node-identity.mjs:101`) does NOT strip it — it maps `.` → `-`, deriving
+  aof `nodeId:"umairs-mac-mini-local"`. Tailscale's HostName/DNSName for the SAME box is `umairs-mac-mini`
+  (no `.local`). `resolvePeers` joins fabric peers to aof nodeIds by HostName / DNSName-leading-label
+  (`mesh-fabric.mjs:262-278`), so with the REAL roster (`umairs-msi`, `umairs-mac-mini-local`) read off the
+  published node records, the macOS peer matches **neither** key and surfaces **UNJOINED** (`nodeId:null`) —
+  verified against live `tailscale status --json` from `umairs-msi`.
+  Impact: the milestone's core objective — "**see every node** + assign and run work end-to-end" over the
+  fabric — is **broken for any macOS node**: from Windows the mac appears as an unidentified peer, so
+  `mesh:status` can't map its fabric liveness to its aof identity and cross-node issuance can't target it by
+  nodeId. This is the exact F-3204 integration promise failing on the real fabric. It passed CI because the
+  `mesh-fabric-seam/00` fixtures use idealized rosters where the aof nodeId **equals** the Tailscale HostName
+  (`umairs-mbp`/`umairs-mbp`, no `.local`) — the `.local` case was never modelled.
+  Type: bug (cross-OS integration). Severity: **blocker**. Triage (PO/inline): **blocker** → route to a new
+  `@bug` task (`@finding-F-3302`) + fix via `aof:continue`, then re-verify the live cross-OS join.
+  **FIX LANDED `2026-07-04`** (`aof:continue`, story 01): `sanitizeHostname` (`node-identity.mjs`) now
+  strips a trailing `.local` so macOS derives `umairs-mac-mini` matching Tailscale; the self-heal
+  (`healIdentitySidecar`, `work.mjs`) gained a churn-safe **stale-format trigger** (new exported
+  `isDerivationOf`) so an existing `.local` id auto-migrates on next load (recognises the collision-suffixed
+  form → a legitimate collision id is never churned; self-terminating). Regression tests added: the
+  `mesh-fabric-seam/00` **F-3302** case derives the roster nodeId from a `.local` hostname so a revert goes
+  RED (the fixture gap that hid this); a `self-heal/03` **F-3302** case locks the auto-migration; the
+  codified-wrong `identity-sidecar-persist` row `["MacBook-Pro.local","macbook-pro-local"]` corrected to
+  `"macbook-pro"`. Suite **2237/0**. Live-tailnet re-check from `umairs-msi`: the pre-fix id
+  (`umairs-mac-mini-local`) resolves UNJOINED; the post-fix id (`umairs-mac-mini`) JOINS the live peer.
+  Status: **FIXED in code + verified locally/live; awaiting the mac re-derive (auto-heal) + task 05 re-run
+  on real hardware to close.** Routed-to: `aof:continue` (story 01) — done.
 - **F-3301 — fleet-shared committed `mesh` config was not restored (minor / non-blocker / defer).**
   Observed: committed `.aof/aof.config.json` `mesh` block is `{}` — neither `relay.controlNode` nor
   `mesh.fabric` is declared (ADR-004.1 says a real node's fleet-shared config holds both). Story 00's

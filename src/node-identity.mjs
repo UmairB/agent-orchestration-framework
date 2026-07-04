@@ -95,12 +95,23 @@ export async function writeSidecarPatch(sidecarPath, patch) {
 }
 
 // Sanitize a raw hostname to a path-safe, human-readable stem (ADR-003): lowercase,
-// collapse every RUN of non-[a-z0-9-] characters to a SINGLE "-", trim leading /
-// trailing "-". An all-illegal hostname sanitizes to "" — the caller falls back to the
-// install-hash form (the resolved empty-stem mis-spec). digits + hyphens are preserved.
+// strip the macOS mDNS `.local` suffix (F-3302, below), collapse every RUN of
+// non-[a-z0-9-] characters to a SINGLE "-", trim leading / trailing "-". An all-illegal
+// hostname sanitizes to "" — the caller falls back to the install-hash form (the
+// resolved empty-stem mis-spec). digits + hyphens are preserved.
+//
+// F-3302 (milestone 33 / story 01 verify): macOS `os.hostname()` carries the mDNS
+// `.local` suffix (`Umairs-Mac-mini.local`), but Tailscale reports the SHORT machine
+// name (`umairs-mac-mini`). Without stripping, the aof nodeId derives to
+// `umairs-mac-mini-local` and the ADR-002.2 fabric peer→nodeId join (which matches the
+// Tailscale HostName / DNSName label) leaves the mac UNJOINED — "see every node" breaks
+// for macOS. Stripping a trailing `.local` makes the derived id match Tailscale's short
+// name so the join holds on real cross-OS hardware.
 export function sanitizeHostname(hostname) {
   return String(hostname ?? "")
     .toLowerCase()
+    // Strip the macOS mDNS `.local` suffix so the id matches Tailscale's short HostName.
+    .replace(/\.local$/, "")
     // Each run of illegal chars → a single "-"…
     .replace(/[^a-z0-9-]+/g, "-")
     // …then collapse any run of "-" (including pre-existing hyphens that now abut the
@@ -118,6 +129,21 @@ export function sanitizeHostname(hostname) {
 // is ample disambiguation for a small fleet and keeps the id legible.
 export function installHash(salt) {
   return crypto.createHash("sha256").update(String(salt ?? "")).digest("hex").slice(0, 4);
+}
+
+// isDerivationOf(nodeId, hostname, salt) — is `nodeId` a VALID output of deriveNodeId
+// for this hostname+salt under the CURRENT derivation rules? True for the bare sanitized
+// stem, the collision-suffixed form (`<stem>-<installHash(salt)>`), or the empty-stem
+// fallback (`node-<installHash(salt)>`). Lets the self-heal recognise a STALE-FORMAT id
+// — one no longer producible from its own recorded derivation host, e.g. a pre-F-3302
+// `umairs-mac-mini-local` after the `.local` strip landed — and re-derive it, WITHOUT
+// churning a legitimate collision id (which IS a recognised valid form, so it answers
+// true and is left untouched). Churn-safe by construction: every real derivation output
+// answers true, so healing only ever fires on an id no current rule could have produced.
+export function isDerivationOf(nodeId, hostname, salt) {
+  const stem = sanitizeHostname(hostname);
+  if (stem.length === 0) return nodeId === `node-${installHash(salt)}`;
+  return nodeId === stem || nodeId === `${stem}-${installHash(salt)}`;
 }
 
 // Derive THIS node's id under the ADR-003 documented-default rules, in precedence:
