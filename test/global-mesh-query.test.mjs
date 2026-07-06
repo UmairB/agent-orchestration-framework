@@ -50,7 +50,7 @@ async function makeWorkspace(root, { name = path.basename(root), mesh = {}, stor
     `${JSON.stringify({ name, work: { dir: "./wiki/work" }, mesh: { enabled: true, ...mesh } }, null, 2)}\n`,
     "utf8",
   );
-  return loadWorkspace(root);
+  return loadWorkspace(root, undefined, { env: { AOF_GLOBAL_HOME: path.join(path.dirname(root), "home") } });
 }
 
 async function seedNode(workspace, nodeId, fields = {}) {

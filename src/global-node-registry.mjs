@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { workspaceIdFor } from "./global-work-store.mjs";
@@ -12,10 +12,13 @@ const SECRET_KEY_PATTERN = /(token|secret|credential|auth|invite|hash)/i;
 export async function publishGlobalRegistryDescriptorsToStore(store, workspace, options = {}) {
   const paths = store.paths ?? globalMeshPaths(options);
   const now = options.now ?? new Date().toISOString();
-  const snapshot = await assembleGlobalRegistrySnapshot(workspace, { ...options, now, paths });
 
   await mkdir(paths.nodesRoot, { recursive: true });
   await mkdir(paths.workspacesRoot, { recursive: true });
+  const staleFabricDescriptorPaths = fabricOnlyDescriptorPaths(store);
+  await removeStaleFabricDescriptors(staleFabricDescriptorPaths, paths.nodesRoot, []);
+
+  const snapshot = await assembleGlobalRegistrySnapshot(workspace, { ...options, now, paths });
 
   await writeDescriptor(snapshot.workspaceDescriptorPath, snapshot.workspaceDescriptor);
   for (const descriptor of snapshot.nodeDescriptors) {
@@ -23,6 +26,7 @@ export async function publishGlobalRegistryDescriptorsToStore(store, workspace, 
   }
 
   upsertGlobalRegistryRows(store, snapshot);
+  await removeStaleFabricDescriptors(staleFabricDescriptorPaths, paths.nodesRoot, snapshot.nodeDescriptors);
 
   return {
     workspaceId: snapshot.workspaceDescriptor.workspaceId,
@@ -56,23 +60,11 @@ export async function assembleGlobalRegistrySnapshot(workspace, options = {}) {
 
   const peersById = new Map();
   for (const peer of fabricPeers) {
-    const peerId = fabricPeerId(peer);
+    const peerId = joinedMeshPeerId(peer, recordsById);
     if (peerId) peersById.set(peerId, { ...peer, nodeId: peerId });
   }
 
-  const nodeIds = [];
-  const seen = new Set();
-  for (const id of recordsById.keys()) {
-    seen.add(id);
-    nodeIds.push(id);
-  }
-  for (const id of peersById.keys()) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      nodeIds.push(id);
-    }
-  }
-  nodeIds.sort();
+  const nodeIds = [...recordsById.keys()].sort();
 
   const workspaceMembership = {
     workspaceId,
@@ -99,7 +91,7 @@ export async function assembleGlobalRegistrySnapshot(workspace, options = {}) {
         address: typeof peer.dialAddress === "string" ? peer.dialAddress : null,
         online: typeof peer.online === "boolean" ? peer.online : null,
       },
-      recordSource: recordsById.has(nodeId) ? "node-record" : "fabric",
+      recordSource: "node-record",
       workspaces: [workspaceMembership],
       descriptorPath: path.join(paths.nodesRoot, `${flatLeaf(nodeId)}.json`),
     };
@@ -138,7 +130,7 @@ export async function queryGlobalRegistry(store, options = {}) {
 
   // 34/story 02 — nodes are a MACHINE-WIDE fact: the roster is never workspace-filtered
   // (a workspaceId scopes WORK ITEMS, not the node roster). Only the role filter applies.
-  let nodeRows = db.prepare("SELECT * FROM global_nodes ORDER BY node_id").all();
+  let nodeRows = db.prepare("SELECT * FROM global_nodes WHERE COALESCE(record_source, 'node-record') != 'fabric' ORDER BY node_id").all();
   if (roleFilter) nodeRows = nodeRows.filter((row) => row.role === roleFilter);
 
   const errors = [];
@@ -194,6 +186,8 @@ export function upsertGlobalRegistryRows(store, snapshot) {
       snapshot.workspaceDescriptorPath,
     );
 
+    db.prepare("DELETE FROM global_node_workspaces WHERE node_id IN (SELECT node_id FROM global_nodes WHERE record_source = 'fabric')").run();
+    db.prepare("DELETE FROM global_nodes WHERE record_source = 'fabric'").run();
     db.prepare("DELETE FROM global_node_workspaces WHERE workspace_id = ?").run(workspace.workspaceId);
 
     const upsertNode = db.prepare(`
@@ -274,10 +268,47 @@ export function redactDescriptor(value) {
   return output;
 }
 
-function fabricPeerId(peer) {
-  if (typeof peer?.nodeId === "string" && peer.nodeId.length > 0) return peer.nodeId;
-  if (typeof peer?.host === "string" && peer.host.length > 0) return peer.host;
-  return null;
+function joinedMeshPeerId(peer, recordsById) {
+  if (typeof peer?.nodeId !== "string" || peer.nodeId.length === 0) return null;
+  return recordsById.has(peer.nodeId) ? peer.nodeId : null;
+}
+
+function fabricOnlyDescriptorPaths(store) {
+  return store.db.prepare("SELECT descriptor_path FROM global_nodes WHERE record_source = 'fabric'").all()
+    .map((row) => row.descriptor_path)
+    .filter((entry) => typeof entry === "string" && entry.length > 0);
+}
+
+async function removeStaleFabricDescriptors(filePaths, nodesRoot, currentDescriptors) {
+  if (filePaths.length === 0) return;
+  const rootKey = pathKey(nodesRoot);
+  const keep = new Set(currentDescriptors.map((descriptor) => pathKey(descriptor.descriptorPath)));
+  for (const filePath of filePaths) {
+    const resolved = path.resolve(filePath);
+    const key = pathKey(resolved);
+    if (keep.has(key)) continue;
+    if (!key.startsWith(`${rootKey}${path.sep}`)) continue;
+    if (!(await isFabricOnlyDescriptor(resolved))) continue;
+    try {
+      await rm(resolved, { force: true });
+    } catch {
+      // Stale descriptors are best-effort cleanup; database rows are already pruned.
+    }
+  }
+}
+
+async function isFabricOnlyDescriptor(filePath) {
+  try {
+    const descriptor = JSON.parse(await readFile(filePath, "utf8"));
+    return descriptor?.recordSource === "fabric";
+  } catch {
+    return false;
+  }
+}
+
+function pathKey(filePath) {
+  const resolved = path.resolve(filePath);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 function safeString(value) {

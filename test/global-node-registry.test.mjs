@@ -31,7 +31,7 @@ async function makeWorkspace(root, { name = "alpha", mesh = {} } = {}) {
     `${JSON.stringify({ name, work: { dir: "./wiki/work" }, mesh: { enabled: true, ...mesh } }, null, 2)}\n`,
     "utf8",
   );
-  return await loadWorkspace(root);
+  return await loadWorkspace(root, undefined, { env: { AOF_GLOBAL_HOME: path.join(path.dirname(root), "home") } });
 }
 
 async function seedNode(workspace, nodeId, fields = {}) {
@@ -118,21 +118,42 @@ export const globalNodeRegistryTests = [
     }),
   },
   {
-    name: "global-node-registry/00 fabric-only peers are represented as incomplete nodes instead of disappearing",
+    name: "global-node-registry/00 fabric-only peers are ignored unless they match an AOF mesh node record",
     run: async () => withTemp(async (tmp) => {
       const store = await openStore(path.join(tmp, "home"));
       try {
         const ws = await makeWorkspace(path.join(tmp, "alpha"));
+        await seedNode(ws, "node-a", { host: "alpha" });
+
+        await mkdir(store.paths.nodesRoot, { recursive: true });
+        const staleFabricDescriptorPath = path.join(store.paths.nodesRoot, "beta.json");
+        await writeFile(staleFabricDescriptorPath, `${JSON.stringify({ nodeId: "beta", recordSource: "fabric" }, null, 2)}\n`, "utf8");
+        store.db.prepare(`
+          INSERT INTO global_nodes (node_id, role, control_node, host, os, runtimes_json, skills_json, aof_version, published_at, last_seen_at, fabric_address, fabric_online, record_source, descriptor_path)
+          VALUES ('beta', 'worker', 0, 'beta', '', '[]', '[]', '', ?, null, 'ws://beta.tailnet:7007', 1, 'fabric', ?)
+        `).run(NOW, staleFabricDescriptorPath);
+
+        const beforePublish = await queryGlobalRegistry(store, { now: NOW });
+        assert.deepEqual(beforePublish.nodes.map((node) => node.nodeId), [], "stale fabric-only rows are hidden from reads");
+
         await publishGlobalRegistryDescriptorsToStore(store, ws, {
           now: NOW,
-          fabricPeers: [{ dialAddress: "ws://beta.tailnet:7007", online: true, host: "beta" }],
+          fabricPeers: [
+            { nodeId: "node-a", dialAddress: "ws://alpha.tailnet:7007", online: true, host: "alpha" },
+            { dialAddress: "ws://beta.tailnet:7007", online: true, host: "beta" },
+          ],
         });
-        const descriptor = JSON.parse(await readFile(path.join(store.paths.nodesRoot, "beta.json"), "utf8"));
-        assert.equal(descriptor.nodeId, "beta");
-        assert.equal(descriptor.host, "beta");
-        assert.equal(descriptor.fabric.address, "ws://beta.tailnet:7007");
-        assert.equal(descriptor.recordSource, "fabric");
-        assert.deepEqual(descriptor.runtimes, []);
+
+        const rows = store.db.prepare("SELECT node_id, record_source FROM global_nodes ORDER BY node_id").all()
+          .map((row) => ({ node_id: row.node_id, record_source: row.record_source }));
+        assert.deepEqual(rows, [{ node_id: "node-a", record_source: "node-record" }]);
+        assert.equal(existsSync(path.join(store.paths.nodesRoot, "beta.json")), false, "legacy fabric-only descriptors are removed from the global mesh node folder");
+        const nodeA = JSON.parse(await readFile(path.join(store.paths.nodesRoot, "node-a.json"), "utf8"));
+        assert.equal(nodeA.nodeId, "node-a");
+        assert.equal(nodeA.fabric.address, "ws://alpha.tailnet:7007");
+        assert.equal(nodeA.recordSource, "node-record");
+        const workspace = JSON.parse(await readFile(path.join(store.paths.workspacesRoot, `${workspaceIdFor(ws.projectRoot)}.json`), "utf8"));
+        assert.deepEqual(workspace.memberNodeIds, ["node-a"]);
       } finally {
         store.close();
       }
@@ -163,7 +184,7 @@ export const globalNodeRegistryTests = [
         const updated = JSON.parse(await readFile(second.descriptor_path, "utf8"));
         assert.deepEqual(updated.memberNodeIds, ["node-a"]);
         assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM global_node_workspaces WHERE workspace_id = ? AND node_id = ?").get(workspaceId, "node-b").count, 0);
-        assert.ok(existsSync(path.join(store.paths.nodesRoot, "node-b.json")), "the prior node descriptor is not deleted by this workspace update");
+        assert.equal(existsSync(path.join(store.paths.nodesRoot, "node-b.json")), false, "the removed global node record no longer leaves a descriptor in the shared mesh node folder");
       } finally {
         store.close();
       }
