@@ -9,7 +9,7 @@
 // TWO FACES over the SAME core (08/ADR-001 / the 23 precedent):
 //   - launcherProbe(config, options)   — the NON-BLOCKING probe the registered mesh:*
 //                                        command run IS (ADR-003.2): reports fabric
-//                                        state + self-address + peer count + whether
+//                                        state + self-address + registered mesh peer count + whether
 //                                        this node is the control node, and RETURNS.
 //                                        Never starts long-lived listeners or tickers.
 //   - startLauncher(ws, options)       — the long-lived `--serve` face: preflights the
@@ -123,7 +123,7 @@ async function resolveNodeIdentity(ws) {
 
 // launcherProbe(ws, options) → { fabricState, selfAddress, peerCount, issuanceAuthority
 // } — the NON-BLOCKING registered-run shape (ADR-003.2, the relayStatus precedent). A
-// pure config+fabric read: probeFabric + selfAddress + resolvePeers().length + the
+// pure config+fabric read: probeFabric + selfAddress + registered resolvePeers() nodeIds + the
 // control-node comparison — ZERO blocking calls, so acd-mesh-command-cli-bijection
 // stays green (the probe runs clean + parseable + RETURNS).
 export async function launcherProbe(ws, options = {}) {
@@ -137,7 +137,7 @@ export async function launcherProbe(ws, options = {}) {
     fabricState: probe.reason ?? "running",
     healthy: probe.healthy,
     selfAddress: address,
-    peerCount: peers.length,
+    peerCount: new Set(peerNodeIdsFrom(peers)).size,
     issuanceAuthority,
   };
 }

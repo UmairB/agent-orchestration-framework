@@ -8,7 +8,7 @@
 // (Scenario-Outline rows folded into one entry iterating the rows). node:assert/strict.
 //
 //   03_coordination-launcher.feature — the registered run is a non-blocking probe that
-//     reports fabric state + self-address + peer count + issuance authority and
+//     reports fabric state + self-address + registered mesh peer count + issuance authority and
 //     RETURNS (never listens, never starts the loop); the --serve path preflights and
 //     refuses-with-guidance on a degraded fabric (no loop, no presence publish); a
 //     healthy preflight publishes presence, starts the reused sync loop, binds no
@@ -22,8 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { invoke, listCommands } from "../src/command-core.mjs";
-import { presenceRecordPath } from "../src/mesh-store.mjs";
-import { sidecarPathFor } from "../src/node-identity.mjs";
+import { presenceRecordPath, publishNodeRecord } from "../src/mesh-store.mjs";
 import { launcherProbe, startLauncher } from "../src/mesh-launcher.mjs";
 
 const NODE_ID = "test-node-self";
@@ -82,24 +81,50 @@ function manualTicker() {
   };
 }
 
-const cleanup = (repo) => rm(repo, { recursive: true, force: true });
+const cleanup = (repo) => rm(repo, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+
+async function loadLauncherWorkspace(repo) {
+  return await loadWorkspace(repo, undefined, { env: { AOF_GLOBAL_HOME: path.join(repo, ".global-aof") } });
+}
+
+function launcherOptions(repo, options = {}) {
+  const env = { AOF_GLOBAL_HOME: path.join(repo, ".global-aof") };
+  const { controlStreamServerOptions = {}, globalWorkStoreOptions = {}, ...rest } = options;
+  return {
+    ...rest,
+    globalWorkStoreOptions: { env, ...globalWorkStoreOptions },
+    controlStreamServerOptions: {
+      ...controlStreamServerOptions,
+      storeOptions: { env, ...(controlStreamServerOptions.storeOptions ?? {}) },
+    },
+  };
+}
 
 export const meshCoordinationLauncherTests = [
   // ══ Scenario: the registered run is a non-blocking probe that reports fabric state +
-  //    self-address + peer count + issuance authority and RETURNS ══
+  //    self-address + registered mesh peer count + issuance authority and RETURNS ══
   {
-    name: "mesh-coordination-launcher/03 the registered run is a non-blocking probe that reports fabric state + self-address + peer count + issuance authority and RETURNS",
+    name: "mesh-coordination-launcher/03 the registered run is a non-blocking probe that reports fabric state + self-address + registered mesh peer count + issuance authority and RETURNS",
     async run() {
       const repo = await makeRepo({ issuanceAuthority: true });
       try {
-        const ws = await loadWorkspace(repo);
+        const ws = await loadLauncherWorkspace(repo);
+        await publishNodeRecord(ws, "mesh-peer-b", {
+          nodeId: "mesh-peer-b",
+          host: "peer-b",
+          os: "linux",
+          runtimes: ["codex"],
+          publishedAt: "2026-07-06T11:00:00.000Z",
+        });
         const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
         const result = await launcherProbe(ws, { exec, platform: "linux" });
         assert.deepEqual(
           result,
-          { fabricState: "running", healthy: true, selfAddress: "100.121.112.23", peerCount: 2, issuanceAuthority: true },
-          "the probe returns the exact { fabricState, selfAddress, peerCount, issuanceAuthority } shape"
+          { fabricState: "running", healthy: true, selfAddress: "100.121.112.23", peerCount: 1, issuanceAuthority: true },
+          "the probe returns registered mesh peer count, not raw Tailscale peer count"
         );
+        const command = listCommands().find((entry) => entry.id === "mesh:serve");
+        assert.match(command.cli.render(result), /1 mesh peer\(s\)/, "the CLI labels the count as mesh peers, not raw fabric peers");
       } finally {
         await cleanup(repo);
       }
@@ -113,7 +138,7 @@ export const meshCoordinationLauncherTests = [
     async run() {
       const repo = await makeRepo();
       try {
-        const ws = await loadWorkspace(repo);
+        const ws = await loadLauncherWorkspace(repo);
         const exec = async () => { const error = new Error("spawn tailscale ENOENT"); error.code = "ENOENT"; throw error; };
         const result = await launcherProbe(ws, { exec, platform: "linux" });
         assert.equal(result.fabricState, "not-installed", 'the --json result reports fabricState "not-installed"');
@@ -139,8 +164,8 @@ export const meshCoordinationLauncherTests = [
       for (const row of rows) {
         const repo = await makeRepo();
         try {
-          const ws = await loadWorkspace(repo);
-          const handle = await startLauncher(ws, { exec: row.exec, platform: "linux" });
+          const ws = await loadLauncherWorkspace(repo);
+          const handle = await startLauncher(ws, launcherOptions(repo, { exec: row.exec, platform: "linux" }));
           assert.equal(handle.refused, true, `[${row.reason}] the daemon does NOT start`);
           assert.ok(handle.guidance != null && handle.guidance.lines.length > 0, `[${row.reason}] it carries the guidance for this reason`);
           assert.equal(handle.probe.reason, row.reason, `[${row.reason}] the refusal names the matching reason`);
@@ -161,18 +186,18 @@ export const meshCoordinationLauncherTests = [
     async run() {
       const repo = await makeRepo();
       try {
-        const ws = await loadWorkspace(repo);
+        const ws = await loadLauncherWorkspace(repo);
         const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
         const syncTicker = manualTicker();
         const peerTicker = manualTicker();
         let peersSeen = null;
-        const handle = await startLauncher(ws, {
+        const handle = await startLauncher(ws, launcherOptions(repo, {
           exec,
           platform: "linux",
           ticker: syncTicker,
           peerPollTicker: peerTicker,
           onPeers: (peers) => { peersSeen = peers; },
-        });
+        }));
 
         assert.equal(handle.refused, undefined, "the daemon starts (no refusal)");
         const published = await readFile(presenceRecordPath(ws, NODE_ID), "utf8").then((text) => JSON.parse(text)).catch(() => null);
@@ -201,11 +226,11 @@ export const meshCoordinationLauncherTests = [
       for (const signal of ["SIGINT", "SIGTERM"]) {
         const repo = await makeRepo();
         try {
-          const ws = await loadWorkspace(repo);
+          const ws = await loadLauncherWorkspace(repo);
           const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
           const syncTicker = manualTicker();
           const peerTicker = manualTicker();
-          const handle = await startLauncher(ws, { exec, platform: "linux", ticker: syncTicker, peerPollTicker: peerTicker });
+          const handle = await startLauncher(ws, launcherOptions(repo, { exec, platform: "linux", ticker: syncTicker, peerPollTicker: peerTicker }));
           assert.equal(handle.refused, undefined, `[${signal}] the daemon is running with a published presence record and a live sync loop`);
 
           // The CLI's SIGINT/SIGTERM handler, when invoked, calls handle.stop() — the
@@ -238,7 +263,7 @@ export const meshCoordinationLauncherTests = [
 
       const repo = await makeRepo();
       try {
-        const ws = await loadWorkspace(repo);
+        const ws = await loadLauncherWorkspace(repo);
         const start = Date.now();
         const result = await invoke("mesh:serve", {}, { workspace: ws });
         const elapsedMs = Date.now() - start;
@@ -258,8 +283,8 @@ export const meshCoordinationLauncherTests = [
     async run() {
       const repo = await makeFreshRepo();
       try {
-        const ws = await loadWorkspace(repo);
-        const sidecarPath = sidecarPathFor(ws.aofDir);
+        const ws = await loadLauncherWorkspace(repo);
+        const sidecarPath = ws.identityPath;
         assert.equal(existsSync(sidecarPath), false, "precondition: no sidecar exists before the probe");
 
         const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
