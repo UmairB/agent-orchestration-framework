@@ -149,7 +149,11 @@ async function withFleetServer(fn) {
   let server;
   try {
     let url;
-    ({ server, url } = await serveMeshUi({ projectDir: fx.root, port: 0, repoRoot: distRoot }));
+    // scope:"local" (milestone 34 / story 03, ADR-006) — this suite's concern is the
+    // POST /api/mesh/issue write route; isolating the GET /api/mesh/status parity
+    // check from the ambient global store keeps this suite's fixture the sole
+    // source of truth (no dependency on any global projection existing/not).
+    ({ server, url } = await serveMeshUi({ projectDir: fx.root, port: 0, repoRoot: distRoot, scope: "local" }));
     await fn({ server, url, root: fx.root });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));

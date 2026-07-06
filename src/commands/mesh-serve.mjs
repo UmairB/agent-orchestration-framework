@@ -1,13 +1,12 @@
-// mesh:serve — the per-node presence+sync daemon FACE / probe command (milestone 33 /
+// mesh:serve — the per-node presence and global propagation daemon FACE / probe command (milestone 33 /
 // story 01, ADR-003). Thin over src/mesh-launcher.mjs. `aof mesh serve` is a long-lived
-// serve verb (it stands up the fabric presence+sync daemon), but its registered command
+// serve verb (it stands up the fabric presence/global propagation daemon), but its registered command
 // run is the NON-BLOCKING probe (the mesh:relay precedent, ADR-003.2): it reports the
 // fabric state + this node's resolved self-address + the peer count + whether this node
-// is the issuance authority — WITHOUT calling listen()/startSyncLoop/blocking. This
-// keeps the acd-mesh-command-cli-bijection gate honest (`aof mesh serve --json` runs
-// clean + parseable + RETURNS, never hanging on a long-lived serve). The actual
-// long-lived daemon is startLauncher, invoked by the CLI's `--serve` face, not by this
-// one-shot probe.
+// is the control node — WITHOUT starting the long-lived daemon. This keeps the
+// acd-mesh-command-cli-bijection gate honest (`aof mesh serve --json` runs clean + parseable +
+// RETURNS, never hanging on a daemon). The actual long-lived daemon is startLauncher, invoked
+// by the CLI's `--serve` face, not by this one-shot probe.
 import { launcherProbe } from "../mesh-launcher.mjs";
 
 export const meshServeCommand = {
@@ -22,7 +21,7 @@ export const meshServeCommand = {
 
   async run(_input, ctx) {
     // The NON-BLOCKING probe (no listen, no loop started): fabric state + self-address
-    // + peer count + issuance-authority. The `--serve` CLI face is what calls
+    // + peer count + control-node. The `--serve` CLI face is what calls
     // startLauncher (the long-lived daemon); this registered run never blocks.
     return await launcherProbe(ctx.workspace);
   },
@@ -32,11 +31,11 @@ export const meshServeCommand = {
     // named ref).
     argv: () => ({}),
 
-    // The status line: fabric health + self-address + peer count + issuance role.
+    // The status line: fabric health + self-address + peer count + control-node role.
     render(result) {
       if (result == null) return "No launcher status.";
       const address = result.selfAddress ?? "(no address — fabric degraded)";
-      const role = result.issuanceAuthority ? " — this node is the issuance authority" : "";
+      const role = result.issuanceAuthority ? " — this node is the control node" : "";
       return `Fabric ${result.fabricState} (healthy: ${result.healthy}) — self-address ${address} — ${result.peerCount} peer(s)${role}`;
     },
 

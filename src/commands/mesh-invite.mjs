@@ -12,7 +12,7 @@
 //      mesh-relay.mjs — the same seam the endpoint matches through) BEFORE anything
 //      durable sees it. The durable pending record carries codeHash ONLY — never a
 //      plaintext code field (SECURITY T3, acd-enrollment-code-hashed-at-rest: the
-//      registry is git-synced fleet-wide and lives in git history forever).
+//      registry is shared across the mesh and persists in global mesh state).
 //   4. RECORD — append { codeHash, issuedAt, expiresAt, consumedAt: null } through
 //      story 00's writeRegistry (THE single control-node-guarded write seam —
 //      acd-registry-write-scope: this module writes no registry file itself), where

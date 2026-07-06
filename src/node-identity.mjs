@@ -271,21 +271,57 @@ export async function migrateIdentity(configPath, sidecarPath) {
   return { migrated: true };
 }
 
-// Assemble this node's capability descriptor — the frozen 7-key schema (ADR-003), in
-// order: nodeId, host, os, runtimes, skills, aofVersion, publishedAt. A REBUILDABLE
-// projection: it READS config + environment and writes NOTHING. Empty runtimes/skills
-// assemble as [] (honest minimal install), never absent / a crash. publishedAt is an
-// ISO-8601 UTC trailing-Z instant (now ?? new Date().toISOString()).
+// migrateIdentityToGlobal(legacySidecarPath, globalIdentityPath) — milestone 34 / story
+// Global identity migration: move a LEGACY per-workspace identity sidecar (.aof/mesh/identity.json under a
+// project's aofDir, 33/ADR-004) UP into the machine-wide global identity home
+// (globalMeshPaths().identityPath), so one identity is shared by every workspace on this
+// machine. Idempotent and non-clobbering:
+//   - the legacy sidecar carries an identity AND the global home does NOT yet: copy the
+//     legacy { nodeId, salt, derivedFrom, pinned } into the global home (read-merge-write,
+//     writeSidecarPatch) and REMOVE the legacy file (so it can never diverge from global);
+//   - the global home ALREADY carries an identity: the global one WINS — just remove the
+//     now-redundant legacy sidecar (never overwrite a machine identity from a per-project
+//     copy that may have travelled on clone);
+//   - no legacy identity present: a clean byte-level NO-OP (neither file touched).
+// Returns { migrated: boolean } — true iff anything was written/removed.
+export async function migrateIdentityToGlobal(legacySidecarPath, globalIdentityPath) {
+  const legacy = await readSidecar(legacySidecarPath);
+  const hasLegacyIdentity = typeof legacy.nodeId === "string" && legacy.nodeId.length > 0;
+  if (!hasLegacyIdentity) return { migrated: false };
+
+  const global = await readSidecar(globalIdentityPath);
+  const globalHasIdentity = typeof global.nodeId === "string" && global.nodeId.length > 0;
+  if (!globalHasIdentity) {
+    // Copy the legacy identity up to the global home (only the identity keys it carries).
+    const patch = {};
+    for (const key of ["nodeId", "salt", "derivedFrom", "pinned"]) {
+      if (key in legacy) patch[key] = legacy[key];
+    }
+    await writeSidecarPatch(globalIdentityPath, patch);
+  }
+  // Remove the now-redundant per-workspace sidecar (global is the single source now).
+  const { rm } = await import("node:fs/promises");
+  await rm(legacySidecarPath, { force: true });
+  return { migrated: true };
+}
+
+// Assemble this node's descriptor — nodeId, host, os, runtimes, aofVersion, publishedAt.
+// A REBUILDABLE projection: it READS config + environment and writes NOTHING. Empty
+// runtimes assemble as [] (honest minimal install), never absent / a crash. publishedAt
+// is an ISO-8601 UTC trailing-Z instant (now ?? new Date().toISOString()).
+//
+// 34/story 02 (operator directive): `skills` is REMOVED — the aof bundle's resource ids
+// were advertised as node "skills", which is useless from a mesh-identity perspective
+// (every node ships the same bundle; it says nothing about the node).
 //
 // The id is taken AS-GIVEN (the caller derives it via deriveNodeId first, which owns
 // the first-publish persist) so assembly stays a pure projection with no write.
-export function assembleDescriptor({ nodeId, hostname, platform, runtimes, skills, aofVersion, now } = {}) {
+export function assembleDescriptor({ nodeId, hostname, platform, runtimes, aofVersion, now } = {}) {
   return {
     nodeId: String(nodeId ?? ""),
     host: String(hostname ?? ""),
     os: String(platform ?? ""),
     runtimes: Array.isArray(runtimes) ? [...runtimes] : [],
-    skills: Array.isArray(skills) ? [...skills] : [],
     aofVersion: String(aofVersion ?? ""),
     publishedAt: now ?? new Date().toISOString(),
   };

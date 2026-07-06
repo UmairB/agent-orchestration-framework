@@ -3,10 +3,10 @@ type: milestone
 number: 33
 slug: mesh-relay-transport-redesign
 title: "Mesh Relay/Transport Redesign — a mesh-VPN-native fleet (Tailscale-first)"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 depends: [22, 23, 24, 25, 26, 27]
 origin: wiki/work/32_uat_whole-mesh-acceptance/SESSION.md
 ---
@@ -78,14 +78,14 @@ presence bus, while the fabric seam + presence cutover + broker retirement are o
 stories are **file-disjoint** with a soft ordering edge (identity first, so the transport joins peers on
 trustworthy per-install ids). Contracts (task `.feature` files) are authored per story via Three Amigos.
 
-- [ ] **00 · [per-install node identity](stories/00_story_per-install-node-identity/STORY.md)** — the
+- [x] **00 · [per-install node identity](stories/00_story_per-install-node-identity/STORY.md)** — the
   clean-cut, independent fix for **F-3203**: split `config.mesh` into fleet-shared (committed) vs per-install
   identity (`nodeId`/`salt` → the git-ignored sidecar `.aof/mesh/identity.json`); derive from hostname;
   hydrate onto `config.mesh` at `loadWorkspace` so downstream readers are unchanged; committed `mesh.nodeId`
   stays a back-compat fallback + a `doctor` migrate-warn; self-heal on a hostname/nodeId mismatch. Identity is
   never inherited on clone; restores the m22 one-node-per-path partition invariant. **DoD: un-skip
   `acd-mesh-identity-not-committed`.** Sequenced FIRST.
-- [ ] **01 · [fabric-native transport + coordination launcher](stories/01_story_fabric-native-transport/STORY.md)**
+- [x] **01 · [fabric-native transport + coordination launcher](stories/01_story_fabric-native-transport/STORY.md)**
   — the topology rewrite closing **F-3201 / F-3202 / F-3204**: the NEW `src/mesh-fabric.mjs` seam
   (`probeFabric` / `selfAddress` / `resolvePeers` over `tailscale status --json`, joined to aof nodeId by
   hostname; Tailscale-only shipped, other fabrics a clean refusal); the presence fast-path cutover (fabric

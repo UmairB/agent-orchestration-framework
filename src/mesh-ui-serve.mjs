@@ -2,34 +2,34 @@
 // (milestone 25 / story 02; ARCHITECTURE ADR-003/ADR-004). A SIBLING to
 // `board-serve.mjs`, NOT an extension of the work UI: it stands up its OWN single
 // `http.createServer` bound to `127.0.0.1`, serving the BUILT `ui/dist` bundle
-// announced with `?mode=fleet` and its `/api/mesh` routes —
-// `GET /api/mesh/status` → `invoke("mesh:status", …)` and (milestone 27 / story
-// 02, ADR-006) `POST /api/mesh/issue` → `invoke("mesh:issue", …)` — through the
-// command registry.
+// announced with `?mode=fleet` and its `/api/mesh` route: `GET /api/mesh/status`.
+//
+// milestone 34 / story 03 (34/ADR-006) — `GET /api/mesh/status` now DEFAULTS to
+// the machine-wide GLOBAL projection (via `queryGlobalMeshStatus`,
+// ./global-mesh-query.mjs — the ONE additional query surface this face is allowed
+// to reach); `serveMeshUi({ scope: "local" })` (the CLI's `--local`) reads the
+// same global projection narrowed to the current workspace id, and a globally-
+// started server still honours a `?scope=local` deep-link
+// by narrowing the SAME global query to the current workspace id. The face stays
+// thin either way: it never opens the SQLite projection itself and never imports
+// global-work-store.mjs/global-node-registry.mjs directly — only the one
+// composition seam.
 //
 // It is deliberately NOT `serveSetupUi` (the board's server): that server
 // unconditionally wires `handleWorkApi` (a `/api/work` surface) AND
 // `attachTerminalWebSocket` (a `/ws/terminal` upgrade), both of which this face
 // FORBIDS (ADR-004; ADR-003 disjoint `/api/mesh` namespace). So the fleet face
 // owns its own thin server whose surface is exactly: the static bundle,
-// `GET /api/mesh/status`, `POST /api/mesh/issue`, and a clean not-found for
+// `GET /api/mesh/status`, and a clean not-found for
 // everything else.
 //
 // The isolation guarantees are STRUCTURAL:
-//   - it imports NO fleet-data/operation module except `./command-core.mjs`
-//     (the ONE registry door — 08/ADR-004 inv.3, mirrored by
-//     acd-mesh-ui-no-core-import / acd-mesh-ui-single-data-command); the write
-//     route reaches its mutation the SAME way — never a direct `mesh-issuance`
-//     import (27/ADR-006.1);
+//   - it imports the single global query surface only, not low-level work/run/mesh
+//     writers;
 //   - it stands up exactly ONE `http.createServer` bound to `127.0.0.1`, routing
-//     the fleet under `/api/mesh*` and NEVER `/api/work*`
-//     (acd-mesh-ui-single-server);
+//     the fleet under `/api/mesh*` and NEVER `/api/work*`;
 //   - it performs ZERO fs write and NO shell-out of its own; it serves no
-//     `/ws/terminal`; the ONLY mutation route is `POST /api/mesh/issue`, reached
-//     ONLY via `invoke("mesh:issue")` (the BOUNDED-WRITE flip,
-//     acd-mesh-ui-write-isolation, 27/ADR-006.2) — no other write route exists.
-//   - the write route is guarded BEFORE the mutation by a same-origin +
-//     application/json check (SECURITY T1 / fitness S-1, 27/ADR-006).
+//     `/ws/terminal`; there is no fleet mutation route.
 //
 // milestone 28 / story 00 (ADR-003): the default ui/dist location routes
 // through the ONE SEA-safe asset-base seam instead of joining a path off a bare
@@ -42,8 +42,14 @@ import http from "node:http";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { invoke, loadWorkspace } from "./command-core.mjs";
 import { assetPath } from "./asset-base.mjs";
+// milestone 34 / story 03 (ADR-006) — the ONE global query surface this thin serve
+// face is allowed to reach for its GLOBAL `/api/mesh/status` read. `queryGlobalMeshStatus`
+// is itself the composition seam (it owns the SQLite open + the story 00/02 query
+// calls); this face never opens the projection store or imports the low-level
+// global-work-store/global-node-registry modules directly (ADR-006 "must not import
+// low-level work/run/mesh writers; it talks to a query surface").
+import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-query.mjs";
 
 // The default fleet port (task 00, DEV flag): 4181 — the next free port directly
 // above the board (4180), distinct from all of assets-ui 4177/4178 + board 4180
@@ -57,7 +63,21 @@ export function meshUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
 
-export async function serveMeshUi({ projectDir = process.cwd(), port = DEFAULT_MESH_UI_PORT, repoRoot } = {}) {
+// milestone 34 / story 03 (ADR-006) — `scope` selects the default `/api/mesh/status`
+// data source: both "global" (the default) and "local" read the machine-wide
+// projection via queryGlobalMeshStatus; local scope narrows work items to the
+// current workspace id. Either scope still honours a `?scope=` query override per
+// request (task 01) — the STARTED scope only decides the DEFAULT when the query
+// string is silent.
+const VALID_SCOPES = new Set(["global", "local"]);
+
+export async function serveMeshUi({
+  projectDir = process.cwd(),
+  port = DEFAULT_MESH_UI_PORT,
+  repoRoot,
+  scope = "global",
+  globalStoreOptions,
+} = {}) {
   const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
 
   // The board's friendly build-missing refusal, mirrored verbatim onto the fleet
@@ -84,9 +104,17 @@ export async function serveMeshUi({ projectDir = process.cwd(), port = DEFAULT_M
     }
     const pathname = requestUrl.pathname;
 
-    // The ONE fleet READ route: GET /api/mesh/status → invoke("mesh:status")
-    // through the registry door (ADR-002/ADR-003). Its payload deep-equals the
-    // CLI `aof mesh status --json` for the same fixture (one command, two faces).
+    // The ONE fleet READ route: GET /api/mesh/status. milestone 34 / story 03
+    // (ADR-006) — the DATA SOURCE branches on scope, and the MECHANISM depends on
+    // how "local" was reached (task 01's two distinct local paths):
+    //   - a server STARTED with scope:"local" (serveMeshUi({ scope:"local" }))
+    //     narrows the global projection to the current workspace id.
+    //   - a server STARTED with scope:"global" answers the machine-wide
+    //     queryGlobalMeshStatus read by default (task 01 scenario 1); an explicit
+    //     `?scope=local` deep-link on THIS server narrows the SAME global
+    //     projection query to the current workspace id.
+    // Any OTHER ?scope= value is a clean 400 invalid-scope BEFORE any query or
+    // workspace command runs (task 01 scenario 4).
     if (pathname === "/api/mesh/status") {
       // Read-only: only GET is answered. A write method (POST/PUT/PATCH/DELETE)
       // is a clean 405 method-rejection — there is no mutating route on THIS
@@ -96,71 +124,31 @@ export async function serveMeshUi({ projectDir = process.cwd(), port = DEFAULT_M
         sendMethodNotAllowed(response, "GET, HEAD");
         return;
       }
+      const requestedScope = requestUrl.searchParams.get("scope");
+      if (requestedScope != null && !VALID_SCOPES.has(requestedScope)) {
+        sendApiError(response, 400, `Unsupported scope "${requestedScope}".`, "invalid-scope");
+        return;
+      }
+
       try {
-        // Inside the try so a loadWorkspace/invoke throw lands in the catch (a
-        // JSON error envelope, status ?? 500), never escaping the handler.
-        const workspace = await loadWorkspace(resolvedProjectDir);
-        const result = await invoke("mesh:status", {}, { workspace });
-        sendJson(response, 200, result);
+        // 34/story 03 — mesh state is machine-wide GLOBAL, so there is ONE data source:
+        // queryGlobalMeshStatus. `local` is NOT a different source — it is the SAME global
+        // view with the WORK ITEMS filtered to the current repo's workspace id; the NODE
+        // roster stays machine-wide either way (nodes are a machine fact, not per-repo).
+        // A server STARTED with --local always scopes to its own workspace; a globally-
+        // started server honours a ?scope=local deep-link the same way.
+        const effectiveScope = scope === "local" ? "local" : (requestedScope ?? "global");
+        const workspaceId = effectiveScope === "local" ? workspaceIdForProjectRoot(resolvedProjectDir) : null;
+        const result = await queryGlobalMeshStatus({ ...globalStoreOptions, workspaceId });
+        const body = { ...result, scope: effectiveScope };
+        if (effectiveScope === "local") body.currentWorkspace = resolvedProjectDir;
+        sendJson(response, 200, body);
       } catch (error) {
-        sendApiError(response, error.status ?? 500, error.message, error.code ?? "mesh-api-failed");
-      }
-      return;
-    }
-
-    // milestone 27 / story 02 (ADR-006) — the FIRST write route on the fleet
-    // face: POST /api/mesh/issue → invoke("mesh:issue") through the ONE registry
-    // door (never a direct `mesh-issuance` import — acd-mesh-ui-no-core-import
-    // stays green; the bounded-write flip, acd-mesh-ui-write-isolation #7).
-    if (pathname === "/api/mesh/issue") {
-      // Read-only-except-issue: only POST is answered on this route. PUT/PATCH/
-      // DELETE are a clean 405 (task 00/03's method matrix) — the write door
-      // opened for exactly this ONE method on this ONE route.
-      if (request.method !== "POST") {
-        sendMethodNotAllowed(response, "POST");
-        return;
-      }
-
-      // (1) SAME-ORIGIN + CONTENT-TYPE GUARD — BEFORE any body read or invoke
-      // (SECURITY T1 / fitness S-1). A refused request never reaches the body
-      // parser, let alone the mutation — the disk stays byte-unchanged.
-      const origin = request.headers.origin;
-      const boundPort = server.address().port;
-      // BOTH loopback spellings are legitimate same-origin (SECURITY.md S-1
-      // names http://127.0.0.1:<port> AND http://localhost:<port> as the
-      // loopback origin — review fix / architect NIT-1): a browser tab open at
-      // either address is the SAME operator on the SAME loopback boundary, so
-      // accepting either is fail-safe (no security downside — a foreign origin
-      // still matches neither and is still refused).
-      const loopbackOrigins = new Set([`http://127.0.0.1:${boundPort}`, `http://localhost:${boundPort}`]);
-      if (origin && !loopbackOrigins.has(origin)) {
-        sendApiError(response, 403, "Cross-origin request refused.", "forbidden");
-        return;
-      }
-      if (!/application\/json/i.test(request.headers["content-type"] ?? "")) {
-        sendApiError(response, 403, "content-type: application/json required.", "forbidden");
-        return;
-      }
-
-      // (2) BODY READ — the board's readJsonBody transport reader, mirrored
-      // (empty-json / malformed-json are transport concerns, stay in the face —
-      // src/board-ui.mjs:192-216).
-      try {
-        const body = await readJsonBody(request);
-        const workspace = await loadWorkspace(resolvedProjectDir);
-        // The wire sentinel for "untargeted" (the picker's "Any node" default,
-        // ADR-002.3/ADR-003 "absent ⇒ { kind:"any" }") is the literal string
-        // "any" — but its disambiguation is NOT a route-layer concern (review
-        // fix: the route used to normalize "any" ⇒ undefined here, which meant
-        // the CLI face — `aof mesh issue <ref> --to any`, which reaches
-        // resolveTarget with the token still "any" — disagreed with this route
-        // on what "any" means. `body.to` now rides through UNCHANGED; mesh:
-        // issue's own resolveTarget is the ONE place that disambiguates "any"
-        // (case-insensitive, trimmed) into { kind:"any" }, so both faces agree.
-        const result = await invoke("mesh:issue", { ref: body.ref, to: body.to }, { workspace });
-        sendJson(response, 200, result);
-      } catch (error) {
-        sendApiError(response, error.status ?? 500, error.message, error.code ?? "mesh-api-failed");
+        // review fix P0.5: a globalStoreError (global-mesh-query.mjs) carries the
+        // global mesh database `path` on the error object — thread it into the
+        // response body when present (task 03 scenario 2: "the response body
+        // contains path <the global mesh path>"), never just { ok, error, code }.
+        sendApiError(response, error.status ?? 500, error.message, error.code ?? "mesh-api-failed", { path: error.path ?? null });
       }
       return;
     }
@@ -232,58 +220,27 @@ function sendJson(response, status, payload) {
   send(response, status, "application/json", JSON.stringify(payload));
 }
 
-function sendApiError(response, status, message, code) {
-  sendJson(response, status, { ok: false, error: message, code });
+// review fix P0.5: an OPTIONAL 5th `extra` object merges additional coded-error
+// fields into the response body (today: `path`, when the thrown error carries
+// one) — every pre-existing 4-arg call site is byte-unchanged (extra defaults to
+// {}, so `path` resolves to `undefined`, and JSON.stringify OMITS an `undefined`
+// value entirely — the exact pre-existing { ok, error, code } shape survives
+// byte-for-byte for every caller that never opts in).
+function sendApiError(response, status, message, code, extra = {}) {
+  const path = extra?.path ?? undefined;
+  sendJson(response, status, { ok: false, error: message, code, path });
 }
 
 // A write method on a route that does not accept it is a clean method-rejection
 // (ADR-004; task 05; milestone 27 story 02 task 00 — the per-route Allow header)
 // — the { ok:false, error, code } envelope with a 405 + an Allow header naming
 // THIS route's own allowed methods, never a crash and never a state change.
-// `/api/mesh/status` advertises "GET, HEAD"; `/api/mesh/issue` advertises "POST".
+// `/api/mesh/status` advertises "GET, HEAD".
 function sendMethodNotAllowed(response, allowed = "GET, HEAD") {
   response.writeHead(405, { "content-type": "application/json", allow: allowed });
   response.end(JSON.stringify({ ok: false, error: "Method not allowed.", code: "method-not-allowed" }));
 }
 
-// milestone 27 / story 02 — the HTTP-body transport reader for the write route,
-// mirroring board-ui.mjs's readJsonBody verbatim (src/board-ui.mjs:192-216): its
-// payload-too-large / empty-json / malformed-json errors are transport concerns
-// that stay in the face, never operation logic.
-function readJsonBody(request) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    let tooLarge = false;
-    request.on("data", (chunk) => {
-      if (tooLarge) return;
-      body += chunk;
-      if (Buffer.byteLength(body, "utf8") > 1_000_000) tooLarge = true;
-    });
-    request.on("end", () => {
-      if (tooLarge) {
-        reject(httpError("Request body is too large.", "payload-too-large", 413));
-        return;
-      }
-      if (body.trim() === "") {
-        reject(httpError("Request body must be JSON.", "empty-json", 400));
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(httpError(`Malformed JSON: ${error.message}`, "malformed-json", 400));
-      }
-    });
-    request.on("error", reject);
-  });
-}
-
-function httpError(message, code, status) {
-  const error = new Error(message);
-  error.code = code;
-  error.status = status;
-  return error;
-}
 
 function send(response, status, contentTypeValue, body) {
   response.writeHead(status, { "content-type": contentTypeValue });

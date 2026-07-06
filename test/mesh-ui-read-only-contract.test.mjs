@@ -76,7 +76,12 @@ async function withFleet(body) {
   const { repo, workDir } = await makeRepo();
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-root-"));
   await writeDist(meshUiDist(root));
-  const { server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root });
+  // scope:"local" (milestone 34 / story 03, ADR-006) — these scenarios assert the
+  // pre-existing mesh:status board/node aggregate contract (drill-in isolation, no
+  // event stream, write-isolation), which is the LOCAL scope's job now that the
+  // default is global; the global-default read is covered separately in
+  // mesh-ui-global-scope.test.mjs.
+  const { server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" });
   // Record the pathnames the server actually receives (the wire-observable proof
   // that no /api/work request reaches the fleet face on a drill-in).
   const seen = [];

@@ -394,7 +394,7 @@ function dedupe(findings) {
 // file's mesh block independently and hands it in here as plain data, exactly like
 // `now`/`staleWindow` — the engine itself performs no extra disk read.
 export async function doctorWork(workDir, config, scope, options = {}) {
-  const { now, staleWindow, budgets, groups = CHECK_GROUPS, rawCommittedMesh, committedConfigPath } = options;
+  const { now, staleWindow, budgets, groups = CHECK_GROUPS, rawCommittedMesh, committedConfigPath, legacyIdentitySidecarPresent, legacyIdentitySidecarPath } = options;
   const snapshot = await buildSnapshot(workDir);
   const ctx = {
     now: now ?? null,
@@ -403,6 +403,8 @@ export async function doctorWork(workDir, config, scope, options = {}) {
     config: config ?? {},
     rawCommittedMesh: rawCommittedMesh ?? {},
     committedConfigPath: committedConfigPath ?? null,
+    legacyIdentitySidecarPresent: legacyIdentitySidecarPresent === true,
+    legacyIdentitySidecarPath: legacyIdentitySidecarPath ?? null,
   };
 
   const all = [];

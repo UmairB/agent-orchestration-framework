@@ -58,40 +58,109 @@ export type FleetBoard = {
 // The one aggregate the fleet view renders — deep-equal to `aof mesh status --json`
 // for the same fixture (one command, two faces; task 00).
 //
-// milestone 27 / story 02 — `isControlNode` is an ADDITIVE fact (story 01's
-// mesh-status-issued-render.feature:131-149): a PURE, UNCONDITIONAL read of
-// isControlNode(config), present EVEN on an unconfigured node (false, never
-// absent). The fleet bundle gates the [assign ▸] affordance off this ONE
-// already-fetched fact — no second request, no new endpoint (ADR-002).
+// `isControlNode` is an additive mesh-status fact retained for compatibility with
+// older local payloads; the fleet UI no longer exposes a mutation affordance.
+//
+// milestone 34 / story 03 (ADR-006) — the LOCAL scope's response envelope now also
+// carries `scope: "local"` and `currentWorkspace` (the resolved project dir) ahead
+// of the pre-existing nodes/boards aggregate (mesh-ui-serve.mjs's local branch).
 export type MeshStatus = {
+  scope?: "local";
+  currentWorkspace?: string;
   nodes: FleetNode[];
   boards: FleetBoard[];
   isControlNode?: boolean;
 };
 
-// The frozen six-key issuance directive (27/ADR-001.2), as `mesh:issue` /
-// `POST /api/mesh/issue` return it — the [assign ▸] affordance's write result.
-export type IssuanceTarget =
-  | { kind: "any" }
-  | { kind: "node"; nodeId: string }
-  | { kind: "capability"; value: string };
+// --- milestone 34 / story 03 — the GLOBAL scope shapes (ADR-006 default read) ---
 
-export type IssuanceDirective = {
-  itemRef: string;
-  issuer: string;
-  target: IssuanceTarget;
-  state: "issued" | "withdrawn" | "fulfilled";
-  issuedAt: string;
-  aofVersion: string;
+// A workspace row from the global work-projection + registry join
+// (src/global-mesh-query.mjs shapeGlobalStatus) — the "workspaces summary" region.
+export type GlobalWorkspace = {
+  workspaceId: string;
+  projectRoot: string;
+  workDir: string;
+  name: string | null;
+  lastPublishedAt: string | null;
+  meshEnabled: boolean | null;
+  controlNode: string | null;
 };
 
+// A work item row, carrying its owning workspace id (DESIGN "work items table:
+// … with workspace identity visible").
+export type GlobalWorkItem = {
+  workspaceId: string;
+  ref: string;
+  type: string;
+  slug: string;
+  status: string | null;
+  title: string | null;
+  parent: string | null;
+  sourcePath: string;
+};
+
+// A global registry node descriptor (src/global-node-registry.mjs) — the "node
+// panel" region's control/worker rows. Never carries a credential-shaped field
+// (ADR-005; the UI guard in ./scope.mjs re-checks this belt-and-braces).
+export type GlobalNode = {
+  nodeId: string;
+  role: "control" | "worker" | string;
+  controlNode: boolean;
+  host: string;
+  os: string;
+  runtimes: string[];
+  skills: string[];
+  aofVersion: string;
+  publishedAt: string;
+  lastSeenAt: string | null;
+  fabric: { address: string | null; online: boolean | null };
+  recordSource: string;
+  workspaceIds: string[];
+  freshness: "live" | "stale" | "unknown";
+};
+
+// The health/diagnostics region's payload (task 03 — freshness, skipped
+// workspaces, descriptor/projection errors).
+export type GlobalDiagnostics = {
+  projectedAt: string | null;
+  generatedAt: string;
+  databasePath: string;
+  skippedWorkspaces: { workspaceId: string; reason: string; message: string }[];
+  descriptorErrors: { id: string | null; path: string; code: string; message: string }[];
+  projectionErrors: { workspaceId: string; sourcePath: string; code: string | null; message: string }[];
+};
+
+// The GLOBAL scope's status payload (src/global-mesh-query.mjs shapeGlobalStatus).
+// Also the shape a globally-started server answers for a `?scope=local` deep-link
+// (the SAME fields, narrowed to one workspace, with `scope` relabelled "local").
+export type GlobalMeshStatus = {
+  scope: "global" | "local";
+  workspaceId?: string | null;
+  workspaces: GlobalWorkspace[];
+  items: GlobalWorkItem[];
+  nodes: GlobalNode[];
+  diagnostics: GlobalDiagnostics;
+};
+
+// The fleet view's ONE status type: either scope's payload. Fleet.tsx narrows on
+// `.scope` (absent/"local" with `boards` present ⇒ the pre-existing local shape;
+// "global" with `workspaces`/`items` ⇒ the new global shape).
+export type FleetStatus = MeshStatus | GlobalMeshStatus;
+
+
+// review fix P0.5: the coded error body may carry a `path` (mesh-ui-serve.mjs's
+// sendApiError, threaded from globalStoreError — task 03 scenario 2's "the response
+// body contains path <the global mesh path>"). Carried onto the thrown Error so a
+// caller (Fleet.tsx) can render it even though the FAILED response never lands in
+// `status` state (a first-load failure has no prior status to attach it to).
 async function safeError(response: Response): Promise<Error> {
   try {
-    const body = (await response.json()) as { error?: string; code?: string };
+    const body = (await response.json()) as { error?: string; code?: string; path?: string | null };
     const message = body.error ?? `Request failed (${response.status})`;
-    const error = new Error(message) as Error & { code?: string; status?: number };
+    const error = new Error(message) as Error & { code?: string; status?: number; path?: string | null };
     error.code = body.code;
     error.status = response.status;
+    error.path = body.path ?? null;
     return error;
   } catch {
     return new Error(`Request failed (${response.status})`);
@@ -100,25 +169,12 @@ async function safeError(response: Response): Promise<Error> {
 
 export const fleetApi = {
   // The SOLE fleet-data read (ADR-002/ADR-003): a same-origin GET of the one route.
-  async status(): Promise<MeshStatus> {
-    const response = await fetch("/api/mesh/status");
+  // milestone 34 / story 03 (ADR-006) — an optional `scope` appends `?scope=<…>`
+  // for the deep-link filter (task 01/02); omitted, the server answers whatever
+  // scope it was STARTED with (the default global read, or --local's local read).
+  async status(scope?: "global" | "local"): Promise<FleetStatus> {
+    const response = await fetch(scope ? `/api/mesh/status?scope=${scope}` : "/api/mesh/status");
     if (!response.ok) throw await safeError(response);
-    return (await response.json()) as MeshStatus;
-  },
-
-  // milestone 27 / story 02 (ADR-006) — the [assign ▸] affordance's write: a
-  // same-origin, application/json POST of { ref, to? } to the ONE mutation route
-  // on the fleet face, mirroring `mesh:issue`'s own contract (ADR-002.3 — `to`
-  // absent/"any" ⇒ untargeted; a node id ⇒ node target; any other token ⇒
-  // capability target — the command disambiguates, this client never does).
-  // Returns the directive record on success or throws the coded error.
-  async issue(ref: string, to?: string): Promise<IssuanceDirective> {
-    const response = await fetch("/api/mesh/issue", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ref, to }),
-    });
-    if (!response.ok) throw await safeError(response);
-    return (await response.json()) as IssuanceDirective;
+    return (await response.json()) as FleetStatus;
   },
 };

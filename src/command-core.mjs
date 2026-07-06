@@ -95,20 +95,11 @@ import { runRetryCommand } from "./commands/run-retry.mjs";
 // register into the SAME core; ADR-001/003). Thin over story 00's src/mesh-store.mjs
 // (the partition seam + opaque per-node persist/read) and story 01's
 // src/node-identity.mjs (id derivation + descriptor assembly): mesh:identity publishes/
-// reads THIS node's record, mesh:status lists the synced roster. Additive — exactly the
+// reads THIS node's record, mesh:status lists the machine-wide roster. Additive — exactly the
 // 08 move (one import + one COMMANDS entry each). They take the `mesh:` prefix, so they
 // are EXCLUDED from the `work:`-filtered bijection but inherit the NEW registry-derived
 // acd-mesh-command-cli-bijection gate (story 00, fitness #3).
 import { meshIdentityCommand, meshStatusCommand } from "./commands/mesh-identity.mjs";
-// milestone 22 — mesh-foundation (story 02: git-sync engine — mesh:sync registers into
-// the SAME core; ADR-004). Thin over story 02's src/mesh-sync.mjs syncMesh (the
-// PAYLOAD-AGNOSTIC git transport): it stages + commits this node's records under the
-// partition root, pulls peers', pushes — moving FILES, never parsing record content.
-// The one-shot testable transport unit; the background loop is a thin timer over it.
-// Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is
-// EXCLUDED from the `work:`-filtered bijection but inherits the acd-mesh-command-cli-
-// bijection gate (now covering identity+status+sync).
-import { meshSyncCommand } from "./commands/mesh-sync.mjs";
 // milestone 23 — control-node-relay (story 00: presence-heartbeat — mesh:heartbeat
 // registers into the SAME core; ADR-002). Thin over story 00's src/mesh-presence.mjs
 // (the presence-record assembly + the activeRuns read of the run records + the atomic
@@ -154,21 +145,11 @@ import { meshJoinCommand } from "./commands/mesh-join.mjs";
 // the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
 // gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
 import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
-// milestone 27 — work-issuance-routing (story 01: mesh:issue — ADR-002). Thin over
-// story 00/01's src/mesh-issuance.mjs (the frozen six-key directive assembly + the
-// own-path issueDirective/withdrawDirective writes): resolves the ref EXACTLY
-// (write-isolation), disambiguates --to DATA-DRIVEN against the synced roster,
-// writes ONE own-issuer-partition directive, and pushes ONE default-root sync
-// (KR3). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
-// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
-// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+
-// heartbeat+relay+invite+join+revoke+issue).
-import { meshIssueCommand } from "./commands/mesh-issue.mjs";
 // milestone 33 — mesh relay/transport redesign (story 01: fabric-native transport +
 // coordination launcher — mesh:serve registers into the SAME core; ADR-003). Thin over
 // story 01's src/mesh-launcher.mjs: `aof mesh serve` is the per-node presence+sync
 // daemon serve verb, but the registered run is the NON-BLOCKING probe (fabric state +
-// self-address + peer count + issuance authority) — the actual long-lived daemon is the
+// self-address + peer count + control-node status) — the actual long-lived daemon is the
 // `--serve` CLI face's job (startLauncher), never the registered run. Additive — one
 // import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from the
 // `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
@@ -207,13 +188,11 @@ const COMMANDS = [
   runRetryCommand,
   meshIdentityCommand,
   meshStatusCommand,
-  meshSyncCommand,
   meshHeartbeatCommand,
   meshRelayCommand,
   meshInviteCommand,
   meshJoinCommand,
   meshRevokeCommand,
-  meshIssueCommand,
   meshServeCommand,
 ];
 

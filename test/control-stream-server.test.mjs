@@ -1,0 +1,321 @@
+// Traceability wiring for milestone 34 / story 04 — task 02
+// (tasks/02_control-node-stream-server.feature). Covers every @executable scenario /
+// Scenario Outline row:
+//   - the server admits a tailnet peer and refuses a non-peer (Scenario Outline, 2
+//     rows), with a refused connection writing NOTHING to the global store
+//   - an admitted worker's snapshot and deltas are applied to the global store (the
+//     completed item ends up "done")
+//   - secret-shaped fields are redacted before entering the global store
+//   - a worker's stream liveness label follows its connection and heartbeat
+//     (Scenario Outline, 3 rows: live / stale / disconnected)
+//
+// Driven over the pure admission/apply/label functions directly (the STORY.md build
+// note's "task 01's paired fake channel" pattern generalised to the server side) plus
+// an injected peer-identity signal mirroring mesh-fabric's injected exec — no live
+// tailnet, no real ws socket needed for these units (the real-transport accept loop
+// is exercised end-to-end by startControlStreamServer itself, used here over an
+// ephemeral loopback port with an injected origin resolver).
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { WebSocket } from "ws";
+import {
+  isTailnetPeer,
+  applyStreamFrame,
+  streamLivenessLabel,
+  startControlStreamServer,
+} from "../src/control-stream-server.mjs";
+import { openGlobalWorkProjectionStore, queryGlobalWorkProjection } from "../src/global-work-store.mjs";
+
+const NOW = "2026-07-05T10:00:00.000Z";
+
+async function withGlobalHome(fn) {
+  const home = await mkdtemp(path.join(os.tmpdir(), "aof-control-stream-"));
+  try {
+    return await fn({ env: { AOF_GLOBAL_HOME: home } });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+function waitForOpenOrClose(ws) {
+  return new Promise((resolve) => {
+    let settled = false;
+    ws.on("open", () => { if (!settled) { settled = true; resolve({ opened: true }); } });
+    ws.on("close", () => { if (!settled) { settled = true; resolve({ opened: false }); } });
+    ws.on("error", () => { if (!settled) { settled = true; resolve({ opened: false }); } });
+  });
+}
+
+export const controlStreamServerTests = [
+  {
+    name: "control-stream-server/02 the server admits a tailnet peer and refuses a non-peer",
+    run() {
+      const peerNodeIds = new Set(["worker-a", "worker-b"]);
+      assert.equal(isTailnetPeer({ nodeId: "worker-a" }, { peerNodeIds }), true, "a tailnet peer is accepted");
+      assert.equal(isTailnetPeer({ nodeId: "some-other-host" }, { peerNodeIds }), false, "a non-peer is refused");
+      assert.equal(isTailnetPeer({ nodeId: null }, { peerNodeIds }), false, "an unresolved origin is never a peer");
+    },
+  },
+  {
+    name: "control-stream-server/02 a refused connection writes nothing to the global store (end-to-end over the real accept loop)",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const server = await startControlStreamServer({
+          peerNodeIds: ["worker-a"],
+          resolveOrigin: (request) => ({ nodeId: request.headers["x-aof-node-id"] ?? null }),
+          storeOptions: { env },
+        });
+        try {
+          const port = server.server.address().port;
+          const ws = new WebSocket(`ws://127.0.0.1:${port}/`, { headers: { "x-aof-node-id": "not-a-peer" } });
+          const outcome = await waitForOpenOrClose(ws);
+          assert.equal(outcome.opened, false, "a non-peer connection is refused, never opened");
+
+          const store = await openGlobalWorkProjectionStore({ env });
+          try {
+            const projection = queryGlobalWorkProjection(store);
+            assert.equal(projection.items.length, 0, "a refused connection wrote nothing to the global store");
+          } finally {
+            store.close();
+          }
+        } finally {
+          server.stop();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 an admitted worker's snapshot and deltas are applied to the global store",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const snapshot = {
+            kind: "snapshot",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              { ref: "34/04/00", type: "task", slug: "worker-role", status: "in-progress", title: "Worker role", parent: "34/04", sourcePath: "/x/00.md" },
+              { ref: "34/04/01", type: "task", slug: "stream-client", status: "planned", title: "Stream client", parent: "34/04", sourcePath: "/x/01.md" },
+            ],
+            at: NOW,
+          };
+          await applyStreamFrame(store, snapshot, { now: NOW });
+
+          const delta = {
+            kind: "delta",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [{ ref: "34/04/00", type: "task", slug: "worker-role", status: "done", title: "Worker role", parent: "34/04", sourcePath: "/x/00.md" }],
+            at: NOW,
+          };
+          await applyStreamFrame(store, delta, { now: NOW });
+
+          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
+          assert.equal(projection.items.length, 2, "both items for that worker are shown");
+          const done = projection.items.find((item) => item.ref === "34/04/00");
+          assert.equal(done.status, "done");
+          const untouched = projection.items.find((item) => item.ref === "34/04/01");
+          assert.equal(untouched.status, "planned");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 secret-shaped fields are redacted before entering the global store",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const snapshot = {
+            kind: "snapshot",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              {
+                ref: "34/04/00",
+                type: "task",
+                slug: "worker-role",
+                status: "in-progress",
+                title: "Worker role",
+                parent: "34/04",
+                sourcePath: "/x/00.md",
+                relayAuthToken: "super-secret-credential-value",
+              },
+            ],
+            at: NOW,
+          };
+          await applyStreamFrame(store, snapshot, { now: NOW });
+
+          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
+          const stored = projection.items[0];
+          assert.equal(JSON.stringify(stored).includes("super-secret-credential-value"), false, "the credential value never lands in the store");
+          assert.equal("relayAuthToken" in stored, false, "the secret-shaped key itself is stripped, not merely blanked");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    // review fix P0.3 REGRESSION: a delta whose ref is UNSEEN (not already in the
+    // store) and whose own fields don't supply the schema's NOT NULL columns must
+    // be skipped — NOT allowed to abort the merged re-publish and silently drop
+    // every OTHER already-published item in the SAME workspace (the docstring's
+    // "a delta for an unseen item behaves sanely", made true).
+    name: "control-stream-server/02 P0.3 REGRESSION: a delta for an unseen, incomplete ref does not roll back the workspace's other already-published items",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const snapshot = {
+            kind: "snapshot",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              { ref: "34/04/00", type: "task", slug: "worker-role", status: "in-progress", title: "Worker role", parent: "34/04", sourcePath: "/x/00.md" },
+              { ref: "34/04/01", type: "task", slug: "stream-client", status: "planned", title: "Stream client", parent: "34/04", sourcePath: "/x/01.md" },
+            ],
+            at: NOW,
+          };
+          await applyStreamFrame(store, snapshot, { now: NOW });
+
+          // A delta for a ref NEVER seen before, carrying only a status change — no
+          // type/slug/sourcePath of its own (the shape a partial delta frame from a
+          // buggy/lagging worker might carry).
+          const partialDelta = {
+            kind: "delta",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [{ ref: "34/04/02", status: "in-progress" }],
+            at: NOW,
+          };
+          const result = await applyStreamFrame(store, partialDelta, { now: NOW });
+          assert.ok(result != null, "the apply call itself completes (never throws out of applyDeltaFrame)");
+
+          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
+          // The critical assertion: the pre-existing items from the snapshot are
+          // STILL there — a rolled-back txn (the pre-fix behaviour) would have
+          // wiped them (publishWorkspaceSnapshot's own re-publish DELETEs then
+          // re-INSERTs the whole workspace's rows inside one transaction).
+          assert.equal(projection.items.length, 2, "the two already-published items survive; the incomplete unseen-ref delta did not roll back the merged re-publish");
+          assert.ok(projection.items.some((item) => item.ref === "34/04/00"), "34/04/00 is still present");
+          assert.ok(projection.items.some((item) => item.ref === "34/04/01"), "34/04/01 is still present");
+          assert.ok(!projection.items.some((item) => item.ref === "34/04/02"), "the incomplete unseen-ref row itself is skipped, never half-written");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    // review fix P2.8: the pre-existing test above only proves redaction on a
+    // SNAPSHOT frame's initial write; applyDeltaFrame merges the delta's redacted
+    // item into the EXISTING row read back from the store — this proves the
+    // credential-shaped key/value never survive that merge-then-republish path
+    // either (a snapshot establishing the row, then a delta carrying the secret key).
+    name: "control-stream-server/02 a delta frame's secret-shaped field is also redacted before the merged row re-enters the global store (round trip)",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const snapshot = {
+            kind: "snapshot",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              { ref: "34/04/00", type: "task", slug: "worker-role", status: "in-progress", title: "Worker role", parent: "34/04", sourcePath: "/x/00.md" },
+            ],
+            at: NOW,
+          };
+          await applyStreamFrame(store, snapshot, { now: NOW });
+
+          const delta = {
+            kind: "delta",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              {
+                ref: "34/04/00",
+                type: "task",
+                slug: "worker-role",
+                status: "done",
+                title: "Worker role",
+                parent: "34/04",
+                sourcePath: "/x/00.md",
+                relayAuthToken: "delta-secret-credential-value",
+              },
+            ],
+            at: NOW,
+          };
+          await applyStreamFrame(store, delta, { now: NOW });
+
+          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
+          const stored = projection.items.find((item) => item.ref === "34/04/00");
+          assert.equal(stored.status, "done", "the delta's own field update still lands");
+          assert.equal(JSON.stringify(stored).includes("delta-secret-credential-value"), false, "the credential value carried on a DELTA frame never lands in the store");
+          assert.equal("relayAuthToken" in stored, false, "the secret-shaped key from a delta frame is stripped, not merely blanked");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 a worker's stream liveness label follows its connection and heartbeat",
+    run() {
+      const rows = [
+        { condition: "connected and heartbeating", connected: true, lastHeartbeatAt: NOW, now: NOW, label: "live" },
+        { condition: "connected but no heartbeat within the window", connected: true, lastHeartbeatAt: "2026-07-05T09:00:00.000Z", now: NOW, label: "stale" },
+        { condition: "disconnected", connected: false, lastHeartbeatAt: NOW, now: NOW, label: "disconnected" },
+      ];
+      for (const row of rows) {
+        assert.equal(
+          streamLivenessLabel({ connected: row.connected, lastHeartbeatAt: row.lastHeartbeatAt, now: row.now, windowSeconds: 30 }),
+          row.label,
+          row.condition,
+        );
+      }
+    },
+  },
+  {
+    // review fix P2.9: a malformed frame.at (a non-ISO/garbage string) must never
+    // land verbatim in last_published_at — the server clock is used instead when
+    // no explicit `now` option is supplied.
+    name: "control-stream-server/02 P2.9 a malformed frame.at falls back to the server clock rather than being written verbatim",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const snapshot = {
+            kind: "snapshot",
+            nodeId: "worker-a",
+            workspaceId: "ws-worker-a",
+            items: [
+              { ref: "34/04/00", type: "task", slug: "worker-role", status: "in-progress", title: "Worker role", parent: "34/04", sourcePath: "/x/00.md" },
+            ],
+            at: "not-a-real-timestamp",
+          };
+          // No `now` option supplied — the ONLY candidate is the malformed frame.at.
+          const before = Date.now();
+          await applyStreamFrame(store, snapshot);
+          const after = Date.now();
+
+          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
+          const metadata = projection.metadata.find((entry) => entry.key === "lastPublishedAt");
+          assert.ok(metadata != null, "a lastPublishedAt metadata row was written");
+          assert.notEqual(metadata.value, "not-a-real-timestamp", "the malformed frame.at is never written verbatim");
+          const publishedMs = Date.parse(metadata.value);
+          assert.ok(Number.isFinite(publishedMs), "the fallback value parses as a real instant");
+          assert.ok(publishedMs >= before - 1000 && publishedMs <= after + 1000, "the fallback is the server clock (close to now), not garbage");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+];

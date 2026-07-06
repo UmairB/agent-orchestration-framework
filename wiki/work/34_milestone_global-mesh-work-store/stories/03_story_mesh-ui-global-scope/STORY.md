@@ -4,10 +4,10 @@ number: 03
 slug: mesh-ui-global-scope
 title: "Mesh UI global scope — default global view with --local current-workspace filter"
 parent: 34
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -24,10 +24,10 @@ and focused workspace diagnosis deliberately.
 
 ## Tasks
 
-- [ ] [00 · CLI scope selection](tasks/00_cli-scope-selection.feature)
-- [ ] [01 · mesh UI API scope switch](tasks/01_mesh-ui-api-scope-switch.feature)
-- [ ] [02 · fleet UI scope rendering](tasks/02_fleet-ui-scope-rendering.feature)
-- [ ] [03 · empty, error, and health states](tasks/03_empty-error-and-health-states.feature)
+- [x] [00 · CLI scope selection](tasks/00_cli-scope-selection.feature)
+- [x] [01 · mesh UI API scope switch](tasks/01_mesh-ui-api-scope-switch.feature)
+- [x] [02 · fleet UI scope rendering](tasks/02_fleet-ui-scope-rendering.feature)
+- [x] [03 · empty, error, and health states](tasks/03_empty-error-and-health-states.feature)
 
 ## Fitness units
 

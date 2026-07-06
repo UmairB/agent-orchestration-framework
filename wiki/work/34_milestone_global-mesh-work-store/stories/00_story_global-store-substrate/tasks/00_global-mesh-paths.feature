@@ -2,7 +2,7 @@
 Feature: Global mesh paths derive from globalWorkspacePaths and honor AOF_GLOBAL_HOME
   In order to keep machine-wide mesh state relocatable and testable
   the global mesh store paths derive from the existing global AOF workspace seam
-  so that no implementation hard-codes the operator's home directory or a literal ~/.aof path.
+  so that no implementation hard-codes the operator's home directory or writes mesh state into a project .aof folder.
 
   Background:
     Given an environment where AOF_GLOBAL_HOME is set to a fixture directory
@@ -14,6 +14,7 @@ Feature: Global mesh paths derive from globalWorkspacePaths and honor AOF_GLOBAL
     And the work projection root is "<AOF_GLOBAL_HOME>/mesh/work"
     And the node descriptor root is "<AOF_GLOBAL_HOME>/mesh/nodes"
     And the workspace descriptor root is "<AOF_GLOBAL_HOME>/mesh/workspaces"
+    And the machine identity path is "<AOF_GLOBAL_HOME>/mesh/identity.json"
     And the SQLite projection path is under "<AOF_GLOBAL_HOME>/mesh/work"
 
   Scenario: global mesh path resolution is independent of the current project directory
@@ -22,7 +23,7 @@ Feature: Global mesh paths derive from globalWorkspacePaths and honor AOF_GLOBAL
     Then both resolutions return the same absolute global mesh paths
     And no ".aof" directory is created in either current working directory
 
-  Scenario Outline: platform defaults flow through defaultGlobalWorkspaceDir
+  Scenario Outline: platform defaults use the user's global .aof folder
     Given AOF_GLOBAL_HOME is unset
     And the platform is "<platform>"
     And the home directory is "<home>"
@@ -30,10 +31,10 @@ Feature: Global mesh paths derive from globalWorkspacePaths and honor AOF_GLOBAL
     Then the mesh root is under "<expected-global-home>/mesh"
 
     Examples:
-      | platform | home              | expected-global-home                                  |
-      | win32    | C:\Users\Operator | C:\Users\Operator\AppData\Roaming\aof                 |
-      | darwin   | /Users/operator   | /Users/operator/Library/Application Support/aof        |
-      | linux    | /home/operator    | /home/operator/.local/share/aof                       |
+      | platform | home              | expected-global-home      |
+      | win32    | C:\Users\Operator | C:\Users\Operator\.aof  |
+      | darwin   | /Users/operator   | /Users/operator/.aof      |
+      | linux    | /home/operator    | /home/operator/.aof       |
 
   Scenario: project .aof and global .aof are distinct stores
     Given the current project root is "C:\work\repo"

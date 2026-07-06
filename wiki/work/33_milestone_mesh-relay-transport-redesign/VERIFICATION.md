@@ -82,17 +82,20 @@ Task 05 resumes after F-3302 is fixed.
 
 ## Accept decision
 
-**NOT ACCEPTED — milestone 33 stays `in-review` `2026-07-04`; a BLOCKER finding is open (F-3302).**
-Every automated + structural gate passed (suite 2235/0, both fitness DoDs green, `arch/mesh-partition-write`
-restored, relay guards retired, `aof work validate` PASS), and the cross-OS identity lane (task 04) PASSED
-on real hardware — the mac derives a distinct per-install id off committed config. **But the real-hardware
-run did its job and caught what the fixtures could not:** on macOS the `os.hostname()` `.local` suffix makes
-the aof nodeId (`umairs-mac-mini-local`) diverge from the Tailscale hostname (`umairs-mac-mini`), so the
-ADR-002.2 fabric peer→nodeId join leaves the mac **unjoined** — the milestone's "see every node + assign
-cross-node" objective is broken for macOS nodes (**F-3302, blocker**). The acceptance rule ("no blocker
-finding open") is not met. Route F-3302 to a fix (`@bug` task, `aof:continue` on story 01), then re-verify
-the live cross-OS join + run task 05. Retrospective + memory-ingest + STATE compaction run at acceptance,
-not now. F-3301 (fleet-shared config) remains minor/deferred.
+**ACCEPTED (with reservations) — milestone 33 → `done` `2026-07-05`, by owner decision.** All automated +
+structural gates pass (suite 2237/0, both fitness DoDs green, `arch/mesh-partition-write` restored, relay
+guards retired, `aof work validate` PASS). The cross-OS identity lane (task 04) PASSED on real hardware, and
+the one blocker the real-hardware run surfaced — **F-3302** (macOS `.local` fabric-join break) — was **fixed
+and closed end-to-end on the live Windows+macOS tailnet** (the mac's migrated `umairs-mac-mini` joins the
+live fabric). No blocker finding remains open.
+
+This is a **deliberate move-to-34 acceptance, not a "33 delivers its promise" acceptance** — see
+[RETROSPECTIVE.md](RETROSPECTIVE.md). The design debt R2 (the fabric is not actually the discovery plane at
+the UI surface — the roster is still git-sync) and R3 (the control node is near-vestigial post-broker) are
+**carried to milestone 34** (`global-mesh-work-store`), which makes `aof mesh ui` global-by-default and
+composes fabric peer data into the node registry — i.e. 34 is where the mesh becomes openable + single-machine
+testable. Task 05 (the full live-fleet issue→run→watch soak) is **not run**; it re-feeds the UAT 32 re-run.
+F-3301 (fleet-shared config) remains minor/deferred (now a 34 concern).
 
 ## Findings
 
@@ -122,8 +125,11 @@ not now. F-3301 (fleet-shared config) remains minor/deferred.
   codified-wrong `identity-sidecar-persist` row `["MacBook-Pro.local","macbook-pro-local"]` corrected to
   `"macbook-pro"`. Suite **2237/0**. Live-tailnet re-check from `umairs-msi`: the pre-fix id
   (`umairs-mac-mini-local`) resolves UNJOINED; the post-fix id (`umairs-mac-mini`) JOINS the live peer.
-  Status: **FIXED in code + verified locally/live; awaiting the mac re-derive (auto-heal) + task 05 re-run
-  on real hardware to close.** Routed-to: `aof:continue` (story 01) — done.
+  **CLOSED on live hardware `2026-07-04`.** The mac pulled the fix (`2cfed41`) and re-derived: its sidecar
+  id migrated `umairs-mac-mini-local` → **`umairs-mac-mini`** (returned via Taildrop). Re-checked against
+  live `tailscale status --json` from `umairs-msi` with BOTH real migrated ids as the roster — the mac peer
+  now **JOINS** its aof nodeId (`umairs-mac-mini`, online, `100.114.105.64`). The F-3204 "see every node"
+  promise holds cross-OS on real hardware. Status: **CLOSED (fixed + verified end-to-end on live Win+mac).**
 - **F-3301 — fleet-shared committed `mesh` config was not restored (minor / non-blocker / defer).**
   Observed: committed `.aof/aof.config.json` `mesh` block is `{}` — neither `relay.controlNode` nor
   `mesh.fabric` is declared (ADR-004.1 says a real node's fleet-shared config holds both). Story 00's

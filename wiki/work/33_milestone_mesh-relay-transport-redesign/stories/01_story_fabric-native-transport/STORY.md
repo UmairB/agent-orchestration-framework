@@ -4,10 +4,10 @@ number: 01
 slug: fabric-native-transport
 title: "Fabric-native transport + coordination launcher — a mesh-VPN-native reachability model (Tailscale) + a runnable per-node presence+sync daemon; retire the WebSocket broker; peers + liveness ride the fabric peer-map (F-3201/F-3202/F-3204)"
 parent: 33
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

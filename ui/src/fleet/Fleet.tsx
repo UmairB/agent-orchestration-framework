@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PlusCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { fleetApi } from "./api";
-import type { FleetBoard, FleetNode, RunState, MeshStatus } from "./api";
+import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, GlobalWorkspace, GlobalWorkItem, GlobalNode, FleetStatus } from "./api";
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
+import {
+  scopeLabel,
+  scopeFromSearch,
+  withScopeParam,
+  pageState,
+  emptyStateCopy,
+  nodePanelFacts,
+  diagnosticsSummary,
+  errorPathFor,
+} from "./scope.mjs";
+import type { Scope } from "./scope.d.mts";
 
 // The read-only "fleet mission-control" web surface (milestone 25 / story 02;
 // DESIGN surface 1 → the committed mock `mocks/Mesh.dc.html`). A slim top bar over
@@ -15,6 +24,18 @@ import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
 //   - node-presence (a presence dot + relative-age label) — NEW to the fleet;
 //   - run-state (the m21 dot+label chip, ui/src/board/runs.mjs) — REUSED verbatim;
 //   - item-status (the m03 glyph-ring) — NOT on this surface (one level down).
+//
+// milestone 34 / story 03 (ADR-006; DESIGN.md) — the page now ALSO renders the
+// GLOBAL scope: a scope control (Global/Local, always visible in the top bar), a
+// workspaces summary, a work-items table with workspace identity, a node panel
+// (roles/capabilities/fabric addresses), and a health/diagnostics region. The
+// scope lives in the URL (`?scope=<global|local>`) so a refresh/poll/bookmark
+// keeps the selected scope, and switching scope re-queries WITHOUT a full page
+// remount (task 02 scenario 3) — the SAME <Fleet> instance just re-fetches under
+// the new scope. Render-logic that must be node:test-exercisable (scope-active
+// derivation, state selection, filtering, the credential guard) lives in the pure
+// ./scope.mjs helper this component imports (the house pattern — see
+// ui/src/board/runs.mjs) since there is no React test harness in this repo.
 
 // The client poll cadence (DESIGN default / PRD §7.3): visibility is poll /
 // relay-presence, NEVER a push event stream — the client opens no WebSocket / SSE.
@@ -22,10 +43,28 @@ const POLL_MS = 5000;
 // The freshness-label tick — advances the "refreshed Ns ago" age without a re-poll.
 const CLOCK_MS = 1000;
 
+// A GLOBAL-shaped status carries `workspaces`/`items` arrays; the LOCAL shape
+// carries `boards`. Narrowing on the presence of `workspaces` (rather than
+// `scope`, which the local shape may omit on old fixtures) keeps this robust
+// either way.
+function isGlobalStatus(status: FleetStatus | null): status is GlobalMeshStatus {
+  return status != null && Array.isArray((status as GlobalMeshStatus).workspaces);
+}
+
 export function Fleet() {
-  const [status, setStatus] = useState<MeshStatus | null>(null);
+  const [status, setStatus] = useState<FleetStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // review fix P0.5: the FAILED response's `path` (a global-store-unavailable 503
+  // carries the global mesh database path) — captured separately from `status`
+  // because a first-load failure leaves `status` null (there is no prior payload to
+  // attach it to). errorPathFor (./scope.mjs) prefers this over any path a stale
+  // `status` might already carry, so a first-load 503 still names the path.
+  const [errorPath, setErrorPath] = useState<string | null>(null);
+  // The active scope — sourced from the URL so a refresh/poll/bookmark keeps the
+  // selected scope (task 02 scenario 2's "the refresh control keeps the local
+  // scope on the next poll"; DESIGN "must make scope obvious enough…").
+  const [scope, setScope] = useState<Scope>(() => scopeFromSearch(safeSearch()));
   // The last SUCCESSFUL poll instant — drives the "refreshed Ns ago" freshness
   // label. A failed silent re-poll does NOT advance it (keep-last-good).
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -37,67 +76,99 @@ export function Fleet() {
   // place — it never flips to the full-screen loading/error branch (that would
   // unmount the populated subtree and tear the view). Only the first load + an
   // explicit Retry show loading/error; a mid-session poll miss is surfaced QUIETLY
-  // (the freshness label stops advancing), never the page-error.
-  const load = useCallback(async ({ silent = false } = {}) => {
+  // (the freshness label stops advancing), never the page-error. The active
+  // `scope` always rides along on the request (task 01's `?scope=` deep-link) —
+  // a scope switch re-queries under the NEW scope without remounting the page.
+  const load = useCallback(async (targetScope: Scope, { silent = false } = {}) => {
     if (!silent) {
       setLoading(true);
       setError(null);
+      setErrorPath(null);
     }
     try {
-      const next = await fleetApi.status();
+      const next = await fleetApi.status(targetScope);
       setStatus(next);
       setFetchedAt(Date.now());
     } catch (e) {
-      if (!silent) setError(e instanceof Error ? e.message : "Failed to load");
+      if (!silent) {
+        setError(e instanceof Error ? e.message : "Failed to load");
+        setErrorPath(errorPathFor(e as Error & { path?: string | null }, null));
+      }
     } finally {
       if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(scope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   // Poll-only freshness (NO WebSocket, NO SSE): a silent re-poll on the cadence
-  // keeps the view current within the m23 presence bound + one poll.
+  // keeps the view current within the m23 presence bound + one poll. The poll
+  // re-reads under the CURRENT scope (task 02 scenario 2 — the refresh/poll keeps
+  // the selected scope, never silently reverting to the default).
   useEffect(() => {
-    const poll = setInterval(() => void load({ silent: true }), POLL_MS);
+    const poll = setInterval(() => void load(scope, { silent: true }), POLL_MS);
     return () => clearInterval(poll);
-  }, [load]);
+  }, [load, scope]);
 
   useEffect(() => {
     const clock = setInterval(() => setNowMs(Date.now()), CLOCK_MS);
     return () => clearInterval(clock);
   }, []);
 
+  // Switching scope (task 02 scenario 3): update the URL's `?scope=` (pushState —
+  // no navigation, no remount) and let the effect above re-query under the new
+  // scope. The <Fleet> instance itself never unmounts.
+  const onScopeChange = useCallback((next: Scope) => {
+    setScope(next);
+    try {
+      const url = `${location.pathname}${withScopeParam(location.search, next)}`;
+      history.pushState(null, "", url);
+    } catch {
+      /* history may be unavailable in a non-browser test host — the state still updates */
+    }
+  }, []);
+
   const nowIso = useMemo(() => new Date(nowMs).toISOString(), [nowMs]);
-  const nodes = status?.nodes ?? [];
-  const boards = status?.boards ?? [];
+  const state = pageState({ loading, error, status });
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    // DESIGN GAP D1 (HIGH, review fix) — `overflow-x-hidden` here is the page-level
+    // backstop: even though the work-items table now scopes its OWN horizontal
+    // scroll (WorkItemsTable's `overflow-x-auto` container), this belt-and-braces
+    // guard ensures the PAGE body/root itself never grows a horizontal scrollbar
+    // at a 360–414px viewport, matching task-02's "no text overlaps at 360px" for
+    // the now-populated global state too.
+    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background text-foreground">
       <TopBar
         group={groupName}
+        scope={scope}
+        onScopeChange={onScopeChange}
         fetchedAt={fetchedAt}
         nowIso={nowIso}
-        onRefresh={() => void load({ silent: true })}
+        onRefresh={() => void load(scope, { silent: true })}
       />
 
-      {loading ? (
+      {state === "loading" ? (
         <LoadingState />
-      ) : error ? (
-        <ErrorState message={error} onRetry={() => void load()} />
-      ) : nodes.length === 0 ? (
-        // empty fleet (no roster) — a centered dashed placeholder, NOT an error.
-        <EmptyFleet />
+      ) : state === "error" ? (
+        <ErrorState message={error ?? "Failed to load"} path={errorPath} scope={scope} onRetry={() => void load(scope)} />
+      ) : state === "empty" ? (
+        // empty fleet — a centered dashed placeholder, NOT an error (task 03
+        // scenario 1: "does not call the mesh broken or failed").
+        <EmptyFleet scope={scope} />
+      ) : isGlobalStatus(status) ? (
+        <GlobalScopeView status={status} />
       ) : (
-        // populated — the two card grids. A stale node RENDERS (degraded liveness,
-        // never dropped); a nodes-but-no-boards fleet shows the Boards dashed
-        // placeholder, never an error.
+        // populated — the two LOCAL card grids. A stale node RENDERS (degraded
+        // liveness, never dropped); a nodes-but-no-boards fleet shows the Boards
+        // dashed placeholder, never an error.
         <main className="flex-1 px-8 py-7">
           <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
-            <NodesRegion nodes={nodes} />
-            <BoardsRegion boards={boards} nodes={nodes} isControlNode={status?.isControlNode === true} />
+            <NodesRegion nodes={status?.nodes ?? []} />
+            <BoardsRegion boards={status?.boards ?? []} />
           </div>
         </main>
       )}
@@ -105,15 +176,29 @@ export function Fleet() {
   );
 }
 
+// The location.search read, guarded for a non-browser test host (scope.mjs's
+// scopeFromSearch is itself pure/headless; this wrapper is the ONLY DOM touch).
+function safeSearch(): string {
+  try {
+    return location.search;
+  } catch {
+    return "";
+  }
+}
+
 // ─────────────────────────────────────────────────────────── top bar ──────────
 
 function TopBar({
   group,
+  scope,
+  onScopeChange,
   fetchedAt,
   nowIso,
   onRefresh,
 }: {
   group: string;
+  scope: Scope;
+  onScopeChange: (next: Scope) => void;
   fetchedAt: number | null;
   nowIso: string;
   onRefresh: () => void;
@@ -132,11 +217,19 @@ function TopBar({
       <span className="text-sm text-muted-foreground">Mesh</span>
       <span className="h-4 w-px bg-border" aria-hidden="true" />
       <span className="mono rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">{group}</span>
+      {/* milestone 34 / story 03 (ADR-006; DESIGN "scope control") — the ALWAYS
+          visible Global/Local switch. Present in every page state (loading/error/
+          empty/populated — task 02 scenario 4's "the scope control region is
+          visible" even while pending) since it lives in the top-level shell, not
+          the body region that swaps under it. */}
+      <span className="h-4 w-px bg-border" aria-hidden="true" />
+      <ScopeControl scope={scope} onScopeChange={onScopeChange} />
       <span className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
         <Legend />
         {/* ⟳ refresh — click re-polls in place (non-tearing, keep-last-good on a
             failed silent poll). NO push/stream chrome. It both shows freshness AND
-            triggers a manual re-poll. */}
+            triggers a manual re-poll. Re-polls under the CURRENT scope (task 02
+            scenario 2 — refresh never silently reverts to the default scope). */}
         <button
           type="button"
           onClick={onRefresh}
@@ -148,6 +241,34 @@ function TopBar({
         </button>
       </span>
     </header>
+  );
+}
+
+// The scope control (DESIGN "Scope control: shows Global as the active scope and
+// exposes a clear local/current-workspace option" / "--local: shows Local as
+// active"). A two-way toggle, ALWAYS both options visible (never a hidden
+// dropdown) so the operator can never mistake which scope is active — colour AND
+// label travel together, mirroring the run-state chip's own "never colour alone"
+// discipline.
+function ScopeControl({ scope, onScopeChange }: { scope: Scope; onScopeChange: (next: Scope) => void }) {
+  return (
+    <span className="flex items-center gap-1 rounded-md border border-border bg-muted p-0.5 text-xs" role="group" aria-label="Scope">
+      {(["global", "local"] as const).map((candidate) => (
+        <button
+          key={candidate}
+          type="button"
+          aria-pressed={scope === candidate}
+          onClick={() => onScopeChange(candidate)}
+          className={`rounded px-2 py-1 font-semibold transition ${
+            scope === candidate
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-card hover:text-foreground"
+          }`}
+        >
+          {scopeLabel(candidate)}
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -181,6 +302,178 @@ function RegionHeader({ label, summary }: { label: string; summary: string }) {
       <h2 className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted-foreground">{label}</h2>
       <span className="text-xs text-muted-foreground">{summary}</span>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════ GLOBAL scope body (milestone 34 / 03) ═
+
+// The GLOBAL scope's populated body (DESIGN.md's four global regions, in order):
+// workspaces summary, work items table (with workspace identity), node panel
+// (control/worker, roles, last seen, capabilities, fabric addresses), and the
+// health/diagnostics region. Renders EITHER the full machine-wide view (scope:
+// "global") or the SAME regions narrowed to one workspace when the operator
+// deep-linked `?scope=local` on a globally-started server (scope:"local" but
+// still the global-shaped payload — task 01 scenario 3); the CURRENT workspace
+// path is surfaced when the narrowing is active (DESIGN "--local … current
+// workspace path/name is visible").
+function GlobalScopeView({ status }: { status: GlobalMeshStatus }) {
+  return (
+    <main className="min-w-0 flex-1 px-4 py-7 sm:px-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-[1240px] flex-col gap-8">
+        {status.scope === "local" && status.workspaceId ? (
+          <p className="mono text-xs text-muted-foreground">
+            Filtered to workspace <span className="font-semibold text-foreground">{status.workspaceId}</span>
+          </p>
+        ) : null}
+        <WorkspacesSummary workspaces={status.workspaces} />
+        <WorkItemsTable items={status.items} workspaces={status.workspaces} />
+        <GlobalNodePanel nodes={status.nodes} />
+        <DiagnosticsRegion status={status} />
+      </div>
+    </main>
+  );
+}
+
+// The workspaces summary (DESIGN "lists mesh-enabled workspaces known to the
+// global store, with status/freshness").
+//
+// DESIGN GAP D1 (review fix) — a long `projectRoot` path's INTRINSIC content
+// width can exceed its grid track even with `truncate` set, because a grid/flex
+// item's default `min-width` is `auto` (its content), not `0`; `truncate` alone
+// only takes effect once `min-width:0` lets the box actually shrink below that
+// content width. `min-w-0` on the card is what makes the pre-existing `truncate`
+// genuinely clip a long path instead of forcing the grid — and the page — wider.
+function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
+  const summary = `${workspaces.length} ${plural(workspaces.length, "workspace")}`;
+  return (
+    <section className="flex min-w-0 flex-col gap-3.5">
+      <RegionHeader label="Workspaces" summary={summary} />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5">
+        {workspaces.map((workspace) => (
+          <div key={workspace.workspaceId} className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
+            <span className="truncate text-[13px] font-bold text-foreground">{workspace.name ?? workspace.workspaceId}</span>
+            <span className="mono truncate text-[11px] text-muted-foreground" title={workspace.projectRoot}>{workspace.projectRoot}</span>
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${workspace.meshEnabled ? "bg-primary" : "border border-muted-foreground/50"}`} aria-hidden="true" />
+              {workspace.meshEnabled ? "mesh enabled" : "not propagating"}
+              {workspace.lastPublishedAt ? ` · ${relativeTime(workspace.lastPublishedAt)}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// The work items table (DESIGN "aggregates milestones/stories/tasks/runs across
+// workspaces with workspace identity visible").
+//
+// DESIGN GAP D1 (HIGH, review fix) — at ~390px this table + long workspace paths
+// used to push the WHOLE page body into horizontal scroll (the header scrolled
+// off-frame with it). Fixed by scoping the horizontal scroll to THIS table's own
+// container (`overflow-x-auto`, replacing the old `overflow-hidden` which merely
+// CLIPPED instead of letting the page shrink) — the table itself keeps a sane
+// `min-width` so its columns don't crush illegibly, and it is the table's own box
+// that scrolls, never `body`/the page root. Long refs/titles/workspace names get
+// `truncate` (already present) inside `min-w-0` table cells so a long value never
+// forces the table wider than it needs to be.
+function WorkItemsTable({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
+  const nameFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId)?.name ?? workspaceId;
+  const summary = `${items.length} ${plural(items.length, "item")}`;
+  return (
+    <section className="flex min-w-0 flex-col gap-3.5">
+      <RegionHeader label="Work items" summary={summary} />
+      <div className="min-w-0 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
+        <table className="w-full min-w-[560px] text-left text-[12.5px]">
+          <thead className="border-b border-border bg-muted/50 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2">Ref</th>
+              <th className="px-3 py-2">Title</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Workspace</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={`${item.workspaceId}:${item.ref}`} className="border-b border-border last:border-b-0">
+                <td className="mono max-w-[120px] truncate px-3 py-2 text-foreground">{item.ref}</td>
+                <td className="max-w-[220px] truncate px-3 py-2 text-foreground">{item.title ?? "—"}</td>
+                <td className="px-3 py-2 text-muted-foreground">{item.status ?? "—"}</td>
+                <td className="mono max-w-[160px] truncate px-3 py-2 text-muted-foreground" title={nameFor(item.workspaceId)}>{nameFor(item.workspaceId)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// The global node panel (DESIGN "shows control and worker nodes, last seen,
+// roles/capabilities, and fabric address when known"). Uses nodePanelFacts
+// (./scope.mjs) so the SAME projection + credential guard the fitness unit tests
+// governs the rendered fields — no descriptor field is printed raw.
+function GlobalNodePanel({ nodes }: { nodes: GlobalNode[] }) {
+  const summary = `${nodes.length} ${plural(nodes.length, "node")}`;
+  return (
+    <section className="flex flex-col gap-3.5">
+      <RegionHeader label="Nodes" summary={summary} />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5">
+        {nodes.map((node) => {
+          const facts = nodePanelFacts(node);
+          return (
+            <div key={facts.nodeId ?? node.nodeId} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${facts.freshness === "live" ? "bg-primary" : "border border-muted-foreground/50"}`} aria-hidden="true" />
+                <span className="mono truncate text-[13px] font-bold text-foreground">{facts.nodeId}</span>
+                {facts.role ? (
+                  <span className="ml-auto shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {facts.role}
+                  </span>
+                ) : null}
+              </div>
+              <span className="mono truncate text-[11px] text-muted-foreground">{facts.host ?? "—"}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {facts.lastSeenAt ? `last seen ${relativeTime(facts.lastSeenAt)}` : "never seen"}
+              </span>
+              {/* DESIGN GAP D2 (review fix) — the fabric-address row is now ALWAYS
+                  rendered, even when unknown: an absent address used to omit this
+                  row entirely, so "no address known" read identically to "this
+                  slot doesn't exist," making "unknown" indistinguishable from
+                  "dropped." Degrading to an explicit "unknown" keeps the affordance
+                  present and legible either way. */}
+              <span className="mono truncate text-[10.5px] text-muted-foreground">
+                fabric addr: {facts.fabricAddress ?? "unknown"}
+              </span>
+              <span className="mono truncate border-t border-border pt-2 text-[10.5px] text-muted-foreground">
+                {facts.capabilities.length ? facts.capabilities.join(", ") : "no capabilities"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// The health/diagnostics region (DESIGN "shows projection freshness, disabled/
+// non-propagating workspaces, and store errors"; task 03 scenario 4 — never hides
+// healthy workspaces/nodes, just adds a summary alongside them).
+function DiagnosticsRegion({ status }: { status: GlobalMeshStatus }) {
+  const summary = diagnosticsSummary(status);
+  return (
+    <section className="flex flex-col gap-2">
+      <RegionHeader label="Diagnostics" summary="" />
+      <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-card/60 px-4 py-3 text-[11.5px] text-muted-foreground">
+        <span>
+          Projection: {summary.projectedAt ? `updated ${relativeTime(summary.projectedAt)}` : "no snapshot yet"}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>{summary.skippedWorkspaceCount} disabled/skipped {plural(summary.skippedWorkspaceCount, "workspace")}</span>
+        <span aria-hidden="true">·</span>
+        <span>{summary.descriptorErrorCount} descriptor {plural(summary.descriptorErrorCount, "error")}</span>
+      </div>
+    </section>
   );
 }
 
@@ -282,7 +575,7 @@ function PresenceLabel({ node, liveness }: { node: FleetNode; liveness: Liveness
 
 // ──────────────────────────────────────────────────────── BOARDS region ────────
 
-function BoardsRegion({ boards, nodes, isControlNode }: { boards: FleetBoard[]; nodes: FleetNode[]; isControlNode: boolean }) {
+function BoardsRegion({ boards }: { boards: FleetBoard[] }) {
   const running = boards.filter((b) => boardRunState(b) === "running").length;
   const summary = `${boards.length} ${plural(boards.length, "board")} · ${running} running`;
   return (
@@ -297,7 +590,7 @@ function BoardsRegion({ boards, nodes, isControlNode }: { boards: FleetBoard[]; 
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3.5">
           {boards.map((board) => (
-            <BoardTile key={board.ref} board={board} nodes={nodes} isControlNode={isControlNode} />
+            <BoardTile key={board.ref} board={board} />
           ))}
         </div>
       )}
@@ -314,12 +607,9 @@ function boardRunState(board: FleetBoard): RunState | null {
   return null;
 }
 
-function BoardTile({ board, nodes, isControlNode }: { board: FleetBoard; nodes: FleetNode[]; isControlNode: boolean }) {
+function BoardTile({ board }: { board: FleetBoard }) {
   const state = boardRunState(board);
   return (
-    // The TILE CARD is the picker's positioning context (review fix — the open
-    // popover is anchored to the TILE, not the trigger button): `relative` here,
-    // unchanged from before, is what `AssignPicker`'s `absolute` now targets.
     <div className="relative flex flex-col gap-3.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm transition hover:border-muted-foreground/40 hover:shadow-md">
       {/* row 1: board name over its quiet "on <nodeId>" owner (stacked) */}
       <div className="flex flex-col gap-1">
@@ -328,253 +618,14 @@ function BoardTile({ board, nodes, isControlNode }: { board: FleetBoard; nodes: 
           <span className="mono text-[11px] text-muted-foreground">on {board.owner}</span>
         ) : null}
       </div>
-      {/* row 2: the m21 run-state chip (verbatim) · the [⊕ assign] write control
-          (milestone 27 / story 02, ADR-006 — the FIRST write affordance on this
-          surface, control-node-gated TRUE ABSENCE, DESIGN default 3) · the Open
-          board → drill-in */}
+      {/* row 2: the m21 run-state chip (verbatim) · the Open board → drill-in */}
       <div className="flex items-center gap-2">
         {state === null ? (
           <span className="text-xs font-medium text-muted-foreground">No runs yet</span>
         ) : (
           <RunStateChip state={state} />
         )}
-        {isControlNode ? <AssignAffordance board={board} nodes={nodes} /> : null}
         <BoardDrillIn board={board} />
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────── the [assign ▸] affordance ─
-
-// milestone 27 / story 02 (ADR-006 / DESIGN "the issue / assign affordance") —
-// the FIRST write control on the fleet face. Rendered IFF isControlNode is true
-// (a genuine conditional omission at the CALL SITE above — never a disabled
-// attribute here; DESIGN default 3's true-absence mandate). Six states: idle ·
-// (gated-hidden lives at the call site) · open/picking-target · submitting ·
-// success · error.
-type AssignPhase = "idle" | "open" | "submitting" | "success" | "error";
-
-function AssignAffordance({ board, nodes }: { board: FleetBoard; nodes: FleetNode[] }) {
-  const [phase, setPhase] = useState<AssignPhase>("idle");
-  const [target, setTarget] = useState<string>(""); // "" = Any node (the untargeted default)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const open = phase === "open" || phase === "submitting" || phase === "error";
-
-  const close = useCallback(() => {
-    setPhase("idle");
-    setTarget("");
-    setErrorMessage(null);
-  }, []);
-
-  // Escape / click-away dismisses with NO write (DESIGN: "the read-only default
-  // is always one keystroke away" — the picker only STAGES, Issue COMMITS).
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    const onPointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) close();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open, close]);
-
-  const onIssue = useCallback(async () => {
-    setPhase("submitting");
-    setErrorMessage(null);
-    try {
-      const to = target.trim() === "" ? undefined : target.trim();
-      await fleetApi.issue(board.ref, to);
-      setPhase("success");
-      // A quiet, calm confirmation — then back to idle (DESIGN: not a loud
-      // toast/banner; a brief tile-scoped micro-acknowledgement).
-      setTimeout(() => setPhase((p) => (p === "success" ? "idle" : p)), 1800);
-    } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : "Could not issue.");
-      setPhase("error");
-    }
-  }, [board.ref, target]);
-
-  // review fix: `containerRef` now wraps the TRIGGER AND the picker together
-  // (a plain Fragment-scoped span, not `relative` itself — the tile card one
-  // level up is the positioning context the picker anchors to). Click-away
-  // detection still works identically (a click inside the relocated picker is
-  // still "inside" this ref); only WHERE the picker paints moved.
-  return (
-    <span ref={containerRef} className="contents">
-      <span className="relative inline-flex">
-        {/* the idle trigger — a quiet, small primary/teal button; NEVER disabled/
-            greyed on a non-control node (the gate is a true absence one level up) */}
-        <Button
-          type="button"
-          size="sm"
-          variant="default"
-          onClick={() => setPhase("open")}
-          aria-label={`Issue work into ${board.ref}`}
-          className="gap-1.5 px-2.5"
-        >
-          <PlusCircle className="h-3.5 w-3.5" aria-hidden="true" />
-          assign
-        </Button>
-
-        {phase === "success" ? (
-          <span className="absolute left-0 top-full z-20 mt-1.5 whitespace-nowrap rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
-            issued ✓ — an eligible node will pick it up
-          </span>
-        ) : null}
-      </span>
-
-      {open ? (
-        <AssignPicker
-          board={board}
-          nodes={nodes}
-          target={target}
-          onTargetChange={setTarget}
-          submitting={phase === "submitting"}
-          errorMessage={phase === "error" ? errorMessage : null}
-          onCancel={close}
-          onIssue={onIssue}
-        />
-      ) : null}
-    </span>
-  );
-}
-
-// The target picker — a small anchored popover using EXISTING kit primitives
-// (a bordered/shadowed `bg-popover` panel, the same idiom the top bar's Legend
-// already uses — DESIGN: "NOT a full modal, no page dim"). ONE grouped picker:
-// Any node (default) · Nodes (nodeId + liveness dot, from status.nodes) ·
-// Capabilities (the union of node.runtimes + node.skills) — populated from data
-// already fetched, no new endpoint.
-function AssignPicker({
-  board,
-  nodes,
-  target,
-  onTargetChange,
-  submitting,
-  errorMessage,
-  onCancel,
-  onIssue,
-}: {
-  board: FleetBoard;
-  nodes: FleetNode[];
-  target: string;
-  onTargetChange: (value: string) => void;
-  submitting: boolean;
-  errorMessage: string | null;
-  onCancel: () => void;
-  onIssue: () => void;
-}) {
-  const capabilities = useMemo(() => {
-    const set = new Set<string>();
-    for (const node of nodes) {
-      for (const runtime of node.runtimes ?? []) set.add(runtime);
-      for (const skill of node.skills ?? []) set.add(skill);
-    }
-    return Array.from(set);
-  }, [nodes]);
-
-  return (
-    <div
-      role="dialog"
-      aria-label={`Issue into ${board.ref}`}
-      // Anchored to the TILE CARD (BoardTile's own `relative` root), NOT the
-      // trigger button (review fix, round 2): the picker is `w-72` (288px) —
-      // wider than the trigger's clearance to EITHER tile edge, so anchoring to
-      // the TRIGGER always overflows one side or the other (left-0 bled into
-      // the right neighbor tile; right-0 then clipped off the left viewport
-      // edge on the leftmost tile). The TILE CARD is itself ~w-72 in the
-      // auto-fill grid, so a `left-0 top-full` popover relative to the TILE
-      // drops straight below, flush with the tile's own left edge — on-screen
-      // for the leftmost tile, and never over a NEIGHBOUR tile (it only ever
-      // extends as wide as its own tile, downward, never sideways into the
-      // next column).
-      className="absolute left-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-md"
-    >
-      <p className="mb-2 text-xs font-semibold text-foreground">Issue into {board.ref}</p>
-
-      <div className="mb-2.5 flex flex-col gap-1 text-xs">
-        <label className="flex items-center gap-2">
-          <input
-            type="radio"
-            name={`assign-target-${board.ref}`}
-            checked={target === ""}
-            disabled={submitting}
-            onChange={() => onTargetChange("")}
-          />
-          Any node <span className="text-muted-foreground">(default)</span>
-        </label>
-      </div>
-
-      {nodes.length > 0 ? (
-        <div className="mb-2.5">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Nodes</p>
-          <div className="flex flex-col gap-1 text-xs">
-            {nodes.map((node) => (
-              <label key={node.nodeId} className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name={`assign-target-${board.ref}`}
-                  checked={target === node.nodeId}
-                  disabled={submitting}
-                  onChange={() => onTargetChange(node.nodeId)}
-                />
-                <PresenceDot liveness={livenessOf(node)} size="sm" />
-                <span className="mono">{node.nodeId}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {capabilities.length > 0 ? (
-        <div className="mb-2.5">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Capabilities</p>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            {capabilities.map((cap) => (
-              <label key={cap} className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  name={`assign-target-${board.ref}`}
-                  checked={target === cap}
-                  disabled={submitting}
-                  onChange={() => onTargetChange(cap)}
-                />
-                <span className="mono">{cap}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {errorMessage ? (
-        <div className="mb-2.5 flex items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-2 py-1.5 text-[11px] font-medium text-accent">
-          <span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground" aria-hidden="true">!</span>
-          Could not issue: {errorMessage}
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-end gap-2">
-        <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
-        {errorMessage ? (
-          <Button type="button" size="sm" variant="default" onClick={onIssue} disabled={submitting}>
-            Retry
-          </Button>
-        ) : (
-          <Button type="button" size="sm" variant="default" onClick={onIssue} disabled={submitting}>
-            {submitting ? "Issuing…" : "Issue ▸"}
-          </Button>
-        )}
       </div>
     </div>
   );
@@ -676,20 +727,44 @@ function BoardDrillIn({ board }: { board: FleetBoard }) {
 
 // ───────────────────────────────────────────────────────── whole-page states ──
 
+// milestone 34 / story 03 (task 02 scenario 4) — the loading state reserves the
+// SAME region layout the populated global view uses (workspace summary / work
+// items / node panel / diagnostics), so nothing reflows when data arrives and no
+// text overlaps at a 360px viewport (each placeholder is a fixed-height block, not
+// text that could wrap unpredictably). The scope control itself lives in the
+// TopBar (always mounted, task 02 scenario 4's "the scope control region is
+// visible" — true even here, one level up from this body).
 function LoadingState() {
   return (
-    <div className="flex flex-1 items-center justify-center p-10">
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" aria-hidden="true" />
-        Loading fleet…
+    <main className="flex-1 px-4 py-7 sm:px-8">
+      <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
+        <RegionPlaceholder label="Workspaces" />
+        <RegionPlaceholder label="Work items" />
+        <RegionPlaceholder label="Nodes" />
+        <RegionPlaceholder label="Diagnostics" />
       </div>
-    </div>
+    </main>
+  );
+}
+
+function RegionPlaceholder({ label }: { label: string }) {
+  return (
+    <section className="flex flex-col gap-2" aria-busy="true" aria-label={`Loading ${label}`}>
+      <span className="h-3 w-24 animate-pulse rounded bg-muted" aria-hidden="true" />
+      <span className="h-16 w-full animate-pulse rounded-lg border border-border bg-card/40" aria-hidden="true" />
+    </section>
   );
 }
 
 // A PAGE-level failure to reach the mesh (distinct from a stale node, which is
-// normal rendered degradation) — an accent pill + Retry.
-function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+// normal rendered degradation) — an accent pill + Retry. milestone 34 / story 03
+// (task 03 scenario 2) — a global-store-unavailable error names the global mesh
+// PATH so the operator knows exactly which file to inspect, and Retry keeps the
+// CURRENT scope (never silently falling back to the other scope). review fix
+// P0.5: `path` is passed down ALREADY resolved (Fleet.tsx's errorPathFor call) —
+// this component only renders it, it does not re-derive it from `status` (which is
+// null on a first-load failure and so was never a reliable source on its own).
+function ErrorState({ message, path, scope, onRetry }: { message: string; path: string | null; scope: Scope; onRetry: () => void }) {
   return (
     <div className="flex flex-1 items-center justify-center p-10">
       <div className="flex max-w-md flex-col items-center gap-3 text-center">
@@ -697,34 +772,46 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
           <span className="grid h-4.5 w-4.5 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-bold text-accent-foreground" aria-hidden="true">!</span>
           Could not load the mesh: {message}
         </div>
+        {path ? (
+          <p className="mono text-[11px] text-muted-foreground">Global mesh store: {path}</p>
+        ) : null}
         <button
           type="button"
           onClick={onRetry}
           className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-4 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary/20"
         >
-          ⟳ Retry
+          ⟳ Retry {scopeLabel(scope)}
         </button>
       </div>
     </div>
   );
 }
 
-// Empty fleet (no roster) — a centered dashed placeholder, NOT an error (mirrors the
-// CLI's "No nodes in the mesh roster."). Names the enrol path so a fresh install has
-// a next step.
-function EmptyFleet() {
+// Empty fleet — a centered dashed placeholder, NOT an error (mirrors the CLI's "No
+// nodes in the mesh roster."). milestone 34 / story 03 (task 03 scenario 1) — the
+// GLOBAL empty copy explains that no mesh-enabled workspace has published yet
+// (never "broken"/"failed"); the LOCAL empty copy keeps the pre-existing
+// enrol-a-node guidance, unchanged.
+function EmptyFleet({ scope }: { scope: Scope }) {
+  const copy = emptyStateCopy(scope);
   return (
     <div className="flex flex-1 items-center justify-center p-10">
       <div className="flex max-w-md flex-col items-center gap-4 rounded-xl border border-dashed border-border bg-card/50 px-8 py-9 text-center">
         <span className="grid h-11 w-11 place-items-center rounded-xl border-2 border-dashed border-muted-foreground/40 text-xl text-muted-foreground" aria-hidden="true">✦</span>
-        <span className="text-[15px] font-semibold text-foreground">No nodes in the group yet</span>
-        <span className="text-[12.5px] leading-relaxed text-muted-foreground">
-          Enrol a machine to bring it onto the mesh — run one of these on the box you want to add:
+        <span className="text-[15px] font-semibold text-foreground">
+          {scope === "local" ? "No nodes in the group yet" : "No mesh-enabled workspaces yet"}
         </span>
-        <span className="flex w-full flex-col gap-2">
-          <span className="mono rounded-md border border-border bg-muted px-3 py-2 text-left text-[11.5px] text-muted-foreground">aof mesh invite</span>
-          <span className="mono rounded-md border border-border bg-muted px-3 py-2 text-left text-[11.5px] text-muted-foreground">aof mesh join</span>
-        </span>
+        <span className="text-[12.5px] leading-relaxed text-muted-foreground">{copy}</span>
+        {scope === "local" ? (
+          <span className="flex w-full flex-col gap-2">
+            <span className="mono rounded-md border border-border bg-muted px-3 py-2 text-left text-[11.5px] text-muted-foreground">aof mesh invite</span>
+            <span className="mono rounded-md border border-border bg-muted px-3 py-2 text-left text-[11.5px] text-muted-foreground">aof mesh join</span>
+          </span>
+        ) : (
+          <span className="flex w-full flex-col gap-2">
+            <span className="mono rounded-md border border-border bg-muted px-3 py-2 text-left text-[11.5px] text-muted-foreground">config.mesh.enabled: true</span>
+          </span>
+        )}
       </div>
     </div>
   );

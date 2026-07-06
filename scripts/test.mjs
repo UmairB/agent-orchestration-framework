@@ -5,6 +5,33 @@ import { pathTests } from "../test/paths.test.mjs";
 import { promptTests } from "../test/prompt.test.mjs";
 import { modelTests } from "../test/model.test.mjs";
 import { workspaceTests } from "../test/workspace.test.mjs";
+import { globalWorkStoreTests } from "../test/global-work-store.test.mjs";
+import { globalWorkPropagationTests } from "../test/global-work-propagation.test.mjs";
+import { globalNodeRegistryTests } from "../test/global-node-registry.test.mjs";
+import { archTests as acdGlobalMeshPathsHomeTests } from "../test/arch/acd-global-mesh-paths-home.test.mjs";
+import { archTests as acdGlobalStoreNoNativeDepTests } from "../test/arch/acd-global-store-no-native-dep.test.mjs";
+import { archTests as acdGlobalPropagationSinglePredicateTests } from "../test/arch/acd-global-propagation-single-predicate.test.mjs";
+import { archTests as acdGlobalPublisherSingleSeamTests } from "../test/arch/acd-global-publisher-single-seam.test.mjs";
+import { archTests as acdGlobalNodeDescriptorsRedactSecretsTests } from "../test/arch/acd-global-node-descriptors-redact-secrets.test.mjs";
+import { archTests as acdGlobalNodeRegistryProjectionOnlyTests } from "../test/arch/acd-global-node-registry-projection-only.test.mjs";
+// milestone 34 / story 04 — worker live-state stream to control node (ADR-007): the
+// worker-role/control-address resolution, the persistent worker stream client
+// (snapshot-first-then-deltas, reconnect+backoff, failure isolation), the always-on
+// control-node stream server (tailnet-only admission, apply+redact, liveness), and
+// the stream retry/reconciliation/freshness lanes, plus the story's 4 fitness
+// units. Tasks 00–03 are @executable; task 04 (the real two-machine soak) is @manual
+// and deliberately has no test file here.
+import { workerRoleAddressTests } from "../test/worker-role-address.test.mjs";
+import { workerStreamClientTests } from "../test/worker-stream-client.test.mjs";
+import { controlStreamServerTests } from "../test/control-stream-server.test.mjs";
+import { meshLauncherStreamRoleTests } from "../test/mesh-launcher-stream-role.test.mjs";
+import { globalNodeIdentityTests } from "../test/global-node-identity.test.mjs";
+import { archTests as acdGlobalNodeIdentityHomeTests } from "../test/arch/acd-global-node-identity-home.test.mjs";
+import { archTests as acdWorkerStreamSinglePredicateTests } from "../test/arch/acd-worker-stream-single-predicate.test.mjs";
+import { archTests as acdWorkerStreamFabricAddressedTests } from "../test/arch/acd-worker-stream-fabric-addressed.test.mjs";
+import { archTests as acdWorkerStreamNonBlockingTests } from "../test/arch/acd-worker-stream-non-blocking.test.mjs";
+import { archTests as acdControlStreamTailnetOnlyTests } from "../test/arch/acd-control-stream-tailnet-only.test.mjs";
+import { archTests as acdControlStreamAddressBoundTests } from "../test/arch/acd-control-stream-address-bound.test.mjs";
 import { renderPlanTests } from "../test/render-plan.test.mjs";
 import { configInspectTests } from "../test/config-inspect.test.mjs";
 import { configEditorTests } from "../test/config-editor.test.mjs";
@@ -495,14 +522,24 @@ import { meshUiReadOnlyContractTests } from "../test/mesh-ui-read-only-contract.
 import { archTests as acdMeshUiNoCoreImportTests } from "../test/arch/acd-mesh-ui-no-core-import.test.mjs";
 import { archTests as acdMeshUiSingleServerTests } from "../test/arch/acd-mesh-ui-single-server.test.mjs";
 import { archTests as acdMeshUiWriteIsolationTests } from "../test/arch/acd-mesh-ui-write-isolation.test.mjs";
-// milestone 27 — cross-machine issuance & routing (SECURITY, the security-owned
-// fitness for the milestone's genuinely-new surface): S-1 the same-origin + JSON
-// content-type guard on the POST /api/mesh/issue write route (T1 CSRF against the
-// loopback fleet face, story 02 — XOR/vacuous-safe until the route lands); S-2 the
-// revoked-issuer directive filter on the routing candidacy build (T4 revocation
-// completeness, story 01 — existsSync-guarded until the routing filter lands).
-import { archTests as acdMeshIssueRouteSameOriginTests } from "../test/arch/acd-mesh-issue-route-same-origin.test.mjs";
-import { archTests as acdIssuanceRevokedIssuerFilteredTests } from "../test/arch/acd-issuance-revoked-issuer-filtered.test.mjs";
+// milestone 34 / story 03 — mesh UI global scope (ADR-006): `aof mesh ui` /
+// `/api/mesh/status` default to the GLOBAL projection query (src/global-mesh-
+// query.mjs, the ONE composition seam over the story 00/02 query surfaces);
+// `--local` (or `?scope=local`) keeps the pre-existing invoke("mesh:status")
+// current-workspace aggregate, byte-unchanged. Four @executable task features:
+// 00_cli-scope-selection, 01_mesh-ui-api-scope-switch, 02_fleet-ui-scope-
+// rendering, 03_empty-error-and-health-states. Three fitness units:
+// acd-mesh-ui-global-default, acd-mesh-ui-local-filter-preserves-status,
+// acd-mesh-ui-scope-visible. The React fleet surface's scope/region/state/
+// credential-guard logic lives in the pure ui/src/fleet/scope.mjs helper (no
+// React test harness in this repo), exercised headlessly by fleet-scope.test.mjs.
+import { globalMeshQueryTests } from "../test/global-mesh-query.test.mjs";
+import { meshUiGlobalScopeTests } from "../test/mesh-ui-global-scope.test.mjs";
+import { fleetScopeTests } from "../test/fleet-scope.test.mjs";
+import { archTests as acdMeshUiGlobalDefaultTests } from "../test/arch/acd-mesh-ui-global-default.test.mjs";
+import { archTests as acdMeshUiLocalFilterPreservesStatusTests } from "../test/arch/acd-mesh-ui-local-filter-preserves-status.test.mjs";
+import { archTests as acdMeshUiScopeVisibleTests } from "../test/arch/acd-mesh-ui-scope-visible.test.mjs";
+// milestone 27 issuance/routing write surfaces are retired for the global WebSocket-only mesh cleanup.
 // milestone 33 — mesh relay/transport redesign (Tailscale-first). Two Decide-stage
 // fitness functions. acd-mesh-identity-not-committed (F-3203 / ADR-004 — no per-install
 // nodeId/salt in committed config) is UN-SKIPPED + GREEN (story 00 / per-install-node-
@@ -581,9 +618,6 @@ import { meshIdentityCliFaceTests } from "../test/mesh-identity-cli-face.test.mj
 // 02_two-node-render-over-remote feature gets NO executable test (verified at aof:verify).
 // Fitness #4 acd-mesh-sync-record-neutral asserts the engine moves files not fields. The
 // acd-mesh-command-cli-bijection gate now covers identity+status+sync.
-import { meshGitSyncTransportTests } from "../test/mesh-git-sync-transport.test.mjs";
-import { meshSyncCadenceLoopTests } from "../test/mesh-sync-cadence-loop.test.mjs";
-import { archTests as acdMeshSyncRecordNeutralTests } from "../test/arch/acd-mesh-sync-record-neutral.test.mjs";
 // milestone 23 — control-node-relay (story 00: presence-heartbeat — src/mesh-presence.mjs
 // is the presence-record assembly + the node-staleness predicate (reusing m20's isStale
 // shape) + the activeRuns read of the run records; src/commands/mesh-heartbeat.mjs
@@ -764,9 +798,7 @@ import { meshRevokeTests } from "../test/mesh-revoke.test.mjs";
 // forward), the record-driven persist (record.node ⇒ runs/<node>/, null ⇒ flat —
 // byte-identical single-node behaviour), the UNION readers (readRuns/readRun/dedup/
 // completeRun span flat + one level of node subdirs; runId uniqueness spans the
-// union), and syncMesh(workspace, { roots }) defaulting [meshDir] with the
-// runsPathspec resolver (the mesh-aware set carries run records on the tick; the
-// engine stays content-agnostic; failure envelopes unchanged). Three @executable
+// union), and the retired mesh sync root-set path for historical compatibility. Three @executable
 // task features: 00_node-dimensioned-records (the mint-placement matrix + the
 // single-node floor + read-forward + the union read/torn-skip + cross-node dedup +
 // union completion + same-instant distinct ids), 01_sync-root-set (the default-root
@@ -781,8 +813,6 @@ import { meshRevokeTests } from "../test/mesh-revoke.test.mjs";
 // over the root-set engine). The five FROZEN_KEYS literals across the run suites
 // carry the fourteenth key ("node") — the supersede's sanctioned ripple.
 import { runNodePartitionTests } from "../test/run-node-partition.test.mjs";
-import { meshSyncRootSetTests } from "../test/mesh-sync-root-set.test.mjs";
-import { runRecordsAddOnlyMergeTests } from "../test/run-records-add-only-merge.test.mjs";
 import { archTests as acdRunNodePathSingleBuilderTests } from "../test/arch/acd-run-node-path-single-builder.test.mjs";
 import { archTests as acdRunRecordNodeAdditiveTests } from "../test/arch/acd-run-record-node-additive.test.mjs";
 import { archTests as acdRunsEolPinnedTests } from "../test/arch/acd-runs-eol-pinned.test.mjs";
@@ -806,13 +836,6 @@ import { archTests as acdSyncRootSetTests } from "../test/arch/acd-sync-root-set
 // the scripted-envelope fake), 01_presence-is-the-lease-clock, 02_mesh-aware-next,
 // 03_lease-render-on-status. Fitness #6–#8: acd-lease-write-scope,
 // acd-next-lease-injected, acd-lease-arbitration-git-observed.
-import { meshLeaseClaimArbitrationTests } from "../test/mesh-lease-claim-arbitration.test.mjs";
-import { meshLeaseClockTests } from "../test/mesh-lease-clock.test.mjs";
-import { workNextLeaseViewTests } from "../test/work-next-lease-view.test.mjs";
-import { meshStatusLeaseRenderTests } from "../test/mesh-status-lease-render.test.mjs";
-import { archTests as acdLeaseWriteScopeTests } from "../test/arch/acd-lease-write-scope.test.mjs";
-import { archTests as acdNextLeaseInjectedTests } from "../test/arch/acd-next-lease-injected.test.mjs";
-import { archTests as acdLeaseArbitrationGitObservedTests } from "../test/arch/acd-lease-arbitration-git-observed.test.mjs";
 // milestone 26 (story 02) — distributed-runs-leasing: claim integration + relay
 // fast-path + fleet reclaim — the A2 join (ADR-004 + ADR-006). work:run-start composes
 // the FROZEN sequence in ONE file (fleet-reclaim prefilter → acquireLease over the
@@ -848,10 +871,6 @@ import { archTests as acdLeaseArbitrationGitObservedTests } from "../test/arch/a
 // are confirmed DEAD code (no live caller) once the broker is eliminated, so this guard
 // now protects a broker that no longer brokers — superseded by 33/ADR-002 — the broker
 // is eliminated.
-import { runStartClaimSequenceTests } from "../test/run-start-claim-sequence.test.mjs";
-import { runCompleteLeaseReleaseTests } from "../test/run-complete-lease-release.test.mjs";
-import { relayLeaseFastPathTests } from "../test/relay-lease-fast-path.test.mjs";
-import { fleetOrphanReclaimTests } from "../test/fleet-orphan-reclaim.test.mjs";
 import { archTests as acdClaimRelayIndependentTests } from "../test/arch/acd-claim-relay-independent.test.mjs";
 import { archTests as acdFleetReclaimGuardedTests } from "../test/arch/acd-fleet-reclaim-guarded.test.mjs";
 // milestone 27 (story 00) — work-issuance-routing: the issuance directive
@@ -875,56 +894,9 @@ import { archTests as acdFleetReclaimGuardedTests } from "../test/arch/acd-fleet
 // nested issuance sample path, no new .gitattributes rule) + #3
 // (acd-targeting-matcher-descriptor-pure — no node-identity.mjs import + the
 // matcher reads only nodeId/runtimes/skills, m03 planted-violation self-check).
-import { meshIssuanceDirectiveRecordTests } from "../test/mesh-issuance-directive-record.test.mjs";
-import { meshTargetingMatcherTests } from "../test/mesh-targeting-matcher.test.mjs";
-import { meshIssuanceAddOnlyMergeTests } from "../test/mesh-issuance-add-only-merge.test.mjs";
-import { archTests as acdIssuanceRecordFrozenTests } from "../test/arch/acd-issuance-record-frozen.test.mjs";
-import { archTests as acdTargetingMatcherDescriptorPureTests } from "../test/arch/acd-targeting-matcher-descriptor-pure.test.mjs";
-// milestone 27 (story 01) — work-issuance-routing: mesh:issue (the resolve ->
-// assemble -> write -> push composition, ADR-002) + the mesh-issuance.mjs WRITES
-// (issueDirective/withdrawDirective, own-path state writes, ADR-001.3) +
-// commands/next.mjs's UNIFIED candidacy view (routing filter folded into the m26
-// lease-view build, ADR-004) + work.mjs's m26/ADR-007 every-ready-return fold-in +
-// mesh-identity.mjs's additive mesh:status ISSUED render + isControlNode marker.
-// Seven @executable task features (00_mesh-issue-command, 01_directive-withdraw,
-// 02_routing-pickup, 03_candidacy-every-return, 04_mesh-status-issued-render,
-// 05_cross-node-issuance-kr3, 07_revoked-issuer-filtered — 06_kr3-soak is
-// @manual, verify-time only, NOT a CI test). Fitness #1 (acd-issuance-write-scope
-// — the directive write-scope guard, mirrors acd-lease-write-scope), #4
-// (acd-next-candidacy-injected — extends acd-next-lease-injected to the unified
-// view), #5 (acd-next-candidacy-every-return — the XOR/consistency every-return
-// form), #6 (acd-mesh-command-cli-bijection re-armed over the "issue" verb,
-// already wired). The security-owned acd-issuance-revoked-issuer-filtered
-// (already on the tree) ARMS non-vacuously the moment this story's routing
-// filter + the revocation check land together.
-import { meshIssueCommandTests } from "../test/mesh-issue-command.test.mjs";
-import { meshIssueWithdrawTests } from "../test/mesh-issue-withdraw.test.mjs";
-import { meshRoutingPickupTests } from "../test/mesh-routing-pickup.test.mjs";
+// milestone 27 routing-era candidacy compatibility tests retained where they do not depend on retired write surfaces.
 import { meshCandidacyEveryReturnTests } from "../test/mesh-candidacy-every-return.test.mjs";
-import { meshStatusIssuedRenderTests } from "../test/mesh-status-issued-render.test.mjs";
-import { meshRoutingRevokedIssuerTests } from "../test/mesh-routing-revoked-issuer.test.mjs";
-import { meshCrossNodeIssuanceKr3Tests } from "../test/mesh-cross-node-issuance-kr3.test.mjs";
-import { archTests as acdIssuanceWriteScopeTests } from "../test/arch/acd-issuance-write-scope.test.mjs";
-import { archTests as acdNextCandidacyInjectedTests } from "../test/arch/acd-next-candidacy-injected.test.mjs";
-import { archTests as acdNextCandidacyEveryReturnTests } from "../test/arch/acd-next-candidacy-every-return.test.mjs";
-// milestone 27 (story 02) — work-issuance-routing: the fleet-UI issue/assign
-// affordance — the FIRST write route on the fleet face (ADR-006). src/mesh-ui-
-// serve.mjs gains POST /api/mesh/issue -> invoke("mesh:issue") through the ONE
-// registry door, guarded by a same-origin + application/json check BEFORE any
-// body read or invoke (SECURITY T1 / fitness S-1); sendMethodNotAllowed is
-// factored to a per-route Allow header. ui/src/fleet/ gains isControlNode on
-// MeshStatus + fleetApi.issue(), and BoardTile's [assign |] trigger + anchored
-// target picker (Any node / Nodes / Capabilities), rendered IFF isControlNode
-// (a true absence, never disabled). Three @executable task features
-// (00_fleet-ui-issue-route, 01_issue-route-same-origin, 03_write-isolation-
-// bounded — task 02 is @uat, the designer/QA judgement at review, not a CI
-// assert). Fitness acd-mesh-ui-write-isolation #7 SUPERSEDED IN PLACE to the
-// XOR bounded-write shape (green on the m25 zero-write tree OR the exactly-
-// one-route tree); the security fitness acd-mesh-issue-route-same-origin (S-1,
-// already on the tree) arms non-vacuously with NO edit to the test itself.
-import { meshUiIssueRouteTests } from "../test/mesh-ui-issue-route.test.mjs";
-import { meshIssueRouteSameOriginTests } from "../test/mesh-issue-route-same-origin.test.mjs";
-import { meshUiWriteIsolationBoundedTests } from "../test/mesh-ui-write-isolation-bounded.test.mjs";
+// milestone 27 fleet issue/assign write-route tests are retired with the removed fleet write surface.
 // story 30 — per-agent model selection (task 01: bundle default map; task 02:
 // per-project config override wins + validation; task 03: solo-mode inert map)
 import { bundleModelMapTests } from "../test/bundle-model-map.test.mjs";
@@ -1255,119 +1227,15 @@ export const tests = [
   ...acdMeshUiNoCoreImportTests,
   ...acdMeshUiSingleServerTests,
   ...acdMeshUiWriteIsolationTests,
-  // milestone 27 — cross-machine issuance & routing (security-owned fitness: T1
-  // CSRF same-origin write-route guard / T4 revoked-issuer routing filter)
-  ...acdMeshIssueRouteSameOriginTests,
-  ...acdIssuanceRevokedIssuerFilteredTests,
-  // milestone 22 — mesh-foundation (story 01: node-identity + commands)
-  ...meshNodeIdentityTests,
-  ...meshIdentityStatusCommandsTests,
-  ...meshIdentityCliFaceTests,
-  // milestone 22 — mesh-foundation (story 02: git-sync engine)
-  ...meshGitSyncTransportTests,
-  ...meshSyncCadenceLoopTests,
-  ...acdMeshSyncRecordNeutralTests,
-  // milestone 23 — control-node-relay (story 00: presence-heartbeat)
-  ...meshPresenceRecordTests,
-  ...meshNodeStalenessStatusTests,
-  ...acdPresenceWriteScopeTests,
-  ...acdMeshEolPinnedTests,
-  // milestone 23 — control-node-relay (story 01: thin relay). milestone 33 / story 01
-  // (ADR-002): acd-relay-stateless / acd-relay-envelope-neutral RETIRED — superseded by
-  // 33/ADR-002 — the broker is eliminated.
-  ...meshRelayBrokerFanoutTests,
-  ...meshRelayEnvelopeResilienceTests,
-  ...meshRelayControlNodeTests,
-  // milestone 23 — control-node-relay (story 02: presence-over-relay — the integration).
-  // milestone 33 / story 01 (ADR-002.1): meshPresenceDualBusTests + fitness
-  // acd-presence-relay-independent RETIRED — superseded by 33/ADR-002 — the broker is
-  // eliminated. meshPresenceDegradationLoopTests TRIMMED to its cadence-loop-only rows.
-  ...meshPresenceDegradationLoopTests,
-  // milestone 23 — control-node-relay (story 02 / F1 close-out: receive-and-apply
-  // consumer). milestone 33 / story 01 (ADR-002.1): meshRelayReceiveApplyTests + fitness
-  // acd-presence-subscriber-cache-only RETIRED — superseded by 33/ADR-002 — the broker is
-  // eliminated (src/mesh-presence-subscriber.mjs + src/mesh-presence-cache.mjs deleted).
-  // milestone 24 — device-code group-enrollment (SECURITY.md fitness functions — RED-until-built)
-  ...acdEnrollmentCodeHashedAtRestTests,
-  ...acdEnrollmentCodeSingleUseConstantTimeTests,
-  // milestone 33 / story 01 (ADR-002.consequence): acd-relay-auth-gate-checked RETIRED —
-  // superseded by 33/ADR-002 — the broker is eliminated (tailnet membership is the
-  // admission boundary now).
-  // milestone 24 — device-code group-enrollment (ARCHITECTURE.md STRUCTURAL fitness — the
-  // architect's, disjoint from the SECURITY.md fitness above)
-  ...acdRegistryWriteScopeTests,
-  ...acdEnrollEndpointHttpNotWsTests,
-  ...acdEnrollGitArgvNoShellTests,
-  // milestone 24 — device-code group-enrollment (story 00: the group registry)
-  ...meshRegistryStoreSeamTests,
-  ...meshRegistryAggregateMutationsTests,
-  ...meshRegistryPendingLifecycleTests,
-  // milestone 24 — device-code group-enrollment (story 01: device-code enrollment)
-  ...meshInviteMintTests,
-  ...meshEnrollDeviceFlowTests,
-  ...meshJoinProvisionTests,
-  // milestone 24 — device-code group-enrollment (story 02: the enforceable trust boundary —
-  // the relay ws auth-gate + mesh:revoke)
-  ...meshRelayAuthGateTests,
-  ...meshRevokeTests,
-  // milestone 26 (story 00) — distributed-runs-leasing: node-dimensioned run records
-  // (the git substrate — the three task features + fitness #1–#5)
-  ...runNodePartitionTests,
-  ...meshSyncRootSetTests,
-  ...runRecordsAddOnlyMergeTests,
-  ...acdRunNodePathSingleBuilderTests,
-  ...acdRunRecordNodeAdditiveTests,
-  ...acdRunsEolPinnedTests,
-  ...acdRunStoreMeshFreeTests,
-  ...acdSyncRootSetTests,
-  // milestone 26 (story 01) — distributed-runs-leasing: the lease-of-record +
-  // mesh-aware next, git-only (the four task features + fitness #6–#8)
-  ...meshLeaseClaimArbitrationTests,
-  ...meshLeaseClockTests,
-  ...workNextLeaseViewTests,
-  ...meshStatusLeaseRenderTests,
-  ...acdLeaseWriteScopeTests,
-  ...acdNextLeaseInjectedTests,
-  ...acdLeaseArbitrationGitObservedTests,
-  // milestone 26 (story 02) — distributed-runs-leasing: claim integration + relay
-  // fast-path + fleet reclaim — the A2 join (the four @executable task features +
-  // fitness #9/#12; the @manual KR2 soak is an aof:verify deliverable)
-  ...runStartClaimSequenceTests,
-  ...runCompleteLeaseReleaseTests,
-  // milestone 33 / story 01 (ADR-002.1): relayLeaseFastPathTests TRIMMED to its surviving
-  // send-side row; fitness acd-lease-cache-only RETIRED — superseded by 33/ADR-002 — the
-  // broker is eliminated (src/mesh-presence-cache.mjs's createLeaseCache deleted with it).
-  // acd-relay-lease-blind is ALSO RETIRED (review Fix 2) — superseded by 33/ADR-002 —
-  // the broker is eliminated (serveRelay/relayMode are dead code, no live caller).
-  ...relayLeaseFastPathTests,
-  ...fleetOrphanReclaimTests,
-  ...acdClaimRelayIndependentTests,
-  ...acdFleetReclaimGuardedTests,
-  // milestone 27 (story 00) — work-issuance-routing: the issuance directive
-  // substrate + the eligibility matcher
-  ...meshIssuanceDirectiveRecordTests,
-  ...meshTargetingMatcherTests,
-  ...meshIssuanceAddOnlyMergeTests,
-  ...acdIssuanceRecordFrozenTests,
-  ...acdTargetingMatcherDescriptorPureTests,
-  // milestone 27 (story 01) — work-issuance-routing: mesh:issue + the mesh-aware
-  // next routing pickup + the m26/ADR-007 fold-in + the mesh:status issued render
-  ...meshIssueCommandTests,
-  ...meshIssueWithdrawTests,
-  ...meshRoutingPickupTests,
-  ...meshCandidacyEveryReturnTests,
-  ...meshStatusIssuedRenderTests,
-  ...meshRoutingRevokedIssuerTests,
-  ...meshCrossNodeIssuanceKr3Tests,
-  ...acdIssuanceWriteScopeTests,
-  ...acdNextCandidacyInjectedTests,
-  ...acdNextCandidacyEveryReturnTests,
-  // milestone 27 (story 02) — work-issuance-routing: the fleet-UI issue/assign
-  // affordance — the first write route on the fleet face
-  ...meshUiIssueRouteTests,
-  ...meshIssueRouteSameOriginTests,
-  ...meshUiWriteIsolationBoundedTests,
-  // milestone 33 — mesh relay/transport redesign: the two Decide-stage fitness
+  // milestone 34 — global mesh work store (story 03: mesh UI global scope, ADR-006)
+  ...globalMeshQueryTests,
+  ...meshUiGlobalScopeTests,
+  ...fleetScopeTests,
+  ...acdMeshUiGlobalDefaultTests,
+  ...acdMeshUiLocalFilterPreservesStatusTests,
+  ...acdMeshUiScopeVisibleTests,
+  // milestone 27 issuance/routing write surfaces are retired for the global WebSocket-only mesh cleanup.
+// milestone 33 — mesh relay/transport redesign: the two Decide-stage fitness
   // functions (see the import comment; each is the DoD of its build story:
   // F-3203 identity-not-committed — UN-SKIPPED + GREEN by story 00 below;
   // F-3202/F-3204 fabric-single-seam — UN-SKIPPED + GREEN by story 01 below)
@@ -1403,6 +1271,28 @@ export const tests = [
   ...schemaTests,
   ...modelTests,
   ...workspaceTests,
+  ...globalWorkStoreTests,
+  ...globalWorkPropagationTests,
+  ...globalNodeRegistryTests,
+  ...acdGlobalMeshPathsHomeTests,
+  ...acdGlobalStoreNoNativeDepTests,
+  ...acdGlobalPropagationSinglePredicateTests,
+  ...acdGlobalPublisherSingleSeamTests,
+  ...acdGlobalNodeDescriptorsRedactSecretsTests,
+  ...acdGlobalNodeRegistryProjectionOnlyTests,
+  // milestone 34 — global mesh work store (story 04: worker live-state stream to
+  // control node, ADR-007)
+  ...workerRoleAddressTests,
+  ...workerStreamClientTests,
+  ...controlStreamServerTests,
+  ...meshLauncherStreamRoleTests,
+  ...globalNodeIdentityTests,
+  ...acdGlobalNodeIdentityHomeTests,
+  ...acdWorkerStreamSinglePredicateTests,
+  ...acdWorkerStreamFabricAddressedTests,
+  ...acdWorkerStreamNonBlockingTests,
+  ...acdControlStreamTailnetOnlyTests,
+  ...acdControlStreamAddressBoundTests,
   ...pathTests,
   ...promptTests,
   ...catalogTests,
@@ -1432,8 +1322,20 @@ export const tests = [
 async function runSuite() {
   let failures = 0;
 
+  // Per-test hermetic global AOF home (34/story 00) — see scripts/test-unit.mjs for the
+  // rationale: the node identity is machine-wide now, so each test gets its OWN empty
+  // global home to stop identity/global-store state leaking across tests (or onto the real
+  // machine). The integration lane below keeps process.env untouched afterward.
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { rmSync } = await import("node:fs");
+  const ghRoot = join(tmpdir(), `aof-test-gh-${process.pid}`);
+  let ghIndex = 0;
+
   console.log("# unit");
   for (const { name, run } of tests) {
+    const prevHome = process.env.AOF_GLOBAL_HOME;
+    process.env.AOF_GLOBAL_HOME = join(ghRoot, `t-${ghIndex++}`);
     try {
       await run();
       console.log(`ok - ${name}`);
@@ -1441,8 +1343,12 @@ async function runSuite() {
       failures += 1;
       console.error(`not ok - ${name}`);
       console.error(error.stack ?? error.message);
+    } finally {
+      if (prevHome === undefined) delete process.env.AOF_GLOBAL_HOME;
+      else process.env.AOF_GLOBAL_HOME = prevHome;
     }
   }
+  try { rmSync(ghRoot, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
 
   console.log("# integration");
   const previousInProcess = process.env.AOF_IN_PROCESS_INTEGRATION;

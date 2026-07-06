@@ -1,10 +1,8 @@
 // src/mesh-presence.mjs — the PRESENCE dimension (milestone 23 / story 00, ADR-002):
 // the presence-record assembly + the node-staleness predicate + the activeRuns read
-// of the run records + the absence-tolerant presence read. The git-side, poll-for-
-// durability substrate — it works over GIT ALONE (no relay; story 01 is parallel,
-// story 02 adds the best-effort relay push on top). It EXTENDS milestone 20's
-// single-node run liveness into a fleet (node) signal rather than standing up a
-// parallel heartbeat (the genuine 23 → 20 seam, SPEC §Dependencies).
+// of the run records + the absence-tolerant presence read. Presence is a derived
+// machine-global record under the global mesh root; it is not a second authority over
+// the canonical run/work records.
 //
 // THE WRITE-SCOPE DISCIPLINE (ADR-002 / fitness #3, acd-presence-write-scope, the
 // 22/ADR-002 carry-forward): every presence write joins the m22-RESERVED
@@ -39,9 +37,8 @@ import { readRuns, isStale } from "./run-store.mjs";
 // config.mesh.presence.stalenessSeconds fallback). A node whose last heartbeat is
 // older than this is rendered stale; a config value that is absent / malformed /
 // negative / null falls back to THIS single source so the "documented default"
-// assertion has one home. 90s sits comfortably above the ~10–30s git-sync cadence
-// (PRD KR1) — a node that has synced within the last sync window is never falsely
-// flagged stale.
+// assertion has one home. 90s sits comfortably above the default propagation cadence,
+// so a node that has published recently is not falsely flagged stale.
 export const DEFAULT_PRESENCE_STALENESS_SECONDS = 90;
 
 // ----------------------------------------------------- the activeRuns read ----
@@ -84,7 +81,7 @@ export function assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, aofVer
   };
 }
 
-// Publish a node's presence record as exactly ONE git-tracked presence/<id>.json,
+// Publish a node's presence record as exactly ONE global presence/<id>.json,
 // written atomically (writeText temp+rename, 19/R2). Persisted OPAQUE / AS-IS — pretty
 // JSON, no normalization — so a read-back is byte-equivalent (mirroring
 // publishNodeRecord). The mkdir is belt-and-braces (writeText also mkdir's its
@@ -135,27 +132,18 @@ export async function readPresenceRecords(workspace) {
 // --------------------------------------- the read-side liveness merge ----
 
 // mergePresence(diskPresence, cachedPresence) → the FRESHEST of the two presence records
-// (milestone 23 / story 02 / ADR-003, finding F1 — the read-side mirror of the two-publish
-// write path). mesh:status reconciles the ≤30s git-durable record (disk) with the ≤5s
-// relay liveness cache (the subscriber's applied signal) through ONE render, so a peer's
-// pushed change surfaces over the relay WITHOUT waiting for a git sync, yet git stays the
-// authority:
-//   - disk null      ⇒ the cache is all we have (a peer heard over the relay before its
-//                      record synced) — return cached ?? null.
-//   - cached null    ⇒ no relay signal — return disk (the git-only floor, unchanged).
-//   - both present   ⇒ LATEST WINS by Date.parse(heartbeatAt), but a TIE breaks in favour
-//                      of the GIT-DURABLE disk record — git is the authority, so once git
-//                      carries the same heartbeat the render reconciles to the durable bytes
-//                      (the cache never becomes a second system of record; ADR-002 / fitness
-//                      #1). A cache entry only wins while it is STRICTLY newer than disk.
+// (milestone 23 / story 02 / ADR-003). mesh:status reconciles the persisted global
+// record with the optional fast-path cache through ONE render. A cache entry only wins
+// while it is STRICTLY newer than disk; equal or older cached data reconciles to the
+// persisted bytes so the cache never becomes a second system of record.
 // This is a PURE projection over its two inputs — no fs, no clock.
 export function mergePresence(diskPresence, cachedPresence) {
   if (diskPresence == null) return cachedPresence ?? null;
   if (cachedPresence == null) return diskPresence;
   const diskMs = Date.parse(diskPresence.heartbeatAt);
   const cachedMs = Date.parse(cachedPresence.heartbeatAt);
-  // The cache wins ONLY when it is strictly newer than the git-durable record; an equal or
-  // unparseable-cache heartbeat reconciles to the durable disk bytes (git breaks the tie).
+  // The cache wins ONLY when it is strictly newer than the persisted record; an equal or
+  // unparseable-cache heartbeat reconciles to the durable disk bytes.
   if (Number.isFinite(cachedMs) && (!Number.isFinite(diskMs) || cachedMs > diskMs)) {
     return cachedPresence;
   }

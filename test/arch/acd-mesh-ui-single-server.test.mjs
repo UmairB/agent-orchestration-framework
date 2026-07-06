@@ -105,7 +105,10 @@ export const archTests = [
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" (milestone 34 / story 03, ADR-006) — this fitness assertion
+        // is about the single-server/disjoint-namespace INVARIANT, orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         const address = server.address();
         assert.equal(address.address, "127.0.0.1", "the fleet server binds 127.0.0.1");
 

@@ -50,7 +50,10 @@ export const meshHeartbeatCommand = {
     // config.mesh.nodeId wins verbatim (deriveNodeId returns it), so heartbeat and
     // identity carry the SAME id; a never-published node derives + persists a stable
     // id to the git-ignored sidecar (ADR-004.2, F-3203) — never the committed config.
-    const sidecarPath = sidecarPathFor(ws.aofDir);
+    // The machine-wide identity home (34/story 00) — ws.identityPath (global, resolved
+    // by loadWorkspace from AOF_GLOBAL_HOME); a synthetic workspace falls back to the
+    // legacy per-workspace sidecar.
+    const sidecarPath = ws.identityPath ?? sidecarPathFor(ws.aofDir);
     const salt = await resolveInstallSalt(sidecarPath, config);
     const nodeId = await deriveNodeId({
       config,

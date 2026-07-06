@@ -146,8 +146,25 @@ declaration* — is decided here.
 
 ## ADR-002: Topology — the F-3204 call: the central WebSocket broker is ELIMINATED as the presence/liveness transport; the fabric IS the discovery+liveness plane; presence + issuance ride direct-addressability. A residual coordinator survives ONLY as an issuance-authority ROLE, not a network broker
 
-**Status:** Accepted
+**Status:** Accepted · **Amended 2026-07-05** (scope narrowed — see amendment note below; original text is immutable and unedited)
 **Date:** 2026-07-04
+
+> **Amendment note (2026-07-05) — added at the landing of milestone 34 / story 04, per 34/ADR-007's
+> required supersession.** This ADR's headline "the central WebSocket broker is ELIMINATED" now holds only
+> for **PRESENCE / liveness**: the fabric remains the discovery+liveness plane and no aof-run broker fans
+> out presence (decisions 1–4 stand unchanged). It does **NOT** hold for real-time **WORK-STATE**: milestone
+> **34/ADR-007** deliberately **reintroduces a continuously-running persistent-connection server** on the
+> control node — the same *class* of machinery this ADR retired (a long-lived socket server + reconnecting
+> clients + heartbeat), but a different *purpose* (a worker→control work-state ingest stream, not a
+> control→subscriber presence fan-out) and *direction* (workers dial the control node). Read this ADR's
+> "broker eliminated" as **"eliminated for presence; a work-state stream server is reintroduced in
+> 34/ADR-007."** Decision 5 (the issuance-authority *role* is a git-write role, not a network broker) is
+> unaffected — the 34 stream server is a *separate* always-on daemon face on the same control node, not a
+> revival of `serveRelay`'s presence broker. See **34/ADR-007** for the honest reckoning, the connection
+> lifecycle, and the admission-boundary open question (34/ADR-007 open Q4, validated by the @manual
+> two-machine soak). The retired-guard treatment for `acd-relay-auth-gate-checked` and its siblings
+> (Consequences / the ledger below) is unchanged: those guarded the *presence* broker and stay retired;
+> 34's stream server ships its OWN admission fitness (`acd-control-stream-tailnet-only`).
 
 **Context.** This is the load-bearing decision. F-3204: the central control-node WebSocket broker +
 device-code enrollment + git-remote grant + loopback-bind-needing-tunnels re-solves reachability/NAT/

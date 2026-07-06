@@ -65,6 +65,13 @@ doc: state
   its precondition). Next: fix F-3302 (`@bug`, `aof:continue` story 01) → re-verify the live join + task 05.
   Full finding + evidence in [VERIFICATION.md](VERIFICATION.md).
 
+- **Accepted `2026-07-05` → milestone `done` (owner decision, with reservations).** F-3302 fixed + closed
+  on the live tailnet (mac's migrated `umairs-mac-mini` joins the fabric); suite 2237/0; validate PASS.
+  Accepted as a **deliberate move-to-34** — 34 (`global-mesh-work-store`) supersedes 33's user-facing
+  surface (global `aof mesh ui`, fabric-composed node registry) and is where the mesh becomes openable +
+  single-machine testable. Design debt R2 (fabric ≠ discovery plane at the UI) + R3 (vestigial control node)
+  carried to 34, recorded in [RETROSPECTIVE.md](RETROSPECTIVE.md). Task 05 (full fleet e2e) not run → UAT 32.
+
 ## Notes & decisions in flight
 
 - **Pin the fabric before the coordination layer.** UAT 32's retro lesson: the relay was designed

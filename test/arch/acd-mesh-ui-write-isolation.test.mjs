@@ -241,7 +241,10 @@ export const archTests = [
       try {
         const before = await snapshotDir(repo);
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" (milestone 34 / story 03, ADR-006) — this fitness assertion
+        // is about read-only-ness of the WORKSPACE directory, orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         // Serve the page + read the aggregate several times.
         await fetch(new URL("/", url));
         for (let i = 0; i < 3; i += 1) {

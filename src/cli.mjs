@@ -502,14 +502,6 @@ async function meshCommand(args) {
     await meshVerbCli("mesh:status", rest, { positionalAllowed: false });
     return;
   }
-  // milestone 22 / story 02 — the additive git-sync dispatch branch, ABOVE the
-  // unknown-sub fallthrough. The EXACT `subcommand === "sync"` form the
-  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
-  // mesh:sync takes no positional (it syncs THIS node's records, not a named ref).
-  if (subcommand === "sync") {
-    await meshVerbCli("mesh:sync", rest, { positionalAllowed: false });
-    return;
-  }
   // milestone 23 / story 00 — the additive presence-publish dispatch branch, ABOVE the
   // unknown-sub fallthrough. The EXACT `subcommand === "heartbeat"` form the
   // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
@@ -551,17 +543,6 @@ async function meshCommand(args) {
     await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
     return;
   }
-  // milestone 27 / story 01 — the additive issuance dispatch branch, ABOVE the
-  // unknown-sub fallthrough. The EXACT `subcommand === "issue"` form the
-  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
-  // face. `aof mesh issue <ref> [--to <node|cap>] [--withdraw]` takes ONE
-  // positional (the ref) plus the --to/--withdraw extra flags (mesh:issue is the
-  // FIRST mesh:* verb that needs flags beyond --json/--config — extraFlags names
-  // them so meshVerbCli's unknown-flag guard admits exactly these two).
-  if (subcommand === "issue") {
-    await meshVerbCli("mesh:issue", rest, { positionalAllowed: true, extraFlags: ["to", "withdraw"] });
-    return;
-  }
   // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
   // the unknown-sub fallthrough (the m22 additive-branch idiom). `aof mesh ui` is a
   // CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
@@ -578,8 +559,8 @@ async function meshCommand(args) {
   // face for the bare (non-blocking probe) call. `aof mesh serve --serve` is the
   // FOREGROUND presence+sync daemon (the long-lived face over the one-shot core, NEVER
   // the bijection-probed run) — it preflights the fabric via probeFabric and
-  // refuses-with-guidance if degraded, publishes this node's presence, runs the reused
-  // startSyncLoop, and periodically re-reads resolvePeers; it binds NO listening
+  // refuses-with-guidance if degraded, publishes this node's presence, runs global work propagation, and periodically
+  // re-reads resolvePeers; it binds NO listening
   // broker socket. `aof mesh serve` (no --serve) stays the non-blocking probe.
   if (subcommand === "serve") {
     if (parseOptions(rest).serve) {
@@ -625,8 +606,7 @@ async function meshCommand(args) {
 //                     absent null the mesh:identity run returns).
 // opts.positionalAllowed: whether the sub accepts ONE id positional (identity yes,
 // status no). The recognised flags on the mesh face are --json and --config; any other
-// --flag is invalid-input, UNLESS named in opts.extraFlags (milestone 27 — mesh:issue is
-// the FIRST mesh:* verb needing flags beyond --json/--config: --to/--withdraw).
+// --flag is invalid-input, UNLESS named in opts.extraFlags.
 async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [] } = {}) {
   const command = getCommand(id);
 
@@ -678,14 +658,6 @@ async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [
         emitMeshError(true, `No node record for "${options._[0]}".`, "node-not-found");
         return;
       }
-      // FACE sync-failure split (ADR-004): a sync that could not honestly move records
-      // (a failed git pull/push) returns { synced:false, reason } — NOT a success
-      // envelope. The face surfaces it as ONE { ok:false, error, code } + a non-zero
-      // exit; a failed sync is a real error, surfaced as one.
-      if (isSyncFailure(result)) {
-        emitMeshError(true, meshSyncFailureMessage(result), result.reason);
-        return;
-      }
       console.log(JSON.stringify(command.cli.json(result), null, 2));
     } catch (error) {
       emitMeshError(true, error.message, error.code ?? "error");
@@ -700,30 +672,9 @@ async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [
     emitMeshError(false, `No node record for "${options._[0]}".`, "node-not-found");
     return;
   }
-  // A failed sync (synced:false) is surfaced as a face error (stderr + non-zero exit),
-  // never rendered as if records moved.
-  if (isSyncFailure(result)) {
-    emitMeshError(false, meshSyncFailureMessage(result), result.reason);
-    return;
-  }
   console.log(command.cli.render(result));
 }
 
-// A sync-result envelope that the transport marked as a FAILURE (a non-zero git
-// pull/push): the engine did not honestly move records, so the face must not report it
-// as a success. (`synced === false` is the failure flag the transport sets only on the
-// pull-failed/push-failed paths; the happy + no-git-repo envelopes never carry it.)
-function isSyncFailure(result) {
-  return result != null && typeof result === "object" && result.synced === false;
-}
-
-// A human-readable message for a failed sync, naming the structured reason.
-function meshSyncFailureMessage(result) {
-  const reason = result.reason ?? "error";
-  if (reason === "push-failed") return "mesh:sync failed: git push was rejected (records were NOT pushed).";
-  if (reason === "pull-failed") return "mesh:sync failed: git pull failed (peer records were NOT read back).";
-  return `mesh:sync failed (${reason}).`;
-}
 
 // Emit a mesh face error: under --json ONE { ok:false, error, code } document on stdout
 // (+ non-zero exit); otherwise the message on stderr (+ non-zero exit).
@@ -978,22 +929,48 @@ async function workUiCommand(args) {
   });
 }
 
-// `aof mesh ui [--port 4181]` — the read-only fleet mission-control web surface
-// (milestone 25 / story 02; ADR-003). A CLI-ONLY serve verb (a sibling to
-// `aof work ui`), NOT a registered mesh:* command. It stands up its OWN thin fleet
-// serve-face (serveMeshUi) — one 127.0.0.1 server serving the ui/dist bundle with
-// ?mode=fleet + the single GET /api/mesh/status route (invoke("mesh:status")) —
-// and mirrors the board's ui-build-missing + EADDRINUSE friendly refusals (never a
-// stack trace). Default port 4181 clears assets-ui 4177/4178 + board 4180, so the
-// fleet view runs ON TOP of a board on one machine.
+// `aof mesh ui [--port 4181] [--local]` — the read-only fleet mission-control web
+// surface (milestone 25 / story 02, ADR-003; milestone 34 / story 03, ADR-006). A
+// CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
+// command. It stands up its OWN thin fleet serve-face (serveMeshUi) — one
+// 127.0.0.1 server serving the ui/dist bundle with ?mode=fleet + the single
+// GET /api/mesh/status route — and mirrors the board's ui-build-missing +
+// EADDRINUSE friendly refusals (never a stack trace). Default port 4181 clears
+// assets-ui 4177/4178 + board 4180, so the fleet view runs ON TOP of a board on
+// one machine.
+//
+// milestone 34 / story 03 (ADR-006) — `aof mesh ui` is GLOBAL by default: it
+// passes scope "global" to serveMeshUi and does NOT require the current
+// directory to be a mesh-enabled workspace to start (serveMeshUi loads no
+// workspace up front; the global read only opens the machine-wide projection
+// store). `--local` passes scope "local" + this directory as projectDir — the
+// pre-existing focused-workspace view, unchanged. The announced browser URL
+// always names the selected scope (`?mode=fleet&scope=<global|local>`) so a
+// bookmarked/shared link reproduces the same view. An unrecognized flag (e.g.
+// `--workspace`) is rejected BEFORE serveMeshUi is ever called — the CLI's own
+// input-validation guard, mirroring meshVerbCli's "Unknown option" phrasing.
+const MESH_UI_FLAGS = new Set(["port", "local", "target"]);
+
 async function meshUiCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0])
+    .map((flag) => flag.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()));
+  const unknownFlag = flagTokens.find((flag) => !MESH_UI_FLAGS.has(flag));
+  if (unknownFlag) {
+    console.error(`Unknown option "--${unknownFlag}".`);
+    process.exitCode = 1;
+    return;
+  }
+
   const options = parseOptions(args);
   const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_UI_PORT), 10);
   const projectDir = path.resolve(options.target ?? process.cwd());
+  const scope = options.local ? "local" : "global";
 
   let session;
   try {
-    session = await serveMeshUi({ projectDir, port });
+    session = await serveMeshUi({ projectDir, port, scope });
   } catch (error) {
     if (error.code === "ui-build-missing") {
       console.error(error.message);
@@ -1010,7 +987,7 @@ async function meshUiCommand(args) {
 
   const { server, fleetUrl } = session;
   console.log("AOF mesh ui is running locally.");
-  console.log(`Open this URL in your browser: ${fleetUrl}`);
+  console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the fleet view.");
 
@@ -1029,7 +1006,7 @@ async function meshUiCommand(args) {
 // 01, ADR-003.1/.3): the long-lived `--serve` face over the one-shot launcher core
 // (src/mesh-launcher.mjs's startLauncher). Preflights the fabric and refuses-with-
 // guidance if degraded (never starting a loop over a dead fabric); a healthy preflight
-// publishes this node's presence, starts the reused mesh:sync cadence loop, and
+// publishes this node's presence, starts global work propagation, and
 // periodically re-reads the fabric peer-map — binding NO listening broker socket (the
 // "bind" is the fabric self-address). Traps SIGINT/SIGTERM to stop cleanly.
 async function meshServeDaemonCommand(args) {

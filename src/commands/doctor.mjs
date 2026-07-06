@@ -52,11 +52,24 @@ export const doctorCommand = {
     } catch {
       rawCommittedMesh = {}; // an unreadable/torn committed config has no identity to warn about here.
     }
+    // milestone 34 / story 00 — does a LEGACY per-workspace identity sidecar still exist
+    // (should be migrated up to the machine-wide global home)? Read at the impure edge,
+    // handed to the pure check-group as plain data (never a read the engine performs).
+    let legacyIdentitySidecarPresent = false;
+    try {
+      const { sidecarPathFor } = await import("../node-identity.mjs");
+      const { existsSync } = await import("node:fs");
+      legacyIdentitySidecarPresent = existsSync(sidecarPathFor(ctx.workspace.aofDir));
+    } catch {
+      legacyIdentitySidecarPresent = false;
+    }
     const findings = await doctorWork(ctx.workspace.workDir, ctx.workspace.config, scope, {
       now: Date.now(), // the impure edge — the engine stays wall-clock-free
       staleWindow: staleWindowFromConfig(ctx.workspace.config),
       rawCommittedMesh,
       committedConfigPath: ctx.workspace.configPath,
+      legacyIdentitySidecarPresent,
+      legacyIdentitySidecarPath: ctx.workspace.aofDir ? `${ctx.workspace.aofDir}/mesh/identity.json` : null,
     });
 
     // milestone 33 / story 01 (ADR-001.4 / ADR-003.4, task 04) — the fabric preflight

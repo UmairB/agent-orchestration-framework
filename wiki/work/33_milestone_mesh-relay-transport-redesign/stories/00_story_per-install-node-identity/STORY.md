@@ -4,10 +4,10 @@ number: 00
 slug: per-install-node-identity
 title: "Per-install node identity — split config.mesh into fleet-shared (committed) vs per-install identity (git-ignored sidecar); derive from hostname; hydrate at loadWorkspace; back-compat fallback + doctor migrate-warn; self-heal on hostname mismatch (F-3203)"
 parent: 33
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

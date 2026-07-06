@@ -123,7 +123,10 @@ export const meshUiServeTests = [
       try {
         let url;
         let fleetUrl;
-        ({ server, url, fleetUrl } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — this scenario is about serve MECHANICS (one origin, the
+        // static bundle + the API), not the global-vs-local data source, so it stays
+        // isolated from whatever global store (if any) exists on the host machine.
+        ({ server, url, fleetUrl } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         const address = server.address();
         assert.equal(address.address, "127.0.0.1", "the server binds 127.0.0.1");
         // the announce carries the ?mode=fleet selector (the single bundle, fleet mode)
@@ -224,15 +227,22 @@ export const meshUiServeTests = [
   // ═══ Scenario: GET /api/mesh/status answers the mesh:status aggregate ═══════
   // The load-bearing PARITY assertion (one command, two faces): the web payload
   // deep-equals what `aof mesh status --json` prints for the SAME fixture.
+  //
+  // milestone 34 / story 03 (ADR-006) — GET /api/mesh/status now DEFAULTS to the
+  // GLOBAL projection read; the pre-existing mesh:status parity contract this test
+  // asserts is the LOCAL scope's job now, so the fixture explicitly starts
+  // scope:"local" (the CLI's --local) to keep testing the SAME byte-unchanged
+  // aggregate this scenario has always locked down (mesh-ui-global-scope.test.mjs
+  // covers the NEW global-default read).
   {
-    name: "mesh-ui-serve/00 GET /api/mesh/status carries the nodes-and-boards aggregate and deep-equals `aof mesh status --json`",
+    name: "mesh-ui-serve/00 GET /api/mesh/status carries the nodes-and-boards aggregate and deep-equals `aof mesh status --json` (scope: local)",
     async run() {
       const { repo } = await makeRepo();
       const root = await makeRepoRootWithDist();
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         const response = await fetch(new URL("/api/mesh/status", url));
         assert.equal(response.status, 200);
         const payload = await response.json();
@@ -242,9 +252,13 @@ export const meshUiServeTests = [
         assert.ok(payload.nodes.some((n) => n.nodeId === "mac-studio"), "the planted node surfaces");
         assert.ok(payload.boards.some((b) => b.ref === "let-shield"), "the registered board surfaces");
 
-        // deep-equals the CLI --json for the same fixture (the parity oracle)
+        // deep-equals the CLI --json for the same fixture (the parity oracle),
+        // MINUS the scope/currentWorkspace envelope fields the local route now adds.
         const cli = cliStatusJson(repo);
-        assert.deepEqual(payload, cli, "the /api/mesh/status payload deep-equals `aof mesh status --json` for the same fixture");
+        const { scope, currentWorkspace, ...rest } = payload;
+        assert.equal(scope, "local");
+        assert.equal(currentWorkspace, path.resolve(repo));
+        assert.deepEqual(rest, cli, "the /api/mesh/status payload (minus the scope envelope) deep-equals `aof mesh status --json` for the same fixture");
       } finally {
         if (server) await closeServer(server);
         await rm(repo, { recursive: true, force: true });
@@ -262,7 +276,9 @@ export const meshUiServeTests = [
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — the /api/work disjoint-namespace concern is orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         for (const route of ["/api/work/list", "/api/work/doc?ref=03&doc=SPEC", "/api/work/run-status?ref=03"]) {
           const response = await fetch(new URL(route, url));
           assert.equal(response.status, 404, `${route} is a 404 on the fleet face (no /api/work)`);
@@ -288,7 +304,9 @@ export const meshUiServeTests = [
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — the unknown-route survival concern is orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         for (const route of routes) {
           const response = await fetch(new URL(route, url));
           assert.equal(response.status, 404, `${route} is a 404`);

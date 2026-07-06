@@ -1,8 +1,8 @@
 @executable @cli @work @distribution
-Feature: Successful work and mesh mutations publish one workspace snapshot to the global projection
+Feature: Successful work mutations publish one workspace snapshot to the global projection
   In order for the machine-wide mesh view to converge after local changes
   mutation commands publish a workspace snapshot after their canonical local write succeeds
-  so that the global store follows local work/run/mesh records without becoming the write authority.
+  so that the global store follows local work/run records without becoming the write authority.
 
   Background:
     Given a mesh-enabled workspace with config.mesh.enabled true
@@ -20,7 +20,6 @@ Feature: Successful work and mesh mutations publish one workspace snapshot to th
       | command           |
       | work:run-start    |
       | work:run-complete |
-      | mesh:issue        |
       | work:feedback     |
 
   Scenario Outline: failed or refused commands do not publish
@@ -34,21 +33,11 @@ Feature: Successful work and mesh mutations publish one workspace snapshot to th
       | command           |
       | work:run-start    |
       | work:run-complete |
-      | mesh:issue        |
       | work:feedback     |
 
-  Scenario: mesh issue push failure still publishes the durable local directive state
-    Given mesh:issue writes its directive locally
-    And the subsequent mesh sync push fails with code "push-failed"
-    When mesh:issue runs
-    Then mesh:issue returns the original "push-failed" error
-    And the global publisher is called once after the directive write
-    And the projected workspace snapshot includes the locally durable directive
-
-  Scenario: run-complete publishes after lease release and rollback side effects
+  Scenario: run-complete publishes after rollback side effects
     Given work:run-complete transitions a run to failed
-    And the command releases its mesh lease
     And it rolls the item status back to not-started
     When work:run-complete runs
-    Then the global publisher is called after the run transition, lease release, and status rollback
+    Then the global publisher is called after the run transition and status rollback
     And the projected snapshot sees the terminal run and the rolled-back item status

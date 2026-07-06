@@ -4,10 +4,10 @@ number: 00
 slug: global-store-substrate
 title: "Global store substrate — path geometry, SQLite projection, schema versioning, rebuild"
 parent: 34
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -24,21 +24,21 @@ canonical workspace work records.
 
 ## Tasks
 
-- [ ] `tasks/00_global-mesh-paths.feature` — `@executable` — global mesh path geometry derives from
+- [x] `tasks/00_global-mesh-paths.feature` — `@executable` — global mesh path geometry derives from
   `globalWorkspacePaths()` / `AOF_GLOBAL_HOME`, is independent of the current project directory, and keeps
   project `.aof` distinct from global mesh state.
-- [ ] `tasks/01_sqlite-store-open-and-migrate.feature` — `@executable` — the projection store opens under
+- [x] `tasks/01_sqlite-store-open-and-migrate.feature` — `@executable` — the projection store opens under
   the global mesh work root, creates/migrates schema version metadata, and refuses cleanly when SQLite is
   unavailable or the schema is newer than this build supports.
-- [ ] `tasks/02_rebuild-workspace-projection.feature` — `@executable` — publishing a workspace snapshot
+- [x] `tasks/02_rebuild-workspace-projection.feature` — `@executable` — publishing a workspace snapshot
   idempotently replaces that workspace's derived rows, removes stale rows, preserves other workspaces, and
   leaves canonical work record docs untouched.
-- [ ] `tasks/03_projection-query-api.feature` — `@executable` — the query API returns global and
+- [x] `tasks/03_projection-query-api.feature` — `@executable` — the query API returns global and
   workspace-scoped work views, includes projection freshness/errors, and exposes no mutation surface.
-- [ ] **Fitness `acd-global-mesh-paths-home`** — structural guard: no global mesh store path is derived
+- [x] **Fitness `acd-global-mesh-paths-home`** — structural guard: no global mesh store path is derived
   from `os.homedir()` or a literal `~/.aof`; production code must route through the single global mesh path
   helper.
-- [ ] **Fitness `acd-global-store-no-native-dep`** — structural guard: this story does not add a native
+- [x] **Fitness `acd-global-store-no-native-dep`** — structural guard: this story does not add a native
   SQLite npm dependency; package metadata remains unchanged unless a later ADR explicitly authorizes a
   dependency change and supply-chain audit.
 

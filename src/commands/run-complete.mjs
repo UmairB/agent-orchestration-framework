@@ -13,14 +13,7 @@ import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { completeRun } from "../run-store.mjs";
 import { rollbackItemStatus } from "../work.mjs";
-// m26/ADR-003.2 — the holder's lease release at completion: an OWN-PATH state write
-// (its own claim file flips state:"released" — never a delete, never a foreign write),
-// wired here on ALL THREE terminal outcomes (done|failed|cancelled: a failed or
-// cancelled run must hand the item back too, or a crash-free failure would wedge the
-// item exactly like a crash). Gated on config.mesh — an unconfigured install never
-// reads or writes a lease (byte-identical to today).
-import { releaseLease } from "../mesh-lease.mjs";
-import { meshNodeIdOf } from "./mesh-gate.mjs";
+import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
 const VALID_OUTCOMES = new Set(["done", "failed", "cancelled"]);
@@ -68,20 +61,6 @@ export const runCompleteCommand = {
     const reason = typeof input.reason === "string" ? input.reason : null;
     const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason, now: input.now });
 
-    // (3.5) THE LEASE RELEASE (m26/ADR-003.2 — the lifecycle behind the EXISTING verb,
-    // zero new commands): under the config.mesh gate, flip THIS node's OWN claim file
-    // for the item to state:"released" — on EVERY terminal outcome (the run above just
-    // reached done|failed|cancelled), so the item reads claimable again the moment its
-    // run terminates. An own-path STATE write (never a delete — releaseLease is
-    // absence-tolerant: no own claim ⇒ a clean no-op). Unconfigured mesh ⇒ the whole
-    // branch is skipped: no lease read, no lease write, byte-identical to today. The
-    // gate is the ONE shared predicate (mesh-gate.mjs) — it can never drift from the
-    // claim path's.
-    const meshNodeId = meshNodeIdOf(ctx.workspace.config);
-    if (meshNodeId) {
-      await releaseLease(ctx.workspace, item.ref, meshNodeId);
-    }
-
     // (4) Status rollback (20/ADR-005): a run completed as FAILED rolls its in-progress
     // item back to not-started so the stream is left honest — the failed path CALLS the
     // work.mjs writer (best-effort: an item not in-progress / without a record doc is a
@@ -93,7 +72,7 @@ export const runCompleteCommand = {
         if (error.code !== "rollback-not-applicable") throw error;
       }
     }
-    return record;
+    return await withGlobalWorkPropagation(record, ctx.workspace, ctx);
   },
 
   cli: {
@@ -106,7 +85,7 @@ export const runCompleteCommand = {
     }),
 
     // Confirm the terminal state the transition reached.
-    render: (result) => `Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.`,
+    render: (result) => renderWithPropagationWarnings(`Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.`, result),
 
     // No path in the result (records carry refs) — passes through unchanged.
     json: (result) => result,

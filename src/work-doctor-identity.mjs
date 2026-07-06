@@ -21,18 +21,33 @@
 //   Anchored at the committed config path; the message names the sidecar target
 //   (.aof/mesh/identity.json) and the F-3203 migration.
 export function meshIdentityCommittedGroup(snapshot, ctx) {
+  const findings = [];
+
   const mesh = ctx?.rawCommittedMesh ?? {};
   const hasCommittedIdentity = "nodeId" in mesh || "salt" in mesh;
-  if (!hasCommittedIdentity) return [];
-
-  const path = ctx?.committedConfigPath ?? snapshot.workDir;
-  return [
-    {
+  if (hasCommittedIdentity) {
+    findings.push({
       code: "mesh-identity-committed",
       severity: "warn",
-      path,
+      path: ctx?.committedConfigPath ?? snapshot.workDir,
       message:
-        "per-install identity is in committed config — migrate it to .aof/mesh/identity.json (F-3203)",
-    },
-  ];
+        "per-install identity is in committed config — migrate it to the machine-wide identity in the global AOF home (F-3203 / 34-05)",
+    });
+  }
+
+  // milestone 34 / story 00 — a LEGACY per-workspace identity sidecar
+  // (.aof/mesh/identity.json under this project's aofDir) is per-PROJECT, but identity is
+  // now machine-wide (one nodeId per machine, in the global AOF home). Warn so the
+  // operator migrates it up (migrateIdentityToGlobal) rather than carrying a per-project id.
+  if (ctx?.legacyIdentitySidecarPresent === true) {
+    findings.push({
+      code: "mesh-identity-workspace-local",
+      severity: "warn",
+      path: ctx?.legacyIdentitySidecarPath ?? snapshot.workDir,
+      message:
+        "node identity is stored per-workspace — migrate it to the machine-wide global AOF home so every workspace shares one node id (34-05)",
+    });
+  }
+
+  return findings;
 }

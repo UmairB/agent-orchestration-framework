@@ -4,10 +4,10 @@ number: 02
 slug: global-node-registry
 title: "Global node registry — control and worker node descriptors under global AOF"
 parent: 34
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-05
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -24,16 +24,16 @@ can service without opening each workspace by hand.
 
 ## Tasks
 
-- [ ] [00 · node descriptor materialization](tasks/00_node-descriptor-materialization.feature)
-- [ ] [01 · workspace descriptor materialization](tasks/01_workspace-descriptor-materialization.feature)
-- [ ] [02 · descriptor redaction](tasks/02_descriptor-redaction.feature)
-- [ ] [03 · freshness and query API](tasks/03_freshness-and-query-api.feature)
+- [x] [00 · node descriptor materialization](tasks/00_node-descriptor-materialization.feature)
+- [x] [01 · workspace descriptor materialization](tasks/01_workspace-descriptor-materialization.feature)
+- [x] [02 · descriptor redaction](tasks/02_descriptor-redaction.feature)
+- [x] [03 · freshness and query API](tasks/03_freshness-and-query-api.feature)
 
 ## Fitness units
 
-- `acd-global-node-descriptors-redact-secrets` — global node/workspace descriptors and SQLite rows must not
+- [x] `acd-global-node-descriptors-redact-secrets` — global node/workspace descriptors and SQLite rows must not
   contain raw relay credentials, pending invite material, token/hash fields, or secret-looking additive keys.
-- `acd-global-node-registry-projection-only` — query APIs for global node/workspace detail read from the
+- [x] `acd-global-node-registry-projection-only` — query APIs for global node/workspace detail read from the
   global projection/index and descriptor files, not by opening every workspace on each UI request.
 
 ## Notes

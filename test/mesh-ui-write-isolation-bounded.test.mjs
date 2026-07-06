@@ -158,7 +158,10 @@ async function withPlainFleetServer(fn) {
   let server;
   try {
     let url;
-    ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: distRoot }));
+    // scope:"local" (milestone 34 / story 03, ADR-006) — this suite's concern is
+    // write-isolation (method rejection, no fs mutation), orthogonal to
+    // global-vs-local; isolated from the ambient global store.
+    ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: distRoot, scope: "local" }));
     await fn({ server, url, workDir, repo });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
@@ -174,7 +177,8 @@ async function withRemoteFleetServer(fn) {
   let server;
   try {
     let url;
-    ({ server, url } = await serveMeshUi({ projectDir: fx.root, port: 0, repoRoot: distRoot }));
+    // scope:"local" — same isolation rationale as withPlainFleetServer above.
+    ({ server, url } = await serveMeshUi({ projectDir: fx.root, port: 0, repoRoot: distRoot, scope: "local" }));
     await fn({ server, url, root: fx.root });
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));

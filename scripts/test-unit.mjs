@@ -15,10 +15,46 @@ import { schemaTests } from "../test/schema.test.mjs";
 import { adapterWarningTests } from "../test/adapter-warnings.test.mjs";
 import { packageTests } from "../test/packages.test.mjs";
 import { workTests } from "../test/work.test.mjs";
+import { globalWorkStoreTests } from "../test/global-work-store.test.mjs";
+import { globalWorkPropagationTests } from "../test/global-work-propagation.test.mjs";
+import { globalNodeRegistryTests } from "../test/global-node-registry.test.mjs";
 import { resolveItemsTests } from "../test/work-resolve.test.mjs";
 import { validateStreamTests } from "../test/work-validate.test.mjs";
 import { orderWorkTests } from "../test/work-next.test.mjs";
 import { archTests as workContentFreeDiscoveryTests } from "../test/arch/work-content-free-discovery.test.mjs";
+import { archTests as acdGlobalMeshPathsHomeTests } from "../test/arch/acd-global-mesh-paths-home.test.mjs";
+import { archTests as acdGlobalStoreNoNativeDepTests } from "../test/arch/acd-global-store-no-native-dep.test.mjs";
+import { archTests as acdGlobalPropagationSinglePredicateTests } from "../test/arch/acd-global-propagation-single-predicate.test.mjs";
+import { archTests as acdGlobalPublisherSingleSeamTests } from "../test/arch/acd-global-publisher-single-seam.test.mjs";
+import { archTests as acdGlobalNodeDescriptorsRedactSecretsTests } from "../test/arch/acd-global-node-descriptors-redact-secrets.test.mjs";
+import { archTests as acdGlobalNodeRegistryProjectionOnlyTests } from "../test/arch/acd-global-node-registry-projection-only.test.mjs";
+// milestone 34 / story 03 — mesh UI global scope (ADR-006): the global-mesh-query
+// composition seam + its own tests, the mesh-ui-global-scope CLI/API behaviour
+// tests, the pure fleet scope.mjs helper tests, and the story's 3 fitness units.
+import { globalMeshQueryTests } from "../test/global-mesh-query.test.mjs";
+import { meshUiGlobalScopeTests } from "../test/mesh-ui-global-scope.test.mjs";
+import { fleetScopeTests } from "../test/fleet-scope.test.mjs";
+import { archTests as acdMeshUiGlobalDefaultTests } from "../test/arch/acd-mesh-ui-global-default.test.mjs";
+import { archTests as acdMeshUiLocalFilterPreservesStatusTests } from "../test/arch/acd-mesh-ui-local-filter-preserves-status.test.mjs";
+import { archTests as acdMeshUiScopeVisibleTests } from "../test/arch/acd-mesh-ui-scope-visible.test.mjs";
+// milestone 34 / story 04 — worker live-state stream to control node (ADR-007): the
+// worker-role/control-address resolution, the persistent worker stream client
+// (snapshot-first-then-deltas, reconnect+backoff, failure isolation), the always-on
+// control-node stream server (tailnet-only admission, apply+redact, liveness), and
+// the stream retry/reconciliation/freshness lanes, plus the story's 4 fitness
+// units. Tasks 00–03 are @executable; task 04 (the real two-machine soak) is @manual
+// and deliberately has no test file here.
+import { workerRoleAddressTests } from "../test/worker-role-address.test.mjs";
+import { workerStreamClientTests } from "../test/worker-stream-client.test.mjs";
+import { controlStreamServerTests } from "../test/control-stream-server.test.mjs";
+import { meshLauncherStreamRoleTests } from "../test/mesh-launcher-stream-role.test.mjs";
+import { globalNodeIdentityTests } from "../test/global-node-identity.test.mjs";
+import { archTests as acdGlobalNodeIdentityHomeTests } from "../test/arch/acd-global-node-identity-home.test.mjs";
+import { archTests as acdWorkerStreamSinglePredicateTests } from "../test/arch/acd-worker-stream-single-predicate.test.mjs";
+import { archTests as acdWorkerStreamFabricAddressedTests } from "../test/arch/acd-worker-stream-fabric-addressed.test.mjs";
+import { archTests as acdWorkerStreamNonBlockingTests } from "../test/arch/acd-worker-stream-non-blocking.test.mjs";
+import { archTests as acdControlStreamTailnetOnlyTests } from "../test/arch/acd-control-stream-tailnet-only.test.mjs";
+import { archTests as acdControlStreamAddressBoundTests } from "../test/arch/acd-control-stream-address-bound.test.mjs";
 import { bundleTests } from "../test/bundle.test.mjs";
 import { workInitTests } from "../test/work-init.test.mjs";
 import { workUpdateTests } from "../test/work-update.test.mjs";
@@ -75,10 +111,36 @@ const tests = [
   ...adapterWarningTests,
   ...packageTests,
   ...workTests,
+  ...globalWorkStoreTests,
+  ...globalWorkPropagationTests,
   ...resolveItemsTests,
   ...validateStreamTests,
   ...orderWorkTests,
   ...workContentFreeDiscoveryTests,
+  ...acdGlobalMeshPathsHomeTests,
+  ...acdGlobalStoreNoNativeDepTests,
+  ...acdGlobalPropagationSinglePredicateTests,
+  ...acdGlobalPublisherSingleSeamTests,
+  ...globalNodeRegistryTests,
+  ...acdGlobalNodeDescriptorsRedactSecretsTests,
+  ...acdGlobalNodeRegistryProjectionOnlyTests,
+  ...globalMeshQueryTests,
+  ...meshUiGlobalScopeTests,
+  ...fleetScopeTests,
+  ...acdMeshUiGlobalDefaultTests,
+  ...acdMeshUiLocalFilterPreservesStatusTests,
+  ...acdMeshUiScopeVisibleTests,
+  ...workerRoleAddressTests,
+  ...workerStreamClientTests,
+  ...controlStreamServerTests,
+  ...meshLauncherStreamRoleTests,
+  ...globalNodeIdentityTests,
+  ...acdGlobalNodeIdentityHomeTests,
+  ...acdWorkerStreamSinglePredicateTests,
+  ...acdWorkerStreamFabricAddressedTests,
+  ...acdWorkerStreamNonBlockingTests,
+  ...acdControlStreamTailnetOnlyTests,
+  ...acdControlStreamAddressBoundTests,
   ...bundleTests,
   ...workInitTests,
   ...workUpdateTests,
@@ -145,7 +207,21 @@ const tests = [
 
 let failures = 0;
 
+// Per-test hermetic global AOF home (34/story 00): the node identity is now MACHINE-WIDE
+// (globalMeshPaths().identityPath, honoring AOF_GLOBAL_HOME). In a single-process runner a
+// test that mints identity would otherwise pollute the real machine home AND override every
+// later test's committed config.mesh.nodeId. Give each test its OWN empty global home so
+// identity/global-store state never leaks across tests and the real machine is never touched.
+// (A test that sets AOF_GLOBAL_HOME itself just overrides this for its own duration.)
+const { tmpdir } = await import("node:os");
+const { join } = await import("node:path");
+const { rmSync } = await import("node:fs");
+const ghRoot = join(tmpdir(), `aof-test-gh-${process.pid}`);
+let ghIndex = 0;
+
 for (const { name, run } of tests) {
+  const prevHome = process.env.AOF_GLOBAL_HOME;
+  process.env.AOF_GLOBAL_HOME = join(ghRoot, `t-${ghIndex++}`);
   try {
     await run();
     console.log(`ok - ${name}`);
@@ -153,8 +229,12 @@ for (const { name, run } of tests) {
     failures += 1;
     console.error(`not ok - ${name}`);
     console.error(error.stack ?? error.message);
+  } finally {
+    if (prevHome === undefined) delete process.env.AOF_GLOBAL_HOME;
+    else process.env.AOF_GLOBAL_HOME = prevHome;
   }
 }
+try { rmSync(ghRoot, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
 
 if (failures > 0) {
   process.exitCode = 1;

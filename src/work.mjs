@@ -14,7 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { findProjectConfig } from "./workspace.mjs";
+import { findProjectConfig, globalMeshPaths } from "./workspace.mjs";
 import { readJson, writeText } from "./fs.mjs";
 // milestone 33 / story 00 (ADR-004, F-3203) — the per-install identity hydration
 // seam. sidecarPathFor is the ONE sidecar-path builder (never re-derived here);
@@ -120,7 +120,7 @@ export async function healIdentitySidecar({ sidecar = {}, hostname, sidecarPath,
 // `hostname` is the injectable current-hostname override (mirrors deriveNodeId's own
 // injected-hostname seam) — production supplies os.hostname() when absent; tests drive
 // the mismatch deterministically with two fixture strings.
-export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostname } = {}) {
+export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostname, env } = {}) {
   const configPath = await findProjectConfig(cwd, explicitConfig);
   let config = {};
   try {
@@ -137,15 +137,35 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostn
   // decision superseding 22/ADR-002+003's work-stream-co-location).
   const aofDir = path.basename(configDir) === ".aof" ? configDir : path.join(projectRoot, ".aof");
 
-  // The per-install sidecar — read via the ONE tolerant sidecar read (readSidecar,
-  // 22/R2), the SAME degrade-to-{} idiom the config read above uses inline (a torn/
-  // absent/malformed sidecar never crashes loadWorkspace).
-  const sidecarPath = sidecarPathFor(aofDir);
-  let sidecar = await readSidecar(sidecarPath);
+  // The per-install identity (34/story 00) — read from the MACHINE-WIDE GLOBAL home
+  // (globalMeshPaths().identityPath, honoring AOF_GLOBAL_HOME) so one identity is shared
+  // by every workspace on this machine and the global work store keyed on nodeId is
+  // coherent. Read via the ONE tolerant sidecar read (readSidecar, 22/R2) — an absent/
+  // torn/malformed file degrades to {} and never crashes loadWorkspace. Back-compat: a
+  // machine that has not migrated still carries a LEGACY per-workspace sidecar
+  // (.aof/mesh/identity.json under aofDir); when the global identity is absent we read
+  // that as a fallback (read-only — the migrate up to global is a `work doctor` action,
+  // never a silent load-time write into the global home). Precedence: global > legacy
+  // per-workspace sidecar > committed config.mesh > absent (a later deriveNodeId mints
+  // to the global home).
+  const globalMesh = globalMeshPaths({ env });
+  const globalIdentityPath = globalMesh.identityPath;
+  let sidecarPath = globalIdentityPath;
+  let sidecar = await readSidecar(globalIdentityPath);
+  if (!(typeof sidecar.nodeId === "string" && sidecar.nodeId.length > 0)) {
+    const legacyPath = sidecarPathFor(aofDir);
+    const legacy = await readSidecar(legacyPath);
+    if (typeof legacy.nodeId === "string" && legacy.nodeId.length > 0) {
+      sidecar = legacy;
+      sidecarPath = legacyPath;
+    }
+  }
 
   // Self-heal (ADR-004.5) — see healIdentitySidecar's own header for the predicate;
-  // this is the ONE sanctioned load-time sidecar write (task 03's carve-out from
-  // "loadWorkspace writes no file"), narrowly discriminated by the sidecar schema.
+  // this is the ONE sanctioned load-time identity write (task 03's carve-out from
+  // "loadWorkspace writes no file"), narrowly discriminated by the sidecar schema, and
+  // it rewrites WHICHEVER identity we read (the global home, or a legacy sidecar still
+  // in place). On the common path — same machine, same hostname — it is a pure read.
   const currentHostname = typeof hostname === "string" ? hostname : os.hostname();
   sidecar = await healIdentitySidecar({ sidecar, hostname: currentHostname, sidecarPath });
 
@@ -164,7 +184,13 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostn
     config = { ...config, mesh: meshOverlay };
   }
 
-  return { configPath, config, projectRoot, workDir, aofDir };
+  // Expose the MACHINE-WIDE identity write target (34/story 00) so every minting caller
+  // (mesh:identity / mesh:heartbeat / the launcher) persists the id+salt to the SAME
+  // global home this hydration read from — resolved with the SAME env, so a test that
+  // injects AOF_GLOBAL_HOME through loadWorkspace gets a hermetic, machine-shared identity
+  // for free. It is ALWAYS the global path (never the legacy sidecar); the legacy sidecar
+  // is a read-only fallback here and is migrated up by `work doctor`, not by a mint.
+  return { configPath, config, projectRoot, workDir, aofDir, identityPath: globalIdentityPath, globalMeshRoot: globalMesh.meshRoot };
 }
 
 async function readDirSafe(dir) {

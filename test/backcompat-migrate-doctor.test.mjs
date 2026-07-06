@@ -70,7 +70,9 @@ export const backcompatMigrateDoctorTests = [
             assert.ok(finding, `a warn IS emitted for committed mesh ${JSON.stringify(committedMesh)}`);
             assert.equal(finding.severity, "warn");
             assert.equal(finding.path, configPath, "anchored at the committed config path");
-            assert.match(finding.message, /\.aof\/mesh\/identity\.json/, "message names the sidecar target");
+            // 34/story 05: identity is now MACHINE-WIDE (global AOF home), so the migrate
+            // target the warn names is the global home, not the legacy per-workspace sidecar.
+            assert.match(finding.message, /global AOF home/, "message names the machine-wide global home as the migrate target");
             assert.match(finding.message, /F-3203/, "message names the F-3203 migration");
           } else {
             assert.equal(finding, undefined, `NO warn is emitted for committed mesh ${JSON.stringify(committedMesh)}`);
