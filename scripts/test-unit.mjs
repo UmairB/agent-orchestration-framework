@@ -48,6 +48,7 @@ import { workerRoleAddressTests } from "../test/worker-role-address.test.mjs";
 import { workerStreamClientTests } from "../test/worker-stream-client.test.mjs";
 import { controlStreamServerTests } from "../test/control-stream-server.test.mjs";
 import { meshLauncherStreamRoleTests } from "../test/mesh-launcher-stream-role.test.mjs";
+import { meshLauncherLockTests } from "../test/mesh-launcher-lock.test.mjs";
 import { globalNodeIdentityTests } from "../test/global-node-identity.test.mjs";
 import { archTests as acdGlobalNodeIdentityHomeTests } from "../test/arch/acd-global-node-identity-home.test.mjs";
 import { archTests as acdWorkerStreamSinglePredicateTests } from "../test/arch/acd-worker-stream-single-predicate.test.mjs";
@@ -134,6 +135,7 @@ const tests = [
   ...workerStreamClientTests,
   ...controlStreamServerTests,
   ...meshLauncherStreamRoleTests,
+  ...meshLauncherLockTests,
   ...globalNodeIdentityTests,
   ...acdGlobalNodeIdentityHomeTests,
   ...acdWorkerStreamSinglePredicateTests,

@@ -29,6 +29,7 @@ import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 // src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
 // does NOT run it (command-core.mjs: the registered run is the non-blocking probe).
 import { startLauncher } from "./mesh-launcher.mjs";
+import { acquireMeshLauncherLock } from "./mesh-launcher-lock.mjs";
 import { initPlanning } from "./planning-init.mjs";
 // milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
 // (the dev-only vite re-exec route) + the version string for `aof --version`
@@ -1012,29 +1013,40 @@ async function meshUiCommand(args) {
 async function meshServeDaemonCommand(args) {
   const options = parseOptions(args);
   const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  const handle = await startLauncher(workspace, {});
-  if (handle.refused) {
-    console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
-    for (const line of handle.guidance.lines) console.error(`  ${line}`);
+  const launcherLock = await acquireMeshLauncherLock({ env: process.env });
+  if (!launcherLock.acquired) {
+    const pid = launcherLock.pid != null ? ` (pid ${launcherLock.pid})` : "";
+    console.error(`AOF mesh launcher is already running${pid}.`);
     process.exitCode = 1;
     return;
   }
 
-  console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
-  console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
-  console.log("Press Ctrl+C to stop the launcher.");
+  let handle = null;
+  try {
+    handle = await startLauncher(workspace, {});
+    if (handle.refused) {
+      console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
+      for (const line of handle.guidance.lines) console.error(`  ${line}`);
+      process.exitCode = 1;
+      return;
+    }
 
-  await new Promise((resolve) => {
-    const shutdown = () => {
-      handle.stop();
-      resolve();
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
+    console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
+    console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
+    console.log("Press Ctrl+C to stop the launcher.");
+
+    await new Promise((resolve) => {
+      const shutdown = () => {
+        handle.stop();
+        resolve();
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
+  } finally {
+    await launcherLock.release();
+  }
 }
-
 // `aof work use-headroom [dir]` — enable the headroom plugin (config-only read-merge-
 // write of work.headroom; never the lock). PATH-checks headroom and prints a one-line
 // install hint when it is absent, but always writes the config and never installs (ADR-004/005).

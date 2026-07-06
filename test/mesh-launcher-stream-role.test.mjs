@@ -280,8 +280,8 @@ export const meshLauncherStreamRoleTests = [
         assert.equal(transportConstructed, false, "NO transport is constructed when the control node cannot be resolved on the fabric");
         assert.equal(handle.streamClient.connected, false, "no connection attempt is made");
         assert.ok(
-          handle.warnings.some((w) => w.code === "worker-stream-target-unresolved" && /falling back to git sync/.test(w.message)),
-          "the clean git-sync-only degrade message is reported"
+          handle.warnings.some((w) => w.code === "worker-stream-target-unresolved" && /stream sync will retry/.test(w.message)),
+          "the clean stream retry degrade message is reported"
         );
         handle.stop();
       } finally {
