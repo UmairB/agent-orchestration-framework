@@ -124,4 +124,45 @@ export const globalNodeIdentityTests = [
       assert.equal(again.migrated, false, "no legacy sidecar left → clean no-op");
     }),
   },
+  {
+    name: "global-node-identity/00 loadWorkspace hydrates machine-wide mesh config from global AOF home",
+    run: async () => withTemp(async (tmp) => {
+      const home = path.join(tmp, "home");
+      const env = { AOF_GLOBAL_HOME: home };
+      const repo = path.join(tmp, "repo");
+      await mkdir(path.join(home), { recursive: true });
+      await mkdir(path.join(repo, "wiki", "work"), { recursive: true });
+      await mkdir(path.join(repo, ".aof"), { recursive: true });
+      await writeFile(
+        path.join(home, "aof.config.json"),
+        `${JSON.stringify({
+          name: "global",
+          mesh: {
+            enabled: true,
+            fabric: "tailscale",
+            relay: { controlNode: "control-node" },
+            sync: { cadenceSeconds: 5 },
+          },
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      await writeFile(
+        path.join(repo, ".aof", "aof.config.json"),
+        `${JSON.stringify({
+          name: "repo",
+          work: { dir: "./wiki/work" },
+          mesh: { workspaceId: "repo-workspace" },
+        }, null, 2)}\n`,
+        "utf8",
+      );
+
+      const ws = await loadWorkspace(repo, undefined, { env });
+
+      assert.equal(ws.config.mesh.enabled, true, "global mesh.enabled is visible in every workspace");
+      assert.equal(ws.config.mesh.fabric, "tailscale", "global mesh.fabric drives mesh serve preflight");
+      assert.equal(ws.config.mesh.relay.controlNode, "control-node", "global relay control node is preserved");
+      assert.equal(ws.config.mesh.sync.cadenceSeconds, 5, "global sync cadence is preserved");
+      assert.equal(ws.config.mesh.workspaceId, "repo-workspace", "workspace-specific mesh keys still overlay global mesh config");
+    }),
+  },
 ];

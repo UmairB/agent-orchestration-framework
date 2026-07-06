@@ -14,7 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { findProjectConfig, globalMeshPaths } from "./workspace.mjs";
+import { findProjectConfig, globalMeshPaths, globalWorkspacePaths } from "./workspace.mjs";
 import { readJson, writeText } from "./fs.mjs";
 // milestone 33 / story 00 (ADR-004, F-3203) — the per-install identity hydration
 // seam. sidecarPathFor is the ONE sidecar-path builder (never re-derived here);
@@ -46,6 +46,33 @@ const MILESTONE_TAG_RE = /^@milestone-\d+$/i;
 const sameNum = (a, b) => Number.parseInt(a, 10) === Number.parseInt(b, 10);
 
 // ---------------------------------------------------------------- config ----
+
+
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergePlainObjects(base, overlay) {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(overlay)) {
+    if (isPlainObject(value) && isPlainObject(merged[key])) {
+      merged[key] = mergePlainObjects(merged[key], value);
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+async function readGlobalMeshConfig(env) {
+  const paths = globalWorkspacePaths({ env });
+  try {
+    const globalConfig = await readJson(paths.configPath);
+    return isPlainObject(globalConfig?.mesh) ? globalConfig.mesh : {};
+  } catch {
+    return {};
+  }
+}
 
 // milestone 33 / story 00 (ADR-004.5, F-3203) — the self-heal STEP, factored out of
 // loadWorkspace so it is directly unit-testable over an injected sidecar object +
@@ -137,6 +164,11 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostn
   // decision superseding 22/ADR-002+003's work-stream-co-location).
   const aofDir = path.basename(configDir) === ".aof" ? configDir : path.join(projectRoot, ".aof");
 
+  const globalMeshConfig = await readGlobalMeshConfig(env);
+  if (Object.keys(globalMeshConfig).length > 0) {
+    const localMeshConfig = isPlainObject(config.mesh) ? config.mesh : {};
+    config = { ...config, mesh: mergePlainObjects(globalMeshConfig, localMeshConfig) };
+  }
   // The per-install identity (34/story 00) — read from the MACHINE-WIDE GLOBAL home
   // (globalMeshPaths().identityPath, honoring AOF_GLOBAL_HOME) so one identity is shared
   // by every workspace on this machine and the global work store keyed on nodeId is
