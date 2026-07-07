@@ -374,7 +374,7 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
 // progress track, and child story dots derived from the same flat item stream.
 function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
   const milestones = milestoneCardModels(items);
-  const nameFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId)?.name ?? workspaceId;
+  const workspaceFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId) ?? null;
   const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
   return (
     <section className="flex min-w-0 flex-col gap-3.5">
@@ -389,7 +389,7 @@ function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; worksp
             <GlobalMilestoneCard
               key={`${milestone.item.workspaceId}:${milestone.item.ref}`}
               milestone={milestone}
-              workspaceName={nameFor(milestone.item.workspaceId)}
+              workspace={workspaceFor(milestone.item.workspaceId)}
             />
           ))}
         </div>
@@ -398,11 +398,23 @@ function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; worksp
   );
 }
 
-function GlobalMilestoneCard({ milestone, workspaceName }: { milestone: FleetMilestoneCard; workspaceName: string }) {
+function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null }) {
   const m = milestone;
   const isDone = m.item.status === "done";
   const progressLabel = m.total === 0 ? "not started" : "stories done";
   const title = m.item.title ?? m.item.slug ?? m.item.ref;
+  const workspaceName = workspace?.name ?? workspace?.workspaceId ?? m.item.workspaceId;
+  const command = workUiCommandFor(workspace);
+  const [copied, setCopied] = useState(false);
+  const onOpen = useCallback(() => {
+    try {
+      void navigator.clipboard?.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard may be unavailable - the title still names the command */
+    }
+  }, [command]);
 
   let attention = <span className="text-muted-foreground">·</span>;
   if (m.inReview > 0) {
@@ -412,7 +424,12 @@ function GlobalMilestoneCard({ milestone, workspaceName }: { milestone: FleetMil
   }
 
   return (
-    <div className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md">
+    <button
+      type="button"
+      onClick={onOpen}
+      title={workspace?.projectRoot ? `Run \`aof work ui\` in ${workspace.projectRoot}` : "Run `aof work ui` in this workspace"}
+      className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
+    >
       <div className="flex min-w-0 items-center gap-2">
         <StatusRing status={asWorkStatus(m.item.status)} size={18} />
         <span className="mono shrink-0 text-sm text-muted-foreground">{m.item.ref}</span>
@@ -451,12 +468,14 @@ function GlobalMilestoneCard({ milestone, workspaceName }: { milestone: FleetMil
 
       <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
         <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
-        <span className="flex shrink-0 items-center gap-3">{attention}</span>
+        <span className="flex shrink-0 items-center gap-3">
+          {attention}
+          <span className="font-semibold text-primary group-hover:underline">{copied ? "✓ copied aof work ui" : "Open board →"}</span>
+        </span>
       </div>
-    </div>
+    </button>
   );
 }
-
 function MilestoneProgressTrack({ milestone }: { milestone: FleetMilestoneCard }) {
   const m = milestone;
   if (m.total === 0) {
@@ -477,6 +496,11 @@ function MilestoneProgressTrack({ milestone }: { milestone: FleetMilestoneCard }
   );
 }
 
+function workUiCommandFor(workspace: GlobalWorkspace | null): string {
+  const projectRoot = workspace?.projectRoot?.trim();
+  if (!projectRoot) return "aof work ui";
+  return `cd "${projectRoot.replace(/"/g, '\\"')}"\naof work ui`;
+}
 function asWorkStatus(status: string | null | undefined): WorkStatus | null {
   return status as WorkStatus | null;
 }

@@ -20,6 +20,7 @@
 //     - diagnostics summarise projection freshness + skipped workspace/descriptor
 //       error counts without dropping the healthy node/workspace data.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   VALID_SCOPES,
   scopeLabel,
@@ -239,6 +240,17 @@ export const fleetScopeTests = [
       assert.equal(beta.total, 1);
       assert.equal(beta.blocked, 1);
       assert.deepEqual(beta.stories.map((story) => story.workspaceId), ["beta"]);
+    },
+  },
+  {
+    name: "fleet-scope/02 global milestone cards remain clickable drill-ins, not passive display cards",
+    run() {
+      const source = readFileSync(new URL("../ui/src/fleet/Fleet.tsx", import.meta.url), "utf8");
+      const match = source.match(/function GlobalMilestoneCard[\s\S]*?(?=function MilestoneProgressTrack)/);
+      assert.ok(match, "GlobalMilestoneCard exists");
+      assert.match(match[0], /<button\b/, "the milestone card is a button, matching the work overview card affordance");
+      assert.match(match[0], /onClick=\{onOpen\}/, "clicking the card invokes the drill-in handler");
+      assert.match(match[0], /Open board →/, "the click affordance is visible on the card");
     },
   },
 
