@@ -26,6 +26,20 @@ export declare function emptyStateCopy(scope: Scope): string;
 
 export declare function milestoneListItems(items: GlobalWorkItem[] | null | undefined): GlobalWorkItem[];
 
+export type FleetMilestoneCard = {
+  item: GlobalWorkItem;
+  num: string;
+  stories: GlobalWorkItem[];
+  total: number;
+  done: number;
+  inReview: number;
+  inProgress: number;
+  blocked: number;
+  notStarted: number;
+};
+
+export declare function milestoneCardModels(items: GlobalWorkItem[] | null | undefined): FleetMilestoneCard[];
+
 export declare function filterToWorkspace(
   status: FleetStatus | null | undefined,
   workspaceId: string | null | undefined

@@ -36,6 +36,7 @@ import {
   diagnosticsSummary,
   errorPathFor,
   milestoneListItems,
+  milestoneCardModels,
 } from "../ui/src/fleet/scope.mjs";
 
 export const fleetScopeTests = [
@@ -213,6 +214,31 @@ export const fleetScopeTests = [
       assert.deepEqual(milestones.map((item) => item.ref), ["34", "35"]);
       assert.ok(milestones.every((item) => item.type === "milestone"), "only milestone rows render in the global list");
       assert.ok(milestones.every((item) => !item.ref.includes("/")), "nested story/task refs do not render as milestone cards");
+    },
+  },
+  {
+    name: "fleet-scope/02 milestoneCardModels derives board-style story counts per workspace",
+    run() {
+      const items = [
+        { ref: "34", type: "milestone", workspaceId: "alpha", title: "Alpha mesh", status: "in-progress", parent: null },
+        { ref: "34/00", type: "story", workspaceId: "alpha", title: "Alpha done", status: "done", parent: "34" },
+        { ref: "34/01", type: "story", workspaceId: "alpha", title: "Alpha review", status: "in-review", parent: "34" },
+        { ref: "34", type: "milestone", workspaceId: "beta", title: "Beta mesh", status: "not-started", parent: null },
+        { ref: "34/00", type: "story", workspaceId: "beta", title: "Beta blocked", status: "blocked", parent: "34" },
+      ];
+      const cards = milestoneCardModels(items);
+      const alpha = cards.find((card) => card.item.workspaceId === "alpha");
+      const beta = cards.find((card) => card.item.workspaceId === "beta");
+      assert.deepEqual(cards.map((card) => `${card.item.workspaceId}:${card.num}`), ["alpha:34", "beta:34"]);
+      assert.ok(alpha, "alpha milestone card exists");
+      assert.ok(beta, "beta milestone card exists");
+      assert.equal(alpha.total, 2);
+      assert.equal(alpha.done, 1);
+      assert.equal(alpha.inReview, 1);
+      assert.deepEqual(alpha.stories.map((story) => story.workspaceId), ["alpha", "alpha"]);
+      assert.equal(beta.total, 1);
+      assert.equal(beta.blocked, 1);
+      assert.deepEqual(beta.stories.map((story) => story.workspaceId), ["beta"]);
     },
   },
 

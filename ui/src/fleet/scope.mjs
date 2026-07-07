@@ -110,6 +110,38 @@ export function milestoneListItems(items) {
   return (items ?? []).filter((item) => item?.type === "milestone");
 }
 
+function sameMilestoneParent(parent, milestoneRef) {
+  if (parent == null) return false;
+  if (parent === milestoneRef) return true;
+  const a = Number.parseInt(parent, 10);
+  const b = Number.parseInt(milestoneRef, 10);
+  return Number.isFinite(a) && Number.isFinite(b) && a === b;
+}
+
+export function milestoneCardModels(items) {
+  const all = items ?? [];
+  return milestoneListItems(all).map((item) => {
+    const stories = all.filter(
+      (candidate) =>
+        candidate?.type === "story" &&
+        candidate.workspaceId === item.workspaceId &&
+        sameMilestoneParent(candidate.parent, item.ref)
+    );
+    const tally = (status) => stories.filter((story) => story.status === status).length;
+    return {
+      item,
+      num: item.ref,
+      stories,
+      total: stories.length,
+      done: tally("done"),
+      inReview: tally("in-review"),
+      inProgress: tally("in-progress"),
+      blocked: tally("blocked"),
+      notStarted: tally("not-started"),
+    };
+  });
+}
+
 // ------------------------------------------------------- local filtering ------
 
 // Client-side filter of a GLOBAL-shaped status payload down to one workspace id —

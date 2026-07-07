@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fleetApi } from "./api";
 import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, GlobalWorkspace, GlobalWorkItem, GlobalNode, FleetStatus } from "./api";
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
+import { StatusRing, StatusChip, StatusDot } from "../board/status";
+import type { WorkStatus } from "../board/api";
 import {
   scopeLabel,
   scopeFromSearch,
@@ -11,9 +13,9 @@ import {
   nodePanelFacts,
   diagnosticsSummary,
   errorPathFor,
-  milestoneListItems,
+  milestoneCardModels,
 } from "./scope.mjs";
-import type { Scope } from "./scope.d.mts";
+import type { FleetMilestoneCard, Scope } from "./scope.d.mts";
 
 // The read-only "fleet mission-control" web surface (milestone 25 / story 02;
 // DESIGN surface 1 → the committed mock `mocks/Mesh.dc.html`). A slim top bar over
@@ -368,9 +370,10 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
 
 // The milestone list. The global projection still carries stories/tasks for API
 // consumers and local filtering, but this overview intentionally stays at the
-// milestone level so the mesh UI does not become a granular work-item table.
+// milestone level and reuses the work-board card language: status ring/chip,
+// progress track, and child story dots derived from the same flat item stream.
 function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
-  const milestones = milestoneListItems(items);
+  const milestones = milestoneCardModels(items);
   const nameFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId)?.name ?? workspaceId;
   const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
   return (
@@ -381,29 +384,102 @@ function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; worksp
           No milestones published yet.
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3.5">
-          {milestones.map((item) => {
-            const workspaceName = nameFor(item.workspaceId);
-            const title = item.title ?? item.slug ?? item.ref;
-            return (
-              <div key={`${item.workspaceId}:${item.ref}`} className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
-                <div className="flex min-w-0 items-start gap-2">
-                  <span className="mono min-w-0 truncate text-[13px] font-bold text-foreground">{item.ref}</span>
-                  <span className="ml-auto shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {item.status ?? "unknown"}
-                  </span>
-                </div>
-                <span className="truncate text-[13px] font-semibold text-foreground" title={title}>{title}</span>
-                <span className="mono truncate border-t border-border pt-2 text-[10.5px] text-muted-foreground" title={workspaceName}>{workspaceName}</span>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
+          {milestones.map((milestone) => (
+            <GlobalMilestoneCard
+              key={`${milestone.item.workspaceId}:${milestone.item.ref}`}
+              milestone={milestone}
+              workspaceName={nameFor(milestone.item.workspaceId)}
+            />
+          ))}
         </div>
       )}
     </section>
   );
 }
 
+function GlobalMilestoneCard({ milestone, workspaceName }: { milestone: FleetMilestoneCard; workspaceName: string }) {
+  const m = milestone;
+  const isDone = m.item.status === "done";
+  const progressLabel = m.total === 0 ? "not started" : "stories done";
+  const title = m.item.title ?? m.item.slug ?? m.item.ref;
+
+  let attention = <span className="text-muted-foreground">·</span>;
+  if (m.inReview > 0) {
+    attention = <span className="text-accent">◔ {m.inReview} in review</span>;
+  } else if (isDone) {
+    attention = <span className="text-primary">✓ accepted</span>;
+  }
+
+  return (
+    <div className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md">
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusRing status={asWorkStatus(m.item.status)} size={18} />
+        <span className="mono shrink-0 text-sm text-muted-foreground">{m.item.ref}</span>
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">milestone</span>
+        <span className="ml-auto shrink-0">
+          <StatusChip status={asWorkStatus(m.item.status)} />
+        </span>
+      </div>
+
+      <h3 className="mt-2 truncate text-[16px] font-bold leading-snug" title={title}>{title}</h3>
+
+      <div className="mt-3">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{progressLabel}</span>
+          <span className="mono">
+            {m.done} / {m.total}
+          </span>
+        </div>
+        <MilestoneProgressTrack milestone={m} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {m.stories.length === 0 ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <>
+            {m.stories.map((story) => (
+              <StatusDot key={`${story.workspaceId}:${story.ref}`} status={asWorkStatus(story.status)} size={8} title={`${story.ref} · ${story.status ?? "unknown"}`} />
+            ))}
+            <span className="ml-1 text-[11px] text-muted-foreground">
+              {m.stories.length} stor{m.stories.length === 1 ? "y" : "ies"}
+            </span>
+          </>
+        )}
+      </div>
+
+      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
+        <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
+        <span className="flex shrink-0 items-center gap-3">{attention}</span>
+      </div>
+    </div>
+  );
+}
+
+function MilestoneProgressTrack({ milestone }: { milestone: FleetMilestoneCard }) {
+  const m = milestone;
+  if (m.total === 0) {
+    return <div className="mt-1.5 h-1.5 w-full rounded-full bg-muted" />;
+  }
+  const donePct = (m.done / m.total) * 100;
+  const remainderPct = 100 - donePct;
+  const active = m.item.status === "in-progress" || m.inProgress + m.inReview + m.blocked > 0;
+  return (
+    <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      {donePct > 0 ? (
+        <div className="h-full" style={{ width: `${donePct}%`, background: "var(--color-primary)" }} />
+      ) : null}
+      {remainderPct > 0 && active ? (
+        <div className="aof-pending h-full" style={{ width: `${remainderPct}%` }} />
+      ) : null}
+    </div>
+  );
+}
+
+function asWorkStatus(status: string | null | undefined): WorkStatus | null {
+  return status as WorkStatus | null;
+}
 // The global node panel (DESIGN "shows control and worker nodes, last seen,
 // roles/capabilities, and fabric address when known"). Uses nodePanelFacts
 // (./scope.mjs) so the SAME projection + credential guard the fitness unit tests
