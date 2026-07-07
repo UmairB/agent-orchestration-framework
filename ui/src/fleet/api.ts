@@ -147,6 +147,11 @@ export type GlobalMeshStatus = {
 // "global" with `workspaces`/`items` ⇒ the new global shape).
 export type FleetStatus = MeshStatus | GlobalMeshStatus;
 
+export type BoardUrlResponse = {
+  url: string;
+  workspaceId: string;
+  ref: string | null;
+};
 
 // review fix P0.5: the coded error body may carry a `path` (mesh-ui-serve.mjs's
 // sendApiError, threaded from globalStoreError — task 03 scenario 2's "the response
@@ -176,5 +181,13 @@ export const fleetApi = {
     const response = await fetch(scope ? `/api/mesh/status?scope=${scope}` : "/api/mesh/status");
     if (!response.ok) throw await safeError(response);
     return (await response.json()) as FleetStatus;
+  },
+
+  async boardUrl(workspaceId: string, ref: string): Promise<string> {
+    const params = new URLSearchParams({ workspaceId, ref });
+    const response = await fetch(`/api/mesh/board-url?${params.toString()}`);
+    if (!response.ok) throw await safeError(response);
+    const body = (await response.json()) as BoardUrlResponse;
+    return body.url;
   },
 };

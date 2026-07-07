@@ -404,17 +404,19 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
   const progressLabel = m.total === 0 ? "not started" : "stories done";
   const title = m.item.title ?? m.item.slug ?? m.item.ref;
   const workspaceName = workspace?.name ?? workspace?.workspaceId ?? m.item.workspaceId;
-  const command = workUiCommandFor(workspace);
-  const [copied, setCopied] = useState(false);
-  const onOpen = useCallback(() => {
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState(false);
+  const onOpen = useCallback(async () => {
+    setOpening(true);
+    setOpenError(false);
     try {
-      void navigator.clipboard?.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
+      const url = await fleetApi.boardUrl(m.item.workspaceId, m.item.ref);
+      window.location.assign(url);
     } catch {
-      /* clipboard may be unavailable - the title still names the command */
+      setOpenError(true);
+      setOpening(false);
     }
-  }, [command]);
+  }, [m.item.workspaceId, m.item.ref]);
 
   let attention = <span className="text-muted-foreground">·</span>;
   if (m.inReview > 0) {
@@ -427,7 +429,7 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
     <button
       type="button"
       onClick={onOpen}
-      title={workspace?.projectRoot ? `Run \`aof work ui\` in ${workspace.projectRoot}` : "Run `aof work ui` in this workspace"}
+      title={`Open board for ${workspaceName}`}
       className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -470,7 +472,7 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
         <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
         <span className="flex shrink-0 items-center gap-3">
           {attention}
-          <span className="font-semibold text-primary group-hover:underline">{copied ? "✓ copied aof work ui" : "Open board →"}</span>
+          <span className="font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
         </span>
       </div>
     </button>
@@ -496,11 +498,6 @@ function MilestoneProgressTrack({ milestone }: { milestone: FleetMilestoneCard }
   );
 }
 
-function workUiCommandFor(workspace: GlobalWorkspace | null): string {
-  const projectRoot = workspace?.projectRoot?.trim();
-  if (!projectRoot) return "aof work ui";
-  return `cd "${projectRoot.replace(/"/g, '\\"')}"\naof work ui`;
-}
 function asWorkStatus(status: string | null | undefined): WorkStatus | null {
   return status as WorkStatus | null;
 }

@@ -2,7 +2,7 @@
 // (milestone 25 / story 02; ARCHITECTURE ADR-003/ADR-004). A SIBLING to
 // `board-serve.mjs`, NOT an extension of the work UI: it stands up its OWN single
 // `http.createServer` bound to `127.0.0.1`, serving the BUILT `ui/dist` bundle
-// announced with `?mode=fleet` and its `/api/mesh` route: `GET /api/mesh/status`.
+// announced with `?mode=fleet`, its `/api/mesh/status` read route, and its board drill-in URL route.
 //
 // milestone 34 / story 03 (34/ADR-006) — `GET /api/mesh/status` now DEFAULTS to
 // the machine-wide GLOBAL projection (via `queryGlobalMeshStatus`,
@@ -20,12 +20,12 @@
 // `attachTerminalWebSocket` (a `/ws/terminal` upgrade), both of which this face
 // FORBIDS (ADR-004; ADR-003 disjoint `/api/mesh` namespace). So the fleet face
 // owns its own thin server whose surface is exactly: the static bundle,
-// `GET /api/mesh/status`, and a clean not-found for
-// everything else.
+// GET /api/mesh/status, GET /api/mesh/board-url, and a clean not-found
+// for everything else.
 //
 // The isolation guarantees are STRUCTURAL:
-//   - it imports the single global query surface only, not low-level work/run/mesh
-//     writers;
+//   - it imports the single global query surface plus the board launcher, not
+//     low-level work/run/mesh writers;
 //   - it stands up exactly ONE `http.createServer` bound to `127.0.0.1`, routing
 //     the fleet under `/api/mesh*` and NEVER `/api/work*`;
 //   - it performs ZERO fs write and NO shell-out of its own; it serves no
@@ -43,6 +43,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { assetPath } from "./asset-base.mjs";
+import { serveBoard } from "./board-serve.mjs";
 // milestone 34 / story 03 (ADR-006) — the ONE global query surface this thin serve
 // face is allowed to reach for its GLOBAL `/api/mesh/status` read. `queryGlobalMeshStatus`
 // is itself the composition seam (it owns the SQLite open + the story 00/02 query
@@ -79,6 +80,7 @@ export async function serveMeshUi({
   globalStoreOptions,
 } = {}) {
   const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
+  const boardServers = new Map();
 
   // The board's friendly build-missing refusal, mirrored verbatim onto the fleet
   // verb (task 00): a missing ui/dist is a caught { code:"ui-build-missing" }
@@ -103,6 +105,36 @@ export async function serveMeshUi({
       return;
     }
     const pathname = requestUrl.pathname;
+
+    // A drill-in from the global milestone cards opens the real per-workspace
+    // board server. This keeps /api/work off the fleet face: the browser navigates
+    // away to that board origin instead of asking this server to proxy board data.
+    if (pathname === "/api/mesh/board-url") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        sendMethodNotAllowed(response, "GET, HEAD");
+        return;
+      }
+      const workspaceId = (requestUrl.searchParams.get("workspaceId") ?? "").trim();
+      const ref = (requestUrl.searchParams.get("ref") ?? "").trim();
+      if (!workspaceId) {
+        sendApiError(response, 400, "workspaceId is required.", "invalid-workspace");
+        return;
+      }
+
+      try {
+        const status = await queryGlobalMeshStatus({ ...globalStoreOptions });
+        const workspace = (status.workspaces ?? []).find((candidate) => candidate.workspaceId === workspaceId);
+        if (!workspace) {
+          sendApiError(response, 404, `Workspace "${workspaceId}" is not in the mesh projection.`, "workspace-not-found");
+          return;
+        }
+        const url = await boardUrlForWorkspace(boardServers, workspace, { repoRoot, ref });
+        sendJson(response, 200, { url, workspaceId, ref: ref || null });
+      } catch (error) {
+        sendApiError(response, error.status ?? 500, error.message, error.code ?? "board-url-failed", { path: error.path ?? null });
+      }
+      return;
+    }
 
     // The ONE fleet READ route: GET /api/mesh/status. milestone 34 / story 03
     // (ADR-006) — the DATA SOURCE branches on scope, and the MECHANISM depends on
@@ -196,6 +228,15 @@ export async function serveMeshUi({
     }
   });
 
+  const originalClose = server.close.bind(server);
+  server.close = function closeWithBoardServers(callback) {
+    return originalClose((error) => {
+      closeBoardServers(boardServers).finally(() => {
+        if (typeof callback === "function") callback(error);
+      });
+    });
+  };
+
   // Reject (don't hang) when the port can't be bound — e.g. EADDRINUSE — so the
   // CLI verb can degrade honestly (the setup-ui.mjs listen-or-reject idiom).
   await new Promise((resolve, reject) => {
@@ -212,6 +253,42 @@ export async function serveMeshUi({
   // the same single bundle, the fleet mode (task 00 DEV note; ADR-003 decision 4).
   const fleetUrl = `${url}?mode=fleet`;
   return { server, url, fleetUrl };
+}
+
+async function boardUrlForWorkspace(boardServers, workspace, { repoRoot, ref } = {}) {
+  const workspaceId = workspace.workspaceId;
+  let entry = boardServers.get(workspaceId);
+  if (!entry) {
+    const launched = await serveBoard({
+      projectDir: workspace.projectRoot,
+      port: 0,
+      repoRoot,
+      recordSessions: false,
+    });
+    entry = { server: launched.server, boardUrl: launched.boardUrl };
+    boardServers.set(workspaceId, entry);
+    launched.server.on("close", () => boardServers.delete(workspaceId));
+  }
+  const url = new URL(entry.boardUrl);
+  if (ref) url.hash = ref;
+  return url.toString();
+}
+
+async function closeBoardServers(boardServers) {
+  const servers = [...boardServers.values()].map((entry) => entry.server);
+  boardServers.clear();
+  await Promise.all(
+    servers.map(
+      (server) =>
+        new Promise((resolve) => {
+          try {
+            server.close(() => resolve());
+          } catch {
+            resolve();
+          }
+        })
+    )
+  );
 }
 
 // --- local response helpers (mirror board-ui.mjs / setup-ui.mjs; not shared) ---

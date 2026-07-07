@@ -250,7 +250,10 @@ export const fleetScopeTests = [
       assert.ok(match, "GlobalMilestoneCard exists");
       assert.match(match[0], /<button\b/, "the milestone card is a button, matching the work overview card affordance");
       assert.match(match[0], /onClick=\{onOpen\}/, "clicking the card invokes the drill-in handler");
+      assert.match(match[0], /fleetApi\.boardUrl\(m\.item\.workspaceId, m\.item\.ref\)/, "the drill-in asks the mesh server for a real workspace board URL");
+      assert.match(match[0], /window\.location\.assign\(url\)/, "the drill-in opens the returned board URL");
       assert.match(match[0], /Open board →/, "the click affordance is visible on the card");
+      assert.doesNotMatch(match[0], /navigator\.clipboard|copied aof work|workUiCommandFor/, "the milestone card never copies a command instead of opening the board");
     },
   },
 

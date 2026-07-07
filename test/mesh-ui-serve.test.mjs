@@ -3,9 +3,9 @@
 //
 // Covers EVERY @executable scenario / Scenario-Outline row: the `aof mesh ui`
 // serve-face stands up ONE 127.0.0.1 server on its documented default port (4181),
-// serving the built ui/dist bundle + the single GET /api/mesh/status route which
+// serving the built ui/dist bundle, the GET /api/mesh/status route which
 // answers the global mesh projection (with --local narrowing work items to the
-// current workspace); the /api/mesh namespace is DISJOINT from
+// current workspace), and GET /api/mesh/board-url for real board drill-ins; the /api/mesh namespace is DISJOINT from
 // the board's frozen /api/work (a board request is a 404, never a proxied board); an
 // unknown route is a clean { ok:false, error, code:"not-found" } envelope and a miss
 // never crashes the server; a missing bundle + an occupied port are friendly refusals
@@ -278,6 +278,47 @@ export const meshUiServeTests = [
     },
   },
 
+
+  // ═══ Scenario: a milestone drill-in opens a real workspace board URL ═══════
+  {
+    name: "mesh-ui-serve/00 board-url drill-in starts and reuses the selected workspace's real board server",
+    async run() {
+      const { repo, globalStoreOptions } = await makeRepo();
+      const root = await makeRepoRootWithDist();
+      let server;
+      try {
+        let url;
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "global", globalStoreOptions }));
+        const statusResponse = await fetch(new URL("/api/mesh/status", url));
+        assert.equal(statusResponse.status, 200, "the global mesh status answers");
+        const status = await statusResponse.json();
+        const workspaceId = status.workspaces[0]?.workspaceId;
+        assert.ok(workspaceId, "the fixture publishes a workspace id");
+
+        const firstResponse = await fetch(new URL(`/api/mesh/board-url?workspaceId=${encodeURIComponent(workspaceId)}&ref=34`, url));
+        assert.equal(firstResponse.status, 200, "the board-url route answers");
+        const first = await firstResponse.json();
+        assert.equal(first.workspaceId, workspaceId, "the response is for the selected workspace");
+        assert.equal(first.ref, "34", "the response carries the requested milestone ref");
+        assert.ok(first.url.includes("mode=board"), "the drill-in URL selects board mode");
+        assert.ok(first.url.endsWith("#34"), "the drill-in URL selects the requested milestone hash");
+
+        const boardList = await fetch(new URL("/api/work/list", first.url));
+        assert.equal(boardList.status, 200, "the returned board origin serves /api/work/list");
+        const items = await boardList.json();
+        assert.ok(items.some((item) => item.ref === "34" && item.title === "Global Mesh"), "the board serves the selected workspace's work stream");
+
+        const secondResponse = await fetch(new URL(`/api/mesh/board-url?workspaceId=${encodeURIComponent(workspaceId)}&ref=34`, url));
+        assert.equal(secondResponse.status, 200, "a second drill-in answers");
+        const second = await secondResponse.json();
+        assert.equal(second.url, first.url, "the workspace board server is reused, not relaunched per click");
+      } finally {
+        if (server) await closeServer(server);
+        await rm(repo, { recursive: true, force: true });
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
   // ═══ Scenario Outline: an unknown /api/mesh route answers a clean not-found and the server survives ═══
   {
     name: "mesh-ui-serve/00 an unknown /api/mesh route answers a clean not-found envelope and a follow-up read proves the miss did not crash the server",
