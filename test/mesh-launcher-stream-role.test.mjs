@@ -91,7 +91,7 @@ function fakeWorkerTransport() {
 // fixtured tailscale HostName against a real roster entry (the same join every
 // OTHER launcher test seeds via mesh:heartbeat/mesh:invite in production — here
 // seeded directly via publishNodeRecord, the story-00 seam).
-async function makeRepo({ nodeId, controlNode, fabric = true, seedItem = true, peers = [] } = {}) {
+async function makeRepo({ nodeId, controlNode, relayUrl = "ws://control-node.test:4182/ws/relay", fabric = true, seedItem = true, peers = [] } = {}) {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-launcher-stream-role-"));
   const workDir = path.join(repo, "wiki", "work");
   await mkdir(workDir, { recursive: true });
@@ -111,7 +111,7 @@ async function makeRepo({ nodeId, controlNode, fabric = true, seedItem = true, p
     mesh: {
       nodeId,
       ...(fabric ? { fabric: "tailscale" } : {}),
-      ...(controlNode !== undefined ? { relay: { controlNode, url: "ws://control-node.test:4182/ws/relay" } } : {}),
+      ...(controlNode !== undefined ? { relay: { controlNode, ...(relayUrl !== null ? { url: relayUrl } : {}) } } : {}),
     },
   };
   await writeFile(path.join(repo, ".aof", "aof.config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -162,6 +162,35 @@ export const meshLauncherStreamRoleTests = [
     },
   },
   {
+    name: "mesh-launcher-stream-role/04 a control-role launcher without relay.url still binds the default enrollment/stream port",
+    async run() {
+      const repo = await makeRepo({ nodeId: CONTROL_ID, controlNode: CONTROL_ID, relayUrl: null, peers: [WORKER_ID] });
+      try {
+        const ws = await loadWorkspace(repo);
+        const exec = fixturedExec(statusFixtureFor(CONTROL_ID, {
+          a: { HostName: WORKER_ID, DNSName: `${WORKER_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.2.2.2"], Online: true },
+        }));
+        let startServerArgs = null;
+        const handle = await startLauncher(ws, {
+          exec,
+          platform: "linux",
+          ticker: manualTicker(),
+          peerPollTicker: manualTicker(),
+          startControlStreamServer: async (args) => {
+            startServerArgs = args;
+            return { stop() {}, updatePeers() {} };
+          },
+        });
+        assert.equal(handle.refused, undefined, "the daemon starts");
+        assert.equal(handle.role, "control");
+        assert.equal(startServerArgs?.port, 4182, "control-node-only global config must expose the stable join endpoint");
+        handle.stop();
+      } finally {
+        await cleanup(repo);
+      }
+    },
+  },
+  {
     name: "mesh-launcher-stream-role/04 a worker-role launcher with a resolvable control node constructs a client with a transport pointed at the resolved dial address and pushes a snapshot",
     async run() {
       const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID, peers: [CONTROL_ID] });
@@ -193,6 +222,36 @@ export const meshLauncherStreamRoleTests = [
         // The frame's workspaceId matches the SAME id the projection/git-backstop
         // publishes under (review fix P0.1 — never a phantom "null" workspace).
         assert.equal(handle.streamClient.connected, true, "the client reports itself connected after the initial push");
+        handle.stop();
+      } finally {
+        await cleanup(repo);
+      }
+    },
+  },
+  {
+    name: "mesh-launcher-stream-role/04 a worker-role launcher without relay.url still dials the default control stream URL",
+    async run() {
+      const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID, relayUrl: null, peers: [CONTROL_ID] });
+      try {
+        const ws = await loadWorkspace(repo);
+        const exec = fixturedExec(statusFixtureFor(WORKER_ID, {
+          a: { HostName: CONTROL_ID, DNSName: `${CONTROL_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.90.249.80"], Online: true },
+        }));
+        let resolvedUrl = null;
+        const transport = fakeWorkerTransport();
+        const handle = await startLauncher(ws, {
+          exec,
+          platform: "linux",
+          ticker: manualTicker(),
+          peerPollTicker: manualTicker(),
+          createWorkerWsTransport: (url) => {
+            resolvedUrl = url;
+            return transport;
+          },
+        });
+        assert.equal(handle.refused, undefined, "the daemon starts");
+        assert.equal(handle.role, "worker");
+        assert.equal(resolvedUrl, "ws://100.90.249.80:4182/ws/relay", "control-node-only global config must still produce the stable worker dial URL");
         handle.stop();
       } finally {
         await cleanup(repo);

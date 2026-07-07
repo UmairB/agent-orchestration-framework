@@ -37,6 +37,8 @@ import { createEnrollmentHttpHandler } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
+const DEFAULT_CONTROL_SERVICE_PORT = 4182;
+const DEFAULT_CONTROL_STREAM_PATH = "/ws/relay";
 
 function resolveCadenceSeconds(value) {
   if (typeof value !== "number") return DEFAULT_CADENCE_SECONDS;
@@ -62,9 +64,9 @@ function configuredRelayUrl(config) {
 
 function configuredServicePort(config) {
   const parsed = configuredRelayUrl(config);
-  if (parsed == null || parsed.port.length === 0) return null;
+  if (parsed == null || parsed.port.length === 0) return DEFAULT_CONTROL_SERVICE_PORT;
   const port = Number.parseInt(parsed.port, 10);
-  return Number.isInteger(port) && port > 0 ? port : null;
+  return Number.isInteger(port) && port > 0 ? port : DEFAULT_CONTROL_SERVICE_PORT;
 }
 
 function hostForUrl(host) {
@@ -75,9 +77,10 @@ function hostForUrl(host) {
 
 function configuredServiceUrlForAddress(config, dialAddress) {
   const parsed = configuredRelayUrl(config);
-  if (parsed == null) return dialAddress;
-  const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/ws/relay";
-  return `${parsed.protocol}//${hostForUrl(dialAddress)}${parsed.port ? `:${parsed.port}` : ""}${pathname}`;
+  const protocol = parsed?.protocol ?? "ws:";
+  const pathname = parsed?.pathname && parsed.pathname !== "/" ? parsed.pathname : DEFAULT_CONTROL_STREAM_PATH;
+  const port = configuredServicePort(config);
+  return `${protocol}//${hostForUrl(dialAddress)}${port != null ? `:${port}` : ""}${pathname}`;
 }
 function intervalTicker() {
   return {
