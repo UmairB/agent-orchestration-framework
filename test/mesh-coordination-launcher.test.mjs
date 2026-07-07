@@ -24,6 +24,7 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke, listCommands } from "../src/command-core.mjs";
 import { presenceRecordPath, publishNodeRecord } from "../src/mesh-store.mjs";
 import { launcherProbe, startLauncher } from "../src/mesh-launcher.mjs";
+import { acquireMeshLauncherLock } from "../src/mesh-launcher-lock.mjs";
 
 const NODE_ID = "test-node-self";
 
@@ -120,11 +121,25 @@ export const meshCoordinationLauncherTests = [
         const result = await launcherProbe(ws, { exec, platform: "linux" });
         assert.deepEqual(
           result,
-          { fabricState: "running", healthy: true, selfAddress: "100.121.112.23", peerCount: 1, issuanceAuthority: true },
+          { fabricState: "running", healthy: true, selfAddress: "100.121.112.23", peerCount: 1, launcherRunning: false, launcherPid: null, issuanceAuthority: true },
           "the probe returns registered mesh peer count, not raw Tailscale peer count"
         );
         const command = listCommands().find((entry) => entry.id === "mesh:serve");
-        assert.match(command.cli.render(result), /1 mesh peer\(s\)/, "the CLI labels the count as mesh peers, not raw fabric peers");
+        assert.match(command.cli.render(result), /1 mesh peer\(s\).*launcher stopped/, "the CLI labels mesh peer count and separates launcher state from fabric state");
+
+        const lock = await acquireMeshLauncherLock({ paths: { meshRoot: ws.globalMeshRoot }, pid: 12345 });
+        try {
+          const running = await launcherProbe(ws, {
+            exec,
+            platform: "linux",
+            launcherLockOptions: { paths: { meshRoot: ws.globalMeshRoot }, isProcessAlive: (pid) => pid === 12345 },
+          });
+          assert.equal(running.launcherRunning, true, "the probe reports a live launcher lock separately from fabric state");
+          assert.equal(running.launcherPid, 12345, "the probe reports the launcher owner pid");
+          assert.match(command.cli.render(running), /launcher running \(pid 12345\)/, "the CLI renders launcher state explicitly when the daemon is running");
+        } finally {
+          await lock.release();
+        }
       } finally {
         await cleanup(repo);
       }
@@ -295,6 +310,8 @@ export const meshCoordinationLauncherTests = [
         assert.equal(result.healthy, true, "the probe still returned a valid healthy flag");
         assert.equal(typeof result.selfAddress, "string", "the probe still returned a valid selfAddress");
         assert.equal(typeof result.peerCount, "number", "the probe still returned a valid peerCount");
+        assert.equal(typeof result.launcherRunning, "boolean", "the probe still returned a valid launcherRunning flag");
+        assert.equal(result.launcherPid == null || typeof result.launcherPid === "number", true, "the probe still returned a null-or-number launcherPid");
         assert.equal(typeof result.issuanceAuthority, "boolean", "the probe still returned a valid issuanceAuthority");
 
         // The SAME must hold through the registered mesh:serve command (the actual

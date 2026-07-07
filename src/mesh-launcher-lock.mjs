@@ -32,6 +32,16 @@ async function removeLockDir(lockDir) {
   await rm(lockDir, { recursive: true, force: true });
 }
 
+export async function readMeshLauncherLockStatus(options = {}) {
+  const isProcessAlive = typeof options.isProcessAlive === "function" ? options.isProcessAlive : defaultIsProcessAlive;
+  const { lockDir, ownerPath } = meshLauncherLockPaths(options);
+  const owner = await readOwner(ownerPath);
+  const ownerPid = Number.isInteger(owner?.pid) ? owner.pid : null;
+  if (ownerPid == null) return { running: false, pid: null, path: lockDir };
+  if (isProcessAlive(ownerPid)) return { running: true, pid: ownerPid, path: lockDir };
+  return { running: false, pid: null, path: lockDir, stalePid: ownerPid };
+}
+
 export async function acquireMeshLauncherLock(options = {}) {
   const pid = Number.isInteger(options.pid) ? options.pid : process.pid;
   const now = typeof options.now === "function" ? options.now : () => new Date().toISOString();

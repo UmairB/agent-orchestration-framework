@@ -32,6 +32,7 @@ import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
+import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 
@@ -133,13 +134,24 @@ export async function launcherProbe(ws, options = {}) {
   const nodeRecords = probe.healthy ? await readNodeRecords(ws) : [];
   const peers = probe.healthy ? await resolvePeers(config, { ...options, roster: nodeRecords }) : [];
   const { issuanceAuthority } = await resolveNodeIdentity(ws);
+  const launcherStatus = await resolveLauncherStatus(ws, options);
   return {
     fabricState: probe.reason ?? "running",
     healthy: probe.healthy,
     selfAddress: address,
     peerCount: new Set(peerNodeIdsFrom(peers)).size,
+    launcherRunning: launcherStatus.running === true,
+    launcherPid: launcherStatus.running === true ? launcherStatus.pid : null,
     issuanceAuthority,
   };
+}
+
+async function resolveLauncherStatus(ws, options) {
+  if (typeof options?.launcherStatus === "function") return await options.launcherStatus();
+  const lockOptions = options?.launcherLockOptions ?? (typeof ws?.globalMeshRoot === "string" && ws.globalMeshRoot.length > 0
+    ? { paths: { meshRoot: ws.globalMeshRoot } }
+    : { env: process.env });
+  return await readMeshLauncherLockStatus(lockOptions);
 }
 
 // startLauncher(ws, options) → { stop() } | { refused: true, guidance } — the long-lived

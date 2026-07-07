@@ -36,7 +36,8 @@ export const meshServeCommand = {
       if (result == null) return "No launcher status.";
       const address = result.selfAddress ?? "(no address — fabric degraded)";
       const role = result.issuanceAuthority ? " — this node is the control node" : "";
-      return `Fabric ${result.fabricState} (healthy: ${result.healthy}) — self-address ${address} — ${result.peerCount} mesh peer(s)${role}`;
+      const launcher = result.launcherRunning ? `launcher running${result.launcherPid != null ? ` (pid ${result.launcherPid})` : ""}` : "launcher stopped";
+      return `Fabric ${result.fabricState} (healthy: ${result.healthy}) — self-address ${address} — ${result.peerCount} mesh peer(s) — ${launcher}${role}`;
     },
 
     // The --json face is the bare probe (the non-blocking bijection-probe shape).
