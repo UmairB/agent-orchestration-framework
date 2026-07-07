@@ -2,9 +2,9 @@
 // ADR-003). The coordination launcher (F-3201): with the ws@8 broker eliminated
 // (ADR-002), this is the per-node process the fabric-native model needs — it publishes
 // this node's global presence record, runs global propagation cadence, and
-// periodically re-reads the fabric peer-map so mesh:status reflects live liveness. It
-// binds NO listening broker socket — the "bind" is the fabric self-address resolved via
-// src/mesh-fabric.mjs's selfAddress.
+// periodically re-reads the fabric peer-map so mesh:status reflects live liveness. On
+// the control node it hosts the mesh WebSocket/enrollment service; on worker nodes it
+// opens an outbound WebSocket client to that control service.
 //
 // TWO FACES over the SAME core (08/ADR-001 / the 23 precedent):
 //   - launcherProbe(config, options)   — the NON-BLOCKING probe the registered mesh:*
@@ -12,11 +12,12 @@
 //                                        state + self-address + registered mesh peer count + whether
 //                                        this node is the control node, and RETURNS.
 //                                        Never starts long-lived listeners or tickers.
-//   - startLauncher(ws, options)       — the long-lived `--serve` face: preflights the
+//   - startLauncher(ws, options)       — the long-lived launcher face: preflights the
 //                                        fabric (refuse-with-guidance if degraded),
-//                                        publishes presence, starts the reused
-//                                        global propagation, and periodically re-reads
-//                                        resolvePeers. Returns { stop() } (mirrors
+//                                        publishes presence, starts the reused global
+//                                        propagation, and for control/worker roles
+//                                        starts the appropriate server/client stream.
+//                                        Returns { stop() } (mirrors
 //                                        the serveRelay returned shape)
 //                                        so the CLI face traps SIGINT/SIGTERM and calls
 //                                        it — never a dependency on a raw process.on
@@ -32,6 +33,7 @@ import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
+import { createEnrollmentHttpHandler } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
@@ -48,6 +50,35 @@ function cadenceFromConfig(workspace) {
   return resolveCadenceSeconds(workspace?.config?.mesh?.sync?.cadenceSeconds);
 }
 
+function configuredRelayUrl(config) {
+  const raw = config?.mesh?.relay?.url;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+}
+
+function configuredServicePort(config) {
+  const parsed = configuredRelayUrl(config);
+  if (parsed == null || parsed.port.length === 0) return null;
+  const port = Number.parseInt(parsed.port, 10);
+  return Number.isInteger(port) && port > 0 ? port : null;
+}
+
+function hostForUrl(host) {
+  const value = String(host ?? "");
+  if (value.includes(":") && !value.startsWith("[")) return `[${value}]`;
+  return value;
+}
+
+function configuredServiceUrlForAddress(config, dialAddress) {
+  const parsed = configuredRelayUrl(config);
+  if (parsed == null) return dialAddress;
+  const pathname = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/ws/relay";
+  return `${parsed.protocol}//${hostForUrl(dialAddress)}${parsed.port ? `:${parsed.port}` : ""}${pathname}`;
+}
 function intervalTicker() {
   return {
     start(intervalSeconds, onTick) {
@@ -163,7 +194,9 @@ async function resolveLauncherStatus(ws, options) {
 //       publishPresenceRecord) + starts global propagation on the configured
 //       cadence (an INJECTED ticker, default intervalTicker() — no wall-clock wait in
 //       tests) + starts a peer-poll ticker that periodically re-reads resolvePeers.
-//   (c) binds NO listening broker socket — the "bind" is the fabric self-address.
+//   (c) starts the role-specific stream path: control listens on the fabric service
+//       address; worker dials the control node's fabric service URL; standalone does
+//       neither.
 // options: { exec, platform } (the injected fabric-exec seam, task 00), { ticker }
 // (the sync-loop ticker, default intervalTicker()), { peerPollTicker } (a SEPARATE
 // injectable ticker for the peer re-read cadence, defaulting to the same real
@@ -227,10 +260,13 @@ export async function startLauncher(ws, options = {}) {
     // the ONE module allowed to call resolvePeers (acd-worker-stream-fabric-
     // addressed); control-stream-server.mjs only ever consumes the resolved roster.
     const boundAddress = await selfAddress(config, options);
+    const servicePort = configuredServicePort(config);
     streamServer = await startServer({
       ...(boundAddress ? { bindAddress: boundAddress } : {}),
+      ...(servicePort != null ? { port: servicePort } : {}),
       peerNodeIds: peerNodeIdsFrom(peers),
       peersByAddress: peers,
+      httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
       ...(options?.controlStreamServerOptions ?? {}),
     });
   } else if (role === "worker" && options?.streamClient !== false) {
@@ -254,7 +290,7 @@ export async function startLauncher(ws, options = {}) {
     let transport;
     if (resolved.target != null) {
       const createTransport = options?.createWorkerWsTransport ?? createWorkerWsTransport;
-      transport = createTransport(resolved.target, options?.workerWsTransportOptions ?? {});
+      transport = createTransport(configuredServiceUrlForAddress(config, resolved.target), options?.workerWsTransportOptions ?? {});
     } else if (resolved.message) {
       launcherWarnings.push({ code: "worker-stream-target-unresolved", message: resolved.message, path: null });
     }

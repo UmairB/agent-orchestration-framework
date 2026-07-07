@@ -233,6 +233,7 @@ export async function startControlStreamServer({
   openStore = openGlobalWorkProjectionStore,
   storeOptions = {},
   now = () => new Date().toISOString(),
+  httpHandler = null,
 } = {}) {
   const registry = createStreamRegistry();
   const store = await openStore(storeOptions);
@@ -240,7 +241,25 @@ export async function startControlStreamServer({
   const addressIndex = buildAddressIndex(peersByAddress);
   const resolve = resolveOrigin ?? ((request) => defaultResolveOrigin(request, { peersByAddress: addressIndex }));
 
+  const handleHttp = typeof httpHandler === "function" ? httpHandler : null;
   const server = http.createServer((request, response) => {
+    if (handleHttp) {
+      handleHttp(request, response)
+        .then((handled) => {
+          if (handled) return;
+          response.writeHead(426, { "Content-Type": "text/plain" });
+          response.end("Upgrade required");
+        })
+        .catch(() => {
+          try {
+            response.writeHead(500, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ ok: false, error: "request failed unexpectedly" }));
+          } catch {
+            /* response already settled */
+          }
+        });
+      return;
+    }
     response.writeHead(426, { "Content-Type": "text/plain" });
     response.end("Upgrade required");
   });

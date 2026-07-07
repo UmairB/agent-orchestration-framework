@@ -1,7 +1,7 @@
 ---
 doc: retrospective
 milestone: 34
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 <!--
   Milestone RETROSPECTIVE.md — carryable lessons distilled from this milestone's mistakes,
@@ -145,6 +145,8 @@ operator-run environmental check deferred by design (ADR-007's stated testabilit
   (distinct `AOF_GLOBAL_HOME`) resolve DISTINCT ids; a clone inherits nothing. Recorded as ADR-009 (identity is global, amending 33/ADR-004's persist location).
 
 - **R11 (architecture/process failure — global means one operator-visible folder, not several platform-private homes) — I let "global" split across multiple places before forcing a single global folder contract.** The corrected folder contract is explicit: `AOF_GLOBAL_HOME` wins; otherwise the default global AOF home is the user's `~/.aof` on every OS (`C:\Users\<user>\.aof` on Windows, `/Users/<user>/.aof` on macOS, `/home/<user>/.aof` on Linux). Mesh state then lives under that one home: `<global>/mesh/identity.json`, `<global>/mesh/work/projection.sqlite`, `<global>/mesh/nodes/`, and `<global>/mesh/workspaces/`. The earlier AppData / Application Support / XDG-data default was wrong for this milestone because it created another "global" location distinct from the operator-facing `.aof` home and made the system harder to inspect, explain, and test. **How to apply:** when a milestone says "global AOF folder", define the physical path in the ADR and tests before implementing storage; list concrete Windows/macOS/Linux examples; and reject designs that create multiple global homes unless the ADR names a real reason for the split. One logical global plane gets one default folder.
+
+- **R12 (operator model failure — joining is not serving) — I confused mesh membership with running a local service on the worker.** The intended model is simple: the **control node** hosts the authoritative mesh service and global store; a worker runs `aof mesh join <code>` to register itself with that control node; after that, any long-running worker process is an **outbound WebSocket client** that streams state to the control node. A worker does **not** need to host its own WebSocket application to become a mesh member, and Tailscale peers are only fabric reachability, not AOF mesh membership. The code correction makes `mesh:join` post a sanitized node descriptor and makes the control enrollment handler persist that node record immediately, so the joined worker appears in the global registry without waiting for a worker-side service. The control launcher now hosts enrollment on the same configured service port as worker streams, and the worker stream dial uses the fabric-resolved control address plus the configured service URL. **How to apply:** operator docs and agent guidance must say: control runs the service; worker joins; worker daemon, if used, dials out. Never tell an operator to run worker-side `serve` as the membership step.
 
 ## What went right
 

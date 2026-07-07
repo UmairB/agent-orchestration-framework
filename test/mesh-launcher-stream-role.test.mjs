@@ -111,7 +111,7 @@ async function makeRepo({ nodeId, controlNode, fabric = true, seedItem = true, p
     mesh: {
       nodeId,
       ...(fabric ? { fabric: "tailscale" } : {}),
-      ...(controlNode !== undefined ? { relay: { controlNode } } : {}),
+      ...(controlNode !== undefined ? { relay: { controlNode, url: "ws://control-node.test:4182/ws/relay" } } : {}),
     },
   };
   await writeFile(path.join(repo, ".aof", "aof.config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
@@ -150,6 +150,8 @@ export const meshLauncherStreamRoleTests = [
         assert.ok(handle.streamServer != null, "a streamServer was started");
         assert.equal(handle.streamClient, null, "a control node starts NO worker-stream client");
         assert.ok(startServerArgs != null, "startControlStreamServer was invoked");
+        assert.equal(startServerArgs.port, 4182, "the control service binds the stable port from config.mesh.relay.url so join/workers have a known endpoint");
+        assert.equal(typeof startServerArgs.httpHandler, "function", "the control service hosts the enrollment HTTP route on the same server as worker streams");
         assert.deepEqual(startServerArgs.peerNodeIds, [WORKER_ID], "the admission roster carries the resolved worker peer");
         assert.ok(Array.isArray(startServerArgs.peersByAddress), "an already-resolved peer→dialAddress roster is handed to the server");
         assert.ok(startServerArgs.peersByAddress.some((p) => p.nodeId === WORKER_ID && p.dialAddress === "100.2.2.2"));
@@ -184,7 +186,7 @@ export const meshLauncherStreamRoleTests = [
         assert.equal(handle.role, "worker");
         assert.equal(handle.streamServer, null, "a worker starts NO control-stream server");
         assert.ok(handle.streamClient != null, "a streamClient was constructed");
-        assert.equal(resolvedUrl, "100.90.249.80", "the transport is pointed at the fabric-resolved control-node dial address, never a hand-derived URL");
+        assert.equal(resolvedUrl, "ws://100.90.249.80:4182/ws/relay", "the transport is pointed at the fabric-resolved control-node endpoint, using the configured service port/path");
         assert.equal(transport.connectCalls, 1, "the transport was actually connected (not merely constructed inert)");
         assert.equal(transport.frames.length, 1, "an initial snapshot frame was pushed so the stream genuinely carries state");
         assert.equal(transport.frames[0].kind, "snapshot");

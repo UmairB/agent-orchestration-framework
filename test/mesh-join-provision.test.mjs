@@ -20,6 +20,7 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { serveRelay, sha256Hex } from "../src/mesh-relay.mjs";
 import { writeRegistry } from "../src/mesh-registry.mjs";
+import { readNodeRecord } from "../src/mesh-store.mjs";
 import { spawnCliAsync } from "./support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,7 +57,11 @@ function inviteFor(plain) {
 // route wired (injected clock — every invite above is live at CLOCK).
 async function standControl({ pending, grantUrl }) {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-meshjoin-ctl-"));
-  const workspace = { workDir: path.join(repo, "wiki", "work") };
+  const workspace = {
+    workDir: path.join(repo, "wiki", "work"),
+    projectRoot: repo,
+    globalMeshRoot: path.join(repo, ".global-aof", "mesh"),
+  };
   await mkdir(workspace.workDir, { recursive: true });
   const config = controlConfig(grantUrl);
   await writeRegistry(workspace, { roster: [], boards: [], pending, revocations: [] }, config);
@@ -72,6 +77,7 @@ async function makeJoiner(relayUrl, { gitInit = true } = {}) {
   await mkdir(path.join(root, "wiki", "work"), { recursive: true });
   const config = {
     name: "joiner-fixture",
+    runtimes: ["codex"],
     work: { dir: "./wiki/work" },
     mesh: { nodeId: JOINER_ID, salt: "fixture-salt", relay: { url: relayUrl } },
   };
@@ -110,6 +116,11 @@ export const meshJoinProvisionTests = [
         const ctx = { workspace: await loadWorkspace(joiner.root) };
         const result = await invoke("mesh:join", { code: "123456" }, ctx);
         assert.equal(result.joined, true, "the join reports the admission");
+
+        const joinedRecord = await readNodeRecord(control.workspace, JOINER_ID);
+        assert.ok(joinedRecord, "the control node persisted the joined worker's node record during enrollment");
+        assert.equal(joinedRecord.nodeId, JOINER_ID, "the persisted node record names the joining worker");
+        assert.deepEqual(joinedRecord.runtimes, ["codex"], "the persisted node record carries the worker descriptor details sent by mesh:join");
 
         const after = JSON.parse(await readFile(joiner.configPath, "utf8"));
         // The credential is stored carrying { relayAuth, nodeId, gitRemote }.

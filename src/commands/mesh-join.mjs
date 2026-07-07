@@ -6,9 +6,10 @@
 //      mesh-relay-client.mjs url-read precedent) and derive the device-flow HTTP
 //      endpoint from it (ws://host/ws/relay → http://host/enroll — the SAME server,
 //      03/ADR-001; wss → https).
-//   2. PRESENT — POST { code, nodeId } to the endpoint. The control node matches,
-//      consumes, admits, and issues; a rejection (bad / expired / consumed / capped)
-//      comes back as a structured JSON class.
+//   2. PRESENT — POST { code, nodeId, nodeRecord } to the endpoint. The control node
+//      matches, consumes, admits, persists the joined node descriptor, and issues;
+//      a rejection (bad / expired / consumed / capped) comes back as a structured
+//      JSON class.
 //   3. ON MATCH — store the issued credential { relayAuth, nodeId, gitRemote } at
 //      config.mesh.credential via the READ-MERGE-WRITE of the free-form mesh subtree
 //      (the resolveInstallSalt precedent in mesh-identity.mjs): the on-disk config is
@@ -25,9 +26,12 @@
 //   5. ON REJECTION — a clean face-level error and NOTHING stored: the config file is
 //      byte-unchanged and no git remote is added.
 import path from "node:path";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readJson, writeText } from "../fs.mjs";
+import { assembleDescriptor } from "../node-identity.mjs";
+import { aofVersion } from "./mesh-identity.mjs";
 
 // A structured command error the mesh face renders as ONE { ok:false, error, code }
 // envelope (the property is assigned, not an object-literal field).
@@ -135,6 +139,14 @@ export const meshJoinCommand = {
       throw faceError("mesh:join needs this node's identity (config.mesh.nodeId) — run `aof mesh identity` first.", "no-node-identity");
     }
 
+    const nodeRecord = assembleDescriptor({
+      nodeId,
+      hostname: os.hostname(),
+      platform: process.platform,
+      runtimes: Array.isArray(config.runtimes) ? config.runtimes : [],
+      aofVersion: aofVersion(),
+    });
+
     // (2) PRESENT the code. An unreachable endpoint is an honest face error — admission
     // requires the control node's relay ONLINE (there is no offline verification path).
     let response;
@@ -145,7 +157,7 @@ export const meshJoinCommand = {
       response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, nodeId }),
+        body: JSON.stringify({ code, nodeId, nodeRecord }),
       });
     } catch {
       throw faceError(`the enrollment endpoint is unreachable at ${endpoint} — admission requires the control node's relay online. Nothing was stored.`, "endpoint-unreachable");
