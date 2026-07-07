@@ -30,6 +30,7 @@ import os from "node:os";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readJson, writeText } from "../fs.mjs";
+import { globalWorkspacePaths } from "../workspace.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
 import { aofVersion } from "./mesh-identity.mjs";
 
@@ -53,6 +54,68 @@ function deriveEndpoint(relayUrl) {
   }
   const scheme = parsed.protocol === "wss:" ? "https:" : "http:";
   return `${scheme}//${parsed.host}/enroll`;
+}
+
+const DEFAULT_RELAY_PORT = 4182;
+const DEFAULT_RELAY_PATH = "/ws/relay";
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hostForUrl(host) {
+  const value = String(host ?? "").trim();
+  if (value.includes(":") && !value.startsWith("[")) return `[${value}]`;
+  return value;
+}
+
+function relayUrlForControl(control) {
+  const value = nonEmptyString(control);
+  if (value == null) return null;
+  if (/^wss?:\/\//i.test(value)) return value;
+  return `ws://${hostForUrl(value)}:${DEFAULT_RELAY_PORT}${DEFAULT_RELAY_PATH}`;
+}
+
+function relayUrlFromInput(input, config) {
+  return nonEmptyString(input?.relayUrl)
+    ?? relayUrlForControl(input?.control)
+    ?? nonEmptyString(config?.mesh?.relay?.url);
+}
+
+function controlNodeFrom(input, config, credential) {
+  return nonEmptyString(credential?.controlNode)
+    ?? nonEmptyString(input?.control)
+    ?? nonEmptyString(config?.mesh?.relay?.controlNode);
+}
+
+async function writeGlobalMeshConfig({ env, relayUrl, controlNode, credential, fabric }) {
+  const paths = globalWorkspacePaths({ env });
+  let onDisk = {};
+  try {
+    onDisk = await readJson(paths.configPath);
+  } catch {
+    onDisk = {};
+  }
+  if (!isPlainObject(onDisk)) onDisk = {};
+
+  const existingMesh = isPlainObject(onDisk.mesh) ? onDisk.mesh : {};
+  const existingRelay = isPlainObject(existingMesh.relay) ? existingMesh.relay : {};
+  const nextRelay = { ...existingRelay, url: relayUrl };
+  if (controlNode != null) nextRelay.controlNode = controlNode;
+
+  onDisk.mesh = {
+    ...existingMesh,
+    enabled: true,
+    fabric: nonEmptyString(existingMesh.fabric) ?? nonEmptyString(fabric) ?? "tailscale",
+    relay: nextRelay,
+    credential,
+  };
+  await writeText(paths.configPath, `${JSON.stringify(onDisk, null, 2)}\n`);
+  return paths.configPath;
 }
 
 // The joining node's OWN clone: walk up from the workspace's work stream to the
@@ -108,7 +171,7 @@ export const meshJoinCommand = {
   id: "mesh:join",
   input: {
     type: "object",
-    properties: { code: { type: "string" } },
+    properties: { code: { type: "string" }, control: { type: "string" }, relayUrl: { type: "string" } },
     additionalProperties: false,
   },
 
@@ -121,15 +184,15 @@ export const meshJoinCommand = {
       throw faceError("mesh:join requires the 6-digit invite code the operator read off `aof mesh invite`.", "invalid-input");
     }
 
-    // (1) The control node's endpoint, off the SAME config key the relay push client
-    // reads (config.mesh.relay.url — the mesh-relay-client precedent).
-    const relayUrl = config?.mesh?.relay?.url;
-    if (typeof relayUrl !== "string" || relayUrl.length === 0) {
-      throw faceError("mesh:join needs config.mesh.relay.url — the control node's relay endpoint to present the code to.", "no-relay-url");
+    // (1) The control node's endpoint, either from the human-facing --control name,
+    // the --url escape hatch, or an existing global/workspace relay URL.
+    const relayUrl = relayUrlFromInput(input, config);
+    if (relayUrl == null) {
+      throw faceError("mesh:join needs a control node target — use --control <tailscale-name> or --url <ws-url>.", "no-relay-url");
     }
     const endpoint = deriveEndpoint(relayUrl);
     if (endpoint == null) {
-      throw faceError(`mesh:join could not parse config.mesh.relay.url ("${relayUrl}") as a url.`, "invalid-relay-url");
+      throw faceError(`mesh:join could not parse the relay url ("${relayUrl}") as a url.`, "invalid-relay-url");
     }
 
     // The stream-identity half the admission records: THIS node's stable id. Enrolment
@@ -177,37 +240,34 @@ export const meshJoinCommand = {
     }
     const credential = payload.credential;
 
-    // (3) STORE the credential — read-merge-write of the free-form config.mesh.*
-    // subtree (the resolveInstallSalt precedent): re-read the on-disk config and set
-    // ONLY mesh.credential, so every other key survives byte-equivalent.
-    if (ws.configPath) {
-      let onDisk = {};
-      try {
-        onDisk = await readJson(ws.configPath);
-      } catch {
-        onDisk = {};
-      }
-      if (!onDisk.mesh || typeof onDisk.mesh !== "object") onDisk.mesh = {};
-      onDisk.mesh.credential = credential;
-      await writeText(ws.configPath, `${JSON.stringify(onDisk, null, 2)}\n`);
-    }
+    // (3) STORE the mesh enrollment state in the machine-wide AOF config. Joining a
+    // mesh is machine identity, not repository state, so the workspace .aof config is
+    // left alone.
+    const controlNode = controlNodeFrom(input, config, credential);
+    const configPath = await writeGlobalMeshConfig({
+      env: ctx?.env ?? process.env,
+      relayUrl,
+      controlNode,
+      credential,
+      fabric: config?.mesh?.fabric,
+    });
 
     // (4) PROVISION the granted git remote on THIS node's own clone (argv-form git).
     const gitRemote = provisionGitRemote(ws, credential.gitRemote);
 
-    return { joined: true, nodeId: credential.nodeId ?? nodeId, credential, gitRemote };
+    return { joined: true, nodeId: credential.nodeId ?? nodeId, credential, gitRemote, relayUrl, controlNode, configPath };
   },
 
   cli: {
     // `aof mesh join <code>` — ONE positional: the presented 6-digit code.
-    argv: (positionals) => ({ code: positionals[0] }),
+    argv: (positionals, options = {}) => ({ code: positionals[0], control: options.control, relayUrl: options.url }),
 
     render(result) {
       const remoteLine = result.gitRemote?.provisioned
         ? `git remote "${result.gitRemote.name}" → ${result.gitRemote.url}${result.gitRemote.existing ? " (already configured)" : ""}`
         : `no git remote provisioned (${result.gitRemote?.reason ?? "no grant"})`;
       return [
-        `Joined the mesh as ${result.nodeId} — credential stored at config.mesh.credential.`,
+        `Joined the mesh as ${result.nodeId} — credential stored at ${result.configPath ?? "global AOF config"}.`,
         remoteLine,
       ].join("\n");
     },

@@ -209,7 +209,8 @@ export const meshCoordinationLauncherTests = [
         const handle = await startLauncher(ws, launcherOptions(repo, {
           exec,
           platform: "linux",
-          ticker: syncTicker,
+          streamServer: false,
+          propagationTicker: syncTicker,
           peerPollTicker: peerTicker,
           onPeers: (peers) => { peersSeen = peers; },
         }));
@@ -218,7 +219,7 @@ export const meshCoordinationLauncherTests = [
         const published = await readFile(presenceRecordPath(ws, NODE_ID), "utf8").then((text) => JSON.parse(text)).catch(() => null);
         assert.ok(published != null, "this node's git presence record is published (via the reused publishPresenceRecord)");
         assert.equal(published.nodeId, NODE_ID, "the published record carries this node's id");
-        assert.equal(syncTicker.handles.length, 1, "the reused startSyncLoop is started on the configured cadence");
+        assert.equal(syncTicker.handles.length, 1, "the global propagation loop is started on the configured cadence");
         assert.equal(handle.selfAddress, "100.121.112.23", 'no listening broker socket is bound (the "bind" is the fabric self-address)');
 
         // Each ticker tick re-reads resolvePeers so mesh:status reflects live fabric liveness.
@@ -245,7 +246,7 @@ export const meshCoordinationLauncherTests = [
           const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
           const syncTicker = manualTicker();
           const peerTicker = manualTicker();
-          const handle = await startLauncher(ws, launcherOptions(repo, { exec, platform: "linux", ticker: syncTicker, peerPollTicker: peerTicker }));
+          const handle = await startLauncher(ws, launcherOptions(repo, { exec, platform: "linux", streamServer: false, propagationTicker: syncTicker, peerPollTicker: peerTicker }));
           assert.equal(handle.refused, undefined, `[${signal}] the daemon is running with a published presence record and a live sync loop`);
 
           // The CLI's SIGINT/SIGTERM handler, when invoked, calls handle.stop() — the

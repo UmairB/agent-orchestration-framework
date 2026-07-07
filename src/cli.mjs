@@ -532,7 +532,7 @@ async function meshCommand(args) {
     return;
   }
   if (subcommand === "join") {
-    await meshVerbCli("mesh:join", rest, { positionalAllowed: true });
+    await meshVerbCli("mesh:join", rest, { positionalAllowed: true, extraFlags: ["control", "url"] });
     return;
   }
   // milestone 24 / story 02 — the additive revoke dispatch branch, ABOVE the unknown-sub

@@ -43,6 +43,19 @@ function refusal(message, token) {
   return error;
 }
 
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function cliToken(value) {
+  return /^[A-Za-z0-9._~:-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+function joinCommandFor(code, controlNode) {
+  const control = nonEmptyString(controlNode);
+  return control == null ? `aof mesh join ${code}` : `aof mesh join ${code} --control ${cliToken(control)}`;
+}
+
 export const meshInviteCommand = {
   id: "mesh:invite",
   input: {
@@ -98,7 +111,9 @@ export const meshInviteCommand = {
 
     // (5) The plaintext code is returned ONCE — this result is its only existence
     // outside the operator's head; the durable record holds only codeHash.
-    return { code: minted, issuedAt, expiresAt, ttlSeconds };
+    const control = nonEmptyString(config?.mesh?.relay?.controlNode);
+    const relayUrl = nonEmptyString(config?.mesh?.relay?.url);
+    return { code: minted, issuedAt, expiresAt, ttlSeconds, control, relayUrl, joinCommand: joinCommandFor(minted, control) };
   },
 
   cli: {
@@ -108,7 +123,7 @@ export const meshInviteCommand = {
 
     render(result) {
       return [
-        `Invite code ${result.code} — read it to the joining machine (aof mesh join ${result.code}).`,
+        `${result.joinCommand ?? `aof mesh join ${result.code}`} — run this on the joining machine.`,
         `Expires ${result.expiresAt} (${result.ttlSeconds}s). Shown once — the registry keeps only its hash.`,
       ].join("\n");
     },

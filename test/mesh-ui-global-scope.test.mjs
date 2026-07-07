@@ -5,9 +5,8 @@
 //     scope "global" by default and scope "local" under --local; an unrecognized
 //     flag is rejected BEFORE serveMeshUi is ever called.
 //   tasks/01_mesh-ui-api-scope-switch.feature (@executable) — GET /api/mesh/status
-//     defaults to the global projection query; --local (or ?scope=local) keeps the
-//     pre-existing invoke("mesh:status") aggregate; an unsupported ?scope= value is
-//     a clean 400 invalid-scope; the write/namespace isolation matrix is unchanged.
+//     defaults to the global projection query; --local (or ?scope=local) narrows the
+//     same global projection to the current workspace; an unsupported ?scope= value is//     a clean 400 invalid-scope; the write/namespace isolation matrix is unchanged.
 //
 // The CLI-level scenarios drive the REAL CLI (bin/aof.mjs mesh ui) via spawn (the
 // mesh-ui-cli-face.test.mjs idiom) with AOF_GLOBAL_HOME relocated to an isolated
@@ -52,7 +51,7 @@ async function makeRepoRootWithDist() {
 
 // A workspace whose config points work.dir at wiki/work and (optionally) enables
 // mesh global propagation — the global-node-registry.test.mjs makeWorkspace idiom.
-async function makeWorkspace(root, { name = path.basename(root), mesh = {}, seedItem = true } = {}) {
+async function makeWorkspace(root, { name = path.basename(root), mesh = {}, seedItem = true, env } = {}) {
   const workDir = path.join(root, "wiki", "work");
   if (seedItem) {
     const milestoneDir = path.join(workDir, "34_milestone_global-mesh");
@@ -71,11 +70,11 @@ async function makeWorkspace(root, { name = path.basename(root), mesh = {}, seed
     `${JSON.stringify({ name, work: { dir: "./wiki/work" }, mesh: { enabled: true, ...mesh } }, null, 2)}\n`,
     "utf8"
   );
-  return loadWorkspace(root);
+  return loadWorkspace(root, undefined, { env });
 }
 
 // A LOCAL (non-global-propagating) workspace whose .aof/mesh holds node/presence
-// records so invoke("mesh:status") reads a non-empty local aggregate — mirrors
+// records so the legacy local fixture remains non-empty — mirrors
 // mesh-ui-serve.test.mjs's makeRepo, but WITHOUT mesh.enabled (local-only fixture;
 // the global default scenario must not depend on any global propagation).
 async function makeLocalRepo() {
@@ -116,8 +115,9 @@ async function seedNode(workspace, nodeId, fields = {}) {
 
 async function buildGlobalFixture(home) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-global-scope-store-"));
-  const alpha = await makeWorkspace(path.join(tmp, "alpha"), { mesh: { nodeId: "node-a" } });
-  const beta = await makeWorkspace(path.join(tmp, "beta"), { mesh: { nodeId: "node-b" } });
+  const env = { AOF_GLOBAL_HOME: home };
+  const alpha = await makeWorkspace(path.join(tmp, "alpha"), { mesh: { nodeId: "node-a" }, env });
+  const beta = await makeWorkspace(path.join(tmp, "beta"), { mesh: { nodeId: "node-b" }, env });
   await seedNode(alpha, "node-a");
   await seedNode(beta, "node-b");
 
@@ -301,7 +301,7 @@ export const meshUiGlobalScopeTests = [
   // ═══ task 01 — mesh UI API scope switch ══════════════════════════════════════
 
   {
-    name: "mesh-ui-global-scope/01 global mode answers the global projection query (two workspaces, work items, and nodes) and never calls invoke(mesh:status)",
+    name: "mesh-ui-global-scope/01 global mode answers the global projection query (two workspaces, work items, and nodes)",
     async run() {
       const home = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-global-scope-home-"));
       const root = await makeRepoRootWithDist();

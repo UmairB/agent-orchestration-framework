@@ -25,7 +25,7 @@
 //
 //   Phase 2 (guarded by existsSync of the fleet serve-face): when
 //   src/mesh-ui-serve.mjs exists (milestone 25 story 03), assert its ONLY reach to
-//   fleet data is invoke("mesh:status", …) through ./command-core.mjs — it imports NO
+//   fleet data is queryGlobalMeshStatus(…) through ./command-core.mjs — it imports NO
 //   mesh-store / mesh-presence / mesh-registry / commands/* module directly (a second
 //   data path). Skipped (a pinned green) while the module is absent — the
 //   absence-tolerant idiom (acd-mesh-command-cli-bijection's RED-until-commands
@@ -96,7 +96,7 @@ export const archTests = [
     },
   },
   {
-    name: "arch/25 ADR-003: when the fleet serve-face exists, it reaches fleet data ONLY via invoke(mesh:status) through the registry (no second data path)",
+    name: "arch/34 ADR-006: when the fleet serve-face exists, it reaches fleet data ONLY via global-mesh-query (no second data path)",
     run: async () => {
       if (!existsSync(MESH_UI_SERVE)) {
         // Absence-tolerant pinned green: the fleet serve-face is authored by story 03.
@@ -109,26 +109,26 @@ export const archTests = [
       // The door IS present — the face reaches fleet data through the command registry.
       const specifiers = imports(source).map((i) => i.specifier);
       assert.ok(
-        specifiers.includes("./command-core.mjs"),
-        "mesh-ui-serve.mjs imports the command registry (./command-core.mjs) — the only door to the fleet data"
+        specifiers.includes("./global-mesh-query.mjs"),
+        "mesh-ui-serve.mjs imports the global query surface (./global-mesh-query.mjs) — the only door to fleet data"
       );
       // No OTHER fleet-data-bearing import: mesh-store / mesh-presence / mesh-registry /
       // mesh-sync / commands/* would each be a second data path bypassing mesh:status.
       const secondPath = imports(source).filter((i) => {
         const spec = i.specifier;
         if (!spec.startsWith(".")) return false;
-        if (spec === "./command-core.mjs") return false; // the door
-        return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || spec.startsWith("./commands/");
+        if (spec === "./global-mesh-query.mjs") return false; // the door
+        return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || /\.\/global-(work-store|node-registry)\.mjs$/.test(spec) || spec.startsWith("./commands/");
       });
       assert.deepEqual(
         secondPath.map((i) => i.specifier),
         [],
-        "mesh-ui-serve.mjs imports no fleet-data module except ./command-core.mjs — it invoke's mesh:status, never a second read"
+        "mesh-ui-serve.mjs imports no fleet-data module except ./global-mesh-query.mjs — it never opens stores or imports command bodies directly"
       );
       // Positive: it reaches the fleet data by invoking mesh:status (call-form grep,
       // comments already discounted) — the ONE registered command (ADR-002).
       assert.ok(
-        /invoke\s*\(\s*["']mesh:status["']/.test(source),
+        /queryGlobalMeshStatus\s*\(/.test(source),
         "mesh-ui-serve.mjs reaches the fleet aggregate via invoke(\"mesh:status\", …) — the single data command"
       );
     },

@@ -24,7 +24,7 @@ async function makeWorkspace() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-meshstore-rec-"));
   const workDir = path.join(repo, "wiki", "work");
   await mkdir(workDir, { recursive: true });
-  return { repo, workspace: { workDir } };
+  return { repo, workspace: { workDir, globalMeshRoot: path.join(repo, "global", "mesh") } };
 }
 
 // A node-record object in the frozen ADR-003 schema shape (the store persists it
@@ -74,10 +74,10 @@ export const meshRecordStoreTests = [
         const files = await listNodeFiles(workspace);
         assert.equal(files.length, 1, "the nodes/ dir contains exactly one file");
         assert.equal(files[0], "umair-desktop.json", "that file is named umair-desktop.json");
-        // it lives under the partition root meshDir, which IS the .aof/mesh sidecar
+        // it lives under the global partition root meshDir.
         assert.equal(path.dirname(path.join(nodesDir(workspace), files[0])), path.join(meshDir(workspace), "nodes"), "the file is under meshDir/nodes");
         const nodesSegments = path.join(meshDir(workspace), "nodes").split(path.sep);
-        assert.ok(nodesSegments.includes(".aof") && nodesSegments.includes("mesh"), "the partition root IS the .aof/mesh sidecar (nodes dir resolves under .aof and mesh)");
+        assert.ok(nodesSegments.includes("mesh"), "the partition root is the global mesh home (nodes dir resolves under mesh)");
 
         const parsed = JSON.parse(await readBytes(workspace, files[0]));
         assert.deepEqual(parsed, record, "the file parses as JSON equal to the published node record");

@@ -6,7 +6,7 @@
 // Examples). node:assert/strict.
 //
 //   01_path-partition-convention.feature — the node-record path is the single
-//     node-id-keyed seam under the partition root (the .aof/mesh sidecar); the id is
+//     node-id-keyed seam under the global partition root; the id is
 //     ONE flat leaf segment directly under nodes/, never escaping into a parent or
 //     nested dir; there is no aggregate nodes.json two nodes co-write; the
 //     run-dimension convention equals milestone 19's runRecordPath + one <node>/
@@ -27,7 +27,7 @@ import { mkdtemp, rm, mkdir, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const workspace = { workDir: path.join("C:", "repo", "wiki", "work") };
+const workspace = { workDir: path.join("C:", "repo", "wiki", "work"), globalMeshRoot: path.join("C:", "aof-global", "mesh") };
 
 export const meshPartitionConventionTests = [
   {
@@ -39,11 +39,11 @@ export const meshPartitionConventionTests = [
       // the path ends with nodes/build-server.json
       assert.equal(path.basename(p), "build-server.json", "the path's leaf is build-server.json");
       assert.equal(path.basename(path.dirname(p)), "nodes", "the leaf sits directly under a nodes/ dir");
-      // rooted at the partition root, which IS the .aof/mesh sidecar
+      // rooted at the global partition root.
       assert.equal(path.dirname(p), path.join(meshDir(workspace), "nodes"), "the path is rooted under meshDir/nodes");
       assert.ok(p.startsWith(meshDir(workspace) + path.sep), "the path is inside the partition root");
       const segments = p.split(path.sep);
-      assert.ok(segments.includes(".aof") && segments.includes("mesh"), "the partition root IS the .aof/mesh sidecar (the node-record path resolves under .aof and mesh)");
+      assert.ok(segments.includes("mesh"), "the partition root is the global mesh home (the node-record path resolves under mesh)");
     },
   },
   {
@@ -85,7 +85,7 @@ export const meshPartitionConventionTests = [
     async run() {
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-partition-"));
       try {
-        const ws = { workDir: path.join(repo, "wiki", "work") };
+        const ws = { workDir: path.join(repo, "wiki", "work"), globalMeshRoot: path.join(repo, "global", "mesh") };
         await mkdir(ws.workDir, { recursive: true });
         const { publishNodeRecord, meshDir } = await import("../src/mesh-store.mjs");
 
@@ -163,7 +163,7 @@ export const meshPartitionConventionTests = [
       const { presenceRecordPath, meshDir, publishNodeRecord } = await import("../src/mesh-store.mjs");
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-presence-"));
       try {
-        const ws = { workDir: path.join(repo, "wiki", "work") };
+        const ws = { workDir: path.join(repo, "wiki", "work"), globalMeshRoot: path.join(repo, "global", "mesh") };
         await mkdir(ws.workDir, { recursive: true });
 
         // the convention NAMES the presence record shape as presence/<node-id>.json

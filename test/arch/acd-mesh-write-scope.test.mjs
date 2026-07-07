@@ -27,7 +27,7 @@ const MESH_STORE = new URL("../../src/mesh-store.mjs", import.meta.url);
 // record-doc reference, still writeText-only, still zero bare writeFile/appendFile.
 const MESH_COMMAND_MODULES = [
   new URL("../../src/commands/mesh-identity.mjs", import.meta.url),
-  new URL("../../src/commands/mesh-sync.mjs", import.meta.url),
+  new URL("../../src/commands/mesh-join.mjs", import.meta.url),
   new URL("../../src/node-identity.mjs", import.meta.url),
 ];
 const RECORD_DOCS = ["SPEC.md", "STORY.md", "STATE.md", "SESSION.md"];
@@ -83,18 +83,8 @@ export const archTests = [
       assert.ok(/function\s+meshDir\s*\(/.test(code), "meshDir is defined as the single partition-root seam");
       assert.ok(/function\s+nodeRecordPath\s*\(/.test(code), "nodeRecordPath is the single node-record path builder");
       assert.ok(/nodeRecordPath[\s\S]*?meshDir\s*\(/.test(code), "nodeRecordPath is built from meshDir (one seam)");
-
-      // The only path.join into the .aof config home (aofHome) is meshDir's "mesh"
-      // leaf — no write joins the config home directly with a non-mesh segment.
-      // (Location moved off workDir to .aof/mesh at 28/verify.)
-      const aofHomeJoins = [...code.matchAll(/path\.join\s*\(\s*aofHome\s*\(\s*workspace\s*\)\s*,([^)]*)\)/g)];
-      assert.ok(aofHomeJoins.length >= 1, "meshDir joins aofHome(workspace) — the partition root is anchored on the .aof config home");
-      for (const match of aofHomeJoins) {
-        assert.ok(
-          /["']mesh["']/.test(match[1]),
-          `the only join into aofHome(workspace) is the mesh partition root — got path.join(aofHome(workspace), ${match[1].trim()})`
-        );
-      }
+      assert.ok(/globalMeshPaths\s*\(\s*\)\.meshRoot/.test(code), "meshDir falls back to globalMeshPaths().meshRoot — the machine-global partition root");
+      assert.ok(/workspace\?\.globalMeshRoot/.test(code), "meshDir honors an injected workspace.globalMeshRoot before the process-global default");
     },
   },
   {
@@ -134,7 +124,7 @@ export const archTests = [
       }
       // mesh-identity legitimately writes the config via writeText(configPath, …) — so
       // the scan is non-vacuous (it actually observed a routed write, not an empty set).
-      assert.ok(sawWriteText, "a mesh:* command persists via the atomic writeText seam (mesh-identity's config persist)");
+      assert.ok(sawWriteText, "a mesh:* command persists via the atomic writeText seam (mesh command config persist)");
       // Self-check (non-vacuous): the bare-write detector DOES fire on a real writeFile.
       assert.equal(
         collectCalls(stripComments('await writeFile(configPath, body);'), DIRECT_WRITE_VERBS).length,

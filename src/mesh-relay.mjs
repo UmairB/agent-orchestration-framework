@@ -400,6 +400,7 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
     const relayAuth = crypto.randomBytes(32).toString("hex");
     const relayAuthHash = sha256Hex(relayAuth);
     const gitRemote = resolveGitRemoteGrant(config);
+    const controlNode = typeof config?.mesh?.relay?.controlNode === "string" && config.mesh.relay.controlNode.length > 0 ? config.mesh.relay.controlNode : null;
     const consumed = consumePendingInvite(registry, matched.codeHash, nowIso);
     const admitted = admitNode(consumed, { nodeId: joiner, admittedAt: nowIso, boards: [], relayAuthHash });
     const persisted = await writeRegistry(workspace, admitted, config);
@@ -409,7 +410,7 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
     }
 
     attemptBuckets.delete(source);
-    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, gitRemote } });
+    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode, gitRemote } });
   }
 
   return async function enrollmentHttpHandler(request, response) {
