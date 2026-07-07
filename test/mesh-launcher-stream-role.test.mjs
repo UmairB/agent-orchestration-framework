@@ -9,7 +9,7 @@
 //     and pushes an initial snapshot frame (P1.7b: the dial is assembled +
 //     connected, not merely constructed inert);
 //   - standalone role → neither a streamServer nor a streamClient is started;
-//   - a worker whose control node is ABSENT from the fabric degrades git-sync-only
+//   - a worker whose control node is ABSENT from the fabric enters stream-degraded
 //     — a client is still returned (so streamClient/stop() stay well-defined) but
 //     carries NO transport, and NO connection attempt is made (task 00's clean
 //     degrade, verbatim — asserted here by the injected transport's connect never
@@ -77,7 +77,7 @@ function fakeWorkerTransport() {
       return { id: connectCalls };
     },
     async send(handle, frame) {
-      frames.push({ kind: frame.kind, items: frame.items });
+      frames.push(frame);
     },
     close() {},
     onDrop(handler) { dropHandler = handler; },
@@ -217,9 +217,11 @@ export const meshLauncherStreamRoleTests = [
         assert.ok(handle.streamClient != null, "a streamClient was constructed");
         assert.equal(resolvedUrl, "ws://100.90.249.80:4182/ws/relay", "the transport is pointed at the fabric-resolved control-node endpoint, using the configured service port/path");
         assert.equal(transport.connectCalls, 1, "the transport was actually connected (not merely constructed inert)");
-        assert.equal(transport.frames.length, 1, "an initial snapshot frame was pushed so the stream genuinely carries state");
+        assert.equal(transport.frames.length, 2, "an initial snapshot and durable presence frame were pushed so the stream genuinely carries state and liveness");
         assert.equal(transport.frames[0].kind, "snapshot");
-        // The frame's workspaceId matches the SAME id the projection/git-backstop
+        assert.equal(transport.frames[1].kind, "presence");
+        assert.equal(transport.frames[1].presence.nodeId, WORKER_ID);
+        // The frame's workspaceId matches the SAME id the global projection
         // publishes under (review fix P0.1 — never a phantom "null" workspace).
         assert.equal(handle.streamClient.connected, true, "the client reports itself connected after the initial push");
         handle.stop();
@@ -317,7 +319,7 @@ export const meshLauncherStreamRoleTests = [
     },
   },
   {
-    name: "mesh-launcher-stream-role/04 a worker whose control node is absent from the fabric degrades git-sync-only — a client exists but makes NO connection attempt",
+    name: "mesh-launcher-stream-role/04 a worker whose control node is absent from the fabric enters stream-degraded mode — a client exists but makes NO connection attempt",
     async run() {
       const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID });
       try {
@@ -335,7 +337,7 @@ export const meshLauncherStreamRoleTests = [
             return fakeWorkerTransport();
           },
         });
-        assert.equal(handle.refused, undefined, "the daemon still starts (git-sync-only degrade, never a refusal)");
+        assert.equal(handle.refused, undefined, "the daemon still starts (stream-degraded retry state, never a refusal)");
         assert.equal(handle.role, "worker");
         assert.ok(handle.streamClient != null, "streamClient/stop() stay well-defined even in the degrade branch");
         assert.equal(transportConstructed, false, "NO transport is constructed when the control node cannot be resolved on the fabric");
@@ -373,11 +375,11 @@ export const meshLauncherStreamRoleTests = [
           streamSyncTicker,
           createWorkerWsTransport: () => transport,
         });
-        // At connect the daemon pushed exactly ONE snapshot of the current projection
-        // (the seeded milestone → 1 item).
-        assert.equal(transport.frames.length, 1, "one initial snapshot at connect");
+        // At connect the daemon pushed a snapshot of the current projection plus durable presence.
+        assert.equal(transport.frames.length, 2, "one initial snapshot plus presence at connect");
         assert.equal(transport.frames[0].kind, "snapshot");
         assert.equal(transport.frames[0].items.length, 1, "the initial snapshot carries the seeded milestone only");
+        assert.equal(transport.frames[1].kind, "presence", "the connect path also forwards durable worker presence");
 
         // A stream-sync ticker WAS registered, and its cadence is under the server's
         // stale window so a running worker stays "live" (never silently stale).
@@ -398,9 +400,10 @@ export const meshLauncherStreamRoleTests = [
         );
         await streamSyncTicker.fire(streamSyncTicker.handles[0]);
 
-        assert.equal(transport.frames.length, 2, "the stream-sync tick pushed another frame (the daemon keeps the stream current)");
-        assert.equal(transport.frames[1].kind, "snapshot", "the re-sync frame is a snapshot");
-        assert.equal(transport.frames[1].items.length, 2, "the re-snapshot reflects the ADVANCE (milestone + the new story) — convergence over the stream");
+        assert.equal(transport.frames.length, 4, "the stream-sync tick pushed another snapshot plus presence frame (the daemon keeps work and liveness current)");
+        assert.equal(transport.frames[2].kind, "snapshot", "the re-sync work frame is a snapshot");
+        assert.equal(transport.frames[2].items.length, 2, "the re-snapshot reflects the ADVANCE (milestone + the new story) — convergence over the stream");
+        assert.equal(transport.frames[3].kind, "presence", "the re-sync path refreshes durable worker presence too");
         handle.stop();
       } finally {
         await cleanup(repo);
@@ -434,7 +437,7 @@ export const meshLauncherStreamRoleTests = [
     },
   },
   {
-    name: "mesh-launcher-stream-role/04 a git-sync-only degraded worker (control unresolvable) runs NO stream-sync ticker — nothing to push into",
+    name: "mesh-launcher-stream-role/04 a stream-degraded worker (control unresolvable) runs NO stream-sync ticker — nothing to push into",
     async run() {
       const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID });
       try {

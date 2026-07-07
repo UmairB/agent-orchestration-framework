@@ -234,6 +234,40 @@ export const meshCoordinationLauncherTests = [
     },
   },
 
+  {
+    name: "mesh-coordination-launcher/03 the healthy launcher refreshes this node's durable presence on each propagation tick",
+    async run() {
+      const repo = await makeRepo();
+      try {
+        const ws = await loadLauncherWorkspace(repo);
+        const exec = async () => ({ stdout: JSON.stringify(STATUS_FIXTURE), status: 0 });
+        const syncTicker = manualTicker();
+        const peerTicker = manualTicker();
+        let now = "2026-07-05T10:00:00.000Z";
+        const handle = await startLauncher(ws, launcherOptions(repo, {
+          exec,
+          platform: "linux",
+          streamServer: false,
+          propagationTicker: syncTicker,
+          peerPollTicker: peerTicker,
+          now: () => now,
+        }));
+        assert.equal(handle.refused, undefined, "the daemon starts");
+        const initial = JSON.parse(await readFile(presenceRecordPath(ws, NODE_ID), "utf8"));
+        assert.equal(initial.heartbeatAt, "2026-07-05T10:00:00.000Z", "initial presence uses the injected clock");
+
+        now = "2026-07-05T10:00:05.000Z";
+        syncTicker.fire(syncTicker.handles[0]);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        const refreshed = JSON.parse(await readFile(presenceRecordPath(ws, NODE_ID), "utf8"));
+        assert.equal(refreshed.heartbeatAt, "2026-07-05T10:00:05.000Z", "the running daemon refreshes durable presence, not just work projection");
+        handle.stop();
+      } finally {
+        await cleanup(repo);
+      }
+    },
+  },
   // ══ Scenario Outline: <signal> stops the sync loop and the presence publisher
   //    cleanly ══
   {

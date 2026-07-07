@@ -27,6 +27,7 @@ import {
   startControlStreamServer,
 } from "../src/control-stream-server.mjs";
 import { openGlobalWorkProjectionStore, queryGlobalWorkProjection } from "../src/global-work-store.mjs";
+import { readPresenceRecord } from "../src/mesh-presence.mjs";
 
 const NOW = "2026-07-05T10:00:00.000Z";
 
@@ -259,6 +260,46 @@ export const controlStreamServerTests = [
           assert.equal(stored.status, "done", "the delta's own field update still lands");
           assert.equal(JSON.stringify(stored).includes("delta-secret-credential-value"), false, "the credential value carried on a DELTA frame never lands in the store");
           assert.equal("relayAuthToken" in stored, false, "the secret-shaped key from a delta frame is stripped, not merely blanked");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 a presence frame from an admitted worker is persisted into the control node's global presence store",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" };
+          await applyStreamFrame(store, { kind: "presence", nodeId: "worker-a", presence, at: NOW }, { now: NOW });
+
+          const saved = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "worker-a");
+          assert.deepEqual(saved, presence, "the control node stores the worker's durable presence in the same seam the UI reads");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 durable presence is attributed to the admitted socket node, not a self-declared frame node",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const presence = { nodeId: "spoofed-node", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" };
+          await applyStreamFrame(store, { kind: "presence", nodeId: "spoofed-node", presence, at: NOW }, { now: NOW, nodeId: "worker-a" });
+
+          const savedWorker = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "worker-a");
+          const savedSpoofed = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "spoofed-node");
+          assert.deepEqual(
+            savedWorker,
+            { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" },
+            "presence is stored for the admitted connection identity"
+          );
+          assert.equal(savedSpoofed, null, "the self-declared frame node cannot create another node's presence record");
         } finally {
           store.close();
         }

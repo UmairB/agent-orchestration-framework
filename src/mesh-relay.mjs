@@ -2,8 +2,8 @@
 // a ws@8 broker shipped as the same aof binary in a `relay` mode, carrying a FROZEN,
 // payload-agnostic ephemeral envelope. It brokers signals IN MEMORY ONLY and fans them
 // out — it persists NOTHING authoritative, imports NO record schema, and is NEVER a
-// system of record. Kill it and the fleet loses LIVENESS, not DATA (every signal has a
-// durable git counterpart — that durable write is story 00/02, never here).
+// system of record. Kill it and the fleet loses LIVENESS, not DATA (durable state is
+// written through the global mesh store/presence seams, never here).
 //
 // THE SERVE UNIT (the board-serve/terminal-ws precedent, 03/ADR-001): serveRelay({ port,
 // config }) returns { server, url, stop } — ONE http.createServer; a single
@@ -135,17 +135,7 @@ function hashesEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// The git-remote GRANT the credential carries (ADR-003 move 1 — "provisioned
-// alongside"): the trusted-operator single-group default is the remote the operator
-// configured on the control node (config.mesh.enrollment.gitRemote — the free-form
-// mesh subtree). An unconfigured url is an honest null grant (the join side then has
-// nothing to provision — a degraded-but-valid credential, not a crash).
-function resolveGitRemoteGrant(config) {
-  const raw = config?.mesh?.enrollment?.gitRemote;
-  const url = typeof raw?.url === "string" && raw.url.length > 0 ? raw.url : null;
-  const name = typeof raw?.name === "string" && raw.name.length > 0 ? raw.name : "aof-mesh";
-  return { url, name };
-}
+
 
 // One structured JSON response — the never-crash HTTP discipline (03/ADR-003 mirrored
 // over HTTP): EVERY enrollment outcome, success or rejection, is a written response,
@@ -399,7 +389,6 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
 
     const relayAuth = crypto.randomBytes(32).toString("hex");
     const relayAuthHash = sha256Hex(relayAuth);
-    const gitRemote = resolveGitRemoteGrant(config);
     const controlNode = typeof config?.mesh?.relay?.controlNode === "string" && config.mesh.relay.controlNode.length > 0 ? config.mesh.relay.controlNode : null;
     const consumed = consumePendingInvite(registry, matched.codeHash, nowIso);
     const admitted = admitNode(consumed, { nodeId: joiner, admittedAt: nowIso, boards: [], relayAuthHash });
@@ -410,7 +399,7 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
     }
 
     attemptBuckets.delete(source);
-    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode, gitRemote } });
+    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode } });
   }
 
   return async function enrollmentHttpHandler(request, response) {

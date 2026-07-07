@@ -1,18 +1,15 @@
 // Traceability wiring for milestone 24 / story 01 — task 02
 // (tasks/02_mesh-join-and-provision.feature). aof mesh join <code> presents the code to
 // the control node's endpoint, stores the issued credential in config.mesh.credential
-// (merge-not-clobber), and provisions git-remote via the shell-less git-argv idiom.
+// (merge-not-clobber). Repository remotes are deliberately outside mesh membership.
 //
 // Covers EVERY @executable scenario, driving mesh:join against the SAME in-process
 // serveRelay endpoint as task 01 (serveRelay on port 0, the story-00 registry seeded via
-// writeRegistry) — no spawned relay. The git-remote provision runs against a LOCAL
-// fixture clone (a real `git init` repo the test controls), with a granted url carrying
-// a SPACE to prove the argv form does not word-split it (the 13/ADR-002 Windows hazard).
-// Whether a real PUSH works is the @manual half (task 03) — here the remote is asserted
-// configured in the fixture repo's own config. One test object per scenario.
+// writeRegistry) — no spawned relay. Any legacy repository grant returned by a stale
+// control endpoint is ignored; fixture remotes exist only to prove join leaves them alone.
+// One test object per scenario.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,9 +68,9 @@ async function standControl({ pending, grantUrl }) {
   return { repo, workspace, config, relay };
 }
 
-// ---- the joining side: a real git fixture clone with the mesh config seeded ----
+// ---- the joining side: a workspace fixture with the mesh config seeded ----
 
-async function makeJoiner(relayUrl, { gitInit = true } = {}) {
+async function makeJoiner(relayUrl) {
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-meshjoin-node-"));
   await mkdir(path.join(root, ".aof"), { recursive: true });
   await mkdir(path.join(root, "wiki", "work"), { recursive: true });
@@ -89,10 +86,6 @@ async function makeJoiner(relayUrl, { gitInit = true } = {}) {
   };
   const configPath = path.join(root, ".aof", "aof.config.json");
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  if (gitInit) {
-    const init = spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
-    assert.equal(init.status, 0, `git init the joining fixture clone (stderr: ${init.stderr})`);
-  }
   return { root, configPath };
 }
 
@@ -103,9 +96,16 @@ async function seedGlobalConfig(env, content) {
   return paths.configPath;
 }
 
-function gitRemotes(cwd) {
-  const result = spawnSync("git", ["remote"], { cwd, encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
+async function seedGitConfig(root, text) {
+  await mkdir(path.join(root, ".git"), { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), text, "utf8");
+}
+
+async function readGitConfig(root) {
+  return readFile(path.join(root, ".git", "config"), "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
 }
 
 function tailscaleExecWithControlPeer({ controlId = "umairs-msi", address = "100.90.249.80" } = {}) {
@@ -119,10 +119,6 @@ function tailscaleExecWithControlPeer({ controlId = "umairs-msi", address = "100
   return async () => ({ stdout: JSON.stringify(payload), stderr: "", status: 0 });
 }
 
-function gitRemoteUrl(cwd, name) {
-  const result = spawnSync("git", ["remote", "get-url", name], { cwd, encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim() : null;
-}
 
 export const meshJoinProvisionTests = [
   // ══ Scenario: mesh:join command input accepts a Tailscale control name ═══════════
@@ -141,7 +137,7 @@ export const meshJoinProvisionTests = [
     async run() {
       let joiner = null;
       try {
-        joiner = await makeJoiner(null, { gitInit: false });
+        joiner = await makeJoiner(null);
         const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
         const workspace = await loadWorkspace(joiner.root, undefined, { env });
         let requestedUrl = null;
@@ -167,6 +163,7 @@ export const meshJoinProvisionTests = [
 
         assert.equal(requestedUrl, "http://100.90.249.80:4182/enroll", "--control posts enrollment to the resolved Tailscale IP, not the raw short name");
         assert.equal(result.relayUrl, "ws://100.90.249.80:4182/ws/relay", "the joined global config records the resolved relay URL");
+        assert.doesNotMatch(meshJoinCommand.cli.render(result), /git remote|no git remote/i, "the human join output does not mention git remotes");
         const paths = globalWorkspacePaths({ env });
         const globalConfig = JSON.parse(await readFile(paths.configPath, "utf8"));
         assert.equal(globalConfig.mesh.relay.url, "ws://100.90.249.80:4182/ws/relay", "the global config persists the resolved relay URL");
@@ -210,7 +207,7 @@ export const meshJoinProvisionTests = [
         assert.equal(typeof globalAfter.mesh.credential.relayAuth, "string", "global config mesh.credential carries relayAuth");
         assert.ok(globalAfter.mesh.credential.relayAuth.length > 0, "relayAuth is non-empty");
         assert.equal(globalAfter.mesh.credential.nodeId, JOINER_ID, "global config mesh.credential carries the stream identity");
-        assert.deepEqual(globalAfter.mesh.credential.gitRemote, { url: grantUrl, name: GRANT_NAME }, "global config mesh.credential carries the git-remote grant");
+        assert.equal("gitRemote" in globalAfter.mesh.credential, false, "global config mesh.credential carries no git-remote grant; mesh sync is websocket-only");
         assert.equal(globalAfter.mesh.existing, "preserved", "existing global mesh keys survive the merge");
         assert.equal(globalAfter.name, "global-fixture", "existing top-level global config keys survive the merge");
       } finally {
@@ -221,45 +218,28 @@ export const meshJoinProvisionTests = [
     },
   },
 
-  // ══ Scenario: on a match git-remote access is provisioned via the shell-less
-  //    git-argv form on the joining node's own clone ════════════════════════════════
+  // ══ Scenario: mesh:join is websocket-only and never provisions git remotes ══════
   {
-    name: "mesh-join-provision/02 on a match the granted remote is configured on the joining node's OWN clone via the spawnSync argv form — a url containing a SPACE is not word-split, and no foreign git write verb exists",
+    name: "mesh-join-provision/02 on a match mesh:join ignores any legacy git grant and configures no git remote",
     async run() {
-      // The load-bearing grant: a url carrying a SPACE (a shell string would word-split
-      // it into two argv tokens — the 13/ADR-002 Windows hazard).
       const grantUrl = "https://git.example.test/group remotes/fleet.git";
       const control = await standControl({ pending: [inviteFor("654321")], grantUrl });
       let joiner = null;
       try {
         joiner = await makeJoiner(control.relay.url);
+        const gitConfigBefore = `[remote "origin"]\n\turl = https://git.example.test/origin.git\n`;
+        await seedGitConfig(joiner.root, gitConfigBefore);
         const ctx = { workspace: await loadWorkspace(joiner.root) };
         const result = await invoke("mesh:join", { code: "654321" }, ctx);
 
-        // The remote was provisioned on the joining node's OWN clone.
-        assert.equal(result.gitRemote.provisioned, true, "the join provisioned the granted remote");
-        assert.deepEqual(gitRemotes(joiner.root), [GRANT_NAME], "the named remote is configured in the joining clone");
-        // The EXACT granted url survives — the space was NOT word-split.
-        assert.equal(gitRemoteUrl(joiner.root, GRANT_NAME), grantUrl, "the remote carries the exact granted url — the space was not word-split (argv form, not a shell string)");
+        assert.equal(result.joined, true, "the join still admits the worker");
+        assert.equal("gitRemote" in result, false, "the join result exposes no git provisioning result");
+        assert.equal(await readGitConfig(joiner.root), gitConfigBefore, "repository metadata is byte-unchanged; mesh sync is websocket-only");
 
-        // The structural half of the observable: the spawn IS the argv form.
         const source = await readFile(MESH_JOIN_SRC, "utf8");
         const noComments = source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-        assert.ok(
-          /spawnSync\s*\(\s*"git"\s*,\s*\[\s*"remote"\s*,\s*"add"/.test(noComments),
-          'git remote add is invoked as spawnSync("git", ["remote","add",name,url]) — the argv form'
-        );
-        assert.ok(!/\bexec(?:Sync)?\s*\(/.test(noComments), "no exec(/execSync( shell form exists in mesh-join");
-        // No git WRITE verb against any foreign source tree: the only argv verbs are the
-        // remote-configuration verbs on the node's own clone.
-        const verbs = [];
-        for (const m of noComments.matchAll(/spawnSync\s*\(\s*"git"\s*,\s*\[([^\]]*)\]/g)) {
-          for (const lit of m[1].matchAll(/"([^"]+)"/g)) verbs.push(lit[1]);
-        }
-        assert.ok(verbs.length > 0, "the argv extractor reads the git verbs (an unreadable spawn would be a shell form)");
-        for (const verb of verbs) {
-          assert.ok(["remote", "get-url", "add"].includes(verb), `the git verb "${verb}" only configures the node's own clone (no commit/push/clone against a foreign tree)`);
-        }
+        assert.ok(!/spawnSync\s*\(\s*"git"/.test(noComments), "mesh-join no longer spawns git at all");
+        assert.ok(!/\bexec(?:Sync)?\s*\(/.test(noComments), "mesh-join has no exec shell form either");
       } finally {
         await control.relay.stop();
         await rm(control.repo, { recursive: true, force: true });
@@ -279,7 +259,7 @@ export const meshJoinProvisionTests = [
       try {
         joiner = await makeJoiner(control.relay.url);
         const priorBytes = await readFile(joiner.configPath, "utf8");
-        const priorRemotes = gitRemotes(joiner.root);
+        const priorGitConfig = await readGitConfig(joiner.root);
 
         const ctx = { workspace: await loadWorkspace(joiner.root) };
         let refused = null;
@@ -296,9 +276,9 @@ export const meshJoinProvisionTests = [
 
         // R4 — config is BYTE-unchanged (no config.mesh.credential written).
         assert.equal(await readFile(joiner.configPath, "utf8"), priorBytes, "config is byte-unchanged after the rejection");
-        // And no git remote was added on the rejection.
-        assert.deepEqual(gitRemotes(joiner.root), priorRemotes, "no git remote was added to the joining clone");
-        assert.deepEqual(priorRemotes, [], "the clone had no remotes before, and still has none");
+        // And no repository metadata was created on the rejection.
+        assert.equal(await readGitConfig(joiner.root), priorGitConfig, "repository metadata is unchanged after the rejected join");
+        assert.equal(priorGitConfig, null, "the fixture starts without repository metadata, and join does not create it");
       } finally {
         await control.relay.stop();
         await rm(control.repo, { recursive: true, force: true });

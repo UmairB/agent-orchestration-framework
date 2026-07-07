@@ -125,25 +125,23 @@ import { meshRelayCommand } from "./commands/mesh-relay.mjs";
 // control-node-guarded MINT (a 6-digit code, recorded HASHED as a pending invite
 // through story 00's writeRegistry seam, the plaintext returned ONCE in the result);
 // mesh:join PRESENTS a code to the control node's device-flow HTTP endpoint (the
-// POST /enroll route on serveRelay's ONE http server), stores the issued credential at
-// config.mesh.credential (read-merge-write of the free-form mesh subtree — the
-// resolveInstallSalt precedent), and provisions the granted git remote via the
-// shell-less spawnSync("git", [ … ]) argv idiom (13/ADR-002). Additive — one import +
-// one COMMANDS entry each. They take the `mesh:` prefix, so they are EXCLUDED from the
-// `work:`-filtered bijection but RIDE the existing acd-mesh-command-cli-bijection gate
-// (now covering identity+status+sync+heartbeat+relay+invite+join).
+// POST /enroll route on the control service), stores the issued websocket credential
+// in the machine-global mesh config, and configures no repository remotes. Additive —
+// one import + one COMMANDS entry each. They take the `mesh:` prefix, so they are
+// EXCLUDED from the `work:`-filtered bijection but RIDE the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+
+// relay+invite+join).
 import { meshInviteCommand } from "./commands/mesh-invite.mjs";
 import { meshJoinCommand } from "./commands/mesh-join.mjs";
 // milestone 24 — group-enrollment (story 02: the enforceable trust boundary — ADR-004).
 // mesh:revoke is the control-node-guarded REVOKE: it removes the node from the registry
 // roster + appends an explicit-deny revocation { nodeId, revokedAt, reason } through
-// story 00's writeRegistry seam (ONE atomic write), and de-provisions git-remote on the
-// control node's OWN clone via the shell-less spawnSync("git", ["remote","remove",…])
-// argv idiom (13/ADR-002). After it the relay auth-gate (in mesh-relay.mjs's upgrade
-// handler) rejects the revoked node's credential on its next connect (T6). Additive —
-// one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from
-// the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
-// gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
+// story 00's writeRegistry seam (ONE atomic write). After it the relay auth-gate (in
+// mesh-relay.mjs's upgrade handler) rejects the revoked node's credential on its next
+// connect (T6). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
+// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+
+// relay+invite+join+revoke).
 import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 // milestone 33 — mesh relay/transport redesign (story 01: fabric-native transport +
 // coordination launcher — mesh:serve registers into the SAME core; ADR-003). Thin over

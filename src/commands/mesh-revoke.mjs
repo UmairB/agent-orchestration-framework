@@ -15,21 +15,9 @@
 //      single control-node-guarded write seam — acd-registry-write-scope). The deny is
 //      what the relay auth-gate (task 00) honours on the revoked node's NEXT connect,
 //      regardless of roster-sync lag (T6 revocation completeness).
-//   4. DE-PROVISION — git-remote access is removed on the control node's OWN clone via
-//      the shell-less spawnSync("git", ["remote","remove",name]) argv idiom (13/ADR-002
-//      / the inverse of ADR-003 move 3's provision — a shell string would word-split a
-//      name on Windows; acd-enroll-git-argv-no-shell greps the argv form here). The
-//      remote name is the <nodeId>-remote convention (injectable for white-box tests);
-//      an absent remote is a tolerated no-op, never a throw, and no git verb touches a
-//      foreign source tree (the read-only-source discipline — it edits THIS clone's
-//      config only).
-//
 // revokedAt is an INJECTED white-box input (the 22/R2 inject-the-clock discipline — the
 // task feature drives the revocation instant over it); the live CLI face passes no flag
 // for it, so production revokes against wall-clock.
-import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import {
   isControlNode,
   readRegistry,
@@ -45,59 +33,7 @@ function refusal(message, token) {
   return error;
 }
 
-// The control node's OWN clone: walk up from the workspace's work stream to the
-// containing git repo (the mesh-join findRepoRoot shape), falling back to a projectRoot
-// that is itself a repo. Null ⇒ no repo to de-provision (a structured degraded outcome
-// on the result, never a crash).
-function findRepoRoot(workspace) {
-  const start = workspace.workDir ?? workspace.projectRoot;
-  let dir = start ? path.resolve(start) : null;
-  while (dir) {
-    if (existsSync(path.join(dir, ".git"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  const projectRoot = workspace.projectRoot ? path.resolve(workspace.projectRoot) : null;
-  if (projectRoot && existsSync(path.join(projectRoot, ".git"))) return projectRoot;
-  return null;
-}
 
-// De-provision the revoked node's git remote on the control node's OWN clone — the
-// shell-less argv idiom ONLY (13/ADR-002: spawnSync("git", ["remote","remove",name]) with
-// the name as ONE argv token, never a shell string a name could word-split on Windows).
-// Tolerant: no repo / an absent remote are structured outcomes on the result, never
-// throws — the only git verb used is the remote-configuration verb on THIS clone (remote
-// remove), no write verb against any foreign source tree (the read-only-source discipline).
-function deprovisionGitRemote(workspace, remoteName) {
-  if (typeof remoteName !== "string" || remoteName.length === 0) {
-    return { deprovisioned: false, reason: "no-remote-name" };
-  }
-  const repoRoot = findRepoRoot(workspace);
-  if (repoRoot == null) {
-    return { deprovisioned: false, reason: "no-git-repo", name: remoteName };
-  }
-  // Probe first (a read of THIS clone's config) — an absent remote is a tolerated no-op,
-  // not a failure (the node may never have had a remote provisioned on this clone).
-  const probe = spawnSync("git", ["remote", "get-url", remoteName], { cwd: repoRoot, encoding: "utf8" });
-  if (probe.error || probe.status !== 0) {
-    return { deprovisioned: false, reason: "no-such-remote", name: remoteName };
-  }
-  const removed = spawnSync("git", ["remote", "remove", remoteName], { cwd: repoRoot, encoding: "utf8" });
-  if (removed.error || removed.status !== 0) {
-    const detail = removed.error ? String(removed.error.message ?? removed.error) : (removed.stderr ?? "").trim();
-    return { deprovisioned: false, reason: "git-remote-remove-failed", detail, name: remoteName };
-  }
-  return { deprovisioned: true, name: remoteName };
-}
-
-// The remote-name convention: the credential's git-remote grant is provisioned on the
-// joining node under a fixed name; on the control node's own tracking clone the revoked
-// node's remote follows the <nodeId>-remote convention. Injectable for white-box tests.
-function remoteNameFor(nodeId, injected) {
-  if (typeof injected === "string" && injected.length > 0) return injected;
-  return `${nodeId}-remote`;
-}
 
 export const meshRevokeCommand = {
   id: "mesh:revoke",
@@ -111,9 +47,6 @@ export const meshRevokeCommand = {
       // The injected revocation instant (ISO-8601) — a white-box test input, never a
       // CLI flag (22/R2). Absent ⇒ wall-clock.
       revokedAt: { type: "string" },
-      // The git remote name to de-provision — a white-box override; absent ⇒ the
-      // <nodeId>-remote convention.
-      remoteName: { type: "string" },
     },
     additionalProperties: false,
   },
@@ -166,10 +99,7 @@ export const meshRevokeCommand = {
       throw refusal("mesh:revoke could not persist the revocation (the registry seam refused a non-control write).", "not-control-node");
     }
 
-    // (4) De-provision git-remote on the control node's OWN clone (argv-form git).
-    const gitRemote = deprovisionGitRemote(ws, remoteNameFor(nodeId, input?.remoteName));
-
-    return { revoked: true, nodeId, revokedAt, reason, gitRemote };
+    return { revoked: true, nodeId, revokedAt, reason };
   },
 
   cli: {
@@ -178,17 +108,10 @@ export const meshRevokeCommand = {
     argv: (positionals) => ({ node: positionals[0] }),
 
     render(result) {
-      const remoteLine = result.gitRemote?.deprovisioned
-        ? `git remote "${result.gitRemote.name}" removed`
-        : `no git remote de-provisioned (${result.gitRemote?.reason ?? "none"})`;
-      return [
-        `Revoked ${result.nodeId} at ${result.revokedAt} — removed from the roster and recorded as revoked.`,
-        remoteLine,
-      ].join("\n");
+      return `Revoked ${result.nodeId} at ${result.revokedAt} — removed from the roster and recorded as revoked.`;
     },
 
-    // The --json face reports the revoked nodeId + the recorded revokedAt + the
-    // de-provision outcome.
+    // The --json face reports the revoked nodeId + the recorded revokedAt.
     json: (result) => result,
   },
 };

@@ -28,8 +28,6 @@ import { writeRegistry, readRegistry } from "../src/mesh-registry.mjs";
 
 const CONTROL_ID = "control-node-a";
 const JOINER_ID = "joiner-node";
-const GRANT_URL = "https://git.example.test/group.git";
-const GRANT_NAME = "aof-mesh";
 const CLOCK_START = "2026-07-01T10:00:00.000Z";
 
 function controlConfig(extraMesh = {}) {
@@ -37,16 +35,15 @@ function controlConfig(extraMesh = {}) {
     mesh: {
       nodeId: CONTROL_ID,
       relay: { controlNode: CONTROL_ID },
-      enrollment: { gitRemote: { url: GRANT_URL, name: GRANT_NAME } },
       ...extraMesh,
     },
   };
 }
 
-// Merge enrollment knobs INTO the control config without dropping the gitRemote grant.
+// Merge enrollment knobs INTO the control config.
 function configWithKnobs(knobs) {
   const base = controlConfig();
-  base.mesh.enrollment = { ...base.mesh.enrollment, ...knobs };
+  base.mesh.enrollment = { ...(base.mesh.enrollment ?? {}), ...knobs };
   return base;
 }
 
@@ -151,7 +148,7 @@ export const meshEnrollDeviceFlowTests = [
   // ══ Scenario: a good live code matches — the node is admitted, a credential is
   //    issued, and the invite is consumed ═══════════════════════════════════════════
   {
-    name: "mesh-enroll-flow/01 a good live code admits the node (roster append), issues { relayAuth, nodeId, gitRemote }, consumes the matched invite, and leaves every other pending invite byte-unchanged",
+    name: "mesh-enroll-flow/01 a good live code admits the node (roster append), issues { relayAuth, nodeId }, consumes the matched invite, and leaves every other pending invite byte-unchanged",
     async run() {
       const target = "123456";
       const otherA = inviteFor("111111");
@@ -160,13 +157,13 @@ export const meshEnrollDeviceFlowTests = [
       try {
         const { status, payload } = await postEnroll(stand.base, { code: target, nodeId: JOINER_ID });
 
-        // A structured HTTP success carrying the credential { relayAuth, nodeId, gitRemote }.
+        // A structured HTTP success carrying the credential { relayAuth, nodeId }.
         assert.equal(status, 200, "the response is a structured HTTP success");
         assert.equal(payload.ok, true, "the success envelope is structured (ok: true)");
         assert.equal(typeof payload.credential.relayAuth, "string", "the credential carries a relayAuth token");
         assert.ok(payload.credential.relayAuth.length > 0, "relayAuth is non-empty");
         assert.equal(payload.credential.nodeId, JOINER_ID, "the credential carries the stream identity (the joining nodeId)");
-        assert.deepEqual(payload.credential.gitRemote, { url: GRANT_URL, name: GRANT_NAME }, "the credential carries the git-remote grant");
+        assert.equal("gitRemote" in payload.credential, false, "the credential carries no repository grant; mesh sync is websocket-only");
 
         const after = await readRegistry(stand.workspace);
         // Admitted exactly once — { nodeId, admittedAt, boards } (+ the verifiable hash half).
@@ -579,7 +576,6 @@ export const meshEnrollDeviceFlowTests = [
         mesh: {
           nodeId: "not-the-authority-node",
           relay: { controlNode: CONTROL_ID },
-          enrollment: controlCfg.mesh.enrollment,
         },
       };
       const relay = await serveRelay({ port: 0, config: nonAuthorityCfg, workspace, now: () => CLOCK_START });

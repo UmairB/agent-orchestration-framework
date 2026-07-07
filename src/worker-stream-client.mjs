@@ -7,7 +7,9 @@
 // extended to the live stream).
 //
 // THE WIRE FRAME (an ADR-007 open question this build resolves — documented, not
-// frozen elsewhere): { kind: "snapshot" | "delta", nodeId, workspaceId, items, at }.
+// frozen elsewhere): { kind: "snapshot" | "delta", nodeId, workspaceId, items, at }
+// for work state, plus { kind: "presence", nodeId, presence, at } for durable worker
+// liveness in the control node's global presence store.
 //   - "snapshot" — items is the FULL current item-row array for the workspace (the
 //                  SAME row shape global-work-store.mjs's readWorkspaceProjectionItems
 //                  produces: { ref, type, slug, status, title, parent, sourcePath }).
@@ -43,6 +45,10 @@ export function buildSnapshotFrame(nodeId, workspaceId, items, now) {
 // pure projection, same shape family as the snapshot frame (kind differs).
 export function buildDeltaFrame(nodeId, workspaceId, items, now) {
   return { kind: "delta", nodeId, workspaceId, items: Array.isArray(items) ? [...items] : [], at: now };
+}
+
+export function buildPresenceFrame(nodeId, presence, now) {
+  return { kind: "presence", nodeId, presence: presence && typeof presence === "object" ? { ...presence } : {}, at: now };
 }
 
 // createWorkerStreamClient({ transport, ticker, nodeId, workspaceId, now, onWarning })
@@ -166,6 +172,10 @@ export function createWorkerStreamClient({
     return sendFrame(buildDeltaFrame(nodeId, workspaceId, deltaItems, resolveNow()));
   }
 
+  async function sendPresence(presence) {
+    return sendFrame(buildPresenceFrame(nodeId, presence, resolveNow()));
+  }
+
   // notifyDrop() — an explicit signal the connection dropped (production wires this
   // from the transport's own onDrop/close event); schedules a backoff reconnect over
   // the injected ticker. The reconnect itself does not resend a frame on its own — a
@@ -202,6 +212,7 @@ export function createWorkerStreamClient({
     ensureConnected,
     sendSnapshot,
     sendDelta,
+    sendPresence,
     notifyDrop,
     stop,
     get connected() { return connected; },

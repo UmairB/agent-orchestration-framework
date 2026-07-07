@@ -538,8 +538,7 @@ async function meshCommand(args) {
   // milestone 24 / story 02 — the additive revoke dispatch branch, ABOVE the unknown-sub
   // fallthrough. The EXACT `subcommand === "revoke"` form the acd-mesh-command-cli-bijection
   // grep requires; reuses the shared meshVerbCli face. mesh:revoke takes ONE positional —
-  // the nodeId to revoke (the control node removes it from the roster + records a revocation
-  // + de-provisions its git-remote).
+  // the nodeId to revoke (the control node removes it from the roster + records a revocation).
   if (subcommand === "revoke") {
     await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
     return;

@@ -52,6 +52,18 @@ function cadenceFromConfig(workspace) {
   return resolveCadenceSeconds(workspace?.config?.mesh?.sync?.cadenceSeconds);
 }
 
+function resolveNow(options = {}) {
+  if (typeof options?.now === "function") return String(options.now());
+  if (typeof options?.now === "string" && options.now.length > 0) return options.now;
+  return new Date().toISOString();
+}
+
+async function assembleCurrentPresenceRecord(ws, nodeId, options = {}) {
+  const items = await listItems(ws.workDir);
+  const activeRuns = await readActiveRuns(items);
+  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, aofVersion: aofVersion() });
+}
+
 function configuredRelayUrl(config) {
   const raw = config?.mesh?.relay?.url;
   if (typeof raw !== "string" || raw.length === 0) return null;
@@ -112,9 +124,12 @@ function peerNodeIdsFrom(peers) {
 // snapshot the client's own reconnect contract already re-sends on every future
 // reconnect (worker-stream-client.mjs's needsSnapshot flag); it does not itself
 // re-snapshot on a later local mutation.
-async function defaultConnectWorkerStreamClient(client, ws) {
+async function defaultConnectWorkerStreamClient(client, ws, presenceRecord = null) {
   const items = await readWorkspaceProjectionItems(ws).then((result) => result.rows).catch(() => []);
   await client.sendSnapshot(items);
+  if (presenceRecord != null && typeof client.sendPresence === "function") {
+    await client.sendPresence(presenceRecord);
+  }
 }
 
 // Resolve THIS node's stable id + whether it is the control node
@@ -130,8 +145,8 @@ async function defaultConnectWorkerStreamClient(client, ws) {
 // life of this probe/serve call, even though nothing was written). Minting +
 // persisting the salt/id stays owned exclusively by mesh:identity / mesh:heartbeat
 // (story 00's design) — the launcher's registered run is a config+fabric READ, never
-// a mint, and its --serve daemon's presence publish is the only legitimate git write
-// it performs.
+// a mint. The --serve daemon writes only this machine's global presence/global work
+// projection records.
 async function resolveNodeIdentity(ws) {
   const config = ws.config ?? {};
   // Read the salt from the MACHINE-WIDE identity home (34/story 00) — ws.identityPath
@@ -213,17 +228,18 @@ export async function startLauncher(ws, options = {}) {
     return { refused: true, probe, guidance: fabricGuidance(probe, {}) };
   }
 
-  // Publish this node's presence record ONCE at start (the reused assembly + atomic
-  // publish seam — byte-identical to mesh:heartbeat's record shape).
+  // Publish this node's presence at start, then refresh it on every propagation tick.
   const { nodeId } = await resolveNodeIdentity(ws);
-  const items = await listItems(ws.workDir);
-  const activeRuns = await readActiveRuns(items);
-  const heartbeatAt = typeof options?.now === "string" && options.now.length > 0 ? options.now : new Date().toISOString();
-  const record = assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, aofVersion: aofVersion() });
-  await publishPresenceRecord(ws, nodeId, record);
+  const publishCurrentPresence = async () => {
+    const nextRecord = await assembleCurrentPresenceRecord(ws, nodeId, options);
+    await publishPresenceRecord(ws, nodeId, nextRecord);
+    return nextRecord;
+  };
+  let record = await publishCurrentPresence();
 
   const launcherWarnings = [];
   const capturePropagation = async () => {
+    record = await publishCurrentPresence();
     const propagation = await publishGlobalWorkSnapshot(ws, options);
     if (propagation.warning) launcherWarnings.push(propagation.warning);
     return propagation;
@@ -244,8 +260,8 @@ export async function startLauncher(ws, options = {}) {
   // inside the poll closure) so the SAME streamServer instance the poll refreshes is
   // the one returned to the caller.
   const role = meshRole(config, nodeId);
-  // review fix P0.1: the frame workspaceId MUST be the SAME id the projection/
-  // git-backstop publishes under (workspaceIdFor(projectRoot) when config carries no
+  // review fix P0.1: the frame workspaceId MUST be the SAME id the global projection
+  // publishes under (workspaceIdFor(projectRoot) when config carries no
   // explicit config.mesh.workspaceId) — never a bare `?? null`, which would land the
   // worker's streamed rows under a phantom "null" workspace distinct from every other
   // write path for this same workspace.
@@ -285,7 +301,7 @@ export async function startLauncher(ws, options = {}) {
     // degrade, verbatim).
     const createClient = options?.createWorkerStreamClient ?? createWorkerStreamClient;
     const resolveTarget = options?.resolveWorkerStreamTarget ?? resolveWorkerStreamTarget;
-    const nowFn = () => (typeof options?.now === "string" && options.now.length > 0 ? options.now : new Date().toISOString());
+    const nowFn = () => resolveNow(options);
 
     const nodeRecords = await readNodeRecords(ws);
     const resolved = await resolveTarget(config, nodeId, { ...options, roster: nodeRecords });
@@ -317,7 +333,7 @@ export async function startLauncher(ws, options = {}) {
         transport.onDrop(() => client.notifyDrop());
       }
       const connectClient = options?.connectWorkerStreamClient ?? defaultConnectWorkerStreamClient;
-      await connectClient(client, ws);
+      await connectClient(client, ws, record);
     }
     workerStreamHasTransport = transport != null;
   }
@@ -377,7 +393,11 @@ export async function startLauncher(ws, options = {}) {
       : Math.max(5, Math.floor(DEFAULT_HEARTBEAT_WINDOW_SECONDS / 3));
     const pushStreamSnapshot = async () => {
       const items = await readWorkspaceProjectionItems(ws).then((result) => result.rows).catch(() => []);
+      const presence = await publishCurrentPresence();
       await streamClient.sendSnapshot(items);
+      if (typeof streamClient.sendPresence === "function") {
+        await streamClient.sendPresence(presence);
+      }
     };
     streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch(() => {}));
   }

@@ -25,6 +25,7 @@ import {
   readWorkspaceItems,
 } from "./global-work-store.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
+import { publishPresenceRecord } from "./mesh-presence.mjs";
 
 // isTailnetPeer(origin, { peerNodeIds }) — the ADMISSION PREDICATE: a tailnet peer is
 // one whose resolved nodeId (via the fabric join, mesh-fabric.resolvePeers) is a
@@ -112,12 +113,36 @@ export async function applyDeltaFrame(store, frame, { now } = {}) {
   });
 }
 
+function safeStringArray(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+
+export async function applyPresenceFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const presence = frame?.presence && typeof frame.presence === "object" ? frame.presence : {};
+  const nodeId = ownerNode ?? frameNode ?? (typeof presence.nodeId === "string" && presence.nodeId.length > 0 ? presence.nodeId : null);
+  if (nodeId == null) return { published: false, skipped: true, code: "missing-node-id" };
+  const nowValue = typeof options.now === "function" ? options.now() : options.now;
+  const heartbeatAt = validFrameAt(presence.heartbeatAt) ?? validFrameAt(frame?.at) ?? validFrameAt(nowValue) ?? new Date().toISOString();
+  const record = {
+    nodeId,
+    heartbeatAt,
+    activeRuns: safeStringArray(presence.activeRuns),
+    aofVersion: typeof presence.aofVersion === "string" ? presence.aofVersion : "",
+  };
+  const workspace = options.presenceWorkspace ?? { globalMeshRoot: store?.paths?.meshRoot };
+  await publishPresenceRecord(workspace, nodeId, record);
+  return { published: true, nodeId, record };
+}
+
 // applyStreamFrame(store, frame, options) — dispatch by frame.kind. An unrecognised
 // kind is a no-op (never a crash — the never-crash discipline every mesh module in
 // this codebase keeps).
 export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "snapshot") return applySnapshotFrame(store, frame, options);
   if (frame?.kind === "delta") return applyDeltaFrame(store, frame, options);
+  if (frame?.kind === "presence") return applyPresenceFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 
@@ -293,8 +318,9 @@ export async function startControlStreamServer({
         registry.markHeartbeat(nodeId, now());
         return;
       }
-      registry.markHeartbeat(nodeId, now());
-      applyStreamFrame(store, frame, { now: now() }).catch(() => {
+      const receivedAt = now();
+      registry.markHeartbeat(nodeId, receivedAt);
+      applyStreamFrame(store, frame, { now: receivedAt, nodeId, presenceWorkspace: { globalMeshRoot: store.paths?.meshRoot } }).catch(() => {
         // A store-apply fault must never crash the accept loop — the next frame
         // simply tries again (mirrors probeFabric's never-crash discipline).
       });

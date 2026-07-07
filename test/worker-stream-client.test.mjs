@@ -39,7 +39,7 @@ function fakeTransport({ failConnect = false, failSendOnce = false } = {}) {
         sendShouldThrowNext = false;
         throw new Error("send failed mid-stream");
       }
-      frames.push({ kind: frame.kind, items: frame.items });
+      frames.push(frame);
     },
     close() {
       closeCalls += 1;
@@ -83,6 +83,22 @@ export const workerStreamClientTests = [
       assert.deepEqual(transport.frames[0].items, twoItems);
       assert.equal(transport.frames[1].kind, "delta");
       assert.deepEqual(transport.frames[1].items, advanced);
+    },
+  },
+  {
+    name: "worker-stream-client/01 the worker can send a durable presence frame over the established stream",
+    async run() {
+      const transport = fakeTransport();
+      const client = createWorkerStreamClient({ transport, nodeId: "worker-a", workspaceId: "ws-1", now: () => NOW });
+      const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" };
+
+      await client.sendSnapshot([{ ref: "34/04/00", status: "in-progress" }]);
+      await client.sendPresence(presence);
+
+      assert.equal(transport.frames.length, 2);
+      assert.equal(transport.frames[0].kind, "snapshot", "the work-state contract still sends a snapshot first");
+      assert.equal(transport.frames[1].kind, "presence", "presence is a separate durable-liveness frame");
+      assert.deepEqual(transport.frames[1].presence, presence, "the durable presence payload is carried unchanged");
     },
   },
   {
