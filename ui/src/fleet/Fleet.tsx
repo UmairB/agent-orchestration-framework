@@ -11,6 +11,7 @@ import {
   nodePanelFacts,
   diagnosticsSummary,
   errorPathFor,
+  milestoneListItems,
 } from "./scope.mjs";
 import type { Scope } from "./scope.d.mts";
 
@@ -27,7 +28,7 @@ import type { Scope } from "./scope.d.mts";
 //
 // milestone 34 / story 03 (ADR-006; DESIGN.md) — the page now ALSO renders the
 // GLOBAL scope: a scope control (Global/Local, always visible in the top bar), a
-// workspaces summary, a work-items table with workspace identity, a node panel
+// workspaces summary, milestone cards with workspace identity, a node panel
 // (roles/capabilities/fabric addresses), and a health/diagnostics region. The
 // scope lives in the URL (`?scope=<global|local>`) so a refresh/poll/bookmark
 // keeps the selected scope, and switching scope re-queries WITHOUT a full page
@@ -136,8 +137,8 @@ export function Fleet() {
 
   return (
     // DESIGN GAP D1 (HIGH, review fix) — `overflow-x-hidden` here is the page-level
-    // backstop: even though the work-items table now scopes its OWN horizontal
-    // scroll (WorkItemsTable's `overflow-x-auto` container), this belt-and-braces
+    // backstop: milestone cards and long workspace labels should shrink inside the
+    // content rail, while this belt-and-braces
     // guard ensures the PAGE body/root itself never grows a horizontal scrollbar
     // at a 360–414px viewport, matching task-02's "no text overlaps at 360px" for
     // the now-populated global state too.
@@ -308,7 +309,7 @@ function RegionHeader({ label, summary }: { label: string; summary: string }) {
 // ═══════════════════════════════════════ GLOBAL scope body (milestone 34 / 03) ═
 
 // The GLOBAL scope's populated body (DESIGN.md's four global regions, in order):
-// workspaces summary, work items table (with workspace identity), node panel
+// workspaces summary, milestone list (with workspace identity), node panel
 // (control/worker, roles, last seen, capabilities, fabric addresses), and the
 // health/diagnostics region. Renders EITHER the full machine-wide view (scope:
 // "global") or the SAME regions narrowed to one workspace when the operator
@@ -326,7 +327,7 @@ function GlobalScopeView({ status }: { status: GlobalMeshStatus }) {
           </p>
         ) : null}
         <WorkspacesSummary workspaces={status.workspaces} />
-        <WorkItemsTable items={status.items} workspaces={status.workspaces} />
+        <MilestonesList items={status.items} workspaces={status.workspaces} />
         <GlobalNodePanel nodes={status.nodes} />
         <DiagnosticsRegion status={status} />
       </div>
@@ -365,46 +366,40 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
   );
 }
 
-// The work items table (DESIGN "aggregates milestones/stories/tasks/runs across
-// workspaces with workspace identity visible").
-//
-// DESIGN GAP D1 (HIGH, review fix) — at ~390px this table + long workspace paths
-// used to push the WHOLE page body into horizontal scroll (the header scrolled
-// off-frame with it). Fixed by scoping the horizontal scroll to THIS table's own
-// container (`overflow-x-auto`, replacing the old `overflow-hidden` which merely
-// CLIPPED instead of letting the page shrink) — the table itself keeps a sane
-// `min-width` so its columns don't crush illegibly, and it is the table's own box
-// that scrolls, never `body`/the page root. Long refs/titles/workspace names get
-// `truncate` (already present) inside `min-w-0` table cells so a long value never
-// forces the table wider than it needs to be.
-function WorkItemsTable({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
+// The milestone list. The global projection still carries stories/tasks for API
+// consumers and local filtering, but this overview intentionally stays at the
+// milestone level so the mesh UI does not become a granular work-item table.
+function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
+  const milestones = milestoneListItems(items);
   const nameFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId)?.name ?? workspaceId;
-  const summary = `${items.length} ${plural(items.length, "item")}`;
+  const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
   return (
     <section className="flex min-w-0 flex-col gap-3.5">
-      <RegionHeader label="Work items" summary={summary} />
-      <div className="min-w-0 overflow-x-auto rounded-lg border border-border bg-card shadow-sm">
-        <table className="w-full min-w-[560px] text-left text-[12.5px]">
-          <thead className="border-b border-border bg-muted/50 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2">Ref</th>
-              <th className="px-3 py-2">Title</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Workspace</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={`${item.workspaceId}:${item.ref}`} className="border-b border-border last:border-b-0">
-                <td className="mono max-w-[120px] truncate px-3 py-2 text-foreground">{item.ref}</td>
-                <td className="max-w-[220px] truncate px-3 py-2 text-foreground">{item.title ?? "—"}</td>
-                <td className="px-3 py-2 text-muted-foreground">{item.status ?? "—"}</td>
-                <td className="mono max-w-[160px] truncate px-3 py-2 text-muted-foreground" title={nameFor(item.workspaceId)}>{nameFor(item.workspaceId)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <RegionHeader label="Milestones" summary={summary} />
+      {milestones.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border bg-card/40 p-6 text-sm text-muted-foreground">
+          No milestones published yet.
+        </div>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(272px,1fr))] gap-3.5">
+          {milestones.map((item) => {
+            const workspaceName = nameFor(item.workspaceId);
+            const title = item.title ?? item.slug ?? item.ref;
+            return (
+              <div key={`${item.workspaceId}:${item.ref}`} className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
+                <div className="flex min-w-0 items-start gap-2">
+                  <span className="mono min-w-0 truncate text-[13px] font-bold text-foreground">{item.ref}</span>
+                  <span className="ml-auto shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {item.status ?? "unknown"}
+                  </span>
+                </div>
+                <span className="truncate text-[13px] font-semibold text-foreground" title={title}>{title}</span>
+                <span className="mono truncate border-t border-border pt-2 text-[10.5px] text-muted-foreground" title={workspaceName}>{workspaceName}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -728,8 +723,8 @@ function BoardDrillIn({ board }: { board: FleetBoard }) {
 // ───────────────────────────────────────────────────────── whole-page states ──
 
 // milestone 34 / story 03 (task 02 scenario 4) — the loading state reserves the
-// SAME region layout the populated global view uses (workspace summary / work
-// items / node panel / diagnostics), so nothing reflows when data arrives and no
+// SAME region layout the populated global view uses (workspace summary / milestones /
+// node panel / diagnostics), so nothing reflows when data arrives and no
 // text overlaps at a 360px viewport (each placeholder is a fixed-height block, not
 // text that could wrap unpredictably). The scope control itself lives in the
 // TopBar (always mounted, task 02 scenario 4's "the scope control region is
@@ -739,7 +734,7 @@ function LoadingState() {
     <main className="flex-1 px-4 py-7 sm:px-8">
       <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
         <RegionPlaceholder label="Workspaces" />
-        <RegionPlaceholder label="Work items" />
+        <RegionPlaceholder label="Milestones" />
         <RegionPlaceholder label="Nodes" />
         <RegionPlaceholder label="Diagnostics" />
       </div>

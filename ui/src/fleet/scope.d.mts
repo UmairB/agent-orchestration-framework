@@ -1,5 +1,5 @@
 // Type declarations for scope.mjs (the pure fleet scope/region/state helpers).
-import type { FleetNode, FleetStatus } from "./api";
+import type { FleetNode, FleetStatus, GlobalWorkItem } from "./api";
 
 export type Scope = "global" | "local";
 export type PageState = "loading" | "error" | "empty" | "populated";
@@ -23,6 +23,8 @@ export declare function pageState(ctx: {
 }): PageState;
 export declare function isEmptyStatus(status: FleetStatus | null | undefined): boolean;
 export declare function emptyStateCopy(scope: Scope): string;
+
+export declare function milestoneListItems(items: GlobalWorkItem[] | null | undefined): GlobalWorkItem[];
 
 export declare function filterToWorkspace(
   status: FleetStatus | null | undefined,

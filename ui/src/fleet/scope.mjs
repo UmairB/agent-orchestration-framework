@@ -100,6 +100,16 @@ export function emptyStateCopy(scope) {
   return "No mesh-enabled workspaces have published yet. Enable mesh on a workspace (config.mesh.enabled) and it will appear here.";
 }
 
+// ------------------------------------------------------- milestone list -------
+
+// The global mesh read model intentionally carries the COMPLETE work stream
+// (milestones, stories, tasks). The fleet UI's top-level global list is a
+// milestone list, so it projects that complete payload down to milestone rows at
+// render time instead of asking the store to forget lower-level items.
+export function milestoneListItems(items) {
+  return (items ?? []).filter((item) => item?.type === "milestone");
+}
+
 // ------------------------------------------------------- local filtering ------
 
 // Client-side filter of a GLOBAL-shaped status payload down to one workspace id —

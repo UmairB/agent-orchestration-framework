@@ -35,6 +35,7 @@ import {
   nodePanelFacts,
   diagnosticsSummary,
   errorPathFor,
+  milestoneListItems,
 } from "../ui/src/fleet/scope.mjs";
 
 export const fleetScopeTests = [
@@ -197,6 +198,21 @@ export const fleetScopeTests = [
     run() {
       const status = { workspaces: [{ workspaceId: "alpha" }], items: [], nodes: [] };
       assert.deepEqual(filterToWorkspace(status, null), status);
+    },
+  },
+  {
+    name: "fleet-scope/02 milestoneListItems keeps the global mesh UI at milestone level, never story/task rows",
+    run() {
+      const items = [
+        { ref: "34", type: "milestone", workspaceId: "alpha", title: "Global mesh work store", status: "in-progress" },
+        { ref: "34/00", type: "story", workspaceId: "alpha", title: "Global work propagation", status: "done" },
+        { ref: "34/00/00", type: "task", workspaceId: "alpha", title: "Projection delta", status: "done" },
+        { ref: "35", type: "milestone", workspaceId: "beta", title: "Next milestone", status: "not-started" },
+      ];
+      const milestones = milestoneListItems(items);
+      assert.deepEqual(milestones.map((item) => item.ref), ["34", "35"]);
+      assert.ok(milestones.every((item) => item.type === "milestone"), "only milestone rows render in the global list");
+      assert.ok(milestones.every((item) => !item.ref.includes("/")), "nested story/task refs do not render as milestone cards");
     },
   },
 

@@ -86,8 +86,8 @@ export type GlobalWorkspace = {
   controlNode: string | null;
 };
 
-// A work item row, carrying its owning workspace id (DESIGN "work items table:
-// … with workspace identity visible").
+// A work item row, carrying its owning workspace id. The global API keeps the
+// complete stream even when the UI projects it to milestone cards.
 export type GlobalWorkItem = {
   workspaceId: string;
   ref: string;
