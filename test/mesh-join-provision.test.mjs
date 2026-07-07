@@ -108,6 +108,17 @@ function gitRemotes(cwd) {
   return result.status === 0 ? result.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
 }
 
+function tailscaleExecWithControlPeer({ controlId = "umairs-msi", address = "100.90.249.80" } = {}) {
+  const payload = {
+    BackendState: "Running",
+    Self: { HostName: JOINER_ID, DNSName: `${JOINER_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.1.1.1"], Online: true },
+    Peer: {
+      control: { HostName: controlId, DNSName: `${controlId}.tail1a2b.ts.net.`, TailscaleIPs: [address], Online: true },
+    },
+  };
+  return async () => ({ stdout: JSON.stringify(payload), stderr: "", status: 0 });
+}
+
 function gitRemoteUrl(cwd, name) {
   const result = spawnSync("git", ["remote", "get-url", name], { cwd, encoding: "utf8" });
   return result.status === 0 ? result.stdout.trim() : null;
@@ -123,6 +134,46 @@ export const meshJoinProvisionTests = [
         { code: "123456", control: "umairs-msi", relayUrl: undefined },
         "the command input maps --control into the join request"
       );
+    },
+  },
+  {
+    name: "mesh-join-provision/02 --control resolves the Tailscale node name to its fabric IP before posting enrollment",
+    async run() {
+      let joiner = null;
+      try {
+        joiner = await makeJoiner(null, { gitInit: false });
+        const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
+        const workspace = await loadWorkspace(joiner.root, undefined, { env });
+        let requestedUrl = null;
+        const fetchImpl = async (url, options) => {
+          requestedUrl = url;
+          const body = JSON.parse(options.body);
+          assert.equal(body.code, "123456", "the invite code is still presented to enrollment");
+          assert.equal(body.nodeId, JOINER_ID, "the joining node identity is presented to enrollment");
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, credential: { relayAuth: "secret", nodeId: JOINER_ID, controlNode: "umairs-msi", gitRemote: null } }),
+          };
+        };
+
+        const result = await invoke("mesh:join", { code: "123456", control: "umairs-msi" }, {
+          workspace,
+          env,
+          exec: tailscaleExecWithControlPeer(),
+          platform: "linux",
+          fetch: fetchImpl,
+        });
+
+        assert.equal(requestedUrl, "http://100.90.249.80:4182/enroll", "--control posts enrollment to the resolved Tailscale IP, not the raw short name");
+        assert.equal(result.relayUrl, "ws://100.90.249.80:4182/ws/relay", "the joined global config records the resolved relay URL");
+        const paths = globalWorkspacePaths({ env });
+        const globalConfig = JSON.parse(await readFile(paths.configPath, "utf8"));
+        assert.equal(globalConfig.mesh.relay.url, "ws://100.90.249.80:4182/ws/relay", "the global config persists the resolved relay URL");
+        assert.equal(globalConfig.mesh.relay.controlNode, "umairs-msi", "the global config keeps the friendly control node identity separately");
+      } finally {
+        if (joiner) await rm(joiner.root, { recursive: true, force: true });
+      }
     },
   },
   // ══ Scenario: mesh:join on a match stores the credential in the global AOF config

@@ -31,6 +31,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readJson, writeText } from "../fs.mjs";
 import { globalWorkspacePaths } from "../workspace.mjs";
+import { resolvePeers } from "../mesh-fabric.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
 import { aofVersion } from "./mesh-identity.mjs";
 
@@ -80,10 +81,28 @@ function relayUrlForControl(control) {
   return `ws://${hostForUrl(value)}:${DEFAULT_RELAY_PORT}${DEFAULT_RELAY_PATH}`;
 }
 
-function relayUrlFromInput(input, config) {
-  return nonEmptyString(input?.relayUrl)
-    ?? relayUrlForControl(input?.control)
-    ?? nonEmptyString(config?.mesh?.relay?.url);
+function fabricConfigForControlResolution(config) {
+  const mesh = isPlainObject(config?.mesh) ? config.mesh : {};
+  return { ...config, mesh: { ...mesh, fabric: nonEmptyString(mesh.fabric) ?? "tailscale" } };
+}
+
+async function relayUrlFromInput(input, config, ctx) {
+  const explicit = nonEmptyString(input?.relayUrl);
+  if (explicit != null) return explicit;
+
+  const control = nonEmptyString(input?.control);
+  if (control != null) {
+    const peers = await resolvePeers(fabricConfigForControlResolution(config), {
+      exec: ctx?.exec,
+      platform: ctx?.platform,
+      roster: [{ nodeId: control, host: control }],
+    });
+    const match = peers.find((peer) => peer.nodeId === control && nonEmptyString(peer.dialAddress) != null);
+    if (match != null) return relayUrlForControl(match.dialAddress);
+    throw faceError(`mesh:join could not resolve control node "${control}" on the Tailscale fabric — check Tailscale is running and the node is in the mesh, or use --url <ws-url>.`, "control-node-unresolved");
+  }
+
+  return nonEmptyString(config?.mesh?.relay?.url);
 }
 
 function controlNodeFrom(input, config, credential) {
@@ -186,7 +205,7 @@ export const meshJoinCommand = {
 
     // (1) The control node's endpoint, either from the human-facing --control name,
     // the --url escape hatch, or an existing global/workspace relay URL.
-    const relayUrl = relayUrlFromInput(input, config);
+    const relayUrl = await relayUrlFromInput(input, config, ctx);
     if (relayUrl == null) {
       throw faceError("mesh:join needs a control node target — use --control <tailscale-name> or --url <ws-url>.", "no-relay-url");
     }
@@ -217,7 +236,8 @@ export const meshJoinCommand = {
       // (shorthand body deliberately — no bare code-named field literal lives in a
       // module that also performs a durable write, the hashed-at-rest grep discipline)
       const code = presented;
-      response = await fetch(endpoint, {
+      const fetchImpl = ctx?.fetch ?? fetch;
+      response = await fetchImpl(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, nodeId, nodeRecord }),
