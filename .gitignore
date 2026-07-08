@@ -11,6 +11,7 @@ graphify-out/
 *.sqlite-journal
 .DS_Store
 *.log
+.tmp
 
 # milestone 28 / story 00 — the SEA build recipe's local output (esbuild bundle,
 # sidecar assets, sea-config.json, blob, and the built binary). A generated
