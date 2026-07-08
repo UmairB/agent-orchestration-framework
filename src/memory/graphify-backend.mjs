@@ -156,24 +156,37 @@ async function attemptGraphBuild(ctx) {
     // so error.message IS the install hint) — never a crash.
     const code = error?.code ?? "graph-build-failed";
     const binaryAbsent = code === "graphify-missing";
+    // The graph build outran its wall-clock budget and was force-killed by the spawn
+    // guard (a PRESENT binary that blocks — e.g. the claude-cli extraction hangs). This
+    // is the case the pre-timeout code could NOT reach: an unbounded spawnSync hung the
+    // whole `ingest`/`reindex` forever. Now it degrades exactly like binary-absent —
+    // the records were written BEFORE the graph attempt, so reindex still TERMINATES and
+    // returns; only the derived graph re-rank signal is skipped (10/ADR-004).
+    const timedOut = code === "graphify-timeout";
     const hint = error?.message ?? String(error);
     return {
       built: false,
       backend,
       graphPath: null,
       egress: null,
-      // The structured miss code (graphify-missing when the binary is absent).
+      // The structured miss code (graphify-missing when the binary is absent,
+      // graphify-timeout when a present binary outran the wall-clock budget).
       skipped: code,
       // An explicit boolean so callers/renderers need not string-match the code: the
       // graph was skipped specifically because the graphify binary is absent.
       binaryAbsent,
-      // The 09 install hint, carried through (the `aof project provision graphify`
-      // guidance) — the VISIBLE, actionable degrade signal (10/ADR-004).
+      // Likewise for the timeout skip — the graph build blocked and was killed, so the
+      // command did not hang (the records half is intact regardless).
+      timedOut,
+      // The 09 install hint (binary absent) or the timeout guidance, carried through —
+      // the VISIBLE, actionable degrade signal (10/ADR-004).
       hint,
       // A ready-to-surface one-line reason in the ADR-004 shape.
       reason: binaryAbsent
         ? `graph skipped (graphify binary absent — ${hint})`
-        : `graph skipped (${code} — ${hint})`,
+        : timedOut
+          ? `graph skipped (graphify timed out — ${hint})`
+          : `graph skipped (${code} — ${hint})`,
     };
   }
 }

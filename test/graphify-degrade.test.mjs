@@ -96,6 +96,21 @@ function missingBinaryInvoke() {
   };
 }
 
+// The INJECTED invoke that simulates a PRESENT-but-BLOCKING binary: graph:build's spawn
+// outran the wall-clock guard and was force-killed, so it throws the structured
+// `graphify-timeout` (the exact code src/graphify.mjs raises on ETIMEDOUT). This is the
+// case the original hang lived in — an unbounded spawnSync blocked `ingest`/`reindex`
+// forever. reindex must CATCH it and still rebuild the records (TERMINATE, not block).
+function timeoutInvoke() {
+  return async () => {
+    const error = new Error(
+      "graphify timed out after 120000ms — raise AOF_GRAPHIFY_TIMEOUT_MS for a large repo, or check the extraction backend is not blocking."
+    );
+    error.code = "graphify-timeout";
+    throw error;
+  };
+}
+
 function fakeLoadWorkspace(projectRoot) {
   return async () => ({
     config: { name: "demo", resources: [], memory: { backend: "graphify" } },
@@ -103,6 +118,18 @@ function fakeLoadWorkspace(projectRoot) {
     projectRoot,
     workDir: path.join(projectRoot, "wiki", "work"),
   });
+}
+
+// A Background ctx like ctxFor, but graph:build TIMES OUT (present binary blocked +
+// force-killed) instead of being absent — the reindex-terminates-on-timeout regression.
+function timeoutCtxFor(projectRoot) {
+  return {
+    workDir: path.join(projectRoot, "wiki", "work"),
+    projectRoot,
+    configMemory: { backend: "graphify" },
+    invoke: timeoutInvoke(),
+    loadWorkspace: fakeLoadWorkspace(projectRoot),
+  };
 }
 
 // The Background ctx: graphify selected, the binary absent (resolveGraphifyBinary →
@@ -262,6 +289,34 @@ export const graphifyDegradeTests = [
       assert.ok(typeof result.graph.hint === "string" && result.graph.hint.length > 0, "the skip carries a non-empty install hint");
       assert.match(result.graph.hint, /aof project provision/, "the install hint names `aof project provision`");
       assert.match(result.graph.reason, /graph skipped \(graphify binary absent/, "the reason is the ADR-004 graph-skipped shape");
+    },
+  },
+  {
+    // Regression for the `aof work memory ingest`/`reindex` HANG: a PRESENT graphify
+    // binary whose extraction blocks used to hang reindex forever (unbounded spawnSync).
+    // With the spawn now bounded, graph:build raises graphify-timeout on overrun; reindex
+    // must CATCH it and TERMINATE with the records rebuilt (they were written before the
+    // graph attempt) — never hang, never crash.
+    name: "graphify/degrade: reindex TERMINATES and fails soft when the graph build times out (records rebuilt, graph skipped)",
+    run: async () => {
+      const { projectRoot } = await tempStream(["00", "01"]);
+      const ctx = timeoutCtxFor(projectRoot);
+      let result;
+      await assert.doesNotReject(async () => {
+        result = await graphifyBackend.reindex(null, ctx);
+      }, "reindex never hangs/throws when the graph build times out — it returns");
+
+      // The records half is unaffected — the store was written BEFORE the graph attempt.
+      assert.equal(result.backend, "graphify", "the result is the graphify backend's");
+      assert.ok(result.recordCount > 0, "the record store is rebuilt and non-empty");
+      assert.ok(Array.isArray(result.records) && result.records.length > 0, "the rebuilt records are returned");
+
+      // The graph was SKIPPED with the structured timeout code + a visible reason.
+      assert.equal(result.graph.built, false, "the graph build was skipped, not crashed");
+      assert.equal(result.graph.skipped, "graphify-timeout", "the skip carries the structured graphify-timeout code");
+      assert.equal(result.graph.timedOut, true, "the skip is flagged as a timeout");
+      assert.equal(result.graph.binaryAbsent, false, "a timeout is NOT a binary-absent skip");
+      assert.match(result.graph.reason, /graph skipped \(graphify timed out/, "the reason is the ADR-004 graph-skipped shape");
     },
   },
   {

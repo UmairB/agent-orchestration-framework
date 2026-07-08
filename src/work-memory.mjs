@@ -298,6 +298,16 @@ export function memoryUsage() {
 //   status  -> backend.status(ctx)
 //   unknown / missing verb -> print usage, exit non-zero, invoke NO backend method.
 export async function runMemory(argv, { config, resolveBackend, render = defaultRender, log = console.log, ctx = {} } = {}) {
+  // --help/-h is a GUARD that prints usage and returns WITHOUT resolving or reaching a
+  // backend. Checked FIRST, before parsing/verb-gating: ingest/reindex start the record
+  // rebuild AND spawn the graph build the instant they route, so `... memory ingest
+  // --help` must never do real work (before this guard it dropped straight into the
+  // rebuild — the reason `--help` itself hung).
+  if (argv.includes("--help") || argv.includes("-h")) {
+    log(memoryUsage());
+    return { ok: true, exitCode: 0 };
+  }
+
   const { verb, query, only, scope, opts, json, block } = parseMemoryArgv(argv);
 
   if (!verb || !MEMORY_VERBS.includes(verb)) {

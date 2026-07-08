@@ -118,12 +118,76 @@ export function graphifyBuildArgs(input, projectRoot) {
   return args;
 }
 
+// ---------------------------------------------------------- spawn-safety envelope ----
+//
+// EVERY graphify spawn is SYNCHRONOUS (spawnSync) and, with a network extraction
+// backend like `claude-cli`, can run for minutes or block on an interactive prompt —
+// so an UNBOUNDED spawn hangs the whole aof process indefinitely. This is the memory
+// `ingest`/`reindex` hang: the records index write completes, then the graph:build
+// spawn NEVER returns (graphify shells out to the `claude` CLI and blocks). The
+// binary-absent "fail soft" (resolveGraphifyBinary → graphify-missing, caught) does
+// NOT cover a PRESENT binary that blocks — and that path is @manual, never CI-checked.
+// Two guards make every graphify spawn ALWAYS terminate:
+//   - `timeout` (+ SIGKILL): a run that outlives the wall-clock budget is force-killed
+//     and surfaces as a structured `graphify-timeout` the memory backend FAILS SOFT on
+//     (records intact, graph skipped). Tunable via AOF_GRAPHIFY_TIMEOUT_MS for a
+//     genuinely large repo; a non-positive/garbage value falls back to the default
+//     (never "no timeout" — that would reintroduce the hang).
+//   - stdin is IGNORED (`stdio[0]="ignore"`): a graphify/claude-cli prompt that reads
+//     stdin gets EOF instead of blocking forever on a pipe nothing writes to.
+// stdout/stderr stay piped + captured (encoding:"utf8"), so counts still come from
+// graph.json (ADR-001) and the opaque markdown is still carried.
+export const GRAPHIFY_TIMEOUT_ENV = "AOF_GRAPHIFY_TIMEOUT_MS";
+export const DEFAULT_GRAPHIFY_TIMEOUT_MS = 120_000;
+
+// The wall-clock budget (ms) from AOF_GRAPHIFY_TIMEOUT_MS, or the pinned default. Only
+// a positive finite integer overrides; anything else (absent / 0 / negative / garbage)
+// falls back to the default so the spawn is NEVER unbounded. `env` is injectable so a
+// test drives the override without mutating the global process env.
+export function graphifySpawnTimeoutMs(env = process.env) {
+  const raw = Number.parseInt(env?.[GRAPHIFY_TIMEOUT_ENV] ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_GRAPHIFY_TIMEOUT_MS;
+}
+
+// The spawnSync options EVERY graphify spawn shares (build/query/triage). Bounds the
+// wall-clock, force-kills on overrun, and closes the child's stdin (see the envelope
+// note above). Pure + injectable (`env`) so a unit test asserts the guards without a
+// live binary.
+export function graphifySpawnOptions({ projectRoot, env = process.env } = {}) {
+  return {
+    cwd: projectRoot,
+    encoding: "utf8",
+    timeout: graphifySpawnTimeoutMs(env),
+    killSignal: "SIGKILL",
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+}
+
+// Translate a spawnSync `result.error` (a timeout kill or a failed launch) into the
+// structured command error the callers map. `graphify-timeout` when the wall-clock
+// budget was exceeded (spawnSync sets error.code === "ETIMEDOUT" and force-kills) — the
+// memory backend FAILS SOFT on it; `graphify-spawn-failed` for any other launch error.
+// A clean run (no result.error) is a no-op — the caller reads stdout/graph.json.
+function throwOnSpawnError(result, options) {
+  if (!result.error) return;
+  const timedOut = result.error.code === "ETIMEDOUT";
+  const error = new Error(
+    timedOut
+      ? `graphify timed out after ${options.timeout}ms — raise ${GRAPHIFY_TIMEOUT_ENV} for a large repo, or check the extraction backend is not blocking.`
+      : `graphify failed to run: ${result.error.message}`
+  );
+  error.code = timedOut ? "graphify-timeout" : "graphify-spawn-failed";
+  throw error;
+}
+
 // graph build — `graphify extract <path> --out <projectRoot> [--backend X]
 // [--token-budget N]` (RESEARCH §B; finding-F2). cwd = projectRoot so the query
 // family finds <projectRoot>/graphify-out/graph.json (#756, RESEARCH §I), AND
 // `--out projectRoot` so extract WRITES there (its --out default is <path>, the
 // target — not cwd). A null/absent backend passes NO --backend flag → code/AST
-// only, zero egress (privacy boundary, ADR-005).
+// only, zero egress (privacy boundary, ADR-005). The spawn is BOUNDED (timeout +
+// ignored stdin, see graphifySpawnOptions) so a blocking extraction can't hang aof —
+// an overrun throws graphify-timeout, which the memory reindex catches and skips soft.
 export function runGraphifyBuild(input, { projectRoot }) {
   const resolved = resolveGraphifyBinary();
   if (!resolved.found) {
@@ -132,10 +196,9 @@ export function runGraphifyBuild(input, { projectRoot }) {
     throw error;
   }
   const args = graphifyBuildArgs(input, projectRoot);
-  const result = spawnSync(resolved.path, args, {
-    cwd: projectRoot,
-    encoding: "utf8",
-  });
+  const options = graphifySpawnOptions({ projectRoot });
+  const result = spawnSync(resolved.path, args, options);
+  throwOnSpawnError(result, options);
   return {
     graphPath: graphJsonPath(projectRoot),
     stdout: result.stdout ?? "",
@@ -157,10 +220,9 @@ export function runGraphifyQuery(input, { projectRoot }) {
   if (input.strategy === "dfs") args.push("--dfs");
   if (input.strategy === "bfs") args.push("--bfs");
   if (input.budget != null) args.push("--budget", String(input.budget));
-  const result = spawnSync(resolved.path, args, {
-    cwd: projectRoot,
-    encoding: "utf8",
-  });
+  const options = graphifySpawnOptions({ projectRoot });
+  const result = spawnSync(resolved.path, args, options);
+  throwOnSpawnError(result, options);
   return {
     stdout: result.stdout ?? "",
     graphPath: graphJsonPath(projectRoot),
@@ -185,10 +247,9 @@ export function runGraphifyTriage(input, { projectRoot }) {
   } else {
     args.push("--triage");
   }
-  const result = spawnSync(resolved.path, args, {
-    cwd: projectRoot,
-    encoding: "utf8",
-  });
+  const options = graphifySpawnOptions({ projectRoot });
+  const result = spawnSync(resolved.path, args, options);
+  throwOnSpawnError(result, options);
   return {
     stdout: result.stdout ?? "",
     graphPath: graphJsonPath(projectRoot),
