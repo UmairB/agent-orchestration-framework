@@ -22,7 +22,15 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { defaultGlobalWorkspaceDir, toolStoreRoot, toolVersionDir } from "../src/paths.mjs";
-import { resolveManagedBinary, exeDirFor, exeNameFor, defaultProbe } from "../src/tool-store.mjs";
+import {
+  resolveManagedBinary,
+  exeDirFor,
+  exeNameFor,
+  defaultProbe,
+  toolSpawnOptions,
+  TOOL_PROBE_TIMEOUT_ENV,
+  DEFAULT_TOOL_PROBE_TIMEOUT_MS,
+} from "../src/tool-store.mjs";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -283,6 +291,43 @@ export const toolStorePathResolutionTests = [
       } finally {
         await store.cleanup();
       }
+    },
+  },
+  {
+    // Regression for the INTERMITTENT `aof work memory ingest`/`reindex` hang: every
+    // resolveManagedBinary call spawns the `where`/`which` locator (even when the tool
+    // is ABSENT — running it is HOW absence is determined) and, on a hit, a `--version`
+    // probe. An UNBOUNDED spawn there stalls the caller forever under machine contention.
+    // toolSpawnOptions is the guard: a positive finite wall-clock timeout (force-kill on
+    // overrun) + an IGNORED stdin so neither child can block reading a prompt.
+    name: "tool-store/00 the locator + version-probe spawns are BOUNDED (finite timeout + ignored stdin)",
+    run() {
+      const opts = toolSpawnOptions();
+      assert.equal(opts.encoding, "utf8", "the spawn still captures stdout as utf8 (probe/locator parse it)");
+      assert.ok(
+        Number.isFinite(opts.timeout) && opts.timeout > 0,
+        "a positive, finite timeout is always set (never unbounded)"
+      );
+      assert.equal(opts.timeout, DEFAULT_TOOL_PROBE_TIMEOUT_MS, "the default is the pinned short probe budget");
+      assert.ok(opts.killSignal, "a kill signal is set so a stalled locator/probe is force-killed on overrun");
+      assert.equal(
+        Array.isArray(opts.stdio) && opts.stdio[0],
+        "ignore",
+        "the child's stdin is ignored (a prompt gets EOF, never a hang)"
+      );
+
+      // AOF_TOOL_PROBE_TIMEOUT_MS overrides the budget — injected via the env seam so the
+      // global process env is never mutated; garbage/non-positive falls back to the default.
+      assert.equal(
+        toolSpawnOptions({ [TOOL_PROBE_TIMEOUT_ENV]: "3000" }).timeout,
+        3000,
+        "AOF_TOOL_PROBE_TIMEOUT_MS overrides the default timeout"
+      );
+      assert.equal(
+        toolSpawnOptions({ [TOOL_PROBE_TIMEOUT_ENV]: "0" }).timeout,
+        DEFAULT_TOOL_PROBE_TIMEOUT_MS,
+        "a non-positive override falls back to the default (never unbounded)"
+      );
     },
   },
 ];

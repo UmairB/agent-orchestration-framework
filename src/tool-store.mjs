@@ -78,16 +78,49 @@ function isFile(candidate) {
   }
 }
 
+// The wall-clock budget (ms) shared by EVERY tool-resolution spawn — the `where`/
+// `which` locator and the `<bin> --version` probe. Both run on every
+// resolveManagedBinary call (the locator even when the tool is ABSENT — running it is
+// HOW absence is determined), so an UNBOUNDED spawn here hangs the caller
+// INTERMITTENTLY under machine contention: a stuck `where.exe`/`which` (or a `--version`
+// that blocks) never returns, and a resident hung one wedges the next attempt. This is
+// the `aof work memory ingest`/`reindex` intermittent hang on a machine where graphify
+// is ABSENT (the graph build never runs — only resolution does). These probes are cheap
+// (sub-second normally), so the budget is SHORT; a non-positive/garbage override falls
+// back to the default (never "no timeout"). Tunable via AOF_TOOL_PROBE_TIMEOUT_MS.
+export const TOOL_PROBE_TIMEOUT_ENV = "AOF_TOOL_PROBE_TIMEOUT_MS";
+export const DEFAULT_TOOL_PROBE_TIMEOUT_MS = 10_000;
+
+export function toolProbeTimeoutMs(env = process.env) {
+  const raw = Number.parseInt(env?.[TOOL_PROBE_TIMEOUT_ENV] ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TOOL_PROBE_TIMEOUT_MS;
+}
+
+// The spawnSync options every tool-resolution spawn shares (locator + version probe).
+// Bounds the wall-clock and force-kills on overrun so a stalled child DEGRADES rather
+// than hangs — the locator falls through to the manual PATH scan, the probe to
+// version:null. stdin is IGNORED so neither child can block reading a prompt. `env` is
+// injectable so a unit test asserts the guards without a live binary.
+export function toolSpawnOptions(env = process.env) {
+  return {
+    encoding: "utf8",
+    timeout: toolProbeTimeoutMs(env),
+    killSignal: "SIGKILL",
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+}
+
 // The default version probe: spawn `<bin> --version` and degrade to null on ANY
-// failure — a missing flag, a non-zero exit, an ENOENT (RESEARCH §A4). NEVER
-// throws. Modelled on graphify.mjs's probeVersion. Injectable via the resolver's
+// failure — a missing flag, a non-zero exit, an ENOENT, a TIMEOUT (RESEARCH §A4).
+// NEVER throws. Modelled on graphify.mjs's probeVersion. Injectable via the resolver's
 // `probe` seam so a test can drive the clean / failing / empty rows hermetically.
 // `spawn` is an injectable seam (default: the real spawnSync) so the degrade
 // BRANCH LOGIC itself — non-zero exit → null, empty/odd stdout → null, a clean
-// dotted version → that version — is unit-testable without a live binary.
+// dotted version → that version — is unit-testable without a live binary. The live
+// spawn is BOUNDED (toolSpawnOptions): a hung `--version` is killed and degrades to null.
 export function defaultProbe(exeFile, spawn = spawnSync) {
   try {
-    const result = spawn(exeFile, ["--version"], { encoding: "utf8" });
+    const result = spawn(exeFile, ["--version"], toolSpawnOptions());
     if (!result || result.status !== 0 || typeof result.stdout !== "string") return null;
     // The --version output form varies per tool; extract a dotted version if
     // present, else the trimmed stdout, else null (never throw).
@@ -114,7 +147,9 @@ function findBinaryOnPath(binary, { pathValue = process.env.PATH ?? "", useLocat
   if (useLocator) {
     const locator = platform === "win32" ? "where" : "which";
     try {
-      const probe = spawnSync(locator, [binary], { encoding: "utf8" });
+      // BOUNDED (toolSpawnOptions): a stalled `where`/`which` is force-killed and
+      // falls through to the manual PATH scan below — never an unbounded hang.
+      const probe = spawnSync(locator, [binary], toolSpawnOptions());
       if (probe.status === 0 && typeof probe.stdout === "string") {
         const first = probe.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
         if (first) return first;
