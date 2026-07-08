@@ -157,3 +157,49 @@ After the global-home/WebSocket-only cleanup:
 - `npm run test:unit` started and passed through the global store/propagation/query sections, then the sandbox blocked the spawn-based mesh UI test with `spawn EPERM`.
 - `npm run ui:build` was likewise blocked by sandbox `spawn EPERM` when Vite/esbuild tried to spawn.
 - Escalated retries for both blocked commands were refused by the environment quota, so full local verification must be rerun outside this sandbox.
+---
+
+## Re-accept `2026-07-08` — finish pass (story 06 + retirement-debris cleanup)
+
+Operator order: "cleanup and finish 34." This pass closes the milestone.
+
+### Story 06 · explicit repo publish (ADR-010) — GREEN
+
+- `aof mesh repo publish` built as a CLI-only nested verb (sibling of `aof mesh ui`; outside the flat
+  `acd-mesh-command-cli-bijection`). It writes a per-repo `mesh.repo.published` marker into the local
+  `.aof/aof.config.json` (read-merge-write; every other key preserved) and publishes a snapshot through the
+  ONE publisher seam (ADR-004); the shared propagation predicate now also treats `mesh.repo.published === true`
+  as enabled, so a published repo auto-propagates on future work.
+- **`test/mesh-repo-publish.test.mjs`** → 2/2: (1) publishing opts a not-yet-enabled repo in — marker written,
+  other keys preserved, workspace + items land in the global store; (2) idempotent re-publish refreshes
+  `publishedAt` and preserves committed `mesh.nodeId`/`relay`.
+- Agent-run CLI end-to-end: `aof mesh repo publish --json` (clean envelope), the local config marker, idempotent
+  re-run, and the three face errors (no-verb / unknown-verb / unknown-flag → single `{ok:false,...}` + non-zero).
+
+### Records cleanup
+
+- Story-05 records inconsistency corrected: story 05 (global per-install node identity, ADR-009) restored to
+  the SPEC stories list; STATE's inaccurate "folded into 00/02 and pending deletion" note withdrawn (the
+  fold-back was never carried out — the identity work is a real, shipped story).
+- **35 retired-feature test files deleted** (all unregistered — completes the git-bus/leasing/issuance
+  retirement the `1536a51` commit left behind): 21 that no longer imported (referenced deleted
+  `mesh-sync`/`mesh-lease`/`mesh-issuance` modules or removed `mesh-store` exports) + 14 fitness/tests for
+  retired features (issuance/lease/sync/targeting/next-candidacy/issue-route). `mesh-ui-write-isolation-bounded`
+  and `cli-child-process` were KEPT (not retired).
+
+### Automated suite — GREEN
+
+- **`npm run test:unit`** → **855 / 0**.
+- **`npm test`** (full) → **2027 / 0** on a clean confirmation run. An earlier full run showed 2 failures, both
+  resolved: (1) an unrequested `MESH_USAGE` refresh tripped the 12-milestone-old "skeleton usage" fitness
+  (`mesh-face-skeleton` mesh-store/02) — the refresh was **reverted**; (2) `mesh-ui-global-scope/00` — the
+  documented spawn-contention flake (R7), **passes 10/10 in isolation** and did not reproduce on the clean run.
+
+### Accept decision
+
+**ACCEPTED (re-accept).** All seven stories (`00`–`06`) are done; the milestone is accepted. The story-04
+two-machine live-stream soak remains a **deferred operator-run** environmental check (non-blocking, unchanged),
+and the pre-existing non-blocker findings F-3401/F-3402/F-3403 stay in the backlog. The global work store is
+coherent (machine-wide identity, ADR-009), cross-machine sync is WebSocket-only, the git-bus/leasing/issuance
+machinery and its tests are retired, and an operator can now add a repo to the mesh explicitly via
+`aof mesh repo publish` (ADR-010). Milestone `status: done`.

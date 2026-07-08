@@ -17,6 +17,7 @@ import { packageTests } from "../test/packages.test.mjs";
 import { workTests } from "../test/work.test.mjs";
 import { globalWorkStoreTests } from "../test/global-work-store.test.mjs";
 import { globalWorkPropagationTests } from "../test/global-work-propagation.test.mjs";
+import { meshRepoPublishTests } from "../test/mesh-repo-publish.test.mjs";
 import { globalNodeRegistryTests } from "../test/global-node-registry.test.mjs";
 import { resolveItemsTests } from "../test/work-resolve.test.mjs";
 import { validateStreamTests } from "../test/work-validate.test.mjs";
@@ -114,6 +115,7 @@ const tests = [
   ...workTests,
   ...globalWorkStoreTests,
   ...globalWorkPropagationTests,
+  ...meshRepoPublishTests,
   ...resolveItemsTests,
   ...validateStreamTests,
   ...orderWorkTests,

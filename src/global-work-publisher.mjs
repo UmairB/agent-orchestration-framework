@@ -23,7 +23,15 @@ export const MESH_GLOBAL_DISABLED_CODE = "mesh-global-disabled";
 export function meshGlobalPropagationDecision(workspaceOrConfig) {
   const config = workspaceOrConfig?.config ?? workspaceOrConfig ?? {};
   const mesh = config?.mesh;
-  if (mesh?.enabled === true) return { enabled: true };
+  // A workspace opts into machine-wide propagation EITHER by the global mesh enable
+  // (mesh?.enabled === true — set by `aof mesh join` into the global config, merged
+  // into every workspace) OR by an explicit per-repo publish marker written by
+  // `aof mesh repo publish` (34/story 06, ADR-010): mesh.repo.published === true makes
+  // THIS repo a first-class mesh repo whose future work mutations auto-propagate, even
+  // on a control node that never "joined". The single-predicate invariant
+  // (acd-global-propagation-single-predicate) holds: this ONE function is still the sole
+  // decision, and it still literally requires mesh?.enabled === true as one arm.
+  if (mesh?.enabled === true || mesh?.repo?.published === true) return { enabled: true };
 
   const hasMeshHints = mesh != null && Object.keys(mesh).some((key) => key !== "enabled");
   return {

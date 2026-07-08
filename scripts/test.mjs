@@ -7,6 +7,7 @@ import { modelTests } from "../test/model.test.mjs";
 import { workspaceTests } from "../test/workspace.test.mjs";
 import { globalWorkStoreTests } from "../test/global-work-store.test.mjs";
 import { globalWorkPropagationTests } from "../test/global-work-propagation.test.mjs";
+import { meshRepoPublishTests } from "../test/mesh-repo-publish.test.mjs";
 import { globalNodeRegistryTests } from "../test/global-node-registry.test.mjs";
 import { archTests as acdGlobalMeshPathsHomeTests } from "../test/arch/acd-global-mesh-paths-home.test.mjs";
 import { archTests as acdGlobalStoreNoNativeDepTests } from "../test/arch/acd-global-store-no-native-dep.test.mjs";
@@ -1274,6 +1275,7 @@ export const tests = [
   ...workspaceTests,
   ...globalWorkStoreTests,
   ...globalWorkPropagationTests,
+  ...meshRepoPublishTests,
   ...globalNodeRegistryTests,
   ...acdGlobalMeshPathsHomeTests,
   ...acdGlobalStoreNoNativeDepTests,

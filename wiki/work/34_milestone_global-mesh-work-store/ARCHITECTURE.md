@@ -302,3 +302,24 @@ bitten by.
 - The global work store is now coherent: one `nodeId` per machine across all its workspaces.
 - **Strictly more clone-safe than 33/ADR-004** (the F-3203 concern): the global home is *outside any repo*, so a `git clone` can never carry identity at all — the per-workspace git-ignored sidecar was only a half-measure.
 - New fitness `acd-global-node-identity-home` guards it structurally (identity resolves from the global home, never a per-workspace `aofDir`) — the check that was missing at the wrong accept.
+
+---
+
+## ADR-010: A repo joins the machine-wide store either implicitly (a work mutation on a mesh-enabled workspace) OR explicitly via `aof mesh repo publish`, which also writes a durable per-repo published marker
+
+**Status:** Accepted
+**Date:** 2026-07-08
+**Extends:** ADR-002 (the propagation enablement predicate) and ADR-004 (the one shared publisher seam). Does not supersede either.
+
+**Context.** ADR-002/004 make a workspace appear in the global store as a SIDE EFFECT: a work-mutating command (`run start`/`run complete`/`feedback`) or the launcher's converge tick calls the shared publisher when `config.mesh.enabled === true`. Operationally this left a gap the operator hit directly: there was **no verb to say "make this repo visible in the mesh now."** A repo that had never run one of those commands was simply invisible in `aof mesh ui`, with no obvious way to add it — and `mesh.enabled` (set into the *global* config by `aof mesh join`) is a machine-wide flag, not a per-repo record of which repos are actually mesh repos.
+
+**Decision.**
+- Add `aof mesh repo publish` — a **CLI-only nested verb** (a `repo` sub-group under `mesh`, a sibling of `aof mesh ui` and the `serve --serve` daemon). It is deliberately OUTSIDE the flat `acd-mesh-command-cli-bijection` (which maps a registry `mesh:<sub>` id to a `subcommand === "<sub>"` branch); a nested `repo publish` has no flat registry id, exactly as `ui`/`serve` do not.
+- The verb does two things, in order: (1) writes a **per-repo published marker** into the repo's LOCAL `.aof/aof.config.json` — `mesh.repo = { published: true, publishedAt, workspaceId }` — via a read-merge-write that preserves every other key (the marker is written to the local on-disk config, never the global-merged in-memory view, so the global mesh subtree is not copied down into the repo); (2) publishes a snapshot NOW through the ONE publisher seam (ADR-004), with the marker applied in-memory so the propagation gate treats the repo as enabled for the immediate publish.
+- **The marker is also a propagation-enable arm.** The single shared predicate (ADR-002, `meshGlobalPropagationDecision`) now returns enabled when `mesh?.enabled === true` **OR** `mesh?.repo?.published === true`. So an explicitly-published repo's FUTURE work mutations auto-propagate, even on a control node that never "joined" (never got the global `mesh.enabled`). The single-predicate invariant is preserved: this remains the ONE decision function, and it still literally requires `mesh?.enabled === true` as one arm (fitness `acd-global-propagation-single-predicate` holds).
+- A failed snapshot write is **non-fatal** (ADR-004): the marker still lands and the caller gets a warning — canonical local work already succeeded.
+
+**Consequences.**
+- Operators have a direct, obvious "add this repo to the mesh" action, closing the discoverability gap.
+- The `mesh.repo.published` marker is a durable, per-repo, inspectable record of which repos are mesh repos — the natural substrate for a future `--all` (publish every known repo) and for milestone 35's work-assignment targeting (a control node needs to know which repos exist on which workers).
+- No new store seam: the verb reaches the global store only through the ADR-004 publisher, so `acd-global-publisher-single-seam` is untouched.

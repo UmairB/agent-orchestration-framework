@@ -24,6 +24,7 @@ import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
+import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
 // milestone 33 / story 01 (ADR-003) — the coordination-launcher serve seam:
 // `aof mesh serve --serve` is a foreground per-node presence+sync daemon over
 // src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
@@ -553,6 +554,15 @@ async function meshCommand(args) {
     await meshUiCommand(rest);
     return;
   }
+  // milestone 34 / story 06 (ADR-010) — the additive `aof mesh repo <verb>` sub-group,
+  // ABOVE the unknown-sub fallthrough. Like `ui` and the `serve --serve` daemon it is a
+  // CLI-ONLY nested verb, NOT a registered mesh:* command — so it is (correctly)
+  // OUTSIDE the flat acd-mesh-command-cli-bijection (which maps registry mesh:* ids to
+  // `subcommand === "<sub>"` branches; a nested `repo publish` has no flat registry id).
+  if (subcommand === "repo") {
+    await meshRepoCommand(rest);
+    return;
+  }
   // milestone 33 / story 01 (ADR-003) — the additive coordination-launcher dispatch
   // branch, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "serve"` form
   // the acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
@@ -1000,6 +1010,68 @@ async function meshUiCommand(args) {
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   });
+}
+
+// `aof mesh repo <verb>` — the per-repo mesh membership sub-group (milestone 34 / story
+// 06, ADR-010). Today the ONE verb is `publish`: it writes the local per-repo published
+// marker into .aof/aof.config.json AND publishes a snapshot into the machine-wide global
+// store now (src/commands/mesh-repo.mjs's publishRepoToMesh). CLI-only (see the dispatch
+// branch note). A failed snapshot is a non-fatal warning (the marker still lands);
+// only a real fault is a non-zero mesh-face error.
+const MESH_REPO_FLAGS = new Set(["json", "config"]);
+
+async function meshRepoCommand(args) {
+  const verb = typeof args[0] === "string" && !args[0].startsWith("--") ? args[0] : undefined;
+  const rest = verb === undefined ? args : args.slice(1);
+
+  const flagTokens = rest
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_REPO_FLAGS.has(flag));
+  const options = parseOptions(rest);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+  if (verb === undefined) {
+    emitMeshError(options.json, "`aof mesh repo` needs a verb.\n\nUsage:\n  aof mesh repo publish   publish this repo into the mesh", "invalid-input");
+    return;
+  }
+  if (verb !== "publish") {
+    emitMeshError(options.json, `Unknown mesh repo verb "${verb}".`, "unknown-subcommand");
+    return;
+  }
+  if (options._.length > 0) {
+    emitMeshError(options.json, `"repo publish" takes no positional argument (got "${options._[0]}").`, "invalid-input");
+    return;
+  }
+
+  let result;
+  try {
+    const workspace = await loadWorkspace(process.cwd(), options.config);
+    result = await publishRepoToMesh(workspace, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    return;
+  }
+  const lines = [
+    `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
+    `Marked as a mesh repo in ${result.configPath}.`,
+  ];
+  if (!result.published && result.warning) {
+    lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
+  } else {
+    lines.push("Snapshot written to the global mesh store.");
+  }
+  console.log(lines.join("\n"));
 }
 
 // `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
