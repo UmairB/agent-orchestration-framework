@@ -24,3 +24,16 @@ dist-sea/
 
 # NOTE: the mesh record stream (.aof/mesh/) is ignored in .aof/.gitignore, alongside
 # the other .aof/ runtime/derived state — not here.
+
+# milestone 36 / story 00 — the Rust Cargo build output for the Mesh Desktop App
+# (app/desktop/). Cargo.lock IS committed (an application workspace, not a published
+# library) — only the compiled target/ artifact directory is generated/ignored.
+app/desktop/target/
+
+# milestone 36 / stories 01-02 — the Tauri shell (crates/app/) is EXCLUDED from the
+# app/desktop/ Cargo workspace (its own independent build), so it gets its own
+# target/ output dir; and crates/app/gen/ is Tauri's own build-script-generated
+# schema/capability output (regenerated every build, never hand-edited).
+app/desktop/crates/app/target/
+app/desktop/crates/app/gen/
+

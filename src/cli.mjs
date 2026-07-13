@@ -25,6 +25,17 @@ import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
+import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
+// milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
+// nested-verb sub-group (the mesh-repo.mjs/mesh-assign.mjs `← 1 cli.mjs` shape).
+// Deliberately outside the mesh:* registry (see the meshCommand dispatch note below).
+import { meshDesktopCommand } from "./commands/mesh-desktop.mjs";
+// milestone 38 / story 00 (ADR-002) — `aof session start|ping|end`, the
+// assistant-agnostic session-presence CLI seam. A CLI-only TOP-LEVEL command (the
+// mesh-desktop.mjs nested-verb shape, but at the top level rather than under
+// `mesh`) — NOT a registered mesh:* command (its stdin-JSON/env identity resolution
+// doesn't fit meshVerbCli's single-positional shape).
+import { meshSessionCommand } from "./commands/mesh-session.mjs";
 // milestone 33 / story 01 (ADR-003) — the coordination-launcher serve seam:
 // `aof mesh serve --serve` is a foreground per-node presence+sync daemon over
 // src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
@@ -86,6 +97,15 @@ export async function run(argv) {
 
   if (command === "mesh") {
     await meshCommand(rest);
+    return;
+  }
+
+  // milestone 38 / story 00 (ADR-002) — the additive `aof session start|ping|end`
+  // top-level dispatch (the mesh-desktop.mjs CLI-only nested-verb precedent, but a
+  // top-level sibling of `work`/`graph`/`mesh` since a session verb is fired from an
+  // editor hook, not nested under a mesh sub-group).
+  if (command === "session") {
+    await meshSessionCommand(rest);
     return;
   }
 
@@ -561,6 +581,26 @@ async function meshCommand(args) {
   // `subcommand === "<sub>"` branches; a nested `repo publish` has no flat registry id).
   if (subcommand === "repo") {
     await meshRepoCommand(rest);
+    return;
+  }
+  // milestone 35 / story 00 (ADR-001/003/007) — the additive `aof mesh assign <ref>
+  // --to <nodeId>` / `--withdraw` dispatch verb, ABOVE the unknown-sub fallthrough.
+  // Like `repo`/`ui` it is a CLI-ONLY nested verb, NOT a registered mesh:* command
+  // (the --to/--withdraw flags don't fit the single-positional meshVerbCli face) — so
+  // it is (correctly) OUTSIDE the flat acd-mesh-command-cli-bijection.
+  if (subcommand === "assign") {
+    await meshAssignCommand(rest);
+    return;
+  }
+  // milestone 36 / story 03 (ADR-003) — the additive `aof mesh desktop <install|run>`
+  // sub-group, ABOVE the unknown-sub fallthrough. Like `repo`/`ui`/`assign` it is a
+  // CLI-ONLY nested verb, NOT a registered mesh:* command (the nested inner-verb face
+  // doesn't fit the single-positional meshVerbCli shape) — so it is (correctly)
+  // OUTSIDE the flat acd-mesh-command-cli-bijection (fitness acd-desktop-verbs-
+  // outside-bijection). Routes the WHOLE `desktop` sub to the one new command
+  // module (commands/mesh-desktop.mjs), which then dispatches on its own inner verb.
+  if (subcommand === "desktop") {
+    await meshDesktopCommand(rest);
     return;
   }
   // milestone 33 / story 01 (ADR-003) — the additive coordination-launcher dispatch
@@ -1072,6 +1112,99 @@ async function meshRepoCommand(args) {
     lines.push("Snapshot written to the global mesh store.");
   }
   console.log(lines.join("\n"));
+}
+
+// `aof mesh assign <ref> --to <nodeId>` / `--withdraw` — the operator dispatch verb
+// (milestone 35 / story 00, ADR-001/003/007). CLI-only (see the dispatch branch
+// note); core kept in commands/mesh-assign.mjs so it is unit-testable without
+// spawning the CLI. One `--json` envelope: `{ ok:true, …record }` on a clean mint/
+// withdraw, `{ ok:false, error, code }` on any coded refusal — never a second shape.
+const MESH_ASSIGN_FLAGS = new Set(["json", "config", "to", "withdraw"]);
+
+async function meshAssignCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_ASSIGN_FLAGS.has(flag));
+  const options = parseOptions(args);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+
+  const ref = options._[0];
+  if (typeof ref !== "string" || ref.length === 0) {
+    emitMeshError(
+      options.json,
+      "`aof mesh assign` needs a work ref.\n\nUsage:\n  aof mesh assign <ref> --to <nodeId>   assign a work item to a node\n  aof mesh assign <ref> --withdraw      withdraw the active assignment",
+      "invalid-input",
+    );
+    return;
+  }
+  if (options._.length > 1) {
+    emitMeshError(options.json, `"mesh assign" takes exactly one positional ref (got "${options._[1]}").`, "invalid-input");
+    return;
+  }
+  if (options.withdraw && options.to) {
+    emitMeshError(options.json, `"mesh assign" takes either --to <nodeId> or --withdraw, not both.`, "invalid-input");
+    return;
+  }
+  if (!options.withdraw && (typeof options.to !== "string" || options.to.length === 0)) {
+    emitMeshError(options.json, "`aof mesh assign <ref>` needs --to <nodeId> (or --withdraw).", "invalid-input");
+    return;
+  }
+
+  let workspace;
+  try {
+    workspace = await loadWorkspace(process.cwd(), options.config);
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.withdraw) {
+    let result;
+    try {
+      result = await withdrawWork(workspace, ref, {});
+    } catch (error) {
+      emitMeshError(options.json, error.message, error.code ?? "error");
+      return;
+    }
+    if (!result.ok) {
+      emitMeshError(options.json, result.error, result.code);
+      return;
+    }
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, assignment: result.assignment }, null, 2));
+      return;
+    }
+    console.log(
+      result.assignment == null
+        ? `No assignment exists for "${ref}"; nothing to withdraw.`
+        : `Withdrew the assignment for "${ref}" (assignmentId ${result.assignment.assignmentId}).`,
+    );
+    return;
+  }
+
+  let result;
+  try {
+    result = await assignWork(workspace, ref, options.to, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+  if (!result.ok) {
+    emitMeshError(options.json, result.error, result.code);
+    return;
+  }
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    return;
+  }
+  console.log(`Assigned "${ref}" to "${result.targetNodeId}" (assignmentId ${result.assignmentId}).`);
 }
 
 // `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story

@@ -19,6 +19,18 @@ Dispatch on the item's `type`. **`--autonomous`** changes only *where you stop*,
 produce* — without it each stage stops at its review gate; with it (see the block after the dispatch)
 refine cascades through every sub-stage of the item and stops once, at the end, for a single review.
 
+- **spike / chore — refuse, no Three-Amigos, no break-down (ADR-003).** Neither type is a refine
+  target: both are **top-level drivers that group no stories** (ADR-001) and carry **no task
+  contract** to author — a spike's deliverable is a recorded finding (`SPIKE.md` `## Finding`), a
+  chore's is a ticked `## Definition of Done` checklist, neither a `.feature`. There is nothing here
+  to Decide (no ARCHITECTURE/DESIGN/RESEARCH fork — the item itself frames its own question/intent),
+  nothing to Break down (it groups no stories), and no Contract to author (no Three Amigos, no
+  `tasks/`). **Decline and redirect:** report that this type has nothing to break down or contract for,
+  and point at the item's own record doc as the next step instead — a spike is worked directly (fill
+  `## Investigation` / `## Finding`) and closed with `aof:verify <ref>`; a chore is worked directly
+  (tick `## Definition of Done`) and closed the same way. Create **no `stories/` folder and no task
+  `.feature` file** under the item — refine is a strict no-op on disk for these two types.
+
 - **milestone — Decide + Break-down:**
   1. **Decide** (only for genuine open questions; skip what it lacks): blocking unknown →
      `aof-researcher` → `RESEARCH.md`; non-trivial decision → `aof-architect` → ADRs in
@@ -93,6 +105,8 @@ story-by-story is needless friction once the breakdown is trusted):
   early only** for a genuine blocking unknown or an unsafe/irreversible decision — a real gate, never
   routine breakdown or contract authoring.
 - **story** → author its full Contract (already a single stage).
+- **spike / chore** → the refuse/redirect above applies unchanged; `--autonomous` has nothing to
+  cascade (no sub-stage exists for either type).
 
 Produce the whole tree, then hand back **one** consolidated review (the breakdown + all contracts).
 Still **doc-producing only**: stop before any build.
@@ -103,12 +117,15 @@ Still **doc-producing only**: stop before any build.
   `SPEC.md` `## Stories`.
 - Created tasks are unchecked boxes in `STORY.md` `## Tasks`.
 - Set the refined item's `status` → `in-progress` once it has its breakdown / contract. Bump `updated:`.
+- **spike / chore** — refine touches nothing: no `status` change, no `stories/`, no `tasks/`.
 </progress_tracking>
 
 <output>
 **Default** — report what was produced + what's still open.
 **`--autonomous`** — present the full refined tree (the milestone breakdown + every story's authored
 contract) as a single review surface, calling out any default decisions taken and anything still open.
+**spike / chore** — report the decline (nothing to break down/contract) and point at `aof:verify <ref>`
+as the type's own close path; produce nothing on disk.
 Either way — Next: `aof:continue <ref>`. If a story feeds a `uat` gate, restate that the gate is
 **still open** and is closed only by `aof:verify <uat-ref>` once these amendments verify — so it isn't
 left dangling.

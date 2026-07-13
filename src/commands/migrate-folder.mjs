@@ -41,8 +41,11 @@ import { recoverMilestone, listRecoverableMilestones } from "../import/recovery.
 import { slugifySource } from "../import/store.mjs";
 
 // The aof top-level work-item folder pattern (mirrors src/work.mjs ITEM_RE, scoped
-// to the leading number) — used to find the next free slot under work.dir.
-const ITEM_RE = /^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$/;
+// to the leading number) — used to find the next free slot under work.dir. Keep the
+// six-type alternation in lockstep with src/work.mjs (m37 added spike/chore): a
+// top-slot spike/chore folder must count toward nextFreeSlot, else migrate could
+// mint a milestone with a duplicate driver number.
+const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
 // A story-folder pattern under a source milestone's `stories/` dir. Tolerant of the
 // aof `SS_story_slug` form and a loose `SS[-_]slug` numbered form (a foreign source
 // need not use aof's exact naming — the project principle: ingest as-is).

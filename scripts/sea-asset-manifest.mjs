@@ -1,6 +1,6 @@
 // milestone 28 / story 00 (ADR-001/ADR-003) — the asset-manifest generator.
 //
-// Walks the two runtime directory-asset trees (src/bundle/** — 37 files —
+// Walks the two runtime directory-asset trees (src/bundle/** — 41 files —
 // and ui/dist/**) into the flat file list the SEA sidecar build copies
 // verbatim beside the binary (ADR-003: directory assets are not a SEA `assets`
 // map primitive — RESEARCH §1 — so the build recipe ships them as an on-disk

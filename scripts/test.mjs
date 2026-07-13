@@ -9,6 +9,143 @@ import { globalWorkStoreTests } from "../test/global-work-store.test.mjs";
 import { globalWorkPropagationTests } from "../test/global-work-propagation.test.mjs";
 import { meshRepoPublishTests } from "../test/mesh-repo-publish.test.mjs";
 import { globalNodeRegistryTests } from "../test/global-node-registry.test.mjs";
+// milestone 35 / story 00 — assignment record + assign/withdraw verb + the control-side
+// repo-availability gate (ADR-001/003/007): the frozen 10-key record + state→producer
+// enum + the additive v2→v3 global_assignments table + dedicated writers (task 00), the
+// assign verb + store-uniqueness arbitration (task 01), withdraw as a state write
+// (task 02), and the loud coded repo-availability gate (task 03).
+import { meshAssignmentRecordTests } from "../test/mesh-assignment-record.test.mjs";
+import { meshAssignVerbTests } from "../test/mesh-assign-verb.test.mjs";
+import { meshAssignWithdrawTests } from "../test/mesh-assign-withdraw.test.mjs";
+import { meshAssignRepoGateTests } from "../test/mesh-assign-repo-gate.test.mjs";
+import { archTests as acdNoGitBusReturnTests } from "../test/arch/acd-no-git-bus-return.test.mjs";
+import { archTests as acdAssignmentStateHasProducerTests } from "../test/arch/acd-assignment-state-has-producer.test.mjs";
+import { archTests as acdAssignmentRecordFrozenTests } from "../test/arch/acd-assignment-record-frozen.test.mjs";
+import { archTests as acdAssignmentsSurviveSnapshotTests } from "../test/arch/acd-assignments-survive-snapshot.test.mjs";
+import { archTests as acdAssignmentArbitrationStoreNotGitTests } from "../test/arch/acd-assignment-arbitration-store-not-git.test.mjs";
+import { archTests as acdAssignmentTargetNotConnectedLoudTests } from "../test/arch/acd-assignment-target-not-connected-loud.test.mjs";
+// milestone 35 / story 01 — control->worker command channel (ADR-002, the up-half of
+// ADR-001): the server-side nodeId->ws targeting map + directive down-frame (task 00),
+// admission (T5) + live-re-read revocation (T2) gating dispatch (task 01), and the
+// worker's assignment-status up-frame write-through into ADR-001's dedicated writer,
+// authored from the connection's nodeId (T6, task 02). Extends milestone 34's stream
+// transport — no second socket, no git-bus.
+import { meshDirectiveDownFrameTests } from "../test/mesh-directive-down-frame.test.mjs";
+import { meshDirectiveAdmissionTests } from "../test/mesh-directive-admission.test.mjs";
+import { meshAssignmentStatusUplinkTests } from "../test/mesh-assignment-status-uplink.test.mjs";
+import { meshDirectiveWorkerChannelTests } from "../test/mesh-directive-worker-channel.test.mjs";
+import { archTests as acdDirectiveTargetsOnePeerTests } from "../test/arch/acd-directive-targets-one-peer.test.mjs";
+import { archTests as acdDirectiveOnlyFromAdmittedPeerTests } from "../test/arch/acd-directive-only-from-admitted-peer.test.mjs";
+import { archTests as acdRevokedIssuerDirectiveNeverExecutesTests } from "../test/arch/acd-revoked-issuer-directive-never-executes.test.mjs";
+import { archTests as acdAssignmentStatusAuthoredByHolderTests } from "../test/arch/acd-assignment-status-authored-by-holder.test.mjs";
+// milestone 35 / ADR-008 (as-built review fast-follow, 2026-07-09) — the control-side
+// dispatch/reclaim driver: task 01/03's DISPATCH half (the launcher's control tick
+// dispatches an assigned row targeting a connected peer).
+import { meshControlDispatchDriverTests } from "../test/mesh-control-dispatch-driver.test.mjs";
+// milestone 35 / story 02 — isolated worker execution, the HEADLINE story (ADR-004):
+// the worker-side repo guard FIRST (task 01), a dedicated git worktree keyed by
+// assignmentId under the ONE .aof/mesh/worktrees/ seam, detached-at-commit (task 00),
+// the accepted->running->done|failed run-lifecycle bracket through the EXISTING
+// mesh-blind run-store with a BOUNDED headless-runtime spawn seam (task 02), cleanup
+// on done / retain on failed bounded by a documented retention default (task 03), and
+// the control-side dual-staleness reclaim path (task 04, ADR-005). Task 05
+// (two-machine soak) is @manual — no executable test, verified at aof:verify.
+import { meshWorktreeMaterializeTests } from "../test/mesh-worktree-materialize.test.mjs";
+import { meshWorkerRepoGuardTests } from "../test/mesh-worker-repo-guard.test.mjs";
+import { meshRunLifecycleBracketingTests } from "../test/mesh-run-lifecycle-bracketing.test.mjs";
+import { meshWorktreeCleanupRetentionTests } from "../test/mesh-worktree-cleanup-retention.test.mjs";
+import { meshAssignmentReclaimTests } from "../test/mesh-assignment-reclaim.test.mjs";
+import { archTests as acdAssignmentWorktreePathScopedTests } from "../test/arch/acd-assignment-worktree-path-scoped.test.mjs";
+import { archTests as acdWorktreePathScopedTests } from "../test/arch/acd-worktree-path-scoped.test.mjs";
+import { archTests as acdAssignmentRepoAvailabilityLoudTests } from "../test/arch/acd-assignment-repo-availability-loud.test.mjs";
+import { archTests as acdUnpublishedRepoDirectiveRefusedTests } from "../test/arch/acd-unpublished-repo-directive-refused.test.mjs";
+import { archTests as acdAssignmentReclaimDualStalenessTests } from "../test/arch/acd-assignment-reclaim-dual-staleness.test.mjs";
+import { archTests as acdAssignmentRunStoreMeshBlindTests } from "../test/arch/acd-assignment-run-store-mesh-blind.test.mjs";
+// milestone 38 — cross-machine worker execution & session presence (ADR-001/002/003/005)
+import { archTests as acdSessionPresenceAdditiveTests } from "../test/arch/acd-session-presence-additive.test.mjs";
+import { archTests as acdSessionTtlReusesIsStaleTests } from "../test/arch/acd-session-ttl-reuses-isstale.test.mjs";
+import { archTests as acdPresenceAggregatesNodeWorkspacesTests } from "../test/arch/acd-presence-aggregates-node-workspaces.test.mjs";
+import { archTests as acdSessionRecordFrozenTests } from "../test/arch/acd-session-record-frozen.test.mjs";
+import { archTests as acdSessionTtlSelfExpiresTests } from "../test/arch/acd-session-ttl-self-expires.test.mjs";
+import { archTests as acdSessionRunReconciliationTests } from "../test/arch/acd-session-run-reconciliation.test.mjs";
+// milestone 38 / as-built amendment at aof:verify (ADR-004 AMENDMENT + the new
+// ADR-008 "producer-fed contract test" rule) — the three fitness functions that arm
+// the milestone's structural lesson: the frozen `string[]` wire shape across BOTH
+// languages (F1+F8), the captured-fixture discipline for the cross-language surface
+// (F7/F8), and the mounted-component guard (F9 — NodeCard was dead code in
+// production while its fixture-fed test stayed green).
+import { archTests as acdActiveRunsFrozenStringArrayTests } from "../test/arch/acd-active-runs-frozen-string-array.test.mjs";
+import { archTests as acdCapturedProducerFixtureTests } from "../test/arch/acd-captured-producer-fixture.test.mjs";
+import { archTests as acdRenderedComponentFedByRouteTests } from "../test/arch/acd-rendered-component-fed-by-route.test.mjs";
+import { meshSessionCliRecordTests } from "../test/mesh-session-cli-record.test.mjs";
+import { meshSessionTtlLivenessTests } from "../test/mesh-session-ttl-liveness.test.mjs";
+import { meshPresenceAdditiveSessionsTests } from "../test/mesh-presence-additive-sessions.test.mjs";
+import { meshPresenceAggregateWorkspacesTests } from "../test/mesh-presence-aggregate-workspaces.test.mjs";
+// milestone 38 / story 00 / task 10 — finding F11 (aof:verify 38, BLOCKER): the
+// write-side + read-side absolute-workDir fix (global-node-registry.mjs's
+// assembleGlobalRegistrySnapshot + mesh-presence.mjs's resolveNodeWorkspaces) —
+// resolving a registered workspace's work dir from a FOREIGN cwd, exercised over
+// the REAL descriptor store.
+import { meshWorkspaceWorkdirAbsoluteTests } from "../test/mesh-workspace-workdir-absolute.test.mjs";
+import { meshFleetSessionRenderTests } from "../test/mesh-fleet-session-render.test.mjs";
+// milestone 38 / story 00 / task 08 — finding F6 (aof:verify 38, BLOCKER): the
+// fleet read route (/api/mesh/status, queryGlobalMeshStatus) now carries each
+// node's presence record through to the wire, closing the fixture-vs-producer
+// gap that left row 3 permanently `idle` in production.
+import { meshFleetPresencePlumbingTests } from "../test/mesh-fleet-presence-plumbing.test.mjs";
+import { meshAssistantHookWiringTests } from "../test/mesh-assistant-hook-wiring.test.mjs";
+import { meshHookIdentityFromCwdTests } from "../test/mesh-hook-identity-from-cwd.test.mjs";
+import { archTests as acdWorkerCloneTargetScopedTests } from "../test/arch/acd-worker-clone-target-scoped.test.mjs";
+import { archTests as acdWorkerCloneNoCredentialPersistedTests } from "../test/arch/acd-worker-clone-no-credential-persisted.test.mjs";
+import { archTests as acdWorkerCheckoutReusesWorktreeTests } from "../test/arch/acd-worker-checkout-reuses-worktree.test.mjs";
+import { archTests as acdCloneCredentialPullNotPushedTests } from "../test/arch/acd-clone-credential-pull-not-pushed.test.mjs";
+import { archTests as acdCloneCredentialRelayNotLoggedTests } from "../test/arch/acd-clone-credential-relay-not-logged.test.mjs";
+// milestone 38 / story 01 — worker-repo-checkout (tasks 00-03 traceability modules)
+import { meshWorkerCloneLocationConfigTests } from "../test/mesh-worker-clone-location-config.test.mjs";
+import { meshWorkerCloneScopedCheckoutTests } from "../test/mesh-worker-clone-scoped-checkout.test.mjs";
+import { meshWorkerCloneRegisterFallthroughTests } from "../test/mesh-worker-clone-register-fallthrough.test.mjs";
+import { meshWorkerCloneCredentialNotPersistedTests } from "../test/mesh-worker-clone-credential-not-persisted.test.mjs";
+// milestone 38 / story 01 task 05 (ADR-009, finding F12) — the clone credential is
+// PULLED by the worker at the moment it hits a clone miss, over the already-open
+// stream, so a private repo can actually be cloned in production.
+import { meshWorkerCloneCredentialPullTests } from "../test/mesh-worker-clone-credential-pull.test.mjs";
+// milestone 35 / ADR-008 (as-built review fast-follow, 2026-07-09) — the control-side
+// dispatch/reclaim driver: task 02/06's RECLAIM half (the SAME launcher control tick
+// also runs reclaimStaleAssignments) + the shared fitness function guarding both halves.
+import { meshReclaimSchedulerTests } from "../test/mesh-reclaim-scheduler.test.mjs";
+import { archTests as acdControlDispatchReclaimDriverWiredTests } from "../test/arch/acd-control-dispatch-reclaim-driver-wired.test.mjs";
+// milestone 35 / story 03 — the READ-ONLY assignment lifecycle in the fleet UI
+// (ADR-007): task 00 extends the /api/mesh/status read shape (shapeGlobalStatus)
+// to carry assignment rows per item/node; task 01 is the pure assignment-chip
+// helper (ui/src/fleet/assignments.mjs) mirroring the run-state ramp; task 02
+// re-arms the m34 read-only serve-face posture over the extended shape
+// (fitness #11, acd-mesh-ui-read-only). Independent of stories 01/02 — renders
+// whatever assignment rows Story 00 wrote.
+import { assignmentFleetStatusShapeTests } from "../test/assignment-fleet-status-shape.test.mjs";
+import { fleetAssignmentChipTests } from "../test/fleet-assignment-chip.test.mjs";
+import { meshUiAssignmentReadOnlyTests } from "../test/mesh-ui-assignment-read-only.test.mjs";
+import { archTests as acdMeshUiReadOnlyTests } from "../test/arch/acd-mesh-ui-read-only.test.mjs";
+// milestone 36 / mesh desktop app — the native Windows supervisor's STRUCTURAL
+// invariants (ADR-003/ADR-004), authored at refine as GUARD-IF-PRESENT arch-tests:
+// each asserts its invariant when its target (the greenfield app/desktop/ Rust subtree,
+// or the new CLI-only nested verbs in meshCommand) exists, and is a deliberate no-op
+// while absent — so the suite stays GREEN now and each guard converts to a hard
+// assertion the moment the code lands. no-mesh-logic + single-data-path + read-only +
+// trusted-spawn target the Rust subtree; verbs-outside-bijection guards the CLI seam
+// (and asserts the existing ui/repo/assign sibling precedent NOW).
+import { archTests as acdDesktopNoMeshLogicTests } from "../test/arch/acd-desktop-no-mesh-logic.test.mjs";
+import { archTests as acdDesktopSingleDataPathTests } from "../test/arch/acd-desktop-single-data-path.test.mjs";
+import { archTests as acdDesktopReadOnlyFleetTests } from "../test/arch/acd-desktop-read-only-fleet.test.mjs";
+import { archTests as acdDesktopTrustedSpawnTests } from "../test/arch/acd-desktop-trusted-spawn.test.mjs";
+import { archTests as acdDesktopVerbsOutsideBijectionTests } from "../test/arch/acd-desktop-verbs-outside-bijection.test.mjs";
+// milestone 36 / story 03 — the `aof mesh desktop install|run` CLI-only nested verbs (ADR-003):
+// verb dispatch + --json single-envelope + no mesh:* id (task 00); the staged-then-swap idempotent
+// install into $HOME/.aof/bin + WebView2 bootstrapper placed file + friendly-refusal matrix (task 01);
+// co-located discovery + detached launch + not-installed refusal (task 02). Node-side @executable;
+// the @uat end-to-end (task 03) is deferred to aof:verify.
+import { meshDesktopDispatchTests } from "../test/mesh-desktop-dispatch.test.mjs";
+import { meshDesktopInstallTests } from "../test/mesh-desktop-install.test.mjs";
+import { meshDesktopRunTests } from "../test/mesh-desktop-run.test.mjs";
 import { archTests as acdGlobalMeshPathsHomeTests } from "../test/arch/acd-global-mesh-paths-home.test.mjs";
 import { archTests as acdGlobalStoreNoNativeDepTests } from "../test/arch/acd-global-store-no-native-dep.test.mjs";
 import { archTests as acdGlobalPropagationSinglePredicateTests } from "../test/arch/acd-global-propagation-single-predicate.test.mjs";
@@ -1000,6 +1137,26 @@ import { releaseSidecarArchiveRoundtripTests } from "../test/release-sidecar-arc
 // self-inconsistent, CI-key-mismatch) plus a check that the real, checked-in
 // install.sh is self-consistent today.
 import { releaseFingerprintPinTests } from "../test/release-fingerprint-pin.test.mjs";
+// milestone 37 — spike & chore item types (ADRs 001-003; RED-until-built fitness functions,
+// gated on the ITEM_RE alternation / template existence — inert-green until story 00/01 land,
+// then self-activating). FF-3701..3706.
+import { archTests as acdSpikeChoreVocabularyTests } from "../test/arch/acd-spike-chore-vocabulary.test.mjs";
+import { archTests as acdSpikeChoreAreDriversTests } from "../test/arch/acd-spike-chore-are-drivers.test.mjs";
+import { archTests as acdSpikeChoreRecordDocTests } from "../test/arch/acd-spike-chore-record-doc.test.mjs";
+import { archTests as acdSpikeNoFeatureTests } from "../test/arch/acd-spike-no-feature.test.mjs";
+import { archTests as acdChoreNoFeatureTests } from "../test/arch/acd-chore-no-feature.test.mjs";
+import { archTests as acdSpikeChoreNextUatShapedTests } from "../test/arch/acd-spike-chore-next-uat-shaped.test.mjs";
+import { archTests as acdChoreDodChecklistTests } from "../test/arch/acd-chore-dod-checklist.test.mjs";
+// milestone 37 / story 00 — the 3 task-feature traceability modules (every
+// @executable scenario + Examples row wired to the LOCKED engine surface).
+import { workSpikeChoreEnumerateTests } from "../test/work-spike-chore-enumerate.test.mjs";
+import { workSpikeChoreNextTests } from "../test/work-spike-chore-next.test.mjs";
+import { workSpikeChoreValidateTests } from "../test/work-spike-chore-validate.test.mjs";
+// milestone 37 / story 01 — scaffold commands & templates (task-feature traceability
+// for 00_spike-template-and-command, 01_chore-template-and-command, 02_bundle-membership).
+import { workSpikeTemplateTests } from "../test/work-spike-template.test.mjs";
+import { workChoreTemplateTests } from "../test/work-chore-template.test.mjs";
+import { bundleSpikeChoreMembershipTests } from "../test/bundle-spike-chore-membership.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1208,6 +1365,16 @@ export const tests = [
   // pure helpers; story 01: rerun verb + in-flight predicate)
   ...boardRunStatusRouteTests,
   ...boardRunsPureTests,
+  // milestone 26 (story 00, mesh-blindness half only) — acd-run-store-mesh-free:
+  // registered here at milestone 35 / story 02 build time (fitness #12
+  // acd-assignment-run-store-mesh-blind re-arms it). FINDING: this arch-test was
+  // imported (scripts/test.mjs) but never spread into this array — a pre-existing
+  // registration gap discovered while arming #12 (see
+  // test/arch/acd-assignment-run-store-mesh-blind.test.mjs's header comment for the
+  // fuller finding, including the SIBLING acd-fleet-reclaim-guarded, which is left
+  // UNregistered here because its 4th proof is now stale against the retired
+  // git-bus lease machinery — flagged, not silently fixed, in this story's report).
+  ...acdRunStoreMeshFreeTests,
   // milestone 22 — mesh-foundation (story 00: mesh-store spine + face skeleton)
   ...meshRecordStoreTests,
   ...meshPartitionConventionTests,
@@ -1276,7 +1443,92 @@ export const tests = [
   ...globalWorkStoreTests,
   ...globalWorkPropagationTests,
   ...meshRepoPublishTests,
+  // milestone 36 / story 03 — mesh desktop CLI verbs (dispatch / install / run)
+  ...meshDesktopDispatchTests,
+  ...meshDesktopInstallTests,
+  ...meshDesktopRunTests,
   ...globalNodeRegistryTests,
+  // milestone 35 / story 00 — assignment record + assign/withdraw verb + repo-availability gate
+  ...meshAssignmentRecordTests,
+  ...meshAssignVerbTests,
+  ...meshAssignWithdrawTests,
+  ...meshAssignRepoGateTests,
+  ...acdNoGitBusReturnTests,
+  ...acdAssignmentStateHasProducerTests,
+  ...acdAssignmentRecordFrozenTests,
+  ...acdAssignmentsSurviveSnapshotTests,
+  ...acdAssignmentArbitrationStoreNotGitTests,
+  ...acdAssignmentTargetNotConnectedLoudTests,
+  // milestone 35 / story 01 — control->worker command channel
+  ...meshDirectiveDownFrameTests,
+  ...meshDirectiveAdmissionTests,
+  ...meshAssignmentStatusUplinkTests,
+  ...meshDirectiveWorkerChannelTests,
+  ...acdDirectiveTargetsOnePeerTests,
+  ...acdDirectiveOnlyFromAdmittedPeerTests,
+  ...acdRevokedIssuerDirectiveNeverExecutesTests,
+  ...acdAssignmentStatusAuthoredByHolderTests,
+  // milestone 35 / ADR-008 (as-built review fast-follow) — the control-side
+  // dispatch/reclaim driver's DISPATCH half (task 01/03)
+  ...meshControlDispatchDriverTests,
+  // milestone 35 / story 02 — isolated worker execution (the headline)
+  ...meshWorktreeMaterializeTests,
+  ...meshWorkerRepoGuardTests,
+  ...meshRunLifecycleBracketingTests,
+  ...meshWorktreeCleanupRetentionTests,
+  ...meshAssignmentReclaimTests,
+  ...acdAssignmentWorktreePathScopedTests,
+  ...acdWorktreePathScopedTests,
+  ...acdAssignmentRepoAvailabilityLoudTests,
+  ...acdUnpublishedRepoDirectiveRefusedTests,
+  ...acdAssignmentReclaimDualStalenessTests,
+  ...acdAssignmentRunStoreMeshBlindTests,
+  // milestone 38 — session presence + cross-machine worker execution (ADR-001/002/003/005)
+  ...acdSessionPresenceAdditiveTests,
+  ...acdSessionTtlReusesIsStaleTests,
+  ...acdPresenceAggregatesNodeWorkspacesTests,
+  ...acdSessionRecordFrozenTests,
+  ...acdSessionTtlSelfExpiresTests,
+  ...acdSessionRunReconciliationTests,
+  // the as-built amendment's fitness functions (ADR-004 AMENDMENT + ADR-008)
+  ...acdActiveRunsFrozenStringArrayTests,
+  ...acdCapturedProducerFixtureTests,
+  ...acdRenderedComponentFedByRouteTests,
+  ...meshSessionCliRecordTests,
+  ...meshSessionTtlLivenessTests,
+  ...meshPresenceAdditiveSessionsTests,
+  ...meshPresenceAggregateWorkspacesTests,
+  ...meshWorkspaceWorkdirAbsoluteTests,
+  ...meshFleetSessionRenderTests,
+  ...meshFleetPresencePlumbingTests,
+  ...meshAssistantHookWiringTests,
+  ...meshHookIdentityFromCwdTests,
+  ...acdWorkerCloneTargetScopedTests,
+  ...acdWorkerCloneNoCredentialPersistedTests,
+  ...acdWorkerCheckoutReusesWorktreeTests,
+  ...acdCloneCredentialPullNotPushedTests,
+  ...acdCloneCredentialRelayNotLoggedTests,
+  ...meshWorkerCloneLocationConfigTests,
+  ...meshWorkerCloneScopedCheckoutTests,
+  ...meshWorkerCloneRegisterFallthroughTests,
+  ...meshWorkerCloneCredentialNotPersistedTests,
+  ...meshWorkerCloneCredentialPullTests,
+  // milestone 35 / ADR-008 (as-built review fast-follow) — the control-side
+  // dispatch/reclaim driver's RECLAIM half (task 02/06) + the shared fitness function
+  ...meshReclaimSchedulerTests,
+  ...acdControlDispatchReclaimDriverWiredTests,
+  // milestone 35 / story 03 — assignment lifecycle in the fleet UI (read-only)
+  ...assignmentFleetStatusShapeTests,
+  ...fleetAssignmentChipTests,
+  ...meshUiAssignmentReadOnlyTests,
+  ...acdMeshUiReadOnlyTests,
+  // milestone 36 — mesh desktop app: the guard-if-present structural fitness functions
+  // (ADR-003/ADR-004). Green now (targets absent, pre-build); each arms at build.
+  ...acdDesktopNoMeshLogicTests,
+  ...acdDesktopSingleDataPathTests,
+  ...acdDesktopReadOnlyFleetTests,
+  ...acdDesktopTrustedSpawnTests,
+  ...acdDesktopVerbsOutsideBijectionTests,
   ...acdGlobalMeshPathsHomeTests,
   ...acdGlobalStoreNoNativeDepTests,
   ...acdGlobalPropagationSinglePredicateTests,
@@ -1317,7 +1569,24 @@ export const tests = [
   ...releaseChecksumManifestTests,
   ...releaseWorkflowLintTests,
   ...releaseSidecarArchiveRoundtripTests,
-  ...releaseFingerprintPinTests
+  ...releaseFingerprintPinTests,
+  // milestone 37 — spike & chore item types (ADRs 001-003; RED-until-built fitness functions)
+  ...acdSpikeChoreVocabularyTests,
+  ...acdSpikeChoreAreDriversTests,
+  ...acdSpikeChoreRecordDocTests,
+  ...acdSpikeNoFeatureTests,
+  ...acdChoreNoFeatureTests,
+  ...acdSpikeChoreNextUatShapedTests,
+  ...acdChoreDodChecklistTests,
+  // milestone 37 / story 00 — task-feature traceability (00_admit-and-enumerate,
+  // 01_drivers-ordering-and-next, 02_record-doc-and-structural-validate)
+  ...workSpikeChoreEnumerateTests,
+  ...workSpikeChoreNextTests,
+  ...workSpikeChoreValidateTests,
+  // milestone 37 / story 01 — scaffold commands & templates
+  ...workSpikeTemplateTests,
+  ...workChoreTemplateTests,
+  ...bundleSpikeChoreMembershipTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The
@@ -1363,6 +1632,41 @@ async function runSuite() {
     delete process.env.AOF_IN_PROCESS_INTEGRATION;
   } else {
     process.env.AOF_IN_PROCESS_INTEGRATION = previousInProcess;
+  }
+
+  // milestone 36 / story 00 — the guard-if-present cargo lane for the app/desktop/ Rust core.
+  // Shells `cargo test` when the Rust toolchain AND the crate are both present; a clean, explicit
+  // skip otherwise (mirroring the guard-if-present arch-test ethos) so the suite stays green pre-build
+  // and becomes a real gate the moment the crate lands. Folds cargo's exit code into `failures`.
+  console.log("# cargo (app/desktop)");
+  {
+    const { spawnSync } = await import("node:child_process");
+    const { existsSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const cargoManifest = fileURLToPath(new URL("../app/desktop/Cargo.toml", import.meta.url));
+    const hasCargo = spawnSync("cargo", ["--version"], { stdio: "ignore", shell: process.platform === "win32" }).status === 0;
+    if (hasCargo && existsSync(cargoManifest)) {
+      const result = spawnSync("cargo", ["test", "--manifest-path", cargoManifest], { stdio: "inherit", shell: process.platform === "win32" });
+      if (result.status !== 0) failures += 1;
+      console.log(result.status === 0 ? "ok - cargo test (app/desktop)" : "not ok - cargo test (app/desktop)");
+    } else {
+      console.log(`ok - cargo test (app/desktop) skipped (cargo=${hasCargo}, manifest=${existsSync(cargoManifest)})`);
+    }
+
+    // The Tauri shell (`crates/app`) is deliberately EXCLUDED from the workspace
+    // `members` (see app/desktop/Cargo.toml) so `cargo test` above never pulls in
+    // tauri/WebView2 — but that also means nothing compiles the shell, so a core API
+    // change could silently break it while this suite stays green. `cargo check`
+    // (not `build` — cheaper, still catches API drift) closes that gap, gated behind
+    // the SAME guard-if-present shape as the lane above.
+    const appManifest = fileURLToPath(new URL("../app/desktop/crates/app/Cargo.toml", import.meta.url));
+    if (hasCargo && existsSync(appManifest)) {
+      const shellResult = spawnSync("cargo", ["check", "--manifest-path", appManifest, "--quiet"], { stdio: "inherit", shell: process.platform === "win32" });
+      if (shellResult.status !== 0) failures += 1;
+      console.log(shellResult.status === 0 ? "ok - cargo check (app/desktop shell)" : "not ok - cargo check (app/desktop shell)");
+    } else {
+      console.log(`ok - cargo check (app/desktop shell) skipped (cargo=${hasCargo}, manifest=${existsSync(appManifest)})`);
+    }
   }
 
   if (failures > 0 || process.exitCode) {

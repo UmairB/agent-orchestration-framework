@@ -15,13 +15,51 @@ Read `.aof/aof.config.json` → `work.dir`, `work.agents`, `work.ui.baseUrl`. Pa
 `@uat`. The **design-review base URL** = `--url` if given, else `work.ui.baseUrl` (may be absent — ACD
 never boots the app; the project serves it).
 
-The ref may be a **milestone**, a **story**, or a **uat session**. A uat session (`type: uat`) is a
-cross-milestone acceptance gate: its record doc is its own `SESSION.md` (not a milestone
-`VERIFICATION.md`), and the scenarios in scope are the `@manual`/`@uat` ones across the milestones it
-accepts (its `depends:` list). Run those milestones' `@executable` suite + fitness functions first as
-an integrated **regression sweep** (green) before the manual/human lanes. The same steps below apply —
-just write to `SESSION.md` and read scenarios across the accepted span.
+The ref may be a **milestone**, a **story**, a **uat session**, a **spike**, or a **chore**. A uat
+session (`type: uat`) is a cross-milestone acceptance gate: its record doc is its own `SESSION.md` (not
+a milestone `VERIFICATION.md`), and the scenarios in scope are the `@manual`/`@uat` ones across the
+milestones it accepts (its `depends:` list). Run those milestones' `@executable` suite + fitness
+functions first as an integrated **regression sweep** (green) before the manual/human lanes. The same
+steps below apply — just write to `SESSION.md` and read scenarios across the accepted span.
+
+**Spike/chore dispatch (ADR-003) — skip straight to `<spike-chore>` below.** A `spike` or `chore` is
+verified on its **own per-type criterion**, never through the `<process>` steps below (no
+`@executable` suite, no `@manual` scenario run, no design conformance, no human `@uat` step — neither
+type carries a behavioural contract, and a chore/spike folder legitimately has no `tasks/`/`.feature`
+to run). Detect the type from `aof work find` and branch there first.
 </config>
+
+<spike-chore>
+**Spike → finding-recorded (ADR-003).** Read the spike's `SPIKE.md`. The close criterion is the
+`## Finding` section alone:
+- **Accept** when `## Finding` is present and filled with a real, resolved finding (not empty, not
+  absent, not a placeholder/template stub). Cite the recorded finding as the close
+  criterion in the report — a spike carries no separate `VERIFICATION.md`; `SPIKE.md` is its whole
+  record, so nothing else is written. Run **no scenario suite** and report **no "tests green" step** —
+  the spike's code is a throwaway prototype, not shippable behaviour. Set `SPIKE.md` `status: done`,
+  bump `updated:`.
+- **Decline** when `## Finding` is empty, absent, or placeholder-only. **Placeholder = unfilled**: the
+  section is placeholder-only if its body is (or still contains) the shipped template stub — the
+  angle-bracket text `<the answer, and the evidence/reasoning behind it>` — or *any* residual `<…>`
+  angle-bracket placeholder, or a bare stub like "TODO"; a finding still holding the template's own
+  placeholder has not been filled. Report the finding as unresolved and leave `status` unchanged,
+  stating plainly what is missing (heading absent / body empty / body still the `<…>` stub) so the
+  owner knows what to fill in before re-running `aof:verify`.
+
+**Chore → checklist + validate-green (ADR-003).** Read the chore's `CHORE.md`. The close criteria are
+**both**, together:
+1. Every box under `## Definition of Done` is ticked (`- [x]`), none left `- [ ]`.
+2. `aof work validate` (scoped to the chore, or the whole stream if scope is ambiguous) reports
+   **PASS** — no regression.
+- **Accept** only when both hold: cite the ticked checklist and the green validate as the close
+  criteria in the report. Run **no `.feature` and no behavioural-verify step** — a chore carries no
+  acceptance scenarios by design. Set `CHORE.md` `status: done`, bump `updated:`.
+- **Decline** when either fails: an unticked box, or a red/failing `validate` (or both) — report which
+  gate(s) failed (name the unticked item(s); quote the validate finding) and leave `status` unchanged.
+
+Neither path runs `aof:validate <ref>`'s milestone-acceptance/retrospective machinery (progress_tracking
+below is for milestone/story/uat only) — a spike/chore closes standalone, on its own record doc.
+</spike-chore>
 
 <process>
 Record results in the milestone `VERIFICATION.md` (or, for a uat session, in its `SESSION.md` — its
@@ -78,5 +116,7 @@ Accept only when validate passes and **no blocker finding is open**:
 
 <output>
 Report the verification evidence, any human sign-offs, findings (with triage + routing), the validate
-result, and the accept decision.
+result, and the accept decision. For a spike/chore, report the per-type close criterion checked (the
+recorded finding, or the ticked checklist + validate result) and the accept/decline decision — no
+scenario-run or human sign-off section applies.
 </output>

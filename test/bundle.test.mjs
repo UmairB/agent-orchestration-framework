@@ -42,7 +42,9 @@ const AGENT_IDS = [
   "aof-security"
 ];
 const COMMAND_IDS = [
+  "add-chore",
   "add-milestone",
+  "add-spike",
   "add-story",
   "add-task",
   "add-uat",
@@ -58,7 +60,7 @@ const COMMAND_IDS = [
   "validate",
   "verify"
 ];
-const TEMPLATE_IDS = ["milestone", "story", "task", "uat"];
+const TEMPLATE_IDS = ["chore", "milestone", "spike", "story", "task", "uat"];
 
 function descriptorMembers() {
   return readDescriptor().members;
@@ -74,7 +76,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 15 commands, 4 templates)",
+    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 17 commands, 6 templates)",
     run: async () => {
       const ids = new Set(memberIds());
       for (const id of AGENT_IDS) assert.ok(ids.has(id), `missing agent ${id}`);
@@ -82,8 +84,8 @@ export const bundleTests = [
       for (const id of TEMPLATE_IDS) assert.ok(ids.has(id), `missing template ${id}`);
       const byKind = (kind) => descriptorMembers().filter((m) => m.kind === kind).length;
       assert.equal(byKind("agent"), 8, "8 agents");
-      assert.equal(byKind("command"), 15, "15 commands");
-      assert.equal(byKind("template"), 4, "milestone/story/task/uat templates");
+      assert.equal(byKind("command"), 17, "17 commands");
+      assert.equal(byKind("template"), 6, "milestone/story/task/uat/spike/chore templates");
     }
   },
   {
@@ -153,7 +155,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 15 commands, 4 templates",
+    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 17 commands, 6 templates",
     run: async () => {
       const members = descriptorMembers();
       for (const member of members) {
@@ -168,12 +170,12 @@ export const bundleTests = [
       assert.deepEqual(
         members.filter((m) => m.kind === "command").map((m) => m.id).sort(),
         [...COMMAND_IDS].sort(),
-        "15 commands declared"
+        "17 commands declared"
       );
       assert.deepEqual(
         members.filter((m) => m.kind === "template").map((m) => m.id).sort(),
         [...TEMPLATE_IDS].sort(),
-        "milestone/story/task/uat templates declared as kind template"
+        "milestone/story/task/uat/spike/chore templates declared as kind template"
       );
     }
   },
@@ -181,7 +183,7 @@ export const bundleTests = [
     name: "bundle/descriptor: every resource member (agent + command) names one or more target runtimes",
     run: async () => {
       const resourceMembers = descriptorMembers().filter((m) => m.kind === "agent" || m.kind === "command");
-      assert.equal(resourceMembers.length, 23, "23 resource members");
+      assert.equal(resourceMembers.length, 25, "25 resource members");
       for (const member of resourceMembers) {
         assert.ok(Array.isArray(member.runtimes) && member.runtimes.length >= 1, `${member.id} declares >=1 runtime`);
       }
@@ -212,7 +214,7 @@ export const bundleTests = [
   },
   // Scenario Outline: a template member is declared with id and kind "template".
   {
-    name: "bundle/descriptor: outline — template members (milestone, story, task, uat) are kind template",
+    name: "bundle/descriptor: outline — template members (milestone, story, task, uat, spike, chore) are kind template",
     run: async () => {
       const byId = new Map(descriptorMembers().map((m) => [m.id, m]));
       for (const id of TEMPLATE_IDS) {
@@ -247,7 +249,7 @@ export const bundleTests = [
     run: async () => {
       const bundle = loadBundle();
       const outputs = renderBundleOutputs(bundle, { runtimes: ["claude"] });
-      // Claude supports all agents (8) + all commands (15) + all template files (12) = 35.
+      // Claude supports all agents (8) + all commands (17) + all template files (14) = 39.
       const resourceOutputs = outputs.filter((o) => o.resource.kind === "agent" || o.resource.kind === "command");
       assert.equal(resourceOutputs.length, AGENT_IDS.length + COMMAND_IDS.length, "one output per claude resource member");
       for (const output of outputs) {
