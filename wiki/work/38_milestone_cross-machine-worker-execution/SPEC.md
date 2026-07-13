@@ -1,0 +1,112 @@
+---
+type: milestone
+number: 38
+slug: cross-machine-worker-execution
+title: "Cross-machine worker execution & session presence — workers that can take on work, and a mesh that reflects live activity"
+status: in-progress
+owner: product-owner
+created: 2026-07-10
+updated: 2026-07-13
+depends: [34, 35, 36]
+---
+<!--
+  Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
+  Owner: product-owner. A milestone GROUPS stories and holds their shared context
+  (ARCHITECTURE / DESIGN / RESEARCH / UAT live in this folder too, conditionally).
+  Does NOT contain: a per-story user story (→ each STORY.md) or acceptance criteria (→ task .feature).
+-->
+# 38 · Cross-machine worker execution & session presence
+
+## Objective
+
+The mesh can name its nodes and assign work (milestones 33–35), and a desktop/web fleet view can
+render them (25/36) — but two gaps stop cross-machine work from being *real*:
+
+1. **The fleet lies about what a node is doing.** "Current work" only counts *executed aof task-runs*
+   (`running` run records), and the presence daemon reads runs from **one** workspace (its launch cwd).
+   So a node actively being worked on reads **`idle`**, and a packaged tray app launched from the
+   install dir can never reflect *any* repo's work. (Found live in the milestone-36 UAT.)
+2. **A worker can't actually run assigned work it isn't already set up for.** If a repo isn't checked
+   out on the worker, or has no isolated worktree, an assignment has nowhere to execute.
+
+This milestone closes both: a node's presence reflects **live coding-assistant sessions** (not just
+task-runs), aggregated across **all** its workspaces; and a worker node can **provision itself** for an
+assignment — check out the repo if missing, and create an isolated worktree to run in.
+
+An outsider can verify the objective is met when: (a) opening a coding assistant on a repo makes that
+node read **`working · <repo>`** in the fleet within the heartbeat window, and closing it returns the
+node to `idle` (self-expiring, never stuck); a node working two repos shows both; and (b) assigning
+work to a worker that lacks the repo results in the worker **cloning it** (from a configured location,
+with auth) and creating a **worktree**, then executing — with no manual pre-setup on that machine.
+
+## Scope
+
+In scope:
+- **Session presence (idle/working via assistant hooks)** — an assistant-agnostic CLI (`aof session
+  start|ping|end`) fed by editor hooks (Claude Code `SessionStart`/`UserPromptSubmit`/`SessionEnd` in
+  `.claude/settings.json`); a per-`(node, workspace, assistant)` session record with `lastPingAt`;
+  **TTL-based liveness** (a crashed session self-expires, mirroring presence staleness — never a stuck
+  "working"). The mesh presence publisher **aggregates active runs + live sessions across ALL of a
+  node's registered workspaces** (fixing the single-launch-cwd scope bug). The fleet (desktop 36 / web
+  25) renders `working` on any running task **or** live session — task `ref · title`, else `· <repo>
+  (session)`.
+- **Worker-node repo checkout** — when work is assigned to a worker that lacks the repo, clone it. The
+  repo location comes from a **new global aof config key**. Includes the **auth-transmission** design:
+  how git credentials / tokens / SSH reach the worker to clone a *private* repo securely (needs
+  research + a security review — see the open question below).
+- **Worktrees on the worker node** — create an isolated git worktree per assignment on the worker so
+  concurrent/isolated execution never collides on a shared checkout.
+
+Out of scope:
+- **A general remote-shell / arbitrary-command channel** — the worker provisions *itself* off the
+  assignment; this milestone does not add a way to run arbitrary commands on a peer.
+- **Multi-assistant richness** (per-file focus, token/cost telemetry) — session presence is
+  binary-per-workspace (working / idle) here; finer signal is additive later.
+- **Credential storage / a secrets vault** — auth *transmission* for a clone is in scope; a durable
+  machine-wide secret store is not (name where it defers if it proves needed).
+- **Reflecting non-aof activity** (a bare editor with no assistant hook) — presence is fed by the
+  assistant hook contract; an editor that reports nothing stays `idle`.
+
+## Stories
+
+<!-- Broken down `2026-07-10` via `aof:refine 38 --autonomous`. The graph-grounded partition (ARCHITECTURE
+     ADR-007) is TWO independent stories, not three: `worker-worktrees` was folded away (ADR-006) because
+     the worktree mechanics ALREADY SHIP from m35/ADR-004 (`mesh-worktree.mjs` add/remove/list/sweep + the
+     worker handler that already creates a per-assignment worktree) — the checkout story reuses them
+     verbatim, so there is zero net-new worktree work. The milestone is accepted when both stories are. -->
+
+- [x] [`00_story_session-presence`](stories/00_story_session-presence/STORY.md) — a live coding-assistant
+  session marks a node `working · <repo>` via the `aof session start|ping|end` seam (TTL liveness reusing
+  the shared `isStale` predicate), the presence record gains an additive `sessions` key (ADR-001), presence
+  aggregates across ALL the node's `global_node_workspaces` (ADR-003 — the single-launch-cwd fix), and the
+  fleet renders it with run↔session reconciliation (ADR-004). **Fixes the "always idle" + single-workspace
+  presence-scope bug.** No blocking research/security dependency.
+- [ ] [`01_story_worker-repo-checkout`](stories/01_story_worker-repo-checkout/STORY.md) — a worker assigned
+  work it lacks the repo for clones it from `config.mesh.repo.cloneUrl` into the scoped
+  `meshCheckoutPath(workspaceId)`, registers the workspace, then FALLS THROUGH to the unchanged m35
+  worktree+run flow (ADR-005/006). **Carries the open auth-transmission question** → `RESEARCH.md` (measured:
+  `GIT_ASKPASS` + control-minted short-lived token) + `SECURITY.md` (threat model). Tasks 00–03 buildable
+  now; the real private-repo two-machine clone is the `@manual` soak, gated on the SECURITY-approved mechanism.
+
+<!-- FOLDED AWAY (ADR-006): `worker-worktrees` — delivered by m35/ADR-004; no story, no net-new work. -->
+- [x] ~~`worker-worktrees`~~ — SUBSUMED by milestone 35 (ADR-006); the worktree-per-assignment mechanics
+  already ship and are reused verbatim by `worker-repo-checkout`.
+
+## Dependencies
+
+- **34 · global-mesh-work-store** — the presence / `activeRuns` model this extends, and the machine-wide
+  registry of a node's workspaces the aggregation reads.
+- **35 · mesh-work-assignment** — the worker-execution path (`mesh-worker-execution.mjs`) that provisioning
+  (checkout + worktree) hangs off, and that a `running` run record already flows from.
+- **36 · mesh-desktop-app** — the desktop fleet view (and the web view, 25) that renders the new
+  `working`/`idle` + session signal; the milestone whose UAT surfaced gap #1.
+
+## Open questions (resolve at refine → research/security)
+
+- **Auth transmission for a private-repo clone on a worker.** How does the worker obtain credentials to
+  `git clone` a private repo — a short-lived token minted by the control node and passed over the relay?
+  A pre-provisioned per-worker deploy key / SSH agent? Delegated to the fabric (e.g. Tailscale identity)?
+  This needs `aof-researcher` (prior art / vendor behaviour) + `aof-security` (threat model: a credential
+  crossing the mesh must not be exfiltratable or over-scoped). Blocks the `worker-repo-checkout` story.
+- **Session ↔ run reconciliation.** When a live session AND a task-run exist for the same workspace, which
+  wins the "current work" line, and do they merge? (Design at refine.)

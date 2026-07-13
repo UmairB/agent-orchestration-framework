@@ -3,10 +3,10 @@ type: milestone
 number: 35
 slug: mesh-work-assignment
 title: "Mesh Work Assignment — control→worker dispatch (assign a work item to a node, run it in isolation)"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-09
 depends: [26, 33, 34]
 ---
 <!--
@@ -69,9 +69,22 @@ Out of scope:
 
 ## Stories
 
-<!-- Populated at the Break-down stage (aof:refine 35). To be broken down. -->
+<!-- Broken down `2026-07-08` via `aof:refine 35 --autonomous`. Four INDEPENDENT-by-construction stories
+     drawn from the codebase-graph coupling (see ARCHITECTURE.md "Story breakdown rationale"): the record →
+     channel → execution spine (00 → 01 → 02) plus the read-only UI (03) forking off 00 in parallel. Every
+     contract authored (Three Amigos) in the same autonomous pass. -->
 
-- [ ] to be broken down by `aof:refine 35`
+- [x] [`00 · assignment-record-and-verb`](stories/00_story_assignment-record-and-verb/STORY.md) — the
+  `global_assignments` record (frozen 10-key + named-producer enum) + `aof mesh assign <ref> --to`/`--withdraw`
+  + the control-side repo-availability gate. **Foundation** (ADR-001/003). Depends: none.
+- [x] [`01 · control-worker-command-channel`](stories/01_story_control-worker-command-channel/STORY.md) — the
+  targeted `directive` down-frame + `nodeId→ws` map, admitted-peer-only, and the `assignment-status` uplink
+  write-through. **Transport** (ADR-002). Depends: 00.
+- [x] [`02 · isolated-worker-execution`](stories/02_story_isolated-worker-execution/STORY.md) — the dedicated
+  git worktree per assignment + node-partitioned run lifecycle + dual-staleness reclaim. **Headline**
+  (ADR-004/005/006). Depends: 00, 01.
+- [x] [`03 · assignment-fleet-ui`](stories/03_story_assignment-fleet-ui/STORY.md) — the read-only fleet view
+  renders the lifecycle on the 5s poll (assign stays CLI-only). **UI** (ADR-007). Depends: 00 (parallel to 01/02).
 
 ## Dependencies
 
