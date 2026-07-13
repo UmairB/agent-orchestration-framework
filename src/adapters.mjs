@@ -373,13 +373,24 @@ function resourcePath(runtime, resource) {
 
 function renderResource(runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   if (resource.kind === "skill") {
-    return [
+    // `disable-model-invocation: true` makes Claude Code NOT auto-trigger the
+    // skill — it runs only when the user invokes `/<name>` explicitly. Emitted
+    // when the resource carries the flag. For the codex-* delegation skills this is
+    // driven by the `work.agents.delegation` toggle (applyDelegationToResources):
+    // OFF (default) keeps the flag (skills won't auto-fire); ON drops it (skills
+    // become auto-invocable). So the toggle literally turns the skills on and off.
+    const frontmatter = [
       "---",
       "aof-generated: true",
       `name: ${resource.name ?? resource.id}`,
-      `description: ${resource.description ?? ""}`,
-      `aof-runtime: ${runtime}`,
-      "---",
+      `description: ${resource.description ?? ""}`
+    ];
+    if (resource.disableModelInvocation === true) {
+      frontmatter.push("disable-model-invocation: true");
+    }
+    frontmatter.push(`aof-runtime: ${runtime}`, "---");
+    return [
+      ...frontmatter,
       "",
       contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
       ""

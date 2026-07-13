@@ -1203,6 +1203,17 @@ function validateWorkAgents(agents, diagnostics) {
     return;
   }
 
+  // work.agents.delegation — the gpt-5.6 delegation toggle (default "off"). When
+  // provided it must be exactly "off" or "on"; anything else is an error.
+  if (agents.delegation !== undefined && agents.delegation !== "off" && agents.delegation !== "on") {
+    diagnostics.push(diagnostic(
+      "error",
+      "work.agents.delegation",
+      'work.agents.delegation must be "off" or "on" when provided.',
+      "delegation-bad-value"
+    ));
+  }
+
   const rawMap = agents.models;
   if (rawMap === undefined) return;
   if (!rawMap || typeof rawMap !== "object" || Array.isArray(rawMap)) {

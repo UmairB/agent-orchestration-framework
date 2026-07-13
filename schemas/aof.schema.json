@@ -367,6 +367,10 @@
               "enum": ["inline", "agent"],
               "description": "inline = the main session authors SPEC/story/acceptance; agent = delegate authoring to the aof-product-owner sub-agent."
             },
+            "delegation": {
+              "enum": ["off", "on"],
+              "description": "The gpt-5.6 delegation toggle (default \"off\" when absent). off = Claude does everything itself and the codex-* skills render with disable-model-invocation:true (Claude Code won't auto-trigger them); on = the codex-* skills render auto-invocable so the ACD agents may hand bulk/mechanical work to gpt-5.6-sol via the Codex CLI when it is available. The init/update render honours this flag (applyDelegationToResources); flipping it re-renders the skills. Set with `aof work delegation on|off`."
+            },
             "models": {
               "type": "object",
               "description": "Per-role model override map: an ACD role id (one of the 8 frozen roles, e.g. aof-architect) -> a model string (a moving family alias like \"opus\"/\"sonnet\", or a pinned id). Wins over the bundle's shipped default in the rendered agent file under orchestrated mode; inert (surfaced, not enforced) under mode \"solo\". Authoritative validation is `aof project validate` (no Ajv runs at validate time, so this schema is advisory): keys are checked against the live 8-role set derived from the bundle descriptor, and values must be non-empty and non-whitespace.",

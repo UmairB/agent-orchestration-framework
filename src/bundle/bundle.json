@@ -15,6 +15,7 @@
     { "id": "add-uat", "kind": "command", "file": "commands/add-uat.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "autonomous", "kind": "command", "file": "commands/autonomous.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "code-review", "kind": "command", "file": "commands/code-review.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "delegate", "kind": "command", "file": "commands/delegate.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "continue", "kind": "command", "file": "commands/continue.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "feedback", "kind": "command", "file": "commands/feedback.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "recent", "kind": "command", "file": "commands/recent.md", "runtimes": ["claude"], "commandNamespace": "aof" },
@@ -23,6 +24,10 @@
     { "id": "shatter", "kind": "command", "file": "commands/shatter.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "validate", "kind": "command", "file": "commands/validate.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "verify", "kind": "command", "file": "commands/verify.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+
+    { "id": "codex-implementation", "kind": "skill", "file": "skills/codex-implementation/SKILL.md", "runtimes": ["claude"], "disableModelInvocation": true },
+    { "id": "codex-review", "kind": "skill", "file": "skills/codex-review/SKILL.md", "runtimes": ["claude"], "disableModelInvocation": true },
+    { "id": "codex-computer-use", "kind": "skill", "file": "skills/codex-computer-use/SKILL.md", "runtimes": ["claude"], "disableModelInvocation": true },
 
     { "id": "milestone", "kind": "template", "dir": "templates/milestone" },
     { "id": "story", "kind": "template", "dir": "templates/story" },
