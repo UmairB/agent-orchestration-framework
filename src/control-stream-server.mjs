@@ -17,7 +17,7 @@
 // THE WIRE FRAME — the SAME { kind, nodeId, workspaceId, items, at } shape
 // worker-stream-client.mjs emits (documented there). This module never re-derives
 // that schema; it only reads it.
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import http from "node:http";
 import {
   openGlobalWorkProjectionStore,
@@ -26,6 +26,27 @@ import {
 } from "./global-work-store.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
+import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
+
+// isRevokedLocal(registry, nodeId) — milestone 35 / ADR-002, story 01 task 01
+// (SECURITY T2). A deliberate LOCAL re-implementation of mesh-registry.mjs's
+// isRevoked(registry, nodeId) predicate (mesh-registry.mjs:256-260, verbatim
+// two-line `.some()` shape) — NOT an import of that module. 34/ADR-007 (this
+// module's own docstring, above) draws a hard line: control-stream-server.mjs
+// never imports mesh-registry.mjs's credential/enrollment gate
+// (acd-control-stream-tailnet-only's "no token/device-code" invariant); admission
+// here is `isTailnetPeer`, a DIFFERENT, lighter predicate. T2's revocation check
+// is a tiny, stable, SEMANTIC-only fact ("is this nodeId in the live
+// revocations list") that does not warrant pulling in mesh-registry.mjs's much
+// larger roster/credential/enrollment surface — replicating the 3-line predicate
+// keeps that architectural boundary intact while still honouring SECURITY T2's
+// live-re-read discipline (the caller's getMeshRegistry() is called fresh, this
+// function itself holds no state).
+function isRevokedLocal(registry, nodeId) {
+  if (nodeId == null) return false;
+  const revocations = registry?.revocations ?? [];
+  return revocations.some((entry) => entry?.nodeId === nodeId);
+}
 
 // isTailnetPeer(origin, { peerNodeIds }) — the ADMISSION PREDICATE: a tailnet peer is
 // one whose resolved nodeId (via the fabric join, mesh-fabric.resolvePeers) is a
@@ -136,6 +157,190 @@ export async function applyPresenceFrame(store, frame, options = {}) {
   return { published: true, nodeId, record };
 }
 
+// applyAssignmentStatusFrame(store, frame, options) — milestone 35 / story 01, task
+// 02: the up-frame { kind:"assignment-status", nodeId, assignmentId, state, runId?,
+// at } write-throughs the worker-reported lifecycle transition into ADR-001's
+// dedicated writer (updateAssignmentState). SECURITY T6: the transition is authored
+// from the CONNECTION's authenticated nodeId (options.nodeId, bound at connection
+// time — the SAME ownerNode ?? frameNode precedence applyPresenceFrame uses above,
+// :120-124), never a self-reported frame.nodeId alone — a frame arriving on
+// worker-a's connection can never advance an assignment held by worker-b, even if
+// the frame's own `nodeId` field claims to BE worker-b. R4(m23) build note: this
+// validates the frame's SHAPE (assignmentId/state present, holder matches) before
+// any protocol-layer limit — the contract-frame check fires first.
+export async function applyAssignmentStatusFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+  const state = typeof frame?.state === "string" && frame.state.length > 0 ? frame.state : null;
+  if (connectionNodeId == null || assignmentId == null || state == null) {
+    return { applied: false, skipped: true, code: "assignment-status-frame-invalid" };
+  }
+
+  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
+  if (!existing) {
+    return { applied: false, skipped: true, code: "assignment-status-unknown-assignment" };
+  }
+  // T6: the CONNECTION's authenticated nodeId must be the row's holder — a frame on
+  // worker-a's connection can never advance an assignment held by worker-b, no
+  // matter what the frame itself self-declares as `nodeId`.
+  if (existing.target_node_id !== connectionNodeId) {
+    return { applied: false, skipped: true, code: "assignment-status-not-holder" };
+  }
+
+  const now = options.now ?? new Date().toISOString();
+  const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : undefined;
+  const updated = updateAssignmentState(store, assignmentId, state, { now, runId });
+  return { applied: updated != null, assignment: updated };
+}
+
+// defaultMintCloneCredential(workspaceId, assignmentId) — milestone 38 / ADR-009: the
+// CONTROL-NODE-SIDE credential SOURCE seam (SECURITY T4's minting AUTHORITY — an
+// Accepted, operator-verified residual; this ADR chooses the CHANNEL + the seam, NEVER
+// the TTL/scope/authority). The DEFAULT reads a single operator-provisioned token from
+// THIS control node's own environment — `process.env.AOF_MESH_CLONE_TOKEN` — never a
+// COMMITTED config key (`config.mesh.repo.cloneUrl` is fleet-shared and committed; a
+// real credential must NEVER be committed alongside it). Absent/blank resolves to
+// `null` — a legitimate "no credential configured for this workspace" reply (the
+// public-repo path), never a refusal. An operator wiring a real per-repo, short-lived
+// mint (a forge App token, a CI secrets store, …) supplies their OWN
+// `mintCloneCredential(workspaceId, assignmentId)` at `startControlStreamServer(...)` /
+// mesh-launcher.mjs's `controlStreamServerOptions`, closing over whatever real minting
+// authority they run — this default is deliberately the simplest thing that could
+// possibly work for a single-repo fleet, never a policy prescription (no fitness
+// function asserts a server-side minting policy — SECURITY, verbatim).
+function defaultMintCloneCredential(/* workspaceId, assignmentId */) {
+  const token = process.env.AOF_MESH_CLONE_TOKEN;
+  return typeof token === "string" && token.length > 0 ? token : null;
+}
+
+// buildCloneCredentialFrame(to, { assignmentId, credential, code, at }) — the DOWN-half
+// of the milestone 38 / ADR-009 clone-credential PULL: { kind: "clone-credential", to,
+// assignmentId, credential, at }, plus an OPTIONAL `code` key present ONLY on a
+// refusal (never on a normal reply — whether that reply carries a real token or an
+// explicit `credential: null` "not needed" decision). A NET-NEW frame kind, purely
+// ADDITIVE alongside the FROZEN `buildDirectiveFrame` five-key projection (35/ADR-002)
+// below — this frame is never pushed onto, and never read from, the directive frame.
+function buildCloneCredentialFrame(to, { assignmentId, credential = null, code, at }) {
+  const frame = { kind: "clone-credential", to, assignmentId, credential, at };
+  if (typeof code === "string" && code.length > 0) frame.code = code;
+  return frame;
+}
+
+// The LOUD coded refusals (never a silent empty reply) applyCloneCredentialRequestFrame
+// (below) can reply with.
+export const CLONE_CREDENTIAL_NOT_HOLDER = "clone-credential-not-holder";
+export const CLONE_CREDENTIAL_UNKNOWN_ASSIGNMENT = "clone-credential-unknown-assignment";
+export const CLONE_CREDENTIAL_REQUEST_INVALID = "clone-credential-request-invalid";
+export const CLONE_CREDENTIAL_MINT_FAILED = "clone-credential-mint-failed";
+// SECURITY T6 / finding F15 (High) — the requester-supplied frame.workspaceId is
+// NEVER trusted as the mint's scope: it must match the assignment row's OWN
+// workspace_id, or the mint is refused outright (never silently substituted with the
+// row's value — a mismatch is a loud, coded, ATTACK-SHAPED refusal, not a quiet
+// correction, so a probing/compromised worker gets no signal about which repos exist
+// in the fleet).
+export const CLONE_CREDENTIAL_WORKSPACE_MISMATCH = "clone-credential-workspace-mismatch";
+// SECURITY T6 / finding F16 (Medium) — a terminal (done/failed/withdrawn/reclaimed) or
+// otherwise non-active assignment mints nothing, ever — a worker that finished, or was
+// taken off the work by control, cannot keep pulling fresh repo credentials against it.
+export const CLONE_CREDENTIAL_ASSIGNMENT_INACTIVE = "clone-credential-assignment-inactive";
+
+// applyCloneCredentialRequestFrame(store, frame, options) — milestone 38 / ADR-009: the
+// up-frame { kind:"clone-credential-request", nodeId, assignmentId, workspaceId, at } a
+// worker sends ONLY on an actual clone miss, over the ALREADY-OPEN persistent stream
+// (a new branch in applyStreamFrame's dispatch, below).
+//
+// AUTHORIZATION reuses applyAssignmentStatusFrame's EXACT holder check (SECURITY T6,
+// above): only the assignment's `target_node_id` (its HOLDER) may ask, resolved from
+// the CONNECTION's authenticated nodeId (options.nodeId, bound at connection time),
+// NEVER a self-reported frame.nodeId. A non-holder — or an unknown assignment, or a
+// malformed request — is refused LOUDLY: a CODED `clone-credential` reply is sent
+// straight back down the SAME directiveTargets targeting map sendDirective already
+// uses (never a silent drop, never a mint attempt).
+//
+// On authorization, calls the INJECTED `options.mintCloneCredential(existing.workspace_id,
+// assignmentId)` — the ASSIGNMENT ROW's OWN workspaceId, NEVER the requester-supplied
+// `frame.workspaceId` (SECURITY T6 / finding F15: minting on unverified requester
+// input is a privilege-escalation seam — a holder of any assignment could otherwise
+// name an arbitrary workspaceId and mint a credential for a repo it was never
+// assigned) — and only for an assignment still in an ACTIVE state (SECURITY T6 /
+// finding F16: a terminal/withdrawn/reclaimed assignment mints nothing, ever).
+// Default `defaultMintCloneCredential`, T4's minting-policy residual. Replies with
+// the `clone-credential` down-frame, addressed back to the REQUESTER's own connection
+// (never a fan-out — the same one-target discipline sendDirective already enforces).
+// A mint fault degrades to a loud coded refusal reply rather than leaving the worker
+// to exhaust its own bounded wait.
+export async function applyCloneCredentialRequestFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+  const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+  const now = options.now ?? new Date().toISOString();
+  const directiveTargets = options.directiveTargets ?? null;
+
+  const refuse = (code) => {
+    if (connectionNodeId != null && directiveTargets != null) {
+      sendDirective(directiveTargets, connectionNodeId, buildCloneCredentialFrame(connectionNodeId, { assignmentId, credential: null, code, at: now }));
+    }
+    return { applied: false, skipped: true, code };
+  };
+
+  if (connectionNodeId == null || assignmentId == null || workspaceId == null) {
+    return refuse(CLONE_CREDENTIAL_REQUEST_INVALID);
+  }
+
+  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
+  if (!existing) {
+    return refuse(CLONE_CREDENTIAL_UNKNOWN_ASSIGNMENT);
+  }
+  // T6: the CONNECTION's authenticated nodeId must be the row's holder — the identical
+  // check applyAssignmentStatusFrame already applies. A worker can therefore only ever
+  // ASK about an assignment it ACTUALLY holds — but holding the assignment alone does
+  // NOT yet authorize a mint; the workspace-match and active-state gates below still
+  // apply before anything is minted.
+  if (existing.target_node_id !== connectionNodeId) {
+    return refuse(CLONE_CREDENTIAL_NOT_HOLDER);
+  }
+
+  // SECURITY T6 / F15 (High, privilege escalation) — the mint is scoped to the
+  // ASSIGNMENT ROW's OWN workspace_id, never the requester-supplied frame.workspaceId.
+  // The holder check above only proves the requester holds `assignmentId`; it says
+  // NOTHING about which workspace the frame claims — a holder of ANY assignment could
+  // otherwise name an arbitrary `workspaceId` and mint a credential for a repo it was
+  // never assigned. A mismatch is refused outright, never silently substituted with
+  // the row's real value (a quiet correction would still hand the requester a working
+  // credential for a repo it didn't ask to be scoped to, and would leak nothing about
+  // WHY to a legitimate caller debugging a stale local workspaceId).
+  if (workspaceId !== existing.workspace_id) {
+    return refuse(CLONE_CREDENTIAL_WORKSPACE_MISMATCH);
+  }
+
+  // SECURITY T6 / F16 (Medium, terminal-state reuse) — a terminal or otherwise
+  // non-active assignment mints NOTHING. Reuses assignment-record.mjs's OWN active-
+  // state predicate (never a second, drifting copy of the state list) — a worker that
+  // already reached done/failed, or was withdrawn/reclaimed OFF the assignment by
+  // control, cannot keep pulling fresh repo credentials against it indefinitely.
+  if (!isActiveAssignmentState(existing.state)) {
+    return refuse(CLONE_CREDENTIAL_ASSIGNMENT_INACTIVE);
+  }
+
+  const mint = typeof options.mintCloneCredential === "function" ? options.mintCloneCredential : defaultMintCloneCredential;
+  let credential = null;
+  try {
+    credential = await mint(existing.workspace_id, assignmentId);
+  } catch {
+    return refuse(CLONE_CREDENTIAL_MINT_FAILED);
+  }
+  const resolved = typeof credential === "string" && credential.length > 0 ? credential : null;
+
+  if (directiveTargets != null) {
+    sendDirective(directiveTargets, connectionNodeId, buildCloneCredentialFrame(connectionNodeId, { assignmentId, credential: resolved, at: now }));
+  }
+  return { applied: true, minted: resolved != null, assignmentId, workspaceId };
+}
+
 // applyStreamFrame(store, frame, options) — dispatch by frame.kind. An unrecognised
 // kind is a no-op (never a crash — the never-crash discipline every mesh module in
 // this codebase keeps).
@@ -143,6 +348,8 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "snapshot") return applySnapshotFrame(store, frame, options);
   if (frame?.kind === "delta") return applyDeltaFrame(store, frame, options);
   if (frame?.kind === "presence") return applyPresenceFrame(store, frame, options);
+  if (frame?.kind === "assignment-status") return applyAssignmentStatusFrame(store, frame, options);
+  if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 
@@ -172,6 +379,83 @@ export function freshnessLabel({ connected, everConnected, lastHeartbeatAt, now,
   if (!everConnected) return "never-connected";
   const label = streamLivenessLabel({ connected, lastHeartbeatAt, now, windowSeconds });
   return label === "disconnected" ? "stale" : label;
+}
+
+// buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at }) — the down-frame
+// (milestone 35 / ADR-002, story 01 task 00). A pure projection — exactly five keys,
+// no clock read other than the injected `at`.
+export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at }) {
+  return { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
+}
+
+// createDirectiveTargetRegistry() — milestone 35 / ADR-002, story 01 task 00: the
+// server-side `nodeId → ws` targeting map. Populated in wss.on("connection") and
+// CLEARED on that same socket's close/error (never a stale route surviving a dropped
+// connection — "a directive reaches a node only while its connection is live").
+// `set` is keyed by nodeId (one live socket per node, the SAME identity the liveness
+// registry tracks) so a reconnect naturally replaces the prior (now-dead) entry.
+function createDirectiveTargetRegistry() {
+  const byNodeId = new Map();
+  return {
+    set(nodeId, ws) {
+      byNodeId.set(nodeId, ws);
+    },
+    // deleteIfCurrent — only clears the entry if IT is still the live socket for
+    // that nodeId (a reconnect's NEW socket must never be clobbered by the OLD
+    // socket's belated close/error handler firing after the new one already
+    // registered).
+    deleteIfCurrent(nodeId, ws) {
+      if (byNodeId.get(nodeId) === ws) byNodeId.delete(nodeId);
+    },
+    get(nodeId) {
+      return byNodeId.get(nodeId) ?? null;
+    },
+  };
+}
+
+// ASSIGNMENT_TARGET_NOT_CONNECTED — the LOUD coded refusal (ADR-002 / 34-ADR-008):
+// a directive to a node with no live socket in the targeting map surfaces this code,
+// never a silent drop, and writes NO frame to any socket.
+export const ASSIGNMENT_TARGET_NOT_CONNECTED = "assignment-target-not-connected";
+
+// sendDirective(targets, nodeId, directive) — resolves EXACTLY one socket from the
+// targeting map (`targets.get(nodeId)`) and writes the directive frame to it. There
+// is NO fan-out here — no `wss.clients` iteration, no "send to all" branch
+// (`acd-directive-targets-one-peer`). A target with no live socket is a LOUD coded
+// `assignment-target-not-connected` refusal — nothing is written anywhere.
+export function sendDirective(targets, nodeId, directive) {
+  const ws = targets.get(nodeId);
+  if (ws == null || ws.readyState !== WebSocket.OPEN) {
+    return { sent: false, code: ASSIGNMENT_TARGET_NOT_CONNECTED };
+  }
+  ws.send(JSON.stringify(directive));
+  return { sent: true };
+}
+
+// dispatchDirectiveOverTargets(targets, directive, { getMeshRegistry }) — milestone
+// 35 / ADR-002, story 01 task 01: the ONE composed control-side entry point (T5 + T2).
+//
+// SECURITY T5 (admission IS the trust boundary): `targets` (the nodeId -> ws
+// registry) is populated EXCLUSIVELY inside wss.on("connection") — i.e. strictly
+// post-admission, since the upgrade gate destroys any non-peer socket before a ws
+// is ever emitted (:293-304 above). So resolving ANY socket from `targets` is, by
+// construction, resolving an admitted, live tailnet-peer connection — there is no
+// separate "is this a peer" re-check to perform here; a directive whose target
+// resolves to nothing in `targets` (never admitted, or since disconnected) is
+// exactly the ASSIGNMENT_TARGET_NOT_CONNECTED miss sendDirective already surfaces.
+//
+// SECURITY T2 (revocation completeness, live re-read): `getMeshRegistry()` is
+// called FRESH on every dispatch (never a serve-start snapshot, never cached across
+// calls) — a directive whose `issuer` is in the CURRENT live registry revocations
+// never routes, even over an admitted stream. Fail-safe direction: an absent/empty
+// registry (getMeshRegistry() returning null/undefined, or a registry with no
+// revocations) never blocks routing — isRevoked(...) already returns false for
+// both (mesh-registry.mjs:256-260).
+export function dispatchDirectiveOverTargets(targets, directive, { getMeshRegistry = () => null } = {}) {
+  if (directive?.issuer != null && isRevokedLocal(getMeshRegistry(), directive.issuer)) {
+    return { sent: false, code: "assignment-issuer-revoked" };
+  }
+  return sendDirective(targets, directive?.to, directive);
 }
 
 // ------------------------------------------------------- the server host ----
@@ -259,8 +543,21 @@ export async function startControlStreamServer({
   storeOptions = {},
   now = () => new Date().toISOString(),
   httpHandler = null,
+  // getMeshRegistry() — milestone 35 / ADR-002, story 01 task 01 (SECURITY T2): an
+  // OPTIONAL accessor returning the LIVE mesh registry ({ revocations: [...] }) —
+  // read PER DECISION (never a serve-start snapshot) so a directive whose issuer is
+  // revoked AFTER it was admitted is filtered on the very next directive it sends.
+  // Fail-safe: absent (default) leaves every directive routing normally.
+  getMeshRegistry = () => null,
+  // mintCloneCredential(workspaceId, assignmentId) — milestone 38 / ADR-009: the
+  // INJECTED control-node-side credential SOURCE (default defaultMintCloneCredential,
+  // above — SECURITY T4's minting-policy residual). A caller (mesh-launcher.mjs's
+  // controlStreamServerOptions, or a test) may supply a real per-repo/short-lived
+  // minting authority here.
+  mintCloneCredential = defaultMintCloneCredential,
 } = {}) {
   const registry = createStreamRegistry();
+  const directiveTargets = createDirectiveTargetRegistry();
   const store = await openStore(storeOptions);
   const roster = new Set(Array.isArray(peerNodeIds) ? peerNodeIds : peerNodeIds instanceof Set ? [...peerNodeIds] : []);
   const addressIndex = buildAddressIndex(peersByAddress);
@@ -306,6 +603,11 @@ export async function startControlStreamServer({
   wss.on("connection", (ws, meta) => {
     const nodeId = meta.nodeId;
     registry.markConnected(nodeId, now());
+    // milestone 35 / ADR-002, story 01 task 00: the nodeId -> ws targeting map,
+    // populated HERE (post-admission, inside wss.on("connection")) and cleared on
+    // this SAME socket's close/error below — never a stale route past a dropped
+    // connection.
+    directiveTargets.set(nodeId, ws);
 
     ws.on("message", (data) => {
       let frame = null;
@@ -320,7 +622,16 @@ export async function startControlStreamServer({
       }
       const receivedAt = now();
       registry.markHeartbeat(nodeId, receivedAt);
-      applyStreamFrame(store, frame, { now: receivedAt, nodeId, presenceWorkspace: { globalMeshRoot: store.paths?.meshRoot } }).catch(() => {
+      applyStreamFrame(store, frame, {
+        now: receivedAt,
+        nodeId,
+        presenceWorkspace: { globalMeshRoot: store.paths?.meshRoot },
+        // milestone 38 / ADR-009 — clone-credential-request handling needs the SAME
+        // nodeId -> ws targeting map sendDirective/dispatchDirective already use (to
+        // reply down the requester's own connection) and the injected minting seam.
+        directiveTargets,
+        mintCloneCredential,
+      }).catch(() => {
         // A store-apply fault must never crash the accept loop — the next frame
         // simply tries again (mirrors probeFabric's never-crash discipline).
       });
@@ -328,9 +639,11 @@ export async function startControlStreamServer({
 
     ws.on("close", () => {
       registry.markDisconnected(nodeId);
+      directiveTargets.deleteIfCurrent(nodeId, ws);
     });
     ws.on("error", () => {
       registry.markDisconnected(nodeId);
+      directiveTargets.deleteIfCurrent(nodeId, ws);
     });
   });
 
@@ -351,6 +664,21 @@ export async function startControlStreamServer({
     server,
     wss,
     registry,
+    directiveTargets,
+    // dispatchDirective(directive) — milestone 35 / ADR-002, story 01 tasks 00/01:
+    // the ONE control-side entry point that sends a directive down the targeting
+    // map. Admission (T5) is structural here — directiveTargets is populated ONLY
+    // inside wss.on("connection"), i.e. post-admission, so ANY resolved socket is
+    // by construction an admitted, live tailnet-peer connection; there is no
+    // separate "is this a peer" re-check to perform on the SEND side (the upgrade
+    // gate already the sole admission surface, 34/ADR-007). SECURITY T2: the LIVE
+    // registry revocations are re-read PER DECISION (never a serve-start snapshot,
+    // via getMeshRegistry() called fresh on every dispatch) — a directive whose
+    // `issuer` is revoked never routes, even over an admitted stream. Fail-safe: an
+    // absent/empty registry never blocks routing.
+    dispatchDirective(directive) {
+      return dispatchDirectiveOverTargets(directiveTargets, directive, { getMeshRegistry });
+    },
     updatePeers(nextPeerNodeIds, nextPeersByAddress) {
       roster.clear();
       for (const id of (Array.isArray(nextPeerNodeIds) ? nextPeerNodeIds : [...(nextPeerNodeIds ?? [])])) {

@@ -51,6 +51,33 @@ export function buildPresenceFrame(nodeId, presence, now) {
   return { kind: "presence", nodeId, presence: presence && typeof presence === "object" ? { ...presence } : {}, at: now };
 }
 
+// buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now }) — milestone
+// 35 / ADR-002, story 01 task 02: the up-frame a worker streams to report a lifecycle
+// transition (`accepted`/`running`/`done`/`failed`). `runId` is included only when
+// supplied (the "running" transition's ADR-004 run link) — a pure projection, same
+// shape family as the other frame builders.
+export function buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now } = {}) {
+  const frame = { kind: "assignment-status", nodeId, assignmentId, state, at: now };
+  if (typeof runId === "string" && runId.length > 0) frame.runId = runId;
+  return frame;
+}
+
+// buildCloneCredentialRequestFrame(nodeId, assignmentId, workspaceId, now) — milestone
+// 38 / ADR-009: the up-frame a worker sends ONLY on an actual clone miss, over the
+// ALREADY-OPEN persistent stream (the SAME sendFrame failure-isolation seam every
+// other up-frame goes through). A pure projection, same shape family as the other
+// frame builders — additive alongside the FROZEN directive down-frame (35/ADR-002),
+// which this never touches.
+export function buildCloneCredentialRequestFrame(nodeId, assignmentId, workspaceId, now) {
+  return { kind: "clone-credential-request", nodeId, assignmentId, workspaceId, at: now };
+}
+
+// THE CLONE-CREDENTIAL BOUNDED WAIT — a request that is refused, dropped, or never
+// answered must never hang the worker forever (ADR-009: "failure is LOUD, never a
+// hang"). Overridable per-client via options.cloneCredentialTimeoutMs (tests inject a
+// short bound; production keeps the default).
+export const DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS = 15000;
+
 // createWorkerStreamClient({ transport, ticker, nodeId, workspaceId, now, onWarning })
 // → { connect(), sendSnapshot(items), sendDelta(items), notifyDrop(), stop() }.
 //
@@ -85,6 +112,10 @@ export function createWorkerStreamClient({
   workspaceId,
   now = () => new Date().toISOString(),
   onWarning = () => {},
+  // cloneCredentialTimeoutMs — milestone 38 / ADR-009: the bounded wait
+  // requestCloneCredential (below) applies to its own pending reply. Tests inject a
+  // short bound; production keeps DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS.
+  cloneCredentialTimeoutMs = DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS,
 } = {}) {
   let handle = null;
   let connected = false;
@@ -92,12 +123,77 @@ export function createWorkerStreamClient({
   let consecutiveDrops = 0;
   let reconnectHandle = null;
   let stopped = false;
+  // milestone 35 / ADR-002, story 01 task 00/02 — the down-channel receive seam
+  // Story 02 implements against: a registered directive handler, invoked with the
+  // PARSED { kind:"directive", to, assignmentId, itemRef, workspaceId, at } frame.
+  // This story delivers/accepts frames; it does NOT run work — directiveHandler is
+  // called and nothing else happens here.
+  let directiveHandler = null;
+  // milestone 38 / ADR-009 — pending clone-credential-request correlation, keyed by
+  // assignmentId (per-clone, per-assignment: at most ONE clone-miss is ever in flight
+  // for a given assignment). A bounded wait backstops a request that is refused,
+  // dropped, or never answered — see requestCloneCredential below.
+  const pendingCloneCredentialRequests = new Map();
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
   const warn = (code, error) => {
     onWarning({ code, message: error?.message ?? String(error ?? "stream fault"), path: null });
   };
+
+  // settleCloneCredentialRequest(assignmentId, frame) — resolves a pending
+  // requestCloneCredential() wait with the RAW down-frame that arrived for it (the
+  // correlation key), clearing its timeout. A no-op if nothing is pending for that
+  // assignmentId (an unsolicited/late/duplicate clone-credential frame).
+  function settleCloneCredentialRequest(assignmentId, frame) {
+    const pending = pendingCloneCredentialRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingCloneCredentialRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+    pending.resolve({ frame });
+  }
+
+  // clearPendingCloneCredentialRequest(assignmentId) — drops a pending registration
+  // WITHOUT resolving it (used when the up-frame send itself fails — the caller is
+  // about to throw synchronously, so nothing is left waiting on the timer).
+  function clearPendingCloneCredentialRequest(assignmentId) {
+    const pending = pendingCloneCredentialRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingCloneCredentialRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+  }
+
+  // handleTransportMessage(raw) — the worker's FIRST receive listener (STORY.md:
+  // "the worker client's FIRST receive listener is a clean additive sibling to
+  // onDrop"). A malformed frame is dropped, never thrown (the SAME never-crash
+  // discipline control-stream-server.mjs's own message handler keeps). A "directive"
+  // kind is dispatched to directiveHandler; milestone 38 / ADR-009 adds ONE additive
+  // sibling branch — a "clone-credential" kind resolves the matching pending
+  // requestCloneCredential() wait (below). Any OTHER kind is silently ignored (this is
+  // the RECEIVE side; there is no store to write a no-op result into) — both branches
+  // dispatch on frame.kind exactly as control-stream-server.mjs's own applyStreamFrame
+  // does, so the frozen directive frame (35/ADR-002) is untouched by this addition.
+  function handleTransportMessage(raw) {
+    let frame = null;
+    try {
+      frame = typeof raw === "string" ? JSON.parse(raw) : JSON.parse(raw.toString());
+    } catch {
+      return; // never-crash: a malformed frame is dropped, never thrown.
+    }
+    if (frame?.kind === "directive") {
+      directiveHandler?.(frame);
+      return;
+    }
+    if (frame?.kind === "clone-credential") {
+      const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+      if (assignmentId != null) settleCloneCredentialRequest(assignmentId, frame);
+      return;
+    }
+  }
+
+  if (transport != null && typeof transport.onMessage === "function") {
+    transport.onMessage(handleTransportMessage);
+  }
 
   // markDropped() — a connect/send fault OR an explicit notifyDrop(): the session
   // is no longer connected, so the NEXT frame (once reconnected) must be a snapshot.
@@ -176,6 +272,80 @@ export function createWorkerStreamClient({
     return sendFrame(buildPresenceFrame(nodeId, presence, resolveNow()));
   }
 
+  // sendAssignmentStatus(assignmentId, state, { runId }) — milestone 35 / ADR-002,
+  // story 01 task 02: the up-frame emitter Story 02 calls to stream
+  // accepted -> running -> done|failed back up the SAME persistent socket. Reuses
+  // the SAME failure-isolation seam every other send goes through (sendFrame) — a
+  // transport fault here is a warning, never a rethrow (ADR-004).
+  async function sendAssignmentStatus(assignmentId, state, { runId } = {}) {
+    return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now: resolveNow() }));
+  }
+
+  // requestCloneCredential({ assignmentId, workspaceId }) — milestone 38 / ADR-009:
+  // sends the clone-credential-request up-frame over the SAME sendFrame
+  // failure-isolation seam, then awaits the matching clone-credential down-frame
+  // correlated on assignmentId, bounded by cloneCredentialTimeoutMs (never a hang). A
+  // PURE TRANSPORT LEAF (the graph's zero-outbound-edges invariant this module keeps,
+  // ADR-009): this function CARRIES a credential — it never mints, resolves,
+  // persists, or logs one.
+  //
+  // Resolves to the credential STRING on a well-formed non-refusal reply carrying
+  // one; resolves to `null` on a well-formed reply EXPLICITLY carrying no credential
+  // (control decided none is needed — the public-repo path). REJECTS (a coded error)
+  // on a send failure, a refusal, a timeout, or a malformed/blank reply — the caller
+  // (mesh-worker-execution.mjs's cloneRepoForWorkspace) turns any rejection into the
+  // existing loud coded assignment-repo-unavailable failure.
+  async function requestCloneCredential({ assignmentId, workspaceId } = {}) {
+    if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+      const error = new Error("requestCloneCredential requires an assignmentId");
+      error.code = "clone-credential-request-invalid";
+      throw error;
+    }
+
+    const waitForReply = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingCloneCredentialRequests.delete(assignmentId);
+        resolve({ timedOut: true });
+      }, cloneCredentialTimeoutMs);
+      pendingCloneCredentialRequests.set(assignmentId, { resolve, timer });
+    });
+
+    const sent = await sendFrame(buildCloneCredentialRequestFrame(nodeId, assignmentId, workspaceId, resolveNow()));
+    if (!sent.sent) {
+      clearPendingCloneCredentialRequest(assignmentId);
+      const error = new Error("clone-credential-request could not be sent (transport unavailable)");
+      error.code = "assignment-repo-unavailable";
+      throw error;
+    }
+
+    const outcome = await waitForReply;
+    if (outcome?.timedOut) {
+      const error = new Error(`clone-credential-request timed out waiting for control's reply (assignmentId=${assignmentId})`);
+      error.code = "clone-credential-timeout";
+      throw error;
+    }
+    const frame = outcome?.frame ?? null;
+    if (typeof frame?.code === "string" && frame.code.length > 0) {
+      const error = new Error(`clone-credential-request was refused by control (code=${frame.code})`);
+      error.code = frame.code;
+      throw error;
+    }
+    if (frame?.credential === null) return null; // control explicitly decided no credential is needed
+    if (typeof frame?.credential === "string" && frame.credential.length > 0) return frame.credential;
+    const error = new Error("clone-credential-request received a blank/absent credential");
+    error.code = "clone-credential-blank";
+    throw error;
+  }
+
+  // onDirective(handler) — milestone 35 / ADR-002, story 01: registers the ONE
+  // handler invoked with a PARSED directive frame when one arrives on the receive
+  // listener above. Mirrors createWorkerWsTransport's onDrop(handler) shape
+  // (additive — a caller that never registers one simply receives directives into
+  // the void; this story delivers/accepts, story 02 is the first real registrant).
+  function onDirective(handler) {
+    directiveHandler = typeof handler === "function" ? handler : null;
+  }
+
   // notifyDrop() — an explicit signal the connection dropped (production wires this
   // from the transport's own onDrop/close event); schedules a backoff reconnect over
   // the injected ticker. The reconnect itself does not resend a frame on its own — a
@@ -213,6 +383,9 @@ export function createWorkerStreamClient({
     sendSnapshot,
     sendDelta,
     sendPresence,
+    sendAssignmentStatus,
+    requestCloneCredential,
+    onDirective,
     notifyDrop,
     stop,
     get connected() { return connected; },
@@ -238,6 +411,7 @@ export function createWorkerStreamClient({
 // onDrop gets byte-identical connect/send/close behaviour.
 export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
   let dropHandler = null;
+  let messageHandler = null;
   let currentSocket = null;
   return {
     async connect() {
@@ -251,6 +425,15 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
             currentSocket = ws;
             resolve(ws);
           }
+        });
+        // milestone 35 / ADR-002, story 01 task 00: the worker's FIRST receive
+        // listener — wired here (inside connect(), on the SAME socket send()
+        // already writes to) so a directive down-frame reaches onMessage's
+        // registered handler over the ONE persistent connection, never a second
+        // socket. Additive: a caller that never calls onMessage(handler) below
+        // leaves messageHandler null and this is a silent no-op per message.
+        ws.on("message", (data) => {
+          messageHandler?.(data);
         });
         ws.on("error", (error) => {
           if (!settled) { settled = true; reject(error); return; }
@@ -281,6 +464,14 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
     },
     onDrop(handler) {
       dropHandler = typeof handler === "function" ? handler : null;
+    },
+    // onMessage(handler) — milestone 35 / ADR-002, story 01 task 00: registers the
+    // ONE handler invoked with the raw message payload (a Buffer/string, exactly as
+    // ws@8 hands it to "message") whenever a frame arrives on the current socket —
+    // mirrors onDrop(handler) above. Zero behaviour change for a caller that never
+    // registers one.
+    onMessage(handler) {
+      messageHandler = typeof handler === "function" ? handler : null;
     },
   };
 }

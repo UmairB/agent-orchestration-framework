@@ -1,0 +1,182 @@
+// src/mesh-assignment-reclaim.mjs — the CONTROL-side dual-staleness reclaim path
+// (milestone 35 / story 02, ADR-005, task 04). A non-terminal assignment is
+// reclaimed to `reclaimed` ONLY when BOTH clocks agree the target worker is gone:
+// presence stale (`isNodeStale`, IMPORTED from mesh-presence, default 90s) AND the
+// linked run's heartbeat stale (`isStale`, IMPORTED from run-store, the m20
+// `work.autonomous.heartbeatStaleMs` 15m default) — both strict `>`. This is
+// `reclaimed`'s SOLE producer (assignment-record.mjs's ASSIGNMENT_STATE_PRODUCERS:
+// "the control reclaim path").
+//
+// SEMANTICS mined from `reference/retired-dispatch-tests/fleet-orphan-reclaim.mjs`
+// (the git-observed LEASE mechanism is discarded per ADR-003/005 — only the decision
+// table transfers): presence has PRECEDENCE (fresh presence is hands-off even with a
+// stale heartbeat — the worker is alive, the run is just quiet); NO presence record is
+// UNKNOWN liveness, NOT staleness (the m23/KR2 guard — never reclaim a possibly-live
+// peer); exactly-AT the presence threshold is still LIVE (strict `>`).
+//
+// BOTH staleness predicates are IMPORTED and SHARED, never re-derived (fitness #10
+// acd-assignment-reclaim-dual-staleness) — this module holds no parallel heartbeat
+// definition.
+import { isNodeStale, readPresenceRecord, DEFAULT_PRESENCE_STALENESS_SECONDS } from "./mesh-presence.mjs";
+import { isStale, readRuns, applyTransition } from "./run-store.mjs";
+import { findWork } from "./work.mjs";
+import { updateAssignmentState, isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
+// milestone 35 / ADR-008 — runControlDispatchReclaimTick (bottom of this file) is the
+// control-side driver's DATA-LAYER orchestrator: it owns the ONE store-open call for
+// BOTH halves (dispatch scan + reclaim), so mesh-launcher.mjs itself never imports
+// global-work-store.mjs / openGlobalWorkProjectionStore directly (fitness
+// acd-global-publisher-single-seam — the launcher reaches the global store only
+// through a sanctioned seam, never the SQLite store module itself).
+import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+
+// The PRODUCTION row source: every assignment row for `workspaceId`, off the SAME
+// bulk reader story 03's status shape already uses (no second query surface).
+function defaultListAssignments(store, workspaceId) {
+  return listAllAssignments(store).filter((row) => row.workspaceId === workspaceId);
+}
+
+// The documented default run-heartbeat staleness threshold (ms) — the SAME m20
+// `work.autonomous.heartbeatStaleMs` default `commands/run-start.mjs` already uses
+// for the restart-time reclaim scan (never a second, drifting definition).
+export const DEFAULT_ASSIGNMENT_HEARTBEAT_STALE_MS = 15 * 60 * 1000;
+
+// nonTerminalAssignments(rows) — the assignment-record ACTIVE-state partition
+// (assigned/accepted/running) restated as a filter; a terminal row (done/failed/
+// withdrawn/reclaimed) is never a reclaim candidate.
+function nonTerminalAssignments(rows) {
+  return rows.filter((row) => isActiveAssignmentState(row.state));
+}
+
+// dualStalenessDecision({ presence, heartbeatAt }, nowMs, thresholds) → boolean — the
+// ONE decision predicate the scenario outline's 6 rows exercise, ANDing the two
+// IMPORTED predicates. `presence` is the raw presence record (or null — no record
+// exists); `heartbeatAt` is the linked run's heartbeat/updatedAt stamp.
+export function dualStalenessDecision({ presence, heartbeatAt }, nowMs, { presenceThresholdMs, heartbeatThresholdMs }) {
+  // No presence record ⇒ UNKNOWN liveness, NOT staleness (m23/KR2) ⇒ hands-off.
+  if (presence == null || typeof presence.heartbeatAt !== "string") return false;
+  const presenceStale = isNodeStale(presence, nowMs, presenceThresholdMs);
+  // Presence precedence: fresh presence is hands-off REGARDLESS of the heartbeat.
+  if (!presenceStale) return false;
+  const runStale = isStale({ heartbeatAt }, nowMs, heartbeatThresholdMs);
+  return runStale;
+}
+
+// reclaimStaleAssignments(store, workspace, workspaceId, options) — the scan: every
+// non-terminal assignment row for `workspaceId`, joined to its target's presence
+// record and its linked run's heartbeat, reclaimed under dual staleness. Returns the
+// list of reclaimed assignment records (post-write). `now`/thresholds are INJECTED
+// (the 22/R2 clock discipline) — this module reads no wall clock beyond the top-level
+// default parameter.
+//
+//   store            — the opened global-work-store handle (assignment-record.mjs's
+//                       writers operate on it directly).
+//   workspace         — the loaded workspace (work.mjs shape: { workDir, … }) used to
+//                       resolve each assignment's itemRef to its item.dir (readRuns
+//                       needs the item, not just the ref) via findWork.
+//   workspaceId       — narrows the scan to this workspace's assignment rows.
+//   listAssignments   — INJECTED row source: (store, workspaceId) => rows[] (tests
+//                       inject a scoped list; production passes a thin wrapper over
+//                       listAllAssignments filtered to workspaceId — kept injectable
+//                       so a test never needs every workspace seeded).
+export async function reclaimStaleAssignments(store, workspace, workspaceId, options = {}) {
+  const {
+    now = new Date().toISOString(),
+    presenceThresholdSeconds = DEFAULT_PRESENCE_STALENESS_SECONDS,
+    heartbeatThresholdMs = DEFAULT_ASSIGNMENT_HEARTBEAT_STALE_MS,
+    listAssignments = defaultListAssignments,
+  } = options;
+  const nowMs = Date.parse(now);
+  const presenceThresholdMs = presenceThresholdSeconds * 1000;
+
+  const rows = nonTerminalAssignments(await listAssignments(store, workspaceId));
+  const reclaimed = [];
+  const presenceCache = new Map();
+
+  for (const row of rows) {
+    if (row.runId == null) continue; // no run minted yet (still `assigned`) — nothing to check a heartbeat against
+
+    const matches = await findWork(workspace.workDir, row.itemRef);
+    const item = matches.find((m) => m.ref === row.itemRef) ?? matches[0] ?? null;
+    if (item == null) continue; // the item no longer resolves — nothing to reclaim a run against
+
+    const runs = await readRuns(item);
+    const run = runs.find((r) => r.runId === row.runId) ?? null;
+    if (run == null || run.state !== "running") continue; // already terminal, or no matching run record
+
+    if (!presenceCache.has(row.targetNodeId)) {
+      presenceCache.set(row.targetNodeId, await readPresenceRecord(workspace, row.targetNodeId));
+    }
+    const presence = presenceCache.get(row.targetNodeId);
+
+    const shouldReclaim = dualStalenessDecision(
+      { presence, heartbeatAt: run.heartbeatAt ?? run.updatedAt },
+      nowMs,
+      { presenceThresholdMs, heartbeatThresholdMs },
+    );
+    if (!shouldReclaim) continue;
+
+    // Force-fail the run runtime_offline, retryable (reusing the EXACT applyTransition
+    // edge reclaimStaleRuns itself uses — the single source of "how a run is
+    // reclaimed", never a second write path).
+    await applyTransition(item, run.runId, "failed", {
+      now,
+      failureReason: "runtime_offline",
+      reclaimedAt: now,
+    });
+
+    const updated = updateAssignmentState(store, row.assignmentId, "reclaimed", { now, reclaimedAt: now });
+    if (updated) reclaimed.push(updated);
+  }
+
+  return reclaimed;
+}
+
+// runControlDispatchReclaimTick(ws, streamServer, options) — milestone 35 / ADR-008:
+// the control-side driver's ONE tick body, called from mesh-launcher.mjs's control-
+// tick ticker callback. Owns the ONE store-open for both halves:
+//   (1) DISPATCH — scans global_assignments for `assigned` rows whose targetNodeId is
+//       a currently-connected admitted peer in streamServer.directiveTargets, and
+//       dispatchDirective(buildDirectiveFrame(row)) each over the ADR-002 channel — at
+//       most once per assignmentId per launcher lifetime (options.dispatchedIds, a
+//       caller-held Set so the once-guard survives across ticks; NOT persisted).
+//   (2) RECLAIM — calls reclaimStaleAssignments(store, ws, workspaceId, { now })
+//       VERBATIM (ADR-005's decision, never re-derived).
+// `options.openStore` defaults to openGlobalWorkProjectionStore (this module's own
+// import — the launcher itself never imports it, keeping acd-global-publisher-
+// single-seam intact). `options.buildDirectiveFrame` is INJECTED (default the real
+// control-stream-server.mjs export) so this module does not import that module at
+// the top level either (it only needs the pure frame-shape function, handed in by
+// the ONE caller — mesh-launcher.mjs — that already imports it for the worker-side
+// wiring, avoiding a needless new cross-module edge here).
+export async function runControlDispatchReclaimTick(ws, streamServer, options = {}) {
+  const {
+    workspaceId,
+    now = new Date().toISOString(),
+    openStore = openGlobalWorkProjectionStore,
+    storeOptions = {},
+    buildDirectiveFrame,
+    dispatchedIds = new Set(),
+  } = options;
+
+  const store = await openStore(storeOptions);
+  try {
+    const rows = await listAllAssignments(store);
+    for (const row of rows) {
+      if (row.state !== "assigned") continue;
+      if (dispatchedIds.has(row.assignmentId)) continue;
+      const connected = streamServer?.directiveTargets?.get?.(row.targetNodeId) != null;
+      if (!connected) continue;
+      streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
+        assignmentId: row.assignmentId,
+        itemRef: row.itemRef,
+        workspaceId: row.workspaceId,
+        at: now,
+      }));
+      dispatchedIds.add(row.assignmentId);
+    }
+
+    return await reclaimStaleAssignments(store, ws, workspaceId, { now });
+  } finally {
+    store.close?.();
+  }
+}
