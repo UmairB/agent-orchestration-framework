@@ -8,13 +8,27 @@
 // run-state chip (ui/src/board/runs.mjs), verbatim (never a fleet-local vocabulary).
 export type RunState = "queued" | "running" | "done" | "failed" | "cancelled";
 
-// A presence record (m23 story 00 — { nodeId, heartbeatAt, activeRuns, aofVersion }),
-// as mesh:status carries it. Present ONLY when the node has beat at least once; a
-// never-beat node OMITS this key entirely (the m23 locked rule) and reads stale:false.
+// A live coding-assistant session, projected onto the presence record (milestone 38
+// / story 00; ARCHITECTURE ADR-001/002) — already TTL-filtered to LIVE sessions only
+// by the presence aggregate before the wire ever carries it (the card renders only
+// what it is handed, never recomputing liveness itself).
+export type PresenceSession = {
+  workspaceId: string;
+  repo: string;
+  assistant: string;
+  lastPingAt: string;
+};
+
+// A presence record (m23 story 00 — { nodeId, heartbeatAt, activeRuns, aofVersion });
+// milestone 38 / story 00 (ADR-001) grows it ADDITIVELY to FIVE keys, `sessions`
+// inserted before `aofVersion` — a no-session node emits `sessions: []` (present,
+// never omitted). Present ONLY when the node has beat at least once; a never-beat
+// node OMITS this key entirely (the m23 locked rule) and reads stale:false.
 export type PresenceRecord = {
   nodeId: string;
   heartbeatAt: string;
   activeRuns: string[];
+  sessions: PresenceSession[];
   aofVersion: string;
 };
 
@@ -86,8 +100,29 @@ export type GlobalWorkspace = {
   controlNode: string | null;
 };
 
+// milestone 35 / story 03 (DESIGN §2a/§2b; ADR-001/ADR-007) — the READ-ONLY
+// assignment-lifecycle wire shape src/global-mesh-query.mjs's `shapeGlobalStatus`
+// attaches onto item/node rows (task 00). Carries the ADR-001 record's
+// chip-anatomy fields VERBATIM (no label/token/mark applied at the read layer —
+// that mapping is the pure `assignmentChip` helper, ./assignments.mjs).
+export type WorkAssignment = {
+  assignmentId: string;
+  state: string;
+  targetNodeId: string;
+  issuer: string;
+  runId: string | null;
+  assignedAt: string;
+  updatedAt: string;
+  reclaimedAt: string | null;
+};
+
 // A work item row, carrying its owning workspace id. The global API keeps the
 // complete stream even when the UI projects it to milestone cards.
+//
+// milestone 35 / story 03 — `assignment` is the PRIMARY attachment (DESIGN
+// §2a): the most-relevant assignment for this item, when one exists. Absent
+// (never a null/empty placeholder) for an item with no assignment — "absent,
+// not false".
 export type GlobalWorkItem = {
   workspaceId: string;
   ref: string;
@@ -97,11 +132,17 @@ export type GlobalWorkItem = {
   title: string | null;
   parent: string | null;
   sourcePath: string;
+  assignment?: WorkAssignment;
 };
 
 // A global registry node descriptor (src/global-node-registry.mjs) — the "node
 // panel" region's control/worker rows. Never carries a credential-shaped field
 // (ADR-005; the UI guard in ./scope.mjs re-checks this belt-and-braces).
+//
+// milestone 35 / story 03 — `assignments` is the SECONDARY attachment (DESIGN
+// §2b): every assignment row this node HOLDS (any state), when at least one
+// exists. Absent (never an empty array) for a node holding none — "absent, not
+// false"; the UI summarises this array down to a compact per-state count line.
 export type GlobalNode = {
   nodeId: string;
   role: "control" | "worker" | string;
@@ -117,6 +158,12 @@ export type GlobalNode = {
   recordSource: string;
   workspaceIds: string[];
   freshness: "live" | "stale" | "unknown";
+  assignments?: WorkAssignment[];
+  // finding F6 (aof:verify 38) — the global registry row now ADDITIVELY carries
+  // this node's presence record (src/global-node-registry.mjs's queryGlobalRegistry),
+  // alongside the pre-existing `freshness` ramp (unchanged). Absent for a
+  // never-beat node — never a fabricated empty record.
+  presence?: PresenceRecord;
 };
 
 // The health/diagnostics region's payload (task 03 — freshness, skipped

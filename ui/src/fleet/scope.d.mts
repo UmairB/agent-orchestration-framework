@@ -1,5 +1,6 @@
 // Type declarations for scope.mjs (the pure fleet scope/region/state helpers).
 import type { FleetNode, FleetStatus, GlobalWorkItem } from "./api";
+import type { CurrentWorkLines } from "./runs.d.mts";
 
 export type Scope = "global" | "local";
 export type PageState = "loading" | "error" | "empty" | "populated";
@@ -59,6 +60,11 @@ export type NodePanelFacts = {
 };
 
 export declare function nodePanelFacts(node: Partial<FleetNode> & Record<string, unknown>): NodePanelFacts;
+
+// finding F9 (aof:verify 38) — the row-3 current-work-line derivation both the
+// global node panel (the card production actually renders) and the pre-38
+// local NodeCard project from `node.presence`.
+export declare function nodeCurrentWork(node: Partial<FleetNode> & Record<string, unknown>): CurrentWorkLines;
 
 export type DiagnosticsSummary = {
   projectedAt: string | null;

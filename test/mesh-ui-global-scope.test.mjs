@@ -231,7 +231,7 @@ export const meshUiGlobalScopeTests = [
         // — all four announce lines are synchronous console.log calls in immediate
         // succession, but under a loaded aggregated test run they can arrive across
         // two stdout chunks; waiting for BOTH avoids a read-before-arrival flake.
-        handle = await launchFleet(repo, ["mesh", "ui", "--local", "--port", "0"], {
+        handle = await launchFleet(repo, ["mesh", "ui", "--local", "--port", "0"], {}, {
           readyRe: /Open this URL in your browser:\s*\S+[\s\S]*Project:\s*\S+/,
         });
         assert.match(handle.stdout, /scope=local/, "the URL carries scope=local under --local");

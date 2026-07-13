@@ -72,7 +72,10 @@ export const globalWorkStoreTests = [
       const store = await openGlobalWorkProjectionStore({ env: { AOF_GLOBAL_HOME: home } });
       try {
         assert.ok(existsSync(store.paths.databasePath), "projection database exists");
-        assert.equal(store.schemaVersion, 2);
+        // milestone 35 / story 00 (ADR-001) — schema v2 -> v3: the additive
+        // global_assignments table (assignment-record.mjs owns its own dedicated
+        // fixture suite; this is just the pinned-version/table-presence re-arm).
+        assert.equal(store.schemaVersion, 3);
         const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("aof_schema"));
         assert.ok(tables.includes("workspaces"));
@@ -82,6 +85,7 @@ export const globalWorkStoreTests = [
         assert.ok(tables.includes("global_nodes"));
         assert.ok(tables.includes("global_workspace_descriptors"));
         assert.ok(tables.includes("global_node_workspaces"));
+        assert.ok(tables.includes("global_assignments"));
       } finally {
         store.close();
       }
@@ -90,7 +94,7 @@ export const globalWorkStoreTests = [
       try {
         const versions = reopened.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").all();
         assert.equal(versions.length, 1);
-        assert.equal(versions[0].value, 2);
+        assert.equal(versions[0].value, 3);
       } finally {
         reopened.close();
       }

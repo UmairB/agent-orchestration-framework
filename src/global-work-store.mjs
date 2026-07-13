@@ -4,7 +4,7 @@ import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 2;
+export const GLOBAL_WORK_SCHEMA_VERSION = 3;
 
 export function globalStoreError(message, code, status = 500, extra = {}) {
   const error = new Error(message);
@@ -161,6 +161,29 @@ function migrateSchema(db, existingVersion) {
         PRIMARY KEY (node_id, workspace_id)
       );
       CREATE INDEX IF NOT EXISTS idx_global_node_workspaces_workspace ON global_node_workspaces(workspace_id);
+      -- schema v3 (milestone 35 / story 00, ADR-001) — the assignment record is
+      -- operator/worker-CREATED state, never a projection of any doc, so it is a
+      -- NEW, ADDITIVE table that publishWorkspaceSnapshot (below) MUST NEVER touch —
+      -- that DELETE-ALL-then-reinsert cycle would wipe a dispatch fact on the very
+      -- next converge tick. Keyed by assignment_id (PRIMARY KEY); dedicated single-row
+      -- writers (insertAssignment/updateAssignmentState, assignment-record.mjs) are the
+      -- ONLY mutators. (mining prior-lesson R2/m20: the state column's SOLE producer
+      -- per value is enforced by assignment-record.mjs's single source-of-truth enum,
+      -- not by this schema — a frozen+classified column with no named writer is a
+      -- contract hole; ADR-001 closes it at the enum, this table just carries it.)
+      CREATE TABLE IF NOT EXISTS global_assignments (
+        assignment_id TEXT PRIMARY KEY,
+        item_ref TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        target_node_id TEXT NOT NULL,
+        issuer TEXT NOT NULL,
+        state TEXT NOT NULL,
+        run_id TEXT,
+        assigned_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        reclaimed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_global_assignments_item ON global_assignments(workspace_id, item_ref);
     `);
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {

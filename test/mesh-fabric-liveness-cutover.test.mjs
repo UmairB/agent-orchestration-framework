@@ -150,7 +150,12 @@ export const meshFabricLivenessCutoverTests = [
       try {
         const ws = await loadWorkspace(repo);
         const record = assemblePresenceRecord({ nodeId: "node-a", heartbeatAt: "2026-07-04T10:05:00.000Z", activeRuns: [], aofVersion: "0.1.0" });
-        assert.deepEqual(Object.keys(record), ["nodeId", "heartbeatAt", "activeRuns", "aofVersion"], "the record carries EXACTLY the frozen four keys in order");
+        // milestone 38 / story 00 (ADR-001) — the presence record grows ADDITIVELY to
+        // FIVE keys (`sessions` inserted before `aofVersion`); this call site supplies
+        // no sessions, so it emits sessions:[] (absent-is-benign) and the ORIGINAL
+        // four keys' relative order and values are unchanged.
+        assert.deepEqual(Object.keys(record), ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"], "the record carries EXACTLY the frozen five keys in order (sessions additive)");
+        assert.deepEqual(record.sessions, [], "sessions is the empty array — this call site reads no session records");
         await publishPresenceRecord(ws, "node-a", record);
         const written = await readFile(presenceRecordPath(ws, "node-a"), "utf8");
         const readBack = await readPresenceRecord(ws, "node-a");

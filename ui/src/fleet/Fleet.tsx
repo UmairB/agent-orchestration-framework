@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fleetApi } from "./api";
-import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, GlobalWorkspace, GlobalWorkItem, GlobalNode, FleetStatus } from "./api";
+import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, GlobalWorkspace, GlobalWorkItem, GlobalNode, FleetStatus, WorkAssignment } from "./api";
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
+import { assignmentChip, assignmentSummary } from "./assignments.mjs";
+import { fleetCurrentWorkLines } from "./runs.mjs";
 import { StatusRing, StatusChip, StatusDot } from "../board/status";
 import type { WorkStatus } from "../board/api";
 import {
@@ -11,6 +13,7 @@ import {
   pageState,
   emptyStateCopy,
   nodePanelFacts,
+  nodeCurrentWork,
   diagnosticsSummary,
   errorPathFor,
   milestoneCardModels,
@@ -275,8 +278,12 @@ function ScopeControl({ scope, onScopeChange }: { scope: Scope; onScopeChange: (
   );
 }
 
-// The three-ramp legend (◷ legend) — the reader's key to node-liveness vs
-// run-state (never confused; item-status is one level down, not here).
+// The four-ramp legend (◷ legend) — the reader's key to node-liveness vs
+// run-state vs assignment-lifecycle (never confused; item-status is one level
+// down, not here). milestone 35 / story 03 (DESIGN §1 item 1 / §4 legend-parity
+// note) — the "Assignment" block is the THIRD ramp, below "Node liveness" and
+// "Run state", one row per lifecycle state (mark + label) so the new ramp is
+// self-documenting exactly as the two existing ramps are.
 function Legend() {
   return (
     <span className="group relative" aria-label="Legend">
@@ -289,9 +296,17 @@ function Legend() {
           <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-dashed border-muted-foreground/40" /> no presence</span>
         </span>
         <span className="mb-1 block font-semibold uppercase tracking-wide text-muted-foreground">Run state</span>
-        <span className="block space-y-0.5">
+        <span className="mb-2 block space-y-0.5">
           <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-primary" /> running</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-destructive" /> failed</span>
+        </span>
+        <span className="mb-1 block font-semibold uppercase tracking-wide text-muted-foreground">Assignment</span>
+        <span className="block space-y-0.5">
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-muted-foreground/50" /> assigned</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-muted-foreground" /> accepted</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" /> running</span>
+          <span className="flex items-center gap-1.5"><span className="grid h-3 w-3 place-items-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">✓</span> done</span>
+          <span className="flex items-center gap-1.5"><span className="grid h-3 w-3 place-items-center rounded-full bg-destructive text-[8px] font-bold text-destructive-foreground">!</span> failed</span>
         </span>
       </span>
     </span>
@@ -418,12 +433,27 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
     }
   }, [m.item.workspaceId, m.item.ref]);
 
-  let attention = <span className="text-muted-foreground">·</span>;
+  let secondaryAttention = <span className="text-muted-foreground">·</span>;
   if (m.inReview > 0) {
-    attention = <span className="text-accent">◔ {m.inReview} in review</span>;
+    secondaryAttention = <span className="text-accent">◔ {m.inReview} in review</span>;
   } else if (isDone) {
-    attention = <span className="text-primary">✓ accepted</span>;
+    secondaryAttention = <span className="text-primary">✓ accepted</span>;
   }
+
+  // milestone 35 / story 03 (DESIGN §2a) — the assignment chip is the PRIMARY
+  // attention-row occupant, sitting BEFORE the in-review/accepted token when
+  // both apply (assignment first — it is the more actionable state) and
+  // replacing the muted `·` placeholder when the item carries one. It never
+  // displaces the right-aligned "Open board →" drill-in.
+  const assignment = m.item.assignment;
+  const attention = assignment ? (
+    <>
+      <AssignmentChip assignment={assignment} />
+      {secondaryAttention}
+    </>
+  ) : (
+    secondaryAttention
+  );
 
   return (
     <button
@@ -470,9 +500,9 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
 
       <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
         <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
-        <span className="flex shrink-0 items-center gap-3">
+        <span className="flex min-w-0 shrink items-center gap-3">
           {attention}
-          <span className="font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
+          <span className="shrink-0 font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
         </span>
       </div>
     </button>
@@ -513,6 +543,16 @@ function GlobalNodePanel({ nodes }: { nodes: GlobalNode[] }) {
       <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3.5">
         {nodes.map((node) => {
           const facts = nodePanelFacts(node);
+          // finding F9 (aof:verify 38) — THIS is the card the web app actually
+          // renders in production (mesh-ui-serve.mjs serves BOTH scopes from
+          // queryGlobalMeshStatus, so isGlobalStatus(status) is always true and
+          // NodeCard/NodesRegion never mount there). F6 put `presence` on the
+          // wire; this calls nodeCurrentWork (./scope.mjs), the SAME
+          // fleetCurrentWorkLines projection NodeCard already calls — no forked
+          // collapse rule (DESIGN §Surface 1's row 3) — kept in scope.mjs (not
+          // inline) so node:test exercises the EXACT function this component
+          // renders from, with no React harness needed.
+          const currentWork = nodeCurrentWork(node);
           return (
             <div key={facts.nodeId ?? node.nodeId} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
               <div className="flex items-center gap-2">
@@ -528,6 +568,22 @@ function GlobalNodePanel({ nodes }: { nodes: GlobalNode[] }) {
               <span className="text-[11px] text-muted-foreground">
                 {facts.lastSeenAt ? `last seen ${relativeTime(facts.lastSeenAt)}` : "never seen"}
               </span>
+              {/* row 3 equivalent — the current-work line (DESIGN §Surface 1: a
+                  SINGLE text line, same text-[13px] slot, no new chip/dot/badge;
+                  idle=muted, running/working=primary; two repos comma-joined;
+                  the run wins when both exist — all already resolved upstream by
+                  fleetCurrentWorkLines, never re-derived here). Placed between
+                  the presence-age row and the footer-ish rows, per the DESIGN row
+                  order (identity → presence-age → current-work → footer). */}
+              {currentWork.lines.map((line, index) => (
+                <p
+                  key={`${facts.nodeId ?? node.nodeId}-current-work-${index}`}
+                  className={`text-[13px] ${currentWork.token === "primary" ? "font-semibold text-primary" : "text-muted-foreground"}`}
+                >
+                  {line}
+                </p>
+              ))}
+              <AssignmentSummaryLine assignments={node.assignments} />
               {/* DESIGN GAP D2 (review fix) — the fabric-address row is now ALWAYS
                   rendered, even when unknown: an absent address used to omit this
                   row entirely, so "no address known" read identically to "this
@@ -590,9 +646,15 @@ function NodesRegion({ nodes }: { nodes: FleetNode[] }) {
 
 function NodeCard({ node }: { node: FleetNode }) {
   const liveness = livenessOf(node);
-  const runs = node.presence?.activeRuns?.length ?? 0;
   const runtimes = node.runtimes ?? [];
   const skills = node.skills ?? [];
+  // milestone 38 / story 00 (ADR-004; DESIGN §Surface 1) — row 3 grows a THIRD
+  // label on the SAME text line: `idle` / `running N runs` / `working · <repo>
+  // (session)`, reusing the run-state ramp's two tokens (primary active / muted
+  // quiet — never a new dot/chip/badge). The projection is the ONE pure helper
+  // (ui/src/fleet/runs.mjs's fleetCurrentWorkLines) both the desktop and web
+  // views consume — this component renders ONLY what it hands back.
+  const currentWork = fleetCurrentWorkLines(node.presence ?? {});
   return (
     <div className="flex flex-col rounded-lg border border-border bg-card px-4 py-3.5 shadow-sm">
       {/* row 1: presence dot + mono nodeId + right group (this-node tag + version) */}
@@ -619,15 +681,57 @@ function NodeCard({ node }: { node: FleetNode }) {
         <PresenceDot liveness={liveness} size="md" />
         <PresenceLabel node={node} liveness={liveness} />
       </div>
-      {/* row 3: what it's running — the activeRuns count (0 → idle) */}
-      <p className={`mt-2 text-[13px] ${runs > 0 ? "font-semibold text-primary" : "text-muted-foreground"}`}>
-        {runs === 0 ? "idle" : `running ${runs} ${plural(runs, "run")}`}
-      </p>
+      {/* row 3: the current-work line(s) — idle / running N runs / working ·
+          <repo> (session), one line per resolved workspace (ADR-004). */}
+      {currentWork.lines.map((line, index) => (
+        <p
+          key={`${index}-${line}`}
+          className={`text-[13px] ${index === 0 ? "mt-2" : "mt-0.5"} ${currentWork.token === "primary" ? "font-semibold text-primary" : "text-muted-foreground"}`}
+        >
+          {line}
+        </p>
+      ))}
       {/* row 4: the quiet capability footer — runtimes + N skills */}
       <p className="mono mt-3 truncate border-t border-border pt-2.5 text-[10.5px] text-muted-foreground">
         {runtimes.length ? `${runtimes.join(", ")} · ${skills.length} ${plural(skills.length, "skill")}` : "not enrolled · no skills"}
       </p>
     </div>
+  );
+}
+
+// The node-side assignments summary line (milestone 35 / story 03; DESIGN §2b
+// SECONDARY attachment) — a compact muted line, `assignments: N running · N
+// accepted · N assigned`, listing ONLY non-zero states in the same brightness
+// order the ramp climbs. A degraded (failed/reclaimed) held assignment renders
+// its count in the destructive token so it is visible on the WORKER card too
+// ("degraded states must be visible"). All-zero (or no assignments at all) ⇒
+// the row is OMITTED entirely — "absent, not false," never "0 assignments".
+// The pure tally lives in ./assignments.mjs's `assignmentSummary` (task 01);
+// this component is a thin consumer.
+function AssignmentSummaryLine({ assignments }: { assignments?: WorkAssignment[] }) {
+  const summary = assignmentSummary(assignments) as { state: string; count: number }[];
+  if (summary.length === 0) return null;
+  // DESIGN §2b fix (review GAP-2) — the PURE tally (./assignments.mjs) orders
+  // states by the ramp's brightness (running…failed last), which is correct for
+  // the pure projection but meant the destructive "failed" bucket sat at the
+  // truncating tail of this line and was the FIRST thing lost to ellipsis. The
+  // render layer splits the line into a shrink-0 "failed" prefix (never
+  // truncated) and a single truncating span for everything else — a truncated
+  // non-degraded tail is acceptable, a truncated failed count is not.
+  const failed = summary.filter((entry) => entry.state === "failed");
+  const rest = summary.filter((entry) => entry.state !== "failed");
+  const restText = rest.map((entry) => `${entry.count} ${entry.state}`).join(" · ");
+  return (
+    <span className="mono flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+      <span className="shrink-0">assignments:</span>
+      {failed.map((entry) => (
+        <span key={entry.state} className="shrink-0 text-destructive">
+          {entry.count} {entry.state}
+          {rest.length > 0 ? " ·" : ""}
+        </span>
+      ))}
+      {rest.length > 0 ? <span className="min-w-0 truncate">{restText}</span> : null}
+    </span>
   );
 }
 
@@ -765,6 +869,61 @@ function RunStateChip({ state }: { state: string }) {
         />
       )}
       {chip.label}
+    </span>
+  );
+}
+
+// The assignment-lifecycle chip (milestone 35 / story 03; DESIGN §2a/§4) — the
+// PRIMARY attachment on GlobalMilestoneCard's attention row. Mirrors
+// RunStateChip byte-for-byte (the SAME `runChipClasses(token)` tone map, the
+// SAME pill shape) — reusing the run-chip primitive/vocabulary is the DESIGN
+// review's explicit conformance bar (a fleet-local chip system is a GAP). The
+// pure state -> descriptor mapping lives in ./assignments.mjs's
+// `assignmentChip` (task 01) — this component is a thin consumer: it applies
+// NO ramp logic of its own.
+//
+// Anatomy: `<mark> <label> → <nodeId> · <relative-time> [· <note>]` — the
+// `→ nodeId` / `· time` / `· note` are chip-adjacent mono text OUTSIDE the
+// pill (like the board tile's `on <owner>` line), so the pill itself stays the
+// run-chip shape.
+function AssignmentChip({ assignment }: { assignment: WorkAssignment }) {
+  const chip = assignmentChip(assignment) as { label: string; token: string; mark: string; motion: string; note?: string };
+  const tone = runChipClasses(chip.token);
+  const pulsing = chip.motion === "pulse";
+  const check = chip.mark === "a ✓";
+  const bang = chip.mark === "a !";
+  const at = assignment.assignedAt ?? assignment.updatedAt;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-0.5 text-xs font-semibold ${tone.chip}`}
+        title={`assignment ${chip.label}`}
+      >
+        {check || bang ? (
+          <span
+            className={`grid h-3 w-3 place-items-center rounded-full text-[8px] font-bold text-primary-foreground ${tone.dot}`}
+            aria-hidden="true"
+          >
+            {check ? "✓" : "!"}
+          </span>
+        ) : (
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${tone.dot} ${pulsing ? "animate-pulse" : ""}`}
+            aria-hidden="true"
+          />
+        )}
+        {chip.label}
+      </span>
+      {/* DESIGN §2a fix (review GAP-1): this adjacent mono text is the ONE
+          shrinkable/truncating element in the assignment attention-row cluster —
+          the pill above and the sibling "Open board →" label both stay shrink-0
+          (see GlobalMilestoneCard), so a long nodeId/time/note truncates here
+          instead of displacing or clipping the drill-in. */}
+      <span className="mono min-w-0 truncate text-[11px] text-muted-foreground" title={`→ ${assignment.targetNodeId}${at ? ` · ${relativeTime(at)}` : ""}${chip.note ? ` · ${chip.note}` : ""}`}>
+        → {assignment.targetNodeId}
+        {at ? ` · ${relativeTime(at)}` : ""}
+        {chip.note ? ` · ${chip.note}` : ""}
+      </span>
     </span>
   );
 }

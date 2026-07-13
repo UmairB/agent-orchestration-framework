@@ -5,7 +5,10 @@
 // element exactly these seven fields; `parent` is the only tree edge.
 export type WorkItem = {
   ref: string;
-  type: "milestone" | "story" | "task" | "uat";
+  // milestone 37/ADR-003: `spike`/`chore` are additive top-level driver types
+  // (ADR-001, uat-shaped). The board's minimal default is a type badge + the
+  // existing driver placement — no new lane/column, no per-type doc tabs.
+  type: "milestone" | "story" | "task" | "uat" | "spike" | "chore";
   slug: string;
   status: WorkStatus | null;
   title: string | null;

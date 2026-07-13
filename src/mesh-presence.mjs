@@ -18,7 +18,7 @@
 // records m20/m19 own — it does NOT re-implement a run scan and does NOT mutate a run
 // record (it reads the run dimension and publishes to the presence dimension).
 import path from "node:path";
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 // 19/R2 / 20/ADR-007 — every record write routes through the atomic temp+rename seam
 // (the Windows renameWithRetry is load-bearing on this platform). Never a bare writeFile.
 import { writeText } from "./fs.mjs";
@@ -32,6 +32,21 @@ import { meshDir, presenceRecordPath } from "./mesh-store.mjs";
 // layer reuses (never a parallel heartbeat — the SPEC §Dependencies constraint). Both
 // are imported, not re-derived, so the two layers provably share one definition.
 import { readRuns, isStale } from "./run-store.mjs";
+// milestone 38 / story 00 (ADR-001/002) — the session dimension: presence READS the
+// live (non-expired) session records for this node's projection, exactly as it reads
+// (never mutates) the run records for activeRuns. isSessionLive/resolveSessionTtlSeconds
+// are the ONE shared TTL predicate (never a parallel staleness rule here either).
+import { readSessionRecordsForNode, isSessionLive, resolveSessionTtlSeconds } from "./mesh-session.mjs";
+// milestone 38 / story 00 (ADR-003) — resolveNodeWorkspaces is the ONE seam that
+// reaches the global store to read the global_node_workspaces registry. It is the
+// SANCTIONED indirection mesh-launcher.mjs calls (never importing
+// global-work-store.mjs / openGlobalWorkProjectionStore itself — the SAME
+// acd-global-publisher-single-seam discipline mesh-assignment-reclaim.mjs's
+// runControlDispatchReclaimTick already keeps for the dispatch/reclaim driver): the
+// launcher gains no NEW direct SQLite dependency, it reaches the registry only
+// through this presence-dimension seam.
+import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+import { globalMeshPaths } from "./workspace.mjs";
 
 // The DOCUMENTED default node-staleness threshold, in seconds (ADR-002 — the
 // config.mesh.presence.stalenessSeconds fallback). A node whose last heartbeat is
@@ -62,21 +77,149 @@ export async function readActiveRuns(items) {
   return runIds;
 }
 
+// ----------------------------------------------------- the sessions[] read ----
+
+// readLiveSessions(workspace, nodeId, options) — the LIVE session-record projection
+// (ADR-001/002) that becomes the presence record's `sessions` array. Reads every
+// session record for this node (mesh-session.mjs's own absence-tolerant read),
+// filters to the LIVE ones through the SAME isSessionLive/isStale predicate the
+// whole mesh shares (never a session-local staleness rule), and projects each
+// surviving record down to EXACTLY `{ workspaceId, repo, assistant, lastPingAt }` —
+// a DERIVED read: it does not mutate a session record (mirrors readActiveRuns'
+// read-only discipline for run records). `options.now`/`options.ttlSeconds` are the
+// injected clock/TTL (the inject-the-clock discipline — no wall clock read here);
+// `options.config` resolves the TTL via resolveSessionTtlSeconds when
+// options.ttlSeconds is not itself supplied.
+export async function readLiveSessions(workspace, nodeId, options = {}) {
+  const records = await readSessionRecordsForNode(workspace, nodeId);
+  const nowMs = typeof options.now === "function" ? Date.parse(options.now()) : Date.parse(options.now ?? new Date().toISOString());
+  const ttlSeconds = typeof options.ttlSeconds === "number" ? options.ttlSeconds : resolveSessionTtlSeconds(options.config);
+  const ttlMs = ttlSeconds * 1000;
+  const live = [];
+  for (const record of records) {
+    if (isSessionLive(record, nowMs, ttlMs)) {
+      live.push({
+        workspaceId: record.workspaceId,
+        repo: record.repo,
+        assistant: record.assistant,
+        lastPingAt: record.lastPingAt,
+      });
+    }
+  }
+  return live;
+}
+
+// ------------------------------------------- resolving a node's registered workspaces ----
+
+// resolveNodeWorkspaces(nodeId, options) — the ADR-003 aggregation seam:
+// this node's registered workspaces, resolved from `global_node_workspaces WHERE
+// node_id = ?` in the node's OWN local global store (the SAME AOF_GLOBAL_HOME the
+// launcher already publishes into — the SAME table `localNodeWorkspaceMembership`,
+// mesh-worker-execution.mjs, already reads for the worker's OWN repo-membership
+// check). Each row's `workspace_id` is resolved to its `workDir`/`projectRoot` via
+// `global_workspace_descriptors` (the store's own descriptor columns — no second
+// enumeration strategy). FAILURE-ISOLATED (never a daemon crash):
+//   - store unreachable → returns `{ ok:false, workspaces:[] }` (the caller degrades
+//     to the launch-cwd workspace only);
+//   - a workspace row with no matching descriptor, or whose workDir no longer
+//     resolves on disk, is SKIPPED (absence-is-benign) — never thrown.
+// `options.openStore` is the injected store opener (default
+// openGlobalWorkProjectionStore); `options.globalWorkStoreOptions` threads the
+// store's env/paths (the hermetic-test seam every other store caller in this
+// codebase already exposes).
+//
+// FINDING F11 (aof:verify 38, BLOCKER) — the READ-side defensive half of the fix.
+// A stored `work_dir` MUST NOT be `stat()`-ed as-is against the READER's
+// process.cwd() — that is exactly the bug (a relative `"./wiki/work"` only
+// "resolved" when the daemon happened to launch from that very repo; from any
+// OTHER cwd — a packaged tray app's install dir — it resolved to nothing).
+// Every candidate `work_dir` is resolved with `path.resolve(descriptor.project_root,
+// descriptor.work_dir)` — against THAT ROW's OWN absolute `project_root`, never the
+// caller's cwd. `path.resolve` is a no-op (beyond normalization) when `work_dir` is
+// already absolute (the write-side fix's canonical output), so this is the SAME
+// resolve either way: it makes a post-fix row correct AND tolerates a legacy row
+// still holding the pre-fix raw relative string, with zero migration.
+// `skipped` (a `{ workspaceId, workDir, reason }[]`) is the LOUD-skip diagnostic:
+// a workspace whose resolved absolute work dir genuinely does not exist is skipped
+// but SURFACED here — never a silent `continue` that lets a zero-workspace
+// aggregation masquerade as a healthy "nothing to report".
+export async function resolveNodeWorkspaces(nodeId, options = {}) {
+  const openStore = options.openStore ?? openGlobalWorkProjectionStore;
+  const storeOptions = options.globalWorkStoreOptions ?? {};
+  let store;
+  try {
+    store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+  } catch {
+    return { ok: false, workspaces: [], skipped: [] };
+  }
+  try {
+    const rows = store.db.prepare("SELECT workspace_id FROM global_node_workspaces WHERE node_id = ? ORDER BY workspace_id").all(nodeId);
+    const workspaces = [];
+    const skipped = [];
+    for (const row of rows) {
+      const descriptor = store.db.prepare(
+        "SELECT workspace_id, project_root, work_dir FROM global_workspace_descriptors WHERE workspace_id = ?",
+      ).get(row.workspace_id);
+      if (descriptor == null || typeof descriptor.work_dir !== "string" || descriptor.work_dir.length === 0) {
+        skipped.push({ workspaceId: row.workspace_id, workDir: null, reason: "no-descriptor" });
+        continue;
+      }
+      const anchor = typeof descriptor.project_root === "string" && descriptor.project_root.length > 0
+        ? descriptor.project_root
+        // A row with no project_root is degraded data (the schema is NOT NULL, so
+        // this is belt-and-suspenders); resolving against the raw value keeps an
+        // already-absolute work_dir intact and never silently invents a cwd-relative
+        // resolve for one that isn't.
+        : descriptor.work_dir;
+      const resolvedWorkDir = path.resolve(anchor, descriptor.work_dir);
+      try {
+        const stats = await stat(resolvedWorkDir);
+        if (!stats.isDirectory()) {
+          skipped.push({ workspaceId: descriptor.workspace_id, workDir: resolvedWorkDir, reason: "not-a-directory" });
+          continue;
+        }
+      } catch {
+        // descriptor's resolved absolute workDir genuinely doesn't exist on disk —
+        // skip LOUDLY (recorded in `skipped`), never throw.
+        skipped.push({ workspaceId: descriptor.workspace_id, workDir: resolvedWorkDir, reason: "workdir-missing" });
+        continue;
+      }
+      workspaces.push({ workspaceId: descriptor.workspace_id, workDir: resolvedWorkDir, projectRoot: descriptor.project_root });
+    }
+    return { ok: true, workspaces, skipped };
+  } catch {
+    return { ok: false, workspaces: [], skipped: [] };
+  } finally {
+    store.close?.();
+  }
+}
+
 // ------------------------------------------------- the record assembly ----
 
-// Assemble THIS node's presence record — the FROZEN schema, EXACTLY these four keys
-// in this order (ADR-002): { nodeId, heartbeatAt, activeRuns, aofVersion }. The
-// task-00 "carries no keys beyond the frozen schema" + byte-equivalence assertions
-// turn on this key order. nodeId is the SAME stable id the node record carries (read
-// it, never re-derived here); heartbeatAt is the injected/wall-clock ISO-8601 UTC-Z
-// instant; activeRuns is the run-record read; aofVersion is the provenance string.
+// Assemble THIS node's presence record — the FROZEN schema, EXACTLY these FIVE keys
+// in this order (milestone 38 / ADR-001, evolving the m23 four-key freeze): { nodeId,
+// heartbeatAt, activeRuns, sessions, aofVersion }. `sessions` is inserted BEFORE the
+// trailing `aofVersion` provenance string (ADR-001's "group the run/session liveness
+// pair together") — the m23 four keys keep their RELATIVE order, so a no-session
+// record's nodeId/heartbeatAt/activeRuns/aofVersion values stay byte-identical to an
+// m23 record (acd-session-presence-additive). ABSENT-IS-BENIGN: `sessions` defaults
+// to `[]` when the caller supplies none — the key is ALWAYS present (never omitted),
+// so the shape is stable and every pre-38 call site (mesh:heartbeat, which does not
+// yet read session records) keeps emitting a valid, five-key record with an empty
+// sessions array. nodeId is the SAME stable id the node record carries (read it,
+// never re-derived here); heartbeatAt is the injected/wall-clock ISO-8601 UTC-Z
+// instant; activeRuns is the run-record read; sessions is the derived LIVE
+// session-record projection (ADR-002, each entry `{ workspaceId, repo, assistant,
+// lastPingAt }` — presence reads-but-never-mutates session state, exactly as
+// activeRuns reads-but-never-mutates run state); aofVersion is the provenance string.
 // A PURE projection of its inputs — the same inputs yield a content-equivalent record
 // (rebuildability), so it is never a second authority.
-export function assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, aofVersion }) {
+export function assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, sessions, aofVersion }) {
   return {
     nodeId,
     heartbeatAt,
     activeRuns,
+    sessions: sessions ?? [],
     aofVersion,
   };
 }

@@ -23,18 +23,29 @@
 //                                        it — never a dependency on a raw process.on
 //                                        firing inside a test.
 import os from "node:os";
+import path from "node:path";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
 import { aofVersion } from "./commands/mesh-identity.mjs";
-import { assemblePresenceRecord, readActiveRuns, publishPresenceRecord } from "./mesh-presence.mjs";
+import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces } from "./mesh-presence.mjs";
 import { listItems } from "./work.mjs";
 import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems } from "./global-work-publisher.mjs";
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
-import { startControlStreamServer, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
+import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
+// milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
+// client.onDirective(...) registers below.
+import { createMeshWorkerExecutionHandler } from "./mesh-worker-execution.mjs";
 import { createEnrollmentHttpHandler } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
+// milestone 35 / ADR-008 — the control-side dispatch/reclaim driver's DATA-LAYER
+// orchestrator (owns the ONE store-open for both the dispatch scan AND the ADR-005
+// reclaim call — this launcher module itself imports NO SQLite-store module
+// directly, keeping fitness acd-global-publisher-single-seam intact; the launcher
+// tick is the ONLY production CALLER of this orchestrator, per fitness
+// acd-control-dispatch-reclaim-driver-wired).
+import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -58,10 +69,139 @@ function resolveNow(options = {}) {
   return new Date().toISOString();
 }
 
-async function assembleCurrentPresenceRecord(ws, nodeId, options = {}) {
-  const items = await listItems(ws.workDir);
-  const activeRuns = await readActiveRuns(items);
-  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, aofVersion: aofVersion() });
+// resolveAggregationWorkspaces(ws, nodeId, options) — the ADR-003 workspace set this
+// tick aggregates over: this node's registered workspaces (resolveNodeWorkspaces,
+// the mesh-presence.mjs sanctioned seam — mesh-launcher.mjs gains no new direct
+// SQLite dependency) PLUS the launch-cwd workspace, which is ALWAYS included (a
+// registered workspace like any other — so no work is ever lost even when the
+// registry read degrades). De-duplicated by workDir so a launch-cwd that is ALSO
+// separately registered is not double-counted. A store-unreachable read (ok:false)
+// degrades to JUST the launch-cwd workspace — never a crash, never an empty result.
+// Each entry carries its OWN workspaceId (the launch-cwd entry derives it the SAME
+// way the rest of the launcher already does — workspaceIdFor(projectRoot), the
+// existing publish-time seam) — the id is what lets the assembler attribute a run
+// count to its workspace (review F1: activeRuns on the WIRE is a bare `string[]` of
+// run ids, 23/ADR-002 — it carries no workspace attribution of its own; the
+// attribution exists ONLY here, in this per-workspace loop, never downstream).
+// FINDING F11 (aof:verify 38, BLOCKER) — the dedup key is now a NORMALIZED absolute
+// path, not the raw workDir string. Pre-fix, every registry-sourced workDir was the
+// SAME raw relative "./wiki/work" string regardless of which workspace it came from,
+// so this dedup collapsed genuinely DISTINCT workspaces into one (the "same
+// workspace counted N times" half of the bug). Post-fix both mesh-presence.mjs's
+// resolveNodeWorkspaces (the read side) and the launch-cwd's own ws.workDir
+// (loadWorkspace) hand back CANONICAL absolute paths, but two spellings of the SAME
+// directory (case, trailing separator, `..` segments) must still collapse to one —
+// path.resolve normalizes that, and on win32 the comparison is case-folded (NTFS is
+// case-insensitive; the SAME discipline global-node-registry.mjs's own pathKey
+// keeps) so a workspace is never double-counted OR wrongly collapsed with a distinct
+// one.
+function normalizedWorkDirKey(workDir) {
+  const resolved = path.resolve(workDir);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function resolveAggregationWorkspaces(ws, registryResult) {
+  const seen = new Set();
+  const workspaces = [];
+  const addWorkspace = (workDir, workspaceId) => {
+    if (typeof workDir !== "string" || workDir.length === 0) return;
+    const key = normalizedWorkDirKey(workDir);
+    if (seen.has(key)) return;
+    seen.add(key);
+    workspaces.push({ workDir, workspaceId });
+  };
+  addWorkspace(ws.workDir, ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir));
+  if (registryResult.ok) {
+    for (const entry of registryResult.workspaces) addWorkspace(entry.workDir, entry.workspaceId);
+  }
+  return workspaces;
+}
+
+// Review F1 (MAJOR product defect fix): `activeRuns` on the WIRE is the frozen m23
+// `string[]` of bare run ids (23/ADR-002) — it carries NO workspace attribution, so
+// a render-layer helper fed only `{ activeRuns, sessions }` can never correctly
+// decide "which workspace does this run belong to" (the bug the review caught:
+// ui/src/fleet/runs.mjs was keying subsumption off a shape production never emits).
+// The attribution EXISTS only here, in this per-workspace loop — so the "run
+// subsumes a same-workspace session" reconciliation (ADR-004) MUST happen here, not
+// in the render helper. This function assembles activeRuns AND returns the set of
+// workspaceIds that contributed at least one running run, so the caller can drop
+// any live session on one of those workspaces BEFORE the record is published —
+// `sessions[]` is therefore PRE-SUBSUMED on the wire; the render helper never needs
+// (and structurally cannot perform) run-attribution of its own.
+// `listItemsFn` is the injected item-enumeration seam (default the real
+// listItems) — the real production listItems never throws (work.mjs's own
+// readDirSafe swallows every readdir fault internally, an absence-is-benign
+// discipline this codebase keeps throughout), so a test that wants to exercise
+// THIS function's per-workspace try/catch isolation for "a workspace's item
+// enumeration fails" needs an injectable seam rather than a real fs fault
+// (Windows has no reliable cross-platform way to force a genuine EACCES on a
+// directory a test just created) — mirrors every other launcher dependency
+// (exec/now/tickers) already being injectable via options.
+async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) {
+  const activeRuns = [];
+  const workspacesWithRuns = new Set();
+  for (const workspace of workspaces) {
+    // PER-WORKSPACE ISOLATION (never a daemon crash): a workspace whose items can't
+    // be enumerated (its dir vanished mid-tick, a permissions fault, …) is skipped —
+    // absence-is-benign; the rest of the union still aggregates.
+    try {
+      const items = await listItemsFn(workspace.workDir);
+      const runs = await readActiveRuns(items);
+      if (runs.length > 0) {
+        activeRuns.push(...runs);
+        if (typeof workspace.workspaceId === "string" && workspace.workspaceId.length > 0) {
+          workspacesWithRuns.add(workspace.workspaceId);
+        }
+      }
+    } catch {
+      // absence-is-benign — this workspace's runs are skipped, not fatal.
+    }
+  }
+  return { activeRuns, workspacesWithRuns };
+}
+
+// `warningsSink` (default a scratch array — production always passes the real
+// `launcherWarnings` accumulator) is where FINDING F11's LOUD-skip diagnostics land:
+// a workspace resolveNodeWorkspaces skipped (its resolved absolute work dir
+// genuinely doesn't exist) is surfaced HERE as a coded warning — never a silent
+// `continue` that lets a zero/short aggregation masquerade as healthy. The frozen
+// presence record itself (ADR-001's five keys) carries NONE of this — warnings are
+// a launcher-facing diagnostic, never a wire-shape change.
+async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsSink = []) {
+  const registryResult = await resolveNodeWorkspaces(nodeId, options);
+  for (const skip of registryResult.skipped ?? []) {
+    warningsSink.push({
+      code: "workspace-workdir-unresolvable",
+      message: `Workspace ${skip.workspaceId} work dir could not be resolved (${skip.reason})${skip.workDir ? `: ${skip.workDir}` : ""}.`,
+      path: skip.workDir ?? null,
+    });
+  }
+  const workspaces = resolveAggregationWorkspaces(ws, registryResult);
+
+  // activeRuns is the UNION across every resolved workspace's items (ADR-003);
+  // workspacesWithRuns is the per-workspace attribution the render layer cannot
+  // derive from the wire shape (review F1) — used below to subsume a same-workspace
+  // live session BEFORE the record is published.
+  const listItemsFn = typeof options?.listItems === "function" ? options.listItems : listItems;
+  const { activeRuns, workspacesWithRuns } = await assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn);
+
+  // sessions is the union of this node's LIVE session records (ADR-001/002) — session
+  // records are stored per-NODE (mesh-session.mjs), not per-workspace-dir, so ONE
+  // read already covers every workspace; a read fault here degrades to no sessions
+  // for this tick rather than crashing it (the same never-crash discipline every
+  // other launcher read keeps). ADR-004's run-wins-the-primary-line rule is applied
+  // HERE (review F1): a session whose workspaceId already has a running run is
+  // SUBSUMED — dropped before the record is published, so `sessions[]` on the wire
+  // never contains a session the run already accounts for.
+  let sessions = [];
+  try {
+    sessions = (await readLiveSessions(ws, nodeId, options)).filter((session) => !workspacesWithRuns.has(session.workspaceId));
+  } catch {
+    // absence-is-benign — sessions are skipped this tick, not fatal.
+  }
+
+  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: aofVersion() });
 }
 
 function configuredRelayUrl(config) {
@@ -230,14 +370,18 @@ export async function startLauncher(ws, options = {}) {
 
   // Publish this node's presence at start, then refresh it on every propagation tick.
   const { nodeId } = await resolveNodeIdentity(ws);
+  // Declared BEFORE the first publish (finding F11) so a workspace-resolution loud
+  // skip on the VERY FIRST presence assembly — not merely a later propagation tick —
+  // is still captured on this same accumulator the caller reads off the returned
+  // handle, never dropped on the floor.
+  const launcherWarnings = [];
   const publishCurrentPresence = async () => {
-    const nextRecord = await assembleCurrentPresenceRecord(ws, nodeId, options);
+    const nextRecord = await assembleCurrentPresenceRecord(ws, nodeId, options, launcherWarnings);
     await publishPresenceRecord(ws, nodeId, nextRecord);
     return nextRecord;
   };
   let record = await publishCurrentPresence();
 
-  const launcherWarnings = [];
   const capturePropagation = async () => {
     record = await publishCurrentPresence();
     const propagation = await publishGlobalWorkSnapshot(ws, options);
@@ -324,6 +468,39 @@ export async function startLauncher(ws, options = {}) {
     });
     streamClient = client;
 
+    // milestone 35 / story 02 (ADR-004) — wire the accepted-directive execution
+    // handler onto the SAME persistent channel's receive seam (worker-stream-
+    // client.mjs's onDirective, story 01). ADDITIVE + OPTIONS-GATED (the same
+    // discipline every other knob on this function follows): `options.workerExecution
+    // !== false` (the default) wires the REAL handler
+    // (createMeshWorkerExecutionHandler); a caller that passes `workerExecution:
+    // false` — every pre-existing startLauncher test that never wired one — gets
+    // EXACTLY today's behaviour (a client with no registered directive handler,
+    // directives received into the void, worker-stream-client.mjs's own documented
+    // no-op). `options.createMeshWorkerExecutionHandler` / `options.workerExecutionOptions`
+    // let a test inject the execution handler's own collaborators (spawnRuntime, exec,
+    // now, onCleanup, …) through the SAME launcher entry point a real `--serve` uses.
+    if (options?.workerExecution !== false) {
+      const createHandler = options?.createMeshWorkerExecutionHandler ?? createMeshWorkerExecutionHandler;
+      const handler = createHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        nodeId,
+        sendAssignmentStatus: (...args) => client.sendAssignmentStatus(...args),
+        // milestone 38 / story 01 task 05 (ADR-009, finding F12) — THE FIX: the
+        // credential resolver, supplied as a LITERAL key HERE, outside the
+        // workerExecutionOptions test-injection spread below, closing over this
+        // worker's OWN stream client (client.requestCloneCredential — the up/down
+        // clone-credential-request/clone-credential frame pair, worker-stream-
+        // client.mjs). A test may still override it through the spread; production
+        // (`aof mesh serve --serve`) now genuinely supplies one, which it never did
+        // before this fix (fitness acd-clone-credential-pull-not-pushed's F12 guard).
+        requestCloneCredential: (request) => client.requestCloneCredential(request),
+        now: nowFn,
+        ...(options?.workerExecutionOptions ?? {}),
+      });
+      client.onDirective(handler);
+    }
+
     if (transport != null) {
       // Bridge a transport-level drop to the client's own notifyDrop() (ADR-004: a
       // stream fault is a warning, never a rethrow) — production wires the REAL
@@ -372,6 +549,68 @@ export async function startLauncher(ws, options = {}) {
     });
   });
 
+  // milestone 35 / ADR-008 — the control-side DISPATCH + RECLAIM driver: a THIRD
+  // sibling over the SAME injected-ticker seam (propagationTicker/peerPollTicker),
+  // role-gated to "control" and options-gated so every pre-existing launcher test
+  // (which supplies none of these knobs) stays byte-identical. Each tick calls
+  // runControlDispatchReclaimTick (mesh-assignment-reclaim.mjs) — the driver's
+  // DATA-LAYER orchestrator, which owns the ONE store-open for BOTH halves so this
+  // launcher module itself imports NO SQLite-store module / store-opener directly
+  // (fitness acd-global-publisher-single-seam: the launcher reaches the global
+  // store only through a sanctioned seam). That orchestrator:
+  //   (1) DISPATCHES — scans global_assignments for `assigned` rows whose
+  //       targetNodeId is a currently-connected admitted peer in the stream
+  //       server's directiveTargets map (streamServer.directiveTargets.get(id)),
+  //       and dispatchDirective(buildDirectiveFrame(row)) each over the ADR-002
+  //       channel — the missing call site ADR-008 closes. A row whose target is
+  //       NOT connected is left `assigned` (dispatches on a later tick, never a
+  //       silent drop/loud error here). DISPATCH-ONCE (best-effort): dispatchedIds,
+  //       an in-memory Set HELD HERE (this launcher's lifetime, not persisted,
+  //       rebuilt empty on restart) and passed in on every tick — correctness rests
+  //       on the WORKER's onDirective dedupe (mesh-worker-execution.mjs), the
+  //       authoritative guard (a post-restart re-dispatch is safe because the
+  //       worker ignores a duplicate it already holds).
+  //   (2) RECLAIMS — calls reclaimStaleAssignments(store, ws, workspaceId, { now })
+  //       verbatim (ADR-005's decision, never re-derived) so a dual-stale
+  //       assignment converges to `reclaimed` on its own.
+  // Both halves are FAILURE-ISOLATED (ADR-004): a store-read/dispatch fault on one
+  // tick is caught here (the .catch below) and the next tick simply re-attempts —
+  // never a daemon crash.
+  const dispatchedAssignmentIds = new Set();
+  let controlTickHandle = null;
+  let controlDispatchReclaimTicker = null;
+  // The driver requires a REAL stream-server handle (a genuine directiveTargets
+  // map + dispatchDirective seam) — a test that fakes startControlStreamServer
+  // down to a bare `{ stop(), updatePeers() }` (mesh-launcher-stream-role.test.mjs's
+  // idiom) never satisfies this shape check, so it never opts this pre-existing
+  // test into the tick (byte-identical behaviour preserved) without needing an
+  // explicit `controlDispatchReclaimTicker: false` on every such fixture.
+  const hasDispatchSeam = typeof streamServer?.dispatchDirective === "function" && typeof streamServer?.directiveTargets?.get === "function";
+  if (role === "control" && hasDispatchSeam && options?.controlDispatchReclaimTicker !== false) {
+    controlDispatchReclaimTicker = typeof options?.controlDispatchReclaimTicker === "object" && options.controlDispatchReclaimTicker != null
+      ? options.controlDispatchReclaimTicker
+      : intervalTicker();
+    const controlTickSeconds = typeof options?.controlDispatchReclaimSeconds === "number" && options.controlDispatchReclaimSeconds > 0
+      ? options.controlDispatchReclaimSeconds
+      : cadenceFromConfig(ws);
+    // Reuse the SAME store-options resolution the real control-stream server's
+    // own store already opened under (controlStreamServerOptions.storeOptions),
+    // falling back to the launcher's globalWorkStoreOptions knob — never a second,
+    // independently-defaulted store location.
+    const storeOptions = options?.controlStreamServerOptions?.storeOptions ?? options?.globalWorkStoreOptions ?? {};
+    controlTickHandle = controlDispatchReclaimTicker.start(controlTickSeconds, () => {
+      runControlDispatchReclaimTick(ws, streamServer, {
+        workspaceId,
+        now: resolveNow(options),
+        storeOptions,
+        buildDirectiveFrame,
+        dispatchedIds: dispatchedAssignmentIds,
+      }).catch((error) => {
+        launcherWarnings.push({ code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null });
+      });
+    });
+  }
+
   // The STREAM-SYNC ticker (verify follow-up, 34/story 04) — keep the worker's stream
   // CURRENT, not merely pushed-once-at-connect. A run mutation happens in a SEPARATE CLI
   // process this daemon cannot observe in-memory, and the control-stream server marks a
@@ -403,13 +642,15 @@ export async function startLauncher(ws, options = {}) {
   }
 
   // stop() — the clean daemon shutdown (ADR-003.3, the serve-unit discipline): stop
-  // all tickers (peer poll + propagation + optional stream sync) cleanly, plus the stream server/client when
-  // this node started one. No half-published record — the presence publish already
-  // completed before this handle was returned.
+  // all tickers (peer poll + propagation + optional stream sync + optional control
+  // dispatch/reclaim) cleanly, plus the stream server/client when this node started
+  // one. No half-published record — the presence publish already completed before
+  // this handle was returned.
   const stop = () => {
     peerPollTicker.stop(peerPollHandle);
     propagationTicker.stop(propagationHandle);
     if (streamSyncHandle != null) streamSyncTicker.stop(streamSyncHandle);
+    if (controlTickHandle != null) controlDispatchReclaimTicker.stop(controlTickHandle);
     streamServer?.stop?.();
     streamClient?.stop?.();
   };

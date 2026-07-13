@@ -16,6 +16,12 @@ import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore, queryGlobalWorkProjection, globalStoreError, workspaceIdFor } from "./global-work-store.mjs";
 import { queryGlobalRegistry } from "./global-node-registry.mjs";
 import { MESH_GLOBAL_DISABLED_CODE } from "./global-work-publisher.mjs";
+// milestone 35 / story 03 — the READ-ONLY assignment-lifecycle affordance
+// (ADR-007: the fleet UI stays read-only; this thread extends the READ shape
+// only, never a write branch). `listAllAssignments` is the bulk read helper
+// story 03 added to Story 00's frozen assignment-record module (assignment-
+// record.mjs) — a plain SELECT, no new writer.
+import { listAllAssignments } from "./assignment-record.mjs";
 
 // Re-exported so the serve face (ADR-006 "thin … talks to a query surface") can
 // resolve a `?scope=local` deep-link's workspace id WITHOUT importing
@@ -40,8 +46,13 @@ export async function queryGlobalMeshStatus(options = {}) {
       now: options.now,
       stalenessSeconds: options.stalenessSeconds,
     });
+    // milestone 35 / story 03 — the ONE additional read this seam threads
+    // through: every assignment row (bulk, unfiltered — shapeGlobalStatus does
+    // the per-item/per-node join, keeping the join logic PURE and headlessly
+    // testable rather than a second SQL WHERE clause here).
+    const assignments = listAllAssignments(store);
 
-    return shapeGlobalStatus({ paths, workProjection, registry, now: options.now });
+    return shapeGlobalStatus({ paths, workProjection, registry, assignments, now: options.now });
   } finally {
     if (ownsStore) store.close?.();
   }
@@ -65,14 +76,73 @@ async function openGlobalStoreOrCodedError(options) {
   }
 }
 
+// milestone 35 / story 03 (DESIGN §2a/§2b; task 00) — the ADR-001 active states,
+// restated here (not re-imported from assignment-record.mjs) because this
+// function must stay a PURE function of its plain-object inputs only — no store,
+// no live import graph beyond what its caller already threads in. Kept in the
+// SAME order/spelling as ACTIVE_ASSIGNMENT_STATES so the two never drift.
+const ACTIVE_ASSIGNMENT_STATES_FOR_SHAPE = new Set(["assigned", "accepted", "running"]);
+
+// The "most-relevant" assignment for one (workspaceId, itemRef) pair (DESIGN §2a
+// PRIMARY attachment — the item row carries exactly one assignment, the chip
+// anatomy's subject). An ACTIVE assignment (assigned/accepted/running) always
+// wins over a terminal one — it is the "more actionable state" the chip
+// prioritises; `listAllAssignments` already orders most-recent-first, so among
+// several rows for the same item the first active row, or else the first
+// (latest) row overall, is picked. Never fabricates a row when none exists.
+function pickItemAssignment(rows) {
+  if (!rows || rows.length === 0) return null;
+  const active = rows.find((row) => ACTIVE_ASSIGNMENT_STATES_FOR_SHAPE.has(row.state));
+  return active ?? rows[0];
+}
+
+// The read-shape's assignment projection (task 00: "the read layer applies no
+// chip label or colour to the row — that is the render layer's job"). Carries
+// the chip-anatomy fields VERBATIM off the ADR-001 record — state and
+// reclaimedAt travel byte-for-byte so a `reclaimed` row keeps its provenance for
+// task 01's helper to read.
+function projectAssignment(row) {
+  if (!row) return null;
+  return {
+    assignmentId: row.assignmentId,
+    state: row.state,
+    targetNodeId: row.targetNodeId,
+    issuer: row.issuer,
+    runId: row.runId,
+    assignedAt: row.assignedAt,
+    updatedAt: row.updatedAt,
+    reclaimedAt: row.reclaimedAt,
+  };
+}
+
 // Shape the two query results into the ONE global status payload. Kept a pure
 // function of its inputs (no I/O) so the shaping is independently testable without a
 // live store.
-export function shapeGlobalStatus({ paths, workProjection, registry, now }) {
+export function shapeGlobalStatus({ paths, workProjection, registry, assignments, now }) {
   const workspaceRows = workProjection.workspaces ?? [];
   const itemRows = workProjection.items ?? [];
   const registryWorkspaces = registry.workspaces ?? [];
   const registryByWorkspaceId = new Map(registryWorkspaces.map((w) => [w.workspaceId, w]));
+
+  // milestone 35 / story 03 (DESIGN §2a/§2b) — attach assignment rows onto the
+  // item and node rows. ADDITIVE ONLY: every pre-existing field on `items`/
+  // `nodes` keeps its m34 meaning byte-for-byte (the assignment field is a new
+  // key appended per row); "absent, not false" — an item/node with no matching
+  // assignment carries no `assignment(s)` field at all, never a synthesized
+  // zero-count/default row (a reader that ignores the new field is unaffected).
+  const assignmentRows = assignments ?? [];
+  const assignmentsByItem = new Map();
+  const assignmentsByNode = new Map();
+  for (const row of assignmentRows) {
+    const itemKey = `${row.workspaceId} ${row.itemRef}`;
+    if (!assignmentsByItem.has(itemKey)) assignmentsByItem.set(itemKey, []);
+    assignmentsByItem.get(itemKey).push(row);
+
+    if (row.targetNodeId != null) {
+      if (!assignmentsByNode.has(row.targetNodeId)) assignmentsByNode.set(row.targetNodeId, []);
+      assignmentsByNode.get(row.targetNodeId).push(row);
+    }
+  }
 
   // The workspaces summary (DESIGN "workspaces summary: … with status/freshness"):
   // join the projection's published-workspace rows with the registry's mesh-enabled /
@@ -143,12 +213,33 @@ export function shapeGlobalStatus({ paths, workProjection, registry, now }) {
     message: entry.message,
   }));
 
+  // milestone 35 / story 03 (DESIGN §2a PRIMARY) — attach the most-relevant
+  // assignment onto each item row, keyed by (workspaceId, ref). Every
+  // pre-existing item field is spread through byte-unchanged; `assignment` is
+  // the ONLY new key, and it is OMITTED (not a null/empty placeholder) when the
+  // item carries no assignment — "absent, not false".
+  const items = itemRows.map((item) => {
+    const rows = assignmentsByItem.get(`${item.workspaceId} ${item.ref}`);
+    const picked = pickItemAssignment(rows);
+    if (!picked) return item;
+    return { ...item, assignment: projectAssignment(picked) };
+  });
+
+  // milestone 35 / story 03 (DESIGN §2b SECONDARY) — attach the assignments a
+  // node HOLDS onto its node row, keyed by targetNodeId; the UI summarises
+  // counts by state. Omitted (no `assignments` key) when the node holds none.
+  const nodes = (registry.nodes ?? []).map((node) => {
+    const rows = assignmentsByNode.get(node.nodeId);
+    if (!rows || rows.length === 0) return node;
+    return { ...node, assignments: rows.map(projectAssignment) };
+  });
+
   return {
     scope: "global",
     workspaceId: workProjection.workspaceId ?? null,
     workspaces,
-    items: itemRows,
-    nodes: registry.nodes ?? [],
+    items,
+    nodes,
     diagnostics: {
       projectedAt,
       generatedAt: now ?? new Date().toISOString(),

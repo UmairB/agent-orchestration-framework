@@ -25,6 +25,11 @@ export type Derived = {
   items: WorkItem[];
   milestones: Milestone[];
   uat: WorkItem[];
+  // milestone 37/ADR-003: spike/chore are additive top-level drivers (ADR-001,
+  // uat-shaped). Minimal board default — grouped here so they ride the SAME
+  // existing driver placement uat already uses (BoardLanes' `all`-focus lane
+  // bucket), never a new lane/column.
+  otherDrivers: WorkItem[];
   byRef: Map<string, WorkItem>;
   // Stream-wide summary counts (overview chips).
   doneMilestones: number;
@@ -57,6 +62,7 @@ export function deriveBoard(items: WorkItem[]): Derived {
 
   const milestoneItems = items.filter((i) => i.type === "milestone" && i.parent == null);
   const uat = items.filter((i) => i.type === "uat");
+  const otherDrivers = items.filter((i) => i.type === "spike" || i.type === "chore");
 
   const milestones: Milestone[] = milestoneItems.map((item) => {
     const stories = items.filter((s) => s.type === "story" && sameMilestone(s.parent, milestoneKey(item)));
@@ -88,6 +94,7 @@ export function deriveBoard(items: WorkItem[]): Derived {
     items,
     milestones,
     uat,
+    otherDrivers,
     byRef,
     doneMilestones,
     activeMilestones,

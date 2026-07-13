@@ -10,6 +10,14 @@
 // scope is active, which region/state the page shows for a given status payload,
 // local-filtering a global-shaped payload client-side, the URL scope round-trip,
 // and the credential-field guard (ADR-005 — descriptors never render secrets).
+//
+// finding F9 (aof:verify 38) — also carries `nodeCurrentWork`, the ONE
+// current-work-line derivation the ACTUALLY-rendered global node panel calls
+// (mesh-ui-serve.mjs serves both scopes from queryGlobalMeshStatus, so the
+// global-shaped panel is what production always mounts). A thin wrapper over
+// ./runs.mjs's fleetCurrentWorkLines, kept here (not inline in the .tsx) so
+// node:test can exercise it directly, mirroring this file's own pattern.
+import { fleetCurrentWorkLines } from "./runs.mjs";
 
 // ----------------------------------------------------- scope + URL -----------
 
@@ -211,6 +219,22 @@ export function nodePanelFacts(node) {
     fabricAddress: safe.fabric?.address ?? null,
     freshness: safe.freshness ?? (safe.presence ? (safe.stale ? "stale" : "live") : "unknown"),
   };
+}
+
+// ------------------------------------------------- current-work line (F9) -----
+
+// nodeCurrentWork(node) — the row-3 current-work-line derivation (DESIGN
+// §Surface 1: `idle` / `running N runs` / `working · <repo>[, <repo>…]
+// (session)`), a thin pass-through to fleetCurrentWorkLines (./runs.mjs) over
+// `node.presence` — no forked/duplicated collapse rule, and no liveness or
+// run/session subsumption re-derived here (both are already-applied facts on
+// the presence record by the time it reaches this projection, upstream at the
+// publisher). Absent presence (a never-beat node) degrades to `{}`, which
+// fleetCurrentWorkLines already renders as the single `idle` line — never a
+// thrown error. Spans BOTH node shapes (global registry / local mesh:status)
+// exactly as nodePanelFacts does, since both carry `presence` the same way.
+export function nodeCurrentWork(node) {
+  return fleetCurrentWorkLines(node?.presence ?? {});
 }
 
 // --------------------------------------------------------- diagnostics --------

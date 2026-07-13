@@ -3,7 +3,11 @@ import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { workspaceIdFor } from "./global-work-store.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
-import { readPresenceRecords } from "./mesh-presence.mjs";
+// milestone 38 / story 00 / task 08 (finding F6) — `readPresenceRecord` +
+// `assemblePresenceRecord` are the SAME seam mesh:status's diskPresence read
+// (src/commands/mesh-identity.mjs ~line 218) already uses; queryGlobalRegistry
+// reuses them rather than inventing a second presence reader.
+import { readPresenceRecords, readPresenceRecord, assemblePresenceRecord } from "./mesh-presence.mjs";
 import { resolvePeers } from "./mesh-fabric.mjs";
 import { writeText } from "./fs.mjs";
 
@@ -98,10 +102,27 @@ export async function assembleGlobalRegistrySnapshot(workspace, options = {}) {
     return descriptor;
   });
 
+  // FINDING F11 (aof:verify 38, BLOCKER) — the write-side half of the fix. This
+  // used to write config.work.dir VERBATIM (the raw, often-RELATIVE `./wiki/work`
+  // string), so `resolveNodeWorkspaces` (mesh-presence.mjs) later resolved it
+  // against the READER's cwd, not this workspace's own project root — the exact
+  // "presence resolves zero/wrong workspaces from a foreign cwd" bug ADR-003 exists
+  // to kill. `path.resolve(root, dir)` returns `dir` unchanged when `dir` is already
+  // absolute, so a workspace with an absolute configured work dir is unaffected;
+  // a RELATIVE `config.work.dir` (or an absent one, falling back to the already-
+  // resolved `workspace.workDir` loadWorkspace computed) is resolved HERE, against
+  // this workspace's OWN `projectRoot` — never the publisher's launch cwd — so every
+  // row this seam writes is canonical/absolute at rest.
+  const resolvedProjectRoot = path.resolve(workspace.projectRoot);
+  const resolvedWorkDir = path.resolve(
+    resolvedProjectRoot,
+    typeof config?.work?.dir === "string" ? config.work.dir : (workspace.workDir ?? "./wiki/work"),
+  );
+
   const workspaceDescriptor = {
     workspaceId,
-    projectRoot: path.resolve(workspace.projectRoot),
-    workDir: typeof config?.work?.dir === "string" ? config.work.dir : path.resolve(workspace.workDir),
+    projectRoot: resolvedProjectRoot,
+    workDir: resolvedWorkDir,
     name: config.name ?? null,
     meshEnabled: config?.mesh?.enabled === true,
     controlNode: typeof config?.mesh?.relay?.controlNode === "string" ? config.mesh.relay.controlNode : null,
@@ -123,6 +144,13 @@ export async function queryGlobalRegistry(store, options = {}) {
   const workspaceFilter = options.workspaceId ?? options.workspace ?? null;
   const roleFilter = options.role ?? null;
   const db = store.db;
+  // finding F6 (aof:verify 38) — the fleet read route's ONE presence seam: the
+  // SAME machine-wide mesh root queryGlobalMeshStatus's callers already resolve
+  // (store.paths, threaded from globalMeshPaths at store-open time), reused here
+  // as the workspace-shaped anchor readPresenceRecord expects (meshDir(workspace)
+  // reads workspace.globalMeshRoot). No second path-resolution rule.
+  const paths = store.paths ?? globalMeshPaths(options);
+  const presenceWorkspace = { globalMeshRoot: paths.meshRoot };
 
   const workspaceRows = workspaceFilter
     ? db.prepare("SELECT * FROM global_workspace_descriptors WHERE workspace_id = ? ORDER BY workspace_id").all(workspaceFilter)
@@ -141,11 +169,21 @@ export async function queryGlobalRegistry(store, options = {}) {
     const memberships = db.prepare(`
       SELECT workspace_id FROM global_node_workspaces WHERE node_id = ? ORDER BY workspace_id
     `).all(row.node_id).map((entry) => entry.workspace_id);
-    nodes.push({
+    const node = {
       ...descriptor,
       freshness: freshnessFor(row.last_seen_at, now, thresholdMs),
       workspaceIds: memberships, // nodes are machine-wide; never narrowed by a workspace filter (34/story 02)
-    });
+    };
+    // finding F6 — ADDITIVE: carry the node's presence record ALONGSIDE the
+    // pre-existing `freshness` ramp (unchanged), so no existing consumer breaks.
+    // A never-beat node (readPresenceRecord ⇒ null) OMITS `presence` entirely —
+    // never a fabricated empty record. When a record exists, it is reshaped
+    // through assemblePresenceRecord ONLY to guarantee the frozen FIVE-key
+    // order (ADR-001); sessions[]/activeRuns travel through EXACTLY as the
+    // publisher emitted them — no liveness/subsumption is recomputed here.
+    const diskPresence = await readPresenceRecord(presenceWorkspace, row.node_id);
+    if (diskPresence) node.presence = assemblePresenceRecord(diskPresence);
+    nodes.push(node);
   }
 
   const workspaces = [];

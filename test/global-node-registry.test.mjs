@@ -173,7 +173,12 @@ export const globalNodeRegistryTests = [
         const descriptor = JSON.parse(await readFile(first.descriptor_path, "utf8"));
         assert.equal(descriptor.workspaceId, workspaceId);
         assert.equal(descriptor.projectRoot, path.resolve(ws.projectRoot));
-        assert.equal(descriptor.workDir, "./wiki/work");
+        // finding F11 (aof:verify 38) — the write side now resolves the configured
+        // (often relative) work dir against THIS workspace's own project root, never
+        // storing the raw "./wiki/work" string verbatim (that raw value is exactly
+        // what let resolveNodeWorkspaces resolve it against the READER's cwd instead).
+        assert.equal(descriptor.workDir, path.resolve(ws.projectRoot, "./wiki/work"));
+        assert.ok(path.isAbsolute(descriptor.workDir), "workDir is stored absolute, not verbatim-relative");
         assert.equal(descriptor.meshEnabled, true);
         assert.deepEqual(descriptor.memberNodeIds, ["node-a", "node-b"]);
 
