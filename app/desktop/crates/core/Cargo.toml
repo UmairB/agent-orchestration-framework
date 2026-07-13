@@ -1,0 +1,13 @@
+[package]
+name = "mesh-desktop-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shell-agnostic supervisor core for the Mesh Desktop App (milestone 36): trusted aof resolution, mesh status --json deserialization, role-driven supervision set, and the restart/backoff + local-process state machine. No Tauri, no OS window — a pure library so `cargo test` stays fast and hermetic (ADR-001/002/004)."
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,205 @@
+// Traceability wiring for milestone 36 / story 03, task 02_run-launch.feature —
+// `aof mesh desktop run` discovers the installed app and launches it detached,
+// refusing calmly when it is not installed.
+//
+// Exercises discoverDesktopApp/launchDesktopApp directly (src/commands/mesh-
+// desktop.mjs) over a FIXTURE install root with an injected $HOME. The detached
+// spawn is asserted on SHAPE via an injected spawnFn (mirrors src/mesh-fabric.mjs's
+// injected-exec-closure idiom) — no real Tauri app is started, no window opens
+// (the story's RESOLVED developer-amigo note).
+import assert from "node:assert/strict";
+import { chmod, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  discoverDesktopApp,
+  launchDesktopApp,
+  meshDesktopCommand,
+  DESKTOP_APP_EXE,
+} from "../src/commands/mesh-desktop.mjs";
+import { withMeshDesktopFixture, seedInstalledApp } from "./support/mesh-desktop-fixture.mjs";
+
+async function captureConsole(run) {
+  const logs = [];
+  const errors = [];
+  const origLog = console.log;
+  const origError = console.error;
+  const origExitCode = process.exitCode;
+  console.log = (...args) => logs.push(args.join(" "));
+  console.error = (...args) => errors.push(args.join(" "));
+  try {
+    await run();
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+    // The CLI face sets process.exitCode on a refusal — restore the test
+    // runner's OWN process.exitCode so exercising a refusal path here never
+    // leaks a non-zero exit code onto the node:test process itself.
+    process.exitCode = origExitCode;
+  }
+  return { logs, errors };
+}
+
+// A fixture spawn recording exactly how it was called, standing in for the real
+// Tauri .exe spawn — asserts the SHAPE (detached, argv, resolved absolute path),
+// never actually starting a process.
+function makeFixtureSpawn() {
+  const calls = [];
+  const spawnFn = (command, args, options) => {
+    const child = {
+      pid: 4242,
+      unrefCalled: false,
+      on(event) { /* the real code registers an 'error' handler; a no-op here */ },
+      unref() { child.unrefCalled = true; },
+    };
+    calls.push({ command, args, options, child });
+    return child;
+  };
+  return { spawnFn, calls };
+}
+
+export const meshDesktopRunTests = [
+  // Scenario: run discovers the installed app in $HOME/.aof/bin and launches it
+  // detached.
+  {
+    name: "mesh-desktop-run/02 run discovers the installed app by absolute co-located path (no PATH search) and launches it as a detached spawn that returns immediately",
+    async run() {
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await seedInstalledApp(installDir);
+        const { spawnFn, calls } = makeFixtureSpawn();
+
+        const result = await launchDesktopApp({ installDir, spawnFn });
+        assert.equal(result.ok, true, "ok:true reporting the launch");
+        assert.equal(result.appPath, path.join(installDir, DESKTOP_APP_EXE), "discovered by absolute co-located path");
+
+        assert.equal(calls.length, 1, "spawned exactly once");
+        const call = calls[0];
+        assert.equal(call.command, path.join(installDir, DESKTOP_APP_EXE), "the resolved absolute path is spawned directly — no PATH search / no shell string");
+        assert.equal(call.options.detached, true, "launched detached");
+        assert.equal(call.options.stdio, "ignore", "stdio ignored (a long-lived app, not piped to the CLI's own streams)");
+        assert.equal(call.child.unrefCalled, true, "unref()'d so the CLI can exit/resolve without waiting on the long-lived app");
+      });
+    },
+  },
+  // Scenario: run before install is a calm, actionable refusal that names the
+  // install verb, never a crash.
+  {
+    name: "mesh-desktop-run/02 run before install refuses calmly, names `aof mesh desktop install`, launches nothing",
+    async run() {
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        const { spawnFn, calls } = makeFixtureSpawn();
+        await assert.rejects(
+          () => launchDesktopApp({ installDir, spawnFn }),
+          (error) => {
+            assert.equal(error.code, "desktop-not-installed");
+            assert.match(error.message, /aof mesh desktop install/, "names the install verb");
+            return true;
+          },
+        );
+        assert.equal(calls.length, 0, "nothing is launched");
+      }, { seedArtifacts: false });
+    },
+  },
+  // Scenario Outline: a present-but-unrunnable install is a coded refusal, never
+  // a stack trace.
+  {
+    name: "mesh-desktop-run/02 discovery-failure matrix: runnable / never-installed / aof-only / not-runnable — each a coded outcome, never a stack trace",
+    async run() {
+      // Row 1: holds a runnable app executable -> discovers + launches detached.
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await seedInstalledApp(installDir);
+        const { spawnFn, calls } = makeFixtureSpawn();
+        const result = await launchDesktopApp({ installDir, spawnFn });
+        assert.equal(result.ok, true);
+        assert.equal(calls.length, 1);
+      });
+
+      // Row 2: is empty (app never installed) -> refuses, names the install verb.
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await assert.rejects(() => discoverDesktopApp({ installDir }), (error) => {
+          assert.equal(error.code, "desktop-not-installed");
+          assert.match(error.message, /aof mesh desktop install/);
+          return true;
+        });
+      }, { seedAofBinary: false, seedArtifacts: false });
+
+      // Row 3: holds only the aof binary (no desktop app placed yet) -> refuses,
+      // names the install verb.
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await assert.rejects(() => discoverDesktopApp({ installDir }), (error) => {
+          assert.equal(error.code, "desktop-not-installed");
+          assert.match(error.message, /aof mesh desktop install/);
+          return true;
+        });
+      }, { seedArtifacts: false });
+
+      // Row 4: holds an app file that is not executable / is corrupt -> refuses
+      // with a coded not-runnable error (a re-install hint). (POSIX-only bit
+      // check inside discoverDesktopApp; simulate "corrupt" as a directory in
+      // the app's place, which is unrunnable on every platform.)
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        const { mkdir } = await import("node:fs/promises");
+        await mkdir(path.join(installDir, DESKTOP_APP_EXE), { recursive: true });
+        await assert.rejects(() => discoverDesktopApp({ installDir }), (error) => {
+          assert.equal(error.code, "desktop-not-runnable");
+          assert.match(error.message, /re-run `aof mesh desktop install`/i, "a re-install hint");
+          return true;
+        });
+      });
+    },
+  },
+  // POSIX-specific: a present file with no execute bit is the coded not-runnable
+  // refusal (the "is corrupt" branch on a platform where the bit is meaningful).
+  {
+    name: "mesh-desktop-run/02 POSIX: a present app file with no execute bit is a coded not-runnable refusal, never a crash",
+    async run() {
+      if (process.platform === "win32") return; // the execute-bit check is POSIX-only (see the module's platform guard)
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await seedInstalledApp(installDir);
+        await chmod(path.join(installDir, DESKTOP_APP_EXE), 0o644);
+        await assert.rejects(() => discoverDesktopApp({ installDir }), (error) => {
+          assert.equal(error.code, "desktop-not-runnable");
+          return true;
+        });
+      });
+    },
+  },
+  // CLI-face proof: `aof mesh desktop run --json` emits the single { ok:true, ... }
+  // envelope reporting the launch.
+  {
+    name: "mesh-desktop-run/02 the CLI face emits the single { ok:true, ... } envelope reporting the launch under --json",
+    async run() {
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        await seedInstalledApp(installDir);
+        const { spawnFn } = makeFixtureSpawn();
+        const { logs } = await captureConsole(() =>
+          meshDesktopCommand(["run", "--json"], { installDir, spawnFn }),
+        );
+        assert.equal(logs.length, 1, "exactly one line under --json");
+        const parsed = JSON.parse(logs[0]);
+        assert.equal(parsed.ok, true);
+        assert.equal(parsed.appPath, path.join(installDir, DESKTOP_APP_EXE));
+      });
+    },
+  },
+  // CLI-face refusal proof: `aof mesh desktop run` (not installed) is the single
+  // { ok:false, error, code } envelope under --json, and a calm one-line refusal
+  // otherwise — never a stack trace, exit non-zero handled at the outer dispatch
+  // test (mesh-desktop-dispatch.test.mjs covers the spawned-process exit code).
+  {
+    name: "mesh-desktop-run/02 the CLI face's not-installed refusal is the single { ok:false, error, code } envelope, and a calm sentence otherwise, never a stack trace",
+    async run() {
+      await withMeshDesktopFixture(async ({ installDir }) => {
+        const { logs } = await captureConsole(() => meshDesktopCommand(["run", "--json"], { installDir }));
+        assert.equal(logs.length, 1);
+        const parsed = JSON.parse(logs[0]);
+        assert.equal(parsed.ok, false);
+        assert.equal(parsed.code, "desktop-not-installed");
+        assert.match(parsed.error, /aof mesh desktop install/);
+
+        const { errors } = await captureConsole(() => meshDesktopCommand(["run"], { installDir }));
+        assert.equal(errors.length, 1);
+        assert.doesNotMatch(errors[0], /at\s+\S+\s+\(.*:\d+:\d+\)/, "no stack trace frame in the printed refusal");
+      }, { seedArtifacts: false });
+    },
+  },
+];

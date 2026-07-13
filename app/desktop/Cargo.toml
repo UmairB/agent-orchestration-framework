@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+# Story 00 (supervisor-core) lands the shell-agnostic pure core crate; stories 01/02
+# add the sibling `crates/app` Tauri v2 shell (ADR-001) that CONSUMES it. `crates/app`
+# is DELIBERATELY EXCLUDED from `members` (not just omitted) so `cargo test` at this
+# workspace root never pulls in `tauri`/WebView2 and stays fast + hermetic (the
+# five acd-desktop-* fitness functions + the scripts/test.mjs cargo lane only ever
+# run `cargo test --manifest-path crates/core/Cargo.toml`'s workspace, i.e. this one).
+# Build/run `crates/app` explicitly via `cargo build --manifest-path crates/app/Cargo.toml`
+# (its own single-package build, not part of `cargo test` here) — the real tray/window
+# run is @manual/@uat (STORY.md 00 "Build notes" / the developer-amigo feasibility seat).
+members = [
+    "crates/core",
+]
+exclude = [
+    "crates/app",
+]

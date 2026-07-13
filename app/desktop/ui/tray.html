@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aof mesh — tray</title>
+  <!--
+    Milestone 36 · Mesh Desktop App — the taskbar tray menu (DESIGN.md §Surface 2).
+    Self-contained (its own token set). Header = fleet-presence roll-up (non-interactive). Items:
+    Start/Stop mesh (state-labelled; OMITTED on a worker node), Open web UI, Show/Hide window, — , Quit.
+    Demo: ?theme=light|dark  &  ?role=control|worker  &  ?server=running|stopped
+  -->
+  <style>
+    :root {
+      --menu:#f9f9f9; --stroke:rgba(0,0,0,0.09); --stroke-2:rgba(0,0,0,0.13);
+      --text:#1b1b1b; --text-2:rgba(0,0,0,0.62); --text-3:rgba(0,0,0,0.45);
+      --hover:rgba(0,0,0,0.055); --caution-text:#b58a00;
+      --shadow:0 12px 34px rgba(0,0,0,0.20),0 0 0 1px rgba(0,0,0,0.06);
+      --font:'Segoe UI Variable','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+    }
+    :root[data-theme="dark"] {
+      --menu:#2c2c2e; --stroke:rgba(255,255,255,0.09); --stroke-2:rgba(255,255,255,0.15);
+      --text:rgba(255,255,255,0.92); --text-2:rgba(255,255,255,0.64); --text-3:rgba(255,255,255,0.46);
+      --hover:rgba(255,255,255,0.07); --caution-text:#f2cf5a;
+      --shadow:0 14px 38px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.06);
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { min-height:100vh; display:flex; align-items:flex-start; justify-content:center; padding:24px; background:#6e737a; font-family:var(--font); -webkit-font-smoothing:antialiased; }
+    .menu { width:268px; padding:5px 0 0; border-radius:8px; background:var(--menu); box-shadow:var(--shadow); overflow:hidden; }
+    .head { display:flex; align-items:center; gap:9px; padding:11px 11px 10px 13px; }
+    .head .hdot { width:9px; height:9px; border-radius:50%; background:var(--caution-text); flex:none; } /* degraded = caution, not red */
+    .head .online { font-size:13px; color:var(--text); }
+    .head .sep, .head .stale { font-size:13px; color:var(--text-3); }
+    .head .brand { margin-left:auto; font-size:11px; color:var(--text-3); }
+    .rule { height:1px; background:var(--stroke); margin:2px 6px 4px; }
+    .rule.tight { margin:5px 6px; }
+    .item { display:flex; align-items:center; gap:12px; height:34px; margin:0 6px; padding:0 8px; border-radius:5px; cursor:pointer; }
+    .item:hover { background:var(--hover); }
+    .item.last { margin-bottom:5px; }
+    .item .ico { width:18px; display:flex; justify-content:center; flex:none; color:var(--text-2); line-height:1; font-size:14px; }
+    .item .label { font-size:14px; color:var(--text); }
+    .ico .stop { width:9px; height:9px; background:var(--text-2); border-radius:2px; }
+    .ico .win { width:11px; height:9px; border:1.5px solid var(--text-2); border-radius:2px; }
+  </style>
+</head>
+<body>
+  <div class="menu" id="menu"></div>
+  <script>
+    const p = new URLSearchParams(location.search);
+    const theme = p.get('theme') === 'dark' ? 'dark' : p.get('theme') === 'light' ? 'light'
+      : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+
+    const isControl = p.get('role') !== 'worker';        // control node shows the server control; worker omits it
+    const serverRunning = p.get('server') !== 'stopped';
+    const fleet = { online: 3, stale: 1 };                // in-app: the mesh:status roll-up
+
+    const meshItem = isControl ? `
+      <div class="item"><span class="ico"><span class="stop"></span></span><span class="label">${serverRunning ? 'Stop mesh' : 'Start mesh'}</span></div>` : '';
+
+    document.getElementById('menu').innerHTML = `
+      <div class="head">
+        <span class="hdot"></span>
+        <span class="online">${fleet.online} online</span>
+        <span class="sep">&middot;</span>
+        <span class="stale">${fleet.stale} stale</span>
+        <span class="brand">aof mesh</span>
+      </div>
+      <div class="rule"></div>
+      ${meshItem}
+      <div class="item"><span class="ico">&#8599;</span><span class="label">Open web UI</span></div>
+      <div class="item"><span class="ico"><span class="win"></span></span><span class="label">Hide window</span></div>
+      <div class="rule tight"></div>
+      <div class="item last"><span class="ico">&#10005;</span><span class="label">Quit</span></div>`;
+  </script>
+</body>
+</html>

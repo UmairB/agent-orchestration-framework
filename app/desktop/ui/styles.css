@@ -1,0 +1,176 @@
+/*
+  Milestone 36 · Mesh Desktop App — design system (DESIGN.md §Shared ramp; ADR-001 Tauri WebView).
+  Tokens lifted verbatim from the approved design (mocks/AOF Mesh - standalone.html → MeshWindow.dc.html).
+  TWO health vocabularies, never conflated (DESIGN §Non-negotiable framing):
+    · local process health  → the control-bar pills (running / stopped / restarting)
+    · fleet presence         → the body node dots (online / stale / offline)
+  Colour ALWAYS pairs with a shape/label; stale is quiet grey, NEVER red.
+*/
+
+/* ---- Light (default) ---- */
+:root {
+  --bg:#f2f3f5; --titlebar:#eaecef; --layer:#ffffff; --layer-2:#f6f7f9;
+  --stroke:rgba(0,0,0,0.07); --stroke-2:rgba(0,0,0,0.14);
+  --text:#1b1b1b; --text-2:rgba(0,0,0,0.60); --text-3:rgba(0,0,0,0.42);
+  --accent:#005fb8; --accent-soft:rgba(0,95,184,0.10);
+  --dot-stale-ring:rgba(0,0,0,0.34); --dot-dim:rgba(0,0,0,0.26);
+  --caution-bg:#fdf4d3; --caution-stroke:#ecd995; --caution-text:#7a5c00;
+  --skel:rgba(0,0,0,0.09); --skel-2:rgba(0,0,0,0.05);
+  --hover:rgba(0,0,0,0.05); --close-hover:#c42b1c;
+  --shadow:0 12px 34px rgba(0,0,0,0.16),0 1px 3px rgba(0,0,0,0.10);
+
+  --font:'Segoe UI Variable','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+  --mono:'Cascadia Mono',ui-monospace,Consolas,'Courier New',monospace;
+}
+/* ---- Dark (follows OS theme; [data-theme=dark] is set by app.js from prefers-color-scheme or ?theme) ---- */
+:root[data-theme="dark"] {
+  --bg:#202124; --titlebar:#2b2c2f; --layer:#2c2d30; --layer-2:#252629;
+  --stroke:rgba(255,255,255,0.08); --stroke-2:rgba(255,255,255,0.15);
+  --text:rgba(255,255,255,0.92); --text-2:rgba(255,255,255,0.62); --text-3:rgba(255,255,255,0.42);
+  --accent:#60cdff; --accent-soft:rgba(96,205,255,0.14);
+  --dot-stale-ring:rgba(255,255,255,0.42); --dot-dim:rgba(255,255,255,0.30);
+  --caution-bg:#3a3320; --caution-stroke:rgba(252,225,0,0.30); --caution-text:#f2d264;
+  --skel:rgba(255,255,255,0.11); --skel-2:rgba(255,255,255,0.055);
+  --hover:rgba(255,255,255,0.07); --close-hover:#c42b1c;
+  --shadow:0 16px 40px rgba(0,0,0,0.55);
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+@keyframes rpulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.78)} }
+@keyframes shimmer { 0%,100%{opacity:.5} 50%{opacity:.95} }
+
+body {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:#6e737a; /* neutral desktop backdrop for the standalone mock; the real frameless window fills the OS frame */
+  font-family:var(--font); -webkit-font-smoothing:antialiased;
+}
+
+/* ---- Window frame ---- */
+.window {
+  width:760px; height:520px; border-radius:8px; overflow:hidden;
+  display:flex; flex-direction:column;
+  background:var(--bg); color:var(--text); font-size:14px;
+  border:1px solid var(--stroke-2); box-shadow:var(--shadow);
+}
+
+/* ---- Title bar ---- */
+.titlebar {
+  height:40px; flex:none; background:var(--titlebar);
+  display:flex; align-items:center; padding-left:12px; border-bottom:1px solid var(--stroke);
+}
+.logo { width:16px; height:16px; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:3px; flex:none; }
+.logo i { border-radius:50%; background:var(--accent); }
+.title { margin-left:10px; font-size:12.5px; color:var(--text-2); font-weight:500; }
+.title-sub { margin-left:6px; font-size:12.5px; color:var(--text-3); }
+.wincontrols { margin-left:auto; display:flex; height:40px; }
+.wc { width:44px; height:40px; display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:13px; cursor:default; background:transparent; border:0; padding:0; font-family:inherit; }
+.wc:hover { background:var(--hover); }
+.wc-close { width:46px; font-size:12px; }
+.wc-close:hover { background:var(--close-hover); color:#fff; }
+
+/* ---- Control bar (LOCAL process health) ---- */
+.controlbar {
+  flex:none; background:var(--layer); border-bottom:1px solid var(--stroke);
+  display:flex; align-items:center; gap:13px; padding:10px 14px;
+}
+.proc { display:flex; align-items:center; gap:8px; }
+.proc-label { font-size:12px; color:var(--text-2); }
+.pill { display:inline-flex; align-items:center; gap:6px; background:var(--layer-2); border:1px solid var(--stroke); border-radius:6px; padding:3px 9px; }
+.pill-dot { width:8px; height:8px; border-radius:50%; flex:none; }
+.pill-dot.running { background:var(--accent); }
+.pill-dot.restarting { background:var(--caution-text); animation:rpulse 1.2s ease-in-out infinite; }
+.pill-dot.stopped { background:transparent; border:1.6px dashed var(--dot-dim); }
+.pill-text { font-size:12px; color:var(--text); font-weight:500; }
+.toggle { width:25px; height:25px; border-radius:6px; background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; flex:none; padding:0; }
+.toggle.primary { border:1px solid var(--accent); }
+.toggle.primary:hover { background:var(--accent-soft); }
+.toggle.subtle { border:1px solid var(--stroke-2); color:var(--text-2); }
+.toggle.subtle:hover { background:var(--hover); }
+.toggle .stop-glyph { width:8px; height:8px; border-radius:1.5px; }
+.toggle.primary .stop-glyph { background:var(--accent); }
+.toggle.subtle .stop-glyph { background:currentColor; }
+.toggle .play-glyph { width:0; height:0; border-left:8px solid currentColor; border-top:5px solid transparent; border-bottom:5px solid transparent; margin-left:2px; }
+.vsep { width:1px; height:22px; background:var(--stroke); }
+.open-web-ui { display:inline-flex; align-items:center; gap:7px; background:var(--layer-2); border:1px solid var(--stroke-2); border-radius:6px; padding:5px 11px; color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; }
+.open-web-ui:hover { background:var(--hover); }
+.open-web-ui[disabled] { opacity:.45; cursor:default; }
+.open-web-ui .arrow { font-size:12px; line-height:1; color:var(--text-2); }
+.identity { margin-left:auto; display:flex; align-items:center; gap:9px; }
+.identity .lead { font-size:11px; color:var(--text-3); }
+.identity .role { font-size:12px; color:var(--text-2); font-weight:500; }
+.identity .ver { font-family:var(--mono); font-size:11px; color:var(--text-3); }
+
+/* ---- Real frameless-window host (Tauri): fill the OS window instead of the
+   standalone-mock's fixed 760×520 card on a fake desktop backdrop. app.js sets
+   data-host="tauri" only under the WebView; the standalone screenshot/mock path is
+   untouched (keeps its centered card for the committed mocks). ---- */
+:root[data-host="tauri"] body { display:block; min-height:0; background:transparent; }
+:root[data-host="tauri"] .window { width:100vw; height:100vh; border-radius:0; border:none; box-shadow:none; }
+
+/* ---- Body (fleet presence) ---- */
+/* scrollbar-gutter:stable reserves the scroll gutter INSIDE the body so the vertical
+   scrollbar never sits on the window edge / over the rounded corner; the thin styled
+   scrollbar keeps it quiet and inset (WebView2/Chromium). */
+.body { flex:1; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; scrollbar-gutter:stable; }
+.body::-webkit-scrollbar { width:10px; }
+.body::-webkit-scrollbar-track { background:transparent; }
+.body::-webkit-scrollbar-thumb { background:var(--stroke-2); border-radius:6px; border:3px solid transparent; background-clip:content-box; }
+.body::-webkit-scrollbar-thumb:hover { background:var(--dot-dim); background-clip:content-box; }
+.nodes-header { display:flex; align-items:baseline; gap:10px; padding:14px 16px 9px; }
+.nodes-header .kicker { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.09em; color:var(--text-3); }
+.nodes-header .summary { font-size:12px; color:var(--text-3); }
+.node-list { }
+.node-list.degraded { opacity:.5; }
+
+.node-row { display:flex; align-items:center; gap:12px; padding:9px 16px; border-bottom:1px solid var(--stroke); }
+.dot { width:11px; height:11px; border-radius:50%; flex:none; }
+.dot.online { background:var(--accent); }
+.dot.stale  { background:transparent; border:1.6px solid var(--dot-stale-ring); } /* quiet grey ring — NEVER red */
+.dot.offline{ background:transparent; border:1.6px dashed var(--dot-dim); }
+.node-id { display:flex; align-items:center; gap:8px; width:212px; flex:none; }
+.node-name { font-family:var(--mono); font-size:13px; font-weight:600; color:var(--text); }
+.chip { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-3); border:1px solid var(--stroke-2); border-radius:5px; padding:2px 6px; white-space:nowrap; }
+.role-badge { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-3); border:1px solid var(--stroke-2); border-radius:5px; padding:2px 0; width:70px; text-align:center; flex:none; }
+.node-ver { font-family:var(--mono); font-size:12px; color:var(--text-3); width:52px; flex:none; }
+.work { flex:1; display:flex; align-items:center; gap:8px; min-width:0; }
+.work-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; animation:rpulse 1.7s ease-in-out infinite; }
+.work-ref { font-family:var(--mono); font-size:12px; font-weight:600; color:var(--text); flex:none; }
+.work-title { font-size:13px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.work-idle { font-size:13px; color:var(--text-3); }
+/* milestone 38 (F7 fix) — the Tauri-IPC row's single active-work label: both
+   `running N runs` and the NEW `working · <repo> (session)` state render here,
+   sharing the SAME primary/bold emphasis `.work-ref` already carries (DESIGN
+   §Surface 1 "working reads as a PEER of running, not louder and not quieter") —
+   no new colour token, no new primitive, just one more label on the existing line. */
+.work-label { font-size:13px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* ---- Error banner (calm — one sentence + Retry, NEVER a stack trace) ---- */
+.error-banner { margin:12px 16px 4px; display:flex; align-items:center; gap:11px; background:var(--caution-bg); border:1px solid var(--caution-stroke); border-radius:8px; padding:10px 13px; }
+.error-banner .glyph { color:var(--caution-text); font-size:15px; line-height:1; flex:none; }
+.error-banner .msg { flex:1; font-size:12.5px; color:var(--text-2); line-height:1.4; }
+.error-banner .retry { flex:none; background:var(--layer); border:1px solid var(--stroke-2); border-radius:6px; padding:4px 12px; font-size:12px; color:var(--text); cursor:pointer; }
+.error-banner .retry:hover { background:var(--hover); }
+
+/* ---- Empty ---- */
+.empty { flex:1; display:flex; align-items:center; justify-content:center; padding:26px; }
+.empty-card { max-width:390px; border:1.5px dashed var(--stroke-2); border-radius:12px; padding:26px 26px 24px; display:flex; flex-direction:column; align-items:center; gap:11px; text-align:center; background:var(--layer-2); }
+.empty-logo { width:26px; height:26px; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:5px; opacity:.5; }
+.empty-logo i { border-radius:50%; border:1.5px solid var(--dot-dim); }
+.empty-title { font-size:14px; font-weight:600; color:var(--text); }
+.empty-sub { font-size:12.5px; color:var(--text-3); line-height:1.55; }
+.empty-cmds { display:flex; flex-direction:column; gap:7px; width:100%; margin-top:3px; }
+.cmd { display:flex; align-items:center; gap:8px; background:var(--layer); border:1px solid var(--stroke-2); border-radius:7px; padding:8px 11px; }
+.cmd code { flex:1; text-align:left; font-family:var(--mono); font-size:12px; color:var(--text-2); }
+.cmd .copy { font-size:12px; color:var(--text-3); }
+
+/* ---- Loading skeleton (reserves the same layout — no reflow) ---- */
+.skel-header { display:flex; align-items:center; gap:10px; padding:14px 16px 9px; }
+.sk { border-radius:4px; background:var(--skel); animation:shimmer 1.4s ease-in-out infinite; }
+.sk.dim { background:var(--skel-2); }
+.skel-row { display:flex; align-items:center; gap:12px; padding:11px 16px; border-bottom:1px solid var(--stroke); }
+.skel-row .dot-sk { width:11px; height:11px; border-radius:50%; background:var(--skel); flex:none; animation:shimmer 1.4s ease-in-out infinite; }
+
+/* ---- Footer ---- */
+.footer { height:30px; flex:none; border-top:1px solid var(--stroke); background:var(--titlebar); display:flex; align-items:center; gap:7px; padding:0 16px; }
+.foot-glyph { color:var(--text-3); font-size:12px; line-height:1; }
+#footer-text { font-size:12px; color:var(--text-3); }

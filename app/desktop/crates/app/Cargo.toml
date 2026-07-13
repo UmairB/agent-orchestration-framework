@@ -1,0 +1,33 @@
+[package]
+name = "mesh-desktop-app"
+version = "0.1.0"
+edition = "2021"
+description = "The Tauri v2 shell for the Mesh Desktop App (milestone 36): loads ui/, builds the tray from tray_menu()/icon_state(), opens the frameless node/work window, and wires story 00's supervisor core + IPC. DELIBERATELY EXCLUDED from the workspace default-members (see ../../Cargo.toml) so `cargo test` over the core stays fast and does not require the WebView2/Tauri build toolchain. Real run + the tray/window rendering are @manual/@uat (story 01 task 02, story 02 task 03) — this crate is the coherent scaffold, not the verification seam."
+publish = false
+
+[dependencies]
+mesh-desktop-core = { path = "../core" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Single-instance guard (ambient-tray discipline): a SECOND `aof mesh desktop run`
+# must NOT spawn a duplicate supervisor (two tray icons + two `mesh serve`/`mesh ui`
+# child trees = wasted memory) — it hands off to the FIRST instance, which shows +
+# focuses its window. Registered as the FIRST plugin (plugin-ordering requirement).
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "time", "macros", "sync", "io-util"] }
+# ADR-002 d4 / DESIGN §Surface 2 region 3: the default-browser launch for the tray's
+# "Open web UI" (`opener::open_browser`, a non-`Command::new` launch so it never trips
+# `acd-desktop-trusted-spawn`). Cross-platform, so it lives in the shared deps.
+opener = "0.8.5"
+
+# ADR-002 d3: the Windows Job Object (JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) child-tree
+# reaper — the narrow/stable `win32job` crate the ADR names over `processkit`. It is a
+# Windows-only containment detail behind the neutral "reap the supervised tree" seam,
+# so it is a target-scoped dependency (the portable-core posture, ADR-001 — a later
+# macOS/Linux tray swaps a process-group/cgroup behind the same seam).
+[target.'cfg(windows)'.dependencies]
+win32job = "2.0.3"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
