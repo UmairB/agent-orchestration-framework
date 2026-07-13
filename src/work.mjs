@@ -36,7 +36,11 @@ function workError(message, code, status = 400) {
 // `uat` is a top-level acceptance session: like a milestone it sits in the
 // stream, carries `depends`, and gates downstream work — but it groups no
 // stories (it references existing scenarios, it delivers no new behaviour).
-const ITEM_RE = /^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$/;
+// `spike` and `chore` (milestone 37 / ADR-001) are two more top-level DRIVERS,
+// admitted the SAME way: they sit at the stream root, carry `depends`, group
+// no stories, and are themselves the actionable unit — see `isDriver` and the
+// `nextWork` item-is-the-work branch below.
+const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
 const VALID_STATUS = new Set(["not-started", "in-progress", "blocked", "in-review", "done"]);
 const UNIVERSAL_TAGS = new Set(["@executable", "@manual", "@uat", "@bug", "@wip"]);
 const VERIFICATION_TAGS = new Set(["@executable", "@manual", "@uat"]);
@@ -281,12 +285,20 @@ export function recordDoc(item) {
   }
   if (item.type === "story") return "STORY.md";
   if (item.type === "uat") return "SESSION.md";
+  // milestone 37 / ADR-002 — spike/chore are single self-contained record docs
+  // (no separate STATE.md, unlike milestone/uat). Neither is a milestone, so
+  // these branches sit BEFORE the final `return null`.
+  if (item.type === "spike") return "SPIKE.md";
+  if (item.type === "chore") return "CHORE.md";
   return null;
 }
 
 // Top-level "drivers" of the stream — items that sit at the root, carry
-// `depends`, and participate in ordering/gating (milestones and uat sessions).
-const isDriver = (item) => item.type === "milestone" || item.type === "uat";
+// `depends`, and participate in ordering/gating (milestones and uat sessions,
+// and — milestone 37 / ADR-001 — spike and chore: same shape, they group no
+// stories and are themselves the actionable unit).
+const isDriver = (item) =>
+  item.type === "milestone" || item.type === "uat" || item.type === "spike" || item.type === "chore";
 
 // Minimal frontmatter reader: `key: value`, inline lists `[a, b]`, quoted
 // scalars. Block lists/maps are not needed — the only collection any record doc
@@ -687,10 +699,12 @@ const ready = (item, status) => ({
 });
 
 // The next actionable item, respecting `depends`: the first not-`done`
-// top-level driver (milestone or uat session) whose dependencies are all
-// `done`. A milestone is drilled into its first not-`done` story; a uat
-// session is itself the actionable item (it groups no stories — running it
-// is the work). Returns { state: "ready" | "blocked" | "done", ... }.
+// top-level driver (milestone, uat session, spike, or chore) whose
+// dependencies are all `done`. A milestone is drilled into its first not-`done`
+// story; a uat session, spike, or chore is itself the actionable item (each
+// groups no stories — running/resolving/ticking it IS the work; milestone 37 /
+// ADR-001 treats spike/chore the uat way). Returns
+// { state: "ready" | "blocked" | "done", ... }.
 //
 // The OPTIONAL third argument (milestone 26 / ADR-005, WIDENED milestone 27 /
 // ADR-004 — mesh-aware next, INJECTED): `candidacyView` is a pre-computed,
@@ -754,10 +768,14 @@ export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
       continue;
     }
 
-    if (driver.type === "uat") {
+    if (driver.type === "uat" || driver.type === "spike" || driver.type === "chore") {
       // milestone 27 / ADR-004.3 — the uat driver return is now candidacy-aware
       // (before m27 this return was candidacy-BLIND — a peer's next double-offered
-      // a live-leased/targeted-elsewhere uat ref).
+      // a live-leased/targeted-elsewhere uat ref). milestone 37 / ADR-001 (FF-3705,
+      // honouring 26/ADR-007) — spike/chore are routed through this SAME
+      // candidacy-guarded, item-is-the-work return, NOT a fresh unguarded one: they
+      // group no stories, so the milestone drill-down path below would mis-classify
+      // them as "needs break-down".
       const uatCandidacy = candidacyView?.get?.(driver.ref);
       if (uatCandidacy?.routed === "elsewhere" || uatCandidacy?.state === "leased-live") {
         continue; // another node's work, or being worked live — pass over, keep walking

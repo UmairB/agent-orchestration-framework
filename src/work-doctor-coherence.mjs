@@ -48,8 +48,21 @@ function childrenByMilestoneDir(snapshot) {
 // child under a not-started parent is the `stale-parent` shape.
 const isStarted = (status) => status != null && status !== "not-started";
 
+// milestone 37 / ADR-001 — spike/chore admitted here too (mirrors work.mjs's
+// recordDoc), so a cross-item finding anchored on a spike/chore resolves to its
+// own record doc (SPIKE.md/CHORE.md), not its bare folder.
 const recordDocFor = (item) =>
-  item.type === "milestone" ? "SPEC.md" : item.type === "story" ? "STORY.md" : item.type === "uat" ? "SESSION.md" : null;
+  item.type === "milestone"
+    ? "SPEC.md"
+    : item.type === "story"
+      ? "STORY.md"
+      : item.type === "uat"
+        ? "SESSION.md"
+        : item.type === "spike"
+          ? "SPIKE.md"
+          : item.type === "chore"
+            ? "CHORE.md"
+            : null;
 
 // Anchor a finding on the item's record doc when it has one, else its folder — the
 // natural anchor for a cross-item status fact (e.g. the lying parent's SPEC.md).

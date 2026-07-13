@@ -37,15 +37,30 @@ import { meshIdentityCommittedGroup } from "./work-doctor-identity.mjs";
 // tiny bodies here (the same closed vocabulary) rather than re-globbing identity.
 // Exported so the appended check-group modules (stories 01/02) consume the SAME
 // identity vocabulary as the spine — no re-parsing of the item-name grammar.
-export const ITEM_RE = /^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$/;
+// milestone 37 / ADR-001 — spike/chore admitted here too (mirrors work.mjs's
+// ITEM_RE), so doctor does not flag a NN_spike_*/NN_chore_* folder as an unknown
+// orphan.
+export const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const recordDoc = (type) =>
-  type === "milestone" ? "SPEC.md" : type === "story" ? "STORY.md" : type === "uat" ? "SESSION.md" : null;
+  type === "milestone"
+    ? "SPEC.md"
+    : type === "story"
+      ? "STORY.md"
+      : type === "uat"
+        ? "SESSION.md"
+        : type === "spike"
+          ? "SPIKE.md"
+          : type === "chore"
+            ? "CHORE.md"
+            : null;
 
 // Top-level drivers of the stream — the items that carry a number the resolver
-// keys on (milestones + uat sessions). Mirrors `work.mjs`'s `isDriver`.
-export const isDriver = (item) => item.type === "milestone" || item.type === "uat";
+// keys on (milestones + uat sessions + spike/chore — milestone 37 / ADR-001).
+// Mirrors `work.mjs`'s `isDriver`.
+export const isDriver = (item) =>
+  item.type === "milestone" || item.type === "uat" || item.type === "spike" || item.type === "chore";
 
 async function readDirSafe(dir) {
   try {
