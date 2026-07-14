@@ -9,7 +9,9 @@ description: Ask Codex CLI (gpt-5.6) to run local app verification that needs co
 
 Use Codex as a separate local verification agent when the task needs real UI interaction, screenshots, simulator/browser/device state, or an independent runtime check outside Claude's current context.
 
-Target the top-tier gpt-5.6 variant with `-m gpt-5.6-sol` so the verification run uses the strongest available model.
+This project's configured delegation model is `gpt-5.6-sol` (set via `aof work delegation-model <id>`) — target it explicitly with `-m gpt-5.6-sol` so the verification run uses the configured model.
+
+**Be explicit about the model.** Before the run, state `Delegating verification to gpt-5.6-sol via Codex…`; in the final report, name `gpt-5.6-sol` again so it's always clear which model performed the verification.
 
 Do not use this for ordinary code reading, typechecking, linting, or tests Claude can run directly. Launching apps, simulators, or browsers to verify the requested work is fine without asking; ask first only if the run could disrupt the user's environment beyond that (closing their apps, changing system settings, acting on real accounts or data).
 

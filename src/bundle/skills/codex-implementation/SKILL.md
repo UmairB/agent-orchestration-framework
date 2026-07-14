@@ -9,7 +9,9 @@ description: Ask Codex CLI (gpt-5.6) to implement scoped code changes in the cur
 
 Use Codex as a separate implementation agent for bounded code changes. Claude remains responsible for scoping the task, reviewing the diff, running or checking verification, and explaining the final result.
 
-`gpt-5.6-sol` is the most advanced gpt-5.6 variant — target it explicitly with `-m gpt-5.6-sol` so bulk/mechanical implementation runs on the strongest available model. Prefer it for clear-spec implementation, migrations, and other mechanical work.
+This project's configured delegation model is `gpt-5.6-sol` (set via `aof work delegation-model <id>`) — target it explicitly with `-m gpt-5.6-sol` so bulk/mechanical implementation runs on the configured model. Prefer it for clear-spec implementation, migrations, and other mechanical work.
+
+**Be explicit about the model.** Before the run, state `Delegating to gpt-5.6-sol via Codex…`; in the final report, name `gpt-5.6-sol` again so the user always knows which model did the work.
 
 Use this when the user asks for Codex or delegation, or when a bounded task would benefit from a parallel implementation agent producing a patch. Do not let Codex commit, push, deploy, or edit global config unless the user explicitly asked for that.
 

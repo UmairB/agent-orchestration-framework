@@ -13,12 +13,17 @@ import path from "node:path";
 import {
   DELEGATION_STATES,
   DEFAULT_DELEGATION,
+  DEFAULT_DELEGATION_MODEL,
   readDelegation,
+  readDelegationModel,
   resolveDelegation,
   setDelegation,
+  setDelegationModel,
   setDelegationCommand,
+  setDelegationModelCommand,
   showDelegation,
-  applyDelegationToResources
+  applyDelegationToResources,
+  applyDelegationModelToResources
 } from "../src/work-delegation.mjs";
 import { loadBundle, renderBundleOutputs } from "../src/work-bundle.mjs";
 import { validateConfig } from "../src/config-inspect.mjs";
@@ -177,6 +182,135 @@ export const workDelegationTests = [
       const agentBefore = bundle.resources.find((r) => r.kind === "agent");
       const agentAfter = on.find((r) => r.id === agentBefore.id);
       assert.deepEqual(agentAfter, agentBefore, "agents are untouched by the delegation projection");
+    }
+  },
+
+  {
+    name: "work-delegation: readDelegationModel defaults to gpt-5.6-sol and honours an explicit id",
+    run: async () => {
+      assert.equal(DEFAULT_DELEGATION_MODEL, "gpt-5.6-sol");
+      assert.equal(readDelegationModel({}), "gpt-5.6-sol", "absent ≡ default");
+      assert.equal(readDelegationModel({ work: { agents: { delegationModel: "" } } }), "gpt-5.6-sol", "blank ≡ default");
+      assert.equal(readDelegationModel({ work: { agents: { delegationModel: "  " } } }), "gpt-5.6-sol", "whitespace ≡ default");
+      assert.equal(readDelegationModel({ work: { agents: { delegationModel: 42 } } }), "gpt-5.6-sol", "non-string ≡ default");
+      assert.equal(readDelegationModel({ work: { agents: { delegationModel: "gpt-5.7-codex-max" } } }), "gpt-5.7-codex-max");
+      assert.equal(readDelegationModel({ work: { agents: { delegationModel: "  trim-me  " } } }), "trim-me", "trimmed");
+    }
+  },
+
+  {
+    name: "work-delegation: setDelegationModel writes ONLY work.agents.delegationModel, preserving siblings",
+    run: async () => {
+      const config = { name: "x", work: { agents: { delegation: "on", models: { "aof-qa": "opus" }, mode: "orchestrated" } } };
+      setDelegationModel(config, "gpt-5.7-codex-max");
+      assert.equal(config.work.agents.delegationModel, "gpt-5.7-codex-max");
+      assert.equal(config.work.agents.delegation, "on", "delegation toggle sibling preserved");
+      assert.deepEqual(config.work.agents.models, { "aof-qa": "opus" }, "models sibling preserved");
+      assert.equal(config.work.agents.mode, "orchestrated", "mode sibling preserved");
+    }
+  },
+
+  {
+    name: "work-delegation: the model command sets the id and reports the change; blank is rejected without writing",
+    run: async () => {
+      const dir = await fixture({ name: "x", work: { agents: { delegation: "on" } } });
+      try {
+        const set = await setDelegationModelCommand({ targetDir: dir, model: "gpt-5.7-codex-max", log: silent });
+        assert.equal(set.model, "gpt-5.7-codex-max");
+        assert.equal(set.previous, "gpt-5.6-sol", "previous falls back to the default");
+        assert.equal(set.changed, true);
+        const written = await readConfigFile(dir);
+        assert.equal(written.work.agents.delegationModel, "gpt-5.7-codex-max");
+        assert.equal(written.work.agents.delegation, "on", "toggle sibling survives the model write");
+
+        await assert.rejects(
+          () => setDelegationModelCommand({ targetDir: dir, model: "   ", log: silent }),
+          /not a valid delegation model/
+        );
+        assert.equal((await readConfigFile(dir)).work.agents.delegationModel, "gpt-5.7-codex-max", "config untouched on rejection");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  },
+
+  {
+    name: "work-delegation: --show reports the model (default-annotated) alongside the state",
+    run: async () => {
+      const dir = await fixture({ name: "x", work: { agents: { delegation: "on", delegationModel: "gpt-5.7-codex-max" } } });
+      try {
+        const result = await showDelegation({ targetDir: dir, log: silent });
+        assert.equal(result.state, "on");
+        assert.equal(result.model, "gpt-5.7-codex-max");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  },
+
+  {
+    name: "work-delegation: the 3 codex skills + 2 ACD agents ship the default model literal",
+    run: async () => {
+      const bundle = loadBundle();
+      const carriers = bundle.resources.filter((r) => typeof r.body === "string" && r.body.includes(DEFAULT_DELEGATION_MODEL));
+      const ids = carriers.map((r) => r.id).sort();
+      assert.deepEqual(
+        ids,
+        ["aof-developer", "aof-researcher", "codex-computer-use", "codex-implementation", "codex-review"],
+        "exactly the 5 delegation carriers ship the default literal (keeps the substitution + default in sync)"
+      );
+    }
+  },
+
+  {
+    name: "work-delegation: applyDelegationModelToResources swaps a non-default model into every carrier; default is a no-op",
+    run: async () => {
+      const bundle = loadBundle();
+      const carriers = bundle.resources.filter((r) => typeof r.body === "string" && r.body.includes(DEFAULT_DELEGATION_MODEL));
+
+      // A DIFFERENT model rewrites every carrier and leaves no default literal behind.
+      const baked = applyDelegationModelToResources(bundle.resources, "gpt-5.7-codex-max");
+      for (const carrier of carriers) {
+        const after = baked.find((r) => r.id === carrier.id);
+        assert.ok(!after.body.includes(DEFAULT_DELEGATION_MODEL), `${carrier.id} has no leftover default literal`);
+        assert.ok(after.body.includes("gpt-5.7-codex-max"), `${carrier.id} carries the resolved id`);
+      }
+      // Non-carrier resources are returned by reference (no rewrite).
+      const untouched = bundle.resources.filter((r) => typeof r.body !== "string" || !r.body.includes(DEFAULT_DELEGATION_MODEL));
+      for (const r of untouched) {
+        assert.equal(baked.find((b) => b.id === r.id), r, `${r.id} is returned by reference`);
+      }
+      // The DEFAULT (and blank/absent, which resolves to default) is a pure no-op:
+      // the SAME array reference comes back, so the canonical render is untouched.
+      assert.equal(applyDelegationModelToResources(bundle.resources, DEFAULT_DELEGATION_MODEL), bundle.resources, "default ⇒ identity");
+      assert.equal(applyDelegationModelToResources(bundle.resources, ""), bundle.resources, "blank ⇒ default ⇒ identity");
+    }
+  },
+
+  {
+    name: "work-delegation: the validator accepts a non-empty model and rejects a blank/non-string one",
+    run: async () => {
+      const good = await diagnosticsForConfig({ work: { agents: { delegationModel: "gpt-5.7-codex-max" } } });
+      assert.equal(good.some((d) => d.severity === "error" && String(d.path).startsWith("work.agents.delegationModel")), false, "a real id is valid");
+      for (const bad of ["", "   ", 42]) {
+        const diags = await diagnosticsForConfig({ work: { agents: { delegationModel: bad } } });
+        assert.ok(
+          diags.some((d) => d.severity === "error" && d.code === "delegation-model-bad-value"),
+          `${JSON.stringify(bad)} is rejected`
+        );
+      }
+    }
+  },
+
+  {
+    name: "work-delegation: the canonical (config-agnostic) render carries the default model as a real -m target",
+    run: async () => {
+      const outputs = renderBundleOutputs(loadBundle(), { runtimes: ["claude"] });
+      const skills = outputs.filter((o) => o.resource?.kind === "skill");
+      assert.equal(skills.length, 3, "three codex skills render");
+      for (const skill of skills) {
+        assert.match(skill.content, /-m gpt-5\.6-sol/, `${skill.resource.id} renders a real -m default target (no placeholder)`);
+      }
     }
   }
 ];

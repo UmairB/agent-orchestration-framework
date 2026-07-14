@@ -11,7 +11,9 @@ Use Codex as an independent reviewer when the user wants a second-pass review or
 
 Prefer Claude's normal review process for small local checks. Do not delegate review just to avoid reading the code yourself. Treat Codex's output as evidence, not authority.
 
-Target the top-tier gpt-5.6 variant with `-m gpt-5.6-sol` so the review runs on the strongest available model.
+This project's configured delegation model is `gpt-5.6-sol` (set via `aof work delegation-model <id>`) — target it explicitly with `-m gpt-5.6-sol` so the review runs on the configured model.
+
+**Be explicit about the model.** Before the run, state `Delegating review to gpt-5.6-sol via Codex…`; in the user-facing summary, name `gpt-5.6-sol` again so it's always clear which model reviewed.
 
 ## Workflow
 

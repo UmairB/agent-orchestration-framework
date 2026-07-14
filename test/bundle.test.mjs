@@ -59,7 +59,8 @@ const COMMAND_IDS = [
   "verify"
 ];
 const TEMPLATE_IDS = ["milestone", "story", "task", "uat"];
-// The bundled gpt-5.6 delegation skills — how the ACD agents reach gpt-5.6-sol.
+// The bundled gpt-5.6 delegation skills — how the ACD agents reach the configured
+// delegation model (default gpt-5.6-sol; see work-delegation.test.mjs).
 const SKILL_IDS = ["codex-computer-use", "codex-implementation", "codex-review"];
 
 function descriptorMembers() {

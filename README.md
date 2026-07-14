@@ -81,17 +81,27 @@ It writes `settings.claude.model` in `.aof/aof.config.json`, which `aof apply` p
 
 Each **role** ships a default model (a moving family alias), overridable per role via `work.agents.models`: the author/gate/review roles (`aof-architect`, `aof-designer`, `aof-product-owner`, `aof-qa`, `aof-security`, `aof-compliance`) default to **opus**; the execute/gather roles (`aof-developer`, `aof-researcher`) to **sonnet**. **Fable 5 is never a shipped default** — it's expensive, so it stays opt-in: choose it as the orchestrator model, or set it for a specific role via `work.agents.models` (e.g. `{ "aof-designer": "fable" }`).
 
-When delegation is enabled (the toggle below — it's **off by default**), the developer and researcher hand **bulk / mechanical work to gpt-5.6-sol** (the top-tier gpt-5.6 variant), documented by three bundled skills rendered into `.claude/skills/`: **codex-implementation** (scoped patches), **codex-review** (independent review), and **codex-computer-use** (app/UI verification). Each targets `gpt-5.6-sol` via the Codex CLI; Claude stays responsible for scoping, reviewing the diff, and verifying.
+When delegation is enabled (the toggle below — it's **off by default**), the developer and researcher hand **bulk / mechanical work to the configured delegation model** (default `gpt-5.6-sol`, the top-tier gpt-5.6 variant), documented by three bundled skills rendered into `.claude/skills/`: **codex-implementation** (scoped patches), **codex-review** (independent review), and **codex-computer-use** (app/UI verification). Each targets the configured model via the Codex CLI and states which model it is using; Claude stays responsible for scoping, reviewing the diff, and verifying.
 
 **gpt-5.6 is opt-in, off by default.** One switch controls it:
 
 ```sh
-aof work delegation on     # agents may hand bulk/mechanical work to gpt-5.6-sol
+aof work delegation on     # agents may hand bulk/mechanical work to the delegation model
 aof work delegation off    # Claude-only (default) — agents do everything themselves
-aof work delegation --show
+aof work delegation --show # report the toggle state and the active delegation model
 ```
 
 After you flip the toggle it prompts for the **orchestrator (main-session) model — Fable 5 or Opus 4.8** — so both model decisions are made together (pass `--model fable|opus` to set it non-interactively, or `--no-model` to skip). It writes `work.agents.delegation` ("off" | "on", default off) and re-renders the three `codex-*` skills to match: **off** renders them with `disable-model-invocation: true` (Claude Code won't auto-trigger them — Claude does everything itself), **on** drops that flag so they become auto-invocable. So the toggle literally turns gpt-5.6 delegation on and off; reload the Claude Code session after flipping it. Either way you can always invoke `/codex-implementation` (etc.) by hand, and a Claude-only setup (no gpt/Codex subscription) behaves identically to `off` out of the box. The orchestrator choice (Fable 5 / Opus 4.8) is Claude-only and needs no gpt subscription — nothing here is a hard dependency on having both.
+
+**The delegation model is a variable.** It defaults to `gpt-5.6-sol` but is set via `work.agents.delegationModel` — point it at a future Codex model without editing any bundle asset. The value is baked into the rendered `codex-*` skills and the developer/researcher agents (their `-m <model>` recipes) at render time:
+
+```sh
+aof work delegation-model gpt-5.7-codex-max   # set the Codex delegation model
+aof work delegation-model --show              # report the active model
+aof work delegation on --gpt-model gpt-5.6-sol   # flip the toggle AND set the model in one call
+```
+
+`--gpt-model` (the Codex/gpt side) is distinct from `--model fable|opus` (the orchestrator/Claude side) — the two never conflate. Any non-empty id is accepted, so new models work without a code change; re-render (which the command does automatically) and reload the Claude Code session to pick up the new model.
 
 ### `aof work` CLI commands
 
@@ -110,7 +120,8 @@ aof work feedback <ref> --note "…" [--actor …]   # append an attributed feed
 aof work memory <verb> [args] [--json]           # recall / brief / ingest / reindex / status
 aof work ui [--port 4180]            # serve the local board UI (built ui/dist) — one origin
 aof work orchestrator [fable|opus] [--show]      # pick the main-session (orchestrator) model — Fable 5 or Opus 4.8
-aof work delegation [on|off] [--show]            # toggle whether agents delegate bulk work to gpt-5.6-sol (default off)
+aof work delegation [on|off] [--gpt-model <id>] [--show]   # toggle bulk-work delegation (default off), optionally set the model
+aof work delegation-model [<id>] [--show]        # get/set the Codex delegation model (default gpt-5.6-sol)
 aof work use-headroom | unuse-headroom           # toggle the headroom context-compression plugin
 ```
 
