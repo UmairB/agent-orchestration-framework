@@ -254,7 +254,7 @@
         "id": "delegate",
         "kind": "command"
       },
-      "hash": "sha256:c7b431f6130ab6e00697bd8cb3fb9ed51747d7544be0fa8f047e9503b7c78b42"
+      "hash": "sha256:a1a31256fcca8d71bdadc4a561308a943b3f5de56256fb42e91b8dd5c317312d"
     },
     {
       "path": ".claude/commands/aof/feedback.md",

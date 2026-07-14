@@ -1,11 +1,12 @@
 ---
-description: Set this project's two model decisions in one place — toggle gpt-5.6 delegation on/off (default off), then always choose the orchestrator (main-session) model, Fable 5 or Opus 4.8. Pass `status` to just report the current settings.
+description: Set this project's two model decisions in one place — toggle Codex delegation on/off (default off), then always choose the orchestrator (main-session) model, Fable 5 or Opus 4.8. Pass `status` to just report the current settings.
 argument-hint: "on | off | status"
 allowed-tools: [Bash, Read]
 ---
 <objective>
 One command for the project's two model decisions: whether the ACD agents may delegate bulk/mechanical
-work to gpt-5.6 (via Codex — **default off**, Claude does everything itself), and which model the
+work to the configured Codex delegation model (via Codex — **default off**, Claude does everything itself),
+and which model the
 **orchestrator** (main session) runs on — **Fable 5 or Opus 4.8**. On any on/off change you are ALWAYS
 asked which orchestrator model to use.
 </objective>
@@ -30,8 +31,9 @@ Parse "$ARGUMENTS" — one of `on`, `off`, or `status` (empty ≡ `status`).
 
 <notes>
 - Delegation defaults to **off** (Claude-only): the `codex-*` skills render non-auto-invocable, so Claude
-  does everything itself. Turning it **on** re-renders them auto-invocable, so Claude may use gpt-5.6 for
-  bulk/mechanical work when the Codex CLI is available. Either way you can always invoke `/codex-…` by hand.
+  does everything itself. Turning it **on** re-renders them auto-invocable, so Claude may use the configured
+  Codex delegation model for bulk/mechanical work when the Codex CLI is available. Either way you can always
+  invoke `/codex-…` by hand.
 - The change is picked up on the next session load, so remind the user to reload after toggling.
 - Both orchestrator models stay fully available; this is a switch, not a one-way fallback. Fable 5 is the
   strongest but counts against token usage, so it is never a silent default — that is why you always ask.

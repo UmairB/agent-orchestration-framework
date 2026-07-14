@@ -1,5 +1,6 @@
-// The gpt-5.6 delegation toggle SURFACE — one on/off switch for whether the ACD
-// agents lean on gpt-5.6 (via the Codex CLI) for bulk/mechanical work.
+// The Codex delegation toggle SURFACE — one on/off switch for whether the ACD
+// agents lean on the configured delegation model (via the Codex CLI) for
+// bulk/mechanical work.
 //
 // The toggle records the operator's intent at `work.agents.delegation`
 // ("off" | "on", default off ≡ Claude-only) AND drives what the render emits:
@@ -147,10 +148,10 @@ export async function setDelegationCommand({ targetDir = process.cwd(), state, l
 
   if (resolved === "on") {
     const model = readDelegationModel(config);
-    log(`gpt-5.6 delegation is ON (work.agents.delegation = "on") in ${configPath}`);
+    log(`Codex delegation is ON (work.agents.delegation = "on") in ${configPath}`);
     log(`The codex-* skills become auto-invocable and the ACD agents may hand bulk/mechanical work to ${model} when the Codex CLI is available.`);
   } else {
-    log(`gpt-5.6 delegation is OFF (work.agents.delegation = "off") in ${configPath}`);
+    log(`Codex delegation is OFF (work.agents.delegation = "off") in ${configPath}`);
     log("Claude does everything itself — the codex-* skills won't auto-fire. Invoke `/codex-…` by hand for a one-off.");
   }
 
@@ -171,7 +172,7 @@ export async function setDelegationModelCommand({ targetDir = process.cwd(), mod
   setDelegationModel(config, resolved);
   await writeConfig(configPath, config);
 
-  log(`gpt delegation model is ${resolved} (work.agents.delegationModel = "${resolved}") in ${configPath}`);
+  log(`Codex delegation model is ${resolved} (work.agents.delegationModel = "${resolved}") in ${configPath}`);
   log(`The codex-* skills and ACD agents will target ${resolved} via the Codex CLI when delegation is on and Codex is available.`);
 
   return { configPath, config, model: resolved, previous, changed: previous !== resolved };
@@ -183,8 +184,8 @@ export async function showDelegation({ targetDir = process.cwd(), log = console.
   const state = readDelegation(config);
   const model = readDelegationModel(config);
   const modelIsDefault = readRawDelegationModel(config) === undefined;
-  log(`gpt-5.6 delegation: ${state}${state === DEFAULT_DELEGATION ? " (default)" : ""}`);
-  log(`gpt delegation model: ${model}${modelIsDefault ? " (default)" : ""}`);
+  log(`Codex delegation: ${state}${state === DEFAULT_DELEGATION ? " (default)" : ""}`);
+  log(`Codex delegation model: ${model}${modelIsDefault ? " (default)" : ""}`);
   return { configPath, config, state, model };
 }
 

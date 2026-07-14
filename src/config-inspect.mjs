@@ -1203,7 +1203,7 @@ function validateWorkAgents(agents, diagnostics) {
     return;
   }
 
-  // work.agents.delegation — the gpt-5.6 delegation toggle (default "off"). When
+  // work.agents.delegation — the Codex delegation toggle (default "off"). When
   // provided it must be exactly "off" or "on"; anything else is an error.
   if (agents.delegation !== undefined && agents.delegation !== "off" && agents.delegation !== "on") {
     diagnostics.push(diagnostic(

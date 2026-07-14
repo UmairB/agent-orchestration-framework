@@ -369,7 +369,7 @@
             },
             "delegation": {
               "enum": ["off", "on"],
-              "description": "The gpt-5.6 delegation toggle (default \"off\" when absent). off = Claude does everything itself and the codex-* skills render with disable-model-invocation:true (Claude Code won't auto-trigger them); on = the codex-* skills render auto-invocable so the ACD agents may hand bulk/mechanical work to the configured delegation model via the Codex CLI when it is available. The init/update render honours this flag (applyDelegationToResources); flipping it re-renders the skills. Set with `aof work delegation on|off`."
+              "description": "The Codex delegation toggle (default \"off\" when absent). off = Claude does everything itself and the codex-* skills render with disable-model-invocation:true (Claude Code won't auto-trigger them); on = the codex-* skills render auto-invocable so the ACD agents may hand bulk/mechanical work to the configured delegation model (work.agents.delegationModel, default gpt-5.6-sol) via the Codex CLI when it is available. The init/update render honours this flag (applyDelegationToResources); flipping it re-renders the skills. Set with `aof work delegation on|off`."
             },
             "delegationModel": {
               "type": "string",
