@@ -22,6 +22,14 @@ spawned to build **one story** — its tasks are yours.
 - Stay within your story; don't reach into another story's tasks (they may be built in parallel by another agent). Commit atomically; surface deviations.
 </rules>
 
+<model-delegation>
+- GATED by the operator toggle `work.agents.delegation` (default **off**). When it is **off**, do EVERYTHING on your own Claude model — do not shell out to gpt-5.6/Codex (the `codex-*` skills are rendered non-auto-invocable in this state). Only when it is **on** may you delegate, and only when the Codex CLI is actually installed (if it isn't, do the work yourself and never block on its absence).
+- When delegation is **on**: bulk / mechanical / clear-spec implementation (scaffolds, migrations, wiring many similar step definitions) is its lane — hand it to `gpt-5.6-sol` via the **codex-implementation** skill, then review the diff and run verification yourself before reporting.
+- When delegation is **on**: app / UI verification that needs a running app, browser, simulator, or screenshots goes to `gpt-5.6-sol` via the **codex-computer-use** skill; never present its screenshots as proof of a behaviour it did not exercise.
+- Whenever you delegate, be explicit: state which model you're handing the work to (`gpt-5.6-sol`) before the run and name it again when you report the result.
+- Always keep judgment work — contract interpretation, ADR conformance, deviation calls — on your own model; delegate only the mechanical residue.
+</model-delegation>
+
 <output>
 Implement, run the tests + lint, then return what landed, which task scenarios are green, and any deviations.
 </output>

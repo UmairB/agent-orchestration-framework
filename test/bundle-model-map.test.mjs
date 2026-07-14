@@ -11,7 +11,9 @@ import { loadBundle, renderBundleOutputs } from "../src/work-bundle.mjs";
 
 // The locked default map (STORY.md "Locked intent"): opus for the roles that
 // decide "what's correct" (author / gate / review), sonnet for the roles that
-// execute or gather against a locked target.
+// execute or gather against a locked target. Fable is deliberately NOT a shipped
+// default (it is expensive) — it is opt-in per role via `work.agents.models` and
+// as an orchestrator (main-session) choice.
 const DEFAULT_MODEL_BY_ROLE = {
   "aof-architect": "opus",
   "aof-security": "opus",
@@ -55,7 +57,7 @@ function claudeAgentContent(byPath, role) {
 export const bundleModelMapTests = [
   // ====================================================================
   // Scenario Outline: each ACD role's shipped default renders into its
-  // generated agent file (both Examples tables — 6 opus, 2 sonnet).
+  // generated agent file (6 opus, 2 sonnet).
   // ====================================================================
   {
     name: "bundle-model-map: each ACD role's shipped default renders into its generated .claude/agents file (6 opus, 2 sonnet)",

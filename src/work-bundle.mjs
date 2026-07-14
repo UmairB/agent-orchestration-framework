@@ -72,7 +72,7 @@ export function loadBundle() {
   const templates = [];
 
   for (const member of descriptor.members) {
-    if (member.kind === "agent" || member.kind === "command") {
+    if (member.kind === "agent" || member.kind === "command" || member.kind === "skill") {
       const raw = readFileSync(path.join(root, member.file), "utf8");
       const { frontmatter, body } = splitFrontmatter(raw);
       const resource = {
@@ -89,6 +89,13 @@ export function loadBundle() {
       }
       if (member.kind === "command" && member.commandNamespace) {
         resource.commandNamespace = member.commandNamespace;
+      }
+      // A skill member MAY declare `disableModelInvocation` in the descriptor: the
+      // codex-* delegation skills ship with it TRUE so Claude Code never
+      // auto-triggers them — gpt-5.6 is opt-in-on-request (invoke `/<name>`), the
+      // deterministic default that pairs with the `work.agents.delegation` toggle.
+      if (member.kind === "skill" && member.disableModelInvocation === true) {
+        resource.disableModelInvocation = true;
       }
       resources.push(resource);
       continue;

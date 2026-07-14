@@ -22,6 +22,8 @@ import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
+import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
+import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 import { initPlanning } from "./planning-init.mjs";
@@ -347,6 +349,21 @@ async function workCommand(args) {
     return;
   }
 
+  if (subcommand === "orchestrator") {
+    await workOrchestratorCommand(rest);
+    return;
+  }
+
+  if (subcommand === "delegation") {
+    await workDelegationCommand(rest);
+    return;
+  }
+
+  if (subcommand === "delegation-model") {
+    await workDelegationModelCommand(rest);
+    return;
+  }
+
   if (subcommand === "use-headroom") {
     await workUseHeadroomCommand(rest);
     return;
@@ -357,7 +374,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work orchestrator [fable|opus] [--show]\n  aof work delegation [on|off] [--model fable|opus] [--gpt-model <id>] [--no-model] [--show]\n  aof work delegation-model [<id>] [--show]\n  aof work use-headroom\n  aof work unuse-headroom`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -976,6 +993,117 @@ async function meshUiCommand(args) {
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   });
+}
+
+// `aof work orchestrator [model] [dir] [--show]` — set the model the main ACD
+// (orchestrating) session runs on. Config-only read-merge-write of
+// settings.claude.model in .aof/aof.config.json (never the lock); the render engine
+// projects it into .claude/settings.json. With no model arg it prompts Fable 5 vs
+// Opus 4.8; `--show` reports the current value without mutating.
+async function workOrchestratorCommand(args) {
+  const options = parseOptions(args);
+  const positionals = options._ ?? [];
+  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
+
+  if (options.show) {
+    await showOrchestratorModel({ targetDir });
+    return;
+  }
+
+  const model = options.model ?? positionals[0];
+  await selectOrchestratorModel({ targetDir, model });
+}
+
+// `aof work delegation [on|off] [dir] [--model fable|opus] [--no-model] [--show]` —
+// flip whether gpt-5.6 (via Codex) is in play, then pick the orchestrator model.
+// Writes work.agents.delegation (never the lock) and re-renders so the codex-*
+// skills follow the toggle: off ⇒ disable-model-invocation present (won't auto-fire),
+// on ⇒ dropped (auto-invocable). Default off ≡ Claude-only. After setting the toggle
+// it prompts Fable 5 vs Opus 4.8 (skip with --no-model).
+async function workDelegationCommand(args) {
+  const options = parseOptions(args);
+  const positionals = options._ ?? [];
+  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
+  const gptModel = options.gptModel;
+
+  if (options.show || (positionals.length === 0 && options.state === undefined && gptModel === undefined)) {
+    await showDelegation({ targetDir });
+    return;
+  }
+
+  // The on/off toggle is optional here — `--gpt-model <id>` alone sets only the Codex
+  // delegation model (the convenience twin of `aof work delegation-model`). When a
+  // state IS given, flip it first, then apply any model change, then re-render once.
+  const state = options.state ?? positionals[0];
+  if (state !== undefined) {
+    await setDelegationCommand({ targetDir, state });
+  }
+  if (gptModel !== undefined) {
+    await setDelegationModelCommand({ targetDir, model: gptModel });
+  }
+
+  // Re-render so the changes take effect on the installed codex-* skills — the toggle
+  // drives their `disable-model-invocation` (off ⇒ present/blocked, on ⇒ dropped/auto-
+  // invocable) and the model is baked into every `{{delegationModel}}` recipe. Uses the
+  // SAME update path (force re-render), which also keeps the lock consistent. If the
+  // project isn't init'd yet, the config is written and `aof work init` will honour it.
+  const update = await updateWork({ targetDir, force: true });
+  if (update.notInitialized) {
+    console.log("Config written. This project isn't ACD-initialised yet — run `aof work init` and it will be applied.");
+  } else {
+    console.log("Re-rendered the codex-* skills to match the config. Reload your Claude Code session so it picks up the change.");
+  }
+
+  // A model-only invocation (`--gpt-model` with no on/off) is done — don't touch the
+  // orchestrator model.
+  if (state === undefined) {
+    return;
+  }
+
+  // After flipping delegation, also pick the orchestrator (main-session) model —
+  // Fable 5 or Opus 4.8 — so the two model decisions are made together. `--no-model`
+  // skips it; `--model fable|opus` sets it without a prompt; otherwise prompt when
+  // interactive (or the AOF_ORCHESTRATOR_INPUT test seam is set), and on a
+  // non-interactive run with no --model just print a hint rather than hang.
+  if (options.noModel) {
+    console.log("Orchestrator model left unchanged. Set it anytime with `aof work orchestrator fable|opus`.");
+    return;
+  }
+  const model = options.model;
+  const canPrompt = process.stdin.isTTY || process.env.AOF_ORCHESTRATOR_INPUT !== undefined;
+  if (model !== undefined || canPrompt) {
+    await selectOrchestratorModel({ targetDir, model });
+  } else {
+    console.log("Orchestrator model left unchanged. Choose one with `aof work orchestrator fable|opus`, or re-run with `--model fable|opus`.");
+  }
+}
+
+// `aof work delegation-model [<id>] [dir] [--show]` — get or set the Codex delegation
+// model (config-only; never the lock), the moving variable the codex-* skills and ACD
+// agents target. No id (or --show) reports the current model; an id writes
+// work.agents.delegationModel and re-renders so the baked `{{delegationModel}}` recipes
+// pick up the new model. Distinct from `--model fable|opus` (the orchestrator/Claude side).
+async function workDelegationModelCommand(args) {
+  const options = parseOptions(args);
+  const positionals = options._ ?? [];
+  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
+
+  if (options.show || positionals.length === 0) {
+    await showDelegation({ targetDir });
+    return;
+  }
+
+  await setDelegationModelCommand({ targetDir, model: positionals[0] });
+
+  // Re-render so the new model is baked into the installed codex-* skills and agents
+  // (the `{{delegationModel}}` substitution runs on the same force-update path the toggle
+  // uses). If the project isn't init'd yet, the config is written and init will honour it.
+  const update = await updateWork({ targetDir, force: true });
+  if (update.notInitialized) {
+    console.log("Config written. This project isn't ACD-initialised yet — run `aof work init` and the model will be applied.");
+  } else {
+    console.log("Re-rendered the codex-* skills to target the new model. Reload your Claude Code session so it picks up the change.");
+  }
 }
 
 // `aof work use-headroom [dir]` — enable the headroom plugin (config-only read-merge-
@@ -2380,7 +2508,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "show", "noModel"].includes(key)) {
       options[key] = true;
       continue;
     }

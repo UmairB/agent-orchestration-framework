@@ -16,6 +16,7 @@ import { createRenderPlan } from "./render-plan.mjs";
 import { CAPABILITIES, CAPABILITY_STATUS } from "./model.mjs";
 import { renderBundleTemplateOutputs } from "./work-bundle.mjs";
 import { packageVersion } from "./work-bundle-manifest.mjs";
+import { readConfig, readDelegation, readDelegationModel, applyDelegationToResources, applyDelegationModelToResources } from "./work-delegation.mjs";
 
 // A member-kind is installable for a runtime iff the capability matrix says so.
 // `native` and `mapped` render; `unsupported-fail`/`unsupported-warning`/`future`
@@ -95,7 +96,18 @@ export async function planDesiredOutputs(bundle, installableResources, runtimes,
 // compute from the bundle for the selected runtimes. Returns the desired outputs
 // and the not-installable report (the matrix-surfaced members).
 export async function synthesizeBundleConfig(bundle, { runtimes, targetDir }) {
-  const { installable, notInstallable } = partitionByCapability(bundle.resources, runtimes);
+  // Config-aware projection (the ONLY project-config read on the render path): the
+  // `work.agents.delegation` toggle drops disable-model-invocation off the codex-*
+  // skills when ON, so init/update render them auto-invocable. Absent config ⇒ OFF
+  // ⇒ no change (the bundle default). No runtime branch — a generic per-resource map.
+  const { config } = await readConfig(targetDir);
+  // Two config-aware projections, both pure per-resource maps: the delegation
+  // TOGGLE drops disable-model-invocation off the codex-* skills when ON, and the
+  // delegation MODEL bakes the configured id into every `{{delegationModel}}` token
+  // (skills + agents) regardless of the toggle. Absent config ⇒ OFF + default model.
+  const toggled = applyDelegationToResources(bundle.resources, readDelegation(config));
+  const resources = applyDelegationModelToResources(toggled, readDelegationModel(config));
+  const { installable, notInstallable } = partitionByCapability(resources, runtimes);
   const desiredOutputs = await planDesiredOutputs(bundle, installable, runtimes, targetDir);
   return { desiredOutputs, notInstallable };
 }

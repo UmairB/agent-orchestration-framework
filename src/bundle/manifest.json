@@ -146,7 +146,7 @@
         "id": "aof-developer",
         "kind": "agent"
       },
-      "hash": "sha256:0e16fb2cd6b439c392a93438275dafe0648f34a8a0bd003e14cafc545d6f6129"
+      "hash": "sha256:b619918b8b7e9c54b54c8369fb0285cfc6e1ef7e6b1a4473c200d182b4807122"
     },
     {
       "path": ".claude/agents/aof-product-owner.md",
@@ -173,7 +173,7 @@
         "id": "aof-researcher",
         "kind": "agent"
       },
-      "hash": "sha256:01c00eff94f12d6070a2903d6746045d764558ab6ef615dbd4e1c1e333d9f1aa"
+      "hash": "sha256:641709966324c28a77a3068bf6eca5925491c66011b0461f2be9ccfff530d166"
     },
     {
       "path": ".claude/agents/aof-security.md",
@@ -248,6 +248,15 @@
       "hash": "sha256:195a6f74af8ee0100d04af0a70c16010942fe92587a9306b61c35bf0bc46b216"
     },
     {
+      "path": ".claude/commands/aof/delegate.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "delegate",
+        "kind": "command"
+      },
+      "hash": "sha256:a1a31256fcca8d71bdadc4a561308a943b3f5de56256fb42e91b8dd5c317312d"
+    },
+    {
       "path": ".claude/commands/aof/feedback.md",
       "runtime": "claude",
       "resource": {
@@ -309,6 +318,33 @@
         "kind": "command"
       },
       "hash": "sha256:eefb58613782571a1fa455b721294b7d2df239d244937a494bec6674c920c131"
+    },
+    {
+      "path": ".claude/skills/codex-computer-use/SKILL.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "codex-computer-use",
+        "kind": "skill"
+      },
+      "hash": "sha256:63817f896bf18dc3827b51905c02d5001dd07dfe89441778e622116be31bcc8e"
+    },
+    {
+      "path": ".claude/skills/codex-implementation/SKILL.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "codex-implementation",
+        "kind": "skill"
+      },
+      "hash": "sha256:806198ef5b5582efb47c7035358691e361bc8e4107ff6c46a98da6703ff5479b"
+    },
+    {
+      "path": ".claude/skills/codex-review/SKILL.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "codex-review",
+        "kind": "skill"
+      },
+      "hash": "sha256:550842936dbd385b1e84f93096ae329092a38f64b96095f5fe48292bd2220a8f"
     }
   ]
 }
