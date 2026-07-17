@@ -48,9 +48,15 @@ function manualTicker() {
 // A fake control-stream server exposing the EXACT shape the driver reads:
 // `directiveTargets.get(nodeId)` (a connected-peer resolver) + `dispatchDirective`
 // (a recorder), mirroring startControlStreamServer's real returned handle.
-function fakeStreamServer({ connectedNodeIds = [] } = {}) {
+function fakeStreamServer({ connectedNodeIds = [], sendResults = null } = {}) {
   const dispatched = [];
   const connected = new Set(connectedNodeIds);
+  // sendResults: an optional queue of `{ sent }` results dispatchDirective returns in
+  // order (one per call), falling back to `{ sent: true }` once exhausted — lets a
+  // test simulate a target present in directiveTargets but not yet OPEN (review fix,
+  // live soak 2026-07-17): the map entry exists (fakeStreamServer's own `connected`
+  // check passes) while the underlying send still fails.
+  const results = Array.isArray(sendResults) ? [...sendResults] : null;
   return {
     dispatched,
     connected,
@@ -59,7 +65,7 @@ function fakeStreamServer({ connectedNodeIds = [] } = {}) {
     },
     dispatchDirective(directive) {
       dispatched.push(directive);
-      return { sent: true };
+      return results != null && results.length > 0 ? results.shift() : { sent: true };
     },
     updatePeers() {},
     stop() {},
@@ -274,6 +280,37 @@ export const meshControlDispatchDriverTests = [
         } finally {
           await cleanup(repo);
         }
+      }
+    },
+  },
+  {
+    name: "control-dispatch-driver/03 a dispatch attempt that does not actually send (target present but not OPEN) is retried on the next tick",
+    async run() {
+      const repo = await makeRepo();
+      try {
+        await seedAssignedRow(repo, { assignmentId: "asg-1", itemRef: "35/01", targetNodeId: "worker-a" });
+        const controlTicker = manualTicker();
+        // The FIRST dispatch attempt reports sent:false (e.g. the socket is in
+        // directiveTargets but still mid-handshake, not yet OPEN) — the once-guard
+        // must NOT swallow this row; the SECOND attempt succeeds.
+        const server = fakeStreamServer({ connectedNodeIds: ["worker-a"], sendResults: [{ sent: false, code: "target-not-connected" }] });
+        const handle = await startLauncher(await loadWorkspace(repo, undefined, { env: { AOF_GLOBAL_HOME: path.join(repo, ".global-aof") } }), launcherOptions(repo, {
+          startControlStreamServer: async () => server,
+          controlDispatchReclaimTicker: controlTicker,
+        }));
+        assert.equal(handle.refused, undefined);
+
+        controlTicker.fire(controlTicker.handles[0]);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        assert.equal(server.dispatched.length, 1, "a dispatch attempt is made on the first tick");
+
+        controlTicker.fire(controlTicker.handles[0]);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        assert.equal(server.dispatched.length, 2, "a send that did not complete is retried on the next tick, not permanently marked dispatched");
+        assert.equal(server.dispatched[1].assignmentId, "asg-1");
+        handle.stop();
+      } finally {
+        await cleanup(repo);
       }
     },
   },

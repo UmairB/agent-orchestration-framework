@@ -416,6 +416,15 @@ function createDirectiveTargetRegistry() {
     get(nodeId) {
       return byNodeId.get(nodeId) ?? null;
     },
+    // entries() — diagnostic-only introspection (review fix, live soak
+    // 2026-07-17): the dispatch tick's own "not connected" skip previously had no
+    // way to say WHAT it saw instead, making a stuck assignment indistinguishable
+    // from "the whole mechanism is silently broken." Never used for admission/routing
+    // decisions — only for a log line so a live daemon's own log answers "is my
+    // target actually in the map, and is its socket really OPEN?" without guessing.
+    entries() {
+      return [...byNodeId.entries()].map(([nodeId, ws]) => ({ nodeId, readyState: ws?.readyState ?? null }));
+    },
   };
 }
 

@@ -165,14 +165,31 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       if (row.state !== "assigned") continue;
       if (dispatchedIds.has(row.assignmentId)) continue;
       const connected = streamServer?.directiveTargets?.get?.(row.targetNodeId) != null;
-      if (!connected) continue;
-      streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
+      if (!connected) {
+        const seen = streamServer?.directiveTargets?.entries?.() ?? null;
+        console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: not connected; currently tracked targets: ${seen != null ? JSON.stringify(seen) : "n/a"}`);
+        continue;
+      }
+      // review fix (live soak, 2026-07-17): the dispatch RESULT must gate the
+      // once-guard — dispatchDirective/sendDirective checks the socket's readyState
+      // and reports `{ sent: false }` on a target that's present in the map but not
+      // yet (or no longer) OPEN (e.g. mid-handshake right after a worker reconnect).
+      // Marking dispatchedIds unconditionally here meant a send that silently didn't
+      // go out was NEVER retried — the row sat "assigned" forever with no further
+      // attempt, indistinguishable from a hung/misbehaving worker. Found live: a
+      // real assignment stuck for 24h+ despite a confirmed-connected, healthy worker.
+      const result = streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
         assignmentId: row.assignmentId,
         itemRef: row.itemRef,
         workspaceId: row.workspaceId,
         at: now,
       }));
-      dispatchedIds.add(row.assignmentId);
+      if (result?.sent) {
+        dispatchedIds.add(row.assignmentId);
+        console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: directive sent`);
+      } else {
+        console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: send did not complete (${result?.code ?? "unknown"}); will retry next tick`);
+      }
     }
 
     return await reclaimStaleAssignments(store, ws, workspaceId, { now });

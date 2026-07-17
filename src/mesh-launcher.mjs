@@ -232,6 +232,21 @@ async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) 
   return { activeRuns, workspacesWithRuns };
 }
 
+// emitWarning(sink, warning, options) — review fix (live soak, 2026-07-17): every
+// warning pushed into a launcher warnings accumulator used to be read back ONLY by
+// tests (handle.warnings) — the real `aof mesh serve --serve` foreground process
+// never reads that array again after startup, so a worker's own connect failure (or
+// any other fault raised here) was invisible in its own log, forever. `options.onWarning`
+// (production's meshServeDaemonCommand now supplies console.error) surfaces it LIVE,
+// in addition to the existing accumulator — every pre-existing test that never passes
+// onWarning keeps byte-identical behaviour (a no-op fallback).
+function emitWarning(sink, warning, options) {
+  sink.push(warning);
+  if (typeof options?.onWarning === "function") {
+    try { options.onWarning(warning); } catch { /* a warning consumer must never crash the daemon */ }
+  }
+}
+
 // `warningsSink` (default a scratch array — production always passes the real
 // `launcherWarnings` accumulator) is where FINDING F11's LOUD-skip diagnostics land:
 // a workspace resolveNodeWorkspaces skipped (its resolved absolute work dir
@@ -242,11 +257,11 @@ async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) 
 async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsSink = []) {
   const registryResult = await resolveNodeWorkspaces(nodeId, options);
   for (const skip of registryResult.skipped ?? []) {
-    warningsSink.push({
+    emitWarning(warningsSink, {
       code: "workspace-workdir-unresolvable",
       message: `Workspace ${skip.workspaceId} work dir could not be resolved (${skip.reason})${skip.workDir ? `: ${skip.workDir}` : ""}.`,
       path: skip.workDir ?? null,
-    });
+    }, options);
   }
   const workspaces = resolveAggregationWorkspaces(ws, registryResult);
 
@@ -456,7 +471,7 @@ export async function startLauncher(ws, options = {}) {
   const capturePropagation = async () => {
     record = await publishCurrentPresence();
     const propagation = await publishGlobalWorkSnapshot(ws, options);
-    if (propagation.warning) launcherWarnings.push(propagation.warning);
+    if (propagation.warning) emitWarning(launcherWarnings, propagation.warning, options);
     return propagation;
   };
   await capturePropagation();
@@ -540,10 +555,17 @@ export async function startLauncher(ws, options = {}) {
 
     let transport;
     if (resolved.target != null) {
+      const dialUrl = configuredServiceUrlForAddress(config, resolved.target);
+      // review fix (live soak, 2026-07-17): the resolved dial URL was never logged
+      // anywhere — a worker whose connection never even ATTEMPTS (or fails) looked
+      // identical in its own daemon output to one that's healthy. Not a fault, so a
+      // benign code (never surfaced as an error) — emitWarning is reused purely as
+      // the one existing "print it live in production, no-op under test" seam.
+      emitWarning(launcherWarnings, { code: "worker-stream-dial-target", message: `resolving worker stream to ${dialUrl}`, path: null }, options);
       const createTransport = options?.createWorkerWsTransport ?? createWorkerWsTransport;
-      transport = createTransport(configuredServiceUrlForAddress(config, resolved.target), options?.workerWsTransportOptions ?? {});
+      transport = createTransport(dialUrl, options?.workerWsTransportOptions ?? {});
     } else if (resolved.message) {
-      launcherWarnings.push({ code: "worker-stream-target-unresolved", message: resolved.message, path: null });
+      emitWarning(launcherWarnings, { code: "worker-stream-target-unresolved", message: resolved.message, path: null }, options);
     }
 
     const client = createClient({
@@ -551,7 +573,7 @@ export async function startLauncher(ws, options = {}) {
       workspaceId,
       transport,
       now: nowFn,
-      onWarning: (warning) => launcherWarnings.push(warning),
+      onWarning: (warning) => emitWarning(launcherWarnings, warning, options),
       ...(options?.workerStreamClientOptions ?? {}),
     });
     streamClient = client;
@@ -633,7 +655,7 @@ export async function startLauncher(ws, options = {}) {
   const propagationSeconds = typeof options?.propagationSeconds === "number" && options.propagationSeconds > 0 ? options.propagationSeconds : cadenceFromConfig(ws);
   const propagationHandle = propagationTicker.start(propagationSeconds, () => {
     capturePropagation().catch((error) => {
-      launcherWarnings.push({ code: error?.code ?? "global-work-propagation-failed", message: error?.message ?? "Global work propagation failed.", path: null });
+      emitWarning(launcherWarnings, { code: error?.code ?? "global-work-propagation-failed", message: error?.message ?? "Global work propagation failed.", path: null }, options);
     });
   });
 
@@ -694,7 +716,7 @@ export async function startLauncher(ws, options = {}) {
         buildDirectiveFrame,
         dispatchedIds: dispatchedAssignmentIds,
       }).catch((error) => {
-        launcherWarnings.push({ code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null });
+        emitWarning(launcherWarnings, { code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null }, options);
       });
     });
   }

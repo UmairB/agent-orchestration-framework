@@ -340,6 +340,20 @@ async function workCommand(args) {
     return;
   }
 
+  // milestone 39 / story 03 (gap-to-chore, ADR-001, feasibility flag 4) —
+  // work:insert-chore joins the SAME insert-top-level dispatch family (the
+  // shared workInsertCli face); work:promote-gap is its own thin verb but rides
+  // the SAME face (same --json single-envelope discipline).
+  if (subcommand === "insert-chore") {
+    await workInsertCli("work:insert-chore", rest);
+    return;
+  }
+
+  if (subcommand === "promote-gap") {
+    await workInsertCli("work:promote-gap", rest);
+    return;
+  }
+
   if (subcommand === "doctor") {
     await workDoctorCommand(rest);
     return;
@@ -420,7 +434,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -1255,7 +1269,16 @@ async function meshServeDaemonCommand(args) {
 
   let handle = null;
   try {
-    handle = await startLauncher(workspace, {});
+    // review fix (live soak, 2026-07-17): a connect failure, propagation fault, or
+    // dispatch-tick error used to be accumulated into handle.warnings and never read
+    // again by this foreground loop — the daemon's own log showed nothing regardless
+    // of what actually went wrong. Every warning now prints live, timestamped, as it
+    // happens.
+    handle = await startLauncher(workspace, {
+      onWarning: (warning) => {
+        console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
+      },
+    });
     if (handle.refused) {
       console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
       for (const line of handle.guidance.lines) console.error(`  ${line}`);
