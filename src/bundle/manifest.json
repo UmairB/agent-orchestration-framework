@@ -75,7 +75,7 @@
         "id": "milestone",
         "kind": "template"
       },
-      "hash": "sha256:4f84f971ed62e7f99981e39626dd2f9fe9ff1f12283c43b69de6ece973ddfe01"
+      "hash": "sha256:2a0086803f79b5f773bf59b808f7eca7b194295c9c00e7f53f3334add4100fa1"
     },
     {
       "path": ".aof/templates/work/milestone/STATE.md",
@@ -111,7 +111,7 @@
         "id": "story",
         "kind": "template"
       },
-      "hash": "sha256:ab11aa5ff77cddd86b542c0a1e9785561cdf66f855b90cf491e4f4fa83d770d4"
+      "hash": "sha256:6c40420ef7a200cb7e3f9f9b42738da23831820c97a94911a0a6f0cc56c486c3"
     },
     {
       "path": ".aof/templates/work/task/example.feature",

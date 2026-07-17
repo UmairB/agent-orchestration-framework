@@ -90,6 +90,36 @@ export const archTests = [
         work.rollbackItemStatus,
         `the migration writer (${writerName}) and rollbackItemStatus are two separate functions — the status writer's hard bound is untouched (ADR-004)`,
       );
+
+      // ARMED (the writer has landed): the migration writer itself — not just the
+      // rollback writer above — preserves the authored body BYTE-IDENTICALLY while
+      // it rewrites the frontmatter BLOCK (adds/re-values a key). This is the
+      // ADR-004 bound proven over the migration writer, the property milestone 40's
+      // whole upgrade path stands on. A body line that RESEMBLES frontmatter
+      // (`schema: 999`) must survive verbatim — proving the writer edits the block,
+      // not a body echo.
+      const body =
+        "# 00 · Subject\n\nAs a maintainer I want the upgrade to run.\n\n" +
+        "Note: schema: 999 — this body line must survive verbatim.\n\n" +
+        "## Acceptance\n- [ ] a thing\n";
+      const { workDir, item } = await buildStoryFixture(body);
+      try {
+        const before = await readFile(path.join(item.dir, "STORY.md"), "utf8");
+        // Mutate the frontmatter BLOCK: append a `schema: 2` line to the raw inner
+        // block text (the writer's `mutate(block[2])` contract).
+        await work[writerName](item, (blockText) => `${blockText}\nschema: 2`);
+        const after = await readFile(path.join(item.dir, "STORY.md"), "utf8");
+
+        const bodyOf = (text) => text.slice(text.indexOf("\n---", 3) + "\n---".length);
+        assert.equal(bodyOf(after), bodyOf(before), "the migration writer keeps the authored body byte-identical");
+        assert.ok(/^schema:\s*2\s*$/m.test(after), "the migration writer added the schema key inside the frontmatter block (non-vacuity)");
+        assert.ok(
+          after.includes("Note: schema: 999 — this body line must survive verbatim."),
+          "a body line that resembles frontmatter is NOT rewritten by the migration writer",
+        );
+      } finally {
+        await rm(workDir, { recursive: true, force: true });
+      }
     },
   },
 ];

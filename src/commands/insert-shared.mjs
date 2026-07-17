@@ -14,14 +14,18 @@
 // thin per-verb `cli` adapter (ADR-002 — "each is a THIN command wrapper
 // over the ADR-001 engine").
 //
-// Does NOT touch `src/work-reindex.mjs` or `src/work.mjs` — story 01 owns the
-// engine; this module only CALLS `countShiftedByInsert`/`reindexForInsert` and
-// `work.mjs`'s readers (`listItems`, `ITEM_RE`, `recordDoc`).
+// Does NOT touch `src/work-reindex.mjs` or `src/work.mjs` — milestone 41/story 01
+// owns the reindex engine; this module only CALLS `countShiftedByInsert`/
+// `reindexForInsert` and `work.mjs`'s readers/constant (`listItems`, `ITEM_RE`,
+// `recordDoc`, and — milestone 40/story 01, ADR-002 — `WORK_ITEM_SCHEMA_VERSION`,
+// consumed to born-stamp a newly scaffolded item's frontmatter; see stampVersion
+// below).
 import path from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
-import { listItems, ITEM_RE, recordDoc } from "../work.mjs";
+import { listItems, ITEM_RE, recordDoc, WORK_ITEM_SCHEMA_VERSION } from "../work.mjs";
 import { countShiftedByInsert, reindexForInsert } from "../work-reindex.mjs";
 import { writeText } from "../fs.mjs";
+import { packageVersionString } from "../asset-base.mjs";
 import { commandError } from "./errors.mjs";
 
 // ADR-004: "the threshold ... resolved from config via the raw optional-chain
@@ -104,6 +108,16 @@ export function stripBundleMarker(text) {
   return text.replace(/^﻿?<!--[^\n]*-->(?:\r?\n)+(?=\S)/, "");
 }
 
+// The born-stamp (ADR-002, milestone 40): `<schema-version>` / `<aof-version>`
+// resolve to the RUNNING build's own WORK_ITEM_SCHEMA_VERSION / packageVersionString()
+// — never a pinned literal, so the stamp can never drift behind the current
+// shape. A template with no such placeholder (uat/chore — story 01 stamps only
+// the milestone/story templates, per ARCHITECTURE ADR-002) is unaffected: the
+// replace is a harmless no-op when the token is absent.
+function stampVersion(text) {
+  return text.replace(/<schema-version>/g, String(WORK_ITEM_SCHEMA_VERSION)).replace(/<aof-version>/g, packageVersionString());
+}
+
 // Replace the template placeholders (ADR-002 "correctly-numbered,
 // correctly-referenced SKELETON"): `NN` (identity number), `<kebab-slug>`,
 // `YYYY-MM-DD` (created/updated), and the title placeholder — NEVER the body
@@ -123,6 +137,7 @@ function renderTemplate(text, { number, slug, title, today, depends }) {
   if (Array.isArray(depends)) {
     out = out.replace(/^(depends:\s*)\[[^\]]*\]/m, `$1[${depends.join(", ")}]`);
   }
+  out = stampVersion(out);
   return out;
 }
 
@@ -275,6 +290,7 @@ function renderStoryTemplate(text, { number, parent, slug, title, today }) {
   out = out.replace(/<kebab-slug>/g, slug);
   out = out.replace(/YYYY-MM-DD/g, today);
   out = out.replace(/<Story Title>/g, title);
+  out = stampVersion(out);
   return out;
 }
 

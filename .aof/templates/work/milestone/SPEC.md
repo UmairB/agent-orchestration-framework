@@ -9,6 +9,8 @@ status: not-started
 owner: product-owner
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
+schema: <schema-version>
+aofVersion: <aof-version>
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

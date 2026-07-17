@@ -1254,6 +1254,14 @@ import { archTests as acdMigrationWriterBodyPreservingTests } from "../test/arch
 import { archTests as acdChangelogGeneratedTests } from "../test/arch/acd-changelog-generated.test.mjs";
 import { archTests as acdReconstructedMarkerExpressibleTests } from "../test/arch/acd-reconstructed-marker-expressible.test.mjs";
 import { archTests as acdUpgradeEngineBlastRadiusTests } from "../test/arch/acd-upgrade-engine-blast-radius.test.mjs";
+// milestone 40 / story 01 — version stamp & reader (ADR-001/002/003/004): the
+// reader (schema-int/aofVersion-string, schema-0 baseline, task 00), new items
+// born-stamped at scaffold (task 01), and the ADR-004 transform-scoped
+// frontmatter writer (applyItemFrontmatter) coexisting with rollbackItemStatus
+// as two narrow, bounded writers (task 02).
+import { workVersionReaderTests } from "../test/work-version-reader.test.mjs";
+import { workScaffoldBornStampedTests } from "../test/work-scaffold-born-stamped.test.mjs";
+import { workFrontmatterWriterTests } from "../test/work-frontmatter-writer.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1752,7 +1760,11 @@ export const tests = [
   ...acdMigrationWriterBodyPreservingTests,
   ...acdChangelogGeneratedTests,
   ...acdReconstructedMarkerExpressibleTests,
-  ...acdUpgradeEngineBlastRadiusTests
+  ...acdUpgradeEngineBlastRadiusTests,
+  // milestone 40 / story 01 — version stamp & reader task traceability
+  ...workVersionReaderTests,
+  ...workScaffoldBornStampedTests,
+  ...workFrontmatterWriterTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

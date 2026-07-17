@@ -4,7 +4,7 @@ number: 01
 slug: version-stamp-and-reader
 title: "The version stamp & its reader — a work item that records the aof that made it, a schema integer that drives migration, and a born-stamp so new items are never stale-by-construction"
 parent: 40
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
@@ -67,9 +67,9 @@ Grounded in `ARCHITECTURE.md` ADR-001 / ADR-002 / ADR-003 / ADR-004:
      aof-developer feasibility). Each is a tasks/NN_<slug>.feature whose @executable scenarios are the
      acceptance criteria. -->
 
-- [ ] `tasks/00_reader-schema-and-provenance.feature`
-- [ ] `tasks/01_new-items-born-stamped.feature`
-- [ ] `tasks/02_transform-scoped-writer-body-preserving.feature`
+- [x] `tasks/00_reader-schema-and-provenance.feature` — 8/8 green
+- [x] `tasks/01_new-items-born-stamped.feature` — 5/5 green
+- [x] `tasks/02_transform-scoped-writer-body-preserving.feature` — 13/13 green
 
 ## Notes
 

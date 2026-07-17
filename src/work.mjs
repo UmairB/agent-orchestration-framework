@@ -353,6 +353,54 @@ async function readMeta(item) {
 
 const asList = (value) => (Array.isArray(value) ? value : value == null || value === "" ? [] : [value]);
 
+// -------------------------------------------------------- version model ----
+
+// The current work-item record-doc schema (ADR-001, milestone 40) — the ONE
+// exported integer constant declaring "the current document shape", mirroring
+// GLOBAL_WORK_SCHEMA_VERSION's single-constant idiom (global-work-store.mjs:7).
+// It lives HERE (not in a later registry module) because the reader/born-stamp
+// (story 01) must consume it before the migration registry (story 02) exists.
+// Bump this — and add a registered transform reaching it — when a migration
+// changes the document shape.
+export const WORK_ITEM_SCHEMA_VERSION = 1;
+
+// Coerce a raw frontmatter `schema` scalar to a non-negative integer: a
+// missing key or a non-numeric string reads as the pre-versioning baseline 0
+// (ADR-003), mirroring readSchemaVersion's null/absent -> 0 treatment
+// (global-work-store.mjs:80-87, parseInt + isFinite). Deliberately NOT clamped
+// to WORK_ITEM_SCHEMA_VERSION: an item stamped AHEAD (schema: 2) must read 2,
+// faithfully — story 03's staleness check depends on comparing the item's OWN
+// schema against the current constant, not a clamped value.
+function coerceSchemaVersion(raw) {
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const version = Number.parseInt(String(raw), 10);
+  // Non-negative by contract: a NaN or a malformed negative (never produced by
+  // the born-stamp or a genuine older aof) both read as the baseline 0.
+  return Number.isFinite(version) && version >= 0 ? version : 0;
+}
+
+// The version READER (ADR-001/ADR-003) — the public seam over readMeta's
+// PRIVATE frontmatter read (`readMeta` itself stays unexported; `aof work list
+// --json`'s 7-field shape is frozen and does not surface `schema`). Neither
+// function widens `parseFrontmatter` (18/ADR-007 protected) — both keys
+// already parse as raw scalars; the int coercion lives here, in the reader,
+// not the shared parser.
+//
+// readItemSchema resolves the item's `schema` key to a non-negative integer
+// (missing/non-integer -> the baseline 0).
+export async function readItemSchema(item) {
+  const meta = await readMeta(item);
+  return coerceSchemaVersion(meta.schema);
+}
+
+// readItemVersion resolves the item's `aofVersion` key to a plain provenance
+// STRING — never coerced to a number, never parsed for logic. Missing ->
+// empty string (there is no numeric "baseline" concept for provenance).
+export async function readItemVersion(item) {
+  const meta = await readMeta(item);
+  return typeof meta.aofVersion === "string" ? meta.aofVersion : "";
+}
+
 // ------------------------------------------------------- status rollback ----
 
 // The legal rollback TARGETS (20/ADR-005): from in-progress, a transient reclaim
@@ -403,6 +451,51 @@ export async function rollbackItemStatus(item, toStatus, { now } = {}) { // esli
   const updated = block[1] + rewrittenFrontmatter + block[3] + text.slice(block[0].length);
   await writeText(docPath, updated);
   return { ref: item.ref, status: toStatus };
+}
+
+// ------------------------------------------------- frontmatter transforms --
+
+// The transform-scoped frontmatter WRITER (ADR-004, milestone 40) — a SEPARATE
+// export from rollbackItemStatus above, NOT a widening of it. rollbackItemStatus
+// keeps its hard status-only, in-progress-> not-started|blocked bound untouched;
+// this writer is the broader primitive a registered migration transform (story
+// 02) calls to add/rename/re-value ANY frontmatter key.
+//
+// `mutate` receives the RAW inner frontmatter block text (the bytes between the
+// `---` fences, exclusive) and returns the new raw block text — the SAME
+// block-capture + slice idiom rollbackItemStatus uses above (`block[2]`
+// in/out), never a parseFrontmatter+reserialize round-trip (that shared
+// 14-importer parser drops comments/order/formatting — 18/ADR-007). The body —
+// every byte after the closing `---` fence — and everything before the opening
+// fence are reassembled byte-for-byte around the mutated block. `mutate` may be
+// sync or async. Persists via the atomic fs.mjs:writeText temp+rename seam.
+//
+// It runs ONLY as the primitive a registered transform calls — it is not a
+// public "edit any frontmatter" verb in its own right.
+export async function applyItemFrontmatter(item, mutate) {
+  const doc = recordDoc(item);
+  if (!doc) {
+    throw workError(`item ${item.ref} has no record doc to update`, "frontmatter-not-applicable", 409);
+  }
+  const docPath = path.join(item.dir, doc);
+  let text;
+  try {
+    text = await readFile(docPath, "utf8");
+  } catch {
+    throw workError(`item ${item.ref} record doc is unreadable`, "frontmatter-not-applicable", 409);
+  }
+  const block = text.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
+  if (!block) {
+    throw workError(`item ${item.ref} record doc has no frontmatter`, "frontmatter-not-applicable", 409);
+  }
+  const rewrittenFrontmatter = await mutate(block[2]);
+  // Reassembled byte-for-byte around the mutated block: the opening fence
+  // (`block[1]`), the new block, the closing fence (`block[3]`), and every
+  // byte of the body (`text.slice(block[0].length)`) are untouched by anything
+  // other than the mutate callback itself.
+  const updated = block[1] + rewrittenFrontmatter + block[3] + text.slice(block[0].length);
+  await writeText(docPath, updated);
+  return { ref: item.ref, doc };
 }
 
 // ----------------------------------------------------------------- find ----
