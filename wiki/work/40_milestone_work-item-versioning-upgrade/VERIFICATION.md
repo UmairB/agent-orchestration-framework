@@ -3,7 +3,7 @@ doc: verification
 milestone: 40
 verified: 2026-07-17
 verifier: aof:verify
-verdict: in-progress
+verdict: accept
 ---
 <!--
   Milestone VERIFICATION.md — the verification record. Pointers, not restatements.
@@ -138,3 +138,19 @@ check will report zero staleness on the up-to-date stream — the correct post-b
 **Story 03 — accepted (2026-07-17).** Its 4 `@executable` scenarios are green, the cross-cutting ripple
 (born-stamp completion + ~17 fixture stamps) reviewed PASS as legitimate (no hidden failure, no weakened
 assertion), whole-stream + scoped validate clean. The milestone stays `in-progress` (story 04 remains).
+
+**Story 04 — accepted (2026-07-17).** 10/10 `@executable` (incl. a CLI round-trip regression) + the armed
+`acd-changelog-generated`; the `@manual` regenerate==committed byte-identical (983 bytes); behavioural
+review PASS; F-40-04-1 fixed within the story; scoped validate clean.
+
+**Milestone 40 — ACCEPTED (2026-07-17).** All four stories are `done`. The consolidated milestone surface
+is green — **77/77** across the 6 fitness functions (`acd-work-item-schema-single-constant`,
+`acd-migration-writer-body-preserving`, `acd-upgrade-idempotent`, `acd-upgrade-engine-blast-radius`,
+`acd-reconstructed-marker-expressible`, `acd-changelog-generated`) + the 10 story test suites — and
+`aof work validate 40` gates clean (`[]`). The milestone's headline deliverable is live: the work stream
+now carries a version stamp (170 items backstamped to schema 1), `aof upgrade` runs the migrations
+(dry-run→apply, idempotent, ready to carry a reconstructed doc without performing one), `validate` reports
+staleness, and the changelog is generated from the registry (drift-guarded). The one open item, **F-40-01**,
+is a confirmed pre-existing milestone-39 gap (the memory `status` verb does not count `outcome` records) —
+carried to milestone 39 / a memory follow-up in `RETROSPECTIVE.md` R3, explicitly NOT a milestone-40
+defect. No `@uat`, no human sign-off required. Lessons distilled into `RETROSPECTIVE.md` (R1–R4).

@@ -3,7 +3,7 @@ type: milestone
 number: 40
 slug: work-item-versioning-upgrade
 title: "Work-item versioning & the upgrade path — a stream that knows how old it is, and migrations that run"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-14
 updated: 2026-07-17
