@@ -95,4 +95,171 @@ export const meshRepoPublishTests = [
       }
     },
   },
+  {
+    name: "mesh repo publish: auto-detects cloneUrl from `git remote get-url origin` when not already configured",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3-home-"));
+      const root = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3-root-"));
+      const env = { AOF_GLOBAL_HOME: home };
+      try {
+        await makeRepo(root, "demo3"); // no mesh key at all — nothing configured yet.
+        const ws = await loadWorkspace(root, undefined, { env });
+        const now = "2026-07-16T10:00:00.000Z";
+        let seenArgs, seenCwd;
+        const gitRemoteExec = async (args, { cwd }) => {
+          seenArgs = args;
+          seenCwd = cwd;
+          return "https://github.com/acme-org/secret-repo.git";
+        };
+
+        const result = await publishRepoToMesh(ws, { now, globalWorkStoreOptions: { env }, gitRemoteExec });
+
+        assert.deepEqual(seenArgs, ["remote", "get-url", "origin"], "invoked the exact git remote read");
+        assert.equal(seenCwd, root, "ran in the repo's own directory, never the process cwd");
+        assert.equal(result.cloneUrl, "https://github.com/acme-org/secret-repo.git");
+
+        const onDisk = await readJson(path.join(root, ".aof", "aof.config.json"));
+        assert.equal(onDisk.mesh.repo.cloneUrl, "https://github.com/acme-org/secret-repo.git", "detected cloneUrl persisted");
+        assert.equal(onDisk.mesh.repo.published, true);
+
+        const status = await queryGlobalMeshStatus({ env });
+        const workspaceId = workspaceIdFor(root);
+        const published = status.workspaces.find((w) => w.workspaceId === workspaceId);
+        assert.ok(published, "workspace present in the global projection");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "mesh repo publish: strips an embedded personal username from a detected https remote (never fed verbatim to git clone)",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3b-home-"));
+      const root = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3b-root-"));
+      const env = { AOF_GLOBAL_HOME: home };
+      try {
+        await makeRepo(root, "demo3b");
+        const ws = await loadWorkspace(root, undefined, { env });
+        const gitRemoteExec = async () => "https://someuser@github.com/acme-org/secret-repo.git";
+
+        const result = await publishRepoToMesh(ws, { now: "2026-07-16T10:00:00.000Z", globalWorkStoreOptions: { env }, gitRemoteExec });
+
+        assert.equal(
+          result.cloneUrl,
+          "https://github.com/acme-org/secret-repo.git",
+          "the embedded username is stripped — the URL git clone will actually use carries no personal identity",
+        );
+
+        const onDisk = await readJson(path.join(root, ".aof", "aof.config.json"));
+        assert.equal(onDisk.mesh.repo.cloneUrl, "https://github.com/acme-org/secret-repo.git");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "mesh repo publish: an scp-style detected remote (git@host:owner/repo) keeps its conventional `git` user untouched",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3c-home-"));
+      const root = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub3c-root-"));
+      const env = { AOF_GLOBAL_HOME: home };
+      try {
+        await makeRepo(root, "demo3c");
+        const ws = await loadWorkspace(root, undefined, { env });
+        const gitRemoteExec = async () => "git@github.com:acme-org/secret-repo.git";
+
+        const result = await publishRepoToMesh(ws, { now: "2026-07-16T10:00:00.000Z", globalWorkStoreOptions: { env }, gitRemoteExec });
+
+        assert.equal(
+          result.cloneUrl,
+          "git@github.com:acme-org/secret-repo.git",
+          "the scp-style `git@` service-account user is a convention, not a personal credential — left alone",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "mesh repo publish: an already-configured cloneUrl is never overwritten by a git-remote guess",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub4-home-"));
+      const root = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub4-root-"));
+      const env = { AOF_GLOBAL_HOME: home };
+      try {
+        await makeRepo(root, "demo4", { repo: { cloneUrl: "https://github.com/acme/committed-value.git" } });
+        const ws = await loadWorkspace(root, undefined, { env });
+        let called = false;
+        const gitRemoteExec = async () => {
+          called = true;
+          return "https://github.com/acme/should-never-be-used.git";
+        };
+
+        const result = await publishRepoToMesh(ws, { now: "2026-07-16T10:00:00.000Z", globalWorkStoreOptions: { env }, gitRemoteExec });
+
+        assert.equal(called, false, "git-remote detection is never invoked when cloneUrl is already configured");
+        assert.equal(result.cloneUrl, "https://github.com/acme/committed-value.git", "the committed value survives untouched");
+
+        const onDisk = await readJson(path.join(root, ".aof", "aof.config.json"));
+        assert.equal(onDisk.mesh.repo.cloneUrl, "https://github.com/acme/committed-value.git");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "mesh repo publish: a git-remote detection failure (no origin / not a git repo / malformed) is silent and non-fatal",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub5-home-"));
+      const root = await mkdtemp(path.join(os.tmpdir(), "aof-repo-pub5-root-"));
+      const env = { AOF_GLOBAL_HOME: home };
+      try {
+        await makeRepo(root, "demo5");
+        const ws = await loadWorkspace(root, undefined, { env });
+
+        // (a) exec rejects outright (no git installed / ENOENT-shaped failure).
+        const rejecting = async () => {
+          throw new Error("spawn git ENOENT");
+        };
+        const result1 = await publishRepoToMesh(ws, {
+          now: "2026-07-16T10:00:00.000Z",
+          globalWorkStoreOptions: { env },
+          gitRemoteExec: rejecting,
+        });
+        assert.equal(result1.published, true, "publish still succeeds");
+        assert.equal(result1.cloneUrl, null, "no cloneUrl recorded");
+
+        // (b) exec resolves null (git ran, no `origin` remote / not a repo).
+        const ws2 = await loadWorkspace(root, undefined, { env });
+        const nullExec = async () => null;
+        const result2 = await publishRepoToMesh(ws2, {
+          now: "2026-07-16T11:00:00.000Z",
+          globalWorkStoreOptions: { env },
+          gitRemoteExec: nullExec,
+        });
+        assert.equal(result2.cloneUrl, null);
+
+        // (c) exec resolves a malformed value (isWellFormedCloneUrl rejects it).
+        const ws3 = await loadWorkspace(root, undefined, { env });
+        const malformedExec = async () => "not a url at all";
+        const result3 = await publishRepoToMesh(ws3, {
+          now: "2026-07-16T12:00:00.000Z",
+          globalWorkStoreOptions: { env },
+          gitRemoteExec: malformedExec,
+        });
+        assert.equal(result3.cloneUrl, null, "a malformed remote value is rejected, never persisted");
+
+        const onDisk = await readJson(path.join(root, ".aof", "aof.config.json"));
+        assert.equal(onDisk.mesh.repo.cloneUrl, undefined, "no cloneUrl key ever written across all three failure modes");
+        assert.equal(onDisk.mesh.repo.published, true, "the published marker still lands despite detection failing");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
 ];
