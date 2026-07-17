@@ -43,7 +43,17 @@ const BOARD_UI = path.join(repoRoot, "src", "board-ui.mjs");
 // terminal launch (typed PTY input), never a `/api/work` route (21/ADR-002).
 // `run-retry` (m20/ADR-003) likewise stays deferred — m21 ships the FRESH path;
 // m20's resume is a later additive delta on the same affordance.
-const BOARD_DEFERRED = new Set(["run-start", "run-complete", "run-retry"]);
+//
+// `insert-milestone` / `insert-uat` (m41/story 02, ADR-002) stay deferred too:
+// ARCHITECTURE ADR-002 scopes the milestone to "a new mechanical CLI subcommand
+// family" wired through cli.mjs + the acd-work-command-cli-bijection guard only —
+// no board affordance is asked for (framing/placement is an operator CLI action,
+// mirroring the existing `add-*` skills, which are also CLI/prompt-only, never a
+// board button). A future board "insert" UI is a separate, deliberate decision —
+// this carve-out documents the deferral, not an oversight. `insert-story` (m41/
+// story 03) joins the SAME carve-out for the SAME reason — the nested axis is
+// the same CLI-only mechanical surface, no board affordance requested.
+const BOARD_DEFERRED = new Set(["run-start", "run-complete", "run-retry", "insert-milestone", "insert-uat", "insert-story"]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus
 // the board-deferred family. This is the canonical set the /api/work bijection is

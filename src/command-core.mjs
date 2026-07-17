@@ -153,6 +153,22 @@ import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 // `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
 // (now covering identity+status+sync+heartbeat+relay+invite+join+revoke+issue+serve).
 import { meshServeCommand } from "./commands/mesh-serve.mjs";
+// milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
+// milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
+// (src/commands/insert-shared.mjs) over story 01's re-index engine
+// (src/work-reindex.mjs): open the slot at the caller's target position P in the
+// TOP-LEVEL number space, count-gate the confirmation, then scaffold the new
+// item's skeleton from `.aof/templates/work/<type>/` — the SAME templates add-*
+// uses. Additive — the registry-derived acd-work-command-cli-bijection guard
+// covers the new verbs for free (08/ADR-004).
+import { insertMilestoneCommand } from "./commands/insert-milestone.mjs";
+import { insertUatCommand } from "./commands/insert-uat.mjs";
+// milestone 41 / story 03 (insert-story, ADR-002/004/005/006) — work:insert-
+// story, the NESTED-axis sibling: places a new story at local position SS
+// under a milestone NN, reusing the SAME insert-shared.mjs mechanics
+// (count-gate, template-scaffold-strip) via `runInsertStory`. Independent of
+// story 02's top-level pair above — disjoint number space, own command file.
+import { insertStoryCommand } from "./commands/insert-story.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -192,6 +208,9 @@ const COMMANDS = [
   meshJoinCommand,
   meshRevokeCommand,
   meshServeCommand,
+  insertMilestoneCommand,
+  insertUatCommand,
+  insertStoryCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

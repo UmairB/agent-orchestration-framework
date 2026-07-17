@@ -40,7 +40,12 @@ function workError(message, code, status = 400) {
 // admitted the SAME way: they sit at the stream root, carry `depends`, group
 // no stories, and are themselves the actionable unit — see `isDriver` and the
 // `nextWork` item-is-the-work branch below.
-const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
+// Exported (milestone 41 / ADR-001) — the ONE minimal touch of this god-node
+// the whole 41 milestone requires: src/work-reindex.mjs consumes this SAME
+// identity regex (never a re-derived copy) so a renamed folder it produces is
+// guaranteed parseable by every one of work.mjs's 36 dependents. The value is
+// unchanged; only the export keyword is added.
+export const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
 const VALID_STATUS = new Set(["not-started", "in-progress", "blocked", "in-review", "done"]);
 const UNIVERSAL_TAGS = new Set(["@executable", "@manual", "@uat", "@bug", "@wip"]);
 const VERIFICATION_TAGS = new Set(["@executable", "@manual", "@uat"]);

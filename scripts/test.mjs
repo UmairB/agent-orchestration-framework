@@ -109,6 +109,65 @@ import { meshWorkerCloneCredentialNotPersistedTests } from "../test/mesh-worker-
 // PULLED by the worker at the moment it hits a clone miss, over the already-open
 // stream, so a private repo can actually be cloned in production.
 import { meshWorkerCloneCredentialPullTests } from "../test/mesh-worker-clone-credential-pull.test.mjs";
+// milestone 38 / story 02 — clone-credential-mint (ADR-010): the config-selected
+// mint PROVIDER (env-token | github-app) at the ADR-009 mintCloneCredential seam.
+import { meshCloneCredentialProviderConfigTests } from "../test/mesh-clone-credential-provider-config.test.mjs";
+import { meshCloneCredentialGithubAppMintTests } from "../test/mesh-clone-credential-github-app-mint.test.mjs";
+import { meshCloneCredentialAppKeyNotRelayedTests } from "../test/mesh-clone-credential-app-key-not-relayed.test.mjs";
+import { meshCloneCredentialAskpassPromptAwareTests } from "../test/mesh-clone-credential-askpass-prompt-aware.test.mjs";
+import { meshCloneCredentialMintFailureLoudTests } from "../test/mesh-clone-credential-mint-failure-loud.test.mjs";
+import { archTests as acdCloneCredentialProviderConfigDrivenTests } from "../test/arch/acd-clone-credential-provider-config-driven.test.mjs";
+import { archTests as acdCloneAppKeyNotRelayedTests } from "../test/arch/acd-clone-app-key-not-relayed.test.mjs";
+import { archTests as acdMintedTokenScopedSingleRepoTests } from "../test/arch/acd-minted-token-scoped-single-repo.test.mjs";
+// milestone 41 — work-item insertion & re-index (ADR-001/ADR-003, refine-stage
+// fitness functions, GREEN today): resolution is folder-derived so re-index-by-rename
+// is sufficient (no index to rebuild), and the renumber WRITER stays OUT of the
+// work.mjs god-node (work.mjs never imports a reindex/insert engine; guard-if-present
+// that work-reindex.mjs imports work.mjs, never the reverse).
+import { archTests as acdReindexResolutionFolderDerivedTests } from "../test/arch/acd-reindex-resolution-folder-derived.test.mjs";
+import { archTests as acdReindexEngineBlastRadiusTests } from "../test/arch/acd-reindex-engine-blast-radius.test.mjs";
+// milestone 41 / story 01 — reindex-engine (the shared foundation, ADR-001/003/
+// 004/005/006): the deterministic slot-open (rename + frontmatter number bump,
+// task 00), the depends/parent reference rewrite (task 01), the surgical
+// byte-identical frontmatter discipline (task 02), the two number-space axes
+// (task 03), and the pure count primitive (task 04) — all against
+// src/work-reindex.mjs, story 01 has no command surface.
+import { workReindexSlotOpenTests } from "../test/work-reindex-slot-open.test.mjs";
+import { workReindexDependsParentRewriteTests } from "../test/work-reindex-depends-parent-rewrite.test.mjs";
+import { workReindexSurgicalFrontmatterTests } from "../test/work-reindex-surgical-frontmatter.test.mjs";
+import { workReindexNumberSpacesTests } from "../test/work-reindex-number-spaces.test.mjs";
+import { workReindexCountShiftedTests } from "../test/work-reindex-count-shifted.test.mjs";
+// milestone 41 review fast-follow (2026-07-16) — regression coverage for the 4
+// confirmed structural/craft review fixes: fix 3 (the mandatory number: bump's
+// fail-loud guard, work-reindex.mjs).
+import { workReindexNumberBumpGuardTests } from "../test/work-reindex-number-bump-guard.test.mjs";
+// milestone 41 / story 02 — insert-top-level (ADR-002/004/005/006): the two thin
+// commands `work:insert-milestone` / `work:insert-uat` over story 01's engine
+// (task 00 placement+scaffold, task 01 uat depends-framing, task 02 count-gated
+// confirmation + --yes/--force, task 03 the --json envelope's shifted/at/space).
+import { workInsertTopLevelPlacesTests } from "../test/work-insert-top-level-places.test.mjs";
+import { workInsertUatDependsTests } from "../test/work-insert-uat-depends.test.mjs";
+import { workInsertCountGateTests } from "../test/work-insert-count-gate.test.mjs";
+import { workInsertJsonEnvelopeTests } from "../test/work-insert-json-envelope.test.mjs";
+// milestone 41 review fast-follow (2026-07-16) — regression coverage for fix 1
+// (pre-flight everything cheap BEFORE the first mutation, insert-shared.mjs's
+// runInsertTopLevel/runInsertStory) and fix 2 (the CRLF/BOM-tolerant
+// stripBundleMarker, insert-shared.mjs).
+import { workInsertAtomicPreflightTests } from "../test/work-insert-atomic-preflight.test.mjs";
+import { workInsertCrlfTemplateStripTests } from "../test/work-insert-crlf-template-strip.test.mjs";
+// milestone 41 review fast-follow — QA behavioural-review coverage gap F-3: the
+// CLI-facing { ok:false, error, code, shifted } loud-failure envelope
+// (workInsertCli, src/cli.mjs), driven end-to-end as a real child process.
+import { workInsertCliConfirmEnvelopeTests } from "../test/work-insert-cli-confirm-envelope.test.mjs";
+// milestone 41 / story 03 — insert-story (ADR-002/003/004/005/006): the thin
+// command `work:insert-story` over story 01's engine's NESTED axis (task 00
+// placement+scaffold, task 01 nested-shift parent/validate-green, task 02 the
+// best-effort ## Stories checklist update, task 03 the count-gated
+// confirmation scoped to the target milestone's own siblings).
+import { workInsertStoryPlacesTests } from "../test/work-insert-story-places.test.mjs";
+import { workInsertStoryNestedValidateTests } from "../test/work-insert-story-nested-validate.test.mjs";
+import { workInsertStoryChecklistTests } from "../test/work-insert-story-checklist.test.mjs";
+import { workInsertStoryCountGateTests } from "../test/work-insert-story-count-gate.test.mjs";
 // milestone 35 / ADR-008 (as-built review fast-follow, 2026-07-09) — the control-side
 // dispatch/reclaim driver: task 02/06's RECLAIM half (the SAME launcher control tick
 // also runs reclaimStaleAssignments) + the shared fitness function guarding both halves.
@@ -1513,6 +1572,43 @@ export const tests = [
   ...meshWorkerCloneRegisterFallthroughTests,
   ...meshWorkerCloneCredentialNotPersistedTests,
   ...meshWorkerCloneCredentialPullTests,
+  // milestone 38 / story 02 — clone-credential-mint (ADR-010, tasks 00-04 traceability
+  // modules + the F5/F6/F7 fitness functions armed at build)
+  ...meshCloneCredentialProviderConfigTests,
+  ...meshCloneCredentialGithubAppMintTests,
+  ...meshCloneCredentialAppKeyNotRelayedTests,
+  ...meshCloneCredentialAskpassPromptAwareTests,
+  ...meshCloneCredentialMintFailureLoudTests,
+  ...acdCloneCredentialProviderConfigDrivenTests,
+  ...acdCloneAppKeyNotRelayedTests,
+  ...acdMintedTokenScopedSingleRepoTests,
+  // milestone 41 — work-item insertion & re-index (refine-stage fitness functions)
+  ...acdReindexResolutionFolderDerivedTests,
+  ...acdReindexEngineBlastRadiusTests,
+  // milestone 41 / story 01 — reindex-engine task traceability
+  ...workReindexSlotOpenTests,
+  ...workReindexDependsParentRewriteTests,
+  ...workReindexSurgicalFrontmatterTests,
+  ...workReindexNumberSpacesTests,
+  ...workReindexCountShiftedTests,
+  // milestone 41 review fast-follow (2026-07-16) — fix 3 regression coverage
+  ...workReindexNumberBumpGuardTests,
+  // milestone 41 / story 02 — insert-top-level command-surface task traceability
+  ...workInsertTopLevelPlacesTests,
+  ...workInsertUatDependsTests,
+  ...workInsertCountGateTests,
+  ...workInsertJsonEnvelopeTests,
+  // milestone 41 review fast-follow (2026-07-16) — fix 1 + fix 2 regression coverage
+  ...workInsertAtomicPreflightTests,
+  ...workInsertCrlfTemplateStripTests,
+  // milestone 41 review fast-follow — QA coverage gap F-3 (CLI loud-failure envelope)
+  ...workInsertCliConfirmEnvelopeTests,
+  // milestone 41 / story 03 — insert-story (nested axis) command-surface task
+  // traceability
+  ...workInsertStoryPlacesTests,
+  ...workInsertStoryNestedValidateTests,
+  ...workInsertStoryChecklistTests,
+  ...workInsertStoryCountGateTests,
   // milestone 35 / ADR-008 (as-built review fast-follow) — the control-side
   // dispatch/reclaim driver's RECLAIM half (task 02/06) + the shared fitness function
   ...meshReclaimSchedulerTests,

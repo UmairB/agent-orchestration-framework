@@ -1,4 +1,11 @@
 .aof/**/*.json text eol=lf
+# milestone 41 review fast-follow: pin the insert-scaffolded work-item templates
+# to LF too — a `core.autocrlf=true` Windows checkout would otherwise hand
+# insert-shared.mjs's `stripBundleMarker` CRLF bytes around the leading
+# `<!-- aof-generated: bundle -->` marker, and (pre-fix) that defeated the
+# strip, scaffolding a validate-broken doc whose first line stayed the
+# comment. Kept as a belt-and-braces pin alongside the CRLF-tolerant regex fix.
+.aof/templates/**/*.md text eol=lf
 .planning/**/*.md text eol=lf
 test/fixtures/** text eol=lf
 test/integration/**/*.feature text eol=lf

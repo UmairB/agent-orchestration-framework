@@ -33,7 +33,23 @@ const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:n
 // Milestone 20 (ADR-003) registers a 4th run verb — work:run-retry, the resume-vs-fresh
 // command — into the SAME core; another sanctioned in-namespace extension (its CLI face
 // is wired; the board face is milestone 21, the BOARD_DEFERRED carve-out).
-const WORK_IDS = [...SIX_IDS, "work:doctor", "work:run-start", "work:run-complete", "work:run-status", "work:run-retry"];
+// Milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) registers two more —
+// work:insert-milestone / work:insert-uat, the top-level placement pair over story 01's
+// re-index engine — another sanctioned in-namespace extension (CLI-only by design, per
+// ARCHITECTURE ADR-002; the board face is deferred — see BOARD_DEFERRED in
+// acd-work-command-route-coverage.test.mjs). Story 03 registers a third —
+// work:insert-story, the nested-axis sibling — same carve-out, same design.
+const WORK_IDS = [
+  ...SIX_IDS,
+  "work:doctor",
+  "work:run-start",
+  "work:run-complete",
+  "work:run-status",
+  "work:run-retry",
+  "work:insert-milestone",
+  "work:insert-uat",
+  "work:insert-story",
+];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------
 

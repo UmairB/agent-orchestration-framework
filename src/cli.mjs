@@ -317,6 +317,29 @@ async function workCommand(args) {
     return;
   }
 
+  // milestone 41 / story 02 — the two additive insert-top-level dispatch
+  // branches, ABOVE the unknown-subcommand fallthrough (the m19/m22 additive-verb
+  // idiom). The EXACT `subcommand === "<sub>"` form the
+  // acd-work-command-cli-bijection grep requires; both reuse the shared
+  // workInsertCli face.
+  if (subcommand === "insert-milestone") {
+    await workInsertCli("work:insert-milestone", rest);
+    return;
+  }
+
+  if (subcommand === "insert-uat") {
+    await workInsertCli("work:insert-uat", rest);
+    return;
+  }
+
+  // milestone 41 / story 03 — the nested-axis dispatch branch, same shape as
+  // the two above (`--under NN` maps onto the engine's REQUIRED `parent`
+  // selector at the shared workInsertCli face's argv adapter, ADR-006).
+  if (subcommand === "insert-story") {
+    await workInsertCli("work:insert-story", rest);
+    return;
+  }
+
   if (subcommand === "doctor") {
     await workDoctorCommand(rest);
     return;
@@ -397,7 +420,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -1106,6 +1129,11 @@ async function meshRepoCommand(args) {
     `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
     `Marked as a mesh repo in ${result.configPath}.`,
   ];
+  lines.push(
+    result.cloneUrl
+      ? `Clone URL: ${result.cloneUrl}`
+      : "Clone URL: none configured and none detected from `git remote get-url origin` — a worker clone-miss for this workspace will fail loud (assignment-repo-unavailable) until one is set.",
+  );
   if (!result.published && result.warning) {
     lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
   } else {
@@ -1553,6 +1581,37 @@ async function workValidateCommand(args) {
   console.log(command.cli.render(result, { scope }));
   // A non-empty findings list is a non-zero exit (today's CLI behaviour).
   if (result.findings.length > 0) process.exitCode = 1;
+}
+
+// The shared insert-top-level face (milestone 41 / story 02, ADR-002/004) —
+// getCommand -> loadWorkspace -> invoke -> cli.json/render, mirroring
+// projectProvisionCli's single-structured-envelope --json discipline. ADR-004's
+// never-deadlock guard: an above-threshold caller without --yes is a command
+// error (code "insert-confirm-required"), caught here and emitted as ONE
+// { ok:false, error, code, shifted } envelope (+ non-zero exit) in --json mode —
+// never a hang on an unanswered prompt. The non-json face lets the error
+// propagate to bin/aof.mjs (stderr + non-zero exit).
+async function workInsertCli(id, args) {
+  const options = parseOptions(args);
+  const command = getCommand(id);
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const input = command.cli.argv(options._, options);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, input, { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(
+        JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error", shifted: error.shifted ?? null }, null, 2),
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  const result = await invoke(command.id, input, { workspace });
+  console.log(command.cli.render(result));
 }
 
 // `aof work doctor [scope] [--json] [--strict]` — the FACE over work:doctor
@@ -2660,7 +2719,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve", "yes"].includes(key)) {
       options[key] = true;
       continue;
     }
