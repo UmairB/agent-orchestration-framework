@@ -210,7 +210,13 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
 // authority they run — this default is deliberately the simplest thing that could
 // possibly work for a single-repo fleet, never a policy prescription (no fitness
 // function asserts a server-side minting policy — SECURITY, verbatim).
-function defaultMintCloneCredential(/* workspaceId, assignmentId */) {
+//
+// EXPORTED as of milestone 38 / story 02 (ADR-010) so the new config-selected
+// provider seam (src/mesh-clone-credential-provider.mjs's `resolveCloneCredentialProvider`)
+// can return this EXACT function reference for the `env-token` path — byte-identical
+// behaviour, never a re-implementation. This module still gains NO `config` dependency
+// and stays transport-pure; only its visibility changed.
+export function defaultMintCloneCredential(/* workspaceId, assignmentId */) {
   const token = process.env.AOF_MESH_CLONE_TOKEN;
   return typeof token === "string" && token.length > 0 ? token : null;
 }

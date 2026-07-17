@@ -194,6 +194,33 @@ export async function resolveNodeWorkspaces(nodeId, options = {}) {
   }
 }
 
+// resolveWorkspaceProjectRoot(workspaceId, options) — milestone 38 / story 02
+// (ADR-010 Gap A): resolves a `workspaceId` to its committed `project_root`, through
+// the SAME `global_workspace_descriptors` table `resolveNodeWorkspaces` (above)
+// already reads — never a second enumeration strategy. `mesh-launcher.mjs` calls
+// THIS seam (rather than opening the global store itself) so it keeps ZERO direct
+// SQLite-store dependency of its own (fitness `acd-global-publisher-single-seam`) —
+// this module already owns that store access. FAILURE-ISOLATED: a store fault or an
+// absent/blank row resolves to `null`, never a throw.
+export async function resolveWorkspaceProjectRoot(workspaceId, options = {}) {
+  const openStore = options.openStore ?? openGlobalWorkProjectionStore;
+  const storeOptions = options.globalWorkStoreOptions ?? {};
+  let store;
+  try {
+    store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+  } catch {
+    return null;
+  }
+  try {
+    const row = store.db.prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?").get(workspaceId);
+    return row != null && typeof row.project_root === "string" && row.project_root.length > 0 ? row.project_root : null;
+  } catch {
+    return null;
+  } finally {
+    store.close?.();
+  }
+}
+
 // ------------------------------------------------- the record assembly ----
 
 // Assemble THIS node's presence record — the FROZEN schema, EXACTLY these FIVE keys

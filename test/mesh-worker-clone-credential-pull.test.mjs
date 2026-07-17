@@ -77,12 +77,16 @@ async function pathExists(candidate) {
   }
 }
 
-// invokeAskpassShim(shimPath) — runs the GIT_ASKPASS one-shot shim exactly as git
-// would (mirrors task 03's traceability module) — the ONE sanctioned way to observe
-// the credential riding the clone-exec's per-invocation env.
-function invokeAskpassShim(shimPath) {
+// invokeAskpassShim(shimPath, prompt) — runs the GIT_ASKPASS one-shot shim exactly as
+// git would (mirrors task 03's traceability module) — the ONE sanctioned way to
+// observe the credential riding the clone-exec's per-invocation env. MILESTONE 38 /
+// STORY 02 (ADR-010 decision 4): the shim is now PROMPT-AWARE, so every call site
+// here simulates the real git `"Password for '...'"` prompt (the prompt-kind this
+// module's own assertions have always meant to exercise — observing the TOKEN, not
+// the username-vs-password distinction, which is task 03's own dedicated module).
+function invokeAskpassShim(shimPath, prompt = "Password for 'https://git.example.com'") {
   return new Promise((resolve, reject) => {
-    execFile(shimPath, [], { windowsHide: true, shell: process.platform === "win32" }, (error, stdout) => {
+    execFile(shimPath, [prompt], { windowsHide: true, shell: process.platform === "win32" }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });

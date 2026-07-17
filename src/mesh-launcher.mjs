@@ -24,19 +24,20 @@
 //                                        firing inside a test.
 import os from "node:os";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
 import { aofVersion } from "./commands/mesh-identity.mjs";
-import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces } from "./mesh-presence.mjs";
-import { listItems } from "./work.mjs";
+import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
+import { listItems, loadWorkspace } from "./work.mjs";
 import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems } from "./global-work-publisher.mjs";
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, resolveCloneUrl } from "./mesh-worker-execution.mjs";
 import { createEnrollmentHttpHandler } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 35 / ADR-008 — the control-side dispatch/reclaim driver's DATA-LAYER
@@ -46,6 +47,14 @@ import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // tick is the ONLY production CALLER of this orchestrator, per fitness
 // acd-control-dispatch-reclaim-driver-wired).
 import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
+// milestone 38 / story 02 (ADR-010) — the config-selected clone-credential-mint
+// PROVIDER, resolved HERE (where `config` lives) and wired as a LITERAL
+// `mintCloneCredential` key at the ONE production `startServer({...})` call site
+// below (the F12 discipline generalised to the provider). NO direct SQLite-store
+// import here — `resolveWorkspaceProjectRoot` (mesh-presence.mjs, imported above)
+// is the ONE seam this launcher reaches for a workspaceId -> project_root lookup,
+// keeping fitness `acd-global-publisher-single-seam` intact.
+import { resolveCloneCredentialProvider } from "./mesh-clone-credential-provider.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -67,6 +76,68 @@ function resolveNow(options = {}) {
   if (typeof options?.now === "function") return String(options.now());
   if (typeof options?.now === "string" && options.now.length > 0) return options.now;
   return new Date().toISOString();
+}
+
+// createResolveWorkspaceCloneUrl(ws, options) — milestone 38 / story 02 (ADR-010 Gap
+// A): builds the `resolveWorkspaceCloneUrl(workspaceId) => Promise<string|null>` seam
+// the `github-app` provider closes over. Its SOURCE OF TRUTH is the SAME
+// fleet-shared, COMMITTED `config.mesh.repo.cloneUrl` key ADR-005 established and
+// SECURITY T5(a) trusts — NEVER the worker's own request frame (dropped at the
+// client boundary; re-arming F15's "the requester must not steer the mint's repo
+// scope" posture at this layer too).
+//   - the CONTROL node's own launch workspace is the single-repo/bootstrap fallback
+//     (`ws.config.mesh.repo.cloneUrl`, read via the existing `resolveCloneUrl(ws)`
+//     raw optional-chain reader) — used directly when the requested workspaceId IS
+//     this launch workspace's own id (the common single-repo-fleet case, AC 6: no new
+//     config shape, no new store table for that case).
+//   - otherwise, resolved per-workspace through the ADR-003 descriptor seam already
+//     shipped for this exact "workspaceId -> project_root" lookup —
+//     `resolveWorkspaceProjectRoot` (mesh-presence.mjs, mirroring
+//     `resolveNodeWorkspaces`'s own descriptor read, which this launcher already
+//     keeps NO direct SQLite-store dependency of its own to reach) -> `loadWorkspace`
+//     -> `resolveCloneUrl(ws)`. A store fault, a missing descriptor row, or a
+//     workspace whose own config carries no well-formed cloneUrl all resolve to
+//     `null` — the caller (the provider) throws a loud, coded mint failure; this seam
+//     never guesses, never throws itself (FAILURE-ISOLATED, the same discipline every
+//     other launcher collaborator keeps).
+function createResolveWorkspaceCloneUrl(ws, options = {}) {
+  const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+  return async function resolveWorkspaceCloneUrl(workspaceId) {
+    if (workspaceId === ownWorkspaceId) {
+      return resolveCloneUrl(ws);
+    }
+    try {
+      const projectRoot = await resolveWorkspaceProjectRoot(workspaceId, options);
+      if (projectRoot == null) return null;
+      const otherWs = await loadWorkspace(projectRoot, undefined, { env: options?.globalWorkStoreOptions?.env });
+      return resolveCloneUrl(otherWs);
+    } catch {
+      return null;
+    }
+  };
+}
+
+// resolveGithubAppPrivateKey(options) — milestone 38 / story 02 (ADR-010 §6.2, T8):
+// the App private key is resolved from a FILE PATH — `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH`
+// (env, checked first — never a committed config value) or
+// `config.mesh.repo.credential.githubApp.privateKeyPath` (a committed PATH is fine;
+// the PATH is not the secret, the file's CONTENTS are) — read ONCE, here, and handed
+// down as an already-resolved value that closes over the provider (SECURITY F5: the
+// key never touches a log, only ever `createSign(...).sign(privateKey)`). A missing/
+// unreadable key file resolves to `null` — NEVER a launcher crash; the resulting
+// misconfiguration surfaces at the first MINT attempt as the existing loud coded
+// `clone-credential-mint-failed` (task 04), not as a daemon-start fault unrelated to
+// this feature's own scope.
+function resolveGithubAppPrivateKey(config) {
+  const keyPath = process.env.AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH
+    ?? config?.mesh?.repo?.credential?.githubApp?.privateKeyPath
+    ?? null;
+  if (typeof keyPath !== "string" || keyPath.length === 0) return null;
+  try {
+    return readFileSync(keyPath, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 // resolveAggregationWorkspaces(ws, nodeId, options) — the ADR-003 workspace set this
@@ -424,12 +495,29 @@ export async function startLauncher(ws, options = {}) {
     // addressed); control-stream-server.mjs only ever consumes the resolved roster.
     const boundAddress = await selfAddress(config, options);
     const servicePort = configuredServicePort(config);
+    // milestone 38 / story 02 (ADR-010) — THE FIX: the config-selected
+    // clone-credential-mint PROVIDER, resolved HERE (the ONE place `config` lives on
+    // this launcher) and wired as a LITERAL `mintCloneCredential:` key BELOW, BEFORE
+    // and OUTSIDE the `controlStreamServerOptions` test-injection spread — the F12
+    // discipline generalised to the provider (a provider reachable only through that
+    // spread would be production-dead, exactly the story-01 F12 defect class again).
+    // `resolveCloneCredentialProvider` THROWS LOUDLY for an unknown provider string
+    // (never a silent `env-token` degrade, SECURITY T10 applied to selection itself)
+    // — an unresolved mint refuses THIS launch outright, the same "fail loud, never a
+    // hang" posture every other launcher precondition already keeps.
+    const { mintCloneCredential: resolvedMintCloneCredential } = resolveCloneCredentialProvider(config, {
+      appId: config?.mesh?.repo?.credential?.githubApp?.appId ?? null,
+      privateKey: resolveGithubAppPrivateKey(config),
+      installationId: config?.mesh?.repo?.credential?.githubApp?.installationId ?? null,
+      resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
+    });
     streamServer = await startServer({
       ...(boundAddress ? { bindAddress: boundAddress } : {}),
       ...(servicePort != null ? { port: servicePort } : {}),
       peerNodeIds: peerNodeIdsFrom(peers),
       peersByAddress: peers,
       httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
+      mintCloneCredential: resolvedMintCloneCredential,
       ...(options?.controlStreamServerOptions ?? {}),
     });
   } else if (role === "worker" && options?.streamClient !== false) {

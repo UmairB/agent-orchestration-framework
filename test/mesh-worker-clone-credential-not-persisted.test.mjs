@@ -25,15 +25,24 @@ import {
   buildAskpassShim,
 } from "../src/mesh-worker-execution.mjs";
 
-// invokeAskpassShim(shimPath) — runs the GIT_ASKPASS one-shot shim exactly as git
-// would (the documented contract: "the user's input is read from its standard
+// invokeAskpassShim(shimPath, prompt) — runs the GIT_ASKPASS one-shot shim exactly as
+// git would (the documented contract: "the user's input is read from its standard
 // output") and returns what it emits — the ONE sanctioned way to observe the
 // credential riding the clone-exec's per-invocation env without ever asserting on a
 // literal env VALUE (which the shim deliberately never carries — only a POINTER to a
 // one-shot file does).
-function invokeAskpassShim(shimPath) {
+//
+// MILESTONE 38 / STORY 02 (ADR-010 decision 4) — the shim is now PROMPT-AWARE
+// (mesh-worker-execution.mjs's buildAskpassShim): git forwards its OWN distinguishing
+// prompt text as argv. This module's own F2 invariants are about the TOKEN's
+// handling, not the prompt-kind distinction (that is task 03's own dedicated
+// traceability module) — so every pre-existing call site here explicitly simulates
+// the real git `"Password for '...'"` prompt (the SAME prompt-kind these tests always
+// meant to exercise) to stay semantically green under the new contract, never
+// relying on any no-argv legacy default.
+function invokeAskpassShim(shimPath, prompt = "Password for 'https://git.example.com'") {
   return new Promise((resolve, reject) => {
-    execFile(shimPath, [], { windowsHide: true, shell: process.platform === "win32" }, (error, stdout) => {
+    execFile(shimPath, [prompt], { windowsHide: true, shell: process.platform === "win32" }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });
@@ -367,6 +376,28 @@ export const meshWorkerCloneCredentialNotPersistedTests = [
       }
       // After cleanup, the whole one-shot directory is gone.
       await assert.rejects(() => readFile(shim.shimPath, "utf8"), "the shim file is removed after cleanup");
+    }, { cloneUrl: "https://git.example.com/acme/secret.git" }),
+  },
+  // Structural (ADR-010 decision 4, additive): the SAME shared shim answers a
+  // Username prompt with the public constant, never the token — re-arming F2's "the
+  // token is never emitted as the username" posture on the now prompt-aware seam
+  // (task 03's own dedicated module covers the full Username/Password contract; this
+  // is the narrow re-affirmation that touching this shared seam did not regress it).
+  {
+    name: "task03/38 worker-repo-checkout (ADR-010): the prompt-aware askpass shim answers a Username prompt with the public `x-access-token` constant, never the token",
+    run: async () => withMeshCloneFixture(async ({ env }) => {
+      const { meshCheckoutsRoot } = await import("../src/mesh-worker-execution.mjs");
+      const scriptsRoot = meshCheckoutsRoot({ env });
+      const shim = await buildAskpassShim(scriptsRoot, FAKE_TOKEN);
+      try {
+        const usernameAnswer = (await invokeAskpassShim(shim.shimPath, "Username for 'https://git.example.com'")).trim();
+        assert.equal(usernameAnswer, "x-access-token", "the Username prompt is answered with the public constant");
+        assert.notEqual(usernameAnswer, FAKE_TOKEN, "the token is never emitted as the username");
+        const passwordAnswer = (await invokeAskpassShim(shim.shimPath, "Password for 'https://git.example.com'")).trim();
+        assert.equal(passwordAnswer, FAKE_TOKEN, "the Password prompt is still answered with the real token");
+      } finally {
+        await shim.cleanup();
+      }
     }, { cloneUrl: "https://git.example.com/acme/secret.git" }),
   },
 ];

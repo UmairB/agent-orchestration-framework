@@ -199,6 +199,77 @@ export function resolveCloneUrl(ws) {
   return isWellFormedCloneUrl(cloneUrl) ? cloneUrl.trim() : null;
 }
 
+// -------------------------------------------- milestone 38 / story 02 (ADR-010) ----
+
+// parseRepoFromCloneUrl(cloneUrl, config) — LAYERS ON `isWellFormedCloneUrl`'s OWN
+// acceptance surface (RESEARCH §3.5's measured parser): extracts `{ host, owner,
+// repo, apiBaseUrl }` from a well-formed clone URL — https/ssh scheme-form AND
+// scp-style `git@host:owner/repo(.git)`. `.git` suffix / trailing slash / query /
+// hash are stripped from the repo segment (never from `owner`, never a case-fold on
+// the path — only the HOST is lower-cased, matching `new URL()`'s own normalization
+// and RESEARCH's measured table). A `< 2`-path-segment URL (or anything
+// `isWellFormedCloneUrl` itself rejects) parses to `null` — the caller THROWS, never
+// guesses.
+//
+// The host -> API-base RULE (RESEARCH §3.5's "the REAL gap", not a parsing edge
+// case): `github.com` -> `https://api.github.com`; anything else -> the GHES
+// convention `https://<host>/api/v3` (using `url.host`, INCLUDING the port, per the
+// measured edge case — a GHES instance's API can sit behind a non-default port),
+// UNLESS `config.mesh.repo.credential.githubApp.apiBaseUrl` (raw optional-chain) is
+// configured, which wins outright (an operator's explicit override for an API host/
+// port that diverges from the git-clone host).
+export function parseRepoFromCloneUrl(cloneUrl, config = null) {
+  if (!isWellFormedCloneUrl(cloneUrl)) return null;
+  const trimmed = cloneUrl.trim();
+
+  let hostname; // never includes a port — used ONLY for the github.com check
+  let hostForApiBase; // includes a port when present — used to build a GHES API base
+  let pathSegments;
+
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return null;
+    }
+    hostname = parsed.hostname.toLowerCase();
+    // Craft R1 (defensive) — the URL's port is preserved into `hostForApiBase` ONLY
+    // for an http(s)-scheme clone URL (the legitimate GHES-behind-a-non-default-port
+    // case, e.g. `https://ghe.example.com:8443/...`). For any OTHER scheme (ssh, git,
+    // ...) the port is the SSH/clone port, never the forge's REST API port — the mint
+    // always talks HTTPS, so that port must NEVER leak into apiBaseUrl (a
+    // `ssh://host:22/...` clone URL must resolve to `https://host/api/v3`, not
+    // `https://host:22/api/v3`).
+    hostForApiBase = parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.host.toLowerCase() : hostname;
+    pathSegments = parsed.pathname.split("/").filter(Boolean);
+  } else {
+    // scp-style shorthand: user@host:path (git@git.example.com:acme/secret.git).
+    const match = /^[\w.-]+@([\w.-]+):(.+)$/.exec(trimmed);
+    if (!match) return null;
+    hostname = match[1].toLowerCase();
+    hostForApiBase = hostname;
+    pathSegments = match[2].split("?")[0].split("#")[0].split("/").filter(Boolean);
+  }
+
+  if (pathSegments.length < 2) return null;
+  const owner = pathSegments[0];
+  const repo = pathSegments[1].replace(/\.git$/i, "");
+  if (owner.length === 0 || repo.length === 0) return null;
+
+  const configuredApiBase = config?.mesh?.repo?.credential?.githubApp?.apiBaseUrl;
+  let apiBaseUrl;
+  if (typeof configuredApiBase === "string" && configuredApiBase.length > 0) {
+    apiBaseUrl = configuredApiBase;
+  } else if (hostname === "github.com") {
+    apiBaseUrl = "https://api.github.com";
+  } else {
+    apiBaseUrl = `https://${hostForApiBase}/api/v3`;
+  }
+
+  return { host: hostname, owner, repo, apiBaseUrl };
+}
+
 // ------------------------------------------------ task 01: clone TARGET seam ----
 
 // meshCheckoutsRoot(options) / meshCheckoutPath(workspaceId, options) — THE ONE SEAM
@@ -252,13 +323,28 @@ function resolveCloneExec(options) {
 // surveyed mechanisms). GIT_ASKPASS names ONE executable, not "command + args" — on
 // Windows a `node <script>` pointer does not work directly, so this writes a
 // generated one-shot `.cmd` shim (POSIX: a shell script) that internally execs a tiny
-// node helper which simply echoes the token to stdout (the documented askpass
-// contract: "the user's input is read from its standard output"). The token itself
-// is embedded ONLY in this one-shot, scoped-directory file — never process.env, never
-// argv of the clone itself — and the whole shim directory is removed in a `finally`
-// by the caller. NEVER os.tmpdir() (F1) — the shim lives under the SAME scoped
-// checkouts root, in a dedicated `.askpass/` sibling never itself treated as a
-// checkout target.
+// node helper. The token itself is embedded ONLY in this one-shot, scoped-directory
+// file — never process.env, never argv of the clone itself — and the whole shim
+// directory is removed in a `finally` by the caller. NEVER os.tmpdir() (F1) — the
+// shim lives under the SAME scoped checkouts root, in a dedicated `.askpass/` sibling
+// never itself treated as a checkout target.
+//
+// MILESTONE 38 / STORY 02 (ADR-010 decision 4) — PROMPT-AWARE. RESEARCH §3.4 measured
+// that git passes the ASKPASS program a distinguishing prompt string as argv (`
+// "Username for '...'"` vs `"Password for '...'"`) — the shim now FORWARDS that argv
+// (`%*` / `"$@"`) to the helper, which answers the literal, public, non-secret
+// constant `x-access-token` on a Username prompt, and the real token on every OTHER
+// prompt (Password, or none — the legacy no-argv invocation some hermetic tests still
+// use, which stays the token-emitting default). This is GitHub's DOCUMENTED App
+// installation-token form (`x-access-token:<TOKEN>@`), not the previously-shipped
+// same-value-for-both-prompts shim that rested on undocumented, App-token-unconfirmed
+// leniency. The token is STILL never the username, still never process.env/argv of
+// the clone itself, still removed with the whole one-shot directory in the caller's
+// `finally` (story-01 F2 stays green — the token's own handling is unchanged on every
+// axis F2 pins; only WHICH prompt gets the token, vs the public `x-access-token`
+// constant, is new).
+const ASKPASS_USERNAME_CONSTANT = "x-access-token";
+
 export async function buildAskpassShim(scriptsRoot, token) {
   const dir = path.join(scriptsRoot, ".askpass", randomUUID());
   await mkdir(dir, { recursive: true });
@@ -268,12 +354,22 @@ export async function buildAskpassShim(scriptsRoot, token) {
   // The token is written into a file that lives ONLY inside this one-shot, scoped
   // directory — read once by the helper, then the whole directory is removed.
   const tokenPath = path.join(dir, "token");
-  await writeFile(helperPath, "import { readFileSync } from 'node:fs';\nprocess.stdout.write(readFileSync(process.argv[2], 'utf8'));\n", "utf8");
+  await writeFile(
+    helperPath,
+    [
+      "import { readFileSync } from 'node:fs';",
+      "const tokenPath = process.argv[2];",
+      "const prompt = process.argv.slice(3).join(' ');",
+      `process.stdout.write(/^Username/i.test(prompt) ? ${JSON.stringify(ASKPASS_USERNAME_CONSTANT)} : readFileSync(tokenPath, 'utf8'));`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   await writeFile(tokenPath, token, "utf8");
   if (isWindows) {
-    await writeFile(shimPath, `@echo off\r\nnode "${helperPath}" "${tokenPath}"\r\n`, "utf8");
+    await writeFile(shimPath, `@echo off\r\nnode "${helperPath}" "${tokenPath}" %*\r\n`, "utf8");
   } else {
-    await writeFile(shimPath, `#!/bin/sh\nexec node "${helperPath}" "${tokenPath}"\n`, "utf8");
+    await writeFile(shimPath, `#!/bin/sh\nexec node "${helperPath}" "${tokenPath}" "$@"\n`, "utf8");
     await import("node:fs/promises").then((fsp) => fsp.chmod(shimPath, 0o700));
   }
   return { shimPath, cleanup: () => rm(dir, { recursive: true, force: true }) };
@@ -407,7 +503,12 @@ export async function cloneRepoForWorkspace(ws, { workspaceId, nodeId, assignmen
     // applies on the PUBLIC / no-credential path too: a private repo whose relay
     // token never arrived must fail loudly, never succeed via the machine's own
     // keychain.
-    const cloneEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+    // Craft R2 (locale-robust shim) — git LOCALIZES its askpass prompt text (gettext);
+    // the generated helper's `/^Username/i` match (buildAskpassShim above) only
+    // recognises the ENGLISH prompt. Pinning LC_ALL/LANG to the POSIX "C" locale on
+    // this per-invocation env (never process.env) makes git emit the English prompt
+    // regardless of the host machine's own locale, so the match stays reliable.
+    const cloneEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", LANG: "C" };
     if (typeof credential === "string" && credential.length > 0) {
       askpass = await buildAskpassShim(meshCheckoutsRoot(options.globalWorkStoreOptions ?? {}), credential);
       cloneEnv.GIT_ASKPASS = askpass.shimPath;
