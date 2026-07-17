@@ -11,7 +11,56 @@ doc: state
 
 ## Progress
 
-- [ ] Not started — framed 2026-07-14. Next: `aof:refine 40` to break into stories.
+- [x] Framed 2026-07-14.
+- [x] **Refined 2026-07-17** (`aof:refine 40 --autonomous`) — ARCHITECTURE.md ADR-001..008 authored (all
+  five open questions resolved as documented defaults, see below), 6 guard-if-present fitness functions
+  committed, and the milestone broken into **4 independent stories** (`01 → {02, 03}`, `02 → 04`). Status
+  → in-progress. Next: `aof:continue 40` — build the stories to green in dependency order.
+
+## Refine decisions (2026-07-17) — the five open questions, resolved as documented defaults
+
+All five open questions were resolved as documented defaults consistent with the SPEC's own steer and the
+three existing versioning precedents (no fourth idiom invented). None required a hand-back — recorded here
+per the autonomous mandate. Full context + code citations are in `ARCHITECTURE.md`.
+
+- **Q1 — what is the version? → BOTH, as two distinct fields (ADR-001).** `schema` (a monotonic integer,
+  the *only* field the migration selector reads, mirroring `GLOBAL_WORK_SCHEMA_VERSION`) + `aofVersion` (a
+  human-legible provenance string, `packageVersionString()`, never parsed for logic). The current schema
+  is one exported constant `WORK_ITEM_SCHEMA_VERSION` in `work.mjs`, initial value **1**. Conflating the
+  two is exactly what STATE warned makes version fields useless — kept separate.
+- **Q2 — where does the stamp live? → per-item record-doc frontmatter (ADR-002).** Items drift
+  independently (foreign installs at different aof versions; a migration may touch some item *types* not
+  others), so per-item is the only shape that represents a partially-upgraded stream honestly. New items
+  born stamped at scaffold; existing stream backstamped via the registry's `0→1` transform.
+- **Q3 — what version are the pre-stamp items 00–38? → schema 0, the pre-versioning baseline (ADR-003).**
+  No `schema` key reads as `0` (mirrors `readSchemaVersion` null→needs-migration). The `0→1` transform IS
+  the stamp transform; it backstamps the aof repo's own current stream truthfully (they ARE current) and
+  brings foreign unstamped streams forward. Genuinely-old *shape* drift (pre-m14/m37) is NOT retroactively
+  reconstructed — that would be the forbidden inference (see inherited constraint below).
+- **Q4 — widening the bounded frontmatter writer? → NO; a separate transform-scoped writer (ADR-004).**
+  `rollbackItemStatus`'s hard status-only bound (20/ADR-005) is preserved verbatim. A NEW writer
+  (`applyItemFrontmatter`) in `work.mjs` (the item-frontmatter authority, 19/ADR-002) rewrites only the
+  `---…---` block with a byte-identical body, runs only inside a registered transform. Two narrow bounded
+  writers, never one wide mutator.
+- **Q5 — is `chore` the right vehicle? → NO for BUILDING the machinery; YES for RUNNING an upgrade
+  (ADR-007).** This milestone builds the registry/engine/stamp/staleness as stories with real `.feature`
+  contracts (observable behaviour + fitness functions a checklist can't carry). *Invoking* `aof upgrade`
+  on a specific installed stream later is the chore-shaped act (m39's backfill applied to a repo is the
+  first such chore).
+
+**Two consequences flagged by the architect (not blockers, defaulted):**
+- `schema` starts at **1** and does not retro-encode the already-shipped m14 (`AOF.md`) / m37
+  (`spike`/`chore`) shape moves — so "stamped current" declares *version*, not *shape completeness*. Any
+  residual shape gap in a genuinely-ancient foreign stream needs a *future explicit* registered transform,
+  never a silent guess. This is the honest consequence of ADR-008.
+- `aofVersion` is a **born-stamp**, unchanged by an upgrade (a migration advances `schema`; provenance
+  keeps recording origin). A per-item `migratedBy`/`upgradedAt` was considered and deferred — addable
+  later without re-opening ADR-001.
+
+**Security/compliance tier: none (ARCHITECTURE.md verdict).** `aof upgrade` does local in-place frontmatter
+transforms on the user's own repo — no network, no personal/regulated data, no auth. The real risk
+(data-loss from a buggy transform) is *correctness*, covered by the fitness functions (dry-run-first +
+idempotency + atomic write + body-byte-identity), not a threat model.
 
 ## Notes & decisions in flight
 

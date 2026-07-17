@@ -3,10 +3,10 @@ type: milestone
 number: 40
 slug: work-item-versioning-upgrade
 title: "Work-item versioning & the upgrade path — a stream that knows how old it is, and migrations that run"
-status: not-started
+status: in-progress
 owner: product-owner
 created: 2026-07-14
-updated: 2026-07-14
+updated: 2026-07-17
 depends: [00, 01]
 ---
 <!--
@@ -94,9 +94,21 @@ that distinction is not ready to carry the backfill.
 
 ## Stories
 
-<!-- Populated by `aof:refine 40`. -->
+<!-- Populated by `aof:refine 40` (2026-07-17). Four independent stories cut along the real coupling
+     (ARCHITECTURE.md "Story boundaries"): the version MODEL is foundational, everything reads it.
+     Dep graph: 01 → {02, 03} and 02 → 04. After 01, stories 02 and 03 run in parallel. -->
 
-- [ ] to be broken down
+- [ ] [01 · version stamp & reader](stories/01_story_version-stamp-and-reader/STORY.md) — the foundation:
+  the `WORK_ITEM_SCHEMA_VERSION` constant, the two frontmatter keys (`schema` int + `aofVersion`
+  string), the reader (schema-0 baseline), the born-stamp at scaffold, and the transform-scoped writer
+  primitive. *No intra-milestone dep.*
+- [ ] [02 · migration registry & `aof upgrade`](stories/02_story_migration-registry-and-upgrade/STORY.md)
+  — the engine: `work-upgrade.mjs` (`WORK_ITEM_MIGRATIONS` incl. the `0→1` stamp transform + the
+  reconstructed-marker) and the `aof upgrade` dry-run→apply idempotent CLI face. *Dep 40/01.*
+- [ ] [03 · staleness in validate](stories/03_story_validate-staleness/STORY.md) — validate reports a
+  stream behind the current aof, naming `aof upgrade`. *Dep 40/01 only.*
+- [ ] [04 · generated changelog](stories/04_story_generated-changelog/STORY.md) — a projection of the
+  registry that cannot drift. *Dep 40/02.*
 
 ## Dependencies
 
