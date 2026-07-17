@@ -4,7 +4,7 @@ number: 02
 slug: migration-registry-and-upgrade
 title: "The migration registry & aof upgrade — version→version transforms declared as code, a dry-run-first idempotent engine, and a reconstructed-marker so the framework is ready for the backfill without performing it"
 parent: 40
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
@@ -71,11 +71,11 @@ Grounded in `ARCHITECTURE.md` ADR-003 / ADR-005 / ADR-008:
 
 <!-- Authored at `aof:refine 40 --autonomous` (Three Amigos). -->
 
-- [ ] `tasks/00_registry-contiguous-chain.feature`
-- [ ] `tasks/01_upgrade-dry-run-then-apply.feature`
-- [ ] `tasks/02_upgrade-idempotent.feature`
-- [ ] `tasks/03_stamp-transform-backstamps-unstamped.feature`
-- [ ] `tasks/04_reconstructed-marker-expressible.feature`
+- [x] `tasks/00_registry-contiguous-chain.feature` — 5/5 green
+- [x] `tasks/01_upgrade-dry-run-then-apply.feature` — 5/5 green
+- [x] `tasks/02_upgrade-idempotent.feature` — 4/4 green
+- [x] `tasks/03_stamp-transform-backstamps-unstamped.feature` — 6/6 `@executable` green (the `@manual` live-stream backstamp runs at `aof:verify`)
+- [x] `tasks/04_reconstructed-marker-expressible.feature` — 4/4 green
 
 ## Notes
 

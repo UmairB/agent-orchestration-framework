@@ -185,6 +185,10 @@ function argsFor(sub) {
         "60",
         "--json",
       ];
+    // milestone 40 / story 02 — work:upgrade. --dry-run so the probe never
+    // mutates the fixture's "03"/"03/01" refs the other subcommand probes
+    // above depend on (it only REPORTS what would change).
+    case "upgrade": return ["work", "upgrade", "--dry-run", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

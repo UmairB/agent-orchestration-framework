@@ -127,6 +127,17 @@ export async function run(argv) {
     return;
   }
 
+  // milestone 40 / story 02 — reclaim the top-level `upgrade` verb: run the
+  // migration registry engine over the CURRENT work stream (the contrast with
+  // `migrate`: migrate converts a FOREIGN folder in; upgrade advances the
+  // stream's OWN items to this build's schema). A thin argv -> invoke(
+  // "work:upgrade") -> render/--json face, mirroring migrateCommand exactly.
+  // Also reachable as `aof work upgrade` (workCommand, below) — the SAME face.
+  if (command === "upgrade") {
+    await upgradeCommand(rest);
+    return;
+  }
+
   if (["add", "apply", "sync", "clean", "global", "install", "validate", "doctor", "config", "catalog"].includes(command)) {
     throw removedCommandError(command);
   }
@@ -354,6 +365,16 @@ async function workCommand(args) {
     return;
   }
 
+  // milestone 40 / story 02 — `aof work upgrade` is the SAME face as the
+  // top-level `aof upgrade` verb above (both reach work:upgrade); nested here
+  // so the registry-derived acd-work-command-cli-bijection guard (every
+  // work:* command has a reachable `aof work <sub>` dispatch branch) stays
+  // satisfied for work:upgrade's `work:` id.
+  if (subcommand === "upgrade") {
+    await upgradeCommand(rest);
+    return;
+  }
+
   if (subcommand === "doctor") {
     await workDoctorCommand(rest);
     return;
@@ -434,7 +455,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]\n  aof work upgrade [--dry-run] [--json]`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -853,6 +874,37 @@ async function migrateCommand(args) {
 
   // Non-json: render the result; a command error (missing-folder / nothing-
   // recoverable / source-read) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof upgrade [--dry-run] [--json]` — the thin face over the registered
+// work:upgrade command (milestone 40 / story 02, ADR-005). Mirrors
+// migrateCommand EXACTLY: parseOptions → getCommand → loadWorkspace → invoke →
+// cli.render/cli.json. Bare `aof upgrade` APPLIES; `--dry-run` PREVIEWS and
+// writes nothing (the aof project migrate dry-run/apply face). In --json mode
+// a command error (e.g. schema-newer-than-build) is emitted as a SINGLE
+// structured envelope { ok:false, error, code } on stdout (+ non-zero exit),
+// like the import/migrate/graph verbs. Also reachable as `aof work upgrade`
+// (workCommand, above) — the SAME function, both routes reach the one command.
+async function upgradeCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("work:upgrade");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error (schema-newer-than-build)
+  // propagates to bin/aof.mjs (stderr + non-zero exit).
   const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
   console.log(command.cli.render(result));
 }
@@ -2865,6 +2917,7 @@ Work (ACD work stream):
   aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
   aof work ui [--port]                   serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
   aof migrate <folder> [--dry-run] [--json]   convert an existing folder INTO a managed milestone under work.dir (the import contrast)
+  aof upgrade [--dry-run] [--json]       advance the work stream's OWN items to this build's schema (bare = apply, --dry-run = preview only)
   aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]   install the bought planner (pm-skills), record pinned-sha provenance
 
 Defaults:

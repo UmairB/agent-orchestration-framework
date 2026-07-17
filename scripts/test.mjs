@@ -1262,6 +1262,16 @@ import { archTests as acdUpgradeEngineBlastRadiusTests } from "../test/arch/acd-
 import { workVersionReaderTests } from "../test/work-version-reader.test.mjs";
 import { workScaffoldBornStampedTests } from "../test/work-scaffold-born-stamped.test.mjs";
 import { workFrontmatterWriterTests } from "../test/work-frontmatter-writer.test.mjs";
+// milestone 40 / story 02 — migration registry & `aof upgrade` (ADR-005): the
+// contiguous 0->1->… chain + engine selection (task 00), the CLI dry-run/apply/
+// refuse face (task 01), idempotency across re-runs (task 02), the 0->1 stamp
+// transform backstamping every recordDoc type (task 03), and the reconstructed-
+// marker expressibility seam (task 04, ADR-008 readiness for m39's backfill).
+import { workUpgradeRegistryChainTests } from "../test/work-upgrade-registry-chain.test.mjs";
+import { workUpgradeDryRunApplyTests } from "../test/work-upgrade-dry-run-apply.test.mjs";
+import { workUpgradeIdempotentTests } from "../test/work-upgrade-idempotent.test.mjs";
+import { workUpgradeStampTransformTests } from "../test/work-upgrade-stamp-transform.test.mjs";
+import { workUpgradeReconstructedMarkerTests } from "../test/work-upgrade-reconstructed-marker.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1764,7 +1774,13 @@ export const tests = [
   // milestone 40 / story 01 — version stamp & reader task traceability
   ...workVersionReaderTests,
   ...workScaffoldBornStampedTests,
-  ...workFrontmatterWriterTests
+  ...workFrontmatterWriterTests,
+  // milestone 40 / story 02 — migration registry & `aof upgrade` task traceability
+  ...workUpgradeRegistryChainTests,
+  ...workUpgradeDryRunApplyTests,
+  ...workUpgradeIdempotentTests,
+  ...workUpgradeStampTransformTests,
+  ...workUpgradeReconstructedMarkerTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

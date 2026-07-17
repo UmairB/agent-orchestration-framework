@@ -43,6 +43,10 @@ const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:n
 // work:insert-chore (the SAME insert-top-level family, over the chore type) and
 // work:promote-gap (the promotion verb over the same engine) — same CLI-only
 // carve-out (BOARD_DEFERRED), same design.
+// Milestone 40 / story 02 (migration registry & `aof upgrade`, ADR-005)
+// registers one more — work:upgrade, the thin face over the NEW
+// src/work-upgrade.mjs registry engine — another sanctioned in-namespace
+// extension, CLI-only by design (same BOARD_DEFERRED carve-out).
 const WORK_IDS = [
   ...SIX_IDS,
   "work:doctor",
@@ -55,6 +59,7 @@ const WORK_IDS = [
   "work:insert-story",
   "work:insert-chore",
   "work:promote-gap",
+  "work:upgrade",
 ];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------

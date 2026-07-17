@@ -56,6 +56,13 @@ const BOARD_UI = path.join(repoRoot, "src", "board-ui.mjs");
 // `insert-chore` / `promote-gap` (m39/story 03, ADR-001) join the SAME carve-out
 // for the SAME reason: the chore insert seam + the gap-promotion verb are
 // mechanical CLI actions, no board affordance requested here either.
+// `upgrade` (m40/story 02, ADR-005) joins the SAME carve-out for the SAME
+// reason: ARCHITECTURE.md's story boundary scopes this milestone to "the
+// work-upgrade.mjs engine, the `aof upgrade` CLI face" — no board affordance
+// is asked for (a data-mutating migration run is a deliberate CLI/operator
+// action, mirroring `aof migrate`'s CLI-only face). A future board "upgrade"
+// button is a separate, deliberate decision — this carve-out documents the
+// deferral, not an oversight.
 const BOARD_DEFERRED = new Set([
   "run-start",
   "run-complete",
@@ -65,6 +72,7 @@ const BOARD_DEFERRED = new Set([
   "insert-story",
   "insert-chore",
   "promote-gap",
+  "upgrade",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

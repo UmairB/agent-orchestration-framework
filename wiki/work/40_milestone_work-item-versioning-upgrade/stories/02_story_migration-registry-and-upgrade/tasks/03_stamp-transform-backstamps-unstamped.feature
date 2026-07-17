@@ -21,8 +21,8 @@ Feature: the 0→1 stamp transform backstamps an unstamped item to schema 1 with
     Given a fixture work stream whose items are unstamped — no `schema` key — and therefore read as the schema-0 baseline
 
   # The stamp works across every record-doc type recordDoc resolves (ADR-002): a
-  # milestone's SPEC.md, a story's STORY.md, a session, a spike, a chore. Each gains the
-  # two frontmatter keys; each keeps its body byte-identical.
+  # milestone's SPEC.md, a story's STORY.md, a uat session's SESSION.md, a spike, a chore.
+  # Each gains the two frontmatter keys; each keeps its body byte-identical.
   @executable
   Scenario Outline: the 0→1 stamp backstamps an unstamped <type> to schema 1 with a provenance stamp
     Given an unstamped <type> whose record doc is "<doc>"
@@ -35,7 +35,7 @@ Feature: the 0→1 stamp transform backstamps an unstamped item to schema 1 with
       | type      | doc        |
       | milestone | SPEC.md    |
       | story     | STORY.md   |
-      | session   | SESSION.md |
+      | uat       | SESSION.md |
       | spike     | SPIKE.md   |
       | chore     | CHORE.md   |
 

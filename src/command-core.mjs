@@ -178,6 +178,17 @@ import { insertStoryCommand } from "./commands/insert-story.mjs";
 // mechanical bridge from "a gap is a note" to "a gap is schedulable debt".
 import { insertChoreCommand } from "./commands/insert-chore.mjs";
 import { promoteGapToChoreCommand } from "./commands/promote-gap-to-chore.mjs";
+// milestone 40 / story 02 (migration registry & `aof upgrade`, ADR-005) —
+// work:upgrade registers into the SAME core. A thin wrapper over the NEW
+// src/work-upgrade.mjs engine (WORK_ITEM_MIGRATIONS + planUpgrade/runUpgrade),
+// which imports work.mjs's readers + the ADR-004 writer but is never imported
+// BY work.mjs (acd-upgrade-engine-blast-radius — the god-node's blast radius
+// does not grow). Reachable as the top-level `aof upgrade` verb (mirroring
+// `aof migrate` -> migrate:folder) AND as `aof work upgrade` (cli.mjs's
+// workCommand dispatch) — both routes reach this ONE registered command.
+// CLI-only by design (no board affordance requested — the same BOARD_DEFERRED
+// carve-out `insert-milestone`/`insert-chore`/etc already use).
+import { upgradeCommand } from "./commands/upgrade.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -222,6 +233,7 @@ const COMMANDS = [
   insertStoryCommand,
   insertChoreCommand,
   promoteGapToChoreCommand,
+  upgradeCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().
