@@ -1216,6 +1216,31 @@ import { workSpikeChoreValidateTests } from "../test/work-spike-chore-validate.t
 import { workSpikeTemplateTests } from "../test/work-spike-template.test.mjs";
 import { workChoreTemplateTests } from "../test/work-chore-template.test.mjs";
 import { bundleSpikeChoreMembershipTests } from "../test/bundle-spike-chore-membership.test.mjs";
+// milestone 39 — delivery memory (OUTCOME.md): story 01 (the OUTCOME.md bundle
+// template + the verify.md Accept-authoring hook + the generalized stripBundleMarker),
+// story 02 (parseOutcome → buildRecords reaching both backends + the bounded,
+// query-class-conditional capability ranking), story 04 (the dangling-declaration
+// fitness function — declared record-format field with no producer fails red), plus
+// the five ADR fitness functions on disk (frozen-shape ADR-001, single-index-seam
+// ADR-002, capability-ranking-bounded ADR-003, authored-by-verify ADR-004,
+// dangling-declaration-present ADR-005). @executable traceability + arch-tests.
+import { outcomeTemplateTests } from "../test/outcome-template.test.mjs";
+import { verifyAuthorsOutcomeTests } from "../test/verify-authors-outcome.test.mjs";
+import { outcomeParseRecordsTests } from "../test/outcome-parse-records.test.mjs";
+import { capabilityRecallSurfacesTests } from "../test/capability-recall-surfaces.test.mjs";
+import { danglingDeclarationFfTests } from "../test/dangling-declaration-ff.test.mjs";
+// story 03 — gaps are schedulable debt: the `--status` recall filter (gap lifecycle)
+// + promote-gap-to-chore over the reused chore insert seam.
+import { gapCarriesDischargeTests } from "../test/gap-carries-discharge.test.mjs";
+import { promoteGapToChoreTests } from "../test/promote-gap-to-chore.test.mjs";
+// review fix — pin the deliberate SCOPE_FLAGS/SCOPE_FIELDS seam-split as coverage.
+import { scopeFlagsFieldsAgreeTests } from "../test/scope-flags-fields-agree.test.mjs";
+import { archTests as acdOutcomeRecordFrozenShapeTests } from "../test/arch/acd-outcome-record-frozen-shape.test.mjs";
+import { archTests as acdOutcomeSingleIndexSeamTests } from "../test/arch/acd-outcome-single-index-seam.test.mjs";
+import { archTests as acdOutcomeCapabilityRankingBoundedTests } from "../test/arch/acd-outcome-capability-ranking-bounded.test.mjs";
+import { archTests as acdOutcomeAuthoredByVerifyTests } from "../test/arch/acd-outcome-authored-by-verify.test.mjs";
+import { archTests as acdOutcomeDanglingDeclarationPresentTests } from "../test/arch/acd-outcome-dangling-declaration-present.test.mjs";
+import { archTests as acdOutcomeDeclaredFieldHasProducerTests } from "../test/arch/acd-outcome-declared-field-has-producer.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1682,7 +1707,24 @@ export const tests = [
   // milestone 37 / story 01 — scaffold commands & templates
   ...workSpikeTemplateTests,
   ...workChoreTemplateTests,
-  ...bundleSpikeChoreMembershipTests
+  ...bundleSpikeChoreMembershipTests,
+  // milestone 39 — delivery memory (OUTCOME.md): stories 01/02/04 traceability +
+  // the five ADR fitness functions (frozen-shape / single-seam / ranking-bounded /
+  // authored-by-verify / dangling-present) + story 04's declared-field-has-a-producer.
+  ...outcomeTemplateTests,
+  ...verifyAuthorsOutcomeTests,
+  ...outcomeParseRecordsTests,
+  ...capabilityRecallSurfacesTests,
+  ...danglingDeclarationFfTests,
+  ...gapCarriesDischargeTests,
+  ...promoteGapToChoreTests,
+  ...scopeFlagsFieldsAgreeTests,
+  ...acdOutcomeRecordFrozenShapeTests,
+  ...acdOutcomeSingleIndexSeamTests,
+  ...acdOutcomeCapabilityRankingBoundedTests,
+  ...acdOutcomeAuthoredByVerifyTests,
+  ...acdOutcomeDanglingDeclarationPresentTests,
+  ...acdOutcomeDeclaredFieldHasProducerTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

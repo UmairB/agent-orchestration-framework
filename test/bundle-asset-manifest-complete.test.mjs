@@ -36,12 +36,12 @@ function listFilesDirect(dir) {
 
 export const bundleAssetManifestCompleteTests = [
   {
-    name: "bundle-asset-manifest-complete/00 the generated manifest covers every file under src/bundle/** (41 files), empty diff both directions",
+    name: "bundle-asset-manifest-complete/00 the generated manifest covers every file under src/bundle/** (42 files), empty diff both directions",
     run: async () => {
       const manifest = generateAssetManifest(repoRoot);
       const direct = listFilesDirect(path.join(repoRoot, "src", "bundle"));
 
-      assert.equal(direct.length, 41, "the real src/bundle/** tree carries exactly 41 files (37 milestone-01 baseline + 4 milestone-37 spike/chore assets)");
+      assert.equal(direct.length, 42, "the real src/bundle/** tree carries exactly 42 files (37 milestone-01 baseline + 4 milestone-37 spike/chore assets + 1 milestone-39 OUTCOME.md milestone template)");
       assert.deepEqual(manifest.bundle, direct, "the generated bundle manifest is byte-identical (set + order) to the real tree's direct enumeration");
 
       const manifestSet = new Set(manifest.bundle);

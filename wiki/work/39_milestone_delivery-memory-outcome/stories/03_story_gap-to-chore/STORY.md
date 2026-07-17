@@ -4,10 +4,10 @@ number: 03
 slug: gap-to-chore
 title: "Gaps are schedulable debt — a discharge condition, promotable into a chore"
 parent: 39
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -51,11 +51,11 @@ Depends (contract only, not code) on story 01's `## Gaps` grammar and ADR-001's 
      promote seam are not built yet — these features are the contract that drives the build.
      Two FEASIBILITY FLAGS logged for the developer amigo (see task notes below). -->
 
-- [ ] `tasks/00_gap-carries-discharge.feature` — a `gap` record carries an `open`/`discharged` status
+- [x] `tasks/00_gap-carries-discharge.feature` — a `gap` record carries an `open`/`discharged` status
   (the reused `MemoryRecord.status`, ADR-001) and its discharge condition in recallable text;
   `aof work memory recall --status <status>` returns only debt in that lifecycle state (Examples over
   the open|discharged vocabulary; an adr's `Accepted` status is never open debt).
-- [ ] `tasks/01_promote-gap-to-chore.feature` — a declared open gap is promoted into a top-level `chore`
+- [x] `tasks/01_promote-gap-to-chore.feature` — a declared open gap is promoted into a top-level `chore`
   whose `## Definition of Done` is seeded from the gap's discharge condition and which traces back to the
   originating gap; the chore is born `not-started` (closed later by `aof:verify`, never hand-ticked). A
   discharged gap has no debt to schedule (boundary).

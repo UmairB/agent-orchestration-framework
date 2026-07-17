@@ -39,6 +39,10 @@ const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:n
 // ARCHITECTURE ADR-002; the board face is deferred — see BOARD_DEFERRED in
 // acd-work-command-route-coverage.test.mjs). Story 03 registers a third —
 // work:insert-story, the nested-axis sibling — same carve-out, same design.
+// Milestone 39 / story 03 (gap-to-chore, ADR-001) registers two more —
+// work:insert-chore (the SAME insert-top-level family, over the chore type) and
+// work:promote-gap (the promotion verb over the same engine) — same CLI-only
+// carve-out (BOARD_DEFERRED), same design.
 const WORK_IDS = [
   ...SIX_IDS,
   "work:doctor",
@@ -49,6 +53,8 @@ const WORK_IDS = [
   "work:insert-milestone",
   "work:insert-uat",
   "work:insert-story",
+  "work:insert-chore",
+  "work:promote-gap",
 ];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------

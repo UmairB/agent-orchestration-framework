@@ -169,6 +169,15 @@ import { insertUatCommand } from "./commands/insert-uat.mjs";
 // (count-gate, template-scaffold-strip) via `runInsertStory`. Independent of
 // story 02's top-level pair above — disjoint number space, own command file.
 import { insertStoryCommand } from "./commands/insert-story.mjs";
+// milestone 39 / story 03 (gap-to-chore, ADR-001, feasibility flag 4) —
+// work:insert-chore joins the SAME top-level pair above (a THIN wrapper over
+// insert-shared.mjs's runInsertTopLevel, reusing the mechanics, not a bespoke
+// writer). work:promote-gap is the promotion verb: given a declared gap
+// (title + discharge condition), it calls the SAME runInsertTopLevel engine to
+// scaffold a chore, then seeds its Definition of Done + back-reference — the
+// mechanical bridge from "a gap is a note" to "a gap is schedulable debt".
+import { insertChoreCommand } from "./commands/insert-chore.mjs";
+import { promoteGapToChoreCommand } from "./commands/promote-gap-to-chore.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -211,6 +220,8 @@ const COMMANDS = [
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,
+  insertChoreCommand,
+  promoteGapToChoreCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

@@ -100,23 +100,27 @@ export const archTests = [
       const parseOutcome = await outcomeParser();
       if (!parseOutcome) return; // inert-green until the parser lands
 
+      // Pinned OUTCOME.md grammar (39 SPEC "## Stories" — "### " headings, not
+      // bullets; a gap carries a "- **Status:**" + "- **Discharge condition:**"
+      // pair). CONTRACT-DRIFT FIX: this fixture predated the grammar pinned at
+      // refine, which uses "### " headings under Delivered/Gaps, not bullets.
       const OUTCOME_FIXTURE = `---
 doc: outcome
 ---
 # 39 · Fixture — Outcome
 
 ## Delivered
-
-- The capability the milestone now provides.
+### The delivery-memory capability
+The capability the milestone now provides.
 
 ## Assumptions
-
-- The assumption the delivery rests on.
+- **The assumption the delivery rests on** — a condition placeholder.
 
 ## Gaps
-
-- \`warnings_delivered\` is written only by test fixtures; no production path populates it.
-  Discharge: a producer writes it. Status: open.
+### warnings_delivered field
+- **Status:** open
+- **Discharge condition:** a producer writes it.
+\`warnings_delivered\` is written only by test fixtures; no production path populates it.
 `;
       const records = parseOutcome(OUTCOME_FIXTURE, META);
       assert.ok(records.length > 0, "parseOutcome produced at least one delivery record (non-vacuous)");

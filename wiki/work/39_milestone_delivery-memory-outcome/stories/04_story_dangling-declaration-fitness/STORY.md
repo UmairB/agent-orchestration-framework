@@ -4,10 +4,10 @@ number: 04
 slug: dangling-declaration-fitness
 title: "Dangling-declaration fitness function — declared surface with no producer fails red"
 parent: 39
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -54,7 +54,7 @@ architect's `test/arch/acd-outcome-dangling-declaration-present.test.mjs`; this 
      (src/memory/local-indexing.mjs) — all 13 fields have a producer write-site today (clean set is
      green); warnings_delivered exists nowhere in src/ (the planted-negative is synthetic). -->
 
-- [ ] `tasks/00_dangling-declaration-ff.feature` — the fitness function passes a clean field set, fails
+- [x] `tasks/00_dangling-declaration-ff.feature` — the fitness function passes a clean field set, fails
   red on a declared-field-with-no-producer (the `warnings_delivered`-shape planted-negative, tripping
   the SAME detector), catches an undeclared dangling field with no `OUTCOME.md` present, asserts the
   honest in-scope-vs-out-of-scope declaration-class boundary (Examples table), and is wired into the

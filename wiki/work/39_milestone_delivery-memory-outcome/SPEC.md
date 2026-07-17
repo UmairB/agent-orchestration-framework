@@ -3,10 +3,10 @@ type: milestone
 number: 39
 slug: delivery-memory-outcome
 title: "Delivery memory — what shipped, what it assumes, and what it declared but did not fill"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-14
-updated: 2026-07-16
+updated: 2026-07-17
 depends: [05, 37]
 ---
 <!--
@@ -97,17 +97,17 @@ Out of scope:
      blast-radius note): the memory seam (`local-indexing`/`local-retrieval`) is imported by exactly
      the two backends; `work.mjs` is the god-node kept off the `recordDoc` seam (ADR-004). -->
 
-- [ ] **01 · [Outcome record doc](stories/01_story_outcome-record-doc/STORY.md)** — the `OUTCOME.md`
+- [x] **01 · [Outcome record doc](stories/01_story_outcome-record-doc/STORY.md)** — the `OUTCOME.md`
   artifact: bundle template (`Delivered`/`Assumptions`/`Gaps`) + authored at Accept by `aof:verify`,
   stating product state, not motive. Owns the on-disk shape (the 01↔02 interface).
-- [ ] **02 · [Delivery recallable](stories/02_story_delivery-recallable/STORY.md)** —
+- [x] **02 · [Delivery recallable](stories/02_story_delivery-recallable/STORY.md)** —
   `parseOutcome` → `buildRecords` (reaches both backends) + the bounded capability ranking, so a
   "what provides X / is X built" query surfaces the capability record over verbose ADRs. The full
   *indexed AND surfaced* loop.
-- [ ] **03 · [Gaps → schedulable debt](stories/03_story_gap-to-chore/STORY.md)** — a gap carries a
+- [x] **03 · [Gaps → schedulable debt](stories/03_story_gap-to-chore/STORY.md)** — a gap carries a
   discharge condition + `open`/`discharged` status and is promotable into a `chore` (m37), so a
   declared debt becomes work you can choose, not archaeology.
-- [ ] **04 · [Dangling-declaration fitness function](stories/04_story_dangling-declaration-fitness/STORY.md)**
+- [x] **04 · [Dangling-declaration fitness function](stories/04_story_dangling-declaration-fitness/STORY.md)**
   — the mechanical honesty check: declared record-format surface with no producer fails red, whether
   or not an `OUTCOME.md` owned up to it (record-format fields the tractable case; scope stated).
 

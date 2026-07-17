@@ -4,10 +4,10 @@ number: 02
 slug: delivery-recallable
 title: "Delivery recallable — parse OUTCOME into records and surface them over the ADRs"
 parent: 39
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -51,7 +51,7 @@ decisive ADR (the boost did not become an override).
      @memory (the domain-twin 05/01/01_parse-architecture-adrs tag set). Parsed against a FIXTURE
      OUTCOME.md / fixture index in each Background — independent of story 01's authoring path. -->
 
-- [ ] `tasks/00_parse-outcome-records.feature` — `parseOutcome` emits `capability` records from
+- [x] `tasks/00_parse-outcome-records.feature` — `parseOutcome` emits `capability` records from
   `## Delivered` and `gap` records from `## Gaps`, each the frozen `MemoryRecord` (EXACTLY
   `MEMORY_RECORD_FIELDS`, absent-for-type fields present-as-`""`), `area="delivery"`, a capability's
   `status=""` and a gap's `status` ∈ {open, discharged} (default open), assumptions folded into the
@@ -59,7 +59,7 @@ decisive ADR (the boost did not become an override).
   Scenarios: capability field mapping; area-fixed + empty-string-present fields; gap field mapping with
   Status/discharge; assumption folds (not a standing record); one record per `### ` heading; reaches
   both backends via `buildRecords`; a `Scenario Outline` over gap Status values (incl. default-open).
-- [ ] `tasks/01_capability-recall-surfaces.feature` — the ranking (ADR-003). **The calibration-gate
+- [x] `tasks/01_capability-recall-surfaces.feature` — the ranking (ADR-003). **The calibration-gate
   scenario**: a capability record + four verbose keyword-dense ADRs on a "what provides X" query → the
   capability returns **#1**. Plus: a decision-intent query still returns the decisive ADR (tiebreaker,
   not override); the boost never inverts a decisively-stronger base match; the boost is inert on a

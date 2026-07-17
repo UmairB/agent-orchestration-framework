@@ -44,7 +44,12 @@ export const MEMORY_RECORD_FIELDS = [
 // The scope dimensions (ADR-006). `item` is an exact milestone-number match; the
 // rest are substring filters over the record's same-named field. Every record
 // carries each field (absent → "" per ADR-005), so no undefined-guard is needed.
-export const SCOPE_FIELDS = ["area", "stage", "kind", "owner", "item"];
+// 39/ADR-001 (feasibility flag 3): "status" joined this list so `recall --status
+// open` fires — the mechanism (applyScope's substring else-branch) already
+// serves any field named here; a gap's open/discharged lifecycle reuses the
+// frozen `status` field, so no index-format/version change is needed, only this
+// additive wiring (mirrored in work-memory.mjs's SCOPE_FLAGS).
+export const SCOPE_FIELDS = ["area", "stage", "kind", "owner", "item", "status"];
 
 const DEFAULT_LIMIT = 5;
 
@@ -90,10 +95,11 @@ export function normalizeScope(scope = {}) {
 // own length so a long, term-heavy record cannot win on raw repetition; IDF
 // weights rarer query terms higher across the candidate corpus. On top of the
 // content score sit two boosts: a title-match boost (a query term in the title is
-// a strong signal) and a record-type boost that lifts `lesson` over `adr`. The
-// type boost is deliberately SMALL — a fraction of one IDF-weighted term — so it
-// breaks ties between near-equal matches (the "we already learned this" signal)
-// but NEVER overturns a clearly stronger match (ADR-006 boundary case).
+// a strong signal) and a record-type boost — `lesson` over `adr` unconditionally,
+// and (39/ADR-003) `capability` over the rest ONLY on a capability-intent query.
+// Both type boosts are deliberately SMALL — a fraction of one IDF-weighted term —
+// so they break ties between near-equal matches but NEVER overturn a clearly
+// stronger match (ADR-006 boundary case).
 
 // BM25 saturation/length-normalisation parameters (standard defaults).
 const BM25_K1 = 1.2;
@@ -102,7 +108,45 @@ const BM25_B = 0.75;
 // IDF-weighted term so it is a tiebreaker, never a relevance override.
 const TYPE_BOOST_LESSON = 0.15;
 // Per-query-term title-match boost (a query term appearing in the record title).
-const TITLE_BOOST_PER_TERM = 0.6;
+// Exported (review fix) so the ADR-003 fitness function can assert the invariant
+// DIRECTLY (TYPE_BOOST_CAPABILITY < TITLE_BOOST_PER_TERM) rather than relying
+// solely on a fixture whose zero-term-overlap capability lets ANY boost value
+// stay green.
+export const TITLE_BOOST_PER_TERM = 0.6;
+
+// 39/ADR-003: the capability type-boost — a QUERY-CLASS-CONDITIONAL tiebreaker
+// lifting a `capability` record ONLY when the query itself carries a
+// capability-intent trigger (a small explicit lexical set), calibrated STRICTLY
+// below one title-match term so it mirrors TYPE_BOOST_LESSON's boundary: it
+// breaks a residual tie against a co-matching ADR but CANNOT invert an ADR the
+// base ranking already scores decisively higher, and it is inert (0) on a
+// decision/lesson-intent query (no trigger word), so ADR/lesson recall stays
+// byte-for-byte unchanged.
+export const TYPE_BOOST_CAPABILITY = 0.1;
+
+// The capability-intent trigger vocabulary (39/ADR-003 mechanism #2): provide(s)/
+// provided, built (covers "is X built" — tokenize() drops "is"), deliver(s)/
+// delivered, capability, producer/writes (covers "who-writes"), exist(s) (covers
+// "does X exist"). Tested against the QUERY's tokens, never a record's — the
+// gate is on query CLASS, not on what a candidate record happens to contain.
+const CAPABILITY_INTENT_TRIGGERS = new Set([
+  "provide",
+  "provides",
+  "provided",
+  "built",
+  "deliver",
+  "delivers",
+  "delivered",
+  "capability",
+  "producer",
+  "writes",
+  "exist",
+  "exists"
+]);
+
+function hasCapabilityIntent(terms) {
+  return terms.some((t) => CAPABILITY_INTENT_TRIGGERS.has(t));
+}
 
 function computeIdf(candidates, terms) {
   const N = candidates.length || 1;
@@ -147,8 +191,10 @@ function titleBoost(record, terms) {
   return boost;
 }
 
-function typeBoost(record) {
-  return record.recordType === "lesson" ? TYPE_BOOST_LESSON : 0;
+function typeBoost(record, capabilityIntent) {
+  if (record.recordType === "lesson") return TYPE_BOOST_LESSON;
+  if (capabilityIntent && record.recordType === "capability") return TYPE_BOOST_CAPABILITY;
+  return 0;
 }
 
 // Rank records: (a) hard scope pre-filter, (b) length-normalised content score +
@@ -163,6 +209,9 @@ export function rankRecords(records, query, scope = {}, opts = {}) {
   const survivors = applyScope(records, scope);
   const terms = tokenize(query);
   const limit = opts.limit ?? DEFAULT_LIMIT;
+  // 39/ADR-003: the capability-intent gate is a property of the QUERY, computed
+  // once — never per-record.
+  const capabilityIntent = hasCapabilityIntent(terms);
 
   const avgLen =
     survivors.length > 0
@@ -172,7 +221,7 @@ export function rankRecords(records, query, scope = {}, opts = {}) {
 
   const scored = survivors.map((record) => {
     const content = terms.length ? contentScore(record, terms, idf, avgLen) : 0;
-    const score = content + titleBoost(record, terms) + typeBoost(record);
+    const score = content + titleBoost(record, terms) + typeBoost(record, capabilityIntent);
     return { record: { ...record, score }, score };
   });
 

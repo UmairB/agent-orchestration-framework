@@ -12,7 +12,7 @@
 // type-boost boundaries + the four-ADR acceptance self-activate once story 02 lands
 // the `TYPE_BOOST_CAPABILITY` (ADR-003 mechanism #2), detected by a live probe.
 import assert from "node:assert/strict";
-import { rankRecords } from "../../src/memory/local-retrieval.mjs";
+import { rankRecords, TYPE_BOOST_CAPABILITY, TITLE_BOOST_PER_TERM } from "../../src/memory/local-retrieval.mjs";
 
 function record(partial) {
   return {
@@ -78,6 +78,24 @@ function capabilityBoostLive() {
 }
 
 export const archTests = [
+  // Review fix: the "tiebreaker, not override" case above (part b of the next
+  // test) uses a zero-term-overlap capability fixture, so it stays green for
+  // ANY TYPE_BOOST_CAPABILITY value up to the decisive ADR's whole score gap —
+  // an over-boost (e.g. 0.7, well above TITLE_BOOST_PER_TERM's 0.6) would NOT
+  // trip it. This direct, ALWAYS-ON (no capabilityBoostLive gate — the
+  // constants exist unconditionally) comparison pins the actual ADR-003
+  // invariant: the capability type-boost is calibrated STRICTLY below one
+  // title-match term, so it can only ever break a residual tie, never
+  // out-score a single title-term match on its own.
+  {
+    name: "arch/39 ADR-003: TYPE_BOOST_CAPABILITY is calibrated strictly below TITLE_BOOST_PER_TERM (a bounded tiebreaker, never a title-term-equivalent override)",
+    run: () => {
+      assert.ok(
+        TYPE_BOOST_CAPABILITY < TITLE_BOOST_PER_TERM,
+        `TYPE_BOOST_CAPABILITY (${TYPE_BOOST_CAPABILITY}) must stay strictly below TITLE_BOOST_PER_TERM (${TITLE_BOOST_PER_TERM})`,
+      );
+    },
+  },
   {
     name: "arch/39 ADR-003: a terse well-titled capability ranks at or above a verbose keyword-dense ADR on a capability query — LIVE, non-vacuous (base title-boost + length-norm)",
     run: () => {

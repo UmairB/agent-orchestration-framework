@@ -100,6 +100,25 @@ that have content** — no empty "None" placeholders (absence of a section is in
    (a no-op when memory is off — safe to run always). Then **archive** the STATE `## Feedback (for retro)`
    section as part of the compaction — its lessons have graduated, exactly as durable decisions graduate
    into ADRs.
+6. **Outcome (milestone Accept only — 39/ADR-004/ADR-006).** At the SAME juncture as step 5 (STATE
+   compaction / RETROSPECTIVE / `memory ingest`), when accepting a MILESTONE whose stories are all
+   done, instantiate `OUTCOME.md` from `.aof/templates/work/milestone/OUTCOME.md` (leading-marker
+   stripped, exactly like any scaffolded doc) if the milestone folder does not already carry one, then
+   **author it yourself** — `aof:verify` is the sole owner of record docs; never hand this to a
+   developer/evidence subagent (they have `Write` and have been observed to clobber records and
+   fabricate decisions — the exact failure mode this milestone exists to counter). Fill each section as
+   **product state, never motive**:
+   - `## Delivered` — one `### <Capability name>` per capability the milestone's stories now provide,
+     each followed by ONE line stating what the system now IS ("`warnings_delivered` is written only by
+     test fixtures; no production path populates it"), never why it was built ("for testing purposes" is
+     reasoning, not an outcome — that belongs in `RETROSPECTIVE.md`).
+   - `## Assumptions` — a `- **<assumption>** — <condition>` bullet under the nearest-preceding
+     capability for each condition its delivery rests on.
+   - `## Gaps` — one `### <declared-but-unfilled surface>` per gap the milestone declared but did not
+     fill, each carrying `**Status:** open` (or `discharged`) and `**Discharge condition:**` — the
+     condition that stops the gap being true. Leave NO residual `<…>` placeholder in any section.
+   `OUTCOME.md` stays an ADDITIONAL artifact, never the record doc — `SPEC.md` (or `AOF.md`) stays the
+   milestone's identity record; `recordDoc` never resolves to `OUTCOME.md`.
 </process>
 
 <progress_tracking>

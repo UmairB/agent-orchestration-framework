@@ -49,6 +49,11 @@ export async function withInsertFixture(body, configOverrides = {}) {
   await cp(path.join(repoRoot, ".aof", "templates", "work", "story"), path.join(aofDir, "templates", "work", "story"), {
     recursive: true,
   });
+  // milestone 39 / story 03 — insert-chore / promote-gap scaffold from
+  // `.aof/templates/work/chore/`, the SAME template add-chore uses.
+  await cp(path.join(repoRoot, ".aof", "templates", "work", "chore"), path.join(aofDir, "templates", "work", "chore"), {
+    recursive: true,
+  });
   try {
     const workspace = await loadWorkspace(repo);
     return await body({ repo, workDir, workspace });

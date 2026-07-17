@@ -53,7 +53,19 @@ const BOARD_UI = path.join(repoRoot, "src", "board-ui.mjs");
 // this carve-out documents the deferral, not an oversight. `insert-story` (m41/
 // story 03) joins the SAME carve-out for the SAME reason — the nested axis is
 // the same CLI-only mechanical surface, no board affordance requested.
-const BOARD_DEFERRED = new Set(["run-start", "run-complete", "run-retry", "insert-milestone", "insert-uat", "insert-story"]);
+// `insert-chore` / `promote-gap` (m39/story 03, ADR-001) join the SAME carve-out
+// for the SAME reason: the chore insert seam + the gap-promotion verb are
+// mechanical CLI actions, no board affordance requested here either.
+const BOARD_DEFERRED = new Set([
+  "run-start",
+  "run-complete",
+  "run-retry",
+  "insert-milestone",
+  "insert-uat",
+  "insert-story",
+  "insert-chore",
+  "promote-gap",
+]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus
 // the board-deferred family. This is the canonical set the /api/work bijection is

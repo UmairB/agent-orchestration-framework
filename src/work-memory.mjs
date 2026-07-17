@@ -24,7 +24,18 @@ export const MEMORY_VERBS = ["recall", "brief", "ingest", "reindex", "status"];
 // Scope flags are first-class filters (ADR-006) that parse into the `scope`
 // object handed to the backend. `--limit` is an OPTION (parses into `opts`,
 // never `scope`). `--json` selects the output projection.
-const SCOPE_FLAGS = ["area", "stage", "kind", "owner", "item"];
+// 39/ADR-001 (feasibility flag 3): "status" joined this allow-list so
+// `--status open|discharged` parses into `scope.status` — a gap's lifecycle
+// reuses the frozen MemoryRecord `status` field (no new field, no index-format
+// change), and `applyScope`'s existing substring else-branch (local-retrieval.mjs)
+// already filters on any field named in its own SCOPE_FIELDS (mirrored there).
+// Exported (review fix) so a fitness test can assert this list stays IN SYNC
+// with local-retrieval.mjs's own SCOPE_FIELDS — the deliberate two-file seam
+// split (this module owns argv parsing, local-retrieval.mjs owns the
+// pre-filter) means a future scope dimension added to only one of them must
+// fail loudly, not half-work (a flag that parses but never filters, or a
+// field that filters but has no flag to set it).
+export const SCOPE_FLAGS = ["area", "stage", "kind", "owner", "item", "status"];
 
 // The backend registry: name -> a loader returning the backend module's default
 // export (the frozen-interface object). `none` is the real no-op backend this
@@ -272,7 +283,7 @@ function renderBriefDigest(digest) {
 
 export function memoryUsage() {
   return [
-    "Usage: aof work memory <verb> [args] [--area --stage --kind --owner --item NN] [--limit N] [--json]",
+    "Usage: aof work memory <verb> [args] [--area --stage --kind --owner --item NN --status] [--limit N] [--json]",
     "",
     `Verbs: ${MEMORY_VERBS.join(", ")}`,
     "  recall <query>     recall prior lessons/ADRs matching a query (scoped by flags)",

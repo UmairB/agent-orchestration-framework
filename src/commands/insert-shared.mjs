@@ -37,9 +37,16 @@ function resolveConfirmThreshold(config) {
 // The record docs each top-level type scaffolds — the SAME pair add-milestone/
 // add-uat write (SPEC+STATE / SESSION+STATE); no other conditional docs (ADR-002:
 // "Frame ONLY").
+// 39/ADR-001 (feasibility flag 4): `chore` (milestone 37) joins this map — a
+// chore's whole record is the ONE `CHORE.md` doc (no STATE.md; a chore carries
+// no running narrative, per 37/ADR-001 — it groups no stories and its whole
+// deliverable is a ticked checklist). This is the ONLY change needed to make
+// `runInsertTopLevel({ type: "chore", … })` scaffold a chore — the engine below
+// is otherwise untouched (reused, not a bespoke writer).
 const DOCS_BY_TYPE = {
   milestone: ["SPEC.md", "STATE.md"],
   uat: ["SESSION.md", "STATE.md"],
+  chore: ["CHORE.md"],
 };
 
 function normalizeSlug(raw) {
@@ -65,23 +72,36 @@ function deriveTitle(slug) {
 
 // CRITICAL (this milestone's own STATE feedback / the build gotcha this story was
 // warned about): every `.aof/templates/work/<type>/*.md` ships a leading
-// `<!-- aof-generated: bundle -->` comment + a blank line BEFORE the `---` fence.
-// `parseFrontmatter` (work.mjs) anchors on `^---` with NO /m flag, so a doc whose
-// FIRST line is that comment parses to `{}` and is born VALIDATE-BROKEN. Strip it
-// so the scaffolded doc's first line is `---`.
+// `<!-- aof-generated: bundle -->` comment + a blank line BEFORE the doc's real
+// first content line. `parseFrontmatter` (work.mjs) anchors on `^---` with NO /m
+// flag, so an identity-bearing doc whose FIRST line is that comment parses to
+// `{}` and is born VALIDATE-BROKEN. Strip it so the scaffolded doc's first line
+// is its real content.
 //
 // CRLF/BOM tolerant (review fix): `\r?\n+` alone only consumes complete `\r\n`
 // PAIRS one at a time — fine for a lone `\n+` run, but on a CRLF template
 // (`-->\r\n\r\n---`, i.e. TWO separate `\r\n` units) a naive `+` over the
 // 2-char alternation can stop after the FIRST `\r\n`, leaving a leftover
-// `\r\n---` that the `(?=---)` lookahead never satisfies — nothing strips, and
+// `\r\n---` that a fence-only lookahead never satisfied — nothing strips, and
 // the scaffolded doc is born validate-broken (`.gitattributes` did not pin
 // `.aof/templates/**/*.md` to LF, so a `core.autocrlf=true` Windows checkout
 // hits this for real). `(?:\r?\n)+` groups the WHOLE line-ending atom so `+`
 // repeats complete `\r\n`/`\n` units, and a leading UTF-8 BOM (`﻿`) is
 // tolerated too (an editor-saved template may carry one).
-function stripBundleMarker(text) {
-  return text.replace(/^﻿?<!--[^\n]*-->(?:\r?\n)+(?=---)/, "");
+//
+// 39/ADR-004 (feasibility flag 1): the lookahead used to anchor on `(?=---)` — a
+// frontmatter fence — so it never stripped a frontmatter-less template (e.g.
+// `OUTCOME.md`, which opens on `# NN · <Item Title> — Outcome` per ADR-004: it
+// carries no identity). Relaxed to `(?=\S)` — ANY non-blank first content line,
+// frontmatter fence or heading alike — so the strip is a general leading-marker
+// strip, not a frontmatter-specific one. Frontmatter docs are unaffected (`-` in
+// `---` is non-blank, so the lookahead still fires identically); the only change
+// in behaviour is that a marker-carrying doc with no frontmatter now strips too.
+// Exported (39/story 01) so a frontmatter-less doc's strip (OUTCOME.md is never
+// scaffolded through the insert-time DOCS_BY_TYPE path — ADR-004: it is authored
+// at Accept, not insert) can be asserted directly without a DOCS_BY_TYPE entry.
+export function stripBundleMarker(text) {
+  return text.replace(/^﻿?<!--[^\n]*-->(?:\r?\n)+(?=\S)/, "");
 }
 
 // Replace the template placeholders (ADR-002 "correctly-numbered,
@@ -96,6 +116,10 @@ function renderTemplate(text, { number, slug, title, today, depends }) {
   out = out.replace(/YYYY-MM-DD/g, today);
   out = out.replace(/<Milestone Title>/g, title);
   out = out.replace(/<Session Title>/g, title);
+  // 39/ADR-001 (feasibility flag 4): the chore template's own title placeholder
+  // (`.aof/templates/work/chore/CHORE.md` — frontmatter `title:` + the `# NN ·`
+  // heading), the SAME idiom as `<Milestone Title>`/`<Session Title>` above.
+  out = out.replace(/<Chore Title>/g, title);
   if (Array.isArray(depends)) {
     out = out.replace(/^(depends:\s*)\[[^\]]*\]/m, `$1[${depends.join(", ")}]`);
   }
@@ -150,7 +174,13 @@ async function writeTopLevelScaffold(type, slug, today, depends, plan) {
     await writeText(path.join(dir, docName), rendered);
   }
 
-  const created = { ref: paddedNumber, type, slug, parent: null };
+  // `dir` is additive (review fix): the scaffold already computed the created
+  // item's own folder path (`plan.dir`) — surfacing it here lets a caller (e.g.
+  // promote-gap-to-chore.mjs) consume the ENGINE's own path instead of
+  // re-deriving `${ref}_${type}_${slug}` by hand, which duplicates the naming
+  // convention and risks an ENOENT crash after the stream has already been
+  // reindex-shifted. Existing keys are unchanged — this never removes a key.
+  const created = { ref: paddedNumber, type, slug, parent: null, dir };
   if (type === "uat") created.depends = depends ?? [];
   return created;
 }

@@ -15,6 +15,20 @@ doc: state
 - [x] Refined 2026-07-16 (`aof:refine 39 --autonomous`) — Decide (6 ADRs + 5 fitness-function
   arch-tests) + Break-down (4 independent stories) + all task contracts authored (Three Amigos). Status
   → `in-progress`. Next: `aof:continue 39` to build.
+- [x] Built + reviewed 2026-07-17 (`aof:continue 39`). All 4 stories to green (wave 1: 01/02/04 in
+  parallel; wave 2: 03 on the settled tree), the 5 architect arch-tests + story-04's dangling FF + 8
+  `@executable` traceability modules wired into `scripts/test.mjs`. Full suite green (2659 ok). Review:
+  architect **CONFORMS** + QA **PASS** + a craft pass that found 1 MAJOR + several robustness bugs the
+  happy-path suite missed — all 12 confirmed fixes applied with regression tests, suite re-verified green.
+  All four stories → `in-review`. Next: `aof:verify 39` (authors the milestone `OUTCOME.md`, signs off
+  the `@manual` product-state-vs-motive rows, marks stories `done`).
+- [x] Verified + accepted 2026-07-17 (`aof:verify 39`). `@executable` suite green (2659 ok / 0 not-ok,
+  6 m39 fitness functions non-vacuous); both `@manual` scenarios met inline by verify authoring the
+  milestone `OUTCOME.md` (4 capabilities / 3 assumptions / 3 gaps, product-state-only, no `<…>`
+  placeholder); the live loop returns the capability #1 over four ADRs against the real 362-record
+  index; `aof work validate 39` + whole-stream PASS. `RETROSPECTIVE.md` (R1–R4) written + folded into
+  memory (`memory ingest`); no blocker finding. All 4 stories + the milestone → `done`. See
+  `VERIFICATION.md` (## Accept decision) + `OUTCOME.md`.
 
 ## Notes & decisions in flight
 
@@ -115,9 +129,32 @@ milestone compounding it. Genuine *prevention* of a dangling field is the fitnes
 recall. The milestone must not be sold internally — or in its own VERIFICATION — as preventing the
 class of bug that produced it.
 
+## Feedback (for retro) — ARCHIVED 2026-07-17
+
+<!-- Compacted at Accept (`aof:verify 39`). The raw build/review observations that lived here have
+     GRADUATED into RETROSPECTIVE.md as carryable lessons and been folded into memory (`memory ingest`),
+     exactly as durable decisions graduate into ADRs. Pointers kept; the blow-by-blow is in the retro. -->
+
+- **R1** — when an ADR defers a shape to refine, its own fitness-function fixtures are part of that
+  deferred contract (the `acd-outcome-*` bullet-vs-`### ` fixture drift).
+- **R2** — "independent stories" is import-seam independence; parallel *build* independence is a
+  file/edit-region property (the `insert-shared` / `local-retrieval` / `scripts/test.mjs` overlap that
+  forced wave-serialisation).
+- **R3** — a green happy-path suite is not evidence of robustness; the adversarial craft pass was
+  load-bearing (the 4 robustness bugs + 12 fixes).
+- **R4** — a bound fitness function must neutralise the signal it isolates, or it cannot go red for an
+  over-bound value (the `acd-outcome-capability-ranking-bounded` vacuity).
+
+The three **honestly-declared boundaries** (automated gap discharge has no producer; dangling-declaration
+coverage is record-format-fields only; per-capability assumption attribution) were NOT retro lessons — they
+graduated into the milestone `OUTCOME.md` `## Gaps` as schedulable debt (status `open` + discharge
+condition), which is this milestone's own mechanism. The implementation carry-forward gotchas + the
+mid-build concurrent mesh-dispatch tree write are captured in the RETROSPECTIVE trailing note.
+
 ## Verification
 
 <!-- Pointers, not restatements. -->
-- [ ] `@executable` suite green
-- [ ] Fitness functions green
-- [ ] `@manual` signed off
+- [x] `@executable` suite green (2659 ok, `node scripts/test.mjs` exit 0, 2026-07-17)
+- [x] Fitness functions green (5 architect arch-tests + story-04 dangling FF, all wired + green)
+- [x] `@manual` signed off 2026-07-17 (product-state-vs-motive + authored-at-Accept — met inline by
+  `aof:verify` authoring the milestone `OUTCOME.md`; evidence in `VERIFICATION.md` ## Verification evidence)

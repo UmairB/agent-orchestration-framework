@@ -42,6 +42,15 @@
       "hash": "sha256:96f1b330e231cdb2c1677c72a9863b94856c9eb03ff42a23cfd01045f8bdb770"
     },
     {
+      "path": ".aof/templates/work/milestone/OUTCOME.md",
+      "runtime": "claude",
+      "resource": {
+        "id": "milestone",
+        "kind": "template"
+      },
+      "hash": "sha256:6d46ee1beb0a59dc34c3c75d82a92b8e8f97e9e5467797be6d22629197102a84"
+    },
+    {
       "path": ".aof/templates/work/milestone/RESEARCH.md",
       "runtime": "claude",
       "resource": {
@@ -354,7 +363,7 @@
         "id": "verify",
         "kind": "command"
       },
-      "hash": "sha256:38ee75193e0d42ef9e2fff69a9abea97e6fb56159d174e0e3d755630963eba21"
+      "hash": "sha256:9df533c6dab1f86694e2bd1d5b58955b6138c49d9d52366f2a3218d45cb16114"
     },
     {
       "path": ".codex/agents/aof-architect.md",
@@ -579,7 +588,7 @@
         "id": "aof-verify",
         "kind": "skill"
       },
-      "hash": "sha256:12257acad6cfabc213a309295e894f950d7045ce7e2773fea0196498be4aa3c5"
+      "hash": "sha256:b6c4dae0dec45898e422bc108616bea5fb6f82427d0ff947dc4073f68b9da368"
     }
   ]
 }

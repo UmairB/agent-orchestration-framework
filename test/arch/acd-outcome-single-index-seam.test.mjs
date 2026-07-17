@@ -80,6 +80,9 @@ export const archTests = [
       const workDir = path.join(projectRoot, "wiki", "work");
       const dir = path.join(workDir, "39_milestone_delivery-memory-outcome");
       await mkdir(dir, { recursive: true });
+      // Pinned OUTCOME.md grammar (39 SPEC "## Stories" — "### " headings, not
+      // bullets). CONTRACT-DRIFT FIX: this fixture predated the grammar pinned at
+      // refine, which uses "### " headings under Delivered/Gaps, not bullets.
       await writeFile(
         path.join(dir, "OUTCOME.md"),
         `---
@@ -88,12 +91,14 @@ doc: outcome
 # 39 · Delivery — Outcome
 
 ## Delivered
-
-- The delivery-memory capability is now provided.
+### The delivery-memory capability
+The delivery-memory capability is now provided.
 
 ## Gaps
-
-- \`warnings_delivered\` has no production producer. Discharge: a producer writes it. Status: open.
+### warnings_delivered field
+- **Status:** open
+- **Discharge condition:** a producer writes it.
+\`warnings_delivered\` has no production producer.
 `,
         "utf8",
       );

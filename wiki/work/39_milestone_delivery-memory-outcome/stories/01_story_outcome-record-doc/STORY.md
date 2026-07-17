@@ -4,10 +4,10 @@ number: 01
 slug: outcome-record-doc
 title: "Outcome record doc — what a completed item delivered, assumed, and left"
 parent: 39
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-17
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -53,12 +53,12 @@ Driver-level, milestone-minimum (ADR-006). Per-story OUTCOME is a sanctioned fol
 
 <!-- Authored by the Three Amigos (QA leading the .feature scenarios + Examples), 2026-07-16. -->
 
-- [ ] `tasks/00_outcome-template.feature` — `@executable`: the milestone `OUTCOME.md` template ships at
+- [x] `tasks/00_outcome-template.feature` — `@executable`: the milestone `OUTCOME.md` template ships at
   both the source (`src/bundle/templates/milestone/OUTCOME.md`) and bundled
   (`.aof/templates/work/milestone/OUTCOME.md`) paths, opens on the pinned `# NN · … — Outcome` title,
   carries all three pinned sections in the SPEC `## Stories` grammar, and honours the leading-marker
   strip + LF discipline every bundle template carries.
-- [ ] `tasks/01_verify-authors-outcome.feature` — `@manual`: `aof:verify` instantiates + authors
+- [x] `tasks/01_verify-authors-outcome.feature` — `@manual`: `aof:verify` instantiates + authors
   `OUTCOME.md` at Accept (not at insert), stating **product state, not motive** (the product-vs-motive
   Examples table); `@executable`: an item's primary record doc stays its identity doc and a co-present
   `OUTCOME.md` never becomes the record doc `validate`/`recordDoc` resolve.
