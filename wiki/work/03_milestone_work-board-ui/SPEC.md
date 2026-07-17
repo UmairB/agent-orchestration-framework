@@ -8,6 +8,8 @@ owner: product-owner
 created: 2026-06-16
 updated: 2026-06-20
 depends: [00]
+schema: 1
+aofVersion: 0.1.0
 ---
 # 03 · Work Board UI
 

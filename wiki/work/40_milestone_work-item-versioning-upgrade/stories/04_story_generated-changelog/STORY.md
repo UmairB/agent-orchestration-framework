@@ -9,6 +9,8 @@ owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
 depends: [40/02]
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

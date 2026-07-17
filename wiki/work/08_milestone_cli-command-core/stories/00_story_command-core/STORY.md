@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-21
 updated: 2026-06-21
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · The command core — the in-process registry (the spine)
 

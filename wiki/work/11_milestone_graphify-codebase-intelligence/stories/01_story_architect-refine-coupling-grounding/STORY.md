@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23
+schema: 1
+aofVersion: 0.1.0
 ---
 # 01 · Architect + refine coupling grounding — actual coupling, not inferred
 

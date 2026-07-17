@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-25
 updated: 2026-06-25
+schema: 1
+aofVersion: 0.1.0
 ---
 # 04 · Intent-only imports gain a recallable AOF.md digest
 

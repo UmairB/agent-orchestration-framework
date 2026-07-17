@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-18
 updated: 2026-06-19
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · aof planning init — install the bought planner, record pinned provenance
 

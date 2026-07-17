@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-18
 updated: 2026-06-19
+schema: 1
+aofVersion: 0.1.0
 ---
 <!-- Accepted at aof:verify 02 (2026-06-19): F3 closed. readSeam over the genuine create-prd 8-section
      template now yields objective + 5 milestone chunks + 2-in/1-out scope (was objective-only), no

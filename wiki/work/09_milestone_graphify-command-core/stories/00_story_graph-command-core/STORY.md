@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-21
 updated: 2026-06-22
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · The graph command core — the registered commands + the sole graphify driver (the spine)
 

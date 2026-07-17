@@ -9,6 +9,8 @@ created: 2026-07-04
 updated: 2026-07-05
 depends: [22, 23, 24, 25, 26, 27]
 origin: wiki/work/32_uat_whole-mesh-acceptance/SESSION.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

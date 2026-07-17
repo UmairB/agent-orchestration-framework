@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-21
 updated: 2026-06-22
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Rendered faces — the graphify skill + MCP face over the aof graph commands
 

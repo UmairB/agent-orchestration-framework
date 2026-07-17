@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Code-review PR-impact triage — the ranked queue as advisory review context
 

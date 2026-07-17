@@ -8,6 +8,8 @@ owner: qa
 depends: [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
 created: 2026-07-03
 updated: 2026-07-04
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   UAT SESSION.md — the record doc for an acceptance session. Answers ONE question:
