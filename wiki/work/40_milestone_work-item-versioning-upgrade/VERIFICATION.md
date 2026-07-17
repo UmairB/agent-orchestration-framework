@@ -87,6 +87,30 @@ design-conformance review are both out of scope for it.
   isolation.
 - **`aof work validate 40/03` → PASS** (exit 0, `[]`).
 
+### Story 04 · the generated changelog (accepted 2026-07-17)
+
+- **`@executable` suite green** — the 6 scenarios (exactly-one-entry-per-transform on a 3-transform
+  fixture registry; the id/from→to/summary projection; the drift guard regenerate==committed byte-for-byte
+  + deterministic; a hand-edit fails the guard; the `aof-generated` stamp on both output and artifact;
+  downstream-only) + a CLI round-trip regression test = 10/10, plus the armed `acd-changelog-generated`
+  fitness function. *verifies →* `stories/04_story_generated-changelog/tasks/00_*.feature`.
+- **`@manual` — regenerate == committed (the drift-guard delivery).** Ran `aof upgrade --changelog`,
+  diffed against the committed `UPGRADE-CHANGELOG.md`: **BYTE-IDENTICAL, 983 === 983 bytes**; the
+  changelog names `aof upgrade` as the act ("how do I upgrade" resolves to the command, not prose);
+  `changelogDrift(committed) → {drifted:false}`. *verifies →* `00_*.feature` `@manual`.
+- **Behavioural review PASS** (aof-qa) — the drift guard is a genuine full-string byte compare (no
+  trim/normalize/substring); the fixture registries are real 3-transform arrays, not the 1-transform
+  registry relabeled; the generator is genuinely deterministic (no timestamp/version/volatile content in
+  the body — empirically probed); litmus-honest; story 02's upgrade tests still 24/24. Structural verified
+  inline: `--changelog` is a flag on the existing `work:upgrade` command (bijection guards green — no new
+  command), no forbidden import (blast-radius intact), the `.gitattributes` LF pin + the arch-test
+  one-line fix (`generator.fn`, a latent-bug fix) both legitimate.
+- **Finding F-40-04-1 (fixed).** `aof upgrade --changelog` doubled the trailing newline (`console.log`
+  appends its own), which broke the documented `> UPGRADE-CHANGELOG.md` regenerate round-trip. Fixed
+  (render strips the generator's trailing newline) + a regression test asserts CLI stdout === committed.
+  Verified above (byte-identical). Closed within the story.
+- **`aof work validate 40/04` → PASS** (exit 0, `[]`).
+
 ## Findings
 
 | id | observed | type | severity | triage | routed-to | status |

@@ -4,7 +4,7 @@ number: 04
 slug: generated-changelog
 title: "The generated changelog — a projection of the migration registry that cannot drift, so 'how do I upgrade' resolves to a command and never to prose"
 parent: 40
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17

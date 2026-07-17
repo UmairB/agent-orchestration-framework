@@ -109,7 +109,7 @@ that distinction is not ready to carry the backfill.
   reconstructed-marker) and the `aof upgrade` dry-run→apply idempotent CLI face. *Dep 40/01.*
 - [x] [03 · staleness in validate](stories/03_story_validate-staleness/STORY.md) — validate reports a
   stream behind the current aof, naming `aof upgrade`. *Dep 40/01 only.*
-- [ ] [04 · generated changelog](stories/04_story_generated-changelog/STORY.md) — a projection of the
+- [x] [04 · generated changelog](stories/04_story_generated-changelog/STORY.md) — a projection of the
   registry that cannot drift. *Dep 40/02.*
 
 ## Dependencies
