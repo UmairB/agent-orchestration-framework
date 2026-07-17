@@ -304,7 +304,13 @@ export const meshJoinProvisionTests = [
         joiner = await makeJoiner(control.relay.url);
         const gitConfigBefore = `[remote "origin"]\n\turl = https://git.example.test/origin.git\n`;
         await seedGitConfig(joiner.root, gitConfigBefore);
-        const ctx = { workspace: await loadWorkspace(joiner.root) };
+        // review fix (live soak, 2026-07-17): this test invokes the REAL mesh:join
+        // command, which WRITES the global AOF config — an isolated AOF_GLOBAL_HOME
+        // is not optional here. Its absence let a passing test silently overwrite the
+        // real machine's ~/.aof/aof.config.json mesh.relay/mesh.credential during a
+        // full-suite run against real dev-machine state.
+        const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
+        const ctx = { workspace: await loadWorkspace(joiner.root, undefined, { env }), env };
         const result = await invoke("mesh:join", { code: "654321" }, ctx);
 
         assert.equal(result.joined, true, "the join still admits the worker");
@@ -336,7 +342,13 @@ export const meshJoinProvisionTests = [
         const priorBytes = await readFile(joiner.configPath, "utf8");
         const priorGitConfig = await readGitConfig(joiner.root);
 
-        const ctx = { workspace: await loadWorkspace(joiner.root) };
+        // review fix (live soak, 2026-07-17): same isolation gap as the sibling test
+        // above — mesh:join writes real global state on a MATCH; even though this
+        // scenario is a rejection (no write expected), an isolated AOF_GLOBAL_HOME is
+        // still required so a future regression that DID write would land in a
+        // throwaway fixture, never the real machine's config.
+        const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
+        const ctx = { workspace: await loadWorkspace(joiner.root, undefined, { env }), env };
         let refused = null;
         await assert.rejects(
           () => invoke("mesh:join", { code: "999999" }, ctx),

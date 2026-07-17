@@ -596,6 +596,19 @@ function assignmentError(code, message, extra = {}) {
   return error;
 }
 
+// logAssignmentFailure(assignmentId, code, detail) — review fix (live soak,
+// 2026-07-17): EVERY failed-exit in handleDirective below streamed a coded
+// `failed` status up the wire but printed NOTHING to this worker's OWN log — the
+// worst case was assignmentError(...) actually constructing an Error carrying the
+// real message and then discarding it via `void`, the message existing for one
+// tick and then genuinely gone. Found live: an assignment failed on the very
+// first real cross-machine dispatch ever attempted, and neither the control
+// node's assignment row (state alone, no reason) nor the worker's own terminal
+// (nothing at all) could say why.
+function logAssignmentFailure(assignmentId, code, detail) {
+  console.error(`[mesh-worker] assignment ${assignmentId} failed (${code}): ${detail}`);
+}
+
 // createMeshWorkerExecutionHandler(options) → handler(directive) — the function
 // `client.onDirective(handler)` registers (worker-stream-client.mjs). Every
 // collaborator is INJECTED (the transport/ticker injection idiom):
@@ -696,7 +709,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     let ws;
     try {
       ws = await loadWs();
-    } catch {
+    } catch (error) {
+      logAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
       await sendAssignmentStatus?.(assignmentId, "failed", {});
       return;
     }
@@ -734,13 +748,16 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           ws = overlayRepoPublishedMarker(ws, { workspaceId, now: cloneNow });
           hasRepo = await workerHasRepo(ws, workspaceId, nodeId, { openStore, globalWorkStoreOptions });
         } catch (error) {
-          await sendAssignmentStatus?.(assignmentId, "failed", { code: error?.code ?? "assignment-repo-unavailable" });
+          const code = error?.code ?? "assignment-repo-unavailable";
+          logAssignmentFailure(assignmentId, code, String(error?.message ?? error));
+          await sendAssignmentStatus?.(assignmentId, "failed", { code });
           return;
         }
       }
     }
 
     if (!hasRepo) {
+      logAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolveCloneUrl(ws) != null ? "resolved but did not result in a usable repo" : "unresolved — config.mesh.repo.cloneUrl is not set for this workspace"})`);
       await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-repo-unavailable" });
       return;
     }
@@ -769,6 +786,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         // A structural miss (an unresolvable/traversal ref) is a `failed` terminal —
         // task 03's retain-on-failed rule applies here too: the worktree stays for
         // inspection (never removed), the same as every other failed outcome below.
+        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
         await sendAssignmentStatus?.(assignmentId, "failed", {});
         onCleanup(assignmentId, "failed", worktreePath);
         return;
@@ -785,6 +803,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // applied to the primary tree, never a second path-construction strategy.
       item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
       if (item == null) {
+        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
         await sendAssignmentStatus?.(assignmentId, "failed", {});
         onCleanup(assignmentId, "failed", worktreePath);
         return;
@@ -840,7 +859,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // unhandled rejection, never a caught fault — swallow it after the coded
       // status is streamed).
       await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId });
-      void assignmentError("assignment-execution-failed", String(error?.message ?? error));
+      const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
+      logAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
     }
   };
 }
