@@ -4,7 +4,7 @@ number: 01
 slug: version-stamp-and-reader
 title: "The version stamp & its reader — a work item that records the aof that made it, a schema integer that drives migration, and a born-stamp so new items are never stale-by-construction"
 parent: 40
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17

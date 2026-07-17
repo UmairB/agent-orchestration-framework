@@ -98,7 +98,7 @@ that distinction is not ready to carry the backfill.
      (ARCHITECTURE.md "Story boundaries"): the version MODEL is foundational, everything reads it.
      Dep graph: 01 → {02, 03} and 02 → 04. After 01, stories 02 and 03 run in parallel. -->
 
-- [ ] [01 · version stamp & reader](stories/01_story_version-stamp-and-reader/STORY.md) — the foundation:
+- [x] [01 · version stamp & reader](stories/01_story_version-stamp-and-reader/STORY.md) — the foundation:
   the `WORK_ITEM_SCHEMA_VERSION` constant, the two frontmatter keys (`schema` int + `aofVersion`
   string), the reader (schema-0 baseline), the born-stamp at scaffold, and the transform-scoped writer
   primitive. *No intra-milestone dep.*
