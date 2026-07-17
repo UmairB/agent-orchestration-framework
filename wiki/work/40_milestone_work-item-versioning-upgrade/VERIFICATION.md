@@ -40,6 +40,34 @@ design-conformance review are both out of scope for it.
 - **`aof work validate 40/01` → PASS** (exit 0, `[]`) — folder↔frontmatter, tag vocabulary, depends
   graph clean.
 
+### Story 02 · migration registry & `aof upgrade` (accepted 2026-07-17)
+
+- **`@executable` suite green** — the story's 24 scenarios (`00_registry-contiguous-chain` 5/5,
+  `01_upgrade-dry-run-then-apply` 5/5, `02_upgrade-idempotent` 4/4, `03_stamp-transform` 6/6 executable,
+  `04_reconstructed-marker` 4/4) pass, driven against fixture streams + real `aof upgrade`/`aof work
+  upgrade` CLI spawns. *verifies →* `stories/02_story_migration-registry-and-upgrade/tasks/*.feature`.
+- **`@manual` — the live-stream backstamp (the milestone's headline delivery).** Ran `aof upgrade` over
+  the aof repo's own stream: **170 record docs** at schema 0 stamped to `schema: 1` + `aofVersion: 0.1.0`
+  through the `stamp-0-to-1` transform. **Procedure + result:** `aof upgrade --dry-run --json` reported
+  170/170 pending → `aof upgrade` applied → `git diff --shortstat` = **170 files, 340 insertions, 0
+  deletions** (exactly the two frontmatter keys per item; every authored body byte-identical — the
+  ADR-004 bound held on the live stream) → `aof work validate` (whole stream) = `[]` green → a second
+  `aof upgrade --dry-run` = **0 pending** (idempotent). Committed as `2a8f9dd`. *verifies →*
+  `03_stamp-transform-backstamps-unstamped.feature` `@manual`.
+- **Four armed fitness functions green** — `acd-upgrade-idempotent`, `acd-upgrade-engine-blast-radius`
+  (`work.mjs` never imports the engine — graph-confirmed), `acd-reconstructed-marker-expressible`, and
+  `acd-work-item-schema-single-constant` (registry-max === constant, now armed).
+- **Structural review PASS** (aof-architect) — the three modified registry-guard tests
+  (`acd-work-command-cli-bijection`, `acd-work-command-route-coverage`, `command-core-contract`) are
+  **honest additive registration** of the genuinely-wired `work:upgrade` command (an `argsFor` probe
+  case, a precedented `BOARD_DEFERRED` carve-out, the forced `WORK_IDS` exact-bijection entry) — no
+  assertion weakened; all frontmatter writes go only through `applyItemFrontmatter`; the reconstructed
+  marker is readiness-only (no reconstructing transform ships).
+- **Behavioural review PASS** (aof-qa) — 24/24 coverage faithful, the `@manual` correctly deferred (a
+  live non-mutating dry-run confirmed 170/170 still pending pre-backstamp — not silently applied),
+  litmus-honest, idempotency byte-compared, the newer-than-build refusal a genuine whole-run refusal.
+- **`aof work validate 40/02` → PASS** (exit 0, `[]`).
+
 ## Findings
 
 | id | observed | type | severity | triage | routed-to | status |
@@ -55,5 +83,11 @@ design-conformance review are both out of scope for it.
 **Story 01 — accepted (2026-07-17).** Its `@executable` contract and both armed fitness functions are
 green, structural + behavioural review PASS, and the scoped `aof work validate 40/01` gates clean. The
 one full-suite failure (F-40-01) is a confirmed pre-existing milestone-39 regression with zero overlap
-with story 01's surface, so it does not gate this story. The milestone stays `in-progress` (stories
-02–04 remain).
+with story 01's surface, so it does not gate this story.
+
+**Story 02 — accepted (2026-07-17).** Its 24 `@executable` scenarios + the `@manual` live-stream
+backstamp (170 items → schema 1, purely additive, validate-green, idempotent) + four armed fitness
+functions are green; structural + behavioural review PASS (the registry-guard edits confirmed honest
+additive registration); scoped `aof work validate 40/02` clean. The milestone stays `in-progress`
+(stories 03–04 remain). Note: with the live stream now backstamped to schema 1, story 03's staleness
+check will report zero staleness on the up-to-date stream — the correct post-backstamp state.

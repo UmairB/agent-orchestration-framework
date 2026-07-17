@@ -4,7 +4,7 @@ number: 02
 slug: migration-registry-and-upgrade
 title: "The migration registry & aof upgrade — version→version transforms declared as code, a dry-run-first idempotent engine, and a reconstructed-marker so the framework is ready for the backfill without performing it"
 parent: 40
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
