@@ -74,6 +74,92 @@ doc: state
     was structurally false — the desktop is Rust). DESIGN §Surface 1 rewritten to bind the surfaces production
     actually mounts.
 
+- **Story 02 added + refined `2026-07-13` (`aof:add-story` + `aof:refine 38/02 --autonomous`) — at the user's
+  direction, to close the mesh network in THIS milestone rather than defer the credential-mint automation.**
+  `02_story_clone-credential-mint` turns the static `AOF_MESH_CLONE_TOKEN` PAT into a **config-driven mint
+  provider** (`env-token` default | `github-app`) that mints a per-repo, `contents:read`, ~1h installation token —
+  closing SECURITY **T4** by construction. Decide docs produced: **RESEARCH §3** (measured: `node:crypto` signs
+  the App JWT, zero new deps; the mint API shapes; the **`x-access-token`** username question — App tokens likely
+  tolerate username==token but it is NOT GitHub-documented, so the shim is made prompt-aware), **SECURITY T8–T11 +
+  R7/R8** (App key at rest, over-scoped-mint, no-silent-fallback; the **attestation swap** — per-clone scope/TTL
+  moves from operator sign-off to code-enforced; the operator now attests only that the App is installed
+  least-privilege), and **ADR-010** (the provider abstraction; Gap A — repo resolved control-side from the
+  committed `cloneUrl`, never the worker's frame; installation-id auto-resolved; the prompt-aware askpass). Six
+  task contracts authored (00–04 `@executable` over injected signer/http seams + fake key; 05 `@manual` real-App
+  soak). Developer feasibility seat: all six correctly tagged, every seam either exists or is a small named
+  addition — **no contract contradicts the real code** (the inverse of this milestone's F1/F4/F6–F9/F12 pattern).
+  Fitness functions F5/F6/F7 spec'd, authored at build (a detector over the not-yet-built provider would be
+  vacuous — the ADR-008 lesson). **Milestone now accepts only when all THREE stories are done.**
+
+- **Deferred soaks resumed `2026-07-16` (`aof:verify 38`, operator-initiated) — provisioning a real
+  GitHub App for the `github-app` credential path.** Operator chose to run story-01 task 04
+  (private-clone soak) + story-02 task 05 (real-App-mint soak) together against a real second worker
+  node (online) and a real private repo. See
+  [provisioning/github-app-setup.md](provisioning/github-app-setup.md) for the setup runbook (App design,
+  governance Q&A, status) — a provisioning trail, not a verification record; the soak's own evidence
+  lands in VERIFICATION.md once it runs. **Status: App not yet created; awaiting App ID + private-key
+  path handback.**
+
+- **`aof mesh repo publish` taught to auto-detect `cloneUrl` from `git remote get-url
+  origin` `2026-07-16`, at the operator's direction, during the live soak.** The
+  operator rejected hand-editing config and rejected a proposed dedicated `set-clone-url`
+  verb as needless ceremony ("check if it exists first, then add it if it doesn't").
+  Fixed in `src/commands/mesh-repo.mjs`: check the existing committed `cloneUrl` first
+  (never overwritten), else derive it from the repo's own git remote via an injectable
+  exec seam, silent/non-fatal on any detection failure. **A real bug found in the same
+  pass:** a detected `https://` remote can carry the operator's own embedded username,
+  which `git clone`'s verbatim use of `cloneUrl` would feed straight past the askpass
+  shim's `x-access-token` answer — fixed by stripping URL userinfo before persisting
+  (scp-style `git@host:path` left alone, it's a service-account convention not a
+  personal credential). Seven new tests; full suite re-run clean. See
+  [stories/01_story_worker-repo-checkout/STORY.md](stories/01_story_worker-repo-checkout/STORY.md)
+  for the full account.
+
+- **`03_story_per-org-credential-scoping` ADDED `2026-07-16` at the operator's explicit direction, mid
+  live-soak provisioning — locked into THIS milestone's scope, not deferred.** Surfaced when the operator
+  asked how the mesh scales to repos in more than one GitHub org: ADR-010 resolves the
+  `mintCloneCredential` provider (App identity) exactly ONCE, globally, from the control node's own
+  config — one App/token for the whole mesh regardless of org — while `cloneUrl` is already resolved
+  per-workspace (Gap A). Operator's ruling, verbatim: *"this will be fixed in this milestone. No
+  bullshit."* Decision taken this session (mine to make, per the operator): **continue the in-flight live
+  soak now** (the single-org path being provisioned is not invalidated by the future fix — the control
+  node's own workspace stays the fallback case in both designs, same as Gap A already does for
+  `cloneUrl`), **and lock the fix in as a new story now** rather than a note only. See
+  [ARCHITECTURE.md](ARCHITECTURE.md)'s ADR-010 "Known limitation" section and
+  [stories/03_story_per-org-credential-scoping/STORY.md](stories/03_story_per-org-credential-scoping/STORY.md).
+  Mirrors exactly how story-02 itself was added mid-milestone. **Milestone now accepts only when all FOUR
+  stories are done.** Owed at refine: an ADR (extend ADR-010 or a new one — architect decides) + a
+  SECURITY review pass (a per-org secret's resolution/configuration authority is changing). Not yet
+  refined or built — the live soak takes priority while the App creation is mid-flight; `aof:refine 38/03`
+  is the next step once the soak's evidence is captured.
+
+- **GitHub App created + wired `2026-07-16` — installed on the one target repo only** (App ID and
+  install details recorded privately, not in this public repo). Operator's design ruling for story-03,
+  given verbatim: *"assume singular apps, but allow for overrides."* Confirmed at this session:
+  `loadWorkspace` (`src/work.mjs:176-180`) already merges the GLOBAL `~/.aof/aof.config.json` `mesh`
+  config as the base with each project's own LOCAL `mesh` config layered on top (local wins) — so the
+  "singular default, local override" shape already exists for whichever workspace happens to be the
+  daemon's own launch dir; story-03's job is extending the SAME shape to the workspace an assignment
+  actually TARGETS (today fixed to the launch workspace only). Wired the App as the GLOBAL default
+  accordingly: `mesh.repo.credential.provider = "github-app"` + `githubApp.appId` + `.privateKeyPath`
+  added to the operator's global `aof.config.json` (not the `aof` repo's own local config). See
+  [provisioning/github-app-setup.md](provisioning/github-app-setup.md) for the full trail, including an
+  incident note (a private-key Read slipped through before the `.claude/settings.json` deny rule took
+  effect — closed: generic deny rule fixed, key relocated out of Dropbox, no lasting exposure given the
+  App's own one-repo/read-only installation scope).
+
+- **Story 02 VERIFIED + ACCEPTED `2026-07-16` (`aof:verify 38/02`).** `@executable` tasks 00–04 green
+  (40 assertions, 0 not-ok, stable over three full-suite runs) + all three fitness functions
+  (`acd-clone-credential-provider-config-driven` / `acd-clone-app-key-not-relayed` /
+  `acd-minted-token-scoped-single-repo`) green and non-vacuous; producer-fed throughout (real `node:crypto`
+  RS256 signer, real bare-repo clone, real askpass spawn, real `startLauncher` wiring). `aof work validate 38`
+  PASS. SECURITY **T4** closed by construction. Task 05 `@manual` real-App soak is the milestone's deferred
+  human gate — NOT run at story level; closed at `aof:verify 38`. STORY.md `done`; SPEC `## Stories` box
+  ticked. The one suite `not ok` was the **known pre-existing `reclaim-scheduler/06` flake** (EBUSY
+  temp-SQLite unlink race, already routed to a stabilisation chore) — not a story-02 defect. See
+  [VERIFICATION.md](VERIFICATION.md) → "Story-02 · clone-credential-mint". **Milestone stays `in-progress`:
+  2 of 3 stories done — story-01's two-machine private-clone soak (task 04) is still unrun.**
+
 ## Notes & decisions in flight
 
 <!-- Surprises, corrections, mid-build discoveries. Decisions that prove durable graduate to ADRs at
@@ -158,6 +244,12 @@ doc: state
 - **`test/mesh-reclaim-scheduler.test.mjs` case 06 is FLAKY (scheduler timing, pre-existing, NOT this milestone).**
   Fails ~1/5 in isolation, a different sub-case each time. It means the "N ok / 0 not ok" baseline is **not reliably
   reproducible** — a real gap for any gate that trusts a single green run. Route to a stabilisation chore.
+- **A second, previously-undocumented timing flake found `2026-07-16`:
+  `mesh-coordination-launcher/03 the healthy launcher refreshes this node's durable presence on each propagation
+  tick`.** Failed once in a full-suite run (2580 ok / 1 not-ok) but passed cleanly 3/3 times re-run in isolation —
+  confirmed NOT a regression from the same-session `mesh-repo.mjs` change (unrelated subsystem, deterministic in
+  isolation). Same class as the reclaim-scheduler flake — a propagation-tick timing test racing under full-suite
+  load. Route to the same stabilisation chore rather than opening a second one.
 - **ADR-008 must generalise from PAYLOADS to COLLABORATORS (architect, at verify).** ADR-008 was written about
   producer-fed *payloads*. **F12 is the identical defect at the dependency-injection seam** — `cloneCredential` was a
   collaborator **whose only supplier was a test** (`workerExecutionOptions`, documented as a test-injection spread),
@@ -208,10 +300,31 @@ doc: state
   clause (`ending tuple-a leaves tuple-b intact` cannot hold when the tuples are the same record). The dev did NOT edit
   the `.feature`; it asserted the row's satisfiable claim (record-count idempotency) and flagged it. **Action:** amend the
   `.feature` at next refine to scope the "leaves intact" clause to the distinct-tuple rows only (or split the Outline).
+- **Story 02 built + reviewed `2026-07-16` (`aof:continue 38/02`) — all four review lenses GO, no production defect.**
+  The `github-app` provider mint shipped producer-fed, not fixture-fed (the milestone's defining lesson, correctly answered):
+  the JWT is signed by the REAL `node:crypto` RS256 signer and verified with `createVerify`; "no credential at rest" runs a
+  REAL `cloneRepoForWorkspace` against a REAL local bare repo; the prompt-aware askpass is a REAL spawn with real prompt argv;
+  task-00 drives the REAL `startLauncher` control wiring with NO `controlStreamServerOptions` override (the F12 literal-key
+  path genuinely producer-fed). Reviews returned only LOW test-strength + hardening items, all applied: QA F-QA1/2/3 (assert
+  the token/JWT redaction half, all three authz gates for the new provider, non-vacuous no-fallback), craft R1/R2/R3 (ssh-port
+  never leaks into the GHES apiBaseUrl, `LC_ALL/LANG=C` pins English askpass prompts, `.json()` faults become the coded refusal),
+  and a dead-constant dedup. F5/F6/F7 armed non-vacuously (CRLF-safe synthesized plants, landing-asserted).
+- **Blocker (infra, NOT this story) — `scripts/test.mjs` binds a HARDCODED `127.0.0.1:4182` unconditionally, so two
+  concurrent full-suite runs on one machine collide (EADDRINUSE crashes the whole run).** This bit the parallel developer +
+  security fix passes: each `node scripts/test.mjs` crashed at the same real-server test while the other held the port. **Lesson:**
+  the suite is not concurrency-safe on a single host; an early real-listen test should bind an EPHEMERAL/`:0` port (or read one
+  from env), not a fixed 4182 shared with the live `aof mesh serve` daemon. Route to a stabilisation chore (alongside the
+  pre-existing `mesh-reclaim-scheduler` case-06 timing flake, which fired once here and cleared on a clean re-run).
+- **Fitness invariant over-claimed what its detector enforced (F5, security, at review).** SECURITY.md's F5 prose + the F5
+  test header advertised coverage of the mint-time App JWT (T11), but the plant strategy + `KEY_NEEDLE` covered only the private
+  key — the doc read as pinned while CI was not. No live leak (the JWT only rides `Authorization: Bearer` → fetch), but the
+  detector under-enforced its stated invariant. Fixed at review (added the `jwt` needle + `mesh-launcher.mjs` to F5's scan set).
+  **Lesson:** when a fitness invariant names multiple secrets ("key AND JWT"), the plant strategy must enumerate a plant per
+  secret, or the prose must be narrowed to exactly what the needle matches.
 
 ## Verification
 
 <!-- Pointers, not restatements. -->
-- [x] `@executable` suite green — `node scripts/test.mjs` exit 0, 0 not-ok (tasks 00–05 story 00, 00–03 story 01)
-- [x] Fitness functions green — the 6 story-00 + F1/F2/`acd-worker-checkout-reuses-worktree` story-01 arch-tests
-- [ ] `@manual` signed off — story-00 task 06 soak + story-01 task 04 private-clone soak; closed at `aof:verify 38`
+- [x] `@executable` suite green — `node scripts/test.mjs` exit 0, 0 not-ok (2495 ok; tasks 00–05 story 00, 00–03 story 01, **00–04 story 02**)
+- [x] Fitness functions green — the 6 story-00 + F1/F2/`acd-worker-checkout-reuses-worktree` story-01 + **F5 `acd-clone-app-key-not-relayed` / F6 `acd-minted-token-scoped-single-repo` / F7 `acd-clone-credential-provider-config-driven` story-02** arch-tests (armed at build, non-vacuous)
+- [ ] `@manual` signed off — story-00 task 06 soak + story-01 task 04 private-clone soak + **story-02 task 05 real-App-mint soak**; closed at `aof:verify 38`

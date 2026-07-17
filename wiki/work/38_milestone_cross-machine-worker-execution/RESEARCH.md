@@ -45,6 +45,30 @@ directly observed) — never asserted without one of these three tags.
 8. **§2 — this repo's own `.claude/settings.json` currently wires only empty `SessionStart`/
    `PostToolUse`/`PreToolUse` arrays** — no `UserPromptSubmit`, no `SessionEnd` key exists yet in-repo;
    nothing to reuse, a story task must add both.
+9. **§3 — `node:crypto` alone signs a fully spec-compliant RS256 App JWT, AND GitHub's real API accepts
+   it as well-formed** (measured, live: a genuine 404 "Integration not found" for a non-existent App id,
+   not a 401 "Bad credentials" for a malformed bearer) — no `jsonwebtoken`/`jose`/octokit dependency is
+   needed for the sign step.
+10. **§3 — ⚠ the existing askpass shim's "same value for both prompts" behaviour transmits a real, live
+    HTTP Basic-Auth header of `username=<token>, password=<token>`** (measured via a local HTTP capture)
+    — NOT the documented `x-access-token`/`<token>` pair. Whether GitHub's server accepts that shape for
+    an App **installation** token specifically is not directly measured (no live App available) — it is
+    inferred, with corroboration, from GitHub's own PAT docs plus a third-party test; it is NOT the
+    guarantee GitHub's own App docs make. **This is a genuine open risk, not a closed one** — see §3.4.
+11. **§3 — the `mintCloneCredential(workspaceId, assignmentId)` seam (`control-stream-server.mjs:213,329`)
+    is never handed a `cloneUrl`** — a `github-app` provider must independently resolve `owner/repo` on
+    the CONTROL node from `workspaceId`, and nothing in the current codebase gives the control node a
+    workspaceId→cloneUrl mapping today (the only existing reader, `resolveCloneUrl(ws)`, reads a single
+    fleet-wide `ws.config.mesh.repo.cloneUrl` key on whichever process calls it — worker OR control — not
+    a per-workspace map).
+12. **§3 — the worker's own bounded wait on a credential reply is a MEASURED 15s constant**
+    (`DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS`, `worker-stream-client.mjs:79`) — the control-side mint,
+    including up to two sequential external calls to GitHub (installation-id resolve + token exchange)
+    plus JWT signing, must complete inside that window or the clone fails loud, never hangs — a real
+    latency budget the provider design must respect.
+13. **§3 — a GitHub App's `installation_id` is not stable across an uninstall/reinstall** (documented,
+    corroborated) — a control-side config that hard-codes it can silently go stale; resolving it on
+    demand avoids that staleness at the cost of one extra external call inside the 15s budget (#12).
 
 ---
 
@@ -324,6 +348,281 @@ whether TTL self-expiry is required, not optional)?
 
 ---
 
+## § 3 — Automated clone-credential mint (GitHub App installation tokens)
+
+**Question.** For story 02 (`clone-credential-mint`): what is the EXACT mint flow (JWT → installation
+token), does `node:crypto` alone suffice to sign the App JWT, does the EXISTING askpass shim (which echoes
+the SAME credential value for both the git Username and Password prompts) actually work against a GitHub
+App installation token, how does `workspaceId` resolve to `owner/repo`, and what least-privilege posture
+must the App itself carry?
+
+All GitHub API facts below are cross-checked three ways where possible: **official docs** (fetched this
+session), **live, unauthenticated/misauthenticated calls against the REAL `api.github.com`** (no real App
+registered — these calls prove request/response *shape* and *error* behaviour, never a real mint), and
+**this repo's own source** (`src/mesh-worker-execution.mjs`, `src/control-stream-server.mjs`,
+`src/worker-stream-client.mjs`).
+
+### 3.1 The App JWT — RS256, `node:crypto` alone suffices (measured, sign AND verify, plus a live round-trip)
+
+- **Documented** (`docs.github.com`, "Generating a JSON Web Token (JWT) for a GitHub App," fetched this
+  session): three required claims — **`iss`** (the App's ID, "used to find the right public key to verify
+  the signature"), **`iat`** ("set this 60 seconds in the past" for clock-drift tolerance), **`exp`** ("no
+  more than 10 minutes into the future"). Algorithm: **RS256**. The docs supply Ruby/Python/Bash/PowerShell
+  examples and explicitly note **no Node.js example is given** — GitHub's own docs point Node users at the
+  Octokit SDK instead of showing raw JWT construction.
+- **Measured (scratchpad, `node:crypto` only, no dependency):** built the JWT by hand — base64url-encode a
+  `{"alg":"RS256","typ":"JWT"}` header and a `{iat, exp, iss}` payload, `createSign("RSA-SHA256")` over the
+  `header.payload` signing input, base64url-encode the signature. Verified the result three ways:
+  1. **Self-verified with `node:crypto`'s own `createVerify("RSA-SHA256")`** against the keypair's public
+     key — `true`.
+  2. **Claim shape checked structurally** — `iss`/`iat`/`exp` all present, `exp - iat` computed as exactly
+     `600`s (9-minute lifetime + the docs' recommended 60s backdate = inside the 10-minute ceiling with
+     headroom), base64url alphabet clean (no `+`, `/`, or `=`).
+  3. **Live round-trip against the REAL `api.github.com` `POST /app/installations/1/access_tokens`**
+     (fake App id `99999999`, no real App exists): the response was **`404 {"message":"Integration not
+     found"}`** — a look-up-stage failure, NOT `401 {"message":"Bad credentials"}`. **Contrast measured in
+     the same session:** a syntactically-invalid bearer token (`Bearer not-a-jwt-at-all`) sent to the exact
+     same endpoint DOES get `401 "Bad credentials"`. This means GitHub's real backend parsed our
+     `node:crypto`-built JWT as a well-formed JWT and proceeded to an App-existence lookup — the
+     discriminating evidence that the token GitHub *received* was structurally valid, not merely
+     self-consistent in our own verifier.
+- **Measured (PEM format):** GitHub Apps download their private key as **PKCS#1** PEM (`-----BEGIN RSA
+  PRIVATE KEY-----`, confirmed via search/docs — "Managing private keys for GitHub Apps"). Generated a
+  PKCS#1-encoded keypair in the scratchpad and signed with it directly through `createSign(...).sign(pem)`
+  with **no conversion step** — `node:crypto` accepts PKCS#1 exactly as downloaded, alongside PKCS#8.
+- **Measured (no new dependency):** `require.resolve('jsonwebtoken')` and `require.resolve('jose')` both
+  fail (`MODULE_NOT_FOUND`) in this repo today, and neither is a `package.json` dependency — confirming the
+  "no new dependency" requirement is genuinely satisfiable, not merely convenient. `global fetch` is
+  **native in Node v22.22.2** (measured: `typeof fetch === "function"`), so the HTTP calls below need no
+  new dependency either.
+- **Constraint this imposes.** The entire mint flow — JWT sign, installation-id resolve, token exchange —
+  is buildable with `node:crypto` + built-in `fetch` alone. No SDK/dependency decision blocks this story.
+
+### 3.2 The installation-token exchange — request/response shape (documented, cross-checked live)
+
+- **Documented** (`docs.github.com` REST reference + "Generating an installation access token," fetched
+  this session): `POST /app/installations/{installation_id}/access_tokens`, auth `Authorization: Bearer
+  <App JWT>` (never an installation token — the App JWT is the only credential valid here), headers
+  `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: <date>`. Optional body: `repositories:
+  string[]` (repo names) or `repository_ids: number[]`, and `permissions: { <permission>: "read"|"write"|… }`
+  (e.g. `{ contents: "read" }`, matching STORY.md's example exactly). Omitting `repositories`/`permissions`
+  grants the token access to everything the INSTALLATION itself can reach — the caller must actively narrow
+  it for the single-repo/read-only posture SECURITY T4 requires.
+- **Documented response (201):** `token` (string, the credential itself), `expires_at` (ISO-8601),
+  `repository_selection` (`all`|`selected`), `permissions` (the ACTUAL granted set — may be narrower than
+  requested if the App itself lacks a permission), `repositories` (full objects, when scoped).
+- **Documented token lifetime:** **exactly 1 hour** from mint; an expired token yields `401` on subsequent
+  use, requiring a fresh mint — **matches** SECURITY T4's "~1h TTL" and ADR-009's "per-clone, not reused"
+  framing (the token outlives one clone easily, but the PULL design mints fresh every clone-miss regardless,
+  so reuse is a non-issue by construction, not by token lifetime alone).
+- **Documented — over-scope requests are REJECTED, not silently widened:** "The installation access token
+  cannot be granted access to repositories that the installation was not granted access to," and
+  "cannot be granted permissions that the app was not granted" (docs, verbatim). The EXACT wire-level
+  status/body for "installation exists, but the named repo is outside its grant" was not independently
+  live-measured (would require a real App+installation — see the `@manual` item below); community reports
+  (found via search, not GitHub-authoritative) describe both `404`- and `422`-shaped failures depending on
+  which specific misconfiguration is hit. **What IS documented with certainty:** the request cannot silently
+  succeed with a broader grant than the installation holds — the failure mode is a rejection, never a quiet
+  over-grant.
+- **Measured, live (App-existence gate):** `POST /app/installations/1/access_tokens` with a well-formed,
+  correctly-signed JWT for a non-existent App id → `404 {"message":"Integration not found"}` (§3.1). This
+  independently confirms the endpoint requires App-JWT auth and performs an App-existence check before
+  anything installation- or repo-specific is even reached.
+- **Constraint this imposes.** The exact body/response shape in STORY.md's sketch (`{ repositories: [...],
+  permissions: { contents: "read" } }` → `{ token, expires_at }`) is confirmed correct against the live
+  docs; the only residue needing a REAL App to nail exactly is the precise error status for "app not
+  installed on this specific repo" at token-exchange time (as opposed to at installation-lookup time,
+  §3.3, where the 404 shape IS documented precisely) — an `@manual` soak item, not a design blocker (the
+  provider must treat ANY non-2xx from this call as a loud coded mint failure regardless of its exact
+  shape, which the existing `CLONE_CREDENTIAL_MINT_FAILED` refusal path already does generically).
+
+### 3.3 Installation-id resolution (documented, live-confirmed auth requirement; a real latency/staleness trade-off)
+
+- **Documented** (`docs.github.com`, "Get a repository installation for the authenticated app," fetched
+  this session): `GET /repos/{owner}/{repo}/installation`, **requires App-JWT auth** ("You must use a JWT
+  to access this endpoint" — an installation token does NOT work here, only the App JWT). Response (200):
+  an Installation object; `id` (integer) is the value fed into §3.2's URL. **Error: `404` when "the app is
+  not installed on the repository"** — a clean, documented, precise error shape for exactly the
+  "onboarding forgot to install the App on this repo" misconfiguration STORY.md's acceptance criterion 5
+  needs to fail loud on.
+- **Documented/corroborated (not GitHub's own canonical statement, but consistent across multiple
+  independent reports found via search):** an App's `installation_id` for a given target is **NOT stable
+  across an uninstall/reinstall** — reinstalling issues a new id. A control-side config that hard-codes an
+  `installation_id` can therefore go silently stale the moment an operator revokes-and-regrants access,
+  whereas resolving via `GET /repos/{owner}/{repo}/installation` on demand is self-healing but costs one
+  extra external call, on the App-JWT auth path, per resolution.
+  Reference: GitHub Community discussion #164243 ("the installation_id in the payload does not match the
+  installation_id received during the installation callback") and adjacent reports — treated as
+  **corroborated, not authoritative**, since none of these are GitHub's own docs stating the guarantee
+  explicitly; a real App's behaviour across an actual uninstall/reinstall was not exercised live in this
+  pass (no App exists to reinstall).
+- **Measured — the concrete latency budget this trade-off sits inside:** `DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS
+  = 15000` (`src/worker-stream-client.mjs:79`) is the worker's own bounded wait for the ENTIRE
+  `clone-credential`/`clone-credential-request` round-trip. **Source read:**
+  `applyCloneCredentialRequestFrame` (`control-stream-server.mjs:329-335`) `await`s the injected
+  `mintCloneCredential(...)` with only a `try/catch` around it — no additional internal timeout of its own
+  at the control-stream-server layer. So a `github-app` provider that (a) resolves the installation id on
+  demand AND (b) exchanges it for a token performs **two sequential external HTTPS round-trips to
+  `api.github.com`** (plus JWT signing, which is local/instant) inside the SAME 15s worker-side budget that
+  also has to cover the relay hop itself. Configuring the installation id explicitly removes one of those
+  two round-trips from the critical path, at the cost of the staleness risk above.
+- **Constraint this imposes.** Neither "always resolve on demand" nor "always configure explicitly" is
+  free: resolve-on-demand is self-healing but adds one more external call inside a fixed 15s ceiling;
+  configure-explicitly is faster but can go stale on an uninstall/reinstall with no signal until the next
+  mint fails. This is squarely the open question STORY.md already named for the architect — research
+  confirms both real API behaviour AND the concrete timing constraint it sits inside, without resolving it.
+
+### 3.4 ⚠ The username question — MEASURED shim behaviour; the GitHub-side acceptance is corroborated, not directly proven
+
+**This is the key finding the story flagged as load-bearing.**
+
+- **Measured — what the EXISTING shim actually transmits to git/the server.** Built a local HTTP server
+  that issues a `401 WWW-Authenticate: Basic` challenge and captures the resulting `Authorization` header,
+  then reproduced `buildAskpassShim` (`src/mesh-worker-execution.mjs:262-280`) **byte-for-byte** (same
+  generated `.cmd`/helper shape, only a diagnostic log line added), pointed `GIT_ASKPASS` at it, and ran
+  `git -c credential.helper= ls-remote http://127.0.0.1:18734/probe-repo.git` (the identical `-c
+  credential.helper=` reset production uses, `mesh-worker-execution.mjs:416`). Result:
+  - git invoked the askpass program **twice**, with two DIFFERENT, DISTINGUISHING prompts as argv:
+    `PROMPT: "Username for 'http://127.0.0.1:18734': "` then
+    `PROMPT: "Password for 'http://FAKE-INSTALLATION-TOKEN-abc123@127.0.0.1:18734': "` — git DOES tell the
+    askpass program which field it's asking for.
+  - The shim answered **both** with the same token value (exactly as the shipped code does — it hard-bakes
+    the token-file path into the generated `.cmd`/`.sh` and never inspects `%*`/`$*`).
+  - The server captured a real HTTP Basic `Authorization` header decoding to
+    **`user="FAKE-INSTALLATION-TOKEN-abc123" pass="FAKE-INSTALLATION-TOKEN-abc123"`** — i.e., the wire
+    transmits `username == password == <token>`, a **non-blank** username, but **not** the documented
+    `x-access-token` value.
+- **Documented (GitHub App-specific canonical example):** "Authenticating as a GitHub App installation"
+  (fetched this session) states the format as `git clone https://x-access-token:TOKEN@github.com/owner/
+  repo.git` and does not itself state that other usernames are accepted — read literally, the doc specifies
+  `x-access-token` as the username.
+- **Documented (GitHub's OWN PAT docs, a DIFFERENT but likely-shared HTTP Basic-Auth backend):** "Managing
+  your personal access tokens" (fetched this session), verbatim: *"Although you are required to enter your
+  username along with your personal access token, the username is not used to authenticate you. Instead,
+  the personal access token is used to authenticate you."* — and a BLANK username is explicitly rejected
+  ("If you do not enter a username, you will receive an error message that your credentials are invalid").
+  So for PATs, GitHub's own docs guarantee: non-blank username, any value, only the token in the password
+  slot matters.
+- **Documented/corroborated (community, App-token-specific, not GitHub-authoritative):** GitHub Community
+  discussion #173881 ("Git clone with Github App installation token accepts any username instead of
+  required x-access-token," Sep 2025, fetched this session) reports a user testing `git clone https://
+  random-placeholder:<TOKEN>@github.com/OWNER/REPO.git` against a REAL App installation token and finding
+  it succeeds identically to the documented `x-access-token` form — a reply in the thread states "GitHub's
+  authentication backend completely ignores the username field if you provide a valid token in the password
+  slot." This is a third-party report, not a GitHub doc, but it is specifically about App installation
+  tokens (not PATs) and specifically tests a non-`x-access-token` username.
+- **The gap this research could NOT close.** No real GitHub App/installation was available in this
+  environment (would require registering an App on a real GitHub account + a disposable private repo).
+  Two things were therefore NOT directly measured end-to-end: (1) whether GitHub's server accepts
+  `username == password == <the same installation token>` specifically (the community test used an
+  arbitrary PLACEHOLDER username, not the token itself, as username) — though per the PAT docs' "username
+  is not used to authenticate you" statement, this distinction should not matter if App tokens share the
+  PAT auth backend, but that sharing itself is inferred, not documented; (2) whether this holds for git's
+  **smart-HTTP** protocol against a real `github.com` (as opposed to the synthetic local Basic-Auth
+  challenge measured here, which proves what git TRANSMITS but not what GitHub's real server DOES with it).
+- **VERDICT — stated plainly, as the story requires.** The existing shim's "same value for both prompts"
+  behaviour is **LIKELY to work** against a real GitHub App installation token (converging evidence: the
+  PAT docs' explicit guarantee + the App-specific community corroboration + the measured fact that the
+  transmitted username is non-blank, which is the ONE stated requirement), but this is an **INFERENCE from
+  two lower-strength sources (a different-token-type official doc + an unofficial community report),
+  not the GUARANTEE GitHub's own App-specific docs make** (which literally specify `x-access-token`). A
+  vendor could tighten server-side validation for App tokens specifically without notice, since nothing
+  documents the leniency as a supported contract for THIS token type. **This is exactly why story-01's PAT
+  soak did not — and could not — have surfaced this risk**: a PAT's username-doesn't-matter behaviour is
+  officially documented and was implicitly relied on there; an App installation token's equivalent behaviour
+  is only community-observed. **Recommend (reported, not decided): treat this as a required `@manual` soak
+  confirmation item** (clone a real disposable private repo with a real App installation token, using the
+  shim exactly as shipped, and confirm success) **before** relying on the current shim as-is for this
+  provider.
+- **The concrete, measured fact that makes a FIX cheap if the architect decides one is needed.** Git
+  supplies the distinguishing prompt text to the askpass program via argv (measured above: `"Username for
+  '...'"` vs `"Password for '...@...'"`) — the INFORMATION needed to answer differently per prompt is
+  already available at the shim boundary; today's shim simply never reads it (the generated `.cmd`/`.sh`
+  hard-bakes one fixed answer file path regardless of `%*`/`$*`). A prompt-aware shim (answer `x-access-
+  token` when the prompt starts with `"Username"`, the real token when it starts with `"Password"`) is a
+  small, mechanical change to `buildAskpassShim`'s generated script — not a new mechanism, not a new
+  dependency, not a design change to the PULL channel. Whether to make that change (rely on the documented
+  contract) or accept the current same-value behaviour (rely on the corroborated-but-undocumented leniency)
+  is the architect's call; both are now backed by measured facts rather than assumption.
+
+### 3.5 `workspaceId → owner/repo` resolution (measured parser against the story's named forms; a real gap in the existing seam)
+
+- **Measured (scratchpad parser, exercised against exactly the forms STORY.md names, reusing
+  `isWellFormedCloneUrl`'s OWN acceptance surface as the input contract — i.e. this extends, not
+  replaces, `src/mesh-worker-execution.mjs:170`):**
+
+  | Input | Parses to | Note |
+  |---|---|---|
+  | `https://github.com/owner/repo` | `host=github.com owner=owner repo=repo` | baseline |
+  | `https://github.com/owner/repo.git` | same | `.git` suffix stripped |
+  | `https://github.com/owner/repo/` | same | trailing slash tolerated |
+  | `git@github.com:owner/repo.git` | same (scp-style) | the form `isWellFormedCloneUrl` already accepts |
+  | `git@github.com:owner/repo` | same | `.git` optional in scp-style too |
+  | `https://ghe.example.com/owner/repo` | `host=ghe.example.com owner=owner repo=repo` | enterprise host — parses identically, see below for the REAL gap |
+  | `ssh://git@github.com/owner/repo.git` | `host=github.com owner=owner repo=repo` | scheme-form ssh, distinct code path from scp-style but same result |
+  | `https://github.com/owner/repo?ref=main` / `#readme` | same | query/hash ignored, correctly |
+  | `https://github.com/just-one-segment` | **rejected** (`< 2 path segments`) | no repo segment — must stay a loud coded failure, never a guess |
+  | `git@github.com:owner` | **rejected** (`< 2 segments`) | same, scp-style |
+  | `https://github.com:8443/owner/repo` | `host=github.com` (port dropped by `url.hostname`) | **edge case**: `url.hostname` excludes the port; a GHES instance on a non-default port needs `url.host` (host:port), not `url.hostname`, if the API base URL must reproduce the port |
+  | `https://GITHUB.COM/Owner/Repo.GIT` | `host=github.com` (lower-cased by `new URL()`), `owner=Owner repo=Repo` (path CASE PRESERVED) | `new URL()` normalizes hostname casing but NOT path casing — GitHub's API is case-insensitive for owner/repo, but a naive lower-caser would be an unforced, unnecessary transform |
+
+- **The REAL gap this measurement surfaces (not a parsing edge case — a missing API-base fact).**
+  **Documented** (`docs.github.com`, GHES REST overview, fetched this session): github.com's API base is
+  `https://api.github.com`, but a GitHub Enterprise Server instance's is **`http(s)://HOSTNAME/api/v3`** —
+  a DIFFERENT host+path shape, not merely a different hostname substituted into the same template. Parsing
+  `owner`/`repo`/`host` out of the `cloneUrl` (measured above, works cleanly) is **necessary but
+  insufficient** for an enterprise target: the provider also needs a host→API-base RULE (`github.com` →
+  `api.github.com`; anything else → `https://<host>/api/v3`, by convention) or an explicit config override,
+  since this cannot be derived from the clone host string alone with full generality (a GHES instance is
+  free to run its API on a differently-named/ported host than its git-clone host, though the `/api/v3`
+  convention is the documented default).
+- **The seam-signature gap (measured, source read, not inference).** `mintCloneCredential(workspaceId,
+  assignmentId)` (`control-stream-server.mjs:213`, called at `:329`) is the ONLY thing the `github-app`
+  provider receives — **no `cloneUrl`, no host, no owner/repo.** The one existing reader of a `cloneUrl`
+  anywhere in the codebase, `resolveCloneUrl(ws)` (`mesh-worker-execution.mjs:197`), reads a **single**
+  fleet-wide `ws.config.mesh.repo.cloneUrl` key off `ws` — whichever process's OWN loaded workspace happens
+  to call it (worker-side, for the clone itself). Nothing today threads a `cloneUrl` (or any
+  workspaceId-keyed map to one) INTO the control-side `mintCloneCredential` call, and the existing
+  `global_workspace_descriptors` store (ADR-003) maps a `workspaceId` to a LOCAL filesystem `descriptor_path`
+  for item-enumeration — not a remote clone URL, and it presumes the workspace is already known/cloned
+  locally, which is exactly untrue for the repo the mint is being requested FOR.
+- **Constraint this imposes.** The owner/repo PARSING itself is solved (measured, above) and cleanly
+  layers on the existing validator. But parsing alone is not enough to wire a working `github-app`
+  provider: the CONTROL node needs its own source of truth mapping `workspaceId → cloneUrl` (today it has
+  none in the mint seam's own inputs) — this is a wiring/config-shape decision for the ADR, not something
+  this parser resolves by itself. Whatever source is chosen, IT is what the provider parses with the
+  measured parser above.
+
+### 3.6 The App's own least-privilege posture, and the single-key-at-rest contrast with story-01
+
+- **Documented** (`docs.github.com`, "Choosing permissions for a GitHub App," fetched this session): *"If
+  you want your app to use an installation or user access token to authenticate for HTTP-based Git access,
+  you should request the 'Contents' repository permission"* — i.e. the App's OWN grant (independent of
+  what any single minted token later requests) must include `contents: read` (or broader) for this to work
+  at all; a token mint cannot request a permission the App itself was never granted (§3.2, "cannot be
+  granted permissions the app was not granted").
+- **Documented, general GitHub App model (background, not separately fetched this session — standard,
+  stable GitHub App behaviour referenced by every doc page touched above):** a GitHub App is installed on
+  an account with EITHER "all repositories" or "selected repositories" — the least-privilege posture
+  STORY.md's scope section names ("contents: read on *selected* repositories") is a real, first-class
+  installation-time choice, not something the token-mint call has to simulate after the fact; installing
+  on "selected repositories" is itself the structural narrowing, and the per-mint `repositories: [...]`
+  narrows FURTHER (to exactly the one assigned repo) within whatever the installation already allows.
+- **Contrast with story-01 (per-repo PAT) and the deploy-key fallback (§1.2), as STORY.md's scope section
+  frames it — reported for completeness, not re-litigated:** a fine-grained PAT (story-01's `AOF_MESH_CLONE_
+  TOKEN` default) is ONE secret per repo, manually minted, with no server-enforced expiry unless the
+  operator sets one; a deploy key (§1.2) is ONE secret per repo, durable, at rest on the WORKER's disk; a
+  GitHub App private key is **ONE secret for the WHOLE FLEET**, at rest on the CONTROL node only (never a
+  worker), from which every per-clone, per-repo, ~1h-lived token is minted on demand. This is the shape
+  STORY.md's scope section already commits to accepting as the residual (a single fleet-wide key,
+  file-permission-protected, "strictly better than a per-repo PAT or a per-worker deploy key") — reported
+  here only insofar as the API facts above (§3.1-3.3) confirm the key is genuinely sufficient, alone, to
+  produce every downstream token: no second secret, no per-repo provisioning step beyond "install the App
+  on that repo," matching STORY.md acceptance criterion 6 ("onboarding needs only: the App installed + its
+  cloneUrl configured").
+
+---
+
 ## Sources
 
 - **Measured** — this session's direct command execution (git, node, `claude -p`) and source reads of
@@ -339,5 +638,30 @@ whether TTL self-expiry is required, not optional)?
   issue on PAT-in-argv leakage (found via search, illustrating the `ps aux`/`/proc/*/cmdline` leak class on
   Linux) — plus this milestone's own §1.3/33's RESEARCH.md precedent that no live tailnet is available in
   this environment to measure Tailscale claims directly.
+- **§3 — Measured** — a hand-rolled RS256 JWT signer/verifier over `node:crypto` alone (scratchpad,
+  `generateKeyPairSync`/`createSign`/`createVerify`, PKCS#1 and PKCS#8 PEM both exercised); a local
+  synthetic HTTP Basic-Auth challenge server used to capture the EXACT `Authorization` header
+  `buildAskpassShim` (`src/mesh-worker-execution.mjs:262-280`, reproduced byte-for-byte) causes real `git`
+  to transmit; live, unauthenticated/misauthenticated HTTPS calls against the REAL `api.github.com`
+  (`POST /app/installations/1/access_tokens`, `GET /repos/octocat/Hello-World/installation`) to confirm
+  request/auth/error shape without a real App; source reads of `src/control-stream-server.mjs`
+  (`mintCloneCredential`/`applyCloneCredentialRequestFrame`/`defaultMintCloneCredential`),
+  `src/worker-stream-client.mjs` (`DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS`), and
+  `src/mesh-worker-execution.mjs` (`isWellFormedCloneUrl`, `resolveCloneUrl`, `buildAskpassShim`).
+- **§3 — Documented** — https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app
+  (JWT claims/algorithm/10-min ceiling), https://docs.github.com/en/rest/apps/apps (installation
+  access-token request/response shape, `2022-11-28` API version), https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation
+  (the `x-access-token:<TOKEN>@` HTTPS convention, the `contents:read` requirement),
+  https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app
+  (the "Contents" permission for HTTP git access), https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+  ("the username is not used to authenticate you" — PAT-specific, cross-referenced in §3.4),
+  https://docs.github.com/en/enterprise-server@3.14/rest/overview/resources-in-the-rest-api (GHES API base
+  `HOSTNAME/api/v3` vs `api.github.com`), https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps
+  (PKCS#1 `BEGIN RSA PRIVATE KEY` download format) — all fetched this session.
+- **§3 — Documented/corroborated (community, not GitHub-authoritative, flagged as such in §3.4)** —
+  https://github.com/orgs/community/discussions/173881 (App installation-token username leniency, Sep
+  2025), https://github.com/orgs/community/discussions/164243 (installation-id churn on reinstall) — both
+  found via search this session, explicitly reported as a WEAKER evidence tier than the official docs
+  above, never conflated with them.
 - Prior-milestone precedent for house style: `wiki/work/35_milestone_mesh-work-assignment/RESEARCH.md`
   (§ numbering, measured/documented framing, "constraint this imposes" per section).

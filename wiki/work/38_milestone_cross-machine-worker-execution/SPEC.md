@@ -6,7 +6,7 @@ title: "Cross-machine worker execution & session presence — workers that can t
 status: in-progress
 owner: product-owner
 created: 2026-07-10
-updated: 2026-07-13
+updated: 2026-07-16
 depends: [34, 35, 36]
 ---
 <!--
@@ -73,7 +73,10 @@ Out of scope:
      ADR-007) is TWO independent stories, not three: `worker-worktrees` was folded away (ADR-006) because
      the worktree mechanics ALREADY SHIP from m35/ADR-004 (`mesh-worktree.mjs` add/remove/list/sweep + the
      worker handler that already creates a per-assignment worktree) — the checkout story reuses them
-     verbatim, so there is zero net-new worktree work. The milestone is accepted when both stories are. -->
+     verbatim, so there is zero net-new worktree work.
+     UPDATE `2026-07-13`: a THIRD story (`02_story_clone-credential-mint`) was added at the user's direction
+     to close the mesh network in this milestone rather than defer the credential-mint automation — so the
+     milestone is now accepted when ALL THREE stories are. -->
 
 - [x] [`00_story_session-presence`](stories/00_story_session-presence/STORY.md) — a live coding-assistant
   session marks a node `working · <repo>` via the `aof session start|ping|end` seam (TTL liveness reusing
@@ -87,6 +90,23 @@ Out of scope:
   worktree+run flow (ADR-005/006). **Carries the open auth-transmission question** → `RESEARCH.md` (measured:
   `GIT_ASKPASS` + control-minted short-lived token) + `SECURITY.md` (threat model). Tasks 00–03 buildable
   now; the real private-repo two-machine clone is the `@manual` soak, gated on the SECURITY-approved mechanism.
+
+- [x] [`02_story_clone-credential-mint`](stories/02_story_clone-credential-mint/STORY.md) — the control node
+  mints each clone credential automatically from a configured provider (a **GitHub App**): short-lived,
+  `contents:read`, scoped to exactly the assigned repo — replacing the hand-made per-repo PAT and closing
+  SECURITY **T4**'s operator-attested minting-policy residual (scope/TTL become code-enforced, not attested).
+  Added `2026-07-13` at the user's direction — *this milestone is to be the close of the mesh network, so the
+  credential-mint automation lands here rather than deferring to a follow-up.* Plugs into story-01's ADR-009
+  `mintCloneCredential` seam; builds after story 01. **Refine owes: RESEARCH (GitHub App installation-token
+  API + JWT signing), SECURITY (App-key-at-rest threat + least-privilege App scope), an ADR (the provider
+  abstraction).**
+
+- [ ] [`03_story_per-org-credential-scoping`](stories/03_story_per-org-credential-scoping/STORY.md) — each
+  org's clone credential is minted by that org's OWN GitHub App (its own key, its own installation),
+  resolved per-workspace exactly like `config.mesh.repo.cloneUrl` already is (ADR-010 Gap A) — instead of
+  today's ONE App/token resolved globally on the control node for the whole mesh. Added `2026-07-16` at
+  the operator's direction during `aof:verify 38`'s live soak provisioning, locked into THIS milestone's
+  scope (not deferred). **Milestone now accepts only when all FOUR stories are done.**
 
 <!-- FOLDED AWAY (ADR-006): `worker-worktrees` — delivered by m35/ADR-004; no story, no net-new work. -->
 - [x] ~~`worker-worktrees`~~ — SUBSUMED by milestone 35 (ADR-006); the worktree-per-assignment mechanics

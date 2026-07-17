@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 38
-updated: 2026-07-10
+updated: 2026-07-16
 ---
 <!--
   Milestone VERIFICATION.md — the record of aof:verify 38. Written by the orchestration (verify owns
@@ -298,9 +298,85 @@ growth, S6 now binds a deterministic repo order — and a fresh finding was rais
   vocabularies** (`♥ Ns` / `stale · Nm` / `no presence` vs `last seen 8d ago`). Pre-existing; correct answer is one
   ramp, one vocabulary.
 
+## Story-02 · clone-credential-mint — Verification & accept (`aof:verify 38/02`, 2026-07-16)
+
+Story-02 was added `2026-07-13` and built + reviewed `2026-07-16` (`aof:continue 38/02`, all four lenses GO)
+after the milestone-level verify above ran. This is its own story-level accept — its `@manual` real-App soak
+(task 05) is deliberately NOT run here; it is the milestone's deferred human gate, closed at `aof:verify 38`.
+
+### Verification evidence — `@executable` suite + fitness functions (GREEN, producer-fed)
+
+- **Story-02 `@executable` tasks 00–04 green, deterministically:** `node scripts/test.mjs` — **40 story-02
+  assertions ok, 0 not ok**, stable across three consecutive full-suite runs. Covers: the config-selected mint
+  provider (`env-token` default byte-identical | `github-app`) resolved at the launcher and injected as a
+  LITERAL `mintCloneCredential` key with the T6/F15/F16 authz gates still preceding every mint (task 00); the
+  `github-app` provider resolving owner/repo from the CONTROL's committed `cloneUrl`, signing an App JWT with
+  `node:crypto` RS256, auto-resolving the installation, and requesting a token for EXACTLY the assigned repo,
+  `contents:read` (task 01); the App key reaching only the signer — never a frame, log, or ambient env, with
+  key+token redacted on failure and no token at rest (task 02); the prompt-aware `GIT_ASKPASS` shim (Username →
+  `x-access-token`, Password → token) with the env-token PAT path still authenticating (task 03); and every
+  `github-app` fault throwing a coded `clone-credential-mint-failed` → the worker's loud
+  `assignment-repo-unavailable`, never a null / env-token fallback / unauthenticated clone (task 04).
+  verifies → `tasks/00_*`–`tasks/04_*`.
+- **All three story-02 fitness functions green, each with a non-vacuous, landing-asserted self-check** (armed at
+  build, not spec — a detector over an unbuilt provider would be vacuous, per ADR-008):
+  `acd-clone-credential-provider-config-driven` (F7 — the mint is config-resolved at the seam; no hard-coded
+  single provider; the `env-token` default path unchanged), `acd-clone-app-key-not-relayed` (F5 — the App
+  private key AND the mint JWT never cross the relay and are never logged; scan set widened at review to
+  `mesh-launcher.mjs` + a `jwt` needle), `acd-minted-token-scoped-single-repo` (F6 — the `github-app` mint
+  requests an installation token for EXACTLY the assigned repo with `contents:read`; a multi-repo array, a
+  write permission, a broader permission set, or an omitted key ALL trip the detector). verifies → the three
+  fitness units named in STORY.md `## Fitness units`.
+- **Producer-fed, not fixture-fed (the milestone's defining lesson, correctly answered — STATE `2026-07-16`):**
+  the JWT is signed by the REAL `node:crypto` RS256 signer and verified with `createVerify`; "no credential at
+  rest" runs a REAL `cloneRepoForWorkspace` against a REAL local bare repo; the askpass is a REAL spawn with
+  real prompt argv; task-00 drives the REAL `startLauncher` control wiring with NO options override, so the F12
+  literal-key mint path is genuinely producer-fed.
+
+### Environmental note — the known pre-existing `reclaim-scheduler/06` flake (NOT a story-02 defect)
+
+Two of three full-suite runs this session tripped a single `not ok` on `mesh-reclaim-scheduler` case 06 — a
+different sub-assertion each run, always `Error: EBUSY: resource busy or locked, unlink … projection.sqlite`
+(a Windows temp-file teardown race releasing the SQLite handle after the temp-dir cleanup unlinks it). This is
+the **pre-existing, milestone-35 scheduler-case flake already recorded in STATE `## Feedback (for retro)`
+(`~1/5 in isolation, a different sub-case each time`) and routed to a stabilisation chore** — orthogonal to
+story-02 (whose 40 assertions stayed green on every run). Recorded so the "0 not ok" baseline is read
+honestly: it is not reliably reproducible on this host until the flake (and the hardcoded-`:4182` bind) are
+stabilised. No new finding raised — it already has a home.
+
+### Deferred — task 05 `@manual` real-App soak (the milestone gate, not run here)
+
+`tasks/05_real-app-mint-soak.feature` (`@manual`) is the outsider proof: a REAL GitHub App installed
+least-privilege mints a REAL installation token that clones a REAL private repo the worker lacks, drives to a
+terminal run, no credential at rest — plus the operator's least-privilege-App attestation (the ONE human
+attestation that REPLACES story-01's per-repo-PAT scope/TTL sign-off, now code-enforced). It requires a real
+App + a real private repo + a second worker machine → not agent-runnable → **explicitly deferred to
+`aof:verify 38`** by STORY / SPEC / STATE. INCONCLUSIVE at this story level by construction (no live
+environment), NEVER inferred from the code. No `@uat` scenario exists in this story, and it has no UI surface
+(`@cli @work @distribution`), so no human sign-off and no design-conformance lane apply.
+
+### Gate
+
+- `aof work validate 38` → **PASS — 38 is well-formed** (folder↔frontmatter, closed tag vocabulary, depends
+  graph), exit 0. Agent-layer checks hold: story-02 `@executable` test-traceability is satisfied by the wired,
+  green tasks 00–04 modules; litmus clean — task 05's `@manual` tag is honest (a real App + private repo +
+  second machine is not `@executable`-coverable).
+
+### Accept decision — story-02
+
+**Story-02 `clone-credential-mint` — ACCEPTED.** Its `@executable` lanes (tasks 00–04) and all three fitness
+functions are green and producer-fed; its build review passed all four lenses with only LOW hardening items,
+all applied; the gate is PASS; and **no blocker finding is open against it**. SECURITY **T4**'s
+operator-attested minting-policy residual is closed BY CONSTRUCTION (`acd-minted-token-scoped-single-repo`
+code-enforces single-repo / `contents:read`). Its sole human gate (task 05) is the milestone's deferred soak,
+not a story-level check — so the story accepts now; the live outsider proof of SPEC objective (b)'s
+credential automation is witnessed at `aof:verify 38`.
+
 ## Accept decision
 
-**Milestone 38 is NOT accepted. Story-00 is ACCEPTED; story-01 is NOT.**
+**Milestone 38 is NOT accepted. Story-00 ACCEPTED; story-02 ACCEPTED; story-01 NOT (unverified soak).**
+_(Updated `2026-07-16` — story-02 accepted; see its section above. The pre-story-02 verdict below stands for
+stories 00/01.)_
 
 ### Story-00 `session-presence` — **ACCEPTED**
 

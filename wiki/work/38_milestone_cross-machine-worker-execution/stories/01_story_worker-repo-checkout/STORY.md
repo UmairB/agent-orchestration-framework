@@ -75,6 +75,30 @@ Inherited from [ARCHITECTURE.md](../../ARCHITECTURE.md) + [SECURITY.md](../../SE
 
 ## Notes
 
+**`aof mesh repo publish` auto-detects `cloneUrl` from `git remote get-url origin`
+(`2026-07-16`, at the operator's direction, during `aof:verify 38`'s live soak).** The
+operator rejected hand-editing `.aof/aof.config.json` (and rejected a proposed
+`set-clone-url` verb as needless ceremony) — "check if it exists first, then add it if
+it doesn't". `writeRepoPublishedMarker`/`publishRepoToMesh` (`src/commands/mesh-repo.mjs`)
+now check the EXISTING `mesh.repo.cloneUrl` first (never overwritten once configured);
+only when absent do they run `git remote get-url origin` (an injectable exec seam,
+mirroring `mesh-worker-execution.mjs`'s clone-exec idiom) and persist the result through
+the SAME read-merge-write, validated by the existing `isWellFormedCloneUrl` gate. A
+detection failure (no git repo, no `origin` remote, malformed) is silent and non-fatal —
+publish still succeeds with no `cloneUrl`, exactly today's behaviour. **Found and fixed
+in the same pass:** a detected `https://` remote commonly carries the operator's own
+embedded username (`scheme://user@host/...`) — since `git clone` uses `cloneUrl`
+VERBATIM ([mesh-worker-execution.mjs:517](../../../../src/mesh-worker-execution.mjs#L517)),
+an embedded personal username would make git skip the askpass Username prompt entirely,
+silently defeating ADR-010's `x-access-token` prompt-aware answer for a GitHub App
+installation token. `stripUrlUserinfo` strips it before persisting (scp-style
+`git@host:owner/repo` is left untouched — that `git` user is the SSH service-account
+convention, not a personal credential). Seven new tests added to
+`test/mesh-repo-publish.test.mjs` (auto-detect, check-first/no-overwrite, three
+detection-failure modes, userinfo-stripped, scp-style-preserved); full suite re-run
+clean (2580 ok / 1 not-ok — an UNRELATED, pre-existing timing flake, see STATE.md
+Feedback).
+
 Inherits **ADR-005** (clone-on-miss extends the m35 `!hasRepo` branch), **ADR-006** (worktrees reused
 verbatim — no net-new worktree work), **ADR-007** (the two-story partition) and [RESEARCH.md](../../RESEARCH.md)
 + [SECURITY.md](../../SECURITY.md) for the auth-transmission mechanism.

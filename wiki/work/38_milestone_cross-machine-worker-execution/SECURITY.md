@@ -177,6 +177,20 @@ Severity is the impact **inside** the inherited tailnet boundary. Type is `Info-
   `aof:verify` (story-01 `tasks/04_private-clone-soak.feature`: the operator attests the token
   scope/TTL before the soak). No fitness function asserts a server-side minting policy — the
   worker cannot see it.
+- **⇢ Story-02 UPDATE — this residual is being CLOSED for the `github-app` provider.** T4's
+  minting-policy residual (R4 — the operator attests the token is short-lived + single-repo
+  because no worker test can see the server-side scope) is exactly what story 02 closes. The
+  new `github-app` provider at the `mintCloneCredential` seam makes the token **single-repo,
+  `contents:read`, ~1h BY CONSTRUCTION** instead of by attestation: the mint's request SHAPE is
+  now **control-side code**, fitness-asserted by `acd-minted-token-scoped-single-repo` (T9/F6),
+  and the ~1h TTL is a GitHub App property, not an operator setting (T11). So the property the
+  operator attested at R4 (the minted token's scope + TTL) **moves from human to code**; what
+  stays human is the NARROWER, one-off attestation that the **App itself** is installed
+  least-privilege and its key stored appropriately (T8 — see the swapped attestation checklist).
+  The `AOF_MESH_CLONE_TOKEN` default (the `⚠` note above) is RETAINED for a single-repo
+  bootstrap/dev fleet and still carries its R4 attestation **when selected**; only the
+  `github-app` path is code-enforced. New surfaces story 02 opens are threat-modelled as **T8–T11**
+  below.
 
 ### T5 — Over-scoped clone target: SSRF-ish steer, or path traversal on the checkout · `AuthZ` + `Isolation` · sev **Medium**
 
@@ -322,6 +336,145 @@ Severity is the impact **inside** the inherited tailnet boundary. Type is `Info-
   on both paths) — corroborated by security's own live-git re-measurement; + the **`@manual` soak**
   inspection on the real target machine (attestation item 2).
 
+## Threat model — story 02 (`clone-credential-mint`): the GitHub-App mint surface (BEFORE it is built)
+
+Story 02 changes only what the ADR-009 `mintCloneCredential(workspaceId, assignmentId)` seam
+RETURNS — the F15 (workspace-match) / F16 (active-state) / T6 (holder) gates that PRECEDE the mint
+are UNCHANGED and reused verbatim. What is new: the credential SOURCE becomes a **GitHub App
+installation token** (minted per-clone, exactly the assigned repo, `contents:read`, ~1h — T4-compliant
+by construction), and a NEW durable secret appears — the **App private key at rest on the control
+node** (one fleet-wide key, signs the App JWT, NEVER relayed). T8–T11 model that surface.
+
+### T8 — The App private key at rest on the control node — the durable, fleet-wide signing secret · `Info-disclosure` + `AuthZ` · sev **High** (largest single blast radius in this model)
+
+- **NEW surface (story 02 introduces the first durable secret this milestone keeps).** Story 01's
+  credential SOURCE was a value the control node was HANDED (`AOF_MESH_CLONE_TOKEN`) or an injected
+  mint closing over an external authority. Story 02's `github-app` provider makes the control node
+  itself the **minting AUTHORITY**: it holds the GitHub App's **private key** and signs the App JWT
+  (RS256, `node:crypto`) on every mint. That key is a **standing secret at rest on the control node**
+  for the daemon's whole life, and it is **fleet-wide** — it can mint an installation token for EVERY
+  repo the App is installed on.
+- **Attack.** Control-node compromise, or exfiltration of the key (a backup, a support bundle, a
+  world-readable path, a log line, a stray commit), hands an attacker the ability to mint
+  `contents:read` tokens for **every repo the App is installed on**, indefinitely, entirely off-mesh —
+  a far larger prize than any single relay token (one repo, ~1h). This is the highest-value secret in
+  the whole threat model.
+- **Control.** (a) The key lives ONLY on the control node, at a **file-permission-protected path (or
+  an OS-keystore reference)** resolved from config/env — **never a committed config key**
+  (`config.mesh.repo.cloneUrl` is committed; the key MUST NOT be), never in git, never logged, and
+  **never relayed** — only the minted short-lived token ever crosses the wire (fitness-pinned by
+  `acd-clone-app-key-not-relayed`, F5). (b) The App's OWN least-privilege installation bounds the
+  blast radius even ON compromise: the App is installed `contents:read` on **SELECTED repositories
+  only** — never org-wide, never any write scope — so a stolen key mints only read tokens for the
+  handful of repos the fleet actually runs, not the whole org. (b) is a GitHub-side property no
+  worker/CI test can see → the operator attestation (below) is the ONLY place it is verified.
+- **Residual (Accepted — R7; SUPERSEDES R2).** ONE standing key for the whole fleet is the accepted
+  trade, and it is **strictly better** than what it replaces: a per-repo PAT (N standing secrets, one
+  per repo) or a per-worker deploy key (a durable key on every worker's disk, R2). It collapses N
+  durable secrets on N machines to ONE durable secret on ONE machine — the control node — that never
+  leaves it. See R7.
+- **Evidenced by.** **Fitness** `acd-clone-app-key-not-relayed` (F5, spec below) + the architect's
+  ADR-009 mint seam (`mintCloneCredential` — the key is read control-side, never handed to a worker)
+  + the **operator attestation** (the App is installed least-privilege + the key is stored
+  file-perm-protected — the swap below). No test can assert the server-side installation scope or the
+  key's on-disk perms — that residue is the human attestation.
+
+### T9 — Over-scoped mint: the installation token requests more than the one assigned repo + `contents:read` · `AuthZ` · sev **High** — the CODE-ENFORCED closure of T4
+
+- **Attack.** The `github-app` mint exchanges the App JWT for an installation access token but
+  requests it **too broadly**: it OMITS the `repositories`/`repository_ids` selector (→ a token
+  scoped to ALL repos the installation can reach), or names MORE than the one assigned repo, or
+  requests `permissions` beyond `{ contents: "read" }` (`contents: write`, `administration`,
+  org-wide). A worker that captures such a token — or a worker compromise — then holds exactly the
+  broad, over-scoped credential T4 exists to prevent, re-opening "single-repo, read-only by
+  construction".
+- **Control.** The `github-app` mint's installation-token request is **structurally constrained to
+  EXACTLY the one assigned repo + `contents:read`**: the request body names a **single-element**
+  `repositories`/`repository_ids` derived from the mint's `workspaceId` argument (the assignment
+  row's workspaceId — already F15-bound to the holder's own assignment before the mint is reached),
+  and `permissions` is **exactly `{ contents: "read" }`** — never omitted (omission = the
+  installation's full scope), never widened. Unlike the static PAT (whose server-side scope no worker
+  could assert — the T4/R4 residual), this request SHAPE is **local control-side code** and therefore
+  **fitness-assertable**: `acd-minted-token-scoped-single-repo` (F6, spec below) fails CI on a mint
+  whose request omits the repo selector, names >1 repo, or requests any permission beyond
+  `contents:read`. This is the invariant that turns T4's operator-attested minting policy into a
+  code-enforced one. The App's own least-privilege installation (T8) is defence in depth: even a bug
+  that widened the request cannot exceed what the App is installed to grant.
+- **Residual.** None accepted for the request SHAPE (structural, fitness-pinned). The token's
+  server-side realisation (that GitHub honours the request and issues a token no broader than asked)
+  is a GitHub property, bounded by T8's App least-privilege and attested once — not per-soak.
+- **Evidenced by.** **Fitness** `acd-minted-token-scoped-single-repo` (F6) + ADR-009 mint seam +
+  T8's App-least-privilege attestation.
+
+### T10 — Mint-time failure that silently falls back to a broad token or an unauthenticated clone · `AuthZ` + `Info-disclosure` · sev **High**
+
+- **Attack.** The `github-app` provider hits a real fault — App not installed on the repo, private
+  key invalid/mis-parsed, GitHub API unreachable, JWT rejected, `403 permission denied`,
+  installation-not-found — and, rather than failing loudly, degrades **quietly**: (a) it falls back
+  to the `env-token` default (`AOF_MESH_CLONE_TOKEN`), handing out the broad standing PAT T4 warned
+  about; or (b) it returns `credential: null`, and the worker — unable to tell "public repo, no cred"
+  from "mint failed" (the R6 masking gap) — attempts an **unauthenticated** clone, which on a real
+  helper-configured machine F14's ambient-helper bypass would silently rescue with the operator's
+  personal keychain PAT (a wrong, broad credential; a masked misconfiguration).
+- **Control.** A `github-app` provider fault is a **hard error that THROWS** — never a `null` return,
+  never a fallback to `env-token`, never an unauthenticated retry. The existing control-side path
+  already converts a thrown mint into the **loud coded `clone-credential-mint-failed`** refusal
+  (`applyCloneCredentialRequestFrame`'s `try/catch` → `refuse(CLONE_CREDENTIAL_MINT_FAILED)`,
+  `credential: null`, one-target coded reply), and the worker-side resolver already turns a
+  refusal/timeout/blank reply into the existing loud coded **`assignment-repo-unavailable`** `failed`
+  (`cloneRepoForWorkspace`'s resolver `try/catch`) — the exact posture ADR-005/ADR-009 already fixed
+  for an unresolvable clone source. Story 02 adds NO new failure path; it INHERITS this one. Its only
+  new obligations: (i) the `github-app` provider must **THROW on fault, never return `null`** — a
+  `null` return is reserved for the legitimate "no credential configured" public-repo case, which the
+  `github-app` provider (selected precisely BECAUSE the repo is private) must never emit for a fault;
+  and (ii) the provider SELECTOR must NOT, on a `github-app` fault, silently fall through to
+  `env-token`.
+- **Residual.** The public-vs-mint-failed ambiguity of a `credential: null` reply (R6(b)) is
+  unchanged and already accepted — but story 02 NARROWS it: when `github-app` is selected, a `null`
+  can only mean "public repo", because a fault throws. The T7/F14 `GIT_TERMINAL_PROMPT=0` +
+  `credential.helper=` control already converts any resulting unauthenticated private clone to a LOUD
+  failure rather than a silent keychain rescue.
+- **Evidenced by.** The existing loud coded refusals (`clone-credential-mint-failed` →
+  `assignment-repo-unavailable`) — behaviourally pinned by
+  `test/mesh-worker-clone-credential-pull.test.mjs` — + a story-02 `@executable`/behavioural check
+  (armed at refine) that a `github-app` provider fault yields the coded refusal and **never** an
+  `env-token` fallback + the F14 loud-null-path control (T7) + `acd-clone-credential-provider-config-driven`
+  (the architect/developer-owned config-driven fitness that pins the `env-token` default path
+  UNCHANGED — so a `github-app` selection cannot silently become an `env-token` mint).
+
+### T11 — The minted token's ~1h validity window (and the App-JWT's ≤10-min window) — a captured token outlives the clone · `Info-disclosure` + `AuthZ` · sev **Low** (bounded by construction)
+
+- **Attack.** A GitHub App installation token is valid ~**1 hour** (GitHub-fixed, not caller-tunable),
+  but the clone that consumes it takes seconds. A token captured in its exposure window (the askpass
+  file R6, a transit exposure R5) is therefore live for up to ~1h after the clone finishes — a window
+  longer than the operation that needed it. Separately, the App JWT used to MINT the token has a
+  **≤10-min** expiry ceiling (GitHub-enforced) and is signed with the T8 key; a leaked JWT is a
+  (short) bearer for minting.
+- **Control.** Both windows are **short by construction and NOT operator-tunable** — this is the
+  point of the swap: the ~1h token TTL and the ≤10-min JWT window are GitHub App properties, so T4's
+  "short-lived" is met WITHOUT any operator setting or attestation (contrast the static PAT, whose
+  TTL was unbounded and had to be operator-attested at R4). The token is single-repo, `contents:read`
+  (T9), so even a full-window capture reads one repo. The JWT never crosses the relay and is never
+  handed to a worker (a control-side mint-time artefact, held as briefly as the token it fetches) —
+  the same no-relay/no-log discipline as the T8 key (F5 extends to the JWT signing material). No
+  caching/reuse (story scope: "minting per-clone is fine… no cache") — a token is fetched fresh per
+  clone and not persisted, so there is no store of ~1h tokens to harvest.
+- **Residual (Accepted — R8).** The ~1h token window is longer than the clone but is the shortest
+  GitHub offers for an installation token, and is strictly better than the static PAT's unbounded
+  life (T4). No code control can shorten it; accepted as the by-construction floor.
+- **Evidenced by.** ADR-009 (per-clone mint, no cache) + T9 scope
+  (`acd-minted-token-scoped-single-repo`) + T8 no-relay/no-log (`acd-clone-app-key-not-relayed`,
+  extended to the JWT signing material) + R8 (accepted window).
+- **⚠ DEPENDENCY — the `x-access-token` username (parallel researcher).** If the askpass shim must
+  send username `x-access-token` for a GitHub App installation token (a basic-auth requirement for
+  installation tokens, distinct from a PAT), that is a **credential-handling change** to story 01's
+  shim: it must answer the Username prompt with the literal `x-access-token` and the Password prompt
+  with the token — it must **NOT** emit the token as the USERNAME (which would place the secret in a
+  second field and the URL git constructs, a T1/T3 re-exposure). Flagged as a dependency on the
+  researcher's finding; F2 (`acd-worker-clone-no-credential-persisted`) is the fitness that would pin
+  the shim's handling. **The architect reconciles the exact shape — security has NOT invented the
+  resolution.**
+
 ## Residual risk (the honest list) → route to VERIFICATION / UAT
 
 - **R1 — `@manual` / two-machine private-clone soak (T1/T2/T3, live transport).** The real
@@ -337,6 +490,12 @@ Severity is the impact **inside** the inherited tailnet boundary. Type is `Info-
   short-lived token (T4). Managing its rotation/storage is the **out-of-scope secrets-vault**
   concern (SPEC.md:65-66) — named here as the place it defers to a future milestone if the
   fallback path proves needed. Accepted, operator-acknowledged at `aof:verify`.
+  **⇢ SUPERSEDED by R7 (story 02) for the GitHub path.** The `github-app` provider removes the need
+  for a per-repo PAT AND a per-worker deploy key on any GitHub-hosted repo: the durable secret
+  collapses to ONE App private key on the CONTROL node (R7/T8), not a key on every worker. R2's
+  per-worker deploy-key concern survives ONLY as the documented fallback for a **non-GitHub** forge
+  whose token API the control cannot reach (story scope keeps the provider pluggable); for the GitHub
+  fleet it no longer applies.
 - **R3 — Inherited (35/SECURITY T1, Accepted).** The compromised-but-admitted control-node RCE
   boundary is inherited unchanged. A note in the m35 VERIFICATION already records it; not
   re-tested here.
@@ -366,6 +525,22 @@ Severity is the impact **inside** the inherited tailnet boundary. Type is `Info-
   the operator's personal credential). The T7/F14 fix (`credential.helper=` + `GIT_TERMINAL_
   PROMPT=0` on the null path too) converts this to a LOUD failure. Follow-up hardening; recorded
   so the soak operator watches for a "succeeded but with the wrong (personal) credential" outcome.
+- **R7 — Accepted / operator-attested: ONE App private key at rest on the control node (story 02;
+  SUPERSEDES R2 for GitHub).** The `github-app` provider keeps a single, fleet-wide App private key
+  at rest on the control node (T8). This IS a durable standing secret — the thing SPEC.md:65-66 named
+  out of scope for a general vault — but it is the accepted, strictly-better trade: ONE key on ONE
+  machine (the control node, which never relays it) replaces N per-repo PATs or per-worker deploy keys
+  (R2). It is file-permission-protected (or an OS-keystore ref), never committed, never logged, never
+  relayed (F5). Its blast radius on control-node compromise is bounded by the App's OWN least-privilege
+  installation (`contents:read`, selected repos, no write — T8), which the operator attests once (the
+  swap below). No worker/CI test can see the key's on-disk perms or the App's server-side installation
+  scope → operator attestation. Managed rotation/storage of this one key defers to a future
+  secrets-vault milestone IF the fleet grows to need it — named here, not built here.
+- **R8 — Accepted: the minted installation token's ~1h validity window (T11).** Longer than the clone
+  that consumes it, but the shortest GitHub offers for an installation token, single-repo/`contents:read`-scoped
+  (T9), un-cached, and strictly better than the static PAT's unbounded life (T4). No code control can
+  shorten it; accepted as the by-construction floor. Not a soak blocker — the token is dead within ~1h
+  regardless of the operator.
 
 ### What the OPERATOR must attest at `aof:verify` before the private-repo soak (R1/R4)
 
@@ -375,16 +550,36 @@ nothing), and F14 (the clone resets the ambient `credential.helper` chain + sets
 `GIT_TERMINAL_PROMPT=0` on both paths) — each fixed, re-verified at source by security (probe +
 live-git), and pinned by `test/mesh-worker-clone-credential-pull.test.mjs` (behavioural) and the
 strengthened security fitness `acd-worker-clone-no-credential-persisted` (structural, T7/F14
-clause). These are no longer open review items.
+clause). These are no longer open review items. **⇢ Story-02 ADDS to this CI-pinned set:** with the
+`github-app` provider selected, the minted token's **scope** (single-repo + `contents:read`) is
+CI-pinned by `acd-minted-token-scoped-single-repo` (T9/F6) and its ~1h **TTL** is a GitHub property
+(T11) — so the token's scope/TTL is **no longer an operator judgement**. The App private key's
+no-relay/no-log posture is CI-pinned by `acd-clone-app-key-not-relayed` (T8/F5).
 
 **Still requires the HUMAN to personally confirm before the soak (a test cannot assert these):**
 
-1. **Minting policy (R4/T4) — the ONE unavoidable human judgement.** Which is true: (a) a real
-   `mintCloneCredential` seam is wired, emitting a **short-lived, single-repo, read-scoped**
-   token; OR (b) `AOF_MESH_CLONE_TOKEN` is a **fine-grained, read-only, single-repo** PAT and the
-   operator **accepts it is long-lived** (T4's "short-lived" unmet) and will rotate it on the
-   soak's cadence. A broad/all-repo/all-scope PAT is NOT acceptable. *No worker-side test can see
-   the server-side scope/TTL of the minted token — this is irreducibly human.*
+1. **Minting policy (R4/T4/T8) — the human judgement, NARROWED by story 02's code-enforcement (THE
+   SWAP).** WHICH provider is selected (`config.mesh.repo.credential.provider`) decides what remains
+   human:
+   - **`github-app` (story 02 — the closing path).** The token's **scope + TTL are NO LONGER
+     attested** — they are code-enforced (single-repo + `contents:read` by
+     `acd-minted-token-scoped-single-repo`/F6/T9; ~1h by GitHub construction/T11). **The ONE thing the
+     operator NOW attests instead:** that the **GitHub App is installed least-privilege** —
+     `contents:read`, on **SELECTED repositories only**, **no write / no org-wide scope** — and that
+     its **private key is stored appropriately** (a file-permission-protected path or an OS-keystore
+     ref on the control node, never in git). *This is a GitHub-console + control-node-filesystem fact
+     no worker/CI test can see (T8) — the irreducible human residue, but a NARROWER, ONE-OFF
+     attestation (per App, once) than R4's per-repo/per-soak token judgement it replaces.*
+   - **`env-token` (retained bootstrap/dev default).** R4's original attestation STANDS unchanged: the
+     operator confirms `AOF_MESH_CLONE_TOKEN` is a **fine-grained, read-only, single-repo** PAT and
+     **accepts it is long-lived** (T4's "short-lived" unmet), rotating it on the soak's cadence. A
+     broad/all-repo/all-scope PAT is NOT acceptable.
+   **What moved from human to code (the swap, precisely):** the minted token's per-clone **single-repo
+   scope + read-only permission + short TTL** — human at R4 for the static PAT, now code-enforced for
+   `github-app` (F6 + GitHub construction). **What is newly human:** the **App's own installation
+   least-privilege** + the **key-at-rest storage posture** — a server-side / on-disk fact tests cannot
+   reach (T8). *No worker-side test can see either the server-side scope of a minted token OR the App's
+   installation config — the human residue simply moved to the smaller, one-off surface.*
 2. **Live-transport confirmation of the F14 fix on the ACTUAL second machine (R1/T7).** The
    `-c credential.helper=` mechanism is git-core (measured on Windows; platform-independent by
    design), but the soak is the first run on the real target OS/helper: confirm the private clone
@@ -412,6 +607,45 @@ failing CI on violation.
 | F2 | `acd-worker-clone-no-credential-persisted` **(strengthened this review — T7/F14)** | T1, T2, T3, **T7** | The clone path (a) persists NO credential into `.git/config`; (b) assigns NO credential onto the worker's **ambient `process.env`**; (c) logs no credential value; **(d) NEW — RESETS the ambient credential.helper chain (`-c credential.helper=`) and DISABLES the interactive prompt (`GIT_TERMINAL_PROMPT`), so GIT_ASKPASS is authoritative and no token is persisted to the keychain (T7/F14).** | **Source-analysis** over `src/mesh-worker-execution.mjs`. Self-check: the (a)/(b)/(c) plants as before, PLUS a clone that OMITS the `credential.helper=` reset and one that OMITS `GIT_TERMINAL_PROMPT` each trip the new (d) detector; the correct reset+prompt shape stays clean. | GREEN (F14 clause added + verified) |
 | F3 | `acd-clone-credential-pull-not-pushed` | T4 | The credential is PULLED on a clone miss, never pushed on the directive; the resolver is production-wired as a literal key (the F12 guard); no static per-worker credential option exists. | Source + behavioural, over control/launcher/worker. Self-check synthesizes each plant. | GREEN (armed) |
 | F4 | `acd-clone-credential-relay-not-logged` **(NEW this review)** | T3 (re-derived on the relay frame) | Neither the control send-side (`buildCloneCredentialFrame`/mint) nor the worker receive-side (`requestCloneCredential`) passes a `credential` value into a `console.*`/`logger.*`/`warn`/`onWarning` sink — the credential rides the wire (`ws.send`) only, never a log. | **Source-analysis** over `src/control-stream-server.mjs` + `src/worker-stream-client.mjs`. Self-check: a `console.log(frame.credential)`, a `logger.debug(minted)`, and an `onWarning({message: credential})` all trip; the real `warn(code, error)` failure-isolation shape stays clean. | GREEN (added) |
+| F5 | `acd-clone-app-key-not-relayed` **(SPEC — story 02, armed at BUILD)** | **T8, T11** | The GitHub App **private key** (the PEM / configured key material) never (a) crosses the relay — it appears on NO frame builder (`buildCloneCredentialFrame` and every `sendDirective`/`ws.send` payload carry only the minted token, never the key), and (b) reaches no `console.*`/`logger.*`/`warn`/`onWarning`/`Error(...)` message sink. It flows ONLY into the JWT signer (`node:crypto` `createSign`/`sign`). EXTENDS F4 (the minted TOKEN) to the KEY (and to the mint-time App JWT, T11). | **Source-analysis** over the NEW `github-app` provider module + `src/control-stream-server.mjs`. Self-check (spec below). | SPEC — armed at build |
+| F6 | `acd-minted-token-scoped-single-repo` **(SPEC — story 02, armed at BUILD)** | **T9, T4** | The `github-app` mint's installation-token request names EXACTLY the ONE assigned repo — a **single-element** `repositories`/`repository_ids` derived from the mint's `workspaceId` arg (never omitted, never >1) — and `permissions` EXACTLY `{ contents: "read" }` (never omitted, never `write`, never a broader set). The **code-enforcement that closes T4**. | **Source-analysis** over the NEW `github-app` provider module (the request-body shape at the `access_tokens` call). Self-check (spec below). | SPEC — armed at build |
+
+**F5 + F6 are SPEC-only until story 02 builds — deliberately, per the milestone's hard lesson.**
+The `github-app` provider module does not exist yet (story `not-started`); authoring a detector now
+against absent source would produce a **vacuous** self-check (the plant would find nothing to trip and
+the negative control nothing to stay clean). Security specifies the invariant + the exact plant
+strategy here and arms the arch-test at build against the real module. Both self-checks follow the
+milestone's non-vacuity discipline **verbatim** (the F2/F4 precedent): every plant is a SYNTHESIZED
+snippet built with explicit `"\n"` joins (never a string-replace on the real file — the tree is CRLF,
+and a `"\n"` needle would silently no-op against CRLF source and leave the self-check vacuous); the
+real source is asserted clean under the detector first; and each plant asserts it **differs from its
+clean baseline** before asserting `problems.length > 0`.
+
+- **F5 `acd-clone-app-key-not-relayed` — plant strategy.** Detector = F4's `LOG_SINK` + `balancedArgs`
+  scanner widened to a KEY needle (`privateKey`/`appPrivateKey`/`pem`/`PRIVATE KEY`), PLUS a
+  frame/relay scanner (any object literal passed to `buildCloneCredentialFrame` / `sendDirective` /
+  `ws.send` whose values reference the key needle). Plants that MUST trip: (1) `console.log("signing
+  with " + privateKey)` and `logger.debug("app key", appPrivateKey)` (log sink); (2)
+  `buildCloneCredentialFrame(to, { credential: privateKey })` and `ws.send(JSON.stringify({ key:
+  privateKey }))` (key on a relayed frame); (3) `throw new Error("bad key: " + privateKey)` (key in an
+  error message). NEGATIVE control that MUST stay clean: `createSign("RSA-SHA256").update(jwt).sign(
+  privateKey)` — the key flowing ONLY into the signer — and `buildCloneCredentialFrame(to, {
+  credential: mintedToken })` (the TOKEN on the frame is correct; only the KEY is forbidden).
+- **F6 `acd-minted-token-scoped-single-repo` — plant strategy.** Detector parses the request body
+  object passed to the installation `access_tokens` POST and asserts: a `repositories`/`repository_ids`
+  key is PRESENT, holds a SINGLE element, and that element is sourced from the mint's repo/workspace
+  argument (not a literal multi-element array, not absent); AND `permissions` deep-equals `{ contents:
+  "read" }`. Plants that MUST trip: (1) OMIT `repositories`/`repository_ids` (→ all installation
+  repos); (2) `repositories: [repoA, repoB]` (multi-repo); (3) `permissions: { contents: "write" }`;
+  (4) `permissions: { contents: "read", administration: "read" }` (broader set); (5) OMIT `permissions`
+  (→ the installation's full scope). NEGATIVE control that MUST stay clean: `{ repositories: [repo],
+  permissions: { contents: "read" } }` (single-repo, read-only).
+- **F7 (config-driven, NOT security-owned — noted for the seam).** `acd-clone-credential-provider-config-driven`
+  (story fitness unit 1) is **architect/developer-owned**: the mint provider is resolved from
+  `config.mesh.repo.credential.provider` at the `mintCloneCredential` seam, no hard-coded single
+  provider, and the `env-token` default path is byte-unchanged. Security REFERENCES it (it backstops
+  T10 — a `github-app` selection cannot silently degrade to an `env-token` mint) but does not own it;
+  the architect wires the seam, the developer arms the test.
 
 **T7/F15 + T7/F16 pinned (fix landed).** The mint-scoping (keyed on `existing.workspace_id`,
 mismatch refused) and terminal-state gates are pinned **behaviourally against the real producer**
@@ -433,11 +667,26 @@ passed to ONLY the clone's `execFile` — stays clean.
 
 The **architect** owns ADR-005 (clone-on-miss structure) and ADR-009 (the PULL credential
 CHANNEL + the `mintCloneCredential`/`requestCloneCredential` seams). **Security** owns this
-threat→control map and the fitness functions F1–F4 above (F4 added this review). Where a
-fitness function names an invariant an ADR must satisfy (T5 scoped target, T1/T2/T3 credential
-handling), that is the coordination point — the ADR states the decision, the fitness function
-fails CI if the implementation drifts. T4's minting policy and R1/R2/R4/R5/R6 residuals are
-**operator sign-off** at `aof:verify` — no test asserts a server-side or accepted risk.
+threat→control map and the fitness functions F1–F6 above (F4 added at story-01 review; **F5/F6
+specified for story 02, armed at build**). Where a fitness function names an invariant an ADR
+must satisfy (T5 scoped target, T1/T2/T3 credential handling, **T8 key-not-relayed, T9
+single-repo mint**), that is the coordination point — the ADR states the decision, the fitness
+function fails CI if the implementation drifts. R1/R3/R5/R6/**R8** residuals are **operator
+sign-off / accepted** at `aof:verify` — no test asserts a server-side or accepted risk.
+
+**Story-02 division of ownership (the mint-source swap).** The **architect** owns the provider
+abstraction at the `mintCloneCredential` seam (ADR to be written — the `env-token` | `github-app`
+selector, config-driven) and the `github-app` provider's structure (JWT sign → installation-token
+exchange). The **developer** builds the provider and arms `acd-clone-credential-provider-config-driven`
+(F7 — config-driven selection, `env-token` default unchanged). **Security** owns T8–T11 above and the
+two security fitness functions F5 (`acd-clone-app-key-not-relayed`) + F6
+(`acd-minted-token-scoped-single-repo`) — the code-enforcement that closes T4's minting-policy
+residual. **The attestation SWAP** (T4/R4 → T8): the token's scope/TTL moves from human sign-off to
+CI (F6 + GitHub construction); the App's installation least-privilege + key-at-rest storage becomes
+the new, narrower, one-off operator attestation (R7/T8, checklist item 1). **Cross-story dependency —
+`x-access-token` (T11).** If the researcher confirms the askpass shim must send username
+`x-access-token` for an App installation token, that is a credential-handling change to story 01's
+shim (F2's surface); the architect reconciles the shape. Security flags it, does not decide it.
 
 **As-built review verdict — INITIAL (at `aof:verify 38` story-01): CHANGES REQUESTED.** The PULL
 channel's transport, correlation, timeout/failure paths, T2 env-isolation, and T3 no-log were
