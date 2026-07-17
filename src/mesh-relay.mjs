@@ -51,7 +51,7 @@ import {
   isInviteExpired,
   verifyCredential,
 } from "./mesh-registry.mjs";
-import { publishNodeRecord } from "./mesh-store.mjs";
+import { publishNodeRecord, readNodeRecord } from "./mesh-store.mjs";
 
 // The single relay pathname (ADR-001 — ONE path; any other upgrade pathname is
 // destroyed, the terminal-ws default branch). Loopback-bound by default (pre-auth).
@@ -399,7 +399,22 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
     }
 
     attemptBuckets.delete(source);
-    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode } });
+    // review fix (live soak, 2026-07-17): the joiner's record was already persisted
+    // ON THE CONTROL NODE above (publishNodeRecord(workspace, joiner, ...)), but
+    // nothing in the ORIGINAL enroll response ever gave the JOINER a copy of the
+    // CONTROL NODE'S own descriptor — only its bare nodeId string. Without that
+    // descriptor in the joiner's own local nodes/ directory, resolvePeers' roster
+    // join (mesh-fabric.mjs) has nothing to match a live tailscale peer against, so
+    // a freshly (or re-)joined worker can NEVER resolve the control node's dial
+    // address, regardless of tailscale connectivity — the join silently completed
+    // but left the worker permanently unable to stream. Read the control node's OWN
+    // already-published record (every control node publishes itself via `aof mesh
+    // identity` before it can serve) and hand it back so the joiner can persist an
+    // equivalent local copy (mesh-join.mjs). Absence-tolerant: an unpublished
+    // control-node record degrades to admission succeeding exactly as before this
+    // fix, never a failure of the join itself.
+    const controlNodeRecord = controlNode != null ? await readNodeRecord(workspace, controlNode) : null;
+    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode, controlNodeRecord } });
   }
 
   return async function enrollmentHttpHandler(request, response) {

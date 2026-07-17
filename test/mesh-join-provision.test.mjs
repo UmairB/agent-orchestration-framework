@@ -17,7 +17,7 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { serveRelay, sha256Hex } from "../src/mesh-relay.mjs";
 import { writeRegistry } from "../src/mesh-registry.mjs";
-import { readNodeRecord } from "../src/mesh-store.mjs";
+import { readNodeRecord, publishNodeRecord } from "../src/mesh-store.mjs";
 import { globalWorkspacePaths } from "../src/workspace.mjs";
 import { meshJoinCommand } from "../src/commands/mesh-join.mjs";
 import { spawnCliAsync } from "./support/cli-spawn.mjs";
@@ -210,6 +210,81 @@ export const meshJoinProvisionTests = [
         assert.equal("gitRemote" in globalAfter.mesh.credential, false, "global config mesh.credential carries no git-remote grant; mesh sync is websocket-only");
         assert.equal(globalAfter.mesh.existing, "preserved", "existing global mesh keys survive the merge");
         assert.equal(globalAfter.name, "global-fixture", "existing top-level global config keys survive the merge");
+      } finally {
+        await control.relay.stop();
+        await rm(control.repo, { recursive: true, force: true });
+        if (joiner) await rm(joiner.root, { recursive: true, force: true });
+      }
+    },
+  },
+
+  // ══ Scenario: mesh:join persists the CONTROL NODE'S own descriptor locally, not
+  //    just the joiner's own credential — closing the gap where a freshly (or
+  //    re-)joined worker's resolvePeers roster-join had nothing to match a live
+  //    tailscale peer against, regardless of tailscale connectivity ══════════════
+  {
+    name: "mesh-join-provision/02 a matched code persists the control node's OWN descriptor into the joiner's local nodes/ directory",
+    async run() {
+      const grantUrl = "https://git.example.test/group.git";
+      const control = await standControl({ pending: [inviteFor("777888")], grantUrl });
+      let joiner = null;
+      try {
+        // The control node publishes itself locally BEFORE serving (exactly as a real
+        // control node does via `aof mesh identity`) — this is the record the enroll
+        // response now hands back to the joiner.
+        await publishNodeRecord(control.workspace, CONTROL_ID, {
+          nodeId: CONTROL_ID,
+          role: "control",
+          controlNode: true,
+          host: "control-host",
+          os: "linux",
+          runtimes: [],
+          aofVersion: "1.0.0",
+          publishedAt: CLOCK,
+        });
+
+        joiner = await makeJoiner(null);
+        const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
+        const joinerWorkspace = await loadWorkspace(joiner.root, undefined, { env });
+        const ctx = { workspace: joinerWorkspace, env };
+        const result = await invoke("mesh:join", { code: "777888", relayUrl: control.relay.url }, ctx);
+        assert.equal(result.joined, true, "the join reports the admission");
+
+        const persisted = await readNodeRecord(joinerWorkspace, CONTROL_ID);
+        assert.ok(persisted, "the joiner persisted a local node record for the control node it just joined");
+        assert.equal(persisted.nodeId, CONTROL_ID, "the persisted record names the control node");
+        assert.equal(persisted.host, "control-host", "the persisted record carries the control node's own descriptor detail");
+
+        const globalConfigPath = globalWorkspacePaths({ env }).configPath;
+        const globalAfter = JSON.parse(await readFile(globalConfigPath, "utf8"));
+        assert.equal("controlNodeRecord" in globalAfter.mesh.credential, false, "controlNodeRecord is persisted as a node record, not folded into mesh.credential");
+      } finally {
+        await control.relay.stop();
+        await rm(control.repo, { recursive: true, force: true });
+        if (joiner) await rm(joiner.root, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "mesh-join-provision/02 a matched code with NO self-published control-node record still admits cleanly (absence-tolerant, pre-fix control node compatibility)",
+    async run() {
+      const grantUrl = "https://git.example.test/group.git";
+      // standControl never publishes a self node-record for CONTROL_ID here — the
+      // ORIGINAL "a matched code writes mesh enablement..." scenario's own control
+      // fixture, unchanged, exercises exactly this absent-record path already; this
+      // test names the guarantee explicitly so it never silently regresses.
+      const control = await standControl({ pending: [inviteFor("111222")], grantUrl });
+      let joiner = null;
+      try {
+        joiner = await makeJoiner(null);
+        const env = { ...process.env, AOF_GLOBAL_HOME: path.join(joiner.root, ".global-aof") };
+        const joinerWorkspace = await loadWorkspace(joiner.root, undefined, { env });
+        const ctx = { workspace: joinerWorkspace, env };
+        const result = await invoke("mesh:join", { code: "111222", relayUrl: control.relay.url }, ctx);
+        assert.equal(result.joined, true, "the join still admits cleanly with no control-node record to hand back");
+
+        const persisted = await readNodeRecord(joinerWorkspace, CONTROL_ID);
+        assert.equal(persisted, null, "no local node record is fabricated for a control node that never published itself");
       } finally {
         await control.relay.stop();
         await rm(control.repo, { recursive: true, force: true });

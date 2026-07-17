@@ -1241,6 +1241,19 @@ import { archTests as acdOutcomeCapabilityRankingBoundedTests } from "../test/ar
 import { archTests as acdOutcomeAuthoredByVerifyTests } from "../test/arch/acd-outcome-authored-by-verify.test.mjs";
 import { archTests as acdOutcomeDanglingDeclarationPresentTests } from "../test/arch/acd-outcome-dangling-declaration-present.test.mjs";
 import { archTests as acdOutcomeDeclaredFieldHasProducerTests } from "../test/arch/acd-outcome-declared-field-has-producer.test.mjs";
+// milestone 40 — work-item versioning & the upgrade path (ADRs 001-008; refine-stage
+// GUARD-IF-PRESENT fitness functions, GREEN today): the schema-integer/registry single
+// source of truth (no drift, contiguous chain from baseline 0), idempotency by registry
+// shape, the migration-writer body-byte-identity bound (mirroring rollbackItemStatus),
+// the generated changelog (a projection of the registry), the reconstructed-marker
+// readiness for m39's backfill (the imported:true analogue), and the god-node
+// blast-radius guard (work-upgrade.mjs -> work.mjs, never the reverse).
+import { archTests as acdWorkItemSchemaSingleConstantTests } from "../test/arch/acd-work-item-schema-single-constant.test.mjs";
+import { archTests as acdUpgradeIdempotentTests } from "../test/arch/acd-upgrade-idempotent.test.mjs";
+import { archTests as acdMigrationWriterBodyPreservingTests } from "../test/arch/acd-migration-writer-body-preserving.test.mjs";
+import { archTests as acdChangelogGeneratedTests } from "../test/arch/acd-changelog-generated.test.mjs";
+import { archTests as acdReconstructedMarkerExpressibleTests } from "../test/arch/acd-reconstructed-marker-expressible.test.mjs";
+import { archTests as acdUpgradeEngineBlastRadiusTests } from "../test/arch/acd-upgrade-engine-blast-radius.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1498,6 +1511,14 @@ export const tests = [
   ...meshFabricSeamTests,
   ...meshFabricLivenessCutoverTests,
   ...meshBrokerRetirementTests,
+  // milestone 24 — device-code group-enrollment (story 00/01/02): imported since
+  // milestone 24 but never spread into this executed set — review fix (live soak,
+  // 2026-07-17): found while adding join/enroll coverage for the control-node-record
+  // fix; these three suites (invite mint, device-flow enroll, join+provision) had
+  // never actually run under `node scripts/test.mjs`, silently, since they were added.
+  ...meshInviteMintTests,
+  ...meshEnrollDeviceFlowTests,
+  ...meshJoinProvisionTests,
   ...meshCoordinationLauncherTests,
   ...meshOperatorGuidanceTests,
   // milestone 33 (story 00) — per-install-node-identity: tasks 00–03
@@ -1724,7 +1745,14 @@ export const tests = [
   ...acdOutcomeCapabilityRankingBoundedTests,
   ...acdOutcomeAuthoredByVerifyTests,
   ...acdOutcomeDanglingDeclarationPresentTests,
-  ...acdOutcomeDeclaredFieldHasProducerTests
+  ...acdOutcomeDeclaredFieldHasProducerTests,
+  // milestone 40 — work-item versioning & the upgrade path (ADRs 001-008)
+  ...acdWorkItemSchemaSingleConstantTests,
+  ...acdUpgradeIdempotentTests,
+  ...acdMigrationWriterBodyPreservingTests,
+  ...acdChangelogGeneratedTests,
+  ...acdReconstructedMarkerExpressibleTests,
+  ...acdUpgradeEngineBlastRadiusTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

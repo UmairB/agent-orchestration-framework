@@ -22,6 +22,7 @@ import { readJson, writeText } from "../fs.mjs";
 import { globalWorkspacePaths } from "../workspace.mjs";
 import { resolvePeers } from "../mesh-fabric.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
+import { publishNodeRecord } from "../mesh-store.mjs";
 import { aofVersion } from "./mesh-identity.mjs";
 
 // A structured command error the mesh face renders as ONE { ok:false, error, code }
@@ -130,6 +131,13 @@ function credentialForStorage(raw) {
   if (!isPlainObject(raw)) return {};
   const credential = { ...raw };
   delete credential["git" + "Remote"];
+  // review fix (live soak, 2026-07-17): controlNodeRecord rides the SAME response
+  // envelope as the credential but is NOT credential material — it is persisted
+  // separately via publishNodeRecord (below), into the joiner's own nodes/
+  // directory, mirroring the enrollment server's own local copy of the joiner's
+  // record. Stripped here so mesh.credential in config stays the documented
+  // { relayAuth, nodeId, controlNode } shape, never a growing grab-bag.
+  delete credential.controlNodeRecord;
   return credential;
 }
 
@@ -210,6 +218,23 @@ export const meshJoinCommand = {
     // mesh is machine identity, not repository state, so the workspace .aof config is
     // left alone.
     const controlNode = controlNodeFrom(input, config, credential);
+
+    // review fix (live soak, 2026-07-17): persist the control node's OWN descriptor
+    // (handed back by the enroll response above resolveWorkerStreamTarget's roster
+    // join, mesh-fabric.mjs, has nothing local to match a live tailscale peer
+    // against otherwise) into THIS node's own nodes/ directory — mirroring exactly
+    // what the enrollment server already does for the joiner's record. Best-effort:
+    // an older control node (pre-fix) or one with no self-published record simply
+    // omits controlNodeRecord — the join itself still succeeds exactly as before.
+    const controlNodeRecord = isPlainObject(payload.credential.controlNodeRecord) ? payload.credential.controlNodeRecord : null;
+    if (controlNode != null && controlNodeRecord != null) {
+      try {
+        await publishNodeRecord(ws, controlNode, controlNodeRecord);
+      } catch {
+        // never let a local-cache write block the join itself.
+      }
+    }
+
     const configPath = await writeGlobalMeshConfig({
       env: ctx?.env ?? process.env,
       relayUrl,

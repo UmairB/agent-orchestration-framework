@@ -45,7 +45,18 @@ const controlMesh = (extra = {}) => ({ nodeId: CONTROL_ID, relay: { controlNode:
 const nonControlMesh = () => ({ nodeId: PEER_ID, relay: { controlNode: CONTROL_ID } });
 const controlConfig = () => ({ mesh: controlMesh() });
 
-const ctxFor = async (repo, options = {}) => ({ workspace: await loadWorkspace(repo, undefined, options), ...(options.env ? { env: options.env } : {}) });
+// review fix (live soak, 2026-07-17): defaults to an ISOLATED AOF_GLOBAL_HOME
+// (under the fixture's own tmpdir) when a caller doesn't supply one — every
+// pre-existing call site here read the REAL machine's global aof.config.json,
+// so mesh:invite's control-node predicate (config.mesh.relay.controlNode ===
+// config.mesh.nodeId) was silently comparing the fixture's local mesh.nodeId
+// against whatever THIS machine's real global config happened to carry.
+// Passed but invisible for as long as this whole file was never actually wired
+// into scripts/test.mjs; surfaced the moment it was.
+const ctxFor = async (repo, options = {}) => {
+  const env = options.env ?? { ...process.env, AOF_GLOBAL_HOME: path.join(repo, ".global-aof") };
+  return { workspace: await loadWorkspace(repo, undefined, { ...options, env }), env };
+};
 
 // A seeded registry with real roster/boards/revocations content, so the "unaffected
 // lists byte-unchanged" (R4) assertions bite on something.
@@ -258,7 +269,7 @@ export const meshInviteMintTests = [
         const result = spawnCliSync(process.execPath, [cliPath, "mesh", "invite", "--json"], {
           cwd: repo,
           encoding: "utf8",
-          env: { ...process.env, NODE_NO_WARNINGS: "1" },
+          env: { ...process.env, NODE_NO_WARNINGS: "1", AOF_GLOBAL_HOME: path.join(repo, ".global-aof") },
         });
         assert.equal(result.status, 0, `aof mesh invite --json exits cleanly (stderr: ${result.stderr})`);
         let parsed;
