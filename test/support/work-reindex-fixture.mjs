@@ -43,6 +43,7 @@ export function milestoneFields(number, overrides = {}) {
     status: "not-started",
     created: "2026-07-16",
     updated: "2026-07-16",
+    schema: 1,
     ...overrides,
   };
 }
@@ -56,6 +57,7 @@ export function storyFields(number, parent, overrides = {}) {
     created: "2026-07-16",
     updated: "2026-07-16",
     parent,
+    schema: 1,
     ...overrides,
   };
 }
@@ -75,6 +77,7 @@ export function uatFields(number, overrides = {}) {
     status: "not-started",
     created: "2026-07-16",
     updated: "2026-07-16",
+    schema: 1,
     ...overrides,
   };
 }

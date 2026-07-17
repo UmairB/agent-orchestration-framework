@@ -12,7 +12,7 @@
         "id": "chore",
         "kind": "template"
       },
-      "hash": "sha256:4c02e4fa92280ba5a6898ed9473035fbfdd227a2f579ec129ab1ed690707f79a"
+      "hash": "sha256:470e75c00c7de4e854436bc9923679ad3f1b58014ee2b26cdbafe60c245265e0"
     },
     {
       "path": ".aof/templates/work/milestone/ARCHITECTURE.md",
@@ -102,7 +102,7 @@
         "id": "spike",
         "kind": "template"
       },
-      "hash": "sha256:40c63dec2d49de6386bae65e8b678f05c72a59f1d2a44e57962bae73b8264ed7"
+      "hash": "sha256:2ad536da4be2e5243771a559f77dc4ea9bf935614363bc848901754da6a83e4c"
     },
     {
       "path": ".aof/templates/work/story/STORY.md",
@@ -129,7 +129,7 @@
         "id": "uat",
         "kind": "template"
       },
-      "hash": "sha256:e6533a6634a2d6f674a909133928461ddf420775ca7544ed9c84ee5d497cf908"
+      "hash": "sha256:4024dc7219259a6c9ccedd57a2d906594d33706726e64a1a06a172b5c870c3d7"
     },
     {
       "path": ".aof/templates/work/uat/STATE.md",

@@ -93,7 +93,7 @@ export const workInsertStoryNestedValidateTests = [
         // Item "03" (slug delta) declares depends: [01] (targeting bravo, milestone 01).
         await writeFile(
           `${dirs.delta}/SPEC.md`,
-          frontmatter({ type: "milestone", number: "03", slug: "delta", status: "not-started", created: "2026-07-16", updated: "2026-07-16", depends: [1] }),
+          frontmatter({ type: "milestone", number: "03", slug: "delta", status: "not-started", created: "2026-07-16", updated: "2026-07-16", depends: [1], schema: 1 }),
         );
 
         const before = (await listItems(workDir))

@@ -733,6 +733,27 @@ export async function validateWork(workDir, config, scopeRef) {
           add(docPath, `parent "${meta.parent}" does not resolve to a milestone`);
         }
       }
+
+      // 1b. staleness (milestone 40 / story 03, ADR-005/ADR-006) — independent
+      // of the digest/native branch above: an item's own `schema` (missing/
+      // non-integer coerces to the baseline 0, ADR-003) compared against the
+      // current WORK_ITEM_SCHEMA_VERSION. Only checked once the doc actually
+      // parsed (a missing/empty record doc is already reported above; flagging
+      // it stale too would be a misleading second finding for the same root
+      // cause). Deliberately dep-01 only (work.mjs constants alone) — names
+      // the remedy `aof upgrade` as a STRING LITERAL, never imports
+      // work-upgrade.mjs, and never enumerates which transforms are pending
+      // (that is `aof upgrade --dry-run`, story 02) so the message stays
+      // deterministic and stable run-to-run.
+      if (Object.keys(meta).length > 0) {
+        const itemSchema = coerceSchemaVersion(meta.schema);
+        if (itemSchema < WORK_ITEM_SCHEMA_VERSION) {
+          add(
+            docPath,
+            `schema ${itemSchema} is behind the current schema ${WORK_ITEM_SCHEMA_VERSION} — run \`aof upgrade\` to update it`,
+          );
+        }
+      }
     }
 
     // 3a. depends references resolve (to any top-level driver)

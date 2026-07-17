@@ -39,6 +39,8 @@ import { commandError } from "./errors.mjs";
 import { resolveImportSource } from "../import/source.mjs";
 import { recoverMilestone, listRecoverableMilestones } from "../import/recovery.mjs";
 import { slugifySource } from "../import/store.mjs";
+import { WORK_ITEM_SCHEMA_VERSION } from "../work.mjs";
+import { packageVersionString } from "../asset-base.mjs";
 
 // The aof top-level work-item folder pattern (mirrors src/work.mjs ITEM_RE, scoped
 // to the leading number) — used to find the next free slot under work.dir. Keep the
@@ -458,6 +460,11 @@ function renderSpec({ number, slug, title, status, migratedAt, recovered, storie
     owner: "product-owner",
     created: migratedAt,
     updated: migratedAt,
+    // Born-stamp (milestone 40/ADR-002): migrate:folder scaffolds a FRESH native
+    // record doc — "the work BECOMES the item" (module header) — so it is never
+    // stale-by-construction, exactly like the insert-shared.mjs render path.
+    schema: WORK_ITEM_SCHEMA_VERSION,
+    aofVersion: packageVersionString(),
   });
   const objectiveBlock = objective
     ? objective
@@ -538,6 +545,9 @@ function renderStory({ story, parent, migratedAt }) {
     parent,
     created: migratedAt,
     updated: migratedAt,
+    // Born-stamp (milestone 40/ADR-002) — see renderSpec above.
+    schema: WORK_ITEM_SCHEMA_VERSION,
+    aofVersion: packageVersionString(),
   });
   return `${fm}# ${story.number} · ${headingLine(story.title)}\n\n## User story\n\nMigrated from a source folder — refine before continuing.\n`;
 }

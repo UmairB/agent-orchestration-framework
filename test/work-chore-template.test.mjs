@@ -17,7 +17,8 @@ import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateWork } from "../src/work.mjs";
+import { validateWork, WORK_ITEM_SCHEMA_VERSION } from "../src/work.mjs";
+import { packageVersionString } from "../src/asset-base.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TEMPLATE_PATH = path.join(repoRoot, "src", "bundle", "templates", "chore", "CHORE.md");
@@ -39,6 +40,11 @@ function instantiate(raw, overrides = {}) {
   text = text.replaceAll("<Chore Title>", fields.title); // fill the body H1 too (QA m37/01 minor-1: faithful scaffold)
   text = text.replace("<role>", fields.owner);
   text = text.replaceAll("YYYY-MM-DD", fields.created);
+  // milestone 40 born-stamp (ADR-002): fill <schema-version>/<aof-version> the
+  // same way insert-shared.mjs's stampVersion does, so the instantiated folder
+  // is never stale-by-construction.
+  text = text.replace("<schema-version>", String(WORK_ITEM_SCHEMA_VERSION));
+  text = text.replace("<aof-version>", packageVersionString());
   return text;
 }
 

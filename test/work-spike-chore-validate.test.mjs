@@ -41,6 +41,7 @@ function spikeFields(overrides = {}) {
     created: "2026-07-09",
     updated: "2026-07-09",
     depends: [],
+    schema: 1,
     ...overrides,
   };
 }
@@ -55,6 +56,7 @@ function choreFields(overrides = {}) {
     created: "2026-07-09",
     updated: "2026-07-09",
     depends: [],
+    schema: 1,
     ...overrides,
   };
 }

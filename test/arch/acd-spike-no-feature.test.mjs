@@ -44,7 +44,7 @@ async function buildSpikeFixture() {
   await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, "SPIKE.md"),
-    frontmatter({ type: "spike", number: "00", slug: "de-risk-thing", status: "not-started", title: '"De-risk the thing"', owner: "architect", created: "2026-07-09", updated: "2026-07-09", depends: "[]", timebox: '"1d"' }) +
+    frontmatter({ type: "spike", number: "00", slug: "de-risk-thing", status: "not-started", title: '"De-risk the thing"', owner: "architect", created: "2026-07-09", updated: "2026-07-09", depends: "[]", timebox: '"1d"', schema: 1 }) +
       "# 00 · De-risk the thing\n\n## Question\nWhat is the risk?\n\n## Timebox\n1 day.\n\n## Investigation\nnotes\n\n## Finding\n(to be filled)\n\n## Outcome / Next\nunblocks m41\n",
     "utf8"
   );

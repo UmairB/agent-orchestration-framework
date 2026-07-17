@@ -1272,6 +1272,11 @@ import { workUpgradeDryRunApplyTests } from "../test/work-upgrade-dry-run-apply.
 import { workUpgradeIdempotentTests } from "../test/work-upgrade-idempotent.test.mjs";
 import { workUpgradeStampTransformTests } from "../test/work-upgrade-stamp-transform.test.mjs";
 import { workUpgradeReconstructedMarkerTests } from "../test/work-upgrade-reconstructed-marker.test.mjs";
+// milestone 40 / story 03 — staleness in validate (ADR-005/006, dep-01 only):
+// validateWork flags any item whose schema is behind WORK_ITEM_SCHEMA_VERSION,
+// naming aof upgrade as the remedy, while an at-current item and an
+// up-to-date stream stay clean.
+import { workValidateStalenessTests } from "../test/work-validate-staleness.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1780,7 +1785,9 @@ export const tests = [
   ...workUpgradeDryRunApplyTests,
   ...workUpgradeIdempotentTests,
   ...workUpgradeStampTransformTests,
-  ...workUpgradeReconstructedMarkerTests
+  ...workUpgradeReconstructedMarkerTests,
+  // milestone 40 / story 03 — staleness in validate task traceability
+  ...workValidateStalenessTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

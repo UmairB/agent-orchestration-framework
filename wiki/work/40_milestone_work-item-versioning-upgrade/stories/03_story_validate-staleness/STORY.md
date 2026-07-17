@@ -4,7 +4,7 @@ number: 03
 slug: validate-staleness
 title: "Staleness in validate — a stream behind the current aof is reported, with aof upgrade named, so silence is no longer indistinguishable from up-to-date"
 parent: 40
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
@@ -55,7 +55,28 @@ Grounded in `ARCHITECTURE.md` ADR-005 (staleness-independence) / ADR-006:
 
 <!-- Authored at `aof:refine 40 --autonomous` (Three Amigos). -->
 
-- [ ] `tasks/00_validate-flags-behind-item-naming-upgrade.feature`
+- [x] `tasks/00_validate-flags-behind-item-naming-upgrade.feature` — 4 scenarios / 6 assertions green
+
+## Ripple (exposed by the live staleness check — completed in this story)
+
+Making `validateWork` flag unstamped items surfaced that born-stamp coverage was incomplete — newly
+scaffolded items of those paths would be born stale-by-construction. All fixed additively (reviewed
+PASS, structural + behavioural):
+
+- **Born-stamp completed for uat/spike/chore** — `src/bundle/templates/{uat/SESSION.md, spike/SPIKE.md,
+  chore/CHORE.md}` (+ the `.aof/templates/work/…` dogfood copies + regenerated `src/bundle/manifest.json`)
+  gained the `schema`/`aofVersion` placeholder pair story 01 added to milestone/story. `stampVersion()`
+  already filled them generically.
+- **`migrate-folder.mjs` born-stamps** its native SPEC/STORY renders (ADR-002 parity, its own
+  "passes `aof work validate`" contract). A latent m37 fix rode along: its `ITEM_RE` was widened to
+  count `spike|chore` drivers when picking the next free slot (independent of staleness; noted for
+  traceability).
+- **~17 test fixtures** with hand-authored "well-formed current item" frontmatter gained `schema: 1` so
+  they represent a current item (QA confirmed every edit is honest current-item stamping — none hid a
+  staleness/unstamped test; story 02's deliberately-unstamped fixtures were untouched).
+- **Observation (ADR-003, no action):** an imported milestone's `AOF.md` digest carries no `schema` key,
+  so validate flags it stale until `aof upgrade` stamps it — intended (foreign unstamped content reads 0
+  and upgrades forward). Zero AOF.md digests exist in this repo, so no active finding.
 
 ## Notes
 

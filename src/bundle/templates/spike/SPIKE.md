@@ -9,6 +9,8 @@ created: YYYY-MM-DD
 updated: YYYY-MM-DD
 depends: []
 timebox: <e.g. 1d / 2d>
+schema: <schema-version>
+aofVersion: <aof-version>
 ---
 <!--
   SPIKE.md — the record doc for a de-risk spike. Answers ONE question:

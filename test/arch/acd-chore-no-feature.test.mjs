@@ -40,7 +40,7 @@ async function buildChoreFixture() {
   await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, "CHORE.md"),
-    frontmatter({ type: "chore", number: "00", slug: "tidy-config", status: "not-started", title: '"Tidy config"', owner: "developer", created: "2026-07-09", updated: "2026-07-09", depends: "[]" }) +
+    frontmatter({ type: "chore", number: "00", slug: "tidy-config", status: "not-started", title: '"Tidy config"', owner: "developer", created: "2026-07-09", updated: "2026-07-09", depends: "[]", schema: 1 }) +
       "# 00 · Tidy config\n\n## Intent\nHousekeeping — normalise the config files.\n\n## Definition of Done\n- [ ] configs formatted\n- [ ] `aof work validate` green\n\n## Notes\n(optional)\n",
     "utf8"
   );

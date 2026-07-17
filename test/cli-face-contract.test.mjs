@@ -70,6 +70,7 @@ async function writeMilestone(root, { number, slug, status = "in-progress", titl
     title: `"${title}"`,
     created: "2026-06-19",
     updated: "2026-06-19",
+    schema: 1,
     ...fields,
   });
   // The SPEC.md always carries the frontmatter (the record doc); its body is the
@@ -101,6 +102,7 @@ async function writeStory(root, { milestone, number, slug, status = "in-progress
       title: `"${title}"`,
       created: "2026-06-19",
       updated: "2026-06-19",
+      schema: 1,
     }),
     "utf8"
   );
@@ -123,7 +125,7 @@ async function writeUat(root, { number, slug, status = "not-started", title = "A
   await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, "SESSION.md"),
-    frontmatter({ type: "uat", number, slug, status, title: `"${title}"`, created: "2026-06-19", updated: "2026-06-19" }),
+    frontmatter({ type: "uat", number, slug, status, title: `"${title}"`, created: "2026-06-19", updated: "2026-06-19", schema: 1 }),
     "utf8"
   );
   return dir;

@@ -111,9 +111,10 @@ export function stripBundleMarker(text) {
 // The born-stamp (ADR-002, milestone 40): `<schema-version>` / `<aof-version>`
 // resolve to the RUNNING build's own WORK_ITEM_SCHEMA_VERSION / packageVersionString()
 // — never a pinned literal, so the stamp can never drift behind the current
-// shape. A template with no such placeholder (uat/chore — story 01 stamps only
-// the milestone/story templates, per ARCHITECTURE ADR-002) is unaffected: the
-// replace is a harmless no-op when the token is absent.
+// shape. Every scaffolded record-doc template now carries the placeholder pair
+// (milestone/story from story 01; uat/spike/chore completed in story 03 so those
+// types are never born stale-by-construction). The replace stays a harmless no-op
+// on any template that happens to lack the token.
 function stampVersion(text) {
   return text.replace(/<schema-version>/g, String(WORK_ITEM_SCHEMA_VERSION)).replace(/<aof-version>/g, packageVersionString());
 }

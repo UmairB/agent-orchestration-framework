@@ -10,6 +10,8 @@ owner: <role>
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 depends: []
+schema: <schema-version>
+aofVersion: <aof-version>
 ---
 <!--
   CHORE.md — the record doc for a housekeeping chore. Answers ONE question:

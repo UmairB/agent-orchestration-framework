@@ -113,6 +113,7 @@ export const verifyAuthorsOutcomeTests = [
             status: "done",
             created: "2026-01-01",
             updated: "2026-01-02",
+            schema: 1,
           }),
         );
         await writeFile(path.join(dir, "OUTCOME.md"), OUTCOME_BODY);

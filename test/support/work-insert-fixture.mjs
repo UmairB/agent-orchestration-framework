@@ -73,7 +73,7 @@ export async function buildTopLevelMilestones(workDir, count) {
     await mkdir(dir, { recursive: true });
     await writeFile(
       path.join(dir, "SPEC.md"),
-      frontmatter({ type: "milestone", number, slug, status: "not-started", created: "2026-07-16", updated: "2026-07-16" }),
+      frontmatter({ type: "milestone", number, slug, status: "not-started", created: "2026-07-16", updated: "2026-07-16", schema: 1 }),
     );
     dirs[slug] = dir;
   }
@@ -91,7 +91,7 @@ export async function buildMilestone(workDir, number, slug, body = "") {
   await mkdir(dir, { recursive: true });
   await writeFile(
     path.join(dir, "SPEC.md"),
-    frontmatter({ type: "milestone", number, slug, status: "not-started", created: "2026-07-16", updated: "2026-07-16" }) + body,
+    frontmatter({ type: "milestone", number, slug, status: "not-started", created: "2026-07-16", updated: "2026-07-16", schema: 1 }) + body,
   );
   return dir;
 }
@@ -110,6 +110,7 @@ export async function writeStoryItem(milestoneDir, number, parent, overrides = {
       created: "2026-07-16",
       updated: "2026-07-16",
       parent,
+      schema: 1,
       ...overrides,
     }),
   );
@@ -130,6 +131,7 @@ export async function setMilestoneDepends(workDir, number, slug, depends) {
       created: "2026-07-16",
       updated: "2026-07-16",
       depends,
+      schema: 1,
     }),
   );
 }
