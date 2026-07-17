@@ -65,6 +65,7 @@ import { addWorktree, removeWorktree } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
+import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./mesh-presence.mjs";
 
 function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -682,6 +683,12 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     globalWorkStoreOptions,
     requestCloneCredential,
     cloneExec,
+    // resolveWorkspaceCloneUrl — INJECTED (the same idiom as every other
+    // collaborator here), default the real mesh-presence.mjs seam. Resolves the
+    // SYNCED registry's clone_url for a workspace this worker has never checked
+    // out (Gap A extended, review fix live soak 2026-07-17) — a test may still
+    // override it through workerExecutionOptions, exactly like requestCloneCredential.
+    resolveWorkspaceCloneUrl = defaultResolveWorkspaceCloneUrl,
   } = options;
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
@@ -728,8 +735,18 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // cloned). A resolvable source clones into the scoped meshCheckoutPath seam
     // (task 01), then registers BOTH repo-availability facts and RE-CHECKS
     // workerHasRepo (task 02) so the fall-through below is the UNCHANGED m35 flow.
+    let resolvedCloneUrl = null;
     if (!hasRepo) {
-      const cloneUrl = resolveCloneUrl(ws);
+      // Gap A extended (review fix, live soak 2026-07-17): resolveCloneUrl(ws)
+      // only ever reads THIS worker's own launch-workspace config — for a
+      // workspaceId that is NOT the launch workspace (precisely the clone-on-miss
+      // case, by definition), that read is always null. Fall back to the SYNCED
+      // registry's clone_url (mesh-presence.mjs's resolveWorkspaceCloneUrl,
+      // populated by the workspace's own `aof mesh repo publish`) — a worker with
+      // no local knowledge of a repo it has never checked out can still resolve
+      // where to clone it FROM, without needing that config locally at all.
+      resolvedCloneUrl = resolveCloneUrl(ws) ?? await resolveWorkspaceCloneUrl(workspaceId, { openStore, globalWorkStoreOptions });
+      const cloneUrl = resolvedCloneUrl;
       if (cloneUrl != null) {
         try {
           const cloneNow = resolveNow();
@@ -757,7 +774,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     }
 
     if (!hasRepo) {
-      logAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolveCloneUrl(ws) != null ? "resolved but did not result in a usable repo" : "unresolved — config.mesh.repo.cloneUrl is not set for this workspace"})`);
+      logAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
       await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-repo-unavailable" });
       return;
     }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 3;
+export const GLOBAL_WORK_SCHEMA_VERSION = 4;
 
 export function globalStoreError(message, code, status = 500, extra = {}) {
   const error = new Error(message);
@@ -153,7 +153,8 @@ function migrateSchema(db, existingVersion) {
         control_node TEXT,
         member_node_ids_json TEXT NOT NULL DEFAULT '[]',
         published_at TEXT,
-        descriptor_path TEXT NOT NULL
+        descriptor_path TEXT NOT NULL,
+        clone_url TEXT
       );
       CREATE TABLE IF NOT EXISTS global_node_workspaces (
         node_id TEXT NOT NULL,
@@ -185,6 +186,20 @@ function migrateSchema(db, existingVersion) {
       );
       CREATE INDEX IF NOT EXISTS idx_global_assignments_item ON global_assignments(workspace_id, item_ref);
     `);
+
+    // schema v4 (milestone 38 / ADR-010 Gap A, extended) — CREATE TABLE IF NOT
+    // EXISTS above never adds a column to an ALREADY-EXISTING table (every
+    // pre-v4 database on a real machine already has global_workspace_descriptors
+    // with no clone_url). An explicit, idempotent ALTER TABLE closes that: a
+    // worker that has never checked out a workspace has no local config to read
+    // config.mesh.repo.cloneUrl from — clone-on-miss was structurally unable to
+    // resolve a clone source for any workspace but the worker's own launch one,
+    // found live on the FIRST real cross-machine dispatch this mechanism ever ran.
+    const hasCloneUrlColumn = db.prepare("PRAGMA table_info(global_workspace_descriptors)").all()
+      .some((column) => column.name === "clone_url");
+    if (!hasCloneUrlColumn) {
+      db.exec("ALTER TABLE global_workspace_descriptors ADD COLUMN clone_url TEXT");
+    }
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {
       db.prepare(`

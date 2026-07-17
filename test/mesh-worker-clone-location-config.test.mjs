@@ -14,6 +14,8 @@ import {
   createStatusRecorder,
   createRecordingCloneExec,
 } from "./support/mesh-worker-clone-fixture.mjs";
+import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
+import { resolveWorkspaceCloneUrl } from "../src/mesh-presence.mjs";
 
 export const meshWorkerCloneLocationConfigTests = [
   // Scenario: a resolvable cloneUrl is used as the clone source
@@ -135,5 +137,96 @@ export const meshWorkerCloneLocationConfigTests = [
       // resolveCloneUrl never rewrites/round-trips config.mesh.repo through anything.
       assert.equal(ws.config.mesh.repo.someNewMarker, "untouched-value");
     },
+  },
+  // ══ ADR-010 Gap A, EXTENDED (review fix, live soak 2026-07-17) — a worker's own
+  //    launch-workspace config can NEVER carry config.mesh.repo.cloneUrl for a
+  //    DIFFERENT workspace it has never checked out (that is precisely what makes
+  //    it clone-on-miss). resolveWorkspaceCloneUrl (mesh-presence.mjs) closes the
+  //    gap by reading the value the TARGET workspace's own `aof mesh repo publish`
+  //    already synced into the global registry (global-node-registry.mjs) —
+  //    mirroring resolveWorkspaceProjectRoot's existing seam exactly. ══════════════
+  {
+    name: "task00/38 worker-repo-checkout (Gap A extended): resolveWorkspaceCloneUrl reads the clone_url a workspace's own registry publish wrote",
+    run: async () => withMeshCloneFixture(async ({ workspaceId, env }) => {
+      assert.equal(await resolveWorkspaceCloneUrl(workspaceId, { globalWorkStoreOptions: { env } }), null, "an unpublished workspace resolves to null, never a throw");
+
+      const store = await openGlobalWorkProjectionStore({ env });
+      try {
+        store.db.prepare(`
+          INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path, clone_url)
+          VALUES (?, '/synced/root', '/synced/root/wiki/work', 'synced', 1, 'control-a', '[]', '2026-07-17T00:00:00.000Z', '/synced/descriptor.json', ?)
+        `).run(workspaceId, "https://git.example.com/acme/synced.git");
+      } finally {
+        store.close();
+      }
+
+      assert.equal(
+        await resolveWorkspaceCloneUrl(workspaceId, { globalWorkStoreOptions: { env } }),
+        "https://git.example.com/acme/synced.git",
+        "the published clone_url resolves once the registry carries it",
+      );
+    }, { cloneUrl: undefined }),
+  },
+  {
+    name: "task00/38 worker-repo-checkout (Gap A extended): a workspace with NO local cloneUrl still clones, falling back to the SYNCED global registry's clone_url",
+    run: async () => withMeshCloneFixture(async ({ workspace, workspaceId, itemRef, env }) => {
+      assert.equal(resolveCloneUrl(workspace), null, "no local cloneUrl is configured for this workspace (the launch-workspace read alone would refuse)");
+
+      // Seed the registry exactly as a REAL `aof mesh repo publish`, run on the
+      // workspace's OWN checkout (e.g. the control node), would have via
+      // global-node-registry.mjs's upsertGlobalRegistryRows.
+      const store = await openGlobalWorkProjectionStore({ env });
+      try {
+        store.db.prepare(`
+          INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path, clone_url)
+          VALUES (?, '/synced/root', '/synced/root/wiki/work', 'synced', 1, 'control-a', '[]', '2026-07-17T00:00:00.000Z', '/synced/descriptor.json', ?)
+        `).run(workspaceId, "https://git.example.com/acme/synced.git");
+      } finally {
+        store.close();
+      }
+
+      const status = createStatusRecorder();
+      const cloneExec = createRecordingCloneExec();
+      const handler = createMeshWorkerExecutionHandler({
+        loadWs: () => Promise.resolve(workspace),
+        nodeId: "worker-a",
+        sendAssignmentStatus: status.sendAssignmentStatus,
+        cloneExec: cloneExec.exec,
+        globalWorkStoreOptions: { env },
+      });
+      await handler({ assignmentId: "asg-00-gap-a-fallback", itemRef, workspaceId });
+
+      assert.equal(cloneExec.calls.length, 1, "a clone IS attempted, using the registry-resolved URL — the worker is no longer stuck refusing a workspace it has never seen");
+      assert.equal(cloneExec.calls[0].args[3], "https://git.example.com/acme/synced.git", "the clone spawn's argv carries the registry-resolved cloneUrl, never the absent local one");
+    }, { cloneUrl: undefined }),
+  },
+  {
+    name: "task00/38 worker-repo-checkout (Gap A extended): a LOCAL cloneUrl still wins over the registry's — the fallback is additive, never a silent override",
+    run: async () => withMeshCloneFixture(async ({ workspace, workspaceId, itemRef, env }) => {
+      assert.equal(resolveCloneUrl(workspace), "https://git.example.com/acme/local.git");
+
+      const store = await openGlobalWorkProjectionStore({ env });
+      try {
+        store.db.prepare(`
+          INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path, clone_url)
+          VALUES (?, '/synced/root', '/synced/root/wiki/work', 'synced', 1, 'control-a', '[]', '2026-07-17T00:00:00.000Z', '/synced/descriptor.json', ?)
+        `).run(workspaceId, "https://git.example.com/acme/should-not-be-used.git");
+      } finally {
+        store.close();
+      }
+
+      const status = createStatusRecorder();
+      const cloneExec = createRecordingCloneExec();
+      const handler = createMeshWorkerExecutionHandler({
+        loadWs: () => Promise.resolve(workspace),
+        nodeId: "worker-a",
+        sendAssignmentStatus: status.sendAssignmentStatus,
+        cloneExec: cloneExec.exec,
+        globalWorkStoreOptions: { env },
+      });
+      await handler({ assignmentId: "asg-00-gap-a-local-wins", itemRef, workspaceId });
+
+      assert.equal(cloneExec.calls[0].args[3], "https://git.example.com/acme/local.git", "the worker's OWN local cloneUrl is used; the registry is never consulted when a local value already resolves");
+    }, { cloneUrl: "https://git.example.com/acme/local.git" }),
   },
 ];

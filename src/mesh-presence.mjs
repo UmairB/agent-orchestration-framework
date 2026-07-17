@@ -221,6 +221,34 @@ export async function resolveWorkspaceProjectRoot(workspaceId, options = {}) {
   }
 }
 
+// resolveWorkspaceCloneUrl(workspaceId, options) — milestone 38 (ADR-010 Gap A,
+// extended): the SIBLING of resolveWorkspaceProjectRoot above, same seam, same
+// failure-isolation, reading the clone_url column a workspace's OWN
+// `aof mesh repo publish` populates (global-node-registry.mjs). Closes the gap
+// resolveCloneUrl (mesh-worker-execution.mjs) cannot: a worker's own launch
+// workspace has no config.mesh.repo.cloneUrl for a DIFFERENT workspace it has
+// never checked out — this reads the value the CONTROL node (which HAS it
+// checked out) already published into the synced registry. null for an
+// unpublished workspace or a store fault — never a throw, never a fabricated URL.
+export async function resolveWorkspaceCloneUrl(workspaceId, options = {}) {
+  const openStore = options.openStore ?? openGlobalWorkProjectionStore;
+  const storeOptions = options.globalWorkStoreOptions ?? {};
+  let store;
+  try {
+    store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+  } catch {
+    return null;
+  }
+  try {
+    const row = store.db.prepare("SELECT clone_url FROM global_workspace_descriptors WHERE workspace_id = ?").get(workspaceId);
+    return row != null && typeof row.clone_url === "string" && row.clone_url.length > 0 ? row.clone_url : null;
+  } catch {
+    return null;
+  } finally {
+    store.close?.();
+  }
+}
+
 // ------------------------------------------------- the record assembly ----
 
 // Assemble THIS node's presence record — the FROZEN schema, EXACTLY these FIVE keys

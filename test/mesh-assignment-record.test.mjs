@@ -127,10 +127,13 @@ export const meshAssignmentRecordTests = [
 
       const v3 = await openStore(home);
       try {
-        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 3);
-        assert.equal(v3.schemaVersion, 3);
+        // review fix (live soak, 2026-07-17): schema v4 adds global_workspace_descriptors.clone_url
+        // (ADR-010 Gap A extended) — this pin is deliberately bumped alongside it,
+        // catching any FUTURE unintentional version drift, not this one.
+        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 4);
+        assert.equal(v3.schemaVersion, 4);
         const version = v3.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").get();
-        assert.equal(version.value, 3);
+        assert.equal(version.value, 4);
 
         const tables = v3.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("global_assignments"), "global_assignments table exists");
@@ -142,6 +145,54 @@ export const meshAssignmentRecordTests = [
         assert.equal(rows.length, 1, "the existing projected workspace row is still queryable");
       } finally {
         v3.close();
+      }
+    }),
+  },
+  {
+    name: "assignment-record/00 opening a v3 store (no global_workspace_descriptors.clone_url) with a v4 build adds the column via ALTER TABLE, losing no existing row",
+    run: async () => withTemp(async (home) => {
+      // Force a v3 store: open fresh (creates clone_url, since CREATE TABLE IF NOT
+      // EXISTS always uses the CURRENT full schema on a brand-new file), then drop
+      // back to a table shape WITHOUT the column the way a REAL pre-v4 database
+      // would have it — SQLite has no DROP COLUMN pre-3.35, so rebuild the table by
+      // hand to model an authentically-old file.
+      const v3 = await openGlobalWorkProjectionStore({ env: { AOF_GLOBAL_HOME: home } });
+      v3.db.exec(`
+        CREATE TABLE global_workspace_descriptors_v3_shape (
+          workspace_id TEXT PRIMARY KEY,
+          project_root TEXT NOT NULL,
+          work_dir TEXT NOT NULL,
+          name TEXT,
+          mesh_enabled INTEGER NOT NULL DEFAULT 0,
+          control_node TEXT,
+          member_node_ids_json TEXT NOT NULL DEFAULT '[]',
+          published_at TEXT,
+          descriptor_path TEXT NOT NULL
+        );
+        INSERT INTO global_workspace_descriptors_v3_shape
+          SELECT workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path
+          FROM global_workspace_descriptors;
+        DROP TABLE global_workspace_descriptors;
+        ALTER TABLE global_workspace_descriptors_v3_shape RENAME TO global_workspace_descriptors;
+      `);
+      v3.db.prepare(`
+        INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path)
+        VALUES ('ws-preexisting', '/pre/root', '/pre/root/wiki/work', 'pre-existing', 1, 'control-a', '[]', '2026-07-01T00:00:00.000Z', '/pre/descriptor.json')
+      `).run();
+      v3.db.prepare("UPDATE aof_schema SET value = 3 WHERE key = 'version'").run();
+      v3.close();
+
+      const v4 = await openStore(home);
+      try {
+        const columns = v4.db.prepare("PRAGMA table_info(global_workspace_descriptors)").all().map((c) => c.name);
+        assert.ok(columns.includes("clone_url"), "clone_url is added by the v3->v4 migration, not just on a brand-new database");
+
+        const row = v4.db.prepare("SELECT * FROM global_workspace_descriptors WHERE workspace_id = ?").get("ws-preexisting");
+        assert.ok(row, "the pre-existing row survives the ALTER TABLE untouched");
+        assert.equal(row.project_root, "/pre/root", "every pre-existing column value is preserved byte-identical");
+        assert.equal(row.clone_url, null, "the new column reads null for a row that predates it, never a fabricated value");
+      } finally {
+        v4.close();
       }
     }),
   },

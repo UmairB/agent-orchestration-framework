@@ -10,6 +10,7 @@ import { readNodeRecords } from "./mesh-store.mjs";
 import { readPresenceRecords, readPresenceRecord, assemblePresenceRecord } from "./mesh-presence.mjs";
 import { resolvePeers } from "./mesh-fabric.mjs";
 import { writeText } from "./fs.mjs";
+import { resolveCloneUrl } from "./mesh-worker-execution.mjs";
 
 const SECRET_KEY_PATTERN = /(token|secret|credential|auth|invite|hash)/i;
 
@@ -126,6 +127,14 @@ export async function assembleGlobalRegistrySnapshot(workspace, options = {}) {
     name: config.name ?? null,
     meshEnabled: config?.mesh?.enabled === true,
     controlNode: typeof config?.mesh?.relay?.controlNode === "string" ? config.mesh.relay.controlNode : null,
+    // milestone 38 (ADR-010 Gap A, extended) — the SAME raw config.mesh.repo.cloneUrl
+    // read resolveCloneUrl already uses for the PUBLISHING node's own launch
+    // workspace, carried into the SYNCED descriptor so a worker that has never
+    // checked this workspace out can still resolve its clone source (mesh-
+    // presence.mjs's resolveWorkspaceCloneUrl, the sibling of resolveWorkspaceProjectRoot).
+    // null when this workspace has never been `aof mesh repo publish`ed — never
+    // fabricated, never a second URL-shape validator.
+    cloneUrl: resolveCloneUrl(workspace),
     publishedAt: now,
     memberNodeIds: nodeIds,
   };
@@ -201,8 +210,8 @@ export function upsertGlobalRegistryRows(store, snapshot) {
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(`
-      INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO global_workspace_descriptors (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path, clone_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id) DO UPDATE SET
         project_root = excluded.project_root,
         work_dir = excluded.work_dir,
@@ -211,7 +220,8 @@ export function upsertGlobalRegistryRows(store, snapshot) {
         control_node = excluded.control_node,
         member_node_ids_json = excluded.member_node_ids_json,
         published_at = excluded.published_at,
-        descriptor_path = excluded.descriptor_path
+        descriptor_path = excluded.descriptor_path,
+        clone_url = excluded.clone_url
     `).run(
       workspace.workspaceId,
       workspace.projectRoot,
@@ -222,6 +232,7 @@ export function upsertGlobalRegistryRows(store, snapshot) {
       JSON.stringify(workspace.memberNodeIds),
       workspace.publishedAt,
       snapshot.workspaceDescriptorPath,
+      workspace.cloneUrl,
     );
 
     db.prepare("DELETE FROM global_node_workspaces WHERE node_id IN (SELECT node_id FROM global_nodes WHERE record_source = 'fabric')").run();

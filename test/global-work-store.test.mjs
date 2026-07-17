@@ -75,7 +75,11 @@ export const globalWorkStoreTests = [
         // milestone 35 / story 00 (ADR-001) — schema v2 -> v3: the additive
         // global_assignments table (assignment-record.mjs owns its own dedicated
         // fixture suite; this is just the pinned-version/table-presence re-arm).
-        assert.equal(store.schemaVersion, 3);
+        // v3 -> v4 (ADR-010 Gap A extended, review fix live soak 2026-07-17):
+        // global_workspace_descriptors.clone_url — mesh-assignment-record.test.mjs
+        // owns the dedicated ALTER TABLE migration fixture; this is the SAME
+        // pinned-version re-arm.
+        assert.equal(store.schemaVersion, 4);
         const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("aof_schema"));
         assert.ok(tables.includes("workspaces"));
@@ -94,7 +98,7 @@ export const globalWorkStoreTests = [
       try {
         const versions = reopened.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").all();
         assert.equal(versions.length, 1);
-        assert.equal(versions[0].value, 3);
+        assert.equal(versions[0].value, 4);
       } finally {
         reopened.close();
       }
