@@ -107,7 +107,7 @@ that distinction is not ready to carry the backfill.
 - [x] [02 · migration registry & `aof upgrade`](stories/02_story_migration-registry-and-upgrade/STORY.md)
   — the engine: `work-upgrade.mjs` (`WORK_ITEM_MIGRATIONS` incl. the `0→1` stamp transform + the
   reconstructed-marker) and the `aof upgrade` dry-run→apply idempotent CLI face. *Dep 40/01.*
-- [ ] [03 · staleness in validate](stories/03_story_validate-staleness/STORY.md) — validate reports a
+- [x] [03 · staleness in validate](stories/03_story_validate-staleness/STORY.md) — validate reports a
   stream behind the current aof, naming `aof upgrade`. *Dep 40/01 only.*
 - [ ] [04 · generated changelog](stories/04_story_generated-changelog/STORY.md) — a projection of the
   registry that cannot drift. *Dep 40/02.*

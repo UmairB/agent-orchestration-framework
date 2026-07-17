@@ -4,7 +4,7 @@ number: 03
 slug: validate-staleness
 title: "Staleness in validate — a stream behind the current aof is reported, with aof upgrade named, so silence is no longer indistinguishable from up-to-date"
 parent: 40
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17

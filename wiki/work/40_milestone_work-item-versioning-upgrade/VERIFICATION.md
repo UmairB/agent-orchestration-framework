@@ -68,6 +68,25 @@ design-conformance review are both out of scope for it.
   litmus-honest, idempotency byte-compared, the newer-than-build refusal a genuine whole-run refusal.
 - **`aof work validate 40/02` → PASS** (exit 0, `[]`).
 
+### Story 03 · staleness in validate (accepted 2026-07-17)
+
+- **`@executable` suite green** — the 4 scenarios / 6 assertions (`00_validate-flags-behind-item-naming-upgrade`)
+  pass: an item behind the current schema (unstamped→0, or `schema: 0`) is flagged with a `{path, problem}`
+  finding whose message names the literal `aof upgrade` and identifies it as "behind the current schema";
+  a `schema: 1` item is not flagged; an up-to-date stream stays `[]`; the finding is deterministic
+  (byte-identical across runs) and enumerates no pending transforms. *verifies →*
+  `stories/03_story_validate-staleness/tasks/00_*.feature`.
+- **Whole-stream regression** — `aof work validate` (no scope) over the real repo → `[]` (all 170 record
+  docs are schema 1 after story 02's backstamp), so the live check correctly reports zero staleness.
+- **The ripple reviewed PASS** — structural (aof-architect): born-stamp completion for uat/spike/chore
+  templates (+ `.aof` copies + a genuine content-hash manifest regeneration) and migrate-folder's native
+  renders is correct + consistent; the validateWork change is additive with no new import edge
+  (graph-confirmed); all bundle/blast-radius guards green. Behavioural (aof-qa): **all 17 fixture edits
+  are honest current-item stamping — none hid a staleness/unstamped test, no assertion weakened**; story
+  02's deliberately-unstamped fixtures were untouched; the 14 ripple-touched modules pass 250/250 in
+  isolation.
+- **`aof work validate 40/03` → PASS** (exit 0, `[]`).
+
 ## Findings
 
 | id | observed | type | severity | triage | routed-to | status |
@@ -91,3 +110,7 @@ functions are green; structural + behavioural review PASS (the registry-guard ed
 additive registration); scoped `aof work validate 40/02` clean. The milestone stays `in-progress`
 (stories 03–04 remain). Note: with the live stream now backstamped to schema 1, story 03's staleness
 check will report zero staleness on the up-to-date stream — the correct post-backstamp state.
+
+**Story 03 — accepted (2026-07-17).** Its 4 `@executable` scenarios are green, the cross-cutting ripple
+(born-stamp completion + ~17 fixture stamps) reviewed PASS as legitimate (no hidden failure, no weakened
+assertion), whole-stream + scoped validate clean. The milestone stays `in-progress` (story 04 remains).
