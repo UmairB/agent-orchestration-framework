@@ -7,26 +7,50 @@
 // dry-run/apply face precedent (bare = apply, `--dry-run` = preview only). A
 // schema newer than this build REFUSES the whole run (a thrown command error,
 // non-zero exit at the CLI face, nothing written).
-import { runUpgrade } from "../work-upgrade.mjs";
+//
+// `--changelog` (milestone 40 / story 04, ADR-006) is the changelog's
+// regenerate/drift-guard SURFACE: it emits `renderChangelog()` — the pure
+// projection of `WORK_ITEM_MIGRATIONS` — to stdout and touches NO workspace
+// state (no fs read of the committed artifact, no write). A maintainer (or
+// CI) diffs the emitted text against the committed `UPGRADE-CHANGELOG.md` to
+// confirm regenerate == committed, or pipes it straight over the file to
+// regenerate. Takes precedence over `--dry-run`/apply — it never runs the
+// engine.
+import { runUpgrade, renderChangelog } from "../work-upgrade.mjs";
 
 export const upgradeCommand = {
   id: "work:upgrade",
   input: {
     type: "object",
-    properties: { dryRun: { type: "boolean" } },
+    properties: { dryRun: { type: "boolean" }, changelog: { type: "boolean" } },
     additionalProperties: false,
   },
 
   async run(input, ctx) {
+    if (input?.changelog === true) {
+      return { changelog: true, text: renderChangelog() };
+    }
     return await runUpgrade(ctx.workspace.workDir, { apply: input?.dryRun !== true });
   },
 
   cli: {
-    // `aof upgrade [--dry-run] [--json]` (also reachable as `aof work upgrade`,
-    // the SAME face — cli.mjs's workCommand dispatch reuses this one function).
-    argv: (positionals, options = {}) => ({ dryRun: Boolean(options.dryRun) }),
+    // `aof upgrade [--dry-run] [--changelog] [--json]` (also reachable as
+    // `aof work upgrade`, the SAME face — cli.mjs's workCommand dispatch
+    // reuses this one function).
+    argv: (positionals, options = {}) => ({
+      dryRun: Boolean(options.dryRun),
+      changelog: Boolean(options.changelog),
+    }),
 
     render(result) {
+      // `renderChangelog()` output ends in a trailing newline (the committed
+      // UPGRADE-CHANGELOG.md ends in exactly one LF). The CLI's plain-text path
+      // wraps render()'s return in `console.log`, which appends its OWN newline —
+      // so we strip the generator's trailing newline here to emit exactly one,
+      // keeping `aof upgrade --changelog` stdout byte-identical to the committed
+      // artifact (so `--changelog > UPGRADE-CHANGELOG.md` round-trips and the
+      // regenerate-and-diff drift check stays green). QA-40-04-1.
+      if (result.changelog) return result.text.replace(/\n$/, "");
       if (result.dryRun) {
         if (result.pendingCount === 0) {
           return "aof upgrade --dry-run: nothing pending — every item is already at the current schema.";

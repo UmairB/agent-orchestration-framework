@@ -4,7 +4,7 @@ number: 04
 slug: generated-changelog
 title: "The generated changelog — a projection of the migration registry that cannot drift, so 'how do I upgrade' resolves to a command and never to prose"
 parent: 40
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-07-17
 updated: 2026-07-17
@@ -52,7 +52,25 @@ Grounded in `ARCHITECTURE.md` ADR-006:
 
 <!-- Authored at `aof:refine 40 --autonomous` (Three Amigos). -->
 
-- [ ] `tasks/00_changelog-generated-from-registry-no-drift.feature`
+- [x] `tasks/00_changelog-generated-from-registry-no-drift.feature` — 6 `@executable` scenarios green (+ a CLI round-trip regression test); the `@manual` regenerate-and-diff runs at `aof:verify`
+
+## Delivery notes
+
+- **Generator + artifact:** `renderChangelog(migrations = WORK_ITEM_MIGRATIONS)` + `changelogDrift()` in
+  `src/work-upgrade.mjs`; the committed artifact is `UPGRADE-CHANGELOG.md` at the repo root (a
+  package-level "how do I upgrade" artifact — future milestones' transforms land in the same registry
+  and the same changelog). `aof upgrade --changelog` is the regenerate surface. `.gitattributes` pins the
+  artifact to LF so the byte-identity drift guard survives a Windows checkout.
+- **Deterministic by construction:** the generator body is static strings + each descriptor's
+  `id`/`from`/`to`/`summary` — no timestamp, no package version, no volatile value — so
+  `renderChangelog(WORK_ITEM_MIGRATIONS)` reproduces the committed 983-byte artifact byte-for-byte.
+- **Review:** behavioural PASS (drift guard is a genuine full-string byte compare, real 3-transform
+  fixtures, deterministic, litmus-honest). Structural verified inline (the `--changelog` is a flag on the
+  existing `work:upgrade` command — bijection guards green; no forbidden import; `.gitattributes` + the
+  arch-test one-line fix both legitimate). **Finding QA-40-04-1 fixed:** `aof upgrade --changelog`
+  emitted a doubled trailing newline (`console.log` adds its own) that broke the `> UPGRADE-CHANGELOG.md`
+  round-trip — the render now strips the generator's trailing newline; a regression test asserts CLI
+  stdout === committed.
 
 ## Notes
 

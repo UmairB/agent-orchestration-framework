@@ -38,3 +38,12 @@ src/bundle/** text eol=lf
 # the .aof/mesh/** pin above already covers it.)
 **/runs/**/*.json text eol=lf
 
+# The committed upgrade changelog (milestone 40 / story 04, ADR-006): a pure,
+# DETERMINISTIC projection of WORK_ITEM_MIGRATIONS (src/work-upgrade.mjs
+# renderChangelog) — the drift guard is regenerate == committed BYTE-FOR-BYTE
+# (acd-changelog-generated), and renderChangelog always emits LF. Pin LF here
+# too so a core.autocrlf=true Windows checkout never hands the committed file
+# CRLF bytes the generator's LF output could never match (the 22/R5, 01/R2
+# carry-forward: a byte-identity guard must pin line endings).
+UPGRADE-CHANGELOG.md text eol=lf
+

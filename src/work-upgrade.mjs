@@ -143,6 +143,70 @@ async function applyTransform(item, transform) {
   });
 }
 
+// -------------------------------------------------------- the changelog --
+//
+// renderChangelog projects `migrations` (default the real registry) into a
+// markdown changelog — ONE entry per transform descriptor, each showing its
+// `id`, its `from -> to` step, and its `summary` (ADR-006 / story 04). PURE
+// and DETERMINISTIC: nothing volatile (no timestamp, no
+// packageVersionString()/aofVersion, no per-release value) appears anywhere
+// in the output — regenerating this function's output must reproduce the
+// committed artifact (UPGRADE-CHANGELOG.md, repo root — see story 04's
+// STORY.md "committed artifact" note) byte-for-byte, on every call, which is
+// only possible if nothing volatile leaks in. The leading
+// `<!-- aof-generated: true -->` comment is the 01/ADR-005 stamp form, so the
+// artifact is self-identifying. "How do I upgrade" resolves to the
+// `aof upgrade` command named in the preamble — never to prose that could go
+// stale. This function only READS `migrations`; it is never called from
+// planUpgrade/planTransforms/runUpgrade — the changelog is a downstream-only
+// projection of the registry, never fed back into what the engine executes
+// (acd-changelog-generated).
+export function renderChangelog(migrations = WORK_ITEM_MIGRATIONS) {
+  const chain = [...migrations].sort((a, b) => a.from - b.from);
+  const lines = [
+    "<!-- aof-generated: true -->",
+    "",
+    "# Upgrade changelog",
+    "",
+    "This changelog is generated from `WORK_ITEM_MIGRATIONS` (`src/work-upgrade.mjs`) — a pure",
+    "projection of the migration registry, never hand-authored (ADR-006, milestone 40). It",
+    "describes each registered transform; the act of upgrading a work stream to the current",
+    "schema is always the command:",
+    "",
+    "```",
+    "aof upgrade",
+    "```",
+    "",
+    "(`aof upgrade --dry-run` previews the pending transforms without writing; add `--json` for",
+    "a machine-readable plan.) Regenerating this file from the registry reproduces it",
+    "byte-for-byte — a hand edit cannot survive the drift guard.",
+    "",
+    "## Transforms",
+    "",
+  ];
+  for (const transform of chain) {
+    lines.push(`### \`${transform.id}\` — schema ${transform.from} -> ${transform.to}`);
+    lines.push("");
+    lines.push(transform.summary);
+    lines.push("");
+  }
+  while (lines[lines.length - 1] === "") lines.pop();
+  return `${lines.join("\n")}\n`;
+}
+
+// changelogDrift is the drift-guard CHECK (ADR-006 / story 04's second
+// regenerate-surface, alongside the `aof upgrade --changelog` CLI emit,
+// src/commands/upgrade.mjs). It performs NO fs I/O itself — the caller reads
+// the committed artifact's bytes and passes them in — so it stays a pure,
+// injectable comparison: a fresh renderChangelog(migrations) vs the supplied
+// `committedText`. `drifted: true` means the committed artifact no longer
+// matches what the registry would generate today (a hand edit, or a registry
+// change nobody regenerated the file for).
+export function changelogDrift(committedText, migrations = WORK_ITEM_MIGRATIONS) {
+  const regenerated = renderChangelog(migrations);
+  return { drifted: String(committedText) !== regenerated, regenerated };
+}
+
 // runUpgrade is the whole-stream engine `aof upgrade` (src/commands/upgrade.mjs)
 // calls. `{ apply: false }` (the default) is the DRY-RUN — plans and reports,
 // mutates nothing. `{ apply: true }` applies every pending item's transforms in

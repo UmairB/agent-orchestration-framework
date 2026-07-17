@@ -57,7 +57,7 @@ export const archTests = [
       const migrations = mod.WORK_ITEM_MIGRATIONS ?? mod.MIGRATIONS ?? mod.migrations;
       assert.ok(Array.isArray(migrations) && migrations.length >= 1, "the generator has a registry to project");
 
-      const output = String(await generator(migrations));
+      const output = String(await generator.fn(migrations));
       // Every registered transform is represented in the output — the changelog cannot
       // silently omit a transform (that is the drift the ADR abolishes).
       for (const m of migrations) {

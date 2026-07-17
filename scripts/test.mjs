@@ -1272,6 +1272,13 @@ import { workUpgradeDryRunApplyTests } from "../test/work-upgrade-dry-run-apply.
 import { workUpgradeIdempotentTests } from "../test/work-upgrade-idempotent.test.mjs";
 import { workUpgradeStampTransformTests } from "../test/work-upgrade-stamp-transform.test.mjs";
 import { workUpgradeReconstructedMarkerTests } from "../test/work-upgrade-reconstructed-marker.test.mjs";
+// milestone 40 / story 04 — the generated changelog (ADR-006): renderChangelog
+// is a pure, deterministic projection of WORK_ITEM_MIGRATIONS; the committed
+// UPGRADE-CHANGELOG.md matches regenerate byte-for-byte (the drift guard); a
+// hand edit is caught (changelogDrift); the artifact self-identifies via the
+// aof-generated stamp; and the changelog is downstream-only (registry ->
+// changelog live, changelog -> registry dead — no feedback edge).
+import { workUpgradeChangelogTests } from "../test/work-upgrade-changelog.test.mjs";
 // milestone 40 / story 03 — staleness in validate (ADR-005/006, dep-01 only):
 // validateWork flags any item whose schema is behind WORK_ITEM_SCHEMA_VERSION,
 // naming aof upgrade as the remedy, while an at-current item and an
@@ -1786,6 +1793,8 @@ export const tests = [
   ...workUpgradeIdempotentTests,
   ...workUpgradeStampTransformTests,
   ...workUpgradeReconstructedMarkerTests,
+  // milestone 40 / story 04 — the generated changelog task traceability
+  ...workUpgradeChangelogTests,
   // milestone 40 / story 03 — staleness in validate task traceability
   ...workValidateStalenessTests
 ];
