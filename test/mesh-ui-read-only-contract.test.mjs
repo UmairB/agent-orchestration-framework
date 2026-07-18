@@ -212,12 +212,13 @@ export const meshUiReadOnlyContractTests = [
   // ═══ 05_fleet-view-is-read-only.feature @executable ════════════════════════
   // Scenario Outline: a write-method request to the fleet face is rejected without a
   // state change — a clean method-rejection, not a crash. (POST/PUT/PATCH/DELETE is
-  // the mutating set on the READ route; milestone 27 / story 02 lands POST
-  // /api/mesh/issue as the ONE accepted write route — its refusal expectation
-  // INVERTS, so it is REMOVED from this refusal matrix (task 00/01's row for the
-  // accepted write lives in the new mesh-ui-issue-route tests instead); the would-be
-  // m27 /api/mesh/assign row stays — it is still genuinely refused, task 03's
-  // bounded-write matrix.)
+  // the mutating set on the READ route; milestone 27 / story 02 landed POST
+  // /api/mesh/issue as an accepted write route — SINCE RETIRED, `aof graph impact`
+  // confirms it is gone from the live tree. Milestone 38 / story 04 (ADR-012) then
+  // landed POST /api/mesh/assign as the fleet face's FIRST live write route — SO an
+  // UNAUTHENTICATED bare POST to it (no Origin header, this suite's fetch never sets
+  // one) is REFUSED by its own admission guard before ever reaching the mutation;
+  // this row asserts that refusal, never that the route doesn't exist.)
   {
     name: "mesh-ui-read-only/05 a write-method request to the fleet face is a clean method-rejection, never a state change",
     async run() {
@@ -233,13 +234,10 @@ export const meshUiReadOnlyContractTests = [
         for (const { method, route } of rows) {
           const res = await fetch(new URL(route, url), { method });
           // A clean rejection: NOT a 2xx success, and the server did not crash
-          // (a follow-up read still answers). The one route rejects the method
-          // (405); a would-be m27 write route simply does not exist (404).
-          assert.ok(
-            res.status === 405 || res.status === 404,
-            `${method} ${route} is rejected (405 method-not-allowed or 404 not-found) — got ${res.status}`
-          );
-          assert.ok(res.status < 500, `${method} ${route} is a clean rejection, not a crash`);
+          // (a follow-up read still answers). The read routes reject the method
+          // (405); an unauthenticated POST to the m38/ADR-012 assign exception is
+          // refused by its own admission guard (a coded 4xx, never a crash).
+          assert.ok(res.status >= 400 && res.status < 500, `${method} ${route} is rejected (4xx) — got ${res.status}`);
           const body = await res.json().catch(() => ({}));
           assert.notEqual(body.ok, true, `${method} ${route} did not succeed`);
         }

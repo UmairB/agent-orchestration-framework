@@ -20,16 +20,24 @@
 // `attachTerminalWebSocket` (a `/ws/terminal` upgrade), both of which this face
 // FORBIDS (ADR-004; ADR-003 disjoint `/api/mesh` namespace). So the fleet face
 // owns its own thin server whose surface is exactly: the static bundle,
-// GET /api/mesh/status, GET /api/mesh/board-url, and a clean not-found
-// for everything else.
+// GET /api/mesh/status, GET /api/mesh/board-url, POST /api/mesh/assign (the
+// ONE mutation carve-out, below), and a clean not-found for everything else.
 //
-// The isolation guarantees are STRUCTURAL:
+// milestone 38 / story 04 (ADR-012) — the face gains its FIRST live write
+// route: POST /api/mesh/assign wraps the EXISTING `assignWork` verb VERBATIM
+// (`./commands/mesh-assign.mjs`), same-origin + application/json admitted
+// (SECURITY T13), re-running every one of the verb's own gates — no second
+// arbitration, no bespoke uniqueness/repo check. This is the SOLE, deliberate,
+// documented exception to the isolation guarantees below.
+//
+// The isolation guarantees are otherwise STRUCTURAL:
 //   - it imports the single global query surface plus the board launcher, not
-//     low-level work/run/mesh writers;
+//     low-level work/run/mesh writers — PLUS the one `assignWork` verb door;
 //   - it stands up exactly ONE `http.createServer` bound to `127.0.0.1`, routing
 //     the fleet under `/api/mesh*` and NEVER `/api/work*`;
-//   - it performs ZERO fs write and NO shell-out of its own; it serves no
-//     `/ws/terminal`; there is no fleet mutation route.
+//   - it performs ZERO fs write and NO shell-out of its own (the ONE mutation
+//     rides entirely inside `assignWork`'s own gated store write); it serves no
+//     `/ws/terminal`; every OTHER route/method stays read-only.
 //
 // milestone 28 / story 00 (ADR-003): the default ui/dist location routes
 // through the ONE SEA-safe asset-base seam instead of joining a path off a bare
@@ -51,6 +59,15 @@ import { serveBoard } from "./board-serve.mjs";
 // global-work-store/global-node-registry modules directly (ADR-006 "must not import
 // low-level work/run/mesh writers; it talks to a query surface").
 import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-query.mjs";
+// milestone 38 / story 04 (ADR-012) — the fleet face's FIRST live write route. Two
+// imports, both DELIBERATE and narrow: `loadWorkspace` (the standard workspace
+// object every CLI verb loads, `./work.mjs`) resolves the { workDir, config,
+// projectRoot } the verb needs; `assignWork` (`./commands/mesh-assign.mjs`) is the
+// COMPLETE, ALREADY-GATED verb wrapped VERBATIM — no arbitration is reimplemented
+// here, and no OTHER commands module, mesh-store/presence/registry/sync module, or
+// global-work-store/global-node-registry module is imported (ADR-012 inv.2/4).
+import { loadWorkspace } from "./work.mjs";
+import { assignWork } from "./commands/mesh-assign.mjs";
 
 // The default fleet port (task 00, DEV flag): 4181 — the next free port directly
 // above the board (4180), distinct from all of assets-ui 4177/4178 + board 4180
@@ -132,6 +149,85 @@ export async function serveMeshUi({
         sendJson(response, 200, { url, workspaceId, ref: ref || null });
       } catch (error) {
         sendApiError(response, error.status ?? 500, error.message, error.code ?? "board-url-failed", { path: error.path ?? null });
+      }
+      return;
+    }
+
+    // milestone 38 / story 04 (ADR-012) — the fleet face's FIRST and ONLY
+    // mutation route: POST /api/mesh/assign { ref, nodeId }. It wraps the
+    // EXISTING assignWork(workspace, ref, nodeId, ctx) core VERBATIM — no
+    // second uniqueness rule, no bespoke repo check, no arbitration of its
+    // own. Every OTHER method on this path (GET/PUT/DELETE/…) is a clean 405
+    // naming "POST" as the one allowed verb (the read-only-except-this-one-
+    // route posture, structural invariant #1/#4).
+    if (pathname === "/api/mesh/assign") {
+      if (request.method !== "POST") {
+        sendMethodNotAllowed(response, "POST");
+        return;
+      }
+
+      // SECURITY T13 — the same-origin + application/json admission guard,
+      // scoped to THIS write route only (the read routes stay unguarded — a
+      // safe method has no side effect to forge). A same-origin browser
+      // request's Origin ALWAYS matches this server's own `http://<host>`
+      // (the exact string a same-origin `fetch` sends); a cross-site page, an
+      // absent Origin (a bare/simple cross-site form-POST), or a non-JSON
+      // content-type are each refused BEFORE the body is even parsed — the
+      // guard runs strictly before any store read/write.
+      const expectedOrigin = `http://${request.headers.host}`;
+      const originHeader = request.headers.origin;
+      if (typeof originHeader !== "string" || originHeader !== expectedOrigin) {
+        sendApiError(response, 403, "Cross-origin write refused.", "cross-origin-refused");
+        return;
+      }
+      const contentTypeHeader = String(request.headers["content-type"] ?? "");
+      if (!/^application\/json\b/i.test(contentTypeHeader)) {
+        sendApiError(response, 400, "Content-Type must be application/json.", "invalid-content-type");
+        return;
+      }
+
+      let body;
+      try {
+        body = await readJsonBody(request);
+      } catch {
+        sendApiError(response, 400, "Malformed JSON body.", "invalid-body");
+        return;
+      }
+      // ONLY { ref, nodeId } is lifted off the body and passed into the verb —
+      // any other field a client posts (a forged state/assignmentId/issuer,
+      // task 00 scenario 2) rides no further; the verb assembles its own
+      // record shape (ADR-012 inv.2 — "adds no second uniqueness rule, no
+      // bespoke repo check").
+      const ref = typeof body?.ref === "string" ? body.ref.trim() : "";
+      const nodeId = typeof body?.nodeId === "string" ? body.nodeId.trim() : "";
+      if (!ref || !nodeId) {
+        sendApiError(response, 400, "Both \"ref\" and \"nodeId\" are required.", "invalid-body");
+        return;
+      }
+
+      try {
+        // Loaded LAZILY, only for a request that already cleared the CSRF +
+        // shape guards above — mirroring the SEA/CLI's own `loadWorkspace(cwd)`
+        // per-invocation load (never cached across requests; the read routes
+        // above never trigger this at all, so a GET-only test never touches a
+        // workspace object it did not ask for). A malformed/absent config never
+        // throws — loadWorkspace degrades to an empty config (work.mjs's own
+        // contract) — findWork below just resolves nothing for it.
+        const assignWorkspace = await loadWorkspace(resolvedProjectDir, undefined, { env: globalStoreOptions?.env });
+        const result = await assignWork(assignWorkspace, ref, nodeId, { globalWorkStoreOptions: globalStoreOptions ?? {} });
+        if (!result.ok) {
+          // The verb's OWN { ok:false, code } surfaces as a coded non-200 —
+          // never a 200, never swallowed (ADR-012 inv.3). The HTTP NUMBER is
+          // this route's own pinned mapping; the CODE (the contract) is the
+          // verb's, verbatim — including any extra field it attaches
+          // (`holder`/`target`), so a refusal names its cause faithfully.
+          const { ok: _ok, error: message, code, ...extra } = result;
+          sendApiError(response, assignGateStatus(code), message, code, extra);
+          return;
+        }
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendApiError(response, error.status ?? 500, error.message, error.code ?? "assign-failed", { path: error.path ?? null });
       }
       return;
     }
@@ -303,9 +399,57 @@ function sendJson(response, status, payload) {
 // {}, so `path` resolves to `undefined`, and JSON.stringify OMITS an `undefined`
 // value entirely — the exact pre-existing { ok, error, code } shape survives
 // byte-for-byte for every caller that never opts in).
+//
+// milestone 38 / story 04 (ADR-012) — every OTHER `extra` key (e.g. the assign
+// verb's `holder`/`target`, task 01) rides through UNCHANGED, byte-for-byte —
+// "the refusal names the current holder, the verb's own field, surfaced
+// faithfully." `path`'s pre-existing null->omitted normalization is preserved
+// exactly (destructured out first) so no pre-existing caller's shape shifts.
 function sendApiError(response, status, message, code, extra = {}) {
-  const path = extra?.path ?? undefined;
-  sendJson(response, status, { ok: false, error: message, code, path });
+  const { path, ...rest } = extra ?? {};
+  sendJson(response, status, { ok: false, error: message, code, path: path ?? undefined, ...rest });
+}
+
+// milestone 38 / story 04 (ADR-012, BUILD-owed decision) — the assign verb's
+// `{ ok:false, code }` -> HTTP status mapping. The CONTRACT is the CODE (the
+// verb's own, surfaced verbatim in the body above); the NUMBER is this route's
+// pinned choice: an unresolvable ref or an unknown/ineligible target reads as
+// "not found" (404), a uniqueness/readiness conflict with the item's CURRENT
+// state reads as "conflict" (409). Never 200 for a miss, never a code this
+// table does not know (an unmapped future code still refuses, at 400).
+const ASSIGN_GATE_STATUS = Object.freeze({
+  "ref-not-found": 404,
+  "assignment-target-unknown": 404,
+  "assignment-repo-unavailable": 409,
+  "assignment-already-active": 409,
+});
+
+function assignGateStatus(code) {
+  return ASSIGN_GATE_STATUS[code] ?? 400;
+}
+
+// Collects + JSON-parses the request body (there is no body-parser middleware
+// on this thin face — the board/setup-ui idiom, read once, parsed once). A
+// caller with no body at all parses `{}` (never throws on an empty request —
+// the ref/nodeId presence check above is what refuses it).
+function readJsonBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("error", reject);
+    request.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8").trim();
+      if (raw.length === 0) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 // A write method on a route that does not accept it is a clean method-rejection

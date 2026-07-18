@@ -113,17 +113,22 @@ export const archTests = [
         "mesh-ui-serve.mjs imports the global query surface (./global-mesh-query.mjs) — the only door to fleet data"
       );
       // No OTHER fleet-data-bearing import: mesh-store / mesh-presence / mesh-registry /
-      // mesh-sync / commands/* would each be a second data path bypassing mesh:status.
+      // mesh-sync / commands/* would each be a second data path bypassing mesh:status —
+      // EXCEPT milestone 38 / story 04's ONE sanctioned WRITE-verb door (ADR-012):
+      // ./commands/mesh-assign.mjs, the read-only face's first and only mutation
+      // carve-out (POST /api/mesh/assign, wrapping assignWork verbatim — armed by the
+      // dedicated acd-fleet-face-single-mutation-route fitness, not duplicated here).
       const secondPath = imports(source).filter((i) => {
         const spec = i.specifier;
         if (!spec.startsWith(".")) return false;
-        if (spec === "./global-mesh-query.mjs") return false; // the door
+        if (spec === "./global-mesh-query.mjs") return false; // the read door
+        if (spec === "./commands/mesh-assign.mjs") return false; // the ONE sanctioned write door (38/ADR-012)
         return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || /\.\/global-(work-store|node-registry)\.mjs$/.test(spec) || spec.startsWith("./commands/");
       });
       assert.deepEqual(
         secondPath.map((i) => i.specifier),
         [],
-        "mesh-ui-serve.mjs imports no fleet-data module except ./global-mesh-query.mjs — it never opens stores or imports command bodies directly"
+        "mesh-ui-serve.mjs imports no fleet-data module except ./global-mesh-query.mjs (and the one sanctioned ./commands/mesh-assign.mjs write door) — it never opens stores or imports another command body directly"
       );
       // Positive: it reaches the fleet data by invoking mesh:status (call-form grep,
       // comments already discounted) — the ONE registered command (ADR-002).

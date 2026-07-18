@@ -44,19 +44,19 @@ fleet face has ever had — wrapping the existing verb, not a new arbitration pa
      POST — this is the third, deliberate pass. Tasks 00–03 `@executable` over the REAL route + verb with an
      injected store seam; task 04 the real-UI `@manual` soak. -->
 
-- [ ] `tasks/00_fleet-face-assign-route.feature` — `@executable` — `POST /api/mesh/assign {ref,nodeId}` wraps
+- [x] `tasks/00_fleet-face-assign-route.feature` — `@executable` — `POST /api/mesh/assign {ref,nodeId}` wraps
   the existing `assignWork` verb verbatim (no re-implemented arbitration) and mints the real
   `global_assignments` `assigned` record (read back through the real store); it is the ONLY mutation route on
   the fleet face — fitness `acd-fleet-face-single-mutation-route` (every other path/verb stays 405/404).
-- [ ] `tasks/01_assign-gates-hold-on-ui-path.feature` — `@executable` — the UI path re-runs the verb's gates:
+- [x] `tasks/01_assign-gates-hold-on-ui-path.feature` — `@executable` — the UI path re-runs the verb's gates:
   a Scenario Outline over unknown-node / non-member / unpublished / typo'd-ref → coded non-200 (never a 200 +
   phantom record), verb-exact code, nothing minted; plus the single-runner uniqueness invariant (a second
   assign of the same item is refused even to a different node). (T13)
-- [ ] `tasks/02_read-only-posture-preserved.feature` — `@executable` — the carve-out is exactly one route (a
+- [x] `tasks/02_read-only-posture-preserved.feature` — `@executable` — the carve-out is exactly one route (a
   POST to any other fleet-face path is still 405/404 with a per-route `Allow`); the server stays loopback-bound
   with no terminal upgrade; a cross-origin write is refused (a same/cross-origin CSRF matrix, mechanism-agnostic
   so a build's admission choice can't invalidate it). (T13 / ADR-006)
-- [ ] `tasks/03_assign-affordance-renders.feature` — `@executable` — the work-item card's "assign to node"
+- [x] `tasks/03_assign-affordance-renders.feature` — `@executable` — the work-item card's "assign to node"
   affordance renders from real UI production (ADR-008): the worker-node picker is producer-fed from the real
   `/api/mesh/status` roster (empty / one / live+stale states, empty-roster disabled), and the resulting
   `assigned` chip is fed by the real minted record through the m35/story-03 projection. (The full browser

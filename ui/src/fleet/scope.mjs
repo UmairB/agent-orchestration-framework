@@ -237,6 +237,24 @@ export function nodeCurrentWork(node) {
   return fleetCurrentWorkLines(node?.presence ?? {});
 }
 
+// ---------------------------------------------- assign-to-node affordance -----
+
+// assignableNodeOptions(nodes) — milestone 38 / story 04 (ARCHITECTURE ADR-012;
+// ADR-008's producer-fed conformance) — the worker-node picker's options,
+// derived from the REAL GET /api/mesh/status roster (task 03's Outline: empty /
+// one / live+stale). PURE pass-through: every node the roster carries becomes
+// an option — no invented placeholder, no liveness/eligibility filter (a
+// stale-but-known node stays an option; the verb's node-known gate keys on a
+// global_nodes row, NOT on liveness, so the picker must not drop a target the
+// verb would accept). Repo-eligibility (membership + publish) is enforced by
+// the verb AT ASSIGN TIME (task 01) — a coded refusal on the response, never a
+// hidden picker filter here. Non-mutating; an absent/empty roster yields [].
+export function assignableNodeOptions(nodes) {
+  return (nodes ?? [])
+    .map((node) => node?.nodeId)
+    .filter((nodeId) => typeof nodeId === "string" && nodeId.length > 0);
+}
+
 // --------------------------------------------------------- diagnostics --------
 
 // The health/diagnostics region's rendered summary (DESIGN "shows projection

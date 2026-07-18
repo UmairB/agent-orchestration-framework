@@ -5,10 +5,18 @@
 // READ shape only, never the write posture. This RE-ARMS the m34 read-only
 // posture (34/ADR-007) over the story-03 status extension: every non-GET/HEAD is
 // a clean 405 with an `Allow: GET, HEAD` header + body code "method-not-allowed";
-// GET/HEAD are still served; NO /api/mesh/assign or /api/mesh/issue mutating
-// route exists; every WebSocket upgrade destroys the socket; the extended read
-// path performs zero fs write and no shell-out; the route table is still exactly
-// the two GET routes + the static bundle.
+// GET/HEAD are still served; NO /api/mesh/issue mutating route exists; every
+// WebSocket upgrade destroys the socket; the extended read path performs zero fs
+// write and no shell-out; the route table is still exactly the two GET routes +
+// the static bundle.
+//
+// SUPERSEDED IN PLACE at milestone 38 / story 04 (ADR-012) — /api/mesh/assign is
+// no longer a hypothetical "would-be" route: it is the fleet face's ONE
+// sanctioned write exception (SECURITY T13, arch-owned by the new
+// acd-fleet-face-single-mutation-route). The rows below that named it as
+// still-refused now assert the WEAKER (but still load-bearing) claim this
+// file's charter needs: an UNAUTHENTICATED bare POST (no Origin, no body) is
+// STILL refused — never a 200 — even though the route itself now exists.
 //
 // Exercises the REAL server (serveMeshUi) against temp fixtures with an injected
 // globalStoreOptions, mirroring test/mesh-ui-serve.test.mjs / mesh-ui-read-only-
@@ -193,10 +201,12 @@ export const meshUiAssignmentReadOnlyTests = [
     },
   },
 
-  // Scenario Outline: no assignment write route exists — assign/issue paths
-  // are not mutating handlers.
+  // Scenario Outline: /api/mesh/issue is not a mutating handler (never existed);
+  // an UNAUTHENTICATED bare request to /api/mesh/assign — the m38/ADR-012 write
+  // exception — is still refused (never a 2xx), and a non-POST method on it is
+  // a clean 405.
   {
-    name: "mesh-ui-assignment-read-only/02 no assignment write route exists — POST/PUT/DELETE /api/mesh/assign or /api/mesh/issue never succeed",
+    name: "mesh-ui-assignment-read-only/02 /api/mesh/issue never succeeds, and an unauthenticated/wrong-method request to /api/mesh/assign (the m38/ADR-012 exception) never succeeds either",
     async run() {
       const rows = [
         { method: "POST", route: "/api/mesh/assign" },
@@ -208,16 +218,12 @@ export const meshUiAssignmentReadOnlyTests = [
         const before = await snapshotDir(repo);
         for (const { method, route } of rows) {
           const res = await fetch(new URL(route, url), { method });
-          assert.ok(
-            res.status === 405 || res.status === 404,
-            `${method} ${route} is a clean not-found or method-rejection — got ${res.status}`
-          );
-          assert.ok(res.status < 500, `${method} ${route} is not a crash`);
+          assert.ok(res.status >= 400 && res.status < 500, `${method} ${route} is a clean refusal (4xx) — got ${res.status}`);
           const body = await res.json().catch(() => ({}));
           assert.notEqual(body.ok, true, `${method} ${route} did not succeed — no 2xx write acknowledgement`);
         }
         const after = await snapshotDir(repo);
-        assert.deepEqual(diffSnapshots(before, after), [], "no assignment write route wrote any file");
+        assert.deepEqual(diffSnapshots(before, after), [], "no request in this unauthenticated/wrong-method matrix wrote any file under the workspace");
       });
     },
   },
@@ -238,10 +244,12 @@ export const meshUiAssignmentReadOnlyTests = [
     },
   },
 
-  // Scenario: the extended status shape added no write branch — the read-only
-  // route table is unchanged.
+  // Scenario: the story-03 extended status shape added no write branch OF ITS
+  // OWN — the read-only route table is unchanged by IT (the separate, later,
+  // m38/ADR-012 assign exception is a different story's deliberate addition,
+  // asserted structurally by acd-fleet-face-single-mutation-route, not here).
   {
-    name: "mesh-ui-assignment-read-only/02 the extended status shape added no write branch — only the two GET routes + static bundle exist, zero fs write, no shell-out",
+    name: "mesh-ui-assignment-read-only/02 the extended status shape added no write branch of its own — /api/mesh/issue still never exists, an unauthenticated assign POST still never succeeds, zero fs write, no shell-out",
     async run() {
       await withFleet(async ({ url, repo, server }) => {
         const before = await snapshotDir(repo);
@@ -256,12 +264,15 @@ export const meshUiAssignmentReadOnlyTests = [
         assert.ok(assignedItem.assignment, "the assignment row is threaded through the read path");
         assert.equal(assignedItem.assignment.state, "running");
 
-        // no route was added for assign/issue — a write attempt is still
-        // rejected after the extended read path has been exercised.
-        const assignAttempt = await fetch(new URL("/api/mesh/assign", url), { method: "POST" });
-        assert.ok(assignAttempt.status === 404 || assignAttempt.status === 405, "no assign route was added by the extension");
+        // /api/mesh/issue was never added by ANY story to date.
         const issueAttempt = await fetch(new URL("/api/mesh/issue", url), { method: "POST" });
-        assert.ok(issueAttempt.status === 404 || issueAttempt.status === 405, "no issue route was added by the extension");
+        assert.equal(issueAttempt.status, 404, "no issue route exists");
+        // an UNAUTHENTICATED bare POST to /api/mesh/assign (the m38/ADR-012
+        // exception) is still refused after the extended read path has been
+        // exercised — the route exists, but a request that skips its own
+        // admission guard never succeeds.
+        const assignAttempt = await fetch(new URL("/api/mesh/assign", url), { method: "POST" });
+        assert.ok(assignAttempt.status >= 400 && assignAttempt.status < 500, "an unauthenticated assign POST is refused (4xx), never a 2xx");
 
         const after = await snapshotDir(repo);
         assert.deepEqual(diffSnapshots(before, after), [], "the extended read path performed zero fs write under the workspace");

@@ -237,4 +237,22 @@ export const fleetApi = {
     const body = (await response.json()) as BoardUrlResponse;
     return body.url;
   },
+
+  // milestone 38 / story 04 (ARCHITECTURE ADR-012) — the fleet face's ONE
+  // mutation route: a same-origin `POST /api/mesh/assign { ref, nodeId }`,
+  // wrapping the existing `assignWork` verb verbatim. A real browser's `fetch`
+  // sends the page's own Origin automatically (the route's same-origin
+  // admission guard, SECURITY T13) — this client sets no header itself. On a
+  // gate miss (unknown node / already-active / unresolvable ref) the coded
+  // { ok:false, code } envelope surfaces as a thrown Error (safeError), same
+  // shape as every other fleet read failure.
+  async assign(ref: string, nodeId: string): Promise<WorkAssignment> {
+    const response = await fetch("/api/mesh/assign", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref, nodeId }),
+    });
+    if (!response.ok) throw await safeError(response);
+    return (await response.json()) as WorkAssignment;
+  },
 };
