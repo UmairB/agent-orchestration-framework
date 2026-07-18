@@ -4,7 +4,7 @@ number: 04
 slug: ui-driven-assignment
 title: "Assign a work item to a worker node from the UI"
 parent: 38
-status: in-progress
+status: in-review
 owner: product-owner
 created: 2026-07-18
 updated: 2026-07-18

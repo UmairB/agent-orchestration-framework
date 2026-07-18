@@ -117,12 +117,18 @@ function cloneMintStaysReadProblems(source) {
 function pushBeforeRemoveProblems(source) {
   const problems = [];
   const code = stripComments(source);
-  const pushOffset = code.search(/pushWorktreeBranch\s*\(/);
+  // Anchor to the AWAITED CALL (`await pushWorktreeBranch(`), never the exported
+  // function DEFINITION — which appears far earlier in the file (`export async function
+  // pushWorktreeBranch(`). Matching the definition's offset would mask a force-remove
+  // inserted between the definition and the real call site (review nit, structural
+  // review 2026-07-18). The synthesized ordering plants use the awaited-call form too,
+  // so the self-check is unchanged.
+  const pushOffset = code.search(/await\s+pushWorktreeBranch\s*\(/);
   const removeOffset = code.search(/removeWorktree\s*\([^)]*force:\s*true/s);
-  if (pushOffset === -1) problems.push("no pushWorktreeBranch( call found");
+  if (pushOffset === -1) problems.push("no awaited pushWorktreeBranch( call found");
   if (removeOffset === -1) problems.push("no force-remove removeWorktree(...{ force: true }) call found");
   if (pushOffset !== -1 && removeOffset !== -1 && !(pushOffset < removeOffset)) {
-    problems.push("the force-remove removeWorktree call does not come AFTER pushWorktreeBranch in source order — the worktree could be removed before the push runs");
+    problems.push("the force-remove removeWorktree call does not come AFTER the pushWorktreeBranch call — the worktree could be removed before the push runs");
   }
   return problems;
 }

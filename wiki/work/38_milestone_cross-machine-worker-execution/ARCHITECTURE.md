@@ -962,6 +962,50 @@ during the soak's provisioning:
 - **DOCUMENTED DEFAULTS for STATE.md:** branch = `aof/mesh/<itemRef>-<assignmentId>` (sanitized); "done" = pushed branch + optional/manual PR (not merged, not auto-PR by default). Security re-opens T9 and rewrites `acd-minted-token-scoped-single-repo`.
 - **`acd-write-token-scoped-to-push` is SPEC, armed at BUILD** — the push + write-mint path does not exist yet; armed against the real push seam (SECURITY co-owns it with the T9 rewrite).
 
+### AMENDMENT (2026-07-18, structural review of story 07 as-built — RATIFICATION, no decision changed)
+
+The decision above **stands unchanged and shipped**. This block records the AS-BUILT credential-pull wire
+so a future reader does not mis-read decision 2/invariant 4's "no new wire mechanism" as forbidding the new
+frame pair the review found — the two clauses govern DIFFERENT wires, and both were honoured:
+
+- **The credential PULL is a NEW dedicated frame pair — this is decision 3's "its own frame-pair" option,
+  taken as-built, NOT a footprint beyond the ADR.** Decision 3 already pinned "the worker requests a WRITE
+  credential at the push seam via **its own frame-pair** / distinct write-scoped mint request." As built that
+  is `write-credential-request` (up) / `write-credential` (down): `applyWriteCredentialRequestFrame`
+  (`control-stream-server.mjs`), `requestWriteCredential` (`worker-stream-client.mjs`), dispatched by a new
+  `applyStreamFrame` branch. The clone-credential-request frame was NOT extended — a `requestWriteCredential`
+  collaborator hung on the clone path would trip the pre-existing F12 guard
+  `acd-clone-credential-pull-not-pushed` (its `CREDENTIAL_SHAPED` clause), so a FULLY SEPARATE frame pair was
+  the F12-correct shape. The git-side PUSH transmission (decision 2 / invariant 4) separately reuses
+  `buildAskpassShim` VERBATIM in `pushWorktreeBranch` — that is the wire the "no new wire mechanism" clauses
+  govern, and it added none.
+- **The new pull honours the clone pull's holder-authorization gates VERBATIM (verified at source).**
+  `applyWriteCredentialRequestFrame` reproduces `applyCloneCredentialRequestFrame`'s three gates in order:
+  T6 holder (`existing.target_node_id === connectionNodeId`, resolved from the CONNECTION-bound
+  `options.nodeId`, never `frame.nodeId`) → F15 workspace-match (refuses `workspace-mismatch` on
+  `frame.workspaceId !== existing.workspace_id`, and mints with the ROW's own `existing.workspace_id`, never
+  the requester's) → F16 active-state (`isActiveAssignmentState(existing.state)`, imported, not a drifting
+  copy). The worker frame never steers which repo/scope is minted; `autoPr` is control-side only, never read
+  off the frame.
+- **The write token is minted ONLY at the push seam and single-repo-scoped.** The worker calls
+  `requestWriteCredential` only inside the `completed.state === "done"` branch, immediately before
+  `pushWorktreeBranch` and before any force-remove. The mint is `createGithubAppPushMintProvider` — a FULLY
+  SEPARATE export from the clone mint (no shared identity/JWT/scope helper), body
+  `{ repositories:[repo], permissions:{contents:"write"}(+pull_requests:"write" iff autoPr) }`; the clone
+  mint's `{contents:"read"}` body is byte-unchanged. Both mints are wired as LITERAL keys at their production
+  call sites (`mintWriteCredential:` at `startServer({...})`, `requestWriteCredential:` at
+  `createMeshWorkerExecutionHandler({...})`), before the test-injection spreads — the F12 discipline, so the
+  path is producer-wired, not test-only. `resolveWriteCredentialProvider` returns `undefined` for
+  `env-token`/unconfigured (→ `defaultMintWriteCredential` → `null`), so a static standing PAT is never a
+  write grant.
+
+**Consequence for the arch-test set:** the as-built is fully covered by `acd-write-token-scoped-to-push`
+(invariants 1–4, incl. a behavioural non-holder refusal against the real `applyWriteCredentialRequestFrame`)
+and the rewritten two-seam `acd-minted-token-scoped-single-repo`. No further fitness function is owed. The
+only residual is a STALE source comment (below, in the review findings) that claims the launcher "does not
+yet supply" the resolver — the launcher DOES supply it; the comment is a documentation defect, not a wiring
+gap.
+
 ---
 
 ## ADR-016: Worker-verified knowledge syncs to the control node by RIDING GIT — record docs, `RETROSPECTIVE R<n>`, `ADR-NNN` blocks are plain markdown that travels on story-07's push-back/merge; the graphify RECALL INDEX (`graphify-out/graph.json`) is gitignored, machine-local, DERIVED, and NEVER crosses the mesh. The control node rebuilds ITS index by a documented `git pull` + `aof work memory ingest` — no index bytes on the wire

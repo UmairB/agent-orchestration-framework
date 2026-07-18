@@ -58,7 +58,7 @@ export const fleetAssignAffordanceTests = [
     },
   },
   {
-    name: "fleet-assign-affordance/03 the node-picker offers exactly the assignable nodes the REAL /api/mesh/status roster carries — many, live + stale, both stay options",
+    name: "fleet-assign-affordance/03 the node-picker offers exactly the assignable nodes the REAL /api/mesh/status roster carries — many known nodes (both known-but-stale in this fixture), neither dropped (liveness is orthogonal to the node-known gate)",
     async run() {
       await withPublishedAssignFixture(async ({ url }) => {
         // Neither published node ever heartbeats in this fixture, so BOTH read

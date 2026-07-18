@@ -160,6 +160,52 @@ doc: state
   [VERIFICATION.md](VERIFICATION.md) → "Story-02 · clone-credential-mint". **Milestone stays `in-progress`:
   2 of 3 stories done — story-01's two-machine private-clone soak (task 04) is still unrun.**
 
+- **Built + reviewed `2026-07-18` via `aof:continue 38` — the THREE independent roots (03, 04, 07) built to green,
+  reviewed, and moved to `in-review` (→ `done` at `aof:verify`).** Fanned out per the milestone dispatch: story 04
+  worktree-isolated (its own fleet-face + UI surface), stories 03 → 07 serialised in the main tree (both edit
+  `mesh-clone-credential-provider.mjs`). Their dependents (05→06 terminal chain, 08 memory-syncback) are the NEXT
+  `aof:continue 38` pass. Each `@executable` lane + fitness function is green; every `@manual` soak stays deferred
+  to `aof:verify`.
+  - **03 · per-org-credential-scoping** (`55ab259`) — **in-review**. Tasks 00–02 `@executable` green + `acd-cross-org-key-isolation`
+    (4 invariants, non-vacuous). App identity resolves per-assigned-workspace via a new `createResolveWorkspaceAppIdentity`
+    seam (mirrors ADR-010 Gap A); cross-org isolation is STRUCTURAL (a null-resolved own identity throws
+    `github-app-mint-failed`, never borrows a sibling org's key); default key dir code-enforced at
+    `<meshRoot>/credentials/github-app-<appId>.pem` (appId slugged, never sync-scoped). Story-02 provider tests updated
+    to the new deps shape, re-verified green. Task 03 `@manual` two-org soak deferred.
+  - **04 · ui-driven-assignment** (`9939629`, merged `0f998d9`) — **in-review**. Tasks 00–03 `@executable` green +
+    `acd-fleet-face-single-mutation-route` (4 invariants + a behavioural half over the real `serveMeshUi`); `npm run ui:build`
+    green. The fleet face gains its FIRST mutation route — `POST /api/mesh/assign` wrapping `assignWork` verbatim,
+    loopback + same-origin + `application/json` admission, verb-code→coded-non-200 mapping, nothing minted on a gate miss.
+    Five inherited m25/27/34/35 read-only fitness tests WIDENED-not-weakened to the one sanctioned exception (the
+    m27/ADR-006 "SUPERSEDED IN PLACE" precedent). Task 04 `@manual` real-UI soak deferred.
+  - **07 · durable-worker-pushback** (`6330afe`) — **in-review**. Tasks 00–02 `@executable` green over a REAL local bare
+    origin (incl. non-ff / unreachable / pre-receive-declined push failures that RETAIN the worktree) +
+    `acd-write-token-scoped-to-push` + the two-seam rewrite of `acd-minted-token-scoped-single-repo`. Real branch
+    `aof/mesh/<itemRef>-<assignmentId>` (not detached), push BEFORE force-remove; a SEPARATE `createGithubAppPushMintProvider`
+    mints a single-repo `contents:write` token ONLY at push time (clone stays `contents:read`), pulled over a NEW
+    `write-credential-request`/`write-credential` frame pair gated T6/F15/F16 exactly like the clone pull (built to satisfy
+    the pre-existing F12 guard — the dev caught + reverted a shared-helper refactor that would have made story-03's
+    `acd-cross-org-key-isolation` vacuous). Task 03 `@manual` real-GitHub push soak deferred; re-opens SECURITY T9/T15.
+  - **Review verdicts (build gate):** **architect (structural) — all three GO**; ratified story-07's write-credential-pull
+    wire as ADR-015 decision-3's "own frame-pair" option (T6/F15/F16 verbatim, push-seam-only single-repo mint) and wrote
+    an **ADR-015 AMENDMENT** (ratification, no decision changed); all fitness functions confirmed non-vacuous (CRLF-safe,
+    landing-asserted). **QA (behavioural) — all three GO, the F1–F8 producer-fed pattern ABSENT** (every task drives the
+    real seam, every Examples row exercised, real records/git-ordering/mint-scope asserted, not a convenient proxy).
+    **Designer (design conformance, story 04 UI) — INCONCLUSIVE** (honest: no committed mock and the §Surface 1 binding
+    checklist predates story 04) → authored **DESIGN.md §Surface 2**, the assign-affordance binding checklist that BECOMES
+    the baseline for `aof:verify`'s render+judge (owed at verify); deferred design-gaps DG-3/4/5 recorded.
+  - **Confirmed review fixes applied:** architect should-fix — corrected two stale `mesh-worker-execution.mjs` comments that
+    claimed the write-credential wire was "NOT built" (it is: `mesh-launcher.mjs` supplies it as a literal F12-guarded key);
+    architect nit — anchored `acd-write-token-scoped-to-push`'s push-before-remove detector to the awaited CALL (was matching
+    the earlier function DEFINITION, masking a force-remove inserted between); QA nit F-04-B — corrected an over-claiming test
+    name ("live + stale" → "known-but-stale", since `assignableNodeOptions` is liveness-agnostic). All re-verified green (17 ok).
+  - **Integrating full suite `node scripts/test.mjs`: 2839 ok / 1 not-ok; `cargo test` 79 passed.** The sole `not ok` is a
+    **PRE-EXISTING, non-deterministic memory-extraction flake** (`memory-integration: status … lesson/adr split sums to record
+    count`) — proven IDENTICAL at the pre-work baseline `e61ee07`, driven by LLM (`claude-cli`) free-text record-kind extraction
+    (kinds like `"defect (process + integration)"` that are neither lesson nor adr); NOT a story-03/04/07 regression (the memory
+    subsystem is untouched). Same class as the reclaim-scheduler/coordination-launcher timing flakes — route to the same
+    stabilisation chore. **Milestone stays `in-progress`: stories 05, 06, 08 not yet built.**
+
 ## Notes & decisions in flight
 
 <!-- Surprises, corrections, mid-build discoveries. Decisions that prove durable graduate to ADRs at

@@ -72,11 +72,14 @@
 // (+`pull_requests:write` only for auto-PR) token, NEVER a widened clone credential —
 // is `createGithubAppPushMintProvider` (mesh-clone-credential-provider.mjs, task 02,
 // SECURITY T15/T9). Production wiring of `requestWriteCredential` onto a real
-// control<->worker frame-pair (mirroring ADR-009's clone-credential-request) is NOT
-// built by this story's four tasks (none of tasks 00-02's `@executable` scenarios name
-// a wire frame; the ADR's own codebase-graph grounding pins the branch+push blast
-// radius to mesh-worktree.mjs + this file) — flagged in STATE.md Feedback as the gap
-// task 03's `@manual` soak needs closed before it can run for real.
+// control<->worker frame-pair IS built (mirroring ADR-009's clone-credential-request):
+// mesh-launcher.mjs supplies `requestWriteCredential` as a LITERAL production key
+// (F12-guarded by acd-clone-credential-pull-not-pushed) via worker-stream-client.mjs's
+// own DISTINCT `write-credential-request`/`write-credential` frame pair, which the
+// control node answers through `applyWriteCredentialRequestFrame` under the SAME
+// holder gates as the clone pull (T6 connection-bound node, F15 frame-workspace match,
+// F16 active-assignment). What remains for task 03's `@manual` soak is the real
+// two-machine GitHub push over that wire, not the wiring itself.
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -770,11 +773,13 @@ function logAssignmentFailure(assignmentId, code, detail) {
 //                                      requestCloneCredential's OWN per-call-only
 //                                      discipline (SECURITY T4 applied to the write
 //                                      grant): no static credential option exists here
-//                                      either. THERE IS NO PRODUCTION WIRING YET (flag,
-//                                      STATE.md Feedback) — none of tasks 00-02's
-//                                      `@executable` scenarios name a control<->worker
-//                                      wire frame for this resolver, so mesh-launcher.mjs
-//                                      does not yet supply one; a caller that passes
+//                                      either. Production wiring EXISTS:
+//                                      mesh-launcher.mjs supplies this resolver as a
+//                                      LITERAL key — `requestWriteCredential: (request)
+//                                      => client.requestWriteCredential(request)` —
+//                                      over worker-stream-client.mjs's own DISTINCT
+//                                      `write-credential-request`/`write-credential`
+//                                      frame pair (F12-guarded). A caller that passes
 //                                      none makes no resolution attempt (an
 //                                      unauthenticated push, exactly the clone path's
 //                                      own no-resolver default).

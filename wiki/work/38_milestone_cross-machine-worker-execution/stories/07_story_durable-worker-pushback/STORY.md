@@ -4,7 +4,7 @@ number: 07
 slug: durable-worker-pushback
 title: "A worker's output survives — committed to a real branch and pushed for review"
 parent: 38
-status: in-progress
+status: in-review
 owner: product-owner
 created: 2026-07-18
 updated: 2026-07-18
@@ -49,15 +49,15 @@ write-scoped token minted only at push time, keeping the clone credential read-o
      Tasks 00–02 `@executable` (a real local bare repo as `origin` + a fake mint recording the two token bodies —
      no real GitHub); task 03 the real-GitHub-push `@manual` soak that directly inverts RESEARCH §4.1's finding. -->
 
-- [ ] `tasks/00_real-branch-not-detached.feature` — `@executable` — the worktree is checked out on a REAL branch
+- [x] `tasks/00_real-branch-not-detached.feature` — `@executable` — the worktree is checked out on a REAL branch
   `aof/mesh/<itemRef>-<assignmentId>` (sanitized to a `check-ref-format`-valid ref), HEAD on it, NOT a detached
   HEAD (contrast the measured `git worktree add --detach`); distinct branches per assignmentId; a Scenario
   Outline over ref-hostile itemRef/assignmentId shapes that must sanitize to a valid ref.
-- [ ] `tasks/01_push-before-worktree-removed.feature` — `@executable` — on a successful run, `git push origin
+- [x] `tasks/01_push-before-worktree-removed.feature` — `@executable` — on a successful run, `git push origin
   <branch>` (via `buildAskpassShim`) runs BEFORE the worktree force-remove (OBSERVABLE call-order + worktree
   still present at push time), over a real local bare origin; a push FAILURE (non-fast-forward / unreachable /
   auth-refused — Outline) RETAINS the worktree + surfaces a loud coded failure, never a clean `done`. (`@round-trip`)
-- [ ] `tasks/02_two-token-write-scope.feature` — `@executable` — the rewritten `acd-minted-token-scoped-single-repo`:
+- [x] `tasks/02_two-token-write-scope.feature` — `@executable` — the rewritten `acd-minted-token-scoped-single-repo`:
   the CLONE credential body stays EXACTLY `{repositories:[repo],permissions:{contents:read}}`; the WRITE token is
   single-repo, `permissions ⊆ {contents:write(,pull_requests:write when auto-PR)}`, and the write body appears
   ONLY in the push-mint function (never the clone path). An Outline enumerates the plants that MUST trip CI:
