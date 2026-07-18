@@ -1816,10 +1816,14 @@ async function runSuite() {
   // rationale: the node identity is machine-wide now, so each test gets its OWN empty
   // global home to stop identity/global-store state leaking across tests (or onto the real
   // machine). The integration lane below keeps process.env untouched afterward.
-  const { tmpdir } = await import("node:os");
+  //
+  // Rooted under ~/.aof-test (never ~/.aof, the real machine's global home) — a fixed,
+  // dedicated, gitignored test root, not raw OS tmpdir, so stray test fixtures are
+  // trivially auditable/wipeable in one place instead of scattered across the OS temp dir.
+  const { homedir } = await import("node:os");
   const { join } = await import("node:path");
   const { rmSync } = await import("node:fs");
-  const ghRoot = join(tmpdir(), `aof-test-gh-${process.pid}`);
+  const ghRoot = join(homedir(), ".aof-test", `gh-${process.pid}`);
   let ghIndex = 0;
 
   console.log("# unit");

@@ -405,6 +405,17 @@ node** (one fleet-wide key, signs the App JWT, NEVER relayed). T8–T11 model th
   is a GitHub property, bounded by T8's App least-privilege and attested once — not per-soak.
 - **Evidenced by.** **Fitness** `acd-minted-token-scoped-single-repo` (F6) + ADR-009 mint seam +
   T8's App-least-privilege attestation.
+- **⇢ Story-07 RE-OPENS this — and it stays CLOSED under a TWO-TOKEN model (see T15).** Durable
+  push-back (story 07, RESEARCH §4.2) needs `contents:write` (and `pull_requests:write` if it
+  auto-opens a PR) to `git push` a worker's branch — a deliberate widening of the least-privilege
+  posture THIS threat code-enforced at `mesh-clone-credential-provider.mjs:181`. The resolution does
+  NOT relax this invariant: the **CLONE credential STAYS single-repo `contents:read`** (this T9 clause,
+  unchanged and still F6-pinned), and a **SEPARATE write-scoped token** is minted single-repo, ONLY at
+  the push seam, short-lived, off the clone path. F6 (`acd-minted-token-scoped-single-repo`) is
+  REWRITTEN into a TWO-SEAM detector (clone=read, push=write, neither over-scoped, the clone body
+  provably never widened) — the exact rewrite direction is **T15**. T9's own "single-repo,
+  `contents:read`" assertion survives VERBATIM for the clone mint; the write mint is a new, separately
+  bounded clause, not a loosening of this one.
 
 ### T10 — Mint-time failure that silently falls back to a broad token or an unauthenticated clone · `AuthZ` + `Info-disclosure` · sev **High**
 
@@ -474,6 +485,198 @@ node** (one fleet-wide key, signs the App JWT, NEVER relayed). T8–T11 model th
   researcher's finding; F2 (`acd-worker-clone-no-credential-persisted`) is the fitness that would pin
   the shim's handling. **The architect reconciles the exact shape — security has NOT invented the
   resolution.**
+
+## Threat model — stories 03–07 (operator-directed expansion: per-org isolation · the UI mutation face · the terminal mirror · durable push-back)
+
+These four threats extend the model for the mid-milestone stories the operator locked in during
+`aof:verify 38` (RESEARCH §4). Each is operator-directed with RESEARCH backing — a crisp
+threat→attack→control entry, not a re-decided feature. T15 additionally RE-OPENS T9 (updated in-place
+above). ADRs are referenced loosely ("the story-NN ADR") — a parallel architect owns them.
+
+### T12 — Per-org App-key confusion: a mis-scoped resolution mints with the WRONG org's App, or the default key dir lands in a sync/world-readable path · `AuthZ` + `Info-disclosure` · sev **High** (story 03)
+
+- **NEW surface (story 03 moves the App IDENTITY from one-per-fleet to one-per-assigned-workspace).**
+  Story 02 resolved the `mintCloneCredential` provider ONCE, from the control node's own launch-workspace
+  config (`mesh-launcher.mjs:508-513`), so ONE App (or one env-token) mints for EVERY repo across the
+  whole mesh regardless of org. Story 03 resolves the App identity (`appId` + `privateKey` + optional
+  `installationId`) PER-ASSIGNED-workspace, from THAT workspace's OWN committed `mesh.repo.credential.*`
+  config — mirroring how `createResolveWorkspaceCloneUrl` (the story-02 ADR, "Gap A") already resolves
+  `cloneUrl` per workspace. The isolation boundary becomes the ORG: each org its own App, key, installation.
+- **Attack.** (a) **Cross-org key confusion.** A mis-configured — or hostile — workspace descriptor
+  resolves ANOTHER org's App key, so the mint signs org A's repo request with org B's App (or BORROWS
+  org B's App when org A has none configured). A confused/stolen App then mints tokens for repos across
+  an org boundary the operator believed isolated — the fleet-wide T8 blast radius now leaking ACROSS orgs.
+  (b) **The new default private-key directory lands in a sync/world-readable path.** Story 03 adds a
+  code-enforced default key dir (`<meshRoot>/credentials/`, i.e. `~/.aof/mesh/credentials/`) for when
+  neither `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH` nor `config.mesh.repo.credential.githubApp.privateKeyPath`
+  is set (`resolveGithubAppPrivateKey`, `mesh-launcher.mjs:131`). If that default ever resolved into a
+  Dropbox/iCloud/OneDrive-synced or world-readable location, the T8 fleet-wide signing secret is
+  exfiltrated by the sync client itself — a MEASURED operator footgun (the story exists BECAUSE the
+  operator had to relocate the story-02 key OUT of a Dropbox-synced folder).
+- **Control.** (a) Resolution reads ONLY the assigned workspace's OWN committed config (the descriptor
+  lookup, mirroring `createResolveWorkspaceCloneUrl`) — it NEVER reaches for a sibling workspace's App,
+  and absent an App/key for the assigned workspace's org the mint fails **LOUD** (the existing
+  `clone-credential-mint-failed` → `assignment-repo-unavailable` posture), NEVER silently borrows another
+  org's App. A confused/absent descriptor is a refusal, not a cross-org mint. (b) The per-mint scope is
+  UNCHANGED and still code-pinned: WHICHEVER App resolves, F6 (`acd-minted-token-scoped-single-repo`)
+  still bounds the request to single-repo `contents:read` — even a confused App cannot exceed one repo,
+  read-only. (c) The default key dir is a **file-permission-protected, NON-SYNC path under the global
+  mesh home** (`<meshRoot>/credentials/`, honoring `AOF_GLOBAL_HOME`) — never a sync-scoped folder —
+  re-arming T8's "file-permission-protected path" requirement for the DEFAULT case, built from
+  `globalMeshPaths().meshRoot` by the same scoped-seam discipline as `meshCheckoutPath`/F1 (never a
+  user-home guess).
+- **Residual (Accepted — operator-attested, per-org extension of T8/R7).** No worker/CI test can see the
+  server-side installation scope of EACH org's App, nor the on-disk perms of a key file — so the T8
+  attestation now repeats PER ORG: the operator attests each org's App is installed least-privilege
+  (`contents:read`, selected repos, no write / no org-wide) and its key stored file-perm-protected in a
+  non-sync path. NARROWER than re-litigating each token; one-off per App/org.
+- **Evidenced by.** The **story-03 ADR** (per-workspace App-identity resolution, mirroring Gap A) + the
+  story-03 **`@executable`** `tasks/01_cross-org-key-isolation.feature` (a mint for workspace A's org can
+  never be produced with workspace B's App; a workspace whose org has no App fails loud, never borrows) +
+  `tasks/02_default-private-key-directory.feature` (the default resolves under `<meshRoot>/credentials/`,
+  never a sync folder) + **F6** unchanged (per-mint scope stays single-repo `contents:read` whichever App
+  resolves) + the **operator attestation** per org (T8/R7 extended).
+
+### T13 — Hostile POST to the fleet-face mutation carve-out (mint work on an arbitrary/ineligible node; CSRF) · `AuthZ` + `Tampering` · sev **High** (story 04)
+
+- **NEW surface (the read-only fleet face gains its FIRST write route).** `mesh-ui-serve.mjs` is
+  read-only by ADR-004/ADR-006 — it serves `GET /api/mesh/status` + `GET /api/mesh/board-url`, every
+  write method is a clean 405 (`sendMethodNotAllowed`), every WebSocket upgrade is destroyed
+  (`server.on("upgrade", socket.destroy)`), and it does ZERO fs write and NO shell-out (verified at
+  source). Story 04 adds ONE write route wrapping the existing `aof mesh assign <ref> --to <nodeId>`
+  (`mesh-assign.mjs`) so an operator dispatches from the UI. This is the first, single, explicit
+  exception to the read-only invariant.
+- **Attack.** (a) An **unauthenticated / cross-site POST** minting work on an arbitrary node, or forging
+  an assignment to a node that LACKS the repo (an ineligible target). (b) **CSRF**: the face binds
+  `127.0.0.1`, but a browser running on the control host can be driven cross-origin (a malicious page
+  auto-POSTing to `http://127.0.0.1:4181/…`) to mint work the operator never authorized. (c) A POST that
+  bypasses the CLI's arbitration to double-assign a node (breaking the single-runner uniqueness invariant).
+- **Control.** (a) The write route is a THIN wrapper that **re-runs the verb's EXISTING gates** —
+  node-known (live roster), control-side repo-availability, single-runner uniqueness — so an
+  unknown/ineligible/duplicate target is refused **IDENTICALLY to the CLI**; the UI path reimplements no
+  arbitration and can mint nothing the CLI could not. (b) **Admission posture required (specify, then
+  prove): loopback-bind only (`127.0.0.1`, never `0.0.0.0` — already the face's bind) + local-admission
+  at minimum, AND a cross-origin write MUST be refused** (reject on `Origin`/`Sec-Fetch-Site` cross-site,
+  or require a non-simple content-type + a custom header a form-POST cannot forge) — closing the CSRF
+  vector. (c) **The carve-out is EXACTLY ONE route**: the single new POST endpoint; every OTHER method on
+  every OTHER path stays 405/404 exactly as today (the ADR-004 read-only posture is preserved everywhere
+  except this one seam).
+- **Residual (name the fully-local attacker).** Anyone who can already reach `127.0.0.1` on the control
+  host — a local process or logged-in user — can drive the assign route exactly as the operator can
+  (identical to running the `mesh assign` CLI). That is the INHERITED local/tailnet admission boundary
+  (33/ADR-002; 35/SECURITY T1), NOT widened by this story: the UI face grants no capability the CLI on the
+  same host did not already have. What story 04 must NOT do is extend that reach BEYOND the loopback host
+  (hence the bind + cross-origin controls above).
+- **Evidenced by.** The **story-04 ADR** (fleet-face mutation carve-out — endpoint shape + admission
+  gating) + the existing `mesh assign` gates (node-known, repo-availability, single-runner uniqueness)
+  reused verbatim + a story-04 **`@executable`** (a POST to an unknown/ineligible node is refused
+  identically to the CLI; a cross-site POST is rejected; the assign mints the `assigned` record on the
+  happy path) + an **arch-invariant** direction `acd-fleet-face-single-mutation-route` (the fleet face
+  exposes EXACTLY one write route; every other path/method stays 405/404 — the structural pin that the
+  read-only posture gained precisely ONE exception) + the **operator attestation** of the live bind
+  interface (loopback only — no worker/CI test asserts the running bind, R5-style).
+
+### T14 — A worker's live terminal (an agent with credentials + shell) mirrored to the control node · `Info-disclosure` + `Isolation` · sev **High** (story 06)
+
+- **NEW surface (a credentialled interactive terminal now crosses the mesh).** Story 05 replaces
+  `claude -p` with an interactive `claude` in the worker's `/ws/terminal` PTY (`terminal-ws.mjs`, a
+  FROZEN **bidirectional** bytes envelope) — an agent with shell access and live credentials in its
+  process. Story 06 relays that PTY byte stream cross-machine over `mesh-relay.mjs` into the control
+  node's fleet view, routed by (nodeId, sessionId). The fleet face's DELIBERATE no-`/ws/terminal`
+  refusal (the `server.on("upgrade", socket.destroy)` above) becomes a carve-out.
+- **Attack.** (a) Secrets / tokens / source code on-screen become visible to whoever views the control
+  fleet view. (b) A compromised control node HARVESTS the worker's terminal output continuously (a richer
+  prize than one relay frame). (c) The "read-only mirror" being INTENT not FACT: the `terminal-ws`
+  envelope is bidirectional by design, so a reverse **input path** could smuggle keystrokes from the
+  fleet view down to the worker PTY — turning a view into remote shell control (the read-WRITE capability
+  the story explicitly DEFERS to Phase 2).
+- **Control.** (a) **Read-only IN FACT this story — pinned structurally.** The bridge relays PTY
+  **output** bytes ONLY; there is NO wire path from the fleet face to the worker's `/ws/terminal` input.
+  Arch invariant `acd-fleet-terminal-mirror-read-only`: the cross-machine terminal frame carries the
+  output direction only, and NO fleet-originated input/keystroke frame is forwarded onto the worker's PTY
+  socket (the bidirectional envelope is used output-only on this bridge; the input direction has no code
+  path). (b) **Who may view = the SAME admission posture as T13** (loopback-bound control fleet face +
+  local-admission; the cross-machine relay rides the tailnet peer boundary, 33/ADR-002, exactly as the
+  credential relay does — R5). (c) **The credential MATERIAL never streams**: the minted token lives ONLY
+  in the one-shot askpass file (T7/R6), never echoed to the PTY; the App key / JWT / mint are
+  control-side (T8/F5), never on the worker terminal at all. The existing credential-handling invariants
+  (T1/T2/T7 keep the token off argv/env/log; F5 keeps the key off every sink) already keep the secret
+  MATERIAL out of the mirrored bytes — the mirror can leak only what the agent itself PRINTS on screen.
+- **Residual (name it — inherent to a terminal mirror).** On-screen secrets are inherently visible to an
+  AUTHORIZED viewer: any token, file content, or env value the agent prints to its OWN terminal is, by
+  construction, visible to anyone permitted to view the mirror — no control can redact an arbitrary
+  on-screen byte stream. Accepted; and the compromised-admitted-control-node case is the INHERITED
+  35/SECURITY T1 boundary (not widened — but its prize now includes live terminal output). The soak's
+  **`@manual`** inspection watches for a credential appearing on-screen in the mirrored stream.
+- **Evidenced by.** The **story-06 ADR** (cross-machine terminal bridge; read-only mirror; (nodeId,
+  sessionId) routing) + the **arch invariant** `acd-fleet-terminal-mirror-read-only` (armed at build: the
+  bridge + the fleet-face terminal route carry OUTPUT frames only; NO code path forwards a fleet-originated
+  input frame to the worker PTY — the "read-only in fact" pin) + the inherited credential-off-PTY
+  invariants (T7/F2 token only in the askpass file; T8/F5 key/JWT control-side) + the admission posture as
+  T13/R5 (operator-attested bind + tailnet relay) + the **`@manual`** soak inspection (no secret visible
+  in the mirrored stream on a real run).
+
+### T15 — Widened write-scoped mint for push-back — RE-OPENS T9 · `AuthZ` · sev **High** (story 07)
+
+- **NEW surface (least-privilege deliberately widened for `git push`).** Durable push-back (story 07,
+  RESEARCH §4.2) needs `contents:write` to push a worker's branch (and `pull_requests:write` if it
+  auto-opens a PR) — a widening of the single-repo `contents:read` posture story 02 code-locked at
+  `mesh-clone-credential-provider.mjs:181` (`{ repositories:[repo], permissions:{contents:"read"} }`) and
+  pinned by `acd-minted-token-scoped-single-repo` (T9/F6). This RE-OPENS T9 (updated in-place above).
+- **Attack.** (a) A `contents:write` token captured (askpass exposure R6, transit R5) or over-scoped
+  writes to repos BEYOND the assigned one — the exact over-scope T4/T9 exist to prevent, now at WRITE
+  authority (a captured write token can rewrite / force-push / delete branches). (b) The write grant
+  PERSISTS beyond the push instant — a broad exposure window rather than the momentary push. (c) The
+  **CLONE credential is silently widened** to `contents:write` (the easiest wrong move — flip the one
+  existing mint body from `read` to `write`), collapsing the whole clone-on-miss path to write scope so
+  EVERY dispatched worker holds a write token for the whole run.
+- **Control — the §4.2 TWO-TOKEN shape (security-preferred; adopt it).** (a) The **CLONE credential STAYS
+  `contents:read`** — single-repo, minted on the clone-miss PULL, byte-unchanged (the T9/F6 invariant
+  preserved VERBATIM for the clone mint). (b) A **SEPARATE write-scoped token** is minted single-repo,
+  **ONLY at the push seam**, short-lived, and NEVER on the clone path: single-element `repositories`
+  derived from the assigned repo, `permissions` no broader than `{ contents: "write" }` (+
+  `{ pull_requests: "write" }` ONLY if auto-PR) — never `administration`, never org-wide, never omitted.
+  (c) The push reuses the ALREADY-BUILT `GIT_ASKPASS` shim (`buildAskpassShim`), so the write token
+  inherits the SAME handling invariants as the clone token (T1/T2/T7: never persisted to `.git/config`,
+  never on ambient `process.env`, ambient helper reset) — its only NEW property is the wider scope,
+  isolated to the push moment.
+- **Fitness-test rewrite direction — `acd-minted-token-scoped-single-repo` must become a TWO-SEAM
+  detector (spec here; ARMED AT BUILD against the real push-mint module, NOT edited in this pass).**
+  Today the detector locates "the FIRST `access_tokens` call site" (`accessTokensBodyLiteral`) and asserts
+  single-repo + `{ contents: "read" }` — one seam. After story 07 there are TWO mint seams (a read mint
+  for clone, a write mint for push), so the rewrite MUST:
+  1. **DISCRIMINATE the two seams** — locate BOTH `access_tokens` request bodies (iterate EVERY call site
+     rather than `indexOf("access_tokens")` once, or key each body to its own mint function/export: the
+     existing clone `createGithubAppMintProvider` vs the NEW push/write mint). Keep the milestone's
+     non-vacuity discipline VERBATIM (synthesized `"\n"`-joined plants, real source asserted clean FIRST,
+     each plant asserted to DIFFER from its clean baseline — the tree is CRLF).
+  2. **CLONE-mint clause (the T9 invariant, unchanged, now seam-scoped): STILL FAIL any clone-path mint
+     that is not EXACTLY single-repo `contents:read`** — the clone body deep-equals
+     `{ repositories:[repo], permissions:{contents:"read"} }`. ADD a NEW negative plant: a clone-mint body
+     carrying `contents: "write"` (or ANY write) MUST trip — the code-pin against attack (c), "the clone
+     credential is never silently widened".
+  3. **WRITE-mint clause (new): assert the write token is single-repo + minted ONLY at the push seam + no
+     broader than `contents:write`(+`pull_requests:write`)** — its `access_tokens` body names a
+     single-element `repositories`/`repository_ids` derived from the assigned repo (never omitted, never
+     >1), and `permissions` is a subset of `{ contents: "write", pull_requests: "write" }` (auto-PR OFF ⇒
+     EXACTLY `{ contents: "write" }`). Plants that MUST trip: OMIT `repositories` (all-repo WRITE — the
+     worst case), multi-repo write, an ADDED `administration`/org-wide key, an OMITTED `permissions`. And
+     the write mint's `access_tokens` call must live ONLY in the push-mint function — assert the clone
+     provider's exported `mintCloneCredential` contains NO write body (the "minted only at push time,
+     never on the clone path" seam pin). NEGATIVE control (stays clean): clone body =
+     `{ repositories:[repo], permissions:{contents:"read"} }` AND push body =
+     `{ repositories:[repo], permissions:{contents:"write"} }` (or `{contents:"write",pull_requests:"write"}`
+     when auto-PR is in scope).
+- **Residual.** None accepted for the request SHAPE of EITHER seam (structural, fitness-pinned across
+  both). The server-side realisation (GitHub honours each request and issues nothing broader) stays
+  bounded by the App's own least-privilege installation — but note the App must now be installed
+  `contents:write` (+ `pull_requests:write` if auto-PR) for the target repos, a WIDER installation than
+  story-02's read-only App, which the operator attests once (T8/R7 extended to the write grant).
+- **Evidenced by.** The **story-07 ADR** (durable push-back — branch convention, push, PR, two-token vs
+  one-token — the ADR chooses; §4.2 recommends two-token) + the REWRITTEN **F6**
+  `acd-minted-token-scoped-single-repo` (two-seam detector, spec above) + the reused `GIT_ASKPASS`/F2
+  handling on the write token + the T9 update above + the **operator attestation** of the App's
+  now-`contents:write` installation scope (T8/R7 extended).
 
 ## Residual risk (the honest list) → route to VERIFICATION / UAT
 
@@ -639,7 +842,11 @@ clean baseline** before asserting `problems.length > 0`.
   repos); (2) `repositories: [repoA, repoB]` (multi-repo); (3) `permissions: { contents: "write" }`;
   (4) `permissions: { contents: "read", administration: "read" }` (broader set); (5) OMIT `permissions`
   (→ the installation's full scope). NEGATIVE control that MUST stay clean: `{ repositories: [repo],
-  permissions: { contents: "read" } }` (single-repo, read-only).
+  permissions: { contents: "read" } }` (single-repo, read-only). **⇢ Story-07 REWRITES this into a
+  TWO-SEAM detector** — the clone mint stays exactly single-repo `contents:read` (with a NEW plant that
+  a `contents:write` on the CLONE body trips it), and a SEPARATE push mint is asserted single-repo +
+  no broader than `contents:write`(+`pull_requests:write`) + present ONLY at the push seam. The exact
+  direction is in **T15**; armed at build against the real push-mint module, never here.
 - **F7 (config-driven, NOT security-owned — noted for the seam).** `acd-clone-credential-provider-config-driven`
   (story fitness unit 1) is **architect/developer-owned**: the mint provider is resolved from
   `config.mesh.repo.credential.provider` at the `mintCloneCredential` seam, no hard-coded single

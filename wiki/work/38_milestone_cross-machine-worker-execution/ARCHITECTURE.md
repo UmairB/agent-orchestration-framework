@@ -811,6 +811,187 @@ during the soak's provisioning:
 
 ---
 
+## ADR-011: The clone-credential-mint's App IDENTITY is resolved PER-ASSIGNED-WORKSPACE — the same per-workspace treatment ADR-010 Gap A gave `cloneUrl`, extended to `appId`/`privateKey`/`installationId` — so each org's repos are minted by that org's OWN App; a workspace whose own config resolves no App/key fails LOUD, never borrows a sibling org's key. `resolveGithubAppPrivateKey`'s default directory is a CODE-ENFORCED `<meshRoot>/credentials/`, never a sync-scoped folder
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 03. Builds option 2 of ADR-010's "Known limitation" (one App per org, the operator's stated preference — "keep this locked down and explicit"). Does NOT re-open ADR-009's PULL channel or ADR-010's provider selection — it changes only WHERE the `github-app` provider reads its App identity from. Security owns the matching threat T12.**
+
+**Codebase-graph grounding (built fresh at this decision — `aof graph build src` → 1948 nodes / 5041 edges / 92 communities, `builtAt` this session, egress none).** `aof graph impact src/mesh-clone-credential-provider.mjs` → **imported/called by ← 1** (`mesh-launcher.mjs`, sole); imports → `control-stream-server.mjs`, `mesh-worker-execution.mjs` (`parseRepoFromCloneUrl`), `mesh-presence.mjs`. The provider module's production-wiring blast radius is exactly **one importer** — the launcher — the same single-site fact ADR-009/010 relied on. `resolveGithubAppPrivateKey` (`mesh-launcher.mjs:131`) and `createResolveWorkspaceCloneUrl` (`:103`) already live in that one importer. The graph is one input; the decision is the architect's call.
+
+**Context.** ADR-010 shipped the `github-app` provider and made `cloneUrl` resolution per-workspace via `createResolveWorkspaceCloneUrl(ws, options)` (`mesh-launcher.mjs:103`, Gap A) — a repo in any org resolves its clone URL from each workspace's OWN committed `mesh.repo.cloneUrl`. The App IDENTITY did NOT get that treatment: `resolveCloneCredentialProvider` reads `appId`/`privateKey`/`installationId` ONCE, from the control node's launch-workspace merged config, at the single call site (`mesh-launcher.mjs:523-528`) — so one control node mints with exactly one App for every repo across the whole mesh regardless of org (ADR-010's recorded "Known limitation"). `loadWorkspace` ALREADY merges the GLOBAL `~/.aof/aof.config.json` mesh config as the base with each project's LOCAL mesh config on top (`work.mjs:176-180`, local wins) — so a single global App is ALREADY the fleet-wide singular default and a project's local config can ALREADY override it; the ONLY gap is that the override is read once from the launch workspace, never re-resolved for the workspace an assignment actually targets. `resolveGithubAppPrivateKey` today (`mesh-launcher.mjs:131`) returns `null` when neither `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH` nor `config.mesh.repo.credential.githubApp.privateKeyPath` is set — no default directory — so a key must be pointed at explicitly (as the live soak does, after the operator relocated the key out of a Dropbox-synced folder into `~/.aof/mesh/credentials/`).
+
+**Decision.**
+- **App identity is resolved per-assigned-workspace, keyed by the mint's `workspaceId` — mirroring `resolveWorkspaceCloneUrl` verbatim.** The `github-app` provider closes over a NEW injected seam `resolveWorkspaceAppIdentity(workspaceId) → { appId, privateKey, installationId } | null` (name indicative), supplied by the launcher exactly as `resolveWorkspaceCloneUrl` is (Gap A). Its source of truth is each workspace's OWN global-merged committed `config.mesh.repo.credential.githubApp.*`, resolved through the SAME ADR-003 descriptor seam (`resolveWorkspaceProjectRoot` → `loadWorkspace` → the raw optional-chain read) `createResolveWorkspaceCloneUrl` already uses, with the control node's own launch-workspace config as the single-repo/bootstrap fallback (the singular-default case — a single-org fleet needs no per-workspace config at all).
+- **The mint-seam signature stays byte-identical** (ADR-010 decision 2, re-armed). `mintCloneCredential(workspaceId, assignmentId)` is UNCHANGED: the identity resolution moves INTO the provider's closure, keyed by the `workspaceId` the frame handler already F15-binds to `existing.workspace_id`. The worker-supplied frame NEVER steers which App/key is used, exactly as it never steers the cloneUrl.
+- **Singular App by default, override-able per workspace** (operator, 2026-07-16). Absent a per-workspace `mesh.repo.credential.*` override, resolution falls through to the control node's own (global-merged) default App — the SAME singular behaviour as today, now correctly reached for ANY assigned workspace, not only the launch one. A workspace in a different org sets its own local override to isolate.
+- **Cross-org key isolation is STRUCTURAL, not a runtime check.** The App key that mints workspace A's token is resolved FROM workspace A's own committed config, keyed by A's `workspaceId`; there is NO code path that carries a previously-resolved identity across workspaces, and none that reads workspace B's local override to mint A's token. A workspace whose own (global-merged) config resolves NO `appId`, or whose key file is unreadable, resolves to a NULL identity → the provider THROWS the existing loud coded `clone-credential-mint-failed` → `assignment-repo-unavailable` (ADR-009/010's inherited failure path), NEVER a silent fallback to a sibling workspace's / another org's already-resolved App. "Borrowing" is the exact failure this ADR forbids by construction.
+- **The private-key default directory is CODE-ENFORCED and never sync-scoped.** `resolveGithubAppPrivateKey` gains a final fallback after env and config path: a CODE-ENFORCED default under the global mesh home — `<meshRoot>/credentials/` (`~/.aof/mesh/credentials/`, honoring `AOF_GLOBAL_HOME`), composed through the `globalMeshPaths` seam — NEVER a path derived from a Dropbox/iCloud/OneDrive/any sync-scoped folder (SECURITY T8's file-permission-protected-at-rest posture). The key is still read only at resolve time and flows only into the JWT signer (ADR-010 F5), never a log/frame/`process.env`.
+
+**Structural invariants (each testable; armed by `acd-cross-org-key-isolation`).**
+1. **App identity is per-workspace, keyed by the mint's `workspaceId`** — there is a `resolveWorkspaceAppIdentity`-shaped seam keyed by `workspaceId`; the provider does not close over a single static `appId`/`privateKey` applied to every mint.
+2. **No cross-org borrow.** No code path mints workspace A's token with an identity resolved from a workspace whose id ≠ A; a null-resolved identity THROWS the loud coded refusal, never falls back to a sibling's identity or the launch workspace's App.
+3. **The default private-key directory is `<meshRoot>/credentials/`**, code-composed via `globalMeshPaths` — never a config-supplied default that could point at a synced tree, never a `homedir()`+sync-folder path.
+4. **The mint seam signature and the F15 worker-frame-drops-cloneUrl posture are preserved** — identity is keyed by the F15-bound `workspaceId`, not by the worker's frame.
+
+**Consequences.**
+- ADR-010's "Known limitation" is closed for the multi-org case: a leak of one org's App key can mint only THAT org's repos — the isolation boundary is the org, not just the repo inside one shared App.
+- The singular-App single-org fleet (this milestone's soak) is byte-unchanged — no per-workspace credential config is required for it; the launch-workspace fallback IS today's behaviour.
+- Dropping a key into `~/.aof/mesh/credentials/` needs no explicit path after this ships; a key left in a sync-scoped folder is a configuration the operator must make explicitly, never a silent default.
+- **`acd-cross-org-key-isolation` is SPEC, armed at BUILD** — the per-workspace identity seam does not exist yet (story `not-started`); a detector authored now would scan absent wiring (vacuous — the ADR-008 / SECURITY-F5/F6 deferral precedent). Armed at build against the real seam.
+
+---
+
+## ADR-012: The read-only fleet face gains its FIRST live write route — ONE `POST /api/mesh/assign` carve-out wrapping the existing `assignWork` verb VERBATIM, re-running every one of its gates; loopback-bound + same-origin local-admission, adding NO new arbitration. This REALIZES the m35/ADR-007-deferred UI-assign affordance on the m27/ADR-006 bounded-write posture
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 04. Relaxes m25/ADR-004's + this milestone's ADR-006 read-only fleet-face posture — the FIRST live mutation route on `mesh-ui-serve.mjs`. Honours the m27/ADR-006 bounded-write precedent and realizes the m35/ADR-007 explicitly-deferred UI-assign POST. Security owns T13.**
+
+**Codebase-graph grounding (fresh, this decision).** `aof graph impact src/mesh-ui-serve.mjs` → **imported/called by ← 3**: `src/cli.mjs` (the ONE production importer) plus two references under `wiki/work/35_.../reference/retired-dispatch-tests/` (`mesh-issue-route-same-origin.mjs`, `mesh-ui-issue-route.mjs`) — i.e. the m27 `POST /api/mesh/issue` write route was RETIRED, and the current source confirms it: `mesh-ui-serve.mjs` serves GET-only, a POST is a clean 405, and `server.on("upgrade")` destroys every socket ("there is no fleet mutation route"). `aof graph impact src/commands/mesh-assign.mjs` → **imported/called by ← 7** (`cli`, `control-stream-server`, `global-work-publisher`, `mesh-assignment-reclaim`, `mesh-launcher`, `mesh-presence`, `mesh-worker-execution`) — `assignWork` is a well-coupled, reused core. The UI route becomes an 8th CALLER of that SAME core, never a re-implementation. Actual structure, not inference. The graph is one input; the decision is the architect's call.
+
+**Context.** The fleet face is read-only by ADR-006 (this milestone) and m25/ADR-004: `GET /api/mesh/status` + `GET /api/mesh/board-url`, POST = 405, upgrade destroyed. The dispatch verb already exists and is complete — `assignWork(workspace, ref, nodeId, ctx)` (`commands/mesh-assign.mjs:99`): resolves the ref EXACTLY (`findWork`, refuses `ref-not-found`), enforces the single-runner uniqueness invariant (`findActiveAssignment`, refuses `assignment-already-active`), runs the control-side repo-availability gate (`resolveTarget`: node-known → `assignment-target-unknown`, membership+publish → `assignment-repo-unavailable`), and only THEN mints the `assigned` record in `global_assignments`. Every miss mints nothing and returns a structured `{ ok:false, code }`. The operator's requirement (2026-07-18, RESEARCH §4.5): dispatch from the UI where the terminal lives, never the CLI. Prior art the memory-recall surfaced: m27/ADR-006 already established the bounded-fleet-face-write SHAPE (`POST /api/mesh/issue` → invoke a `mesh:*` verb, same-origin 127.0.0.1, flipping exactly the write-isolation fitness to a bounded shape while single-server/no-core-import stay green) — since retired — and m35/ADR-007 explicitly DEFERRED the UI-assign POST as "a guarded same-origin+json POST is a deferred future affordance." This ADR realizes that deferred affordance on that bounded posture.
+
+**Decision.**
+- **ONE new write route: `POST /api/mesh/assign`** (body `{ ref, nodeId }`) — the SINGLE, explicit exception to the read-only invariant. It resolves the current workspace and calls the EXISTING `assignWork(workspace, ref, nodeId, ctx)` core VERBATIM — it adds NO new arbitration, no second uniqueness rule, no bespoke repo check. (Withdraw MAY ride the same route shape as a follow-up; assign is the pinned scope.)
+- **The UI path re-runs the verb's OWN gates — a hostile/ill-formed POST is refused by the SAME gates as the CLI.** Because the route wraps `assignWork`, a POST naming an unknown node hits `assignment-target-unknown`, an ineligible node hits `assignment-repo-unavailable`, a duplicate hits `assignment-already-active`, a typo'd ref hits `ref-not-found` — each mints nothing. The route MUST surface the verb's structured `{ ok:false, code }` as a coded HTTP error (the fleet face's existing `sendApiError` envelope), never a 200, never a second success path around the gates.
+- **Admission / authorization posture — DOCUMENTED DEFAULT (RESEARCH does not pin this; this is the genuine open decision, taken here).** The route is **loopback-bound** (the fleet face already binds `127.0.0.1` only) and admitted by **same-origin local-admission**: it accepts the POST only from a same-origin browser on the loopback interface (the m27/ADR-006 + board-serve single-user posture), with no cross-origin write and no new credential/token in this story. A single-user 127.0.0.1 server needs no more (the terminal-ws/board precedent). A networked, multi-operator fleet face would need a real auth gate — recorded here as the explicit boundary of this decision, NOT built in this story. Security owns whether this posture is sufficient (T13).
+- **The isolation guarantees that must STAY green** (the m27/ADR-006 discipline): the fleet face keeps exactly ONE `http.createServer` bound to loopback; it imports the `assignWork` verb + the existing global query surface, NOT low-level work/run/mesh writers; it still serves no `/ws/terminal` (story 06 opens that carve-out separately). Only the write-isolation invariant flips — from "no mutation route" to "exactly ONE bounded mutation route wrapping one verb."
+- **Producer-fed conformance (ADR-008).** This route is a boundary we now own on BOTH sides (the UI POSTs, the route consumes) — so conformance requires a REAL POST from the REAL built UI hitting the REAL route and producing a REAL `global_assignments` record read back through the REAL store. A test that asserts the route handler agrees with a hand-built request body, or that the "assign" button emits a well-formed URL, proves nothing (F4's "wiring is not a contract"). The affordance is proven by the record it mints.
+
+**Structural invariants (each testable; armed by `acd-fleet-face-single-mutation-route`).**
+1. **EXACTLY ONE mutation route on the fleet face**, and it is `POST /api/mesh/assign`. Any second write route, or a write method on any other path, trips the detector (the read-only invariant keeps exactly one documented exception).
+2. **The write route calls `assignWork` and mints through no other path.** No `insertAssignment` / `global_assignments` write reachable from `mesh-ui-serve.mjs` except through the `assignWork` verb — the gates cannot be bypassed.
+3. **A gate miss is surfaced, never swallowed.** The route maps the verb's `{ ok:false, code }` to a coded non-200; it never mints on a gate miss and never returns 200 for a refusal.
+4. **The fleet face stays otherwise read-only** — one loopback `http.createServer`, no low-level writer import, no `/ws/terminal` (this story), `GET /api/mesh/status` still 405s a write.
+
+**Consequences.**
+- An operator dispatches work from the fleet UI; the assign mints the `global_assignments` record and the UI reflects the `assigned` chip (m35/story-03's read shape) — verifiable independently of the terminal stories.
+- The read-only posture gains exactly ONE documented, testable exception; the m27 write-isolation lesson is honoured (bounded, verb-wrapping, single-server, no-core-import).
+- **DOCUMENTED DEFAULT for STATE.md:** endpoint = `POST /api/mesh/assign` `{ ref, nodeId }`; admission = loopback-bound + same-origin local-admission, no auth token this story (a networked multi-operator face needs a real gate — explicitly out of scope). Security (T13) reviews whether local-admission suffices.
+- **`acd-fleet-face-single-mutation-route` is SPEC, armed at BUILD** — the route does not exist yet; armed against the real handler.
+
+---
+
+## ADR-013: The worker's execution seam replaces `claude -p` with an INTERACTIVE `claude` PTY session — one long-lived interactive session PER ASSIGNMENT, driven by a whole command string typed into stdin, over the EXISTING `terminal-providers`/node-pty seam (on the worker's subscription). Terminal state is an explicit `NEEDS_INPUT` sentinel, not a one-shot JSON `terminal_reason`; the `session_id` is captured; a needs-input session RETAINS its worktree
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 05. Replaces the `defaultSpawnRuntime`/`buildDriverCommand` `claude -p` driver measured in RESEARCH §4.3. Depends on story 04 (an assignment to consume); precedes story 06 (a terminal to stream). Does NOT reintroduce the Agent SDK / per-token API path (§4.3 — that forces off-subscription billing).**
+
+**Codebase-graph grounding (fresh, this decision).** `aof graph impact src/terminal-ws.mjs` → **imported/called by ← 1** (`src/setup-ui.mjs`, the board server) — the fleet face and the worker do NOT reach it today; the interactive PTY seam is a clean, near-leaf subsystem the worker can reuse. `aof graph impact src/mesh-worker-execution.mjs` → dependents ← 4 (`mesh-repo`, `global-node-registry`, `mesh-clone-credential-provider`, `mesh-launcher`); it imports `mesh-worktree.mjs`. `buildDriverCommand`/`defaultSpawnRuntime` are exported functions with narrow reach — replacing what they SPAWN is a near-leaf change. The graph is one input; the decision is the architect's call.
+
+**Context.** The shipped driver is `claude -p` (`buildDriverCommand` → `claude -p <prompt> --output-format json`, `mesh-worker-execution.mjs:559`; `defaultSpawnRuntime:568`), ONE bounded non-interactive turn whose terminal state is read from the parsed JSON `terminal_reason ?? stop_reason` (`:581`). RESEARCH §4.3 MEASURED two load-bearing limits: (1) `claude -p` cannot pause to ask a human — a question-ended turn reports `terminal_reason: "completed"`, EXACTLY the signal `defaultSpawnRuntime` maps to `outcome: "done"`, so the worker cannot tell "finished" from "ended the turn to ask" and would `done`+force-remove a run a human still owes an answer; (2) the Agent SDK path that COULD ask forces per-token API billing off the worker's subscription. The operator's resolution: drop `claude -p`, use the terminal infrastructure this repo already ships. That infrastructure exists and is a near-leaf: `terminal-providers.mjs` (`resolveProvider("claude")` → `buildArgs()`/`buildEnv()`, spawns interactive `claude`, NOT `-p`), node-pty via `terminal-ws.mjs`'s spawn seam, `terminal-sessions.mjs` (the live-session registry). Interactive `claude` runs on the worker-user's subscription (measured, §4.3), asks mid-session natively, and lets a human attach via `claude --resume <session-id>`. The m03/ADR-006 precedent (memory-recall) is exactly the driving pattern: the board's primary action runs an aof command by TYPING it as ordinary PTY input into the spawned agent.
+
+**Decision.**
+- **`buildDriverCommand`/`defaultSpawnRuntime` STOP emitting `claude -p`.** The worker runs interactive `claude` in a node-pty PTY through the EXISTING `terminal-providers` seam (`resolveProvider("claude").buildArgs()` — the empty-args interactive launch, `terminal-providers.mjs:23` — and `buildEnv`), spawned via the same node-pty path `terminal-ws.mjs` uses, cwd = the worktree. The Agent SDK / `canUseTool` / per-token path is explicitly NOT reintroduced (§4.3 — it forces off-subscription API billing).
+- **The assignment directive carries a WHOLE COMMAND STRING, typed into the PTY stdin** (the m03/ADR-006 precedent). The control node sends the slash-command the run should execute — `/aof:refine <ref> --autonomous`, `/aof:continue`, `/aof:verify <ref>` — as a first-class field the worker WRITES into the interactive session's stdin (`pty.write`), never a `-p` prompt argv. The directive frame carries the command; the worker types it.
+- **Session lifecycle — ONE long-lived interactive `claude` PER ASSIGNMENT (DOCUMENTED DEFAULT, the RESEARCH-leaning shape).** One assignment → one interactive session in one worktree (matching worktree-per-assignment isolation), living for the whole run rather than one turn. NOT one shared session per worker (isolation + a clean per-assignment `session_id` to surface). The `session_id` is CAPTURED (the code DISCARDS it today — `mesh-worker-execution.mjs:580-581` reads only `terminal_reason`/`stop_reason`) and surfaced on the assignment/presence record so story 06 can route the stream and a human can `claude --resume <session-id>`.
+- **Terminal-state detection — an explicit `NEEDS_INPUT` sentinel / structured end-signal, NOT a one-shot JSON `terminal_reason` (DOCUMENTED DEFAULT).** The interactive session has no `-p` JSON result to parse. The driver PROMPT instructs the agent, on a genuine judgment call, to STOP and end its turn emitting an explicit `NEEDS_INPUT` sentinel (a documented constant) rather than guess; the worker detects that sentinel in the PTY output and branches to a THIRD terminal state — `needs-input` — BEFORE the done/cleanup path. `done` and `failed` keep their meaning; `needs-input` is new and non-terminal-for-cleanup.
+- **Worktree-retention invariant — a needs-input session MUST NOT force-remove its worktree.** The `needs-input` branch RETAINS the worktree exactly as the `failed` path already does (`mesh-worktree.mjs` retention + `sweepRetainedWorktrees` ceiling; `mesh-worker-execution.mjs:894`), so an attached human has a live working directory to `claude --resume` into. Only a `done` outcome force-removes (unchanged, §4.1/§4.3 — the session transcript survives in `~/.claude/projects/...` but the checkout does not, so retention is required for resume to be useful).
+
+**Structural invariants (each testable; armed by `acd-worker-driver-no-headless-print`).**
+1. **No `claude -p` / headless-print in the worker driver path.** `buildDriverCommand`/`defaultSpawnRuntime` (and whatever replaces them) name no `-p` + `--output-format json` one-shot for the `claude` driver; the interactive launch resolves through the `terminal-providers` seam.
+2. **The command to run is TYPED into the PTY stdin**, carried as a directive field — not baked as a `-p` prompt argv.
+3. **`session_id` is captured and surfaced** on the assignment/presence record (no longer discarded).
+4. **A `needs-input` outcome retains the worktree** — it takes the `failed`-style retention branch, never the `done` force-remove.
+
+**Consequences.**
+- The worker runs real interactive work on subscription billing, can ask a human mid-flight, and a human can attach and answer via `claude --resume`.
+- A question-ended turn is no longer mis-read as `done` — the `needs-input` state + worktree retention make human-in-the-loop actually usable.
+- **DOCUMENTED DEFAULTS for STATE.md:** one long-lived interactive `claude` per ASSIGNMENT; terminal-state via an explicit `NEEDS_INPUT` sentinel constant → a new `needs-input` outcome (three states: done/failed/needs-input).
+- **`acd-worker-driver-no-headless-print` is SPEC, armed at BUILD** — the interactive driver does not exist yet; armed against the real seam. (The `@manual` soak proves subscription-billing + native ask, which no `@executable` test can.)
+
+---
+
+## ADR-014: The cross-machine terminal BRIDGE relays the worker's `/ws/terminal` PTY bytes over the FROZEN `mesh-relay.mjs` envelope as a NEW `kind` (opaque `signal`, routed by (nodeId, sessionId)) into a READ-ONLY fleet-face mirror — an in-memory ephemeral tail (the mesh-presence-subscriber pattern), NEVER a system of record. NO input-frame path from the fleet face back to the worker PTY exists in this story
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 06. Depends on story 05 (an interactive terminal to stream). Opens carve-out #2 on the read-only fleet face (a terminal-VIEW route, after story 04's assign). Read-only MIRROR only; read-WRITE control (keystrokes from the fleet) is DEFERRED to Phase 2. Security owns T14.**
+
+**Codebase-graph grounding (fresh, this decision).** `aof graph impact src/mesh-relay.mjs` → **imported/called by ← 4** (`commands/mesh-invite`, `commands/mesh-relay`, `mesh-launcher`, **`mesh-presence-subscriber`**); imports only `mesh-registry`, `mesh-store`. The relay is a payload-agnostic broker: `parseEnvelope` reads ONLY `{ kind, nodeId }` for routing and forwards the ORIGINAL frame bytes unparsed (`signal` is opaque), so an unknown `kind` is fanned out with ZERO relay change (`mesh-relay.mjs:279-298,592-602` — the m26-leasing property). `mesh-presence-subscriber.mjs` is the existing in-memory-cache subscriber (m23/ADR-004): it applies fanned-out frames into an IN-MEMORY liveness cache, writes NO durable record, and is NEVER a second system of record — the exact pattern the terminal mirror follows. The graph is one input; the decision is the architect's call.
+
+**Context.** Both hard halves already exist (RESEARCH §4.3/§4.5): the local PTY-over-WebSocket with a frozen bidirectional envelope (`terminal-ws.mjs`, `/ws/terminal`), and the persistent cross-machine mesh transport (`mesh-relay.mjs` — a stateless ws@8 broker carrying a FROZEN, payload-agnostic `{ kind, nodeId, signal }` envelope, itself modeled on the board-serve/terminal-ws precedent). The net-new work is the BRIDGE. Two constraints: the fleet face deliberately serves no `/ws/terminal` and destroys every upgrade (ADR-006/ADR-012 read-mostly posture); and streaming a live agent terminal cross-machine is a major new capability, so this story ships a READ-ONLY mirror only.
+
+**Decision.**
+- **Relay the worker's PTY bytes over the FROZEN relay envelope as a NEW `kind`** (e.g. `"terminal-frame"`) — the m26-leasing shape: a new kind rides the wire with ZERO relay change, and the relay forwards the opaque `signal` byte-for-byte. The worker's `/ws/terminal` PTY output (the `term.onData` byte stream) is wrapped as the `signal` blob; `sessionId` rides INSIDE the signal (the relay never parses `signal`, so routing metadata the fleet needs must be carried there, alongside the `nodeId` the envelope already carries). Routed by **(nodeId, sessionId)**.
+- **The fleet face gains a READ-ONLY terminal-VIEW route (carve-out #2).** A server→browser mirror — indicative `GET /ws/terminal-view?nodeId=&sessionId=` — that the fleet face feeds from an IN-MEMORY subscription to the relay's terminal-frames, following the m23/ADR-004 `mesh-presence-subscriber` pattern: an in-memory ephemeral tail that writes NO durable record and is NEVER a second system of record (kill it and the fleet loses the live view, not data — the run's durable bookkeeping is the run record, and its diff is story 07's push). This is the SECOND documented exception to the read-only fleet-face posture (story 04's assign was the first) — an upgrade route where the face today destroys every upgrade.
+- **READ-ONLY MIRROR — the load-bearing invariant.** NO input-frame path exists from the fleet face back to the worker PTY in this story. No code path takes a relay/fleet frame and calls `term.write`, and the fleet terminal-VIEW WebSocket is server→browser only — it never forwards a browser keystroke onto the relay as a terminal-input frame toward the worker. Read-WRITE control (keystrokes from the fleet) is explicitly a Phase-2 concern, structurally absent here. (The worker's own local `/ws/terminal` stays bidirectional for a human logged INTO the worker — this invariant is about the MESH/fleet path only.)
+- **Multiplexing + assignment discovery.** Multiple workers and multiple sessions are multiplexed by (nodeId, sessionId): the nodeId on the envelope + the sessionId in the signal uniquely key a stream. The fleet discovers "which session belongs to which assignment" via the `session_id` surfaced on the assignment/presence record by ADR-013 (story 05) — so opening an assignment's card resolves its (nodeId, sessionId) and subscribes to that stream.
+
+**Structural invariants (each testable; armed by `acd-fleet-terminal-mirror-read-only`).**
+1. **No mesh→PTY input path.** No source that consumes a relay terminal-frame (or a fleet terminal-VIEW message) calls `term.write` / feeds a worker PTY's stdin; the fleet terminal-VIEW route is send-to-browser only.
+2. **The relay envelope is untouched** — the terminal bytes ride the opaque `signal` as a new `kind`; the relay's `parseEnvelope` still reads only `{ kind, nodeId }` and forwards `signal` unparsed (no JSON.parse-then-branch on terminal content).
+3. **The fleet mirror is in-memory + never a system of record** — the terminal-VIEW subscriber writes no durable record (the `mesh-presence-subscriber`/`acd-relay-stateless` discipline); the stream is liveness, not data.
+4. **Routing is by (nodeId, sessionId)** — the sessionId surfaced by ADR-013 is the join key; a frame with no resolvable (nodeId, sessionId) is dropped, never broadcast to an unrelated card.
+
+**Consequences.**
+- An operator watches a dispatched run's live terminal from the control node without logging into the worker; a human can SEE what a `needs-input` session is asking (attaching to ANSWER stays the worker-local `claude --resume` path until Phase-2 read-write).
+- The frozen relay envelope and stateless-broker guarantees survive — the bridge is additive, byte-for-byte opaque, and never persists.
+- **DOCUMENTED DEFAULT for STATE.md:** the fleet terminal-VIEW route is read-only (server→browser); read-write terminal control is Phase-2, out of scope. Security (T14) owns the "agent terminal with credentials/shell exposed to the control node" threat and whether the stream is read-only in fact, not just intent.
+- **`acd-fleet-terminal-mirror-read-only` is SPEC, armed at BUILD** — the bridge does not exist yet; armed against the real relay-frame + fleet-route wiring.
+
+---
+
+## ADR-015: The worker checks out a REAL branch (`aof/mesh/<itemRef>-<assignmentId>`) not a detached HEAD, and on a successful run PUSHES it via the ADR-009 `GIT_ASKPASS` shim BEFORE the worktree is force-removed — retaining the worktree until the push succeeds. The push uses a SEPARATE write-scoped token minted ONLY at push time; the clone credential stays `contents:read`. This re-opens SECURITY T9
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 07. Independent of stories 05/06 (needs only a run that produces commits); precedes story 08 (memory syncs only once output is durable). Widens the least-privilege credential posture story 02 established — security owns the T9 re-model and the rewrite of `acd-minted-token-scoped-single-repo` to permit the write-token ONLY at the push seam.**
+
+**Codebase-graph grounding (fresh, this decision).** `aof graph impact src/mesh-worktree.mjs` → imported ONLY by `mesh-worker-execution.mjs` (a leaf; `addWorktree`/`removeWorktree`/`sweepRetainedWorktrees` are its verbs). `mesh-worker-execution.mjs` owns `buildAskpassShim` (`:349`) — the SAME `GIT_ASKPASS` one-shot the clone uses (ADR-009's PULL). So the branch+push change lands in exactly the two files that already own the worktree + askpass mechanics; blast radius is that pair. The graph is one input; the decision is the architect's call.
+
+**Context.** MEASURED live against the real remote (RESEARCH §4.1, confirmed on `let-shield-portal`): `addWorktree` runs `git worktree add --detach` (a detached HEAD, no branch — `mesh-worktree.mjs:101`); a `done` outcome force-removes the worktree (`removeWorktree(..., { force: true })`, `mesh-worker-execution.mjs:892`); there is NO `git push` anywhere in `src/`. The earlier "successful" chore soak's entire output existed only as an untracked local file on the worker — never committed, never pushed, never merged; garbage-collected the instant the worktree was force-removed. Detached-HEAD-then-force-remove is correct ONLY for a throwaway chore whose deliverable is a side effect; for feature work whose deliverable IS the diff, the output must survive. The credential is code-locked to `contents:read` (`mesh-clone-credential-provider.mjs:181`), guarded by `acd-minted-token-scoped-single-repo` (SECURITY T9) — a `git push` is a `contents:write`, so durable push-back necessarily re-opens T9 (RESEARCH §4.2).
+
+**Decision.**
+- **A REAL branch, not a detached HEAD (DOCUMENTED DEFAULT naming).** The worker checks out a real branch named `aof/mesh/<itemRef>-<assignmentId>` — a scoped, collision-free convention keyed by `assignmentId` (mirroring `meshWorktreePath`'s assignmentId key, `mesh-worktree.mjs:47`; `itemRef` sanitized to a git-ref-safe slug for readability). Implemented either by changing `addWorktree`'s `--detach` call to create the branch, or a `git switch -c <branch>` inside the worktree before the run — the Three Amigos pick the exact mechanic; the invariant is "a named branch, not detached HEAD."
+- **PUSH on a successful run, BEFORE force-remove, reusing the ADR-009 shim.** On a `done` outcome the worker runs `git push origin <branch>` from inside the worktree, reusing `buildAskpassShim` (`mesh-worker-execution.mjs:349`) — the SAME `GIT_ASKPASS` credential-transmission path the clone uses (ADR-009's PULL), pointed at a push instead of a clone; NO new wire mechanism. The push happens BEFORE `removeWorktree`, and the worktree-retention MUST NOT remove until the push succeeds — a failed push RETAINS the worktree (the `failed`-style retention, so the commits are recoverable + retryable), never force-removes over unpushed work.
+- **Credential widening — the §4.2 PREFERRED two-token shape (pinned; security owns the T9 re-model).** The CLONE credential stays `contents:read` (ADR-010, unchanged); a SEPARATE write-scoped token — `contents:write`, plus `pull_requests:write` ONLY if auto-opening a PR — is minted ONLY at push time, isolating the write grant to the one instant it is needed. Mechanism follows ADR-009's PULL by analogy: the worker requests a WRITE credential at the push seam via its own frame-pair / distinct write-scoped mint request, authorized by the SAME holder check (`target_node_id === connectionNodeId`, SECURITY T6) and single-repo-scoped, minted through the ADR-010 provider extended to the write scope. The clone mint is NOT widened. This re-opens T9: SECURITY owns re-modelling the threat and rewriting `acd-minted-token-scoped-single-repo` so it permits the write-token EXCLUSIVELY at the push seam and still forbids a write scope on the clone mint. This ADR pins the STRUCTURE (two tokens, write-scoped only at push, via the same askpass shim); the minting policy (TTL/scope/authority) stays SECURITY's residual, exactly as ADR-005/009/010 deferred the clone mint's.
+- **What "done" means — DOCUMENTED DEFAULT: a PUSHED BRANCH (the honest minimum); a PR is optional/manual.** A successful run means the branch is pushed to `origin` for review. Opening a PR is a separate, optional/manual step (no `pull_requests:write` needed for the default); auto-opening a PR via the GitHub API with the wider scope is an opt-in the operator may enable, not the default. "Merged" is explicitly NOT the worker's job — a human reviews and merges (story 08's syncback triggers on that merge).
+
+**Structural invariants (each testable; armed by `acd-write-token-scoped-to-push`).**
+1. **The clone mint stays `contents:read`.** No `contents:write` on the CLONE credential path — the write scope appears ONLY at the push seam (the T9 rewrite pins this cross-seam).
+2. **The write token is minted ONLY at push time**, single-repo-scoped, holder-authorized — never a run-long standing write credential, never widened onto the clone.
+3. **The worktree is NOT removed until the push succeeds** — a failed push retains (the `failed`-style branch), never force-removes over unpushed commits.
+4. **The push reuses the ADR-009 `buildAskpassShim`** — no new credential wire mechanism; the token never persists into `.git/config`, `process.env`, or a log (the inherited `acd-worker-clone-no-credential-persisted` discipline holds for the push token too).
+
+**Consequences.**
+- A dispatched milestone/story's real diff survives — pushed to a named branch for review — the difference between a mesh that does disposable chores and one that does real work.
+- The least-privilege posture is preserved for everything except the push instant; the clone stays read-only.
+- **DOCUMENTED DEFAULTS for STATE.md:** branch = `aof/mesh/<itemRef>-<assignmentId>` (sanitized); "done" = pushed branch + optional/manual PR (not merged, not auto-PR by default). Security re-opens T9 and rewrites `acd-minted-token-scoped-single-repo`.
+- **`acd-write-token-scoped-to-push` is SPEC, armed at BUILD** — the push + write-mint path does not exist yet; armed against the real push seam (SECURITY co-owns it with the T9 rewrite).
+
+---
+
+## ADR-016: Worker-verified knowledge syncs to the control node by RIDING GIT — record docs, `RETROSPECTIVE R<n>`, `ADR-NNN` blocks are plain markdown that travels on story-07's push-back/merge; the graphify RECALL INDEX (`graphify-out/graph.json`) is gitignored, machine-local, DERIVED, and NEVER crosses the mesh. The control node rebuilds ITS index by a documented `git pull` + `aof work memory ingest` — no index bytes on the wire
+
+**Status:** Accepted
+**Date:** 2026-07-18
+**Story 08. Depends on story 07 (durable output first — memory syncs only once the markdown reaches the control node's checkout). The last story that makes milestone 38 a mesh doing REAL verified work end-to-end. No new wire protocol — knowledge rides git, the index is rebuilt locally.**
+
+**Memory-recall grounding.** `aof work memory recall` surfaced the durable-index principle this ADR rests on: m10/ADR-005 — "both the records AND the graph are fully rebuildable from `.md` source; the backend holds no fact absent from its `.md`"; m10/R3 (near-miss) — "a half-covered git-ignore passes a green suite; extend the FULL ignore baseline"; m05/ADR-005 — "the derived index lives git-ignored." This ADR is the mesh-transport corollary of those: the index is derived, so it is never the payload.
+
+**Context.** MEASURED (RESEARCH §4.4, source read): the durable knowledge a verify produces — RETROSPECTIVE `R<n>` lessons, `ADR-NNN` blocks, updated record docs — is plain markdown committed into the repo, so once story-07's push-back lands and the branch merges, it travels to the control node by ordinary `git pull` like any other file. The graphify RECALL INDEX (`<projectRoot>/graphify-out/graph.json`, `src/graph-normalize.mjs`) is gitignored (`.gitignore:4`, enforced by `src/aof-gitignore.mjs`) and machine-local by design — a DERIVED cache rebuilt from the markdown, not a source of truth; `aof work memory ingest` only updates whichever machine runs it. So there is NOTHING to transmit over the mesh: the knowledge rides git, and each machine rebuilds its own index locally.
+
+**Decision.**
+- **Durable knowledge rides GIT, not the mesh.** Record docs, `RETROSPECTIVE R<n>`, and `ADR-NNN` blocks are markdown that reaches the control node when story-07's pushed branch merges and the control node pulls — no mesh frame carries them. This ADR adds NO wire protocol.
+- **The recall index NEVER crosses the mesh — the load-bearing invariant.** No `graphify-out/graph.json` (or any derived index/graph bytes) is ever placed on a relay frame, a directive/status frame, or any mesh stream. It is gitignored, machine-local, and DERIVED (m10/ADR-005 — fully rebuildable from the `.md`); transmitting it would be shipping a cache that each machine can and must rebuild itself.
+- **The control node rebuilds ITS index by re-ingesting its own checkout — DOCUMENTED DEFAULT: a MANUAL step (the honest minimum).** After a worker-verified milestone/story's branch merges, the control node runs `git pull` (the markdown arrives) + `aof work memory ingest` (its OWN `graphify-out/graph.json` rebuilds from the now-shared markdown). This is a documented operator step in this story. An AUTOMATIC re-ingest — the control node detects a merged worker-branch (or a worker-`done` assignment whose record docs changed) and re-ingests itself — is the RICHER option, noted as future work; the manual step is what this story pins so the end-to-end is provable without a new watcher/hook.
+
+**Structural invariants (each testable; armed by `acd-memory-index-never-on-mesh`).**
+1. **No index/graph bytes on any mesh stream.** No source places `graphify-out/`, `graph.json`, or a normalized-index payload onto a relay frame / directive / status frame / any mesh transport — the index is never the payload.
+2. **`graphify-out/` stays gitignored + derived** — the m10/R3 full-ignore-baseline discipline holds; the index carries no fact absent from the markdown, so a lost index rebuilds from `git pull` + `ingest`.
+3. **Syncback is a re-ingest of the control node's OWN checkout** — the trigger runs `git pull` + `aof work memory ingest` locally; it does not fetch a remote index or a peer's cache.
+
+**Consequences.**
+- Knowledge produced on a worker becomes recallable on the control node in the next `aof:refine`/`aof:continue` — via `aof work memory recall` — once the branch merges and the control node re-ingests.
+- No new mesh protocol, no index-transport threat surface — the mesh stream carries nothing here; git carries the markdown, each machine rebuilds its own index.
+- **DOCUMENTED DEFAULT for STATE.md:** the syncback trigger is a documented MANUAL step (`git pull` + `aof work memory ingest` on the control node after the worker-branch merges); an auto re-ingest on merge/`done`-with-record-doc-change is noted as the richer future option, not built this story.
+- **`acd-memory-index-never-on-mesh` is SPEC, armed at BUILD** — the syncback path does not exist yet; armed against the real trigger + the mesh-frame builders it must never touch.
+
+---
+
 ## Fitness functions (this milestone)
 
 Each ADR's structural invariant is encoded as an arch-test under `test/arch/`, wired into `scripts/test.mjs`
@@ -897,6 +1078,43 @@ function, not a Gherkin scenario):
     App-key-not-relayed + single-repo-mint invariants ADR-010 §6.2/§6.3 states — are likewise SPEC/armed-at-build,
     owned + fully plant-specified in SECURITY.md; not duplicated here.)
 
+**Added at ADR-011–ADR-016 (2026-07-18, stories 03–08 — the durable/interactive-worker mega-scope) — all SPEC, armed at BUILD (each story is `not-started`; a detector against absent production wiring would be vacuous or RED, the ADR-008 / SECURITY-F5/F6 deferral precedent):**
+
+14. `acd-cross-org-key-isolation` (ADR-011; SECURITY T12) — the `github-app` mint's App identity is resolved from
+    the mint's OWN `workspaceId` (a `resolveWorkspaceAppIdentity`-shaped per-workspace seam), never a single
+    launch-workspace identity applied to every mint; a null-resolved identity THROWS the loud coded
+    `clone-credential-mint-failed` → `assignment-repo-unavailable`, never falls back to a sibling workspace's key;
+    and `resolveGithubAppPrivateKey`'s default directory is the code-enforced `<meshRoot>/credentials/` via
+    `globalMeshPaths`, never a config-supplied / sync-scoped path. Plant: a static single-App provider applied to
+    all workspaces; a null-identity fall-through to the launch App; a sync-folder default dir — each trips.
+15. `acd-fleet-face-single-mutation-route` (ADR-012; SECURITY T13) — the fleet face (`mesh-ui-serve.mjs`) exposes
+    EXACTLY ONE mutation route, `POST /api/mesh/assign`, and it mints only through the existing `assignWork` verb
+    (no `insertAssignment`/`global_assignments` write reachable except through the gated verb); a gate miss maps to
+    a coded non-200, never a 200; the face keeps its ONE loopback `http.createServer`, no low-level writer import.
+    Plant: a second write route; a write path that bypasses `assignWork`; a 200 on a gate miss — each trips.
+16. `acd-worker-driver-no-headless-print` (ADR-013) — the worker driver path emits NO `claude -p` + `--output-format
+    json` one-shot; the interactive `claude` launch resolves through the `terminal-providers` seam; the command to
+    run is typed into PTY stdin (a directive field, not a `-p` prompt argv); `session_id` is captured (not
+    discarded); a `needs-input` outcome takes the retain-worktree branch, never the `done` force-remove. Plant: a
+    re-introduced `claude -p` driver; a discarded `session_id`; a needs-input path that force-removes — each trips.
+17. `acd-fleet-terminal-mirror-read-only` (ADR-014; SECURITY T14) — no source consuming a relay terminal-frame (or
+    a fleet terminal-VIEW message) calls `term.write` / feeds a worker PTY stdin (no mesh→PTY input path); the relay
+    envelope is untouched (terminal bytes ride the opaque `signal` as a new `kind`, no JSON-parse-then-branch on
+    terminal content); the fleet mirror writes no durable record (the `mesh-presence-subscriber` in-memory
+    discipline). Plant: a fleet frame routed into `term.write`; a durable write of streamed bytes — each trips.
+18. `acd-write-token-scoped-to-push` (ADR-015; SECURITY T9 re-opened, co-owned) — the CLONE mint stays
+    `contents:read`; a `contents:write` scope appears ONLY at the push seam, single-repo-scoped + holder-authorized
+    + minted only at push time (never a run-long standing write credential, never widened onto the clone); the
+    worktree is not removed until the push succeeds; the push reuses `buildAskpassShim` (no new credential wire, no
+    token in `.git/config`/`process.env`/log). Plant: a `contents:write` on the clone mint; a force-remove before a
+    successful push; a standing write token — each trips. (SECURITY owns the `acd-minted-token-scoped-single-repo`
+    rewrite that permits the write-token EXCLUSIVELY at the push seam.)
+19. `acd-memory-index-never-on-mesh` (ADR-016) — no source places `graphify-out/`/`graph.json`/a normalized-index
+    payload onto a relay frame / directive / status frame / any mesh transport (the index is never the payload);
+    `graphify-out/` stays gitignored + derived (rebuildable from the `.md`, m10/ADR-005); the syncback trigger
+    re-ingests the control node's OWN checkout (`git pull` + `aof work memory ingest`), never fetches a peer's
+    cache. Plant: an index payload on a mesh frame builder; a de-gitignored index; a remote-index fetch — each trips.
+
 (ADR-006's `acd-worker-checkout-reuses-worktree` re-arms the m35 worktree-scope invariant; noted for completeness.
-The twelve armed above + the three ADR-010 SPEC entries (F5/F6/F7, armed at build) are the structural residue of
-this milestone's arch-test set.)
+The twelve armed above + the three ADR-010 SPEC entries (F5/F6/F7) + the six ADR-011–016 SPEC entries (all armed at
+build) are the structural residue of this milestone's arch-test set.)

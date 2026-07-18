@@ -40,6 +40,22 @@ async function withGlobalHome(fn) {
   }
 }
 
+// registerWorkspaceDescriptor(store, workspaceId) — a snapshot/delta frame is now
+// REFUSED (2026-07-18 fix) unless the control node already holds a registered
+// global_workspace_descriptors row for that workspaceId (the ADR-010 registration
+// gate — a worker's frame carries no real projectRoot of its own, so applying an
+// unregistered id can no longer fabricate one). Every test below that exercises
+// applySnapshotFrame/applyDeltaFrame registers its synthetic workspace first,
+// mirroring what a real `mesh:join`/`mesh repo publish` would already have done.
+function registerWorkspaceDescriptor(store, workspaceId) {
+  const projectRoot = `/workspaces/${workspaceId}`;
+  store.db.prepare(`
+    INSERT INTO global_workspace_descriptors
+      (workspace_id, project_root, work_dir, name, mesh_enabled, control_node, member_node_ids_json, published_at, descriptor_path)
+    VALUES (?, ?, ?, ?, 1, 'control-a', '[]', ?, ?)
+  `).run(workspaceId, projectRoot, `${projectRoot}/wiki/work`, workspaceId, NOW, `${projectRoot}/descriptor.json`);
+}
+
 function waitForOpenOrClose(ws) {
   return new Promise((resolve) => {
     let settled = false;
@@ -93,6 +109,7 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
+          registerWorkspaceDescriptor(store, "ws-worker-a");
           const snapshot = {
             kind: "snapshot",
             nodeId: "worker-a",
@@ -132,6 +149,7 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
+          registerWorkspaceDescriptor(store, "ws-worker-a");
           const snapshot = {
             kind: "snapshot",
             nodeId: "worker-a",
@@ -173,6 +191,7 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
+          registerWorkspaceDescriptor(store, "ws-worker-a");
           const snapshot = {
             kind: "snapshot",
             nodeId: "worker-a",
@@ -224,6 +243,7 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
+          registerWorkspaceDescriptor(store, "ws-worker-a");
           const snapshot = {
             kind: "snapshot",
             nodeId: "worker-a",
@@ -332,6 +352,7 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
+          registerWorkspaceDescriptor(store, "ws-worker-a");
           const snapshot = {
             kind: "snapshot",
             nodeId: "worker-a",

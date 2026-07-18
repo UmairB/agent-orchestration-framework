@@ -6,7 +6,7 @@ title: "Cross-machine worker execution & session presence — workers that can t
 status: in-progress
 owner: product-owner
 created: 2026-07-10
-updated: 2026-07-16
+updated: 2026-07-18
 depends: [34, 35, 36]
 schema: 1
 aofVersion: 0.1.0
@@ -109,6 +109,34 @@ Out of scope:
   today's ONE App/token resolved globally on the control node for the whole mesh. Added `2026-07-16` at
   the operator's direction during `aof:verify 38`'s live soak provisioning, locked into THIS milestone's
   scope (not deferred). **Milestone now accepts only when all FOUR stories are done.**
+
+**Stories 04–08 added `2026-07-18`** at the operator's direction after `aof:verify 38`'s real two-machine
+soak proved the plumbing works but exposed that a worker's output is disposable (never pushed), its driver
+can't ask a human anything (`claude -p`), and nothing syncs verified knowledge back to control. The
+operator's bar: *"I'm not signing off this milestone until it actually works in a real-world scenario …
+even if you need to create 100 more stories."* The mega-scope is decomposed into five focused,
+independently-verifiable stories (research + decisions: `RESEARCH.md § 4`), in dependency order:
+
+- [ ] [`04_story_ui-driven-assignment`](stories/04_story_ui-driven-assignment/STORY.md) — assign a
+  milestone/story to a worker node FROM the fleet/board UI (a security-reviewed mutation carve-out on the
+  read-only fleet face, ADR-006, wrapping the existing `aof mesh assign` verb). No CLI. Entry point.
+- [ ] [`05_story_terminal-driven-worker-execution`](stories/05_story_terminal-driven-worker-execution/STORY.md)
+  — the worker runs assigned work as **interactive `claude` in a PTY** (the existing
+  `terminal-ws`/`terminal-providers`/`terminal-sessions` subsystem, on the worker's subscription), driven
+  by whole commands the control node writes into it (`/aof:refine <ref> --autonomous`, `/aof:continue`) —
+  **replacing `claude -p` entirely**. Asks-a-human and subscription-billing both fall out of this. Dep: 04.
+- [ ] [`06_story_worker-terminal-streaming`](stories/06_story_worker-terminal-streaming/STORY.md) — relay
+  the worker's live `/ws/terminal` PTY stream over the mesh into the control node's fleet view (read-only
+  mirror first), routed by (nodeId, sessionId) — the fleet-face no-terminal refusal becomes a carve-out.
+  Dep: 05.
+- [ ] [`07_story_durable-worker-pushback`](stories/07_story_durable-worker-pushback/STORY.md) — the
+  worker's work commits to a **real branch and is pushed/PR'd** (reusing the `GIT_ASKPASS` shim) so output
+  survives the `done`-worktree force-remove; needs the credential widened to `contents:write` (re-opens
+  SECURITY T9). Independent of 05/06.
+- [ ] [`08_story_worker-verified-memory-syncback`](stories/08_story_worker-verified-memory-syncback/STORY.md)
+  — a milestone/story **verified on a worker updates the control node's memory** (`git pull` +
+  `aof work memory ingest` of the now-shared markdown; the graphify index is a local cache, nothing crosses
+  the mesh). Dep: 07. **Milestone now accepts only when all NINE stories (00–08) are done.**
 
 <!-- FOLDED AWAY (ADR-006): `worker-worktrees` — delivered by m35/ADR-004; no story, no net-new work. -->
 - [x] ~~`worker-worktrees`~~ — SUBSUMED by milestone 35 (ADR-006); the worktree-per-assignment mechanics

@@ -214,6 +214,35 @@ doc: state
   is now a pure projection over `{ activeRuns: string[], pre-subsumed sessions[] }`. This is a small refinement to
   where ADR-004's reconciliation lives (assembler vs fleet-model) — flag for architect ratification at `aof:verify`.
 
+- **Refine `2026-07-18` (`aof:refine 38 --autonomous`) — stories 03–08 fully contracted; documented default decisions
+  taken (autonomous mandate, all within the operator's stated direction — none a blocking/unsafe gate).** Authored
+  ADR-011–016 (one per story) + SECURITY T12–T15 (+ T9 re-opened) + 24 task `.feature` files. The defaults taken,
+  recorded here so they can be revisited at build/verify:
+  - **03 (ADR-011):** builds ADR-010's "Known limitation" **option 2** (one GitHub App PER ORG), not one App installed
+    across orgs — org is the isolation boundary. *Build-owed:* the App-key **filename convention** within the code-enforced
+    default dir `<meshRoot>/credentials/` is unpinned (per-org keys need distinct filenames, e.g. keyed by `appId`); task-02
+    asserts only the non-sync **prefix**, so pin the filename/keying at build (aof-qa flag).
+  - **04 (ADR-012):** endpoint `POST /api/mesh/assign {ref,nodeId}`; admission = **loopback-bound + same-origin
+    local-admission, no auth token this story** — a networked multi-operator fleet face would need a real auth gate
+    (explicitly out of scope). The exact 4xx numbers for gate misses are a build mapping (the contract pins the *code*,
+    not the number). ADR-012 grounded on the seam's history: m27/ADR-006 shipped a fleet-face write route later RETIRED,
+    m35/ADR-007 deferred UI-assign — this is the third pass (carry to retro).
+  - **05 (ADR-013):** ONE long-lived interactive `claude` **per assignment**; terminal-state via an explicit
+    **`NEEDS_INPUT` sentinel** → a new third outcome `needs-input` (done/failed/needs-input). *Build-owed:* confirm the
+    empty-string `session_id ""`→absent equivalence (task-03 QA-added boundary, not pinned by the ADR).
+  - **06 (ADR-014):** terminal-VIEW route is **read-only** (server→browser); indicative shape `/ws/terminal-view?nodeId=&sessionId=`
+    and relay `kind: "terminal-frame"` are indicative (scenarios assert *properties*, not literal identifiers, so a
+    Three-Amigos naming choice won't invalidate them). Read-WRITE control deferred to Phase 2.
+  - **07 (ADR-015):** branch `aof/mesh/<itemRef>-<assignmentId>` (sanitized); **"done" = pushed branch** + optional/manual
+    PR (NOT merged, NOT auto-PR by default); two-token widening (clone stays `contents:read`, separate `contents:write`
+    token minted only at push time). *Build-owed:* the push/write mint MUST be a SEPARATE exported function/module (not a
+    widened branch of the clone provider) so the rewritten two-seam `acd-minted-token-scoped-single-repo` can key each
+    body to its own mint (aof-qa flag). **T15 watch (aof-security):** a `contents:write` token is the first repo-MUTATING
+    credential in this milestone + needs the operator to widen the App installation to `contents:write` — put the
+    App-installation-widening attestation (T8/R7 extended) explicitly on the `aof:verify` checklist before this ships.
+  - **08 (ADR-016):** sync-back TRIGGER = documented **MANUAL** `git pull` + `aof work memory ingest` on the control node
+    after the worker branch merges (auto re-ingest on merge / `done`-with-record-doc-change = the richer future option).
+
 ## Feedback (for retro)
 
 <!-- Mistakes, blockers, contract problems surfaced during build/review. Distilled into RETROSPECTIVE.md at aof:verify. -->

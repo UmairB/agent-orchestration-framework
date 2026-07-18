@@ -621,6 +621,195 @@ registered — these calls prove request/response *shape* and *error* behaviour,
   on that repo," matching STORY.md acceptance criterion 6 ("onboarding needs only: the App installed + its
   cloneUrl configured").
 
+## § 4 — Durable + interactive worker runs (story 04): push-back, human-in-the-loop, memory sync
+
+**Questions (raised by the operator 2026-07-18 during `aof:verify 38`, after the chore soak proved the
+wiring but exposed that a worker's output is disposable):** (a) When a worker drives a *real* milestone —
+not a chore — where does its output go, given the shipped code force-removes the worktree on `done` and
+never pushes? (b) The driving agent will hit genuine judgment calls mid-refine/continue/verify — how does
+a question reach a human, ideally by that human logging into the worker machine and answering there? (c)
+When a story/milestone is verified ON a worker, how does the resulting project memory reach the control
+node?
+
+### 4.1 No durable output today — measured against the real remote (the load-bearing finding)
+
+- **Measured (source read):** `src/mesh-worktree.mjs:98-106` — `addWorktree` runs
+  `git worktree add --detach <path> <commitish>`: a **detached HEAD**, no branch created, checked out at
+  the control node's `HEAD` commitish at dispatch time. `src/mesh-worker-execution.mjs:891-893` — on a
+  `done` outcome the worktree is **force-removed** (`removeWorktree(..., { force: true })`), the source
+  comment stating "a `done` worktree carries no content worth a human inspecting." There is **no `git
+  push` call anywhere in `src/`** (measured: grep for `push`/`"push"` in `mesh-worker-execution.mjs`
+  returns nothing).
+- **Measured (real remote):** on `let-shield-portal` (the repo the earlier "successful" soak targeted),
+  `git show origin/main:wiki/work/17_chore_update-aof-bundle/CHORE.md` → *"exists on disk, but not in
+  origin/main"*; `git branch -r` shows only `origin/main`; the chore was `?? wiki/work/17_chore…`
+  (untracked) in `git status`. **The soak's entire output only ever existed as an untracked local file on
+  the worker — never committed, never pushed, never merged.** The run was real end-to-end (dispatch →
+  clone → worktree → headless agent → terminal state), but its product was garbage-collected the moment
+  the worktree was force-removed.
+- **Consequence.** For a real milestone the worker's commits must land on a **real branch** and be
+  **pushed** before the worktree is removed. Detached-HEAD-then-force-remove is correct ONLY for a
+  throwaway chore whose deliverable is a side effect (a re-rendered bundle), never for feature work whose
+  deliverable IS the diff.
+
+### 4.2 Push-back requires widening the minted credential — a deliberate SECURITY change, not a tweak
+
+- **Measured (source read):** `src/mesh-clone-credential-provider.mjs:181` mints the installation token
+  with request body `{ repositories: [repo], permissions: { contents: "read" } }` — read-only. This is
+  **code-enforced, not attested**: `SECURITY.md` T9 (§ "Over-scoped mint") is guarded by the fitness test
+  `acd-minted-token-scoped-single-repo` (`test/arch/acd-minted-token-scoped-single-repo.test.mjs`), which
+  FAILS the build if the request is ever anything but a single-element `repositories` + exactly
+  `{ contents: "read" }`.
+- **Finding.** A worker that pushes a branch needs `contents: write` (a `git push` to a branch is a
+  contents write); opening a PR automatically additionally needs `pull_requests: write`. Both are a
+  **deliberate widening of the least-privilege posture this milestone spent story-02 establishing** —
+  they cannot be slipped in without re-opening the T9 threat model and rewriting its fitness test. The
+  refine for story-04 MUST route through `aof-security` for a fresh review, exactly as story-02 did.
+- **Design options (for the ADR to decide, not settled here):** (i) mint TWO scopes — the existing
+  read-only token for the clone, a separate write-scoped token minted on-demand only at push time (keeps
+  the clone credential least-privilege, isolates the write grant to the one moment it's needed); vs (ii)
+  one `contents: write` token for the whole run (simpler, broader exposure window). (i) preserves the T9
+  posture for everything except the push instant and is the security-preferred shape on its face.
+- **Mechanism, once scoped:** the push itself reuses the ALREADY-BUILT `GIT_ASKPASS` shim
+  (`buildAskpassShim`, `src/mesh-worker-execution.mjs`) — the same credential-transmission path the clone
+  uses (ADR-009's PULL), pointed at a `git push` instead of a `git clone`. No new credential wire
+  mechanism; the branch push is `git push origin <branch>` from inside the worktree (which must first be a
+  real branch, not detached HEAD — a change to `addWorktree`'s call, or a `git switch -c` inside the
+  worktree before the run). Opening the PR can be a separate manual human step (no `pull_requests:write`
+  needed) OR automated via the GitHub API with the wider scope — the ADR chooses.
+
+### 4.3 Human-in-the-loop — `claude -p` cannot ask; the Agent SDK's `canUseTool` can. Resume works.
+
+Grounded via the Claude Code / Agent SDK docs (researched this session; mechanism names cited so they're
+actionable, and non-support stated plainly rather than guessed):
+
+- **`claude -p` (today's driver) CANNOT pause mid-turn to ask a human — MEASURED this session.** Ran
+  `claude -p "Before doing anything else, ask me to choose between option A and option B. Do not proceed
+  until I answer." --output-format json` in a hermetic scratch dir. **Result: it did NOT block** — it
+  returned in ~6s (exit 0), `num_turns: 1`, and wrote the question AS ITS FINAL ASSISTANT MESSAGE in the
+  `result` field ("would you like to go with option A or option B?"), then ENDED. Headless print mode runs
+  one turn to completion and returns; there is no callback interface, no pause. Hooks (`PreToolUse`,
+  `Notification`, …) do **not** block-and-wait either — they fire as detached shell commands with no
+  controlling terminal. **Hard limitation of the `-p` driver our code uses today** (`buildDriverCommand` →
+  `claude -p <prompt> --output-format json`).
+- **THE GAP THIS EXPOSES (measured, load-bearing for story-04).** The question-ended turn above reported
+  **`stop_reason: "end_turn"` and `terminal_reason: "completed"`** — the EXACT terminal signal
+  `defaultSpawnRuntime` maps to `outcome: "done"` (`mesh-worker-execution.mjs:582`:
+  `terminal === "completed" || terminal === "end_turn"`). **So the worker today cannot distinguish "done
+  because the work is finished" from "ended the turn to ask a question and did nothing" — both look like
+  `done`.** A worker driving real work would therefore mark a needs-input run as `done` AND force-remove
+  its worktree (§4.1), when in fact a human still needs to answer. Story-04 MUST add a way to tell these
+  apart — e.g. instruct the driver prompt to emit an explicit `NEEDS_INPUT` sentinel (or structured field)
+  when it wants human input, and branch on that BEFORE the done/cleanup path.
+- **Interactive resume CONTINUES the SAME session with full context — MEASURED this session.** Captured
+  `session_id` from test 1, then ran `claude -p --resume <session-id> "I choose option B. What was I
+  choosing between?" --output-format json`. **Result: same `session_id` returned, and the resumed turn
+  had FULL prior context** — it referenced the exact A/B question it had asked in turn 1 and processed the
+  answer. Confirms a human can attach to the precise dispatched session and answer/steer it. (The resume
+  used `-p` for a scriptable measurement; a human would use interactive `claude --resume <session-id>`
+  identically — same session store.)
+- **A SECOND worktree-lifetime gap this surfaces.** The session TRANSCRIPT lives in
+  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` (NOT in the worktree), so the CONVERSATION survives
+  a worktree removal — but the working directory (the checkout the resumed session's cwd points at) does
+  NOT. For `claude --resume` on the worker to be useful, the worker must **NOT force-remove the worktree
+  while input is pending** — the needs-input branch must RETAIN the worktree (like the `failed` retention
+  path already does), not clean it up.
+- **The Agent SDK (TypeScript/Python library, NOT the `-p` CLI) DOES support human-in-the-loop.** Its
+  `query()` takes a **`canUseTool` callback** that fires when Claude requests a tool OR calls the
+  built-in **`AskUserQuestion`** tool; the callback **pauses execution and stays pending indefinitely**
+  until our code returns a response. This is the exact seam the mesh needs: the worker's callback can
+  relay the question back to the control node over our EXISTING persistent stream (the same ADR-009
+  request/response frame-pair pattern the clone-credential PULL already uses), the control node prompts
+  the operator, and the answer flows back into the callback — Claude continues **without losing context**.
+  Ref: `canUseTool` (agent-sdk/user-input), `AskUserQuestion` tool.
+- **Interactive resume — the operator's own suggested shape — WORKS.** A session started headlessly
+  captures a **`session_id`** (already surfaced in the `--output-format json` output our
+  `defaultSpawnRuntime` parses — but which our code currently DISCARDS: `mesh-worker-execution.mjs:580-581`
+  reads only `terminal_reason`/`stop_reason`, never `session_id`). A human who logs into the worker
+  machine (SSH / remote desktop) can then run **`claude --resume <session-id>`** and attach a normal
+  interactive terminal to that SAME conversation — full history and state restored — to answer a question
+  or keep steering. **Caveat (measured limitation):** headless sessions do NOT appear in the interactive
+  `claude --resume` picker; the human must be TOLD the session id (or list `~/.claude/projects/<encoded-
+  cwd>/*.jsonl`, or use the SDK's `listSessions()`/`list_sessions()`). So the worker MUST surface its
+  session id up to the fleet UI for the "log in and resume" path to be usable — a small, concrete piece
+  of net-new work (capture the id our code already receives, publish it on the presence/assignment
+  record, render it on the node card).
+- **AUTH / BILLING — the constraint that decides between the two shapes (researched this session, docs-
+  grounded).** The Agent SDK **cannot authenticate with a Claude subscription (Pro/Max)** — Anthropic's
+  Agent SDK overview explicitly disallows claude.ai-login/subscription auth for third-party SDK agents and
+  directs SDK users to **API-key auth (`ANTHROPIC_API_KEY`, usage-based per-token billing)** or a cloud
+  provider (Bedrock/Vertex/Foundry). The `claude` CLI is different: its auth precedence ends in
+  **subscription OAuth (the `claude login` default for Pro/Max)**, so `claude -p` on a worker where the
+  user has logged in runs on the **subscription** (fixed monthly), no API key. **Therefore moving the
+  driver to the Agent SDK (shape A) FORCES a switch from subscription to per-token API billing** — a hard
+  architectural cost change, not a config toggle, and material when running many/long worker sessions
+  (a full milestone is far more tokens than a chore). (A long-lived `CLAUDE_CODE_OAUTH_TOKEN` env var also
+  exists in the CLI precedence — a subscription-backed token usable for non-interactive CLI automation
+  without re-login — worth a `@manual` check as the headless-on-subscription enabler.)
+- **Design consequence — (B) is now the clear first build, not merely the smaller one.** Two shapes:
+  (A) **relay via Agent SDK** — `canUseTool`/`AskUserQuestion` → our stream → control-node prompt; fully
+  remote, but **forces API-key/per-token billing** (above) AND is a bigger driver rewrite. (B) **local
+  resume on the CLI** — keep the `claude` CLI driver (stays on subscription), capture + surface the
+  `session_id`, let a human `claude --resume <session-id>` on the worker to answer/steer; the operator's
+  stated acceptable solution, strictly less code, AND preserves subscription billing. **The billing
+  constraint makes (B) the recommended build and (A) a deliberate opt-in only if the operator accepts
+  per-token API cost.** For (B) the prompt should instruct the agent to STOP and end its turn with a
+  recorded question on a judgment call (rather than guess); the worker detects a non-terminal "needs-input"
+  end, surfaces `session_id` + the question to the fleet UI, and a human resumes interactively.
+
+### 4.4 Memory sync-back — mostly falls out of §4.1; the index is a derived cache, not the payload
+
+- **Measured (source read):** the durable knowledge a verify produces (RETROSPECTIVE `R<n>` lessons,
+  `ADR-NNN` blocks, updated record docs) is **plain markdown committed into the repo** — so once §4.1's
+  push-back lands, it travels to the control node by ordinary `git pull` like any other file. The
+  graphify RECALL INDEX (`<projectRoot>/graphify-out/graph.json`, `src/graph-normalize.mjs`) is
+  **gitignored** (`.gitignore:4` `graphify-out/`, enforced by `src/aof-gitignore.mjs`) and **machine-local
+  by design** — it is a DERIVED cache rebuilt from the markdown, not a source of truth, and
+  `aof work memory ingest` only updates whichever machine runs it.
+- **Finding.** There is NO need to transmit the index itself over the mesh (it's regenerable and per-
+  machine). What's needed is: after a worker-produced branch merges, the control node runs `git pull` +
+  `aof work memory ingest` against its OWN checkout to rebuild ITS index from the now-shared markdown. The
+  ADR decides whether that's a **documented manual step** (simplest, honest — the operator pulls and
+  re-ingests) or an **automatic hook** (e.g. the control node re-ingests on detecting a merged
+  worker-branch). No new wire protocol either way — the knowledge rides git, not the mesh stream.
+- **Ordering dependency.** This is downstream of §4.1: memory can only sync back once output is durable at
+  all. Story-04's tasks should sequence push-back FIRST, then human-in-the-loop, then memory-sync (each
+  buildable and independently verifiable, but in that dependency order).
+
+### 4.5 — Operator requirements that shape the decomposition (2026-07-18)
+
+- **UI-driven, not CLI (operator).** *"I should be able to go [to] the milestone and assign a
+  milestone/story/etc to a worker node."* The whole flow originates in the UI where the terminal lives:
+  open a work item in the fleet/board UI, pick a worker node, assign. Bumps the fleet face's read-only
+  posture (`mesh-ui-serve.mjs`, ADR-006 — GET-only, no mutation route): a UI assign is a security-reviewed
+  **mutation carve-out** wrapping the EXISTING `aof mesh assign <ref> --to <nodeId>`
+  (`src/commands/mesh-assign.mjs`).
+- **Memory sync-back on worker completion (operator, reiterated).** *"If a milestone is completed on a
+  worker → control node memory should update."* When a story/milestone is VERIFIED on a worker, the
+  knowledge it produced must become recallable on the CONTROL node. The markdown rides git (once §4.1
+  push-back lands); the graphify index is a gitignored per-machine cache, so the control node must
+  `git pull` + `aof work memory ingest` its OWN checkout after the worker's branch merges (§4.4).
+- **No `claude -p` in the plan (operator).** The terminal infrastructure is THE driver; `claude -p` is
+  referenced only as the current shipped state being replaced.
+- **Decomposition (milestone 38 stays open until all of this ships — operator: "even if you need to
+  create 100 more stories").** The mega-scope splits into FIVE focused, independently-verifiable stories,
+  in dependency order:
+  - **04 · ui-driven-assignment** — the fleet-face mutation carve-out + work-item-card "assign to node"
+    affordance wrapping `mesh assign`. Entry point; verifiable alone (assign mints the record).
+  - **05 · terminal-driven-worker-execution** — replace `defaultSpawnRuntime`'s `claude -p` with
+    interactive `claude` in a PTY (the EXISTING `terminal-ws`/`terminal-providers`/`terminal-sessions`
+    subsystem, on the worker's subscription); the control node's assignment carries the whole slash-command
+    written into the PTY. Depends on 04 (something to run).
+  - **06 · worker-terminal-streaming** — relay the worker's `/ws/terminal` PTY bytes over the mesh into the
+    fleet view (read-only mirror FIRST), routed by (nodeId, sessionId); the fleet-face no-`/ws/terminal`
+    refusal becomes a carve-out. Depends on 05 (a terminal to stream).
+  - **07 · durable-worker-pushback** — real branch + `git push`/PR (reusing the `GIT_ASKPASS` shim), so
+    output survives the `done`-worktree force-remove; needs the credential widened to `contents:write`
+    (re-opens SECURITY T9). Independent of 05/06; needs a run that produces commits.
+  - **08 · worker-verified-memory-syncback** — on a worker-verified milestone/story, the control node
+    `git pull`s + re-`ingest`s its own memory (documented step or auto-hook). Depends on 07 (durable
+    output first).
+
 ---
 
 ## Sources

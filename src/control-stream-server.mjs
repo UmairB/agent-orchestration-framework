@@ -70,17 +70,43 @@ function validFrameAt(value) {
   return typeof value === "string" && value.length > 0 && Number.isFinite(Date.parse(value)) ? value : null;
 }
 
+// resolveKnownWorkspaceRoot(store, workspaceId) — a worker's snapshot/delta frame
+// carries no projectRoot/workDir of its own (only a workspaceId), so applying it
+// must never treat the bare id AS a path: path.resolve()-ing a bare id inside
+// publishWorkspaceSnapshot silently fabricates an absolute-looking path rooted at
+// THIS process's cwd (bug found live 2026-07-18: a worker report for an id this
+// control node didn't recognise overwrote nothing existing, but a KNOWN workspace's
+// real project_root would have been clobbered the same way on its very next report).
+// The canonical descriptor (global_workspace_descriptors, ADR-010's committed
+// registration — every real workspace lands here via `mesh:join`/`mesh repo
+// publish` before any worker can be assigned to it, the same gate mesh-assign.mjs's
+// resolveTarget already requires) is the ONLY source of truth; the caller REFUSES
+// the frame outright when it returns null rather than falling back to a fabricated
+// path (tightened 2026-07-18 — ADR-010 postdates ADR-006's original "any worker may
+// report" design, and every legitimate reporter is registered by the time it can
+// report at all).
+function resolveKnownWorkspaceRoot(store, workspaceId) {
+  const descriptor = store.db.prepare(
+    "SELECT project_root, work_dir FROM global_workspace_descriptors WHERE workspace_id = ?"
+  ).get(workspaceId);
+  return descriptor?.project_root
+    ? { projectRoot: descriptor.project_root, workDir: descriptor.work_dir || descriptor.project_root }
+    : null;
+}
+
 // applySnapshotFrame(store, workspace, frame, { now }) — writes a worker's FULL
 // item-row set into the global store through the SAME publishWorkspaceSnapshot seam
 // story 34/01 built (ADR-004: one shared publisher path). Redacts the frame's items
 // (ADR-005) before anything reaches the store/descriptor. Returns the publish result.
+// A frame for a workspaceId with no registered descriptor is REFUSED — never
+// published under a fabricated path (see resolveKnownWorkspaceRoot above).
 export async function applySnapshotFrame(store, frame, { now } = {}) {
+  const known = resolveKnownWorkspaceRoot(store, frame.workspaceId);
+  if (known == null) {
+    return { published: false, skipped: true, code: "unknown-workspace", workspaceId: frame.workspaceId };
+  }
   const redactedItems = redactDescriptor(frame.items ?? []);
-  const workspace = {
-    projectRoot: frame.workspaceId,
-    workDir: frame.workspaceId,
-    config: {},
-  };
+  const workspace = { projectRoot: known.projectRoot, workDir: known.workDir, config: {} };
   return publishWorkspaceSnapshot(store, workspace, {
     workspaceId: frame.workspaceId,
     items: { rows: redactedItems, errors: [] },
@@ -114,6 +140,12 @@ function isCompleteItemRow(row) {
 // frame's items (and the rest of the workspace's already-published rows) are never
 // collaterally rolled back by one partial/unseen-ref delta.
 export async function applyDeltaFrame(store, frame, { now } = {}) {
+  // A frame for a workspaceId with no registered descriptor is REFUSED — same gate
+  // as applySnapshotFrame above, checked before any read/merge work.
+  const known = resolveKnownWorkspaceRoot(store, frame.workspaceId);
+  if (known == null) {
+    return { published: false, skipped: true, code: "unknown-workspace", workspaceId: frame.workspaceId };
+  }
   const redactedItems = redactDescriptor(frame.items ?? []);
   // review fix Craft: reads through global-work-store.mjs's own readWorkspaceItems
   // accessor rather than a raw store.db.prepare(...) SELECT held here — a plain
@@ -124,7 +156,7 @@ export async function applyDeltaFrame(store, frame, { now } = {}) {
     byRef.set(item.ref, { ...byRef.get(item.ref), ...item });
   }
   const mergedRows = [...byRef.values()].filter(isCompleteItemRow);
-  const workspace = { projectRoot: frame.workspaceId, workDir: frame.workspaceId, config: {} };
+  const workspace = { projectRoot: known.projectRoot, workDir: known.workDir, config: {} };
   return publishWorkspaceSnapshot(store, workspace, {
     workspaceId: frame.workspaceId,
     items: { rows: mergedRows, errors: [] },

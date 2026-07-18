@@ -4,10 +4,10 @@ number: 03
 slug: per-org-credential-scoping
 title: "Per-org credential-provider scoping — a separate GitHub App per org, not one shared App resolved globally on the control node"
 parent: 38
-status: not-started
+status: in-progress
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-18
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -41,10 +41,13 @@ isolation boundary is the org, not just the repo inside one shared App.**
 
 ## Tasks
 
-<!-- Contract authored at `aof:refine 38/03` (Three Amigos). Anticipated shape below — refine may
-     reshape freely; this story is independent of siblings 00–02, all of which are already done. -->
+<!-- Contract authored `2026-07-18` via `aof:refine 38 --autonomous` (Three Amigos: PO headline + aof-qa
+     Examples + aof-developer feasibility). Inherits ARCHITECTURE ADR-011 (per-workspace `resolveWorkspaceAppIdentity`
+     seam, mirroring ADR-010 Gap A) + SECURITY T12 (per-org key confusion) + T8 (App key at rest). Tasks 00–02 are
+     `@executable` (hermetic over an injected signer/http seam + fake keys — no real GitHub, no network); task 03 is
+     the real two-org `@manual` soak. This story is independent of siblings 00–02, all already done. -->
 
-- [ ] `tasks/00_per-workspace-app-identity-resolution.feature` — **singular by default, override-able
+- [ ] `tasks/00_per-workspace-app-identity-resolution.feature` — `@executable` — **singular by default, override-able
   per workspace (operator's explicit direction, `2026-07-16`: "assume singular apps, but allow for
   overrides").** Confirmed at this session: `loadWorkspace` (`src/work.mjs:176-180`) ALREADY merges the
   GLOBAL `~/.aof/aof.config.json`'s `mesh` key as the base with each project's own LOCAL `mesh` config
@@ -62,7 +65,7 @@ isolation boundary is the org, not just the repo inside one shared App.**
   produced using workspace B's org's App key; a workspace whose own org has no App/key configured fails
   loud (the existing `clone-credential-mint-failed` → `assignment-repo-unavailable` posture), never
   silently borrows another org's App.
-- [ ] `tasks/02_default-private-key-directory.feature` — when neither
+- [ ] `tasks/02_default-private-key-directory.feature` — `@executable` — when neither
   `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH` nor `config.mesh.repo.credential.githubApp.privateKeyPath` is
   set, `resolveGithubAppPrivateKey` falls back to a CODE-ENFORCED default directory under the global mesh
   home (`<meshRoot>/credentials/`, i.e. `~/.aof/mesh/credentials/` — never Dropbox, iCloud, OneDrive, or
@@ -70,7 +73,14 @@ isolation boundary is the org, not just the repo inside one shared App.**
   added `2026-07-16` at the operator's direction, during `aof:verify 38`'s live soak, after the operator
   relocated the story-02 App key out of a Dropbox-synced folder into `~/.aof/mesh/credentials/`. Until
   this task ships, the path must be set explicitly via env/config (as today's soak does); after it ships,
-  dropping a key into the default directory needs no explicit path at all.
+  dropping a key into the default directory needs no explicit path at all. Env > config > default
+  precedence; the resolved path is asserted only as a prefix under the non-sync dir (the key *filename*
+  convention within it is pinned at build — flagged by aof-qa, see STATE).
+- [ ] `tasks/03_real-per-org-mint-soak.feature` — `@manual` — the outsider check (ADR-008 real-producer
+  gate): TWO real orgs, each with its OWN GitHub App / installation / key; a worker assigned a repo in
+  each org clones EACH using that org's own App-minted token; a deliberately mis-configured cross-org
+  attempt fails loud, never borrows another org's App. Per-org T8/R7 least-privilege attestation.
+  Deferred human gate — closed at `aof:verify 38`.
 
 ## Notes
 
