@@ -234,6 +234,17 @@ function buildCloneCredentialFrame(to, { assignmentId, credential = null, code, 
   return frame;
 }
 
+// buildCloneUrlFrame(to, { assignmentId, cloneUrl, code, at }) — review fix (ADR-010
+// Gap A extended, live soak 2026-07-18): the SAME down-frame shape as
+// buildCloneCredentialFrame above, for the cloneUrl PULL — purely additive
+// alongside the frozen buildDirectiveFrame, never pushed onto and never read
+// from the directive frame.
+function buildCloneUrlFrame(to, { assignmentId, cloneUrl = null, code, at }) {
+  const frame = { kind: "clone-url", to, assignmentId, cloneUrl, at };
+  if (typeof code === "string" && code.length > 0) frame.code = code;
+  return frame;
+}
+
 // The LOUD coded refusals (never a silent empty reply) applyCloneCredentialRequestFrame
 // (below) can reply with.
 export const CLONE_CREDENTIAL_NOT_HOLDER = "clone-credential-not-holder";
@@ -347,6 +358,68 @@ export async function applyCloneCredentialRequestFrame(store, frame, options = {
   return { applied: true, minted: resolved != null, assignmentId, workspaceId };
 }
 
+// The LOUD coded refusals for the clone-url PULL (review fix, ADR-010 Gap A
+// extended, live soak 2026-07-18) — the SAME shape as the clone-credential
+// refusals above, minus a mint-failure code: this is a plain DB read, nothing to
+// fail to mint.
+export const CLONE_URL_NOT_HOLDER = "clone-url-not-holder";
+export const CLONE_URL_UNKNOWN_ASSIGNMENT = "clone-url-unknown-assignment";
+export const CLONE_URL_REQUEST_INVALID = "clone-url-request-invalid";
+export const CLONE_URL_WORKSPACE_MISMATCH = "clone-url-workspace-mismatch";
+
+// applyCloneUrlRequestFrame(store, frame, options) — review fix (ADR-010 Gap A
+// extended, live soak 2026-07-18): the SAME shape as applyCloneCredentialRequestFrame
+// above — the up-frame { kind:"clone-url-request", nodeId, assignmentId,
+// workspaceId, at } a worker sends on a clone-on-miss where its OWN local
+// resolution came back null (mesh-worker-execution.mjs). Reuses the IDENTICAL
+// holder + workspace-match authorization (SECURITY T6's F15 discipline applies
+// here too, even though a cloneUrl is not a secret — a holder of any assignment
+// must not be able to fish for an arbitrary workspace's repo location by naming
+// a workspaceId it was never assigned). No mint, no minting authority: just the
+// SAME clone_url column resolveWorkspaceCloneUrl (mesh-presence.mjs) reads,
+// looked up directly against the CONTROL node's OWN local registry — the one
+// place this value is actually known, since it is populated only by the
+// workspace's own `aof mesh repo publish` (global-node-registry.mjs).
+export async function applyCloneUrlRequestFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+  const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+  const now = options.now ?? new Date().toISOString();
+  const directiveTargets = options.directiveTargets ?? null;
+
+  const refuse = (code) => {
+    if (connectionNodeId != null && directiveTargets != null) {
+      sendDirective(directiveTargets, connectionNodeId, buildCloneUrlFrame(connectionNodeId, { assignmentId, cloneUrl: null, code, at: now }));
+    }
+    return { applied: false, skipped: true, code };
+  };
+
+  if (connectionNodeId == null || assignmentId == null || workspaceId == null) {
+    return refuse(CLONE_URL_REQUEST_INVALID);
+  }
+
+  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
+  if (!existing) {
+    return refuse(CLONE_URL_UNKNOWN_ASSIGNMENT);
+  }
+  if (existing.target_node_id !== connectionNodeId) {
+    return refuse(CLONE_URL_NOT_HOLDER);
+  }
+  if (workspaceId !== existing.workspace_id) {
+    return refuse(CLONE_URL_WORKSPACE_MISMATCH);
+  }
+
+  const row = store.db.prepare("SELECT clone_url FROM global_workspace_descriptors WHERE workspace_id = ?").get(existing.workspace_id);
+  const resolvedCloneUrl = row != null && typeof row.clone_url === "string" && row.clone_url.length > 0 ? row.clone_url : null;
+
+  if (directiveTargets != null) {
+    sendDirective(directiveTargets, connectionNodeId, buildCloneUrlFrame(connectionNodeId, { assignmentId, cloneUrl: resolvedCloneUrl, at: now }));
+  }
+  return { applied: true, resolved: resolvedCloneUrl != null, assignmentId, workspaceId };
+}
+
 // applyStreamFrame(store, frame, options) — dispatch by frame.kind. An unrecognised
 // kind is a no-op (never a crash — the never-crash discipline every mesh module in
 // this codebase keeps).
@@ -356,6 +429,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "presence") return applyPresenceFrame(store, frame, options);
   if (frame?.kind === "assignment-status") return applyAssignmentStatusFrame(store, frame, options);
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
+  if (frame?.kind === "clone-url-request") return applyCloneUrlRequestFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 

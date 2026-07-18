@@ -227,10 +227,16 @@ async function withProductionWiringFixture(fn) {
       },
     };
     await writeFile(path.join(root, ".aof", "aof.config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    const ws = await loadWorkspace(root);
+    // review fix (live soak, 2026-07-18) — an ISOLATED AOF_GLOBAL_HOME is not
+    // optional here: loadWorkspace/publishNodeRecord/startLauncher all touch
+    // real global state without one. Found while mirroring this fixture for
+    // mesh-worker-clone-url-pull.test.mjs and having the SAME gap correctly
+    // caught before it ran — this file had been shipping with it unnoticed.
+    const env = { ...process.env, AOF_GLOBAL_HOME: path.join(tmp, ".global-aof") };
+    const ws = await loadWorkspace(root, undefined, { env });
     await publishNodeRecord(ws, PROD_WORKER_ID, { nodeId: PROD_WORKER_ID, host: PROD_WORKER_ID, os: "linux", runtimes: [], skills: [], aofVersion: "1.0.0", publishedAt: NOW });
     await publishNodeRecord(ws, PROD_CONTROL_ID, { nodeId: PROD_CONTROL_ID, host: PROD_CONTROL_ID, os: "linux", runtimes: [], skills: [], aofVersion: "1.0.0", publishedAt: NOW });
-    return await fn({ tmp, root, ws, itemRef });
+    return await fn({ tmp, root, ws, itemRef, env });
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
@@ -357,7 +363,7 @@ export const meshWorkerCloneCredentialPullTests = [
   // ------------------------------------------------------------------
   {
     name: "task05/38 clone-credential-pull: the PRODUCTION wiring supplies the resolver — startLauncher, constructed exactly as `aof mesh serve --serve` does with NO credential-shaped test injection, genuinely attempts a clone-credential pull on a clone miss (the F12 guard, behavioural — a test that injects the collaborator it verifies proves nothing)",
-    run: async () => withProductionWiringFixture(async ({ ws, itemRef }) => {
+    run: async () => withProductionWiringFixture(async ({ ws, itemRef, env }) => {
       const exec = fixturedFabricExec({
         BackendState: "Running",
         Self: { HostName: PROD_WORKER_ID, DNSName: `${PROD_WORKER_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.1.1.1"], Online: true },
@@ -370,6 +376,9 @@ export const meshWorkerCloneCredentialPullTests = [
         ticker: manualTicker(),
         peerPollTicker: manualTicker(),
         createWorkerWsTransport: () => transport,
+        // review fix (live soak, 2026-07-18) — the SAME isolated env every internal
+        // store-open this launcher makes must use, never the real machine's.
+        globalWorkStoreOptions: { env },
         // DELIBERATELY NO workerExecutionOptions / createMeshWorkerExecutionHandler /
         // workerExecutionLoadWs override — this is production's OWN wiring, exactly
         // as `aof mesh serve --serve` builds it. A short transport-level bound

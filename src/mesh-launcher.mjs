@@ -605,6 +605,12 @@ export async function startLauncher(ws, options = {}) {
         // (`aof mesh serve --serve`) now genuinely supplies one, which it never did
         // before this fix (fitness acd-clone-credential-pull-not-pushed's F12 guard).
         requestCloneCredential: (request) => client.requestCloneCredential(request),
+        // review fix (ADR-010 Gap A extended, live soak 2026-07-18) — the SAME F12
+        // discipline as requestCloneCredential immediately above: a literal key HERE,
+        // closing over this worker's OWN stream client, so production genuinely
+        // supplies the clone-url PULL resolver rather than it being reachable only
+        // through the workerExecutionOptions test-injection spread below.
+        requestCloneUrl: (request) => client.requestCloneUrl(request),
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });

@@ -72,11 +72,33 @@ export function buildCloneCredentialRequestFrame(nodeId, assignmentId, workspace
   return { kind: "clone-credential-request", nodeId, assignmentId, workspaceId, at: now };
 }
 
+// buildCloneUrlRequestFrame(nodeId, assignmentId, workspaceId, now) — review fix
+// (ADR-010 Gap A extended, live soak 2026-07-18): the SAME PULL shape as
+// buildCloneCredentialRequestFrame above, for a DIFFERENT gap — a worker assigned
+// to a workspace it has never checked out has no local knowledge of that
+// workspace's cloneUrl (config.mesh.repo.cloneUrl lives ONLY in that workspace's
+// OWN committed config, which the worker cannot read before it has cloned it —
+// chicken-and-egg), and the control node's own local global_workspace_descriptors
+// row is NOT synced cross-machine (each node's SQLite file is independently, only
+// LOCALLY populated). Deliberately NOT added to the FROZEN directive frame
+// (35/ADR-002, guarded by acd-clone-credential-pull-not-pushed): control cannot
+// know a clone is even needed at dispatch time, so pushing cloneUrl on EVERY
+// directive is the same "broadest exposure for the least benefit" ADR-009 already
+// rejected for credentials — pulled on-demand, only on an actual clone miss,
+// exactly like the credential.
+export function buildCloneUrlRequestFrame(nodeId, assignmentId, workspaceId, now) {
+  return { kind: "clone-url-request", nodeId, assignmentId, workspaceId, at: now };
+}
+
 // THE CLONE-CREDENTIAL BOUNDED WAIT — a request that is refused, dropped, or never
 // answered must never hang the worker forever (ADR-009: "failure is LOUD, never a
 // hang"). Overridable per-client via options.cloneCredentialTimeoutMs (tests inject a
 // short bound; production keeps the default).
 export const DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS = 15000;
+// review fix (ADR-010 Gap A extended, live soak 2026-07-18) — the SAME bounded-wait
+// discipline for the clone-url PULL: "failure is LOUD, never a hang" applies here
+// exactly as it does to the credential.
+export const DEFAULT_CLONE_URL_TIMEOUT_MS = 15000;
 
 // createWorkerStreamClient({ transport, ticker, nodeId, workspaceId, now, onWarning })
 // → { connect(), sendSnapshot(items), sendDelta(items), notifyDrop(), stop() }.
@@ -116,6 +138,9 @@ export function createWorkerStreamClient({
   // requestCloneCredential (below) applies to its own pending reply. Tests inject a
   // short bound; production keeps DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS.
   cloneCredentialTimeoutMs = DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS,
+  // cloneUrlTimeoutMs — review fix (ADR-010 Gap A extended, live soak 2026-07-18):
+  // the SAME per-client override shape as cloneCredentialTimeoutMs, for requestCloneUrl.
+  cloneUrlTimeoutMs = DEFAULT_CLONE_URL_TIMEOUT_MS,
 } = {}) {
   let handle = null;
   let connected = false;
@@ -134,6 +159,10 @@ export function createWorkerStreamClient({
   // for a given assignment). A bounded wait backstops a request that is refused,
   // dropped, or never answered — see requestCloneCredential below.
   const pendingCloneCredentialRequests = new Map();
+  // review fix (ADR-010 Gap A extended, live soak 2026-07-18) — the SAME
+  // per-assignment pending-request correlation as pendingCloneCredentialRequests
+  // above, for the clone-url PULL (see buildCloneUrlRequestFrame).
+  const pendingCloneUrlRequests = new Map();
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
@@ -163,6 +192,23 @@ export function createWorkerStreamClient({
     clearTimeout(pending.timer);
   }
 
+  // settleCloneUrlRequest / clearPendingCloneUrlRequest — the SAME two functions
+  // as their clone-credential siblings above, over pendingCloneUrlRequests.
+  function settleCloneUrlRequest(assignmentId, frame) {
+    const pending = pendingCloneUrlRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingCloneUrlRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+    pending.resolve({ frame });
+  }
+
+  function clearPendingCloneUrlRequest(assignmentId) {
+    const pending = pendingCloneUrlRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingCloneUrlRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+  }
+
   // handleTransportMessage(raw) — the worker's FIRST receive listener (STORY.md:
   // "the worker client's FIRST receive listener is a clean additive sibling to
   // onDrop"). A malformed frame is dropped, never thrown (the SAME never-crash
@@ -187,6 +233,11 @@ export function createWorkerStreamClient({
     if (frame?.kind === "clone-credential") {
       const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
       if (assignmentId != null) settleCloneCredentialRequest(assignmentId, frame);
+      return;
+    }
+    if (frame?.kind === "clone-url") {
+      const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+      if (assignmentId != null) settleCloneUrlRequest(assignmentId, frame);
       return;
     }
   }
@@ -337,6 +388,60 @@ export function createWorkerStreamClient({
     throw error;
   }
 
+  // requestCloneUrl({ assignmentId, workspaceId }) — review fix (ADR-010 Gap A
+  // extended, live soak 2026-07-18): the SAME PULL shape as requestCloneCredential
+  // above, over the SAME sendFrame failure-isolation seam, bounded by
+  // cloneUrlTimeoutMs. A PURE TRANSPORT LEAF exactly like its sibling — it never
+  // resolves, publishes, or caches a cloneUrl itself, only carries one.
+  //
+  // Resolves to the cloneUrl STRING on a well-formed non-refusal reply carrying
+  // one; resolves to `null` on a well-formed reply EXPLICITLY carrying no cloneUrl
+  // (control has no clone_url on record for this workspace either — the caller
+  // falls through to its own final failure path, exactly as a null credential
+  // falls through to the public-repo path). REJECTS on a send failure, a refusal,
+  // a timeout, or a malformed/blank reply.
+  async function requestCloneUrl({ assignmentId, workspaceId } = {}) {
+    if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+      const error = new Error("requestCloneUrl requires an assignmentId");
+      error.code = "clone-url-request-invalid";
+      throw error;
+    }
+
+    const waitForReply = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingCloneUrlRequests.delete(assignmentId);
+        resolve({ timedOut: true });
+      }, cloneUrlTimeoutMs);
+      pendingCloneUrlRequests.set(assignmentId, { resolve, timer });
+    });
+
+    const sent = await sendFrame(buildCloneUrlRequestFrame(nodeId, assignmentId, workspaceId, resolveNow()));
+    if (!sent.sent) {
+      clearPendingCloneUrlRequest(assignmentId);
+      const error = new Error("clone-url-request could not be sent (transport unavailable)");
+      error.code = "assignment-repo-unavailable";
+      throw error;
+    }
+
+    const outcome = await waitForReply;
+    if (outcome?.timedOut) {
+      const error = new Error(`clone-url-request timed out waiting for control's reply (assignmentId=${assignmentId})`);
+      error.code = "clone-url-timeout";
+      throw error;
+    }
+    const frame = outcome?.frame ?? null;
+    if (typeof frame?.code === "string" && frame.code.length > 0) {
+      const error = new Error(`clone-url-request was refused by control (code=${frame.code})`);
+      error.code = frame.code;
+      throw error;
+    }
+    if (frame?.cloneUrl === null) return null; // control has no clone_url on record for this workspace either
+    if (typeof frame?.cloneUrl === "string" && frame.cloneUrl.length > 0) return frame.cloneUrl;
+    const error = new Error("clone-url-request received a blank/absent cloneUrl");
+    error.code = "clone-url-blank";
+    throw error;
+  }
+
   // onDirective(handler) — milestone 35 / ADR-002, story 01: registers the ONE
   // handler invoked with a PARSED directive frame when one arrives on the receive
   // listener above. Mirrors createWorkerWsTransport's onDrop(handler) shape
@@ -385,6 +490,7 @@ export function createWorkerStreamClient({
     sendPresence,
     sendAssignmentStatus,
     requestCloneCredential,
+    requestCloneUrl,
     onDirective,
     notifyDrop,
     stop,

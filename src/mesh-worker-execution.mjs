@@ -684,11 +684,20 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     requestCloneCredential,
     cloneExec,
     // resolveWorkspaceCloneUrl — INJECTED (the same idiom as every other
-    // collaborator here), default the real mesh-presence.mjs seam. Resolves the
-    // SYNCED registry's clone_url for a workspace this worker has never checked
-    // out (Gap A extended, review fix live soak 2026-07-17) — a test may still
-    // override it through workerExecutionOptions, exactly like requestCloneCredential.
+    // collaborator here), default the real mesh-presence.mjs seam. Reads the
+    // WORKER's OWN local registry — kept as a last-resort, defense-in-depth check
+    // (e.g. a shared-filesystem deployment), but CONFIRMED LIVE (2026-07-18) to
+    // read nothing in the real cross-machine case: each node's SQLite file is
+    // independently, only LOCALLY populated, so a worker that has never itself
+    // published this workspace has no row to find here regardless.
     resolveWorkspaceCloneUrl = defaultResolveWorkspaceCloneUrl,
+    // requestCloneUrl — review fix (ADR-010 Gap A extended, live soak 2026-07-18):
+    // the PULL that actually closes the gap resolveWorkspaceCloneUrl above cannot
+    // — asks the control node directly, over the SAME live stream the credential
+    // PULL already uses (ADR-009's precedent), for the clone_url it has on record
+    // for this workspace. INJECTED; production supplies client.requestCloneUrl
+    // (mesh-launcher.mjs), a test may override it via workerExecutionOptions.
+    requestCloneUrl,
   } = options;
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
@@ -737,15 +746,33 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // workerHasRepo (task 02) so the fall-through below is the UNCHANGED m35 flow.
     let resolvedCloneUrl = null;
     if (!hasRepo) {
-      // Gap A extended (review fix, live soak 2026-07-17): resolveCloneUrl(ws)
+      // Gap A extended (review fix, live soak 2026-07-17/18): resolveCloneUrl(ws)
       // only ever reads THIS worker's own launch-workspace config — for a
       // workspaceId that is NOT the launch workspace (precisely the clone-on-miss
-      // case, by definition), that read is always null. Fall back to the SYNCED
-      // registry's clone_url (mesh-presence.mjs's resolveWorkspaceCloneUrl,
-      // populated by the workspace's own `aof mesh repo publish`) — a worker with
-      // no local knowledge of a repo it has never checked out can still resolve
-      // where to clone it FROM, without needing that config locally at all.
-      resolvedCloneUrl = resolveCloneUrl(ws) ?? await resolveWorkspaceCloneUrl(workspaceId, { openStore, globalWorkStoreOptions });
+      // case, by definition), that read is always null. Three tiers, in order:
+      //   1. this worker's own local config (resolveCloneUrl) — fastest, no I/O.
+      //   2. a live PULL to the control node (requestCloneUrl, ADR-009's precedent)
+      //      — the tier that ACTUALLY closes the gap: confirmed live (2026-07-18)
+      //      that a fresh worker's own registry copy has no row for a workspace it
+      //      has never itself published, so tier 3 alone can never resolve this.
+      //   3. this worker's own local registry (resolveWorkspaceCloneUrl) — kept as
+      //      a last-resort for a deployment where it DOES happen to have relevant
+      //      local knowledge; effectively a no-op in the common cross-machine case.
+      // A PULL fault (refusal, timeout, no transport) is caught and falls through
+      // to tier 3 rather than aborting the clone attempt outright — the SAME
+      // "never let one collaborator's fault become a hard stop" discipline every
+      // other optional resolver in this handler already keeps.
+      let pulledCloneUrl = null;
+      if (resolveCloneUrl(ws) == null && typeof requestCloneUrl === "function") {
+        try {
+          pulledCloneUrl = await requestCloneUrl({ assignmentId, workspaceId });
+        } catch (error) {
+          logAssignmentFailure(assignmentId, error?.code ?? "clone-url-request-failed", `clone-url PULL to control failed, falling through to local registry: ${String(error?.message ?? error)}`);
+        }
+      }
+      resolvedCloneUrl = resolveCloneUrl(ws)
+        ?? pulledCloneUrl
+        ?? await resolveWorkspaceCloneUrl(workspaceId, { openStore, globalWorkStoreOptions });
       const cloneUrl = resolvedCloneUrl;
       if (cloneUrl != null) {
         try {

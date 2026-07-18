@@ -109,6 +109,12 @@ import { meshWorkerCloneCredentialNotPersistedTests } from "../test/mesh-worker-
 // PULLED by the worker at the moment it hits a clone miss, over the already-open
 // stream, so a private repo can actually be cloned in production.
 import { meshWorkerCloneCredentialPullTests } from "../test/mesh-worker-clone-credential-pull.test.mjs";
+// ADR-010 Gap A extended (review fix, live soak 2026-07-18) — the SAME PULL
+// mechanism, mirrored for a workspace's cloneUrl: a worker's own local registry
+// copy can never carry a row for a workspace it has never itself published
+// (confirmed live against the real two-machine soak), so the worker asks the
+// control node directly on a clone miss, exactly like the credential above.
+import { meshWorkerCloneUrlPullTests } from "../test/mesh-worker-clone-url-pull.test.mjs";
 // milestone 38 / story 02 — clone-credential-mint (ADR-010): the config-selected
 // mint PROVIDER (env-token | github-app) at the ADR-009 mintCloneCredential seam.
 import { meshCloneCredentialProviderConfigTests } from "../test/mesh-clone-credential-provider-config.test.mjs";
@@ -1648,6 +1654,7 @@ export const tests = [
   ...meshWorkerCloneRegisterFallthroughTests,
   ...meshWorkerCloneCredentialNotPersistedTests,
   ...meshWorkerCloneCredentialPullTests,
+  ...meshWorkerCloneUrlPullTests,
   // milestone 38 / story 02 — clone-credential-mint (ADR-010, tasks 00-04 traceability
   // modules + the F5/F6/F7 fitness functions armed at build)
   ...meshCloneCredentialProviderConfigTests,
