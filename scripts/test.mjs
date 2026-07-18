@@ -132,6 +132,19 @@ import { meshCloneCredentialAppIdentityPerWorkspaceTests } from "../test/mesh-cl
 import { meshCloneCredentialCrossOrgIsolationTests } from "../test/mesh-clone-credential-cross-org-isolation.test.mjs";
 import { meshCloneCredentialAppKeyDefaultDirTests } from "../test/mesh-clone-credential-app-key-default-dir.test.mjs";
 import { archTests as acdCrossOrgKeyIsolationTests } from "../test/arch/acd-cross-org-key-isolation.test.mjs";
+// milestone 38 / story 07 — durable worker pushback (ADR-015): a REAL branch, not
+// detached (task 00), push BEFORE the worktree is force-removed, over a real local
+// bare origin (task 01), the two-token write scope (task 02) + the REQUIRED
+// write-credential-request wire (production wiring the pre-existing F12 guard,
+// acd-clone-credential-pull-not-pushed, demands the moment a new credential-shaped
+// collaborator exists) + the acd-write-token-scoped-to-push fitness function; the
+// acd-minted-token-scoped-single-repo REWRITE (two-seam) is registered above, in
+// place (SECURITY T15/T9).
+import { meshWorktreeBranchNotDetachedTests } from "../test/mesh-worktree-branch-not-detached.test.mjs";
+import { meshWorkerPushBeforeRemoveTests } from "../test/mesh-worker-push-before-remove.test.mjs";
+import { meshCloneCredentialPushMintScopedTests } from "../test/mesh-clone-credential-push-mint-scoped.test.mjs";
+import { meshWorkerWriteCredentialPullTests } from "../test/mesh-worker-write-credential-pull.test.mjs";
+import { archTests as acdWriteTokenScopedToPushTests } from "../test/arch/acd-write-token-scoped-to-push.test.mjs";
 // milestone 41 — work-item insertion & re-index (ADR-001/ADR-003, refine-stage
 // fitness functions, GREEN today): resolution is folder-derived so re-index-by-rename
 // is sufficient (no index to rebuild), and the renumber WRITER stays OUT of the
@@ -1678,6 +1691,13 @@ export const tests = [
   ...meshCloneCredentialCrossOrgIsolationTests,
   ...meshCloneCredentialAppKeyDefaultDirTests,
   ...acdCrossOrgKeyIsolationTests,
+  // milestone 38 / story 07 — durable worker pushback (ADR-015, tasks 00-02
+  // traceability modules + the write-credential wire + acd-write-token-scoped-to-push)
+  ...meshWorktreeBranchNotDetachedTests,
+  ...meshWorkerPushBeforeRemoveTests,
+  ...meshCloneCredentialPushMintScopedTests,
+  ...meshWorkerWriteCredentialPullTests,
+  ...acdWriteTokenScopedToPushTests,
   // milestone 41 — work-item insertion & re-index (refine-stage fitness functions)
   ...acdReindexResolutionFolderDerivedTests,
   ...acdReindexEngineBlastRadiusTests,

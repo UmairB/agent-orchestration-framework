@@ -19,6 +19,7 @@ import {
   createStatusRecorder,
   createRecordingCloneExec,
   scriptedSpawnRuntime,
+  scriptedPushExec,
 } from "./support/mesh-worker-clone-fixture.mjs";
 
 export const meshWorkerCloneRegisterFallthroughTests = [
@@ -34,6 +35,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
       // already exercise real worktree mechanics; only the CLONE step is faked
       // (no real forge/network, per the developer-amigo feasibility seat).
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -81,6 +83,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec({ status: 1, stdout: "", stderr: "fatal: could not read from remote" });
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -116,6 +119,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -206,6 +210,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
         });
       };
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -236,6 +241,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
           const status = createStatusRecorder();
           const cloneExec = createRecordingCloneExec(script);
           const handler = createMeshWorkerExecutionHandler({
+            pushExec: scriptedPushExec(),
             loadWs: () => Promise.resolve(workspace),
             nodeId: "worker-a",
             sendAssignmentStatus: status.sendAssignmentStatus,
@@ -272,6 +278,7 @@ export const meshWorkerCloneRegisterFallthroughTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,

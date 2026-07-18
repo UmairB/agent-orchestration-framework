@@ -88,6 +88,17 @@ export function scriptedSpawnRuntime(outcome, { failureReason = null } = {}) {
   return async () => ({ outcome, failureReason: outcome === "failed" ? failureReason ?? "agent_error" : null });
 }
 
+// scriptedPushExec — mirrors mesh-worker-exec-fixture.mjs's scripted push double
+// (milestone 38 / story 07, ADR-015): a NO-OP push success double for this fixture
+// family's pre-story-07 tests, which drive `done` outcomes to assert CLONE mechanics
+// unrelated to the push step itself — without this, createMeshWorkerExecutionHandler
+// falls through to a REAL `git push origin <branch>` (no `origin` remote configured
+// in this fixture family), which fails loudly and RETAINS the worktree instead of
+// completing `done`.
+export function scriptedPushExec(status = 0) {
+  return async () => ({ stdout: "", stderr: "", status });
+}
+
 // createRecordingCloneExec(script) — the INJECTED clone-exec double (mirrors
 // mesh-worktree.mjs's options.exec fake idiom). `script` is either a fixed
 // `{ status, stdout, stderr }` result, or a function `(args, opts) => result` for a

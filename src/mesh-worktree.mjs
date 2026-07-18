@@ -24,6 +24,13 @@
 // `.git/worktrees/<name>` prunable metadata that blocks re-add). `failed` → RETAIN for
 // inspection, bounded by a DOCUMENTED retention ceiling (a constant, not scattered) —
 // `sweepRetainedWorktrees` removes anything past it.
+//
+// MILESTONE 38 / STORY 07 (ADR-015, task 00) — a REAL branch, not always detached.
+// `meshWorkerBranchName(itemRef, assignmentId)` below computes the DOCUMENTED DEFAULT
+// `aof/mesh/<itemRef>-<assignmentId>` convention (itemRef sanitized to a
+// `git check-ref-format`-valid slug); `addWorktree` checks out ON that branch when the
+// caller passes `options.branch` (mesh-worker-execution.mjs does, on every dispatch),
+// contrasting the STILL-DEFAULT `--detach` form every other caller keeps unchanged.
 import path from "node:path";
 import { execFile } from "node:child_process";
 
@@ -46,6 +53,56 @@ export function meshWorktreesRoot(projectRoot) {
 // enumerate-then-filter resolver, never a path.join(root, ref)).
 export function meshWorktreePath(projectRoot, assignmentId) {
   return path.join(meshWorktreesRoot(projectRoot), String(assignmentId));
+}
+
+// ------------------------------------------ milestone 38 / story 07 (ADR-015) ----
+
+// MESH_BRANCH_PREFIX — the DOCUMENTED DEFAULT branch namespace every worker-pushed
+// branch lives under (ADR-015 decision 1). Fixed, safe, never user-controlled — the
+// full branch name always starts with these literal (ASCII-letter-leading) segments,
+// so the "cannot begin with a hyphen/slash" git-ref rule is satisfied by construction
+// regardless of what the sanitized slug beneath it looks like.
+const MESH_BRANCH_PREFIX = "aof/mesh/";
+
+// sanitizeRefSlug(value, fallback) — collapses an arbitrary (possibly ref-HOSTILE)
+// string into a slug that is always safe to embed as the LAST path-component of a
+// git ref (git-check-ref-format's rules, https://git-scm.com/docs/git-check-ref-format):
+// no control chars/space/~/^/:/?/*/[/\, no "@{", no ".." run anywhere, no leading or
+// trailing ".", no trailing ".lock". A single whitelist pass (keep only
+// [A-Za-z0-9._-], replace everything else — INCLUDING "/" — with "-") both strips
+// every forbidden character in one step AND collapses a slash into the "valid
+// path-component or collapsed" shape the task allows, never leaving a stray empty
+// path segment. Returns `fallback` (itself assumed already-safe) if sanitizing would
+// otherwise yield an empty string (e.g. a value that is entirely forbidden chars).
+function sanitizeRefSlug(value, fallback) {
+  let slug = String(value ?? "").replace(/[^A-Za-z0-9._-]/g, "-");
+  // No TWO-OR-MORE consecutive dots anywhere in a ref (forbidden regardless of
+  // position) — collapsed to a single "-" in one pass (a single global replace of
+  // every 2+-dot run cannot leave a residual ".." behind, since the replaced chars
+  // are never dots).
+  slug = slug.replace(/\.{2,}/g, "-");
+  // A ref component cannot begin with "." nor end with "." or the sequence ".lock".
+  slug = slug.replace(/^\.+/, "").replace(/\.lock$/i, "-lock").replace(/\.+$/, "");
+  // Cosmetic tidy-up only (not required for validity): collapse runs of "-" the
+  // substitutions above may have produced, and drop stray leading/trailing "-".
+  slug = slug.replace(/-{2,}/g, "-").replace(/^-+/, "").replace(/-+$/, "");
+  return slug.length > 0 ? slug : fallback;
+}
+
+// meshWorkerBranchName(itemRef, assignmentId) — the ADR-015 DOCUMENTED DEFAULT branch
+// convention `aof/mesh/<itemRef>-<assignmentId>`, itemRef sanitized to a git-ref-safe
+// slug, keyed by assignmentId for collision-freedom (mirroring meshWorktreePath's OWN
+// assignmentId key immediately above). Both halves are sanitized — a ref-hostile
+// assignmentId (task 00's Examples row 12) must sanitize too, never only the itemRef
+// half. The exact sanitized text is an implementation mechanic (Three Amigos); the
+// INVARIANT every caller relies on is "a `git check-ref-format`-valid ref, prefixed
+// `aof/mesh/`, distinct per assignmentId" — task 00's own Scenario Outline is the
+// litmus, not a pinned literal mapping (except the one DOCUMENTED example, an
+// already-clean itemRef, which passes through byte-identical).
+export function meshWorkerBranchName(itemRef, assignmentId) {
+  const itemSlug = sanitizeRefSlug(itemRef, "item");
+  const assignmentSlug = sanitizeRefSlug(assignmentId, "asg");
+  return `${MESH_BRANCH_PREFIX}${itemSlug}-${assignmentSlug}`;
 }
 
 // isUnderMeshWorktreesRoot(projectRoot, candidatePath) — the structural/behavioural
@@ -91,14 +148,24 @@ function gitError(message, code, extra = {}) {
 // -------------------------------------------------------- worktree verbs ----
 
 // addWorktree(projectRoot, assignmentId, commitish, options) — `git worktree add
-// --detach <path> <commitish>` at the ONE seam path. Detached-at-commit (RESEARCH.md
-// §4/§5): no branch-name contention between concurrent assignments. Returns the
-// materialized path. A non-zero exit is a thrown, coded fault (the caller/orchestrator
-// decides how to surface it — this module never swallows a real git failure).
+// --detach <path> <commitish>` at the ONE seam path BY DEFAULT (detached-at-commit,
+// RESEARCH.md §4/§5: no branch-name contention between concurrent assignments) —
+// UNLESS `options.branch` names a real branch (milestone 38 / story 07, ADR-015
+// decision 1), in which case the worktree is checked out ON that branch (`git
+// worktree add -b <branch> <path> <commitish>`), HEAD on it, never detached. The
+// caller (mesh-worker-execution.mjs) computes the branch via `meshWorkerBranchName`
+// above and passes it here — this function stays agnostic of itemRef/assignmentId
+// naming, only "was a branch requested". Every EXISTING detached call site (no
+// `options.branch`) is byte-unchanged. Returns the materialized path. A non-zero exit
+// is a thrown, coded fault (the caller/orchestrator decides how to surface it — this
+// module never swallows a real git failure).
 export async function addWorktree(projectRoot, assignmentId, commitish, options = {}) {
   const exec = resolveExec(options);
   const worktreePath = meshWorktreePath(projectRoot, assignmentId);
-  const result = await exec(["worktree", "add", "--detach", worktreePath, commitish], { cwd: projectRoot });
+  const args = options.branch
+    ? ["worktree", "add", "-b", options.branch, worktreePath, commitish]
+    : ["worktree", "add", "--detach", worktreePath, commitish];
+  const result = await exec(args, { cwd: projectRoot });
   if (result.status !== 0) {
     throw gitError(`git worktree add failed for assignment "${assignmentId}": ${result.stderr || result.stdout}`, "worktree-add-failed", { assignmentId, worktreePath, stderr: result.stderr });
   }

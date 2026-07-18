@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { loadWorkspace } from "../src/work.mjs";
 import { createMeshWorkerExecutionHandler, workerHasRepo } from "../src/mesh-worker-execution.mjs";
 import { listWorktrees } from "../src/mesh-worktree.mjs";
-import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime } from "./support/mesh-worker-exec-fixture.mjs";
+import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime, scriptedPushExec } from "./support/mesh-worker-exec-fixture.mjs";
 
 const NOW = "2026-07-09T10:00:00.000Z";
 const NODE_ID = "worker-a";
@@ -22,6 +22,7 @@ function directive({ assignmentId = "asg-guard", itemRef, workspaceId }) {
 
 async function makeHandler(fx, ws, recorder, spawnOutcome = "done") {
   return createMeshWorkerExecutionHandler({
+    pushExec: scriptedPushExec(),
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,

@@ -374,6 +374,40 @@ doc: state
   `resolveWorkspaceAppIdentity: async () => ({ appId, privateKey })` in place of the old static keys — same scenarios,
   same assertions, re-verified green. Named here per the R1(m20) near-miss discipline ("a guard on a shared spine seam
   silently invalidates prior-milestone tests — enumerate them, don't let them rot").
+- **Story 07 (developer, at build) — F12's guard (`acd-clone-credential-pull-not-pushed`) generalises AUTOMATICALLY the
+  moment a new credential-shaped collaborator exists, whether or not a task named its wire.** None of story 07's three
+  `@executable` tasks (00-02) named a control<->worker frame-pair for the write credential — task 02's own Background
+  scopes it to "the real clone-mint + push-mint functions ... no real GitHub, no network" — so the build's first pass
+  supplied `requestWriteCredential` as an injected-only seam (mirroring how `requestCloneCredential` is injected
+  directly in most story-01 task tests, with the wire itself proven separately in story-01's own dedicated task 05).
+  The pre-existing, ALREADY-ARMED `acd-clone-credential-pull-not-pushed` (F12) immediately red-lit: its guard scans
+  EVERY `credential`/`token`/`secret`-shaped option name `createMeshWorkerExecutionHandler` destructures and demands
+  each be a LITERAL key at `mesh-launcher.mjs`'s production call site — `requestWriteCredential` matched that pattern
+  on name alone. **Fixed, not routed around:** built the write-credential PULL wire in full — a NEW, DISTINCT frame
+  pair (`write-credential-request`/`write-credential`, never reusing the clone frame kind), `applyWriteCredentialRequestFrame`
+  (`control-stream-server.mjs`, the IDENTICAL SECURITY T6 holder/F15 workspace-match/F16 active-state gates as the clone
+  credential PULL, applied unchanged to the write grant), `client.requestWriteCredential` (`worker-stream-client.mjs`,
+  the identical bounded-wait/correlation shape), and the literal-key wiring at both the control and worker branches of
+  `mesh-launcher.mjs` (`resolveWriteCredentialProvider`, mirroring but never sharing code with `resolveCloneCredentialProvider`).
+  **Lesson (generalise F12 further): a story that adds ANY new credential-shaped option to a handler F12 already
+  guards inherits the OBLIGATION to wire it to a real producer, even when the story's own tasks never named the wire
+  mechanism explicitly — budget it, don't discover it as a surprise red fitness function after the behavioural work is
+  "done."**
+- **Story 07 (developer, at build) — a "shared plumbing" refactor across two mint functions silently made a
+  DIFFERENT, PRE-EXISTING fitness function (`acd-cross-org-key-isolation`, story 03/ADR-011) vacuous.** The first pass
+  at `createGithubAppPushMintProvider` (the write mint) factored the identity/JWT/installation-resolution steps it
+  shares with `createGithubAppMintProvider` (the clone mint) into a shared internal helper, reasoning that neither
+  helper ever touches the requested SCOPE (the one thing SECURITY T15/T9 cares about) so sharing it was "safe." It
+  was NOT safe: `acd-cross-org-key-isolation` structurally scans `createGithubAppMintProvider`'s OWN function body
+  text for the literal `resolveWorkspaceAppIdentity(workspaceId)` call, the `identity == null` throw, and an
+  outer-scope cache check — moving that logic into a helper function removed it from the scanned span, and three of
+  that fitness function's assertions started failing (caught immediately by the focused-harness re-run, never
+  shipped). **Fixed: reverted to a FULLY INDEPENDENT `createGithubAppPushMintProvider`** — no shared helper with the
+  clone mint at all, the identity/JWT/installation-resolution steps duplicated inline (a small amount of code
+  duplication, deliberately accepted). **Lesson: before factoring "harmless-looking" shared plumbing out of a
+  function an existing STRUCTURAL (source-text-scanning) fitness function already scans, check what that detector's
+  anchors actually require to be INSIDE that function's own body — a refactor that is behaviourally identical can
+  still be structurally invisible to a text-scanning detector.**
 
 ## Verification
 

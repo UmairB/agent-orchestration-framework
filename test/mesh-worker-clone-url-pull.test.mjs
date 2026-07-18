@@ -45,6 +45,7 @@ import {
   createStatusRecorder,
   createRecordingCloneExec,
   scriptedSpawnRuntime,
+  scriptedPushExec,
 } from "./support/mesh-worker-clone-fixture.mjs";
 import { createFakeWorkerTransport, createDirectiveChannelFixture } from "./support/mesh-directive-channel-fixture.mjs";
 import { seedAssignment } from "./support/mesh-assign-fixture.mjs";
@@ -204,6 +205,7 @@ export const meshWorkerCloneUrlPullTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -243,6 +245,7 @@ export const meshWorkerCloneUrlPullTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -363,6 +366,7 @@ export const meshWorkerCloneUrlPullTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -394,6 +398,7 @@ export const meshWorkerCloneUrlPullTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -422,6 +427,7 @@ export const meshWorkerCloneUrlPullTests = [
       const status = createStatusRecorder();
       const cloneExec = createRecordingCloneExec();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,

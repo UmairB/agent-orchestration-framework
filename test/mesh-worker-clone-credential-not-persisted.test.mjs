@@ -53,6 +53,7 @@ import {
   createStatusRecorder,
   createRecordingCloneExec,
   scriptedSpawnRuntime,
+  scriptedPushExec,
 } from "./support/mesh-worker-clone-fixture.mjs";
 
 const FAKE_TOKEN = "FAKE-TOKEN-abc123-not-a-real-credential";
@@ -103,6 +104,7 @@ export const meshWorkerCloneCredentialNotPersistedTests = [
       });
       let agentChildEnv = null;
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -173,6 +175,7 @@ export const meshWorkerCloneCredentialNotPersistedTests = [
       const status = createStatusRecorder();
       const cloneExec2 = createRecordingCloneExec({ status: 128, stdout: "", stderr: authenticatedUrlStderr });
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -257,6 +260,7 @@ export const meshWorkerCloneCredentialNotPersistedTests = [
       };
 
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(workspace),
         nodeId: "worker-a",
         sendAssignmentStatus: status.sendAssignmentStatus,
@@ -329,6 +333,7 @@ export const meshWorkerCloneCredentialNotPersistedTests = [
           const logLines = [];
           const cloneExec = createRecordingCloneExec({ status: 128, stdout: "", stderr });
           const handler = createMeshWorkerExecutionHandler({
+            pushExec: scriptedPushExec(),
             loadWs: () => Promise.resolve(workspace),
             nodeId: "worker-a",
             sendAssignmentStatus: status.sendAssignmentStatus,

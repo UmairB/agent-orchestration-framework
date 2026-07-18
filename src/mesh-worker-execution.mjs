@@ -55,13 +55,35 @@
 // call), NOT aof:continue's multi-agent depth. `@executable` coverage ALWAYS injects a
 // scripted spawnRuntime (no real binary) — the real driver is exercised only by the
 // task-05 @manual soak.
+//
+// MILESTONE 38 / STORY 07 (durable-worker-pushback, ADR-015, tasks 00-02) — the
+// worker's output SURVIVES: a REAL branch (`meshWorkerBranchName`, mesh-worktree.mjs),
+// not a detached HEAD (task 00); on `done`, `git push origin <branch>` runs BEFORE the
+// worktree force-remove, reusing the SAME `buildAskpassShim` one-shot the clone uses
+// (ADR-009's PULL, pointed at a push instead) — the worktree is retained, never
+// force-removed, until the push succeeds; a FAILED push surfaces a loud coded
+// `push-failed` and RETAINS the worktree for inspection/retry, never a silent clean
+// `done` over unpushed commits (task 01, `pushWorktreeBranch` below). The WRITE
+// credential is resolved through an INJECTED `requestWriteCredential(...)` seam
+// (mirroring `requestCloneCredential`'s per-invocation-only discipline, SECURITY T4 —
+// no static credential option exists here either); a caller supplying none makes no
+// resolution attempt (an unauthenticated push, exactly the clone path's own
+// no-resolver default). The MINT itself — a SEPARATE, single-repo, `contents:write`
+// (+`pull_requests:write` only for auto-PR) token, NEVER a widened clone credential —
+// is `createGithubAppPushMintProvider` (mesh-clone-credential-provider.mjs, task 02,
+// SECURITY T15/T9). Production wiring of `requestWriteCredential` onto a real
+// control<->worker frame-pair (mirroring ADR-009's clone-credential-request) is NOT
+// built by this story's four tasks (none of tasks 00-02's `@executable` scenarios name
+// a wire frame; the ADR's own codebase-graph grounding pins the branch+push blast
+// radius to mesh-worktree.mjs + this file) — flagged in STATE.md Feedback as the gap
+// task 03's `@manual` soak needs closed before it can run for real.
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { findWork, loadWorkspace } from "./work.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
-import { addWorktree, removeWorktree } from "./mesh-worktree.mjs";
+import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
@@ -385,6 +407,74 @@ function redactCredentialFromText(text, credential) {
   return text.split(credential).join("[redacted]");
 }
 
+// --------------------------------------- milestone 38 / story 07 (ADR-015, task 01) ----
+
+// defaultPushExec(args, { cwd, env }) — the INJECTED push-exec seam, mirroring
+// resolveCloneExec/defaultCloneExec's OWN shape verbatim (argv-form execFile, never a
+// shell string; a per-invocation `env`, never process.env). Default is a real `git`
+// spawn; `@executable` tests inject a FAKE that records argv/env/cwd + a scripted
+// status (no real forge, no real credential, no network) OR — for task 01, which is
+// explicitly RESOLVED to run over a REAL local bare repo as `origin` — exercise the
+// real spawn against a disposable fixture (the DEFAULT — `pushExec` absent — IS the
+// real spawn).
+function defaultPushExec(args, { cwd, env, timeoutMs = 5 * 60 * 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile("git", args, { cwd, env, timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+      if (error && (error.code === "ENOENT" || error.killed || error.signal)) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), status: error ? (typeof error.code === "number" ? error.code : 1) : 0 });
+    });
+  });
+}
+
+function resolvePushExec(options) {
+  return typeof options?.pushExec === "function" ? options.pushExec : defaultPushExec;
+}
+
+// pushWorktreeBranch(projectRoot, worktreePath, branch, options) — `git push origin
+// <branch>` FROM INSIDE the worktree, reusing `buildAskpassShim` verbatim (ADR-015
+// decision 2/invariant 4) — the SAME `GIT_ASKPASS` one-shot the clone path uses
+// (ADR-009's PULL), pointed at a push instead: the write credential (if any) rides a
+// per-invocation env for THIS exec call ONLY — never process.env — the ambient
+// `credential.helper` is reset (`-c credential.helper=`, SECURITY T7, mirroring the
+// clone path) and `GIT_TERMINAL_PROMPT=0` so a missing/refused credential fails LOUDLY
+// rather than hanging on a prompt or being silently rescued by the machine's own
+// keychain. A non-zero exit or a spawn fault THROWS a coded `push-failed` error
+// (credential-redacted, never forwarded raw) — the caller (handleDirective below)
+// NEVER force-removes the worktree over a failed push; the askpass one-shot directory
+// is always removed in a `finally`, so no token outlives this ONE call regardless of
+// outcome. The shim's own scratch directory lives under `meshWorktreesRoot(projectRoot)`
+// — a `.askpass/` sibling inside the repo's OWN `.aof/mesh/` (already git-ignored),
+// never a bare `os.tmpdir()` (mirroring the clone path's F1 discipline at its own,
+// global-mesh-home-rooted, scope).
+export async function pushWorktreeBranch(projectRoot, worktreePath, branch, options = {}) {
+  const exec = resolvePushExec(options);
+  const credential = typeof options.credential === "string" && options.credential.length > 0 ? options.credential : null;
+  let askpass = null;
+  try {
+    const pushEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", LANG: "C" };
+    if (credential != null) {
+      askpass = await buildAskpassShim(meshWorktreesRoot(projectRoot), credential);
+      pushEnv.GIT_ASKPASS = askpass.shimPath;
+    }
+    const result = await exec(["-c", "credential.helper=", "push", "origin", branch], { cwd: worktreePath, env: pushEnv });
+    if (result.status !== 0) {
+      const message = redactCredentialFromText(`git push failed for branch "${branch}": ${result.stderr || result.stdout}`, credential);
+      const error = new Error(message);
+      error.code = "push-failed";
+      throw error;
+    }
+  } catch (error) {
+    error.message = redactCredentialFromText(String(error?.message ?? error), credential);
+    error.code = error.code ?? "push-failed";
+    throw error;
+  } finally {
+    await askpass?.cleanup?.();
+  }
+}
+
 // ------------------------------------------- task 01/02/03: the clone orchestration ----
 
 // writeNodeWorkspaceMembership(nodeId, workspaceId, options) — the WORKER's OWN
@@ -665,6 +755,29 @@ function logAssignmentFailure(assignmentId, code, detail) {
 //                                      what enforces SECURITY T4, not a comment asking
 //                                      politely. Absent for a public-repo clone (no
 //                                      resolver call is even attempted).
+//   pushExec(args, { cwd, env })    — milestone 38 story 07 task 01's INJECTED
+//                                      push-exec seam (default a real `git` spawn,
+//                                      defaultPushExec above); tests inject a FAKE that
+//                                      records argv/env/order and returns a scripted
+//                                      status, OR (task 01, RESOLVED to run over a REAL
+//                                      local bare origin) let the default real spawn
+//                                      run.
+//   requestWriteCredential(req)     — story 07 task 01/02, ADR-015: the push-seam
+//                                      write-credential ASYNC resolver — ({
+//                                      assignmentId, workspaceId, branch }) =>
+//                                      Promise<string|null> — called ONLY on a `done`
+//                                      outcome, immediately before the push, mirroring
+//                                      requestCloneCredential's OWN per-call-only
+//                                      discipline (SECURITY T4 applied to the write
+//                                      grant): no static credential option exists here
+//                                      either. THERE IS NO PRODUCTION WIRING YET (flag,
+//                                      STATE.md Feedback) — none of tasks 00-02's
+//                                      `@executable` scenarios name a control<->worker
+//                                      wire frame for this resolver, so mesh-launcher.mjs
+//                                      does not yet supply one; a caller that passes
+//                                      none makes no resolution attempt (an
+//                                      unauthenticated push, exactly the clone path's
+//                                      own no-resolver default).
 //
 // Returns a handler `(directive) => Promise<void>` — never throws (a fault inside the
 // handler streams a `failed` frame rather than crashing the worker's stream loop; the
@@ -683,6 +796,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     globalWorkStoreOptions,
     requestCloneCredential,
     cloneExec,
+    pushExec,
+    requestWriteCredential,
     // resolveWorkspaceCloneUrl — INJECTED (the same idiom as every other
     // collaborator here), default the real mesh-presence.mjs seam. Reads the
     // WORKER's OWN local registry — kept as a last-resort, defense-in-depth check
@@ -812,14 +927,21 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     let worktreePath;
     let runRecord;
     let item;
+    // story 07 task 00 (ADR-015) — the REAL branch this assignment's worktree is
+    // checked out on, computed BEFORE addWorktree so both the checkout call and the
+    // eventual push (below) name the SAME branch. Distinct per assignmentId by
+    // construction (meshWorkerBranchName embeds it), so two assignments for the same
+    // itemRef never collide.
+    const branch = meshWorkerBranchName(itemRef, assignmentId);
     try {
-      // task 00 — materialize the dedicated worktree at the ONE seam, detached at the
-      // target commit (RESEARCH.md §4/§5: fast, concurrency-safe, no branch-name
-      // contention). "HEAD" is the target commitish — the assignment always targets
-      // the current tip of the branch the control node dispatched from (no ref
-      // negotiation this milestone; a future story could carry an explicit commit).
+      // task 00 — materialize the dedicated worktree at the ONE seam, ON the REAL
+      // branch above (ADR-015: HEAD lands on `branch`, never detached — CONTRAST the
+      // pre-story-07 `--detach` form). "HEAD" is the target commitish — the assignment
+      // always targets the current tip of the branch the control node dispatched from
+      // (no ref negotiation this milestone; a future story could carry an explicit
+      // commit).
       const commitish = directive.commit ?? "HEAD";
-      worktreePath = await addWorktree(ws.projectRoot, assignmentId, commitish, { exec });
+      worktreePath = await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
 
       // T3b / F4b — the ref resolves INSIDE the worktree's OWN checkout via
       // enumerate-then-filter; a traversal ref yields no item there. This is the
@@ -876,22 +998,44 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         now: resolveNow(),
       });
 
-      await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId });
-
-      // task 03 — cleanup on done, retain on failed. `force:true` on the done path:
-      // the headless runtime's own work inside the worktree (build artifacts,
-      // dependency installs, any file it wrote — RESEARCH.md §4's node_modules-per-
-      // worktree note) is untracked content `git worktree remove` (no force) refuses
-      // to delete over (RESEARCH.md §4 measured: "contains modified or untracked
-      // files"). A `done` worktree carries no content worth a human inspecting (that
-      // is exactly the `failed` retention's job — this run's OWN bookkeeping record
-      // lives in the primary checkout's runs/<node>/, per the item resolved above, so
-      // it is never lost to this removal), so force is the correct, documented
-      // default here — never used on the retain-on-failed path below.
+      // task 03/07 — cleanup on done, retain on failed; on a `done` AGENT outcome,
+      // story 07 (ADR-015) inserts a PUSH before that cleanup can ever run. `force:true`
+      // on the (eventual) done-cleanup path: the headless runtime's own work inside the
+      // worktree (build artifacts, dependency installs, any file it wrote —
+      // RESEARCH.md §4's node_modules-per-worktree note) is untracked content
+      // `git worktree remove` (no force) refuses to delete over (RESEARCH.md §4
+      // measured: "contains modified or untracked files"). A cleanly-pushed `done`
+      // worktree carries no content worth a human inspecting (that is exactly the
+      // `failed`/retained-push-failure job — this run's OWN bookkeeping record lives in
+      // the primary checkout's runs/<node>/, per the item resolved above, so it is
+      // never lost to this removal), so force is the correct, documented default here
+      // — never used on either retention path below.
       if (completed.state === "done") {
-        await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
-        onCleanup(assignmentId, "done", worktreePath);
+        // story 07 task 01 (ADR-015 decisions 2/3, invariants 3/4) — PUSH BEFORE the
+        // worktree is EVER force-removed, reusing the ADR-009 askpass shim
+        // (pushWorktreeBranch above). The worktree is NOT removed until the push
+        // succeeds; a FAILED push (rejected / unreachable / auth-refused) RETAINS the
+        // worktree and surfaces a LOUD coded `failed` — the agent's OWN run may have
+        // completed `done`, but an unpushed diff means the ASSIGNMENT is not cleanly
+        // done, so the "done" status frame is sent ONLY after the push itself succeeds.
+        try {
+          let writeCredential = null;
+          if (typeof requestWriteCredential === "function") {
+            const resolved = await requestWriteCredential({ assignmentId, workspaceId, branch });
+            writeCredential = typeof resolved === "string" && resolved.length > 0 ? resolved : null;
+          }
+          await pushWorktreeBranch(ws.projectRoot, worktreePath, branch, { credential: writeCredential, pushExec });
+          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId });
+          await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
+          onCleanup(assignmentId, "done", worktreePath);
+        } catch (pushError) {
+          const code = pushError?.code ?? "push-failed";
+          logAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
+          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code });
+          onCleanup(assignmentId, "failed", worktreePath);
+        }
       } else {
+        await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId });
         onCleanup(assignmentId, "failed", worktreePath);
       }
     } catch (error) {

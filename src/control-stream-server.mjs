@@ -452,6 +452,115 @@ export async function applyCloneUrlRequestFrame(store, frame, options = {}) {
   return { applied: true, resolved: resolvedCloneUrl != null, assignmentId, workspaceId };
 }
 
+// defaultMintWriteCredential(/* workspaceId, assignmentId */) — milestone 38 / story
+// 07 (ADR-015): the control-node-side WRITE-credential source seam, mirroring
+// `defaultMintCloneCredential` above in EVERY discipline except scope — the honest
+// default is "no write credential configured", `null`, NEVER a fallback to the
+// read-scoped `defaultMintCloneCredential` (that would silently widen a clone
+// credential to push authority — exactly the T15 attack (c) this story's whole
+// two-token model exists to forbid) and never the `AOF_MESH_CLONE_TOKEN` env token
+// either (that PAT is the T4/T9-scoped read credential; reusing it for a push would
+// be the SAME widening under a different name). An operator wiring a real write mint
+// (the `github-app` provider's `createGithubAppPushMintProvider`, task 02) supplies
+// their OWN `mintWriteCredential(workspaceId, assignmentId)` at
+// `startControlStreamServer(...)` / mesh-launcher.mjs's `controlStreamServerOptions` —
+// this default is deliberately inert, never a policy prescription.
+export function defaultMintWriteCredential(/* workspaceId, assignmentId */) {
+  return null;
+}
+
+// buildWriteCredentialFrame(to, { assignmentId, credential, code, at }) — the DOWN-half
+// of the story 07 write-credential PULL, the SAME shape as buildCloneCredentialFrame
+// above with a DISTINCT `kind` ("write-credential", never "clone-credential") — the
+// two seams stay wire-discriminable, mirroring the T15 two-seam mint split at the
+// frame level too.
+function buildWriteCredentialFrame(to, { assignmentId, credential = null, code, at }) {
+  const frame = { kind: "write-credential", to, assignmentId, credential, at };
+  if (typeof code === "string" && code.length > 0) frame.code = code;
+  return frame;
+}
+
+// The LOUD coded refusals (never a silent empty reply) applyWriteCredentialRequestFrame
+// (below) can reply with — the SAME shape as the clone-credential refusals above, one
+// per gate.
+export const WRITE_CREDENTIAL_NOT_HOLDER = "write-credential-not-holder";
+export const WRITE_CREDENTIAL_UNKNOWN_ASSIGNMENT = "write-credential-unknown-assignment";
+export const WRITE_CREDENTIAL_REQUEST_INVALID = "write-credential-request-invalid";
+export const WRITE_CREDENTIAL_MINT_FAILED = "write-credential-mint-failed";
+export const WRITE_CREDENTIAL_WORKSPACE_MISMATCH = "write-credential-workspace-mismatch";
+export const WRITE_CREDENTIAL_ASSIGNMENT_INACTIVE = "write-credential-assignment-inactive";
+
+// applyWriteCredentialRequestFrame(store, frame, options) — milestone 38 / story 07
+// (ADR-015 decision 3; SECURITY T15). The up-frame
+// { kind:"write-credential-request", nodeId, assignmentId, workspaceId, at } a worker
+// sends ONLY at the push seam (on a `done` outcome, BEFORE `git push` —
+// mesh-worker-execution.mjs), over the ALREADY-OPEN persistent stream (a new branch in
+// applyStreamFrame's dispatch, below). AUTHORIZATION reuses
+// applyCloneCredentialRequestFrame's EXACT three gates VERBATIM (SECURITY T6): holder
+// check (the CONNECTION's authenticated nodeId, never a self-reported frame.nodeId),
+// workspace-match (F15 — the assignment ROW's OWN workspace_id, never the
+// requester-supplied frame.workspaceId), active-state (F16 — a terminal/withdrawn/
+// reclaimed assignment mints nothing). A write grant is AT LEAST as sensitive as a
+// read one, never less — the identical discipline applies unchanged.
+//
+// Calls the INJECTED `options.mintWriteCredential(existing.workspace_id, assignmentId)`
+// — SAME two-argument shape as `mintCloneCredential`, deliberately carrying NO
+// worker-frame-supplied scope (never an `autoPr` from the frame — that decision stays
+// entirely CONTROL-side, closed over by whichever `mintWriteCredential` the operator
+// wires, exactly as the clone mint's scope is never worker-influenced). Default
+// `defaultMintWriteCredential` (inert, `null`). Replies with the `write-credential`
+// down-frame, addressed back to the REQUESTER's own connection (never a fan-out). A
+// mint fault degrades to a loud coded refusal reply rather than leaving the worker to
+// exhaust its own bounded wait.
+export async function applyWriteCredentialRequestFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+  const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+  const now = options.now ?? new Date().toISOString();
+  const directiveTargets = options.directiveTargets ?? null;
+
+  const refuse = (code) => {
+    if (connectionNodeId != null && directiveTargets != null) {
+      sendDirective(directiveTargets, connectionNodeId, buildWriteCredentialFrame(connectionNodeId, { assignmentId, credential: null, code, at: now }));
+    }
+    return { applied: false, skipped: true, code };
+  };
+
+  if (connectionNodeId == null || assignmentId == null || workspaceId == null) {
+    return refuse(WRITE_CREDENTIAL_REQUEST_INVALID);
+  }
+
+  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
+  if (!existing) {
+    return refuse(WRITE_CREDENTIAL_UNKNOWN_ASSIGNMENT);
+  }
+  if (existing.target_node_id !== connectionNodeId) {
+    return refuse(WRITE_CREDENTIAL_NOT_HOLDER);
+  }
+  if (workspaceId !== existing.workspace_id) {
+    return refuse(WRITE_CREDENTIAL_WORKSPACE_MISMATCH);
+  }
+  if (!isActiveAssignmentState(existing.state)) {
+    return refuse(WRITE_CREDENTIAL_ASSIGNMENT_INACTIVE);
+  }
+
+  const mint = typeof options.mintWriteCredential === "function" ? options.mintWriteCredential : defaultMintWriteCredential;
+  let credential = null;
+  try {
+    credential = await mint(existing.workspace_id, assignmentId);
+  } catch {
+    return refuse(WRITE_CREDENTIAL_MINT_FAILED);
+  }
+  const resolved = typeof credential === "string" && credential.length > 0 ? credential : null;
+
+  if (directiveTargets != null) {
+    sendDirective(directiveTargets, connectionNodeId, buildWriteCredentialFrame(connectionNodeId, { assignmentId, credential: resolved, at: now }));
+  }
+  return { applied: true, minted: resolved != null, assignmentId, workspaceId };
+}
+
 // applyStreamFrame(store, frame, options) — dispatch by frame.kind. An unrecognised
 // kind is a no-op (never a crash — the never-crash discipline every mesh module in
 // this codebase keeps).
@@ -462,6 +571,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "assignment-status") return applyAssignmentStatusFrame(store, frame, options);
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
   if (frame?.kind === "clone-url-request") return applyCloneUrlRequestFrame(store, frame, options);
+  if (frame?.kind === "write-credential-request") return applyWriteCredentialRequestFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 
@@ -676,6 +786,12 @@ export async function startControlStreamServer({
   // controlStreamServerOptions, or a test) may supply a real per-repo/short-lived
   // minting authority here.
   mintCloneCredential = defaultMintCloneCredential,
+  // mintWriteCredential(workspaceId, assignmentId) — milestone 38 / story 07
+  // (ADR-015): the SEPARATE, WRITE-scoped sibling of mintCloneCredential above
+  // (default defaultMintWriteCredential, inert — SECURITY T15's minting-policy
+  // residual). NEVER the same function reference as mintCloneCredential — that would
+  // collapse the two-token model this story exists to keep apart.
+  mintWriteCredential = defaultMintWriteCredential,
 } = {}) {
   const registry = createStreamRegistry();
   const directiveTargets = createDirectiveTargetRegistry();
@@ -750,8 +866,11 @@ export async function startControlStreamServer({
         // milestone 38 / ADR-009 — clone-credential-request handling needs the SAME
         // nodeId -> ws targeting map sendDirective/dispatchDirective already use (to
         // reply down the requester's own connection) and the injected minting seam.
+        // story 07 (ADR-015) — write-credential-request handling reuses the SAME
+        // targeting map, over its OWN separate minting seam.
         directiveTargets,
         mintCloneCredential,
+        mintWriteCredential,
       }).catch(() => {
         // A store-apply fault must never crash the accept loop — the next frame
         // simply tries again (mirrors probeFabric's never-crash discipline).

@@ -121,3 +121,18 @@ export function createStatusRecorder() {
 export function scriptedSpawnRuntime(outcome, { failureReason = null } = {}) {
   return async () => ({ outcome, failureReason: outcome === "failed" ? failureReason ?? "agent_error" : null });
 }
+
+// scriptedPushExec(status) — milestone 38 / story 07 (ADR-015): a NO-OP push double
+// for every pre-existing test in this shared fixture family that drives a `done`
+// outcome to assert bracketing/cleanup mechanics UNRELATED to the push itself (this
+// story's own push-specific traceability lives in mesh-worker-push-fixture.mjs's REAL
+// local-bare-origin fixture instead). Without this, `createMeshWorkerExecutionHandler`
+// falls through to a REAL `git push origin <branch>` — which fails loudly (no `origin`
+// remote configured in this fixture family) and RETAINS the worktree instead of
+// removing it, silently invalidating every "done removes the worktree" assertion these
+// tests predate story 07 with. Default `status: 0` (a scripted push "success") — the
+// worktree-removal / status-bracketing path proceeds exactly as it did before story 07
+// touched this file.
+export function scriptedPushExec(status = 0) {
+  return async () => ({ stdout: "", stderr: "", status });
+}

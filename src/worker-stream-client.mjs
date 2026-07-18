@@ -90,6 +90,16 @@ export function buildCloneUrlRequestFrame(nodeId, assignmentId, workspaceId, now
   return { kind: "clone-url-request", nodeId, assignmentId, workspaceId, at: now };
 }
 
+// buildWriteCredentialRequestFrame(nodeId, assignmentId, workspaceId, now) — milestone
+// 38 / story 07 (ADR-015): the SAME PULL shape as buildCloneCredentialRequestFrame
+// above, over its OWN DISTINCT frame kind ("write-credential-request", never
+// "clone-credential-request" — the two seams stay wire-discriminable). Sent ONLY at
+// the push seam (mesh-worker-execution.mjs, on a `done` outcome, BEFORE `git push`) —
+// never speculatively, never per-directive.
+export function buildWriteCredentialRequestFrame(nodeId, assignmentId, workspaceId, now) {
+  return { kind: "write-credential-request", nodeId, assignmentId, workspaceId, at: now };
+}
+
 // THE CLONE-CREDENTIAL BOUNDED WAIT — a request that is refused, dropped, or never
 // answered must never hang the worker forever (ADR-009: "failure is LOUD, never a
 // hang"). Overridable per-client via options.cloneCredentialTimeoutMs (tests inject a
@@ -99,6 +109,9 @@ export const DEFAULT_CLONE_CREDENTIAL_TIMEOUT_MS = 15000;
 // discipline for the clone-url PULL: "failure is LOUD, never a hang" applies here
 // exactly as it does to the credential.
 export const DEFAULT_CLONE_URL_TIMEOUT_MS = 15000;
+// milestone 38 / story 07 (ADR-015) — the SAME bounded-wait discipline for the
+// write-credential PULL at the push seam.
+export const DEFAULT_WRITE_CREDENTIAL_TIMEOUT_MS = 15000;
 
 // createWorkerStreamClient({ transport, ticker, nodeId, workspaceId, now, onWarning })
 // → { connect(), sendSnapshot(items), sendDelta(items), notifyDrop(), stop() }.
@@ -141,6 +154,9 @@ export function createWorkerStreamClient({
   // cloneUrlTimeoutMs — review fix (ADR-010 Gap A extended, live soak 2026-07-18):
   // the SAME per-client override shape as cloneCredentialTimeoutMs, for requestCloneUrl.
   cloneUrlTimeoutMs = DEFAULT_CLONE_URL_TIMEOUT_MS,
+  // writeCredentialTimeoutMs — milestone 38 / story 07 (ADR-015): the SAME per-client
+  // override shape as cloneCredentialTimeoutMs, for requestWriteCredential.
+  writeCredentialTimeoutMs = DEFAULT_WRITE_CREDENTIAL_TIMEOUT_MS,
 } = {}) {
   let handle = null;
   let connected = false;
@@ -163,6 +179,9 @@ export function createWorkerStreamClient({
   // per-assignment pending-request correlation as pendingCloneCredentialRequests
   // above, for the clone-url PULL (see buildCloneUrlRequestFrame).
   const pendingCloneUrlRequests = new Map();
+  // milestone 38 / story 07 (ADR-015) — the SAME per-assignment pending-request
+  // correlation, for the write-credential PULL at the push seam.
+  const pendingWriteCredentialRequests = new Map();
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
@@ -209,6 +228,24 @@ export function createWorkerStreamClient({
     clearTimeout(pending.timer);
   }
 
+  // settleWriteCredentialRequest / clearPendingWriteCredentialRequest — the SAME two
+  // functions as their clone-credential siblings above, over
+  // pendingWriteCredentialRequests (story 07, ADR-015).
+  function settleWriteCredentialRequest(assignmentId, frame) {
+    const pending = pendingWriteCredentialRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingWriteCredentialRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+    pending.resolve({ frame });
+  }
+
+  function clearPendingWriteCredentialRequest(assignmentId) {
+    const pending = pendingWriteCredentialRequests.get(assignmentId);
+    if (pending == null) return;
+    pendingWriteCredentialRequests.delete(assignmentId);
+    clearTimeout(pending.timer);
+  }
+
   // handleTransportMessage(raw) — the worker's FIRST receive listener (STORY.md:
   // "the worker client's FIRST receive listener is a clean additive sibling to
   // onDrop"). A malformed frame is dropped, never thrown (the SAME never-crash
@@ -238,6 +275,13 @@ export function createWorkerStreamClient({
     if (frame?.kind === "clone-url") {
       const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
       if (assignmentId != null) settleCloneUrlRequest(assignmentId, frame);
+      return;
+    }
+    // milestone 38 / story 07 (ADR-015) — the write-credential PULL's own reply kind,
+    // resolving the matching pending requestWriteCredential() wait (below).
+    if (frame?.kind === "write-credential") {
+      const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+      if (assignmentId != null) settleWriteCredentialRequest(assignmentId, frame);
       return;
     }
   }
@@ -442,6 +486,66 @@ export function createWorkerStreamClient({
     throw error;
   }
 
+  // requestWriteCredential({ assignmentId, workspaceId }) — milestone 38 / story 07
+  // (ADR-015): the SAME PULL shape as requestCloneCredential above, over its OWN
+  // DISTINCT frame kind ("write-credential-request"/"write-credential") and its OWN
+  // pending-request map, bounded by writeCredentialTimeoutMs. A PURE TRANSPORT LEAF
+  // exactly like its clone sibling — it never mints, resolves, persists, or logs a
+  // credential, only carries one. Called ONLY at the push seam
+  // (mesh-worker-execution.mjs, on a `done` outcome, BEFORE `git push`) — never
+  // speculatively.
+  //
+  // Resolves to the credential STRING on a well-formed non-refusal reply carrying
+  // one; resolves to `null` on a well-formed reply EXPLICITLY carrying no credential
+  // (control has no write mint configured for this workspace — an unauthenticated
+  // push, exactly mirroring the clone path's own "no credential configured"
+  // default). REJECTS (a coded error) on a send failure, a refusal, a timeout, or a
+  // malformed/blank reply — the caller (mesh-worker-execution.mjs's
+  // pushWorktreeBranch flow) treats any rejection as an unauthenticated-push attempt
+  // (a null credential), never a hard stop on its own — the push itself is what
+  // decides success/failure.
+  async function requestWriteCredential({ assignmentId, workspaceId } = {}) {
+    if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+      const error = new Error("requestWriteCredential requires an assignmentId");
+      error.code = "write-credential-request-invalid";
+      throw error;
+    }
+
+    const waitForReply = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingWriteCredentialRequests.delete(assignmentId);
+        resolve({ timedOut: true });
+      }, writeCredentialTimeoutMs);
+      pendingWriteCredentialRequests.set(assignmentId, { resolve, timer });
+    });
+
+    const sent = await sendFrame(buildWriteCredentialRequestFrame(nodeId, assignmentId, workspaceId, resolveNow()));
+    if (!sent.sent) {
+      clearPendingWriteCredentialRequest(assignmentId);
+      const error = new Error("write-credential-request could not be sent (transport unavailable)");
+      error.code = "push-failed";
+      throw error;
+    }
+
+    const outcome = await waitForReply;
+    if (outcome?.timedOut) {
+      const error = new Error(`write-credential-request timed out waiting for control's reply (assignmentId=${assignmentId})`);
+      error.code = "write-credential-timeout";
+      throw error;
+    }
+    const frame = outcome?.frame ?? null;
+    if (typeof frame?.code === "string" && frame.code.length > 0) {
+      const error = new Error(`write-credential-request was refused by control (code=${frame.code})`);
+      error.code = frame.code;
+      throw error;
+    }
+    if (frame?.credential === null) return null; // control has no write mint configured for this workspace
+    if (typeof frame?.credential === "string" && frame.credential.length > 0) return frame.credential;
+    const error = new Error("write-credential-request received a blank/absent credential");
+    error.code = "write-credential-blank";
+    throw error;
+  }
+
   // onDirective(handler) — milestone 35 / ADR-002, story 01: registers the ONE
   // handler invoked with a PARSED directive frame when one arrives on the receive
   // listener above. Mirrors createWorkerWsTransport's onDrop(handler) shape
@@ -491,6 +595,7 @@ export function createWorkerStreamClient({
     sendAssignmentStatus,
     requestCloneCredential,
     requestCloneUrl,
+    requestWriteCredential,
     onDirective,
     notifyDrop,
     stop,

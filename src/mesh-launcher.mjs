@@ -55,7 +55,7 @@ import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
 // import here — `resolveWorkspaceProjectRoot` (mesh-presence.mjs, imported above)
 // is the ONE seam this launcher reaches for a workspaceId -> project_root lookup,
 // keeping fitness `acd-global-publisher-single-seam` intact.
-import { resolveCloneCredentialProvider } from "./mesh-clone-credential-provider.mjs";
+import { resolveCloneCredentialProvider, resolveWriteCredentialProvider } from "./mesh-clone-credential-provider.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -647,6 +647,16 @@ export async function startLauncher(ws, options = {}) {
       resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
       resolveWorkspaceAppIdentity: createResolveWorkspaceAppIdentity(ws, options),
     });
+    // milestone 38 / story 07 (ADR-015 decision 3) — the SEPARATE, WRITE-scoped
+    // sibling mint, resolved the SAME way (the SAME config.mesh.repo.credential.provider
+    // key, the SAME per-workspace identity seams) but through
+    // resolveWriteCredentialProvider — a DIFFERENT function than
+    // resolveCloneCredentialProvider above, so a write body can never be produced by
+    // the clone path's own resolution branch.
+    const { mintWriteCredential: resolvedMintWriteCredential } = resolveWriteCredentialProvider(config, {
+      resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
+      resolveWorkspaceAppIdentity: createResolveWorkspaceAppIdentity(ws, options),
+    });
     streamServer = await startServer({
       ...(boundAddress ? { bindAddress: boundAddress } : {}),
       ...(servicePort != null ? { port: servicePort } : {}),
@@ -654,6 +664,7 @@ export async function startLauncher(ws, options = {}) {
       peersByAddress: peers,
       httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
       mintCloneCredential: resolvedMintCloneCredential,
+      mintWriteCredential: resolvedMintWriteCredential,
       ...(options?.controlStreamServerOptions ?? {}),
     });
   } else if (role === "worker" && options?.streamClient !== false) {
@@ -732,6 +743,13 @@ export async function startLauncher(ws, options = {}) {
         // supplies the clone-url PULL resolver rather than it being reachable only
         // through the workerExecutionOptions test-injection spread below.
         requestCloneUrl: (request) => client.requestCloneUrl(request),
+        // milestone 38 / story 07 (ADR-015) — the SAME F12 discipline once more: the
+        // write-credential resolver, supplied as a LITERAL key HERE, closing over
+        // this worker's OWN stream client (client.requestWriteCredential — the
+        // up/down write-credential-request/write-credential frame pair, worker-
+        // stream-client.mjs). Called ONLY at the push seam
+        // (pushWorktreeBranch/mesh-worker-execution.mjs), never speculatively.
+        requestWriteCredential: (request) => client.requestWriteCredential(request),
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });

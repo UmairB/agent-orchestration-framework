@@ -40,6 +40,26 @@
 // message in this module is a FIXED, key/token-free string (never string-interpolates
 // `privateKey`/`jwt`/the minted `token`) — the redaction discipline SECURITY requires
 // holds BY CONSTRUCTION, not by a post-hoc scrub.
+//
+// MILESTONE 38 / STORY 07 (ADR-015, task 02) — a THIRD export, `createGithubAppPushMintProvider(deps)`:
+// the write-scoped mint minted ONLY at the push seam (SECURITY T15, RE-OPENS T9). THE
+// BUILD-OWED DECISION (aof-qa flag at refine): this is a SEPARATE exported
+// function/module, NOT a widened branch of `createGithubAppMintProvider` — a FULLY
+// INDEPENDENT implementation, sharing NO internal helper with the clone mint (the
+// identity/JWT/installation-resolution STEPS mirror it closely but are written
+// inline, separately, in each function's own closure). Two reasons, both load-
+// bearing: (1) the `access_tokens` request BODY — the one thing SECURITY T15/T9 cares
+// about — is then structurally unreachable from `createGithubAppMintProvider`'s own
+// closure by construction, never merely "unreachable in practice"; (2) the
+// pre-existing `acd-cross-org-key-isolation` fitness function (story 03, ADR-011)
+// scans `createGithubAppMintProvider`'s OWN function body for specific literal
+// patterns (`resolveWorkspaceAppIdentity(workspaceId)`, the `identity == null` throw,
+// no outer-scope identity cache) — factoring that logic out from under it would
+// silently make that detector vacuous, this milestone's own repeated lesson. The
+// clone mint's OWN body stays BYTE-IDENTICAL to its pre-story-07 shape (single-repo
+// `contents:read`, never widened) — see the rewritten two-seam
+// `test/arch/acd-minted-token-scoped-single-repo.test.mjs` (SECURITY T15) that anchors
+// on this exact function-name split.
 import { createSign } from "node:crypto";
 import { defaultMintCloneCredential } from "./control-stream-server.mjs";
 import { parseRepoFromCloneUrl } from "./mesh-worker-execution.mjs";
@@ -75,15 +95,17 @@ async function defaultHttpRequest(url, init) {
   return fetch(url, init);
 }
 
-// mintFailure(message) — every thrown fault in this module goes through here. The
-// message is ALWAYS a fixed, hand-written string naming the FAILING STEP — never an
-// interpolation of `privateKey`, the signed JWT, or a minted `token` value (SECURITY
-// F5's redaction-by-construction: there is no code path in this module that could
-// place a secret into an error message, because no error-message template below ever
-// references one).
-function mintFailure(message) {
+// mintFailure(message, code) — every thrown fault in this module goes through here.
+// The message is ALWAYS a fixed, hand-written string naming the FAILING STEP — never
+// an interpolation of `privateKey`, the signed JWT, or a minted `token` value
+// (SECURITY F5's redaction-by-construction: there is no code path in this module that
+// could place a secret into an error message, because no error-message template below
+// ever references one). `code` defaults to the clone mint's existing coded fault; the
+// push mint (below) passes its OWN distinct code so a caller can tell which seam
+// failed without parsing the message text.
+function mintFailure(message, code = "github-app-mint-failed") {
   const error = new Error(message);
-  error.code = "github-app-mint-failed";
+  error.code = code;
   return error;
 }
 
@@ -199,9 +221,11 @@ export function createGithubAppMintProvider({
       }
     }
 
-    // RESEARCH §3.2 / SECURITY F6/T9 — the SINGLE-repo, `contents:read` request body.
-    // Never omit `repositories`, never more than the ONE assigned repo, never a
-    // permission set broader than `{ contents: "read" }`.
+    // RESEARCH §3.2 / SECURITY F6/T9 (unchanged by story 07/T15 — this clause is the
+    // NEVER-WIDENED clone half of the rewritten two-seam
+    // acd-minted-token-scoped-single-repo detector, which anchors on THIS literal
+    // object). Never omit `repositories`, never more than the ONE assigned repo,
+    // never a permission set broader than `{ contents: "read" }`.
     let exchangeResponse;
     try {
       exchangeResponse = await httpRequest(`${apiBaseUrl}/app/installations/${installationIdToUse}/access_tokens`, {
@@ -236,6 +260,152 @@ export function createGithubAppMintProvider({
   return mintCloneCredential;
 }
 
+// createGithubAppPushMintProvider(deps) — milestone 38 / story 07 (ADR-015 decision 3;
+// SECURITY T15, RE-OPENS T9). THE BUILD-OWED DECISION (aof-qa flag at refine): a
+// SEPARATE exported function/module, NOT a widened branch of
+// `createGithubAppMintProvider` above — deliberately a FULLY INDEPENDENT
+// implementation (no shared internal helper with the clone mint, even though the
+// identity/JWT/installation-resolution STEPS mirror it closely) so (a) the write
+// body can never be produced by any code path the clone mint's own closure reaches,
+// and (b) the pre-existing acd-cross-org-key-isolation fitness function (story 03,
+// ADR-011) — which scans `createGithubAppMintProvider`'s OWN function body for the
+// literal `resolveWorkspaceAppIdentity(workspaceId)` call, the `identity == null`
+// throw, and no outer-scope identity cache — keeps finding those patterns INSIDE that
+// function, exactly where it already expects them; factoring shared plumbing out from
+// under it would silently make that detector vacuous (this milestone's own repeated
+// lesson). ADR-011/T12's per-workspace-fresh discipline is honoured identically here
+// — a write grant is MORE dangerous to leak across workspaces than a read one, never
+// less. `deps` mirrors `createGithubAppMintProvider`'s shape verbatim; the returned
+// `mintWriteCredential(workspaceId, assignmentId, { autoPr })` takes a PER-CALL
+// `autoPr` flag (default `false`, the DOCUMENTED DEFAULT — "done" is a pushed branch,
+// opening a PR is optional/manual, ADR-015). A fault at ANY step THROWS (never
+// `null`, never a fallback) — the SAME loud-failure discipline the clone mint keeps,
+// coded `github-app-push-mint-failed` (distinct from the clone mint's own code, so a
+// caller can tell the two seams apart without parsing the message text).
+export function createGithubAppPushMintProvider({
+  resolveWorkspaceAppIdentity,
+  resolveWorkspaceCloneUrl,
+  config = null,
+  signAppJwt = defaultSignAppJwt,
+  httpRequest = defaultHttpRequest,
+  now = () => new Date(),
+} = {}) {
+  const mintWriteCredential = async function mintWriteCredential(workspaceId, /* assignmentId, unused — kept for signature symmetry with the clone mint */ _assignmentId, { autoPr = false } = {}) {
+    // ADR-011 / SECURITY T12, mirrored (never shared) from the clone mint above — the
+    // App IDENTITY is resolved FRESH, keyed by THIS mint's OWN workspaceId, through
+    // the injected seam. A write grant is MORE dangerous to leak across workspaces
+    // than a read one, never less — the identical discipline applies unchanged.
+    if (typeof resolveWorkspaceAppIdentity !== "function") {
+      throw mintFailure("github-app push mint: no resolveWorkspaceAppIdentity seam was supplied", "github-app-push-mint-failed");
+    }
+    const identity = await resolveWorkspaceAppIdentity(workspaceId);
+    if (
+      identity == null
+      || typeof identity.appId !== "string" || identity.appId.length === 0
+      || typeof identity.privateKey !== "string" || identity.privateKey.length === 0
+    ) {
+      throw mintFailure(`github-app push mint: no usable App identity resolved for workspace "${workspaceId}"`, "github-app-push-mint-failed");
+    }
+    const { appId, privateKey } = identity;
+    const configuredInstallationId = identity.installationId ?? null;
+
+    if (typeof resolveWorkspaceCloneUrl !== "function") {
+      throw mintFailure("github-app push mint: no resolveWorkspaceCloneUrl seam was supplied", "github-app-push-mint-failed");
+    }
+    const cloneUrl = await resolveWorkspaceCloneUrl(workspaceId);
+    if (typeof cloneUrl !== "string" || cloneUrl.trim().length === 0) {
+      throw mintFailure(`github-app push mint: no cloneUrl resolved for workspace "${workspaceId}"`, "github-app-push-mint-failed");
+    }
+    const parsed = parseRepoFromCloneUrl(cloneUrl, config);
+    if (parsed == null) {
+      throw mintFailure(`github-app push mint: cloneUrl for workspace "${workspaceId}" does not parse to an owner/repo`, "github-app-push-mint-failed");
+    }
+    const { owner, repo, apiBaseUrl } = parsed;
+
+    let jwt;
+    try {
+      jwt = signAppJwt({ appId, privateKey, now: now() });
+    } catch {
+      throw mintFailure("github-app push mint: JWT signing failed", "github-app-push-mint-failed");
+    }
+    if (typeof jwt !== "string" || jwt.length === 0) {
+      throw mintFailure("github-app push mint: JWT signer returned no token", "github-app-push-mint-failed");
+    }
+
+    const authHeaders = {
+      Authorization: `Bearer ${jwt}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+
+    let installationIdToUse = configuredInstallationId;
+    if (installationIdToUse == null) {
+      let installationResponse;
+      try {
+        installationResponse = await httpRequest(`${apiBaseUrl}/repos/${owner}/${repo}/installation`, {
+          method: "GET",
+          headers: authHeaders,
+        });
+      } catch {
+        throw mintFailure("github-app push mint: installation lookup unreachable", "github-app-push-mint-failed");
+      }
+      if (!installationResponse?.ok) {
+        throw mintFailure(`github-app push mint: installation lookup failed (status ${installationResponse?.status ?? "unknown"})`, "github-app-push-mint-failed");
+      }
+      let installationBody;
+      try {
+        installationBody = await installationResponse.json();
+      } catch {
+        throw mintFailure("github-app push mint: installation lookup returned a malformed response body", "github-app-push-mint-failed");
+      }
+      installationIdToUse = installationBody?.id ?? null;
+      if (installationIdToUse == null) {
+        throw mintFailure("github-app push mint: installation lookup returned no id", "github-app-push-mint-failed");
+      }
+    }
+
+    // SECURITY T15/T9 — the SINGLE-repo, WRITE-scoped request body. This is the ONLY
+    // `access_tokens` call in this whole module that may ever request a write scope —
+    // the rewritten acd-minted-token-scoped-single-repo detector anchors on THIS
+    // function's own text span to prove that (never reachable from
+    // createGithubAppMintProvider's closure above). `permissions` is EXACTLY
+    // `{ contents: "write" }` when auto-PR is off (the default), widening ONLY to ALSO
+    // carry `pull_requests: "write"` when the caller opts in — never anything
+    // broader, never a second repo, never omitted.
+    let exchangeResponse;
+    try {
+      exchangeResponse = await httpRequest(`${apiBaseUrl}/app/installations/${installationIdToUse}/access_tokens`, {
+        method: "POST",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repositories: [repo],
+          permissions: autoPr
+            ? { contents: "write", pull_requests: "write" }
+            : { contents: "write" },
+        }),
+      });
+    } catch {
+      throw mintFailure("github-app push mint: token exchange unreachable", "github-app-push-mint-failed");
+    }
+    if (!exchangeResponse?.ok) {
+      throw mintFailure(`github-app push mint: token exchange failed (status ${exchangeResponse?.status ?? "unknown"})`, "github-app-push-mint-failed");
+    }
+    let exchangeBody;
+    try {
+      exchangeBody = await exchangeResponse.json();
+    } catch {
+      throw mintFailure("github-app push mint: token exchange returned a malformed response body", "github-app-push-mint-failed");
+    }
+    const token = exchangeBody?.token;
+    if (typeof token !== "string" || token.length === 0) {
+      throw mintFailure("github-app push mint: token exchange returned a blank/absent token", "github-app-push-mint-failed");
+    }
+    return token;
+  };
+  mintWriteCredential.providerName = "github-app-write";
+  return mintWriteCredential;
+}
+
 // resolveCloneCredentialProvider(config, deps) — the ADR-010 selector, see module doc
 // above. Returns `{ mintCloneCredential, provider }` — `provider` is a diagnostic
 // label only (the launcher's own `mintCloneCredential:` literal key at the production
@@ -253,4 +423,27 @@ export function resolveCloneCredentialProvider(config, deps = {}) {
   );
   error.code = CLONE_CREDENTIAL_PROVIDER_UNKNOWN;
   throw error;
+}
+
+// resolveWriteCredentialProvider(config, deps) — milestone 38 / story 07 (ADR-015
+// decision 3). Reads the SAME `config.mesh.repo.credential.provider` key the clone
+// selector above reads (one configured provider, two seams) — `deps` mirrors
+// `resolveCloneCredentialProvider`'s shape (`resolveWorkspaceCloneUrl`,
+// `resolveWorkspaceAppIdentity`). Unlike the clone selector, `env-token` (or
+// unconfigured) has NO write-mint equivalent — a static, standing PAT is exactly the
+// broad, run-long credential story 07 (T15) exists to NOT hand out for a write grant —
+// so that path resolves `mintWriteCredential: undefined`, and
+// `applyWriteCredentialRequestFrame`'s own default (`defaultMintWriteCredential`,
+// control-stream-server.mjs) resolves to `null` — an honest "no write credential
+// configured", exactly mirroring the clone path's OWN "no credential configured for
+// this workspace" default (an unauthenticated push, never a silently-broadened
+// fallback). Only `"github-app"` has a write mint: `createGithubAppPushMintProvider`
+// (this module, task 02) — a SEPARATE function/module from the clone mint, per the
+// BUILD-OWED DECISION.
+export function resolveWriteCredentialProvider(config, deps = {}) {
+  const provider = config?.mesh?.repo?.credential?.provider;
+  if (provider === "github-app") {
+    return { mintWriteCredential: createGithubAppPushMintProvider({ ...deps, config }), provider: "github-app" };
+  }
+  return { mintWriteCredential: undefined, provider: provider === undefined ? "env-token" : provider };
 }

@@ -17,7 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWorkspace } from "../../src/work.mjs";
 import { createMeshWorkerExecutionHandler } from "../../src/mesh-worker-execution.mjs";
-import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime } from "../support/mesh-worker-exec-fixture.mjs";
+import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime, scriptedPushExec } from "../support/mesh-worker-exec-fixture.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const testSuitePath = path.join(repoRoot, "scripts", "test.mjs");
@@ -27,6 +27,7 @@ const NOW = "2026-07-09T10:00:00.000Z";
 async function drive(fx, ws, assignmentId) {
   const recorder = createStatusRecorder();
   const handler = createMeshWorkerExecutionHandler({
+    pushExec: scriptedPushExec(),
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,

@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { loadWorkspace } from "../../src/work.mjs";
 import { createMeshWorkerExecutionHandler } from "../../src/mesh-worker-execution.mjs";
 import { listWorktrees } from "../../src/mesh-worktree.mjs";
-import { withMeshWorkerExecFixture, createStatusRecorder, scriptedSpawnRuntime } from "../support/mesh-worker-exec-fixture.mjs";
+import { withMeshWorkerExecFixture, createStatusRecorder, scriptedSpawnRuntime, scriptedPushExec } from "../support/mesh-worker-exec-fixture.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const executionSourcePath = path.join(repoRoot, "src", "mesh-worker-execution.mjs");
@@ -74,6 +74,7 @@ export const archTests = [
       const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
       const recorder = createStatusRecorder();
       const handler = createMeshWorkerExecutionHandler({
+        pushExec: scriptedPushExec(),
         loadWs: () => Promise.resolve(ws),
         nodeId: "worker-a",
         sendAssignmentStatus: recorder.sendAssignmentStatus,

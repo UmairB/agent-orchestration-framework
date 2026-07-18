@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import { loadWorkspace, findWork } from "../src/work.mjs";
 import { createMeshWorkerExecutionHandler } from "../src/mesh-worker-execution.mjs";
 import { readRuns, runNodeRecordPath } from "../src/run-store.mjs";
-import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime } from "./support/mesh-worker-exec-fixture.mjs";
+import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime, scriptedPushExec } from "./support/mesh-worker-exec-fixture.mjs";
 
 const NODE_ID = "node-a";
 
@@ -22,6 +22,7 @@ async function readyFixture(fx) {
 
 function makeHandler(fx, ws, recorder, spawnOutcome, now) {
   return createMeshWorkerExecutionHandler({
+    pushExec: scriptedPushExec(),
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
