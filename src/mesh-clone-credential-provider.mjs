@@ -1,6 +1,6 @@
-// src/mesh-clone-credential-provider.mjs — milestone 38 / story 02 (ADR-010): the
-// config-selected clone-credential-mint PROVIDER at the ADR-009 `mintCloneCredential`
-// seam (control-stream-server.mjs). Two exports:
+// src/mesh-clone-credential-provider.mjs — milestone 38 / story 02 (ADR-010),
+// extended by story 03 (ADR-011): the config-selected clone-credential-mint PROVIDER
+// at the ADR-009 `mintCloneCredential` seam (control-stream-server.mjs). Two exports:
 //
 //   resolveCloneCredentialProvider(config, deps) — the SELECTOR. Reads
 //   `config.mesh.repo.credential.provider` via the RAW optional-chain idiom (never
@@ -15,16 +15,24 @@
 //       degrade to `env-token` (SECURITY T10 applied to selection itself).
 //
 //   createGithubAppMintProvider(deps) — the `github-app` mint. Given a `workspaceId`,
-//   resolves the repo (`deps.resolveWorkspaceCloneUrl`, CONTROL-trusted — ADR-010 Gap
-//   A, never the worker's frame), signs an App JWT (RS256 via `node:crypto`,
-//   RESEARCH §3.1 — zero new dependency), auto-resolves the installation id (or uses
-//   an explicit `deps.installationId` override, RESEARCH §3.3), and exchanges it for
-//   a SINGLE-repo `contents:read` installation access token (RESEARCH §3.2 — the
+//   resolves the App IDENTITY PER-ASSIGNED-WORKSPACE via `deps.resolveWorkspaceAppIdentity(workspaceId)`
+//   (ADR-011, story 03 — mirrors `resolveWorkspaceCloneUrl` verbatim; the provider
+//   closes over NO static `appId`/`privateKey` reused across every mint), resolves
+//   the repo (`deps.resolveWorkspaceCloneUrl`, CONTROL-trusted — ADR-010 Gap A, never
+//   the worker's frame), signs an App JWT (RS256 via `node:crypto`, RESEARCH §3.1 —
+//   zero new dependency), auto-resolves the installation id (or uses the resolved
+//   identity's own `installationId` override, RESEARCH §3.3), and exchanges it for a
+//   SINGLE-repo `contents:read` installation access token (RESEARCH §3.2 — the
 //   code-enforcement that closes SECURITY T4/T9, F6). A fault at ANY step THROWS
 //   (never `null`, never a fallback) — ADR-010 decision 5 / SECURITY T10: the
 //   caller's existing `try/catch` (`applyCloneCredentialRequestFrame`,
 //   control-stream-server.mjs) converts any throw into the loud coded
-//   `clone-credential-mint-failed`.
+//   `clone-credential-mint-failed`. A `resolveWorkspaceAppIdentity(workspaceId)` that
+//   resolves to `null` (no usable `appId` + readable `privateKey` for THIS workspace)
+//   is the SAME loud-throw fault (ADR-011 invariant #2, SECURITY T12) — never a
+//   fallback to a sibling workspace's or the launch workspace's already-resolved
+//   identity; nothing in this closure ever reads any identity but the ONE this ONE
+//   call resolved for this ONE `workspaceId`.
 //
 // SECURITY F5 (`acd-clone-app-key-not-relayed`, T8): the App private key flows ONLY
 // into `defaultSignAppJwt`'s `createSign(...).sign(privateKey)` call — never a frame,
@@ -79,12 +87,15 @@ function mintFailure(message) {
   return error;
 }
 
-// createGithubAppMintProvider(deps) — see module doc above for the four-step flow.
-// `deps`:
-//   appId, privateKey       — the App's own identity + signing key.
+// createGithubAppMintProvider(deps) — see module doc above for the flow. `deps`:
+//   resolveWorkspaceAppIdentity(workspaceId) => Promise<{appId, privateKey,
+//     installationId}|null> | {appId, privateKey, installationId}|null — the
+//     PER-ASSIGNED-WORKSPACE App identity seam (ADR-011, story 03; mirrors
+//     `resolveWorkspaceCloneUrl` verbatim, supplied by the launcher, keyed by the
+//     mint's OWN `workspaceId`). REQUIRED — this closure never falls back to a
+//     static identity of its own.
 //   resolveWorkspaceCloneUrl(workspaceId) => Promise<string|null> | string|null — the
 //     CONTROL-trusted repo source (ADR-010 Gap A; supplied by the launcher).
-//   installationId          — OPTIONAL explicit override (skips the resolve call).
 //   config                  — OPTIONAL, threaded ONLY into `parseRepoFromCloneUrl`
 //     for its GHES `apiBaseUrl` override.
 //   signAppJwt, httpRequest, now — INJECTABLE seams (default: the REAL node:crypto
@@ -94,16 +105,34 @@ function mintFailure(message) {
 //     default signer — so "signs with node:crypto RS256" is a genuine assertion
 //     against production code, never a vacuous stand-in for it.
 export function createGithubAppMintProvider({
-  appId = null,
-  privateKey = null,
+  resolveWorkspaceAppIdentity,
   resolveWorkspaceCloneUrl,
-  installationId: configuredInstallationId = null,
   config = null,
   signAppJwt = defaultSignAppJwt,
   httpRequest = defaultHttpRequest,
   now = () => new Date(),
 } = {}) {
   const mintCloneCredential = async function mintCloneCredential(workspaceId /*, assignmentId */) {
+    // ADR-011 / SECURITY T12 — the App IDENTITY is resolved FRESH, keyed by THIS
+    // mint's OWN workspaceId, through the injected seam — never a single static
+    // appId/privateKey this closure carries across every mint, and never a fallback
+    // to a sibling workspace's or the launch workspace's identity. A null/incomplete
+    // resolution (no usable appId + readable privateKey for this workspace) is the
+    // SAME loud coded fault every other step on this seam throws.
+    if (typeof resolveWorkspaceAppIdentity !== "function") {
+      throw mintFailure("github-app mint: no resolveWorkspaceAppIdentity seam was supplied");
+    }
+    const identity = await resolveWorkspaceAppIdentity(workspaceId);
+    if (
+      identity == null
+      || typeof identity.appId !== "string" || identity.appId.length === 0
+      || typeof identity.privateKey !== "string" || identity.privateKey.length === 0
+    ) {
+      throw mintFailure(`github-app mint: no usable App identity resolved for workspace "${workspaceId}"`);
+    }
+    const { appId, privateKey } = identity;
+    const configuredInstallationId = identity.installationId ?? null;
+
     if (typeof resolveWorkspaceCloneUrl !== "function") {
       throw mintFailure("github-app mint: no resolveWorkspaceCloneUrl seam was supplied");
     }

@@ -38,28 +38,32 @@ async function pathExists(candidate) {
 // to fault at a DIFFERENT step, never a hand-thrown stand-in error.
 function buildFaultyMint(fault) {
   const { privateKey } = generateThrowawayKeypair();
-  const base = { appId: "app-1", resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" };
+  // identityFor(key) — the resolveWorkspaceAppIdentity seam bundling appId + the
+  // GIVEN key (the "bad-key" row swaps in a genuinely invalid key value; every other
+  // row reuses the real throwaway key).
+  const identityFor = (key) => async () => ({ appId: "app-1", privateKey: key });
+  const base = { resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" };
   if (fault === "app-not-installed") {
     const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(404, { message: "Not Found" }) : jsonResponse(201, { token: "SHOULD-NEVER-MINT" })));
-    return createGithubAppMintProvider({ ...base, privateKey, httpRequest });
+    return createGithubAppMintProvider({ ...base, resolveWorkspaceAppIdentity: identityFor(privateKey), httpRequest });
   }
   if (fault === "bad-key") {
     // A genuinely INVALID key (not PEM at all) — the REAL default node:crypto signer
     // throws synchronously on `createSign(...).sign(...)`. No HTTP call is ever reached.
     const httpRequest = createFakeHttpRequest(async () => { throw new Error("must never be called — signing should fail first"); });
-    return createGithubAppMintProvider({ ...base, privateKey: "not-a-real-private-key", httpRequest });
+    return createGithubAppMintProvider({ ...base, resolveWorkspaceAppIdentity: identityFor("not-a-real-private-key"), httpRequest });
   }
   if (fault === "unreachable") {
     const httpRequest = createFakeHttpRequest(async () => { throw new TypeError("fetch failed: network unreachable"); });
-    return createGithubAppMintProvider({ ...base, privateKey, httpRequest });
+    return createGithubAppMintProvider({ ...base, resolveWorkspaceAppIdentity: identityFor(privateKey), httpRequest });
   }
   if (fault === "permission-denied") {
     const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 1 }) : jsonResponse(403, { message: "Resource not accessible by integration" })));
-    return createGithubAppMintProvider({ ...base, privateKey, httpRequest });
+    return createGithubAppMintProvider({ ...base, resolveWorkspaceAppIdentity: identityFor(privateKey), httpRequest });
   }
   if (fault === "blank-token") {
     const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 1 }) : jsonResponse(201, { token: "" })));
-    return createGithubAppMintProvider({ ...base, privateKey, httpRequest });
+    return createGithubAppMintProvider({ ...base, resolveWorkspaceAppIdentity: identityFor(privateKey), httpRequest });
   }
   throw new Error(`unknown fault ${fault}`);
 }
@@ -205,7 +209,7 @@ export const meshCloneCredentialMintFailureLoudTests = [
         const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation")
           ? { ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token in JSON"); } }
           : jsonResponse(201, { token: "SHOULD-NEVER-MINT" })));
-        const mint = createGithubAppMintProvider({ appId: "app-1", privateKey, httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
+        const mint = createGithubAppMintProvider({ resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }), httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
         await assert.rejects(() => mint("ws-a", "asg-a"), (error) => {
           assert.equal(error.code, "github-app-mint-failed", "a malformed installation-lookup body is the coded mint failure, never a raw SyntaxError");
           return true;
@@ -216,7 +220,7 @@ export const meshCloneCredentialMintFailureLoudTests = [
         const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation")
           ? jsonResponse(200, { id: 1 })
           : { ok: true, status: 201, json: async () => { throw new SyntaxError("Unexpected token in JSON"); } }));
-        const mint = createGithubAppMintProvider({ appId: "app-1", privateKey, httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
+        const mint = createGithubAppMintProvider({ resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }), httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
         await assert.rejects(() => mint("ws-a", "asg-b"), (error) => {
           assert.equal(error.code, "github-app-mint-failed", "a malformed token-exchange body is the coded mint failure, never a raw SyntaxError");
           return true;

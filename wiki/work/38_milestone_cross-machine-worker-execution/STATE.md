@@ -350,6 +350,30 @@ doc: state
   detector under-enforced its stated invariant. Fixed at review (added the `jwt` needle + `mesh-launcher.mjs` to F5's scan set).
   **Lesson:** when a fitness invariant names multiple secrets ("key AND JWT"), the plant strategy must enumerate a plant per
   secret, or the prose must be narrowed to exactly what the needle matches.
+- **Story 03's tasks 00/01 read as contradictory side-by-side unless the fixture is read carefully (developer, at build).**
+  Task 00's Scenario 3 ("ws-c carries NO credential override of its own") resolves to the LAUNCH default (`app-launch`);
+  task 01's Scenario Outline ("ws-noapp has no `githubApp.appId` at all") resolves to `null` and THROWS. Same input SHAPE
+  ("no appId configured"), opposite outcomes — genuinely confusing on a first read. Reconciled: they are NOT the same
+  fixture. Task 00's world has a configured launch default to fall through TO; task 01's world (three real orgs, isolation
+  the point of the feature) configures NO launch default at all, so the SAME "absent override -> fall through to launch"
+  code path resolves to nothing there, because there is nothing to fall through to — never a special-cased "defect"
+  branch. **Lesson:** when a later task's Background implicitly assumes a DIFFERENT baseline fixture than an earlier
+  task's (here: "does the launch workspace itself have a default App configured?"), say so explicitly in the feature's
+  Background/Given — an implementer has to reverse-engineer the reconciling fixture shape from two features read
+  together, which is fragile at scale.
+- **Build-owed decision closed: the App-key filename convention within `<meshRoot>/credentials/` is `github-app-<appId>.pem`**
+  (appId sanitized to a filesystem-safe slug — no path separator can escape the directory), falling back to the bare
+  `github-app.pem` when no appId is configured (the pre-multi-org singular default, unchanged). Covered by dedicated tests
+  in `test/mesh-clone-credential-app-key-default-dir.test.mjs` (two orgs' keys coexist as distinct files; a hostile appId
+  stays contained; the no-appId fallback). Flagged by aof-qa at refine (STATE.md line ~222); pinned at build per this note.
+- **`createGithubAppMintProvider`'s deps shape changed from static `{ appId, privateKey, installationId }` to a required
+  `resolveWorkspaceAppIdentity(workspaceId)` seam (ADR-011).** This is a BREAKING change to story 02's own provider
+  factory signature — the three existing story-02 test files that called it directly with static deps
+  (`mesh-clone-credential-github-app-mint.test.mjs`, `mesh-clone-credential-app-key-not-relayed.test.mjs`,
+  `mesh-clone-credential-mint-failure-loud.test.mjs`) were updated (not left to rot) to supply
+  `resolveWorkspaceAppIdentity: async () => ({ appId, privateKey })` in place of the old static keys — same scenarios,
+  same assertions, re-verified green. Named here per the R1(m20) near-miss discipline ("a guard on a shared spine seam
+  silently invalidates prior-milestone tests — enumerate them, don't let them rot").
 
 ## Verification
 

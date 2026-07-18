@@ -125,6 +125,13 @@ import { meshCloneCredentialMintFailureLoudTests } from "../test/mesh-clone-cred
 import { archTests as acdCloneCredentialProviderConfigDrivenTests } from "../test/arch/acd-clone-credential-provider-config-driven.test.mjs";
 import { archTests as acdCloneAppKeyNotRelayedTests } from "../test/arch/acd-clone-app-key-not-relayed.test.mjs";
 import { archTests as acdMintedTokenScopedSingleRepoTests } from "../test/arch/acd-minted-token-scoped-single-repo.test.mjs";
+// milestone 38 / story 03 — per-org credential-provider scoping (ADR-011): the App
+// identity resolves PER-ASSIGNED-workspace (task 00), cross-org key isolation (task
+// 01), and the code-enforced default private-key directory (task 02).
+import { meshCloneCredentialAppIdentityPerWorkspaceTests } from "../test/mesh-clone-credential-app-identity-per-workspace.test.mjs";
+import { meshCloneCredentialCrossOrgIsolationTests } from "../test/mesh-clone-credential-cross-org-isolation.test.mjs";
+import { meshCloneCredentialAppKeyDefaultDirTests } from "../test/mesh-clone-credential-app-key-default-dir.test.mjs";
+import { archTests as acdCrossOrgKeyIsolationTests } from "../test/arch/acd-cross-org-key-isolation.test.mjs";
 // milestone 41 — work-item insertion & re-index (ADR-001/ADR-003, refine-stage
 // fitness functions, GREEN today): resolution is folder-derived so re-index-by-rename
 // is sufficient (no index to rebuild), and the renumber WRITER stays OUT of the
@@ -1665,6 +1672,12 @@ export const tests = [
   ...acdCloneCredentialProviderConfigDrivenTests,
   ...acdCloneAppKeyNotRelayedTests,
   ...acdMintedTokenScopedSingleRepoTests,
+  // milestone 38 / story 03 — per-org credential-provider scoping (ADR-011, tasks
+  // 00-02 traceability modules + the acd-cross-org-key-isolation fitness function)
+  ...meshCloneCredentialAppIdentityPerWorkspaceTests,
+  ...meshCloneCredentialCrossOrgIsolationTests,
+  ...meshCloneCredentialAppKeyDefaultDirTests,
+  ...acdCrossOrgKeyIsolationTests,
   // milestone 41 — work-item insertion & re-index (refine-stage fitness functions)
   ...acdReindexResolutionFolderDerivedTests,
   ...acdReindexEngineBlastRadiusTests,

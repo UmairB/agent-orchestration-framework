@@ -46,8 +46,7 @@ export const meshCloneCredentialAppKeyNotRelayedTests = [
       const { privateKey } = generateThrowawayKeypair();
       const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 1 }) : jsonResponse(201, { token: "MINTED-TOKEN-abc" })));
       const mintCloneCredential = createGithubAppMintProvider({
-        appId: "app-1",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }),
         httpRequest,
         resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git",
       });
@@ -101,8 +100,7 @@ export const meshCloneCredentialAppKeyNotRelayedTests = [
       // THIS ONE invocation signed.
       const directHttpRequest = createFakeHttpRequest(faultyResponder);
       const directMint = createGithubAppMintProvider({
-        appId: "app-1",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }),
         httpRequest: directHttpRequest,
         resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git",
       });
@@ -122,8 +120,7 @@ export const meshCloneCredentialAppKeyNotRelayedTests = [
 
       const httpRequest = createFakeHttpRequest(faultyResponder);
       const mintCloneCredential = createGithubAppMintProvider({
-        appId: "app-1",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }),
         httpRequest,
         resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git",
       });
@@ -172,8 +169,7 @@ export const meshCloneCredentialAppKeyNotRelayedTests = [
       const { privateKey } = generateThrowawayKeypair();
       const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 1 }) : jsonResponse(201, { token: "GH-APP-MINTED-TOKEN-777" })));
       const mintCloneCredential = createGithubAppMintProvider({
-        appId: "app-1",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }),
         httpRequest,
         resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git",
       });

@@ -25,6 +25,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { globalMeshPaths } from "./workspace.mjs";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
@@ -100,7 +101,7 @@ function resolveNow(options = {}) {
 //     `null` — the caller (the provider) throws a loud, coded mint failure; this seam
 //     never guesses, never throws itself (FAILURE-ISOLATED, the same discipline every
 //     other launcher collaborator keeps).
-function createResolveWorkspaceCloneUrl(ws, options = {}) {
+export function createResolveWorkspaceCloneUrl(ws, options = {}) {
   const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
   return async function resolveWorkspaceCloneUrl(workspaceId) {
     if (workspaceId === ownWorkspaceId) {
@@ -117,27 +118,144 @@ function createResolveWorkspaceCloneUrl(ws, options = {}) {
   };
 }
 
-// resolveGithubAppPrivateKey(options) — milestone 38 / story 02 (ADR-010 §6.2, T8):
-// the App private key is resolved from a FILE PATH — `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH`
-// (env, checked first — never a committed config value) or
-// `config.mesh.repo.credential.githubApp.privateKeyPath` (a committed PATH is fine;
-// the PATH is not the secret, the file's CONTENTS are) — read ONCE, here, and handed
-// down as an already-resolved value that closes over the provider (SECURITY F5: the
-// key never touches a log, only ever `createSign(...).sign(privateKey)`). A missing/
-// unreadable key file resolves to `null` — NEVER a launcher crash; the resulting
-// misconfiguration surfaces at the first MINT attempt as the existing loud coded
-// `clone-credential-mint-failed` (task 04), not as a daemon-start fault unrelated to
-// this feature's own scope.
-function resolveGithubAppPrivateKey(config) {
-  const keyPath = process.env.AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH
-    ?? config?.mesh?.repo?.credential?.githubApp?.privateKeyPath
-    ?? null;
-  if (typeof keyPath !== "string" || keyPath.length === 0) return null;
+// githubAppPrivateKeyFilename(appId) — milestone 38 / story 03 (ADR-011 decision /
+// SECURITY T12(b); the build-owed FILENAME convention flagged by aof-qa at refine,
+// STATE.md's per-org-credential-scoping note). The code-enforced default DIRECTORY
+// (`<meshRoot>/credentials/`, below) is SHARED by every org's App, so the FILE within
+// it is keyed by `appId` — two orgs' keys must coexist as DISTINCT files, never
+// overwrite one another. Pinned convention: `github-app-<appId>.pem`, `appId`
+// sanitized to a filesystem-safe slug (never a raw path segment — a config value can
+// never escape the credentials directory via `..`/separators). Absent an appId (the
+// caller has nothing to key by — resolveWorkspaceAppIdentity refuses a blank appId
+// before this default is ever reached for a MINT) falls back to the bare
+// `github-app.pem` — the pre-multi-org singular default's filename, unchanged.
+function githubAppPrivateKeyFilename(appId) {
+  if (typeof appId === "string" && appId.trim().length > 0) {
+    const slug = appId.trim().replace(/[^A-Za-z0-9_-]/g, "-");
+    return `github-app-${slug}.pem`;
+  }
+  return "github-app.pem";
+}
+
+// defaultGithubAppPrivateKeyPath(config, options) — the CODE-ENFORCED default:
+// `<meshRoot>/credentials/<filename>`, composed via the `globalMeshPaths` seam
+// (honoring `AOF_GLOBAL_HOME`) — NEVER a `homedir()` + sync-folder guess (SECURITY
+// T8/T12(b), the MEASURED footgun this story exists to close: the operator had to
+// relocate the story-02 key OUT of a Dropbox-synced folder into
+// `~/.aof/mesh/credentials/`). Mirrors `meshCheckoutPath`'s identical "one seam, one
+// root" discipline (`mesh-worker-execution.mjs`).
+function defaultGithubAppPrivateKeyPath(config, options = {}) {
+  const appId = config?.mesh?.repo?.credential?.githubApp?.appId ?? null;
+  return path.join(globalMeshPaths(options).meshRoot, "credentials", githubAppPrivateKeyFilename(appId));
+}
+
+function readGithubAppPrivateKeyFile(keyPath, options = {}) {
+  const readFile = options.readPrivateKeyFile ?? readFileSync;
   try {
-    return readFileSync(keyPath, "utf8");
+    return readFile(keyPath, "utf8");
   } catch {
     return null;
   }
+}
+
+// resolveGithubAppPrivateKey(config, options) — milestone 38 / story 02 (ADR-010
+// §6.2, T8), extended by story 03 (ADR-011 decision 5, T12(b)): the App private key
+// resolves from a FILE PATH, precedence:
+//   1. `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH` (env, `options.env ?? process.env`) —
+//      consulted ONLY when `options.allowEnvOverride !== false`. Env is a single
+//      control-node-PROCESS-wide setting, so it is part of "the control node's own"
+//      (launch-workspace) default ONLY — it is NEVER consulted when resolving a
+//      DIFFERENT (non-launch) workspace's OWN committed override (SECURITY T12: a
+//      per-workspace override's sole source is that workspace's OWN committed
+//      config, never a process-wide env value that could leak the SAME path across
+//      an org boundary). `createResolveWorkspaceAppIdentity` below is the ONE caller
+//      that decides which case applies.
+//   2. `config.mesh.repo.credential.githubApp.privateKeyPath` — a committed PATH is
+//      fine (the path is not the secret, the file's contents are).
+//   3. the CODE-ENFORCED default above.
+// Read via the injectable `options.readPrivateKeyFile` seam (default `readFileSync`;
+// `@executable` tests inject a recording fake — no real fs read of a secret). A
+// missing/unreadable key file resolves to `null` — NEVER a launcher crash; the
+// resulting misconfiguration surfaces at the first MINT attempt as the existing loud
+// coded `clone-credential-mint-failed`, not as a daemon-start fault.
+export function resolveGithubAppPrivateKey(config, options = {}) {
+  if (options.allowEnvOverride !== false) {
+    const env = options.env ?? process.env;
+    const envPath = env?.AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH;
+    if (typeof envPath === "string" && envPath.length > 0) {
+      return readGithubAppPrivateKeyFile(envPath, options);
+    }
+  }
+  const configuredPath = config?.mesh?.repo?.credential?.githubApp?.privateKeyPath;
+  if (typeof configuredPath === "string" && configuredPath.length > 0) {
+    return readGithubAppPrivateKeyFile(configuredPath, options);
+  }
+  return readGithubAppPrivateKeyFile(defaultGithubAppPrivateKeyPath(config, options), options);
+}
+
+// identityFromConfig(config, options) — reads ONE workspace's OWN resolved config for
+// a usable `{ appId, privateKey, installationId }` App identity, or `null` when it
+// carries no usable `appId` (blank/absent) or its `privateKey` fails to resolve
+// (unreadable key file) — the "no usable App/key" case SECURITY T12 / ADR-011
+// invariant #2 requires to fail LOUD, never silently borrow elsewhere.
+function identityFromConfig(config, options) {
+  const githubApp = config?.mesh?.repo?.credential?.githubApp ?? {};
+  const appId = typeof githubApp.appId === "string" && githubApp.appId.length > 0 ? githubApp.appId : null;
+  if (appId == null) return null;
+  const privateKey = resolveGithubAppPrivateKey(config, options);
+  if (typeof privateKey !== "string" || privateKey.length === 0) return null;
+  return { appId, privateKey, installationId: githubApp.installationId ?? null };
+}
+
+// createResolveWorkspaceAppIdentity(ws, options) — milestone 38 / story 03 (ADR-011):
+// builds the `resolveWorkspaceAppIdentity(workspaceId) => Promise<{appId, privateKey,
+// installationId}|null>` seam the `github-app` provider closes over, keyed by the
+// mint's OWN `workspaceId` — the SAME per-workspace treatment
+// `createResolveWorkspaceCloneUrl` (Gap A, above) already gives `cloneUrl`. Its
+// source of truth is EACH workspace's OWN global-merged committed
+// `mesh.repo.credential.githubApp.*`, resolved through the IDENTICAL ADR-003
+// descriptor seam (`resolveWorkspaceProjectRoot` -> `loadWorkspace`) that function
+// already uses:
+//   - the CONTROL node's own launch workspace (`ws.config`, already loaded) is used
+//     directly when the requested workspaceId IS the launch workspace's own id (the
+//     env-override-eligible case — today's byte-unchanged single-org default).
+//   - a DIFFERENT (non-launch) assigned workspace whose OWN resolved config carries a
+//     genuine `githubApp.appId` override uses THAT identity exclusively (env is NEVER
+//     consulted for it — SECURITY T12).
+//   - absent a per-workspace override (or an unresolvable descriptor — a store fault,
+//     a missing row, a workspace never checked out), resolution FALLS THROUGH to the
+//     control node's own (global-merged) launch-workspace default — ADR-011's
+//     "singular App by default, override-able per workspace" decision, now correctly
+//     reached for ANY assigned workspace, not only the launch one.
+// A workspace (own OR the launch fallback) whose resolved identity carries no usable
+// `appId` + readable `privateKey` returns `null` — the caller (the provider) throws
+// the loud coded mint failure; this seam never guesses, never throws itself, and
+// NEVER reads a SIBLING (neither-own-nor-launch) workspace's identity — the
+// structural "no cross-org borrow" ADR-011 invariant #2 / SECURITY T12 pins.
+export function createResolveWorkspaceAppIdentity(ws, options = {}) {
+  const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+  return async function resolveWorkspaceAppIdentity(workspaceId) {
+    if (workspaceId === ownWorkspaceId) {
+      return identityFromConfig(ws.config ?? {}, { ...options, allowEnvOverride: true });
+    }
+    let targetConfig = null;
+    try {
+      const projectRoot = await resolveWorkspaceProjectRoot(workspaceId, options);
+      if (projectRoot != null) {
+        const otherWs = await loadWorkspace(projectRoot, undefined, { env: options?.globalWorkStoreOptions?.env });
+        targetConfig = otherWs.config ?? {};
+      }
+    } catch {
+      targetConfig = null;
+    }
+    const ownOverrideAppId = targetConfig?.mesh?.repo?.credential?.githubApp?.appId;
+    if (typeof ownOverrideAppId === "string" && ownOverrideAppId.length > 0) {
+      return identityFromConfig(targetConfig, { ...options, allowEnvOverride: false });
+    }
+    // No override of its own (or an unresolvable descriptor) -> the control node's
+    // own (global-merged) launch-workspace default.
+    return identityFromConfig(ws.config ?? {}, { ...options, allowEnvOverride: true });
+  };
 }
 
 // resolveAggregationWorkspaces(ws, nodeId, options) — the ADR-003 workspace set this
@@ -510,21 +628,24 @@ export async function startLauncher(ws, options = {}) {
     // addressed); control-stream-server.mjs only ever consumes the resolved roster.
     const boundAddress = await selfAddress(config, options);
     const servicePort = configuredServicePort(config);
-    // milestone 38 / story 02 (ADR-010) — THE FIX: the config-selected
-    // clone-credential-mint PROVIDER, resolved HERE (the ONE place `config` lives on
-    // this launcher) and wired as a LITERAL `mintCloneCredential:` key BELOW, BEFORE
-    // and OUTSIDE the `controlStreamServerOptions` test-injection spread — the F12
-    // discipline generalised to the provider (a provider reachable only through that
-    // spread would be production-dead, exactly the story-01 F12 defect class again).
+    // milestone 38 / story 02 (ADR-010), extended by story 03 (ADR-011) — THE FIX:
+    // the config-selected clone-credential-mint PROVIDER, resolved HERE (the ONE
+    // place `config` lives on this launcher) and wired as a LITERAL
+    // `mintCloneCredential:` key BELOW, BEFORE and OUTSIDE the
+    // `controlStreamServerOptions` test-injection spread — the F12 discipline
+    // generalised to the provider (a provider reachable only through that spread
+    // would be production-dead, exactly the story-01 F12 defect class again).
     // `resolveCloneCredentialProvider` THROWS LOUDLY for an unknown provider string
     // (never a silent `env-token` degrade, SECURITY T10 applied to selection itself)
     // — an unresolved mint refuses THIS launch outright, the same "fail loud, never a
-    // hang" posture every other launcher precondition already keeps.
+    // hang" posture every other launcher precondition already keeps. Story 03: the
+    // App IDENTITY is no longer read ONCE as a static appId/privateKey/installationId
+    // triple — `resolveWorkspaceAppIdentity` is handed down as a PER-WORKSPACE seam
+    // (ADR-011 invariant #1), resolved fresh for whichever workspace an assignment
+    // actually targets, mirroring `resolveWorkspaceCloneUrl` immediately below it.
     const { mintCloneCredential: resolvedMintCloneCredential } = resolveCloneCredentialProvider(config, {
-      appId: config?.mesh?.repo?.credential?.githubApp?.appId ?? null,
-      privateKey: resolveGithubAppPrivateKey(config),
-      installationId: config?.mesh?.repo?.credential?.githubApp?.installationId ?? null,
       resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
+      resolveWorkspaceAppIdentity: createResolveWorkspaceAppIdentity(ws, options),
     });
     streamServer = await startServer({
       ...(boundAddress ? { bindAddress: boundAddress } : {}),

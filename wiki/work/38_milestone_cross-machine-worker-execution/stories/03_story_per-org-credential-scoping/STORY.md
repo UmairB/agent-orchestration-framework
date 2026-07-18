@@ -47,7 +47,7 @@ isolation boundary is the org, not just the repo inside one shared App.**
      `@executable` (hermetic over an injected signer/http seam + fake keys — no real GitHub, no network); task 03 is
      the real two-org `@manual` soak. This story is independent of siblings 00–02, all already done. -->
 
-- [ ] `tasks/00_per-workspace-app-identity-resolution.feature` — `@executable` — **singular by default, override-able
+- [x] `tasks/00_per-workspace-app-identity-resolution.feature` — `@executable` — **singular by default, override-able
   per workspace (operator's explicit direction, `2026-07-16`: "assume singular apps, but allow for
   overrides").** Confirmed at this session: `loadWorkspace` (`src/work.mjs:176-180`) ALREADY merges the
   GLOBAL `~/.aof/aof.config.json`'s `mesh` key as the base with each project's own LOCAL `mesh` config
@@ -61,11 +61,11 @@ isolation boundary is the org, not just the repo inside one shared App.**
   descriptor lookup, mirroring `createResolveWorkspaceCloneUrl`'s Gap A treatment of `cloneUrl`); absent
   an override, fall through to the control node's own (global-merged) default — the SAME singular/default
   behaviour as today, now correctly reached for ANY assigned workspace, not only the launch one.
-- [ ] `tasks/01_cross-org-key-isolation.feature` — a credential minted for workspace A's org can never be
+- [x] `tasks/01_cross-org-key-isolation.feature` — a credential minted for workspace A's org can never be
   produced using workspace B's org's App key; a workspace whose own org has no App/key configured fails
   loud (the existing `clone-credential-mint-failed` → `assignment-repo-unavailable` posture), never
   silently borrows another org's App.
-- [ ] `tasks/02_default-private-key-directory.feature` — `@executable` — when neither
+- [x] `tasks/02_default-private-key-directory.feature` — `@executable` — when neither
   `AOF_MESH_GITHUB_APP_PRIVATE_KEY_PATH` nor `config.mesh.repo.credential.githubApp.privateKeyPath` is
   set, `resolveGithubAppPrivateKey` falls back to a CODE-ENFORCED default directory under the global mesh
   home (`<meshRoot>/credentials/`, i.e. `~/.aof/mesh/credentials/` — never Dropbox, iCloud, OneDrive, or

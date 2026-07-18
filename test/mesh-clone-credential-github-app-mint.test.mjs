@@ -49,8 +49,7 @@ export const meshCloneCredentialGithubAppMintTests = [
       });
       let resolvedFor = null;
       const mint = createGithubAppMintProvider({
-        appId: "app-123",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-123", privateKey }),
         httpRequest,
         resolveWorkspaceCloneUrl: async (workspaceId) => {
           resolvedFor = workspaceId;
@@ -94,8 +93,7 @@ export const meshCloneCredentialGithubAppMintTests = [
       const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 1 }) : jsonResponse(201, { token: "TOKEN" })));
       let resolvedFor = null;
       const mint = createGithubAppMintProvider({
-        appId: "app-1",
-        privateKey,
+        resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }),
         httpRequest,
         resolveWorkspaceCloneUrl: async (workspaceId) => {
           resolvedFor = workspaceId;
@@ -151,7 +149,7 @@ export const meshCloneCredentialGithubAppMintTests = [
       // Row A — no override: exactly two calls, in order (resolve, then exchange).
       {
         const httpRequest = createFakeHttpRequest(async ({ url }) => (url.endsWith("/installation") ? jsonResponse(200, { id: 777 }) : jsonResponse(201, { token: "TOKEN-A" })));
-        const mint = createGithubAppMintProvider({ appId: "app-1", privateKey, httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
+        const mint = createGithubAppMintProvider({ resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey }), httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
         const token = await mint("ws-a", "asg-a");
         assert.equal(token, "TOKEN-A");
         assert.equal(httpRequest.calls.length, 2, "at most two sequential HTTP calls");
@@ -163,7 +161,7 @@ export const meshCloneCredentialGithubAppMintTests = [
       // the resolve call is skipped entirely.
       {
         const httpRequest = createFakeHttpRequest(async () => jsonResponse(201, { token: "TOKEN-B" }));
-        const mint = createGithubAppMintProvider({ appId: "app-1", privateKey, httpRequest, installationId: 999, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
+        const mint = createGithubAppMintProvider({ resolveWorkspaceAppIdentity: async () => ({ appId: "app-1", privateKey, installationId: 999 }), httpRequest, resolveWorkspaceCloneUrl: async () => "https://github.com/acme/secret.git" });
         const token = await mint("ws-a", "asg-b");
         assert.equal(token, "TOKEN-B");
         assert.equal(httpRequest.calls.length, 1, "the resolve call is skipped when an installationId override is configured");
