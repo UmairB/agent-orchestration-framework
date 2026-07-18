@@ -17,6 +17,7 @@ import {
   diagnosticsSummary,
   errorPathFor,
   milestoneCardModels,
+  assignableNodeOptions,
 } from "./scope.mjs";
 import type { FleetMilestoneCard, Scope } from "./scope.d.mts";
 
@@ -344,7 +345,7 @@ function GlobalScopeView({ status }: { status: GlobalMeshStatus }) {
           </p>
         ) : null}
         <WorkspacesSummary workspaces={status.workspaces} />
-        <MilestonesList items={status.items} workspaces={status.workspaces} />
+        <MilestonesList items={status.items} workspaces={status.workspaces} nodes={status.nodes} />
         <GlobalNodePanel nodes={status.nodes} />
         <DiagnosticsRegion status={status} />
       </div>
@@ -387,7 +388,7 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
 // consumers and local filtering, but this overview intentionally stays at the
 // milestone level and reuses the work-board card language: status ring/chip,
 // progress track, and child story dots derived from the same flat item stream.
-function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[] }) {
+function MilestonesList({ items, workspaces, nodes }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[]; nodes: GlobalNode[] }) {
   const milestones = milestoneCardModels(items);
   const workspaceFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId) ?? null;
   const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
@@ -405,6 +406,7 @@ function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; worksp
               key={`${milestone.item.workspaceId}:${milestone.item.ref}`}
               milestone={milestone}
               workspace={workspaceFor(milestone.item.workspaceId)}
+              nodes={nodes}
             />
           ))}
         </div>
@@ -413,7 +415,7 @@ function MilestonesList({ items, workspaces }: { items: GlobalWorkItem[]; worksp
   );
 }
 
-function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null }) {
+function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null; nodes: GlobalNode[] }) {
   const m = milestone;
   const isDone = m.item.status === "done";
   const progressLabel = m.total === 0 ? "not started" : "stories done";
@@ -456,56 +458,135 @@ function GlobalMilestoneCard({ milestone, workspace }: { milestone: FleetMilesto
   );
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`Open board for ${workspaceName}`}
-      className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <StatusRing status={asWorkStatus(m.item.status)} size={18} />
-        <span className="mono shrink-0 text-sm text-muted-foreground">{m.item.ref}</span>
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">milestone</span>
-        <span className="ml-auto shrink-0">
-          <StatusChip status={asWorkStatus(m.item.status)} />
-        </span>
-      </div>
-
-      <h3 className="mt-2 truncate text-[16px] font-bold leading-snug" title={title}>{title}</h3>
-
-      <div className="mt-3">
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{progressLabel}</span>
-          <span className="mono">
-            {m.done} / {m.total}
+    // milestone 38 / story 04 (ADR-012) — a plain <div>, not a <button>: the
+    // "assign to node" affordance below is its own interactive control, and an
+    // HTML <button> may never nest another interactive element. The "Open
+    // board" drill-in moves to an inner button covering the SAME clickable
+    // region as before; the assign row sits BELOW it as a sibling, so neither
+    // control's click bubbles into the other.
+    <div className="group flex min-w-0 flex-col rounded-[10px] border border-border bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md">
+      <button
+        type="button"
+        onClick={onOpen}
+        title={`Open board for ${workspaceName}`}
+        className="flex min-w-0 flex-col text-left"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <StatusRing status={asWorkStatus(m.item.status)} size={18} />
+          <span className="mono shrink-0 text-sm text-muted-foreground">{m.item.ref}</span>
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">milestone</span>
+          <span className="ml-auto shrink-0">
+            <StatusChip status={asWorkStatus(m.item.status)} />
           </span>
         </div>
-        <MilestoneProgressTrack milestone={m} />
-      </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {m.stories.length === 0 ? (
-          <span className="text-xs text-muted-foreground">—</span>
-        ) : (
-          <>
-            {m.stories.map((story) => (
-              <StatusDot key={`${story.workspaceId}:${story.ref}`} status={asWorkStatus(story.status)} size={8} title={`${story.ref} · ${story.status ?? "unknown"}`} />
-            ))}
-            <span className="ml-1 text-[11px] text-muted-foreground">
-              {m.stories.length} stor{m.stories.length === 1 ? "y" : "ies"}
+        <h3 className="mt-2 truncate text-[16px] font-bold leading-snug" title={title}>{title}</h3>
+
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{progressLabel}</span>
+            <span className="mono">
+              {m.done} / {m.total}
             </span>
-          </>
-        )}
-      </div>
+          </div>
+          <MilestoneProgressTrack milestone={m} />
+        </div>
 
-      <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-        <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
-        <span className="flex min-w-0 shrink items-center gap-3">
-          {attention}
-          <span className="shrink-0 font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
-        </span>
-      </div>
-    </button>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {m.stories.length === 0 ? (
+            <span className="text-xs text-muted-foreground">—</span>
+          ) : (
+            <>
+              {m.stories.map((story) => (
+                <StatusDot key={`${story.workspaceId}:${story.ref}`} status={asWorkStatus(story.status)} size={8} title={`${story.ref} · ${story.status ?? "unknown"}`} />
+              ))}
+              <span className="ml-1 text-[11px] text-muted-foreground">
+                {m.stories.length} stor{m.stories.length === 1 ? "y" : "ies"}
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
+          <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
+          <span className="flex min-w-0 shrink items-center gap-3">
+            {attention}
+            <span className="shrink-0 font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
+          </span>
+        </div>
+      </button>
+
+      <AssignAffordance ref={m.item.ref} nodes={nodes} />
+    </div>
+  );
+}
+
+// The "assign to node" affordance (milestone 38 / story 04; ARCHITECTURE
+// ADR-012) — a worker-node picker, PRODUCER-FED from the SAME real roster the
+// node panel renders (`assignableNodeOptions`, ./scope.mjs), and the "Assign"
+// action, which POSTs the ONE fleet-face mutation route (`fleetApi.assign`).
+// Empty roster ⇒ the picker is disabled (there is nothing to assign to yet) —
+// never an invented placeholder target. A gate refusal (unknown/ineligible
+// node, already-active item, …) surfaces as an inline error, coded by the verb
+// (ADR-012 inv.3) — this affordance re-implements no arbitration of its own.
+// On success, the assign is left to the existing 5s poll to reflect the
+// resulting `assigned` chip (AssignmentChip, above) — no bespoke refresh path.
+function AssignAffordance({ ref, nodes }: { ref: string; nodes: GlobalNode[] }) {
+  const options = assignableNodeOptions(nodes);
+  const [selected, setSelected] = useState(options[0] ?? "");
+  const [assigning, setAssigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const disabled = options.length === 0;
+
+  const onAssign = useCallback(
+    async (event: React.MouseEvent) => {
+      event.stopPropagation();
+      if (!selected) return;
+      setAssigning(true);
+      setError(null);
+      try {
+        await fleetApi.assign(ref, selected);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Assign failed");
+      } finally {
+        setAssigning(false);
+      }
+    },
+    [ref, selected]
+  );
+
+  return (
+    <div
+      className="mt-3 flex min-w-0 items-center gap-2 border-t border-border pt-3 text-xs"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <select
+        aria-label={`Assign ${ref} to a worker node`}
+        value={selected}
+        disabled={disabled || assigning}
+        onChange={(event) => setSelected(event.target.value)}
+        className="mono min-w-0 flex-1 truncate rounded-md border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground disabled:opacity-50"
+      >
+        {disabled ? (
+          <option value="">No worker nodes yet</option>
+        ) : (
+          options.map((nodeId) => (
+            <option key={nodeId} value={nodeId}>
+              {nodeId}
+            </option>
+          ))
+        )}
+      </select>
+      <button
+        type="button"
+        disabled={disabled || assigning || !selected}
+        onClick={onAssign}
+        className="shrink-0 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {assigning ? "Assigning…" : "Assign →"}
+      </button>
+      {error ? <span className="mono min-w-0 truncate text-[10.5px] text-destructive" title={error}>{error}</span> : null}
+    </div>
   );
 }
 function MilestoneProgressTrack({ milestone }: { milestone: FleetMilestoneCard }) {

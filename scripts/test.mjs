@@ -145,6 +145,18 @@ import { meshWorkerPushBeforeRemoveTests } from "../test/mesh-worker-push-before
 import { meshCloneCredentialPushMintScopedTests } from "../test/mesh-clone-credential-push-mint-scoped.test.mjs";
 import { meshWorkerWriteCredentialPullTests } from "../test/mesh-worker-write-credential-pull.test.mjs";
 import { archTests as acdWriteTokenScopedToPushTests } from "../test/arch/acd-write-token-scoped-to-push.test.mjs";
+// milestone 38 / story 04 — ui-driven-assignment (ADR-012; SECURITY T13): the
+// read-only fleet face's FIRST live write route, POST /api/mesh/assign, wrapping
+// the existing assignWork verb VERBATIM. Task 00 the route + real-store mint
+// readback; task 01 the verb's own gates re-run identically on the UI path; task
+// 02 the read-only posture preserved (one exception, CSRF-refused elsewhere);
+// task 03 the assign affordance's producer-fed picker + chip. Task 04 is the
+// @manual real-UI soak, deferred to aof:verify 38 — no test file here.
+import { meshUiAssignRouteTests } from "../test/mesh-ui-assign-route.test.mjs";
+import { meshUiAssignGatesTests } from "../test/mesh-ui-assign-gates.test.mjs";
+import { meshUiAssignReadOnlyPostureTests } from "../test/mesh-ui-assign-read-only-posture.test.mjs";
+import { fleetAssignAffordanceTests } from "../test/fleet-assign-affordance.test.mjs";
+import { archTests as acdFleetFaceSingleMutationRouteTests } from "../test/arch/acd-fleet-face-single-mutation-route.test.mjs";
 // milestone 41 — work-item insertion & re-index (ADR-001/ADR-003, refine-stage
 // fitness functions, GREEN today): resolution is folder-derived so re-index-by-rename
 // is sufficient (no index to rebuild), and the renumber WRITER stays OUT of the
@@ -1698,6 +1710,13 @@ export const tests = [
   ...meshCloneCredentialPushMintScopedTests,
   ...meshWorkerWriteCredentialPullTests,
   ...acdWriteTokenScopedToPushTests,
+  // milestone 38 / story 04 — ui-driven-assignment (ADR-012; SECURITY T13): the
+  // fleet face's ONE mutation carve-out, POST /api/mesh/assign
+  ...meshUiAssignRouteTests,
+  ...meshUiAssignGatesTests,
+  ...meshUiAssignReadOnlyPostureTests,
+  ...fleetAssignAffordanceTests,
+  ...acdFleetFaceSingleMutationRouteTests,
   // milestone 41 — work-item insertion & re-index (refine-stage fitness functions)
   ...acdReindexResolutionFolderDerivedTests,
   ...acdReindexEngineBlastRadiusTests,

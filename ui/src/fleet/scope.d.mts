@@ -1,5 +1,5 @@
 // Type declarations for scope.mjs (the pure fleet scope/region/state helpers).
-import type { FleetNode, FleetStatus, GlobalWorkItem } from "./api";
+import type { FleetNode, FleetStatus, GlobalNode, GlobalWorkItem } from "./api";
 import type { CurrentWorkLines } from "./runs.d.mts";
 
 export type Scope = "global" | "local";
@@ -74,3 +74,9 @@ export type DiagnosticsSummary = {
 };
 
 export declare function diagnosticsSummary(status: FleetStatus | null | undefined): DiagnosticsSummary;
+
+// milestone 38 / story 04 (ADR-012) — the "assign to node" picker's options,
+// derived from the REAL GET /api/mesh/status roster (producer-fed, ADR-008).
+export declare function assignableNodeOptions(
+  nodes: (Partial<GlobalNode> & Record<string, unknown>)[] | null | undefined
+): string[];

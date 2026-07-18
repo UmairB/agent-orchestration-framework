@@ -1,20 +1,28 @@
 // Fitness function: acd-mesh-ui-read-only (milestone 35 / story 03; ARCHITECTURE
 // ADR-007 — "assign is CLI-only; the fleet UI stays read-only and renders
-// lifecycle; a guarded same-origin+json POST is deferred, not designed"). This
-// RE-ARMS the m34 read-only guarantee (acd-mesh-ui-write-isolation) over the
-// story-03 status shape extension: the extended read path (assignment rows
-// threaded through queryGlobalMeshStatus -> shapeGlobalStatus) added NO new
-// route and NO mutating branch to src/mesh-ui-serve.mjs.
+// lifecycle; a guarded same-origin+json POST is deferred, not designed").
 //
-// "The mesh UI serve face exposes no assignment write route: non-GET/HEAD is a
-//  405; the upgrade is destroyed; the extended status shape added no mutating
-//  handler."
+// SUPERSEDED IN PLACE at milestone 38 / story 04 (ADR-012) — the m35/ADR-007
+// deferral is REALIZED: the fleet face gains its FIRST live write route, a
+// guarded same-origin+json `POST /api/mesh/assign` wrapping `assignWork`
+// verbatim (SECURITY T13). This file's job narrows accordingly: it still
+// RE-ARMS the m34 read-only guarantee (acd-mesh-ui-write-isolation) that every
+// route OTHER than that one exception stays exactly as read-only as before —
+// `acd-fleet-face-single-mutation-route` (the new, story-04-owned fitness) is
+// what now arms the ONE exception's own structural invariants; this file
+// asserts there is no SECOND one.
+//
+// "The mesh UI serve face exposes no assignment write route OTHER than the one
+//  m38/ADR-012 exception: every other non-GET/HEAD is a 405; POST /api/mesh/issue
+//  |route|revoke never exist; the upgrade is destroyed; the extended status
+//  shape added no OTHER mutating handler."
 //
 // A structural grep of src/mesh-ui-serve.mjs (comments discounted) PLUS a
-// behavioural exercise of the real server: every mutating method 405s with the
-// Allow header, no /api/mesh/assign|issue route resolves to a 2xx, every
-// upgrade is destroyed, and the route table is still exactly the two GET
-// routes + the static bundle.
+// behavioural exercise of the real server: every mutating method on the two
+// GET routes 405s with the Allow header, no /api/mesh/issue|route|revoke route
+// resolves to a 2xx, every upgrade is destroyed, and the route table is still
+// exactly the two GET routes + the ONE POST /api/mesh/assign exception + the
+// static bundle.
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -65,34 +73,43 @@ function openSocket(wsUrl, { timeoutMs = 2000 } = {}) {
 
 export const archTests = [
   {
-    name: "arch/35 ADR-007: mesh-ui-serve.mjs declares NO /api/mesh/assign or /api/mesh/issue mutating route — the story-03 shape extension added no write branch",
+    name: "arch/35-38 ADR-007/012: mesh-ui-serve.mjs declares NO /api/mesh/issue|route|revoke mutating route — the ONLY write exception is POST /api/mesh/assign (38/ADR-012), guarded to POST only",
     run: async () => {
       const source = stripComments(await readFile(MESH_UI_SERVE, "utf8"));
 
-      assert.ok(
-        !/pathname\s*===\s*["']\/api\/mesh\/assign["']/.test(source),
-        "mesh-ui-serve.mjs declares no /api/mesh/assign route"
-      );
+      // The m35/ADR-007 deferral names — never a second write route besides the
+      // one m38/ADR-012 exception.
       assert.ok(
         !/pathname\s*===\s*["']\/api\/mesh\/issue["']/.test(source),
         "mesh-ui-serve.mjs declares no /api/mesh/issue route"
       );
-      // The only routes are the two GET reads + the static-bundle fallthrough.
+      assert.ok(
+        !/pathname\s*===\s*["']\/api\/mesh\/(route|revoke)["']/.test(source),
+        "mesh-ui-serve.mjs declares no /api/mesh/route or /api/mesh/revoke route"
+      );
+      // The route table is the two GET reads + the ONE POST /api/mesh/assign
+      // exception + the static-bundle fallthrough — never a fourth /api/mesh/* route.
       const declaredApiRoutes = [...source.matchAll(/pathname\s*===\s*["'](\/api\/mesh\/[a-zA-Z-]+)["']/g)].map((m) => m[1]);
       const uniqueRoutes = [...new Set(declaredApiRoutes)].sort();
       assert.deepEqual(
         uniqueRoutes,
-        ["/api/mesh/board-url", "/api/mesh/status"].sort(),
-        "the route table is still exactly the two GET routes (board-url, status) — no third /api/mesh/* route exists"
+        ["/api/mesh/assign", "/api/mesh/board-url", "/api/mesh/status"].sort(),
+        "the route table is exactly the two GET routes (board-url, status) plus the ONE POST /api/mesh/assign exception — no fourth /api/mesh/* route exists"
       );
 
-      // Both read routes guard themselves to GET/HEAD (a write method is
-      // rejected, never dispatched to a handler).
-      const guardCount = (source.match(/request\.method\s*!==\s*["']GET["']\s*&&\s*request\.method\s*!==\s*["']HEAD["']/g) ?? []).length;
-      assert.ok(guardCount >= 1, "mesh-ui-serve.mjs guards its route(s) to GET/HEAD before any handler body runs");
+      // The two READ routes still guard themselves to GET/HEAD (a write method
+      // is rejected, never dispatched to a handler) — UNCHANGED by the exception.
+      const getHeadGuardCount = (source.match(/request\.method\s*!==\s*["']GET["']\s*&&\s*request\.method\s*!==\s*["']HEAD["']/g) ?? []).length;
+      assert.ok(getHeadGuardCount >= 1, "mesh-ui-serve.mjs guards its GET/HEAD route(s) before any handler body runs");
+      // The ONE write route guards itself to POST only (a GET/PUT/DELETE on
+      // /api/mesh/assign is a rejection, never a dispatch to the verb).
+      assert.ok(
+        /request\.method\s*!==\s*["']POST["']/.test(source),
+        "mesh-ui-serve.mjs guards its ONE write route to POST before dispatching to assignWork"
+      );
 
-      // No fs-write call form and no shell-out — the extended read path
-      // performs zero fs write / no shell-out of its own.
+      // No fs-write call form and no shell-out of the FACE's own — the ONE
+      // mutation rides entirely inside assignWork's own gated store write.
       for (const verb of ["writeFile", "appendFile", "writeFileSync", "appendFileSync", "mkdir", "rm", "rmdir", "unlink", "rename"]) {
         assert.ok(
           !new RegExp(`\\b${verb}\\s*\\(`).test(source),
@@ -118,9 +135,9 @@ export const archTests = [
       );
 
       // --- m03 non-vacuous planted-violation self-check ---
-      // A broken fixture: an assignment write route declared alongside the two
-      // read routes — the detector must FIRE (fail) on this shape, proving the
-      // route-table assertion is not vacuously green.
+      // A broken fixture: a SECOND write route (/api/mesh/issue) declared
+      // alongside the sanctioned /api/mesh/assign — the detector must FIRE (fail)
+      // on this shape, proving the route-table assertion is not vacuously green.
       const plantedWriteRoute = stripComments(`
         if (pathname === "/api/mesh/status") {
           if (request.method !== "GET" && request.method !== "HEAD") { sendMethodNotAllowed(response, "GET, HEAD"); return; }
@@ -133,6 +150,12 @@ export const archTests = [
           return;
         }
         if (pathname === "/api/mesh/assign") {
+          if (request.method !== "POST") { sendMethodNotAllowed(response, "POST"); return; }
+          const result = await assignWork(assignWorkspace, body.ref, body.nodeId, {});
+          sendJson(response, 200, result);
+          return;
+        }
+        if (pathname === "/api/mesh/issue") {
           const body = await readJsonBody(request);
           await insertAssignment(store, body);
           sendJson(response, 200, { ok: true });
@@ -143,12 +166,12 @@ export const archTests = [
       const plantedUnique = [...new Set(plantedRoutes)].sort();
       assert.notDeepEqual(
         plantedUnique,
-        ["/api/mesh/board-url", "/api/mesh/status"].sort(),
-        "self-check: the detector FIRES on a planted third route (/api/mesh/assign) — the broken half"
+        ["/api/mesh/assign", "/api/mesh/board-url", "/api/mesh/status"].sort(),
+        "self-check: the detector FIRES on a planted FOURTH route (/api/mesh/issue) beside the sanctioned exception — the broken half"
       );
       assert.ok(
-        plantedRoutes.includes("/api/mesh/assign"),
-        "self-check: the detector sees the planted /api/mesh/assign route"
+        plantedRoutes.includes("/api/mesh/issue"),
+        "self-check: the detector sees the planted /api/mesh/issue route"
       );
 
       // A broken fixture: an upgrade handler that does NOT destroy the socket
@@ -165,7 +188,7 @@ export const archTests = [
     },
   },
   {
-    name: "arch/35 ADR-007 (behavioural): every non-GET/HEAD is a 405, no assign/issue route resolves to a 2xx, every upgrade is destroyed, and the extended read path answers assignment rows",
+    name: "arch/35-38 ADR-007/012 (behavioural): every non-GET/HEAD on the two read routes is a 405, no /api/mesh/issue route ever resolves to a 2xx, a write method on /api/mesh/assign that isn't POST is a 405, an unauthenticated POST to /api/mesh/assign is refused (never a 200), every upgrade is destroyed",
     run: async () => {
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-fitness-"));
       const root = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-fitness-root-"));
@@ -202,13 +225,25 @@ export const archTests = [
           }
         }
 
-        // no /api/mesh/assign or /api/mesh/issue route resolves to a 2xx
-        for (const route of ["/api/mesh/assign", "/api/mesh/issue"]) {
-          for (const method of ["POST", "PUT", "DELETE"]) {
-            const res = await fetch(new URL(route, url), { method });
-            assert.ok(res.status === 404 || res.status === 405, `${method} ${route} is not-found or method-rejected`);
-          }
+        // /api/mesh/issue (the RETIRED m27 route) never resolves to a 2xx on any method
+        for (const method of ["POST", "PUT", "DELETE"]) {
+          const res = await fetch(new URL("/api/mesh/issue", url), { method });
+          assert.ok(res.status === 404, `${method} /api/mesh/issue is not-found`);
         }
+
+        // milestone 38 / story 04 (ADR-012) — the ONE exception: a write method
+        // on /api/mesh/assign that is NOT POST is still a clean 405 naming POST.
+        for (const method of ["PUT", "PATCH", "DELETE", "GET"]) {
+          const res = await fetch(new URL("/api/mesh/assign", url), { method });
+          assert.equal(res.status, 405, `${method} /api/mesh/assign is a 405`);
+          assert.equal(res.headers.get("allow"), "POST", `${method} /api/mesh/assign carries the Allow: POST header`);
+        }
+        // an UNAUTHENTICATED (no Origin) POST is refused — never a 200, and this
+        // fitness function (unlike acd-fleet-face-single-mutation-route) does not
+        // assert the exact refusal code, only that the ONE exception still never
+        // succeeds for a request that skips the admission guard.
+        const unauthedPost = await fetch(new URL("/api/mesh/assign", url), { method: "POST" });
+        assert.ok(unauthedPost.status >= 400 && unauthedPost.status < 500, "an unauthenticated POST to /api/mesh/assign is refused (4xx), never a 200");
 
         // GET is still served
         const getRes = await fetch(new URL("/api/mesh/status", url));
