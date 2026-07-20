@@ -9,6 +9,13 @@
 > rework — full structural + behavioural re-reviews, validate-gate fix loops, and cold-context
 > subagent respawns each cycle.
 
+> **Review amendments (obs-346, 2026-07-19).** A live working-run review — driving `aof work observe`
+> over milestone 346 (voice-vox-web) — validated the core thesis and produced the tagged inline
+> amendments below (`⟨amend · obs-346⟩`). Headline evidence, flipping the developer sonnet→opus on the
+> **same milestone**: the story build went **511 → 248 turns, 46% → 20% toolchain-wait, 33 → 6
+> error-ish results**. The `developer → opus` default and the transcript-observability layer are
+> **already shipped**; the amendments reweight and extend the rest.
+
 ## Objective
 
 **Objective.** Make the ACD loop's cost and wall-clock **proportional to the work item, not to the
@@ -43,6 +50,11 @@ The loop today, as built (findings from the architecture review, 2026-07):
   generative work (implement to a locked contract) while opus agents re-check and repair its
   output. Reviewing against a locked contract with a green suite is more mechanical than
   implementing against one — the natural allocation is the reverse of today's.
+  - **⟨amend · obs-346⟩** Confirmed by A/B on m346: developer sonnet→opus cut the story build
+    **511 → 248 turns** and **46% → 20%** toolchain-wait, with error-ish results **33 → 6**. The flat
+    `developer → opus` default is the **primary** lever and is **already shipped** (bundle +
+    `bundle-model-map.test.mjs` now 7 opus / 1 sonnet). Escalation-on-retry is a secondary refinement
+    on top of it (see Scope amendment), not the headline.
 - **The build-to-green inner loop is the only uncapped loop in the framework.**
   [continue.md](../../src/bundle/commands/continue.md) instructs "implement … until every task's
   `@executable` scenarios/rows are green" with no iteration ceiling. The only hard cap anywhere is
@@ -50,6 +62,12 @@ The loop today, as built (findings from the architecture review, 2026-07):
   ([run-start.mjs](../../src/commands/run-start.mjs)) — a different, later gate. A
   struggling model grinds invisibly until it converges, exhausts validate attempts, or (mesh) hits
   the 10-minute process timeout.
+  - **⟨amend · obs-346⟩** A cap bounds iteration *count* but not *cost per iteration*. The bigger
+    measured sink is that the developer re-runs the **full** workspace suite (vitest + typecheck +
+    build) after ~every edit — m346: **56 runs, 46% of active time**, avg 56s / worst 404s (a "tight
+    fix-test loop"). Add a discipline lever for **targeted test execution** (failing spec in the loop,
+    full suite once at the gate). Model-independent, and the single biggest wall-clock item observed —
+    see Scope › Loop discipline (e).
 - **Failure surfaces downstream at opus prices.** One weak build triggers: architect review (opus)
   + QA review (opus) + designer (opus, when UI) + craft pass → findings → respawn developer → fix →
   `aof work validate` → red → fix loop → re-review. Each extra developer iteration drags two to
@@ -97,20 +115,41 @@ The loop today, as built (findings from the architecture review, 2026-07):
   records: attempts per item, wall-clock per phase (refine/continue/verify), review cycles per
   story, exhaustion stops — `aof work stats <range> --json` (name illustrative), surfaced on the
   board as a thin face.
+  - **⟨amend · obs-346⟩** Two layers, not one. This run-record rollup answers *how long / how many
+    attempts* but cannot see *why* a phase was slow. The transcript layer — `aof work observe <ref>`
+    (per-agent toolchain-wait %, grind flag, edit↔test rhythm, model-vs-tool split, stalls) — answers
+    *why*, and is **already built** (`src/work-observe.mjs`, opt-in via `work.observability.enabled`,
+    auto-written at the retrospective). Unify them, or have `loop-telemetry` cite the transcript layer
+    as its diagnostic companion rather than re-deriving it.
 - **Model reallocation defaults + guidance.** Revisit the shipped frontmatter defaults (developer
   back to `opus`, or continue-stage reviewers to `sonnet`); document the intended economics in the
   wiki so `work.agents.models` overrides are made deliberately.
+  - **⟨amend · obs-346⟩** `developer → opus` is done and A/B-proven, so this becomes documentation +
+    the escalation map. **Caution on the "reviewers → sonnet" option:** "reviewing a locked contract
+    is mechanical" is untested, and 346 is exactly the class (federated OAuth, security + compliance
+    lenses) where a missed finding is worst. The locked-contract constraint guards the *gates*, not
+    review *acuity* — hold reviewers at opus on any security/compliance-touching item.
 - **Escalation-on-retry.** Attempt-indexed model selection for the developer role (e.g. attempt 1 =
   `sonnet`, attempt ≥ 2 = `opus`), keyed off the existing run lineage; config-shaped as an
   extension of `work.agents.models`, validated in
   [config-inspect.mjs](../../src/config-inspect.mjs), inert in solo mode like the existing map.
+  - **⟨amend · obs-346⟩** Blind spot: escalation fires only on **failure / retry**, but the observed
+    pathology is slow **success** — m346 story-01 ground 511 turns and converged **green on attempt 1**,
+    so it would never escalate. Demote this beneath the flat `developer → opus` default (the actual
+    fix); escalation is a secondary refinement for the genuine validate-red fail-loop, and it only
+    helps once the build-loop cap (Loop discipline (a)) makes attempt 1 fail *fast* instead of grinding
+    — so it **depends on** loop-discipline, not "independent of" it.
 - **Loop discipline in the phase prompts.** (a) An explicit build-loop cap in `continue.md` — after
   N consecutive red runs of the same scenario, stop and flag; (b) reorder the continue flow to
   build → `aof work validate` (deterministic, free) → reviews only on green; (c) delta re-review
   after a fix loop — re-review the fixed findings, not the full structural + behavioural + design
   pass; (d) a consolidated per-story **build brief** assembled once at continue-start (files-as-
   handoff, one doc instead of the SPEC/ADR/DESIGN/feature tree), with fix-loop respawns handed only
-  the failing scenarios + diff context.
+  the failing scenarios + diff context. **(e) targeted test execution during the build loop** — run
+  the single failing scenario/spec while converging, and the full suite + typecheck + build **once** at
+  the gate, not after every edit. `⟨amend · obs-346⟩` m346: 56 full-suite runs = **46%** of developer
+  active time (avg 56s, worst 404s) — the top wall-clock item, and the only lever here that is fully
+  **model-independent**. Highest-confidence, cheapest win in the arc; consider pulling it ahead of the cap.
 - **Headless driver hardening.** Configurable spawn timeout with the execFile timeout mapped to the
   retryable `timeout` reason; result-envelope parsing verified against the real `claude -p
   --output-format json` contract (soak becomes a test); `--model` passed explicitly; stored
@@ -154,6 +193,10 @@ The loop today, as built (findings from the architecture review, 2026-07):
   reclassification, real-envelope completion parsing under test, `--model` and `--resume`
   threading in [mesh-worker-execution.mjs](../../src/mesh-worker-execution.mjs). **Depends on
   milestone 38 (cross-machine-worker-execution)**; independent of the other two consumers.
+  - **⟨amend · obs-346⟩** Orthogonal to the *observed* 346 slowness — that ran on Claude Code Task
+    subagents, not the mesh spawn path, so none of these three defects touched it. Real and worth
+    doing, but should not be sequenced ahead of loop-discipline + model-economics, which are what
+    actually bit the observed run.
 
 ## Adjacent techniques (separate arcs — captured, not scoped here)
 
@@ -172,3 +215,10 @@ The loop today, as built (findings from the architecture review, 2026-07):
   routes only contested findings to an opus adjudicator — the same economics lever applied inside
   the review stage itself. → a review-pipeline arc, gated on loop-telemetry showing review time
   dominates.
+- **Architect-decides loop rhythm (write-first vs TDD) at refine.** `⟨amend · obs-346⟩` Today the
+  developer runs a test-per-edit rhythm regardless of story complexity (m346: "tight fix-test loop"
+  observed on a not-especially-hard story). Make the **architect** call the rhythm at refine — a
+  simple/low-coupling story → write-code-first, verify once; a genuinely complicated or high-risk one
+  → red-green TDD — recorded in `ARCHITECTURE.md` and honoured by `continue.md`. The observe
+  `interleave` classifier makes the chosen rhythm auditable after the fact. → a refine/architecture
+  arc; overlaps difficulty-aware sizing but is a distinct call (loop *rhythm*, not story *size*).
