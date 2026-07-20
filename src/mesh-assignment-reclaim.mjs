@@ -35,6 +35,21 @@ function defaultListAssignments(store, workspaceId) {
   return listAllAssignments(store).filter((row) => row.workspaceId === workspaceId);
 }
 
+// defaultAssignmentDirectiveCommand(itemRef) — milestone 38 / story 05 (ADR-013): the
+// DOCUMENTED DEFAULT whole command string dispatched with every directive. The
+// control side has no operator-facing command-SELECTION UI yet (a later story's
+// concern — this milestone's assignment record stays FROZEN at its ten-key shape,
+// acd-assignment-record-frozen, so this default is computed here rather than stored),
+// so every dispatch names the first phase of the full lifecycle,
+// `/aof:refine <ref> --autonomous`, exactly ADR-013's own worked example. This is what
+// makes buildDirectiveFrame's new `command` field a REAL, non-empty production value
+// (never reachable only through a test's own injected directive) — the worker types
+// EXACTLY this string into its interactive session's PTY stdin
+// (mesh-worker-execution.mjs's driveInteractiveClaudeSession).
+function defaultAssignmentDirectiveCommand(itemRef) {
+  return `/aof:refine ${itemRef} --autonomous`;
+}
+
 // The documented default run-heartbeat staleness threshold (ms) — the SAME m20
 // `work.autonomous.heartbeatStaleMs` default `commands/run-start.mjs` already uses
 // for the restart-time reclaim scan (never a second, drifting definition).
@@ -183,6 +198,7 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
         itemRef: row.itemRef,
         workspaceId: row.workspaceId,
         at: now,
+        command: defaultAssignmentDirectiveCommand(row.itemRef),
       }));
       if (result?.sent) {
         dispatchedIds.add(row.assignmentId);

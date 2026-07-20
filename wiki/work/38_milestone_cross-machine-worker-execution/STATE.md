@@ -206,6 +206,77 @@ doc: state
     subsystem is untouched). Same class as the reclaim-scheduler/coordination-launcher timing flakes — route to the same
     stabilisation chore. **Milestone stays `in-progress`: stories 05, 06, 08 not yet built.**
 
+- **Built + reviewed `2026-07-19` via `aof:continue 38` — the LAST THREE `@executable` stories (05 → 06 → 08) built to green,
+  reviewed, and moved to `in-review` (→ `done` at `aof:verify`). All NINE stories are now built.** Serialised 05 → 06 → 08 in the
+  main tree (06 hard-depends on 05's interactive terminal; 08 shares `scripts/test.mjs` with both AND its frame-vocabulary
+  enumeration must include 06's new `terminal-frame` kind — so parallel worktrees would have collided on `scripts/test.mjs` and
+  risked a stale enumeration, this milestone's own recurring failure mode). A **concurrent `aof:verify 41` session** was live in the
+  same working tree during the pass (authoring `src/bundle/commands/insert-*.md` + editing `scripts/test.mjs`); the operator
+  confirmed it complete before 06/08 were dispatched. Each story's `@executable` lanes + fitness function are green; every `@manual`
+  soak stays deferred to `aof:verify`.
+  - **05 · terminal-driven-worker-execution** — **in-review**. Tasks 00–03 `@executable` green (42 assertions: interactive `claude`
+    PTY via the `terminal-providers` seam replacing `claude -p`; whole command typed into PTY stdin; `NEEDS_INPUT` sentinel → third
+    `needs-input` outcome NOT re-mapped to `done`; needs-input RETAINS the worktree; `session_id` captured/surfaced) +
+    `acd-worker-driver-no-headless-print` (30 assertions, 5 CRLF plants each landing-asserted — it hit + fixed the exact `\n`-needle-vs-CRLF
+    near-miss this milestone is scarred by). Dev caught a **broad-blast hazard**: swapping the bounded `claude -p` default for an unbounded
+    interactive PTY makes ANY test that reaches the worker driver without a `spawnRuntime` override HANG (real `claude` on PATH) — it
+    audited all 19 unoverridden call sites and patched the 2 unsafe pre-existing story-01 tests. Task 04 `@manual` subscription soak deferred.
+    **Review fast-follow `2026-07-19` (`aof:continue 38/05` re-review — architect + QA + craft, all producer-fed):** three CONFIRMED
+    detector defects on the real interactive path (invisible to the single-chunk `@executable` fakes) caught + FIXED — (1) `containsNeedsInputSentinel`
+    was an unanchored `buffer.includes("NEEDS_INPUT")` that false-fired + `term.kill()`ed a healthy run whose output merely NARRATED the token →
+    now matched only as a whole `\n`-terminated line; (2) `extractSessionIdFromOutput`'s `/^\s*(\S+)/` truncated the id when marker+value straddled
+    two `onData` chunks (a truncated non-null id reads as valid → wrong `claude --resume`) → now requires a whitespace-terminated token (`(?=\s)`),
+    degrading to null + re-extract on an in-flight tail; (3) the shared fake-pty fixture's `dispose()` was a no-op → now truly unsubscribes.
+    +2 hermetic regression tests (both FAILED pre-fix), story-05 focused runner now **23/23 green**; story-06 fixture consumer re-run 5/5, no regression.
+  - **06 · worker-terminal-streaming** — **in-review**. Tasks 00–02 `@executable` green (59/59 focused: PTY bytes ride the FROZEN
+    `mesh-relay.mjs` envelope as an opaque `terminal-frame` kind, byte-unchanged, driven through the REAL `serveRelay()`; a read-only
+    `/ws/terminal-view` carve-out on the REAL `serveMeshUi` fleet face — in-memory ephemeral mirror, session-gated, unresolvable-dropped,
+    3-way multiplex) + `acd-fleet-terminal-mirror-read-only` (non-vacuous, structural + behavioural, no mesh→PTY input path). Task 03
+    `@manual` two-machine stream soak deferred.
+  - **08 · worker-verified-memory-syncback** — **in-review**. Tasks 00–01 `@executable` green (task 00: 7 tests, frame-vocabulary Outline
+    over the REAL builders + a real `graphify-out/graph.json` proven untracked via `git add -A`; task 01: 5 tests over a REAL local checkout +
+    REAL `git merge` + REAL `runMemory` ingest/recall on the **`local` backend** — absent-before/recallable-after by specific record id,
+    deterministic-by-construction against the known LLM-extraction flake) + `acd-memory-index-never-on-mesh` (non-vacuous, verified by a LIVE
+    plant on real `control-stream-server.mjs`; frame enumeration COMPLETE — includes story-06 `terminal-frame` + story-07 `write-credential`).
+    Task 02 `@manual` end-to-end mesh soak deferred.
+  - **Review verdicts (build gate):** **architect (structural) — all three GO, MUST-FIX none**; adjudicated story-06's flagged findings and
+    wrote an **ADR-014 AMENDMENT** (RATIFICATION, no decision changed) recording that ADR-014's grounding is STALE — it cited `serveRelay`/`relayMode`
+    (which has NO production call site since the m33 fabric-native redesign moved to `control-stream-server`/`worker-stream-client`) and two modules
+    DELETED at m33 (`mesh-presence-subscriber`/`mesh-presence-cache`, commit `f3a4283`) — and naming what's owed at the task-03 soak (wire `relayMode()`
+    into the control launcher OR pivot the bridge onto `control-stream-server`). Confirmed all 3 new fitness functions sound + non-vacuous and stories
+    03/04/07 invariants intact. **QA (behavioural) — 05 GO-WITH-FIXES, 06 GO-WITH-FIXES, 08 GO**; the F1–F8 producer-fed pattern is ABSENT from the test
+    CONSTRUCTION (every lane drives a real seam), but QA elevated TWO producer-WIRING gaps (see Feedback F-38.05/F-38.06 below). **Designer (design conformance,
+    story-06 UI) — INCONCLUSIVE** (honest: story 06's `@executable` scope shipped the BACKEND route only — `grep terminal-view` in `ui/` = 0 matches, the
+    fleet mounts no terminal component; the on-screen render is the task-03 soak's deliverable) → authored **DESIGN.md §Surface 3** (binding checklist V1–V9 +
+    states table) as the verify render+judge baseline; deferred design-gaps DG-6/7/8 recorded.
+  - **Confirmed build-gate fix applied:** the integrating full suite caught ONE real story-06 regression the architect's regression pass missed —
+    `acd-mesh-ui-single-server.test.mjs`'s m25/ADR-003 sub-assertion blanket-forbade `new WebSocketServer(`, but story 06's `/ws/terminal-view` uses
+    `new WebSocketServer({ noServer:true })` which rides the ONE `http.createServer` via `server.on("upgrade")` and stands up NO second listener. WIDENED-not-weakened
+    (the m27/ADR-006 SUPERSEDED-IN-PLACE precedent story 04 set): permit EXACTLY the one `noServer` read-only terminal-VIEW carve-out, still forbid any port/server-bound
+    WSS or a second listener; verified the widened test still trips on a planted violation. Also applied the architect's one-line doc nit (the F12 `acd-clone-credential-pull-not-pushed`
+    freeze baseline now notes ADR-013's additive `command` key is absent-is-benign, not a regression).
+  - **Integrating full suite `node scripts/test.mjs`: 2883 ok / 9 not-ok; `cargo test` (desktop) green.** After the arch/25 widen fix the residual is **8 not-ok, EVERY one
+    pre-existing or external to stories 05/06/08:** the known `memory-integration` LLM-extraction flake; **five `doctor/00`+`doctor/01` failures that are a NEW date TIME-BOMB**
+    (`test/doctor-coherence-completeness.test.mjs` hardcodes `updated: "2026-06-19"` and pins no `now`, so as of today `2026-07-19` — exactly 30 days — the fixtures cross the
+    stale window and emit an unexpected `stale-updated` finding; the doctor subsystem is untouched by this milestone); the known `global-work-propagation/03` propagation-tick timing
+    flake (confirmed PASSES clean in isolation this session); and `bundle-asset-manifest-complete/00` (`46 !== 42`) from the concurrent `aof:verify 41` session's uncommitted
+    `insert-*.md` bundle assets. None is a story-05/06/08 regression. **Milestone stays `in-progress`: all nine stories built, but 05/06/08 (and 01/03/04/07) remain `in-review`
+    pending their `@manual` soaks + accept at `aof:verify 38`.**
+
+- **⛔→✅ SOAK-BLOCKER F-38.05 CLOSED `2026-07-19` via `aof:continue 38/05` — the producerless sentinel/session_id seam is now PRODUCER-WIRED** (raised at the `aof:verify 38/05` DECLINE the same day; the story stays `in-review`, its `@executable` lanes now producer-honest). Architect-first (rewrote ADR-013 decision-3/4 as an AMENDMENT + rewrote the `acd-worker-driver-no-headless-print` fitness function), then developer built the two missing producers, then architect + QA review (both **GO**):
+  - **session_id** — replaced the phantom `AOF_SESSION_ID:` PTY-marker scan (`extractSessionIdFromOutput`/`SESSION_ID_MARKER`, both RETIRED) with a **transcript-dir watch**: `defaultWatchTranscriptSessionId` reuses `work-observe.mjs`'s `projectSlug`/`claudeProjectsDir`, snapshots `<claudeProjectsDir(worktreeCwd)>/*.jsonl` before spawn and resolves the FIRST NEW `<session_id>.jsonl` basename — deterministic, ZERO model cooperation (Claude Code itself is the producer). Never-throws, abort-aware, bounded by an (injectable) max-wait; degrades to `null` (task-03 Examples unchanged).
+  - **NEEDS_INPUT** — gave the sentinel a real producer home (ADR-013 amendment, **option C**): a worker-scoped `--append-system-prompt NEEDS_INPUT_INSTRUCTION` on the interactive launch (`resolveInteractiveDriverLaunch`). Worker-only BY CONSTRUCTION — the human `/ws/terminal` route calls `resolveProvider` directly and never touches `resolveInteractiveDriverLaunch`, so it can never false-fire on a human session (why not the shared `/aof:*` bundle). Detection (`containsNeedsInputSentinel`, hardened whole-line) UNCHANGED — the amendment adds the missing PRODUCER, not a detector.
+  - **Fitness REWRITTEN** — invariant 4 now pins the transcript-watch producer (was `extractSessionIdFromOutput`); **NEW invariant 6** pins the NEEDS_INPUT producer's existence, so a revert to producerless trips CI. This is the SCOPE FINDING's fix: *a fitness function must pin the PRODUCER's existence, not the consumer's current shape.* Confirmed non-vacuous against the final source (invariants 4 & 6 go RED when the capture/producer is removed).
+  - **Review: architect GO** (fitness non-vacuous, transcript-watch sound, no cross-story regression — story-06 bridge `onOutputChunk(chunk, capturedSessionId)` still fed, story-07 push path intact, invariant-5 retention holds, ADR faithful). **QA GO** (every Examples row producer-fed, the injected watch seam at the real seam, session_id surfaced on the done + needs-input frames asserted, no over-claim of efficacy) + one coverage gap CLOSED at review (a hermetic real-temp-fs test of `defaultWatchTranscriptSessionId` — snapshot-excludes-preexisting / deadline-null / abort-null; NOT `@manual`, the fs is fakeable with no real `claude`). Story-05 focused lanes + fitness: **27 ok / 0 not-ok**, isolated, stable across runs.
+  - **Still deferred to the task-04 `@manual` subscription soak (un-`@executable`, unchanged):** NEEDS_INPUT real EFFICACY (does a live `claude` obey the `--append-system-prompt` and emit the sentinel), and the session_id snapshot-race CAPTURE RATE on a real fast session (a transcript written before the first poll tick would land in the snapshot → null; in-contract null-degrade, worktree is freshly created per-assignment so the dir starts empty). Both are the soak's to measure — the `@executable` build proves DETECTION + producer WIRING, never efficacy.
+
+- **⛔→✅ SOAK-BLOCKER F-38.06 CLOSED `2026-07-19` via `aof:continue 38/06` — the terminal STREAM transport is now PRODUCER-WIRED via a HYBRID; story 06 stays `in-review`, now genuinely soak-ready.** F-38.06 (raised at the `aof:verify 38` pass) was: story 06's `@executable` lanes were green against the in-process `serveRelay()` broker, but NO production call site pushed a `terminal-frame` over any live transport — inert on a real deploy. Closed architect-first, then developer, then a three-lens review (architect/QA/security) that caught THREE further defects green tests never would — the milestone's `green ≠ working` thesis, validated three more times on one story:
+  - **The transport BRIDGE (hybrid — ADR-014 amendment `2026-07-19`).** The architect first pinned option (a) (start the `mesh-relay` broker as a production role, reusing the as-built push/subscribe seams). The orchestration review then found AT SOURCE that `serveRelay` binds **LOOPBACK ONLY** (`mesh-relay.mjs:622` `listen(port,"127.0.0.1")`) — structurally unreachable cross-machine — so (a) could never carry a frame between two machines (the whole SPEC objective). Revised to a HYBRID: the **cross-machine leg (worker→control) rides the FABRIC** (`worker-stream-client.sendTerminalFrame` → `control-stream-server` branches `terminal-frame` BEFORE `applyStreamFrame` into an `onTerminalFrame` sink, never store-persisted); the **same-machine leg (control→the separate `aof mesh ui` process) rides a LOOPBACK `serveRelay` broker** on the known `servicePort` — serveRelay's loopback bind, which DISQUALIFIED it cross-machine, is exactly what QUALIFIES it for the local hop. New anti-inertness fitness `acd-terminal-stream-transport-wired` pins the producer wiring (inv.5 fabric send, inv.6 control-stream branch + known non-ephemeral port + never store-persisted, inv.7 fleet loopback subscribe), RED-until-wired.
+  - **F17 (security — cross-node spoofing, Medium/High-adjacent — FIXED).** The ADR CLAIMED the routing identity is the connection-bound `nodeId` re-stamped control-side, but `mesh-launcher.mjs` pushed the RAW frame → the mirror routed by the worker's SELF-DECLARED `frame.nodeId`. An admitted worker could send `{kind:"terminal-frame", nodeId:"<victim>", …}` up its OWN socket and inject bytes onto ANOTHER node's fleet card. Fixed: `onTerminalFrame: (frame, { nodeId }) => push({ ...frame, nodeId })` re-stamps the connection identity; pinned by a new security fitness `acd-fleet-terminal-frame-connection-identity` (RED-until-fixed) + SECURITY.md T14 block / F8 / residual R9.
+  - **F-38.06b (config footgun — Medium — HARDENED).** `config.mesh.relay.url` was overloaded (its port/path ALSO drive the fabric control-stream endpoint, host substituted per-peer), so an operator setting it to the control node's FABRIC address would silently aim the relay legs at the control-stream server (wrong protocol → clean-degrade to no frames, NO error). Hardened: a shared `loopbackRelayUrl(config)` forces the relay dial's host to `127.0.0.1` (the ONLY correct value — the wrong degree of freedom removed by construction); both transport factories dial it; pinned by a fitness clause (RED-if-reverted).
+  - **QA coverage gaps closed:** the `sendTerminalFrame` best-effort discipline (off the reconnect/`markDropped` path) + the driver `onOutputChunk(chunk, capturedSessionId)` producer link now have behavioural coverage; the stale "not wired" comment in `mesh-worker-execution.mjs` corrected; a `@manual` backpressure/live-tail scenario added to the task-03 soak (deferred `wireTerminalBridge` retirement — scanned by a fitness, non-blocking).
+  - **Final gate:** architect PASS (as-built matches the pinned hybrid; F17 re-stamp + force-loopback confirmed at source); fitness sweep **39/0 GREEN + non-vacuous**, no invariant weakened, no cross-story regression, registration de-duped/clean; ADR-014 amendment + SECURITY.md current. **Story 06 stays `in-review`, now genuinely soak-ready** — the task-03 `@manual` two-machine stream soak (real cross-machine fabric leg + loopback control→UI hop + T14 on-screen-credential inspection + backpressure) is the milestone's deferred human gate, closed at `aof:verify 38`. **Milestone stays `in-progress`.**
+
 ## Notes & decisions in flight
 
 <!-- Surprises, corrections, mid-build discoveries. Decisions that prove durable graduate to ADRs at
@@ -455,9 +526,94 @@ doc: state
   anchors actually require to be INSIDE that function's own body — a refactor that is behaviourally identical can
   still be structurally invisible to a text-scanning detector.**
 
+- **⛔ SOAK-BLOCKER F-38.05 (QA, at build review of story 05) — the `NEEDS_INPUT` / `AOF_SESSION_ID:` PRODUCER is UNWIRED;
+  the milestone's defining green-≠-working risk, at the sentinel seam.** ADR-013 decision-4 says *"the driver PROMPT
+  instructs the agent … to emit an explicit `NEEDS_INPUT` sentinel."* As built, the worker types ONLY `brief.command`
+  into the PTY — no preamble/prompt instructs a real `claude` to emit either marker; the strings exist only as
+  consumer-side scanners. Consequence: in production the `needs-input` outcome (task 02) can never fire and `session_id`
+  (task 03) is always `null`. The `@executable` lanes are green because the TEST emits the marker the real producer is
+  never instructed to emit — the F4 pattern (consumer coded for a payload the producer never sends). NOT fixed this pass
+  DELIBERATELY: RESEARCH §4.3 measured `session_id` only from `claude -p`'s JSON output (interactive-mode capture is
+  UNMEASURED), and the sentinel's real efficacy is exactly what the task-04 `@manual` soak exists to measure — building
+  a speculative producer now risks shipping a wrong mechanism. **Owed at `aof:verify 38` task-04 soak: author the driver
+  prompt preamble (ADR-013 decision-4) + measure how an interactive session surfaces its `session_id`, BEFORE running the
+  soak.** **Lesson: shipping the CONSUMER half of a foreign-producer contract with NO producer at all is the same green-lane
+  inertness this milestone keeps re-learning — budget the producer + its soak, don't defer both silently.**
+  **Addendum (`2026-07-19` continue-review): the consumer half is now LINE-ANCHORED (see story-05 review fast-follow above) —
+  when the producer preamble is authored at the soak it MUST emit the sentinel as `NEEDS_INPUT` alone on its own line, and the
+  id as a newline-terminated `AOF_SESSION_ID:<id>` line, or detection will (correctly) not fire.**
+  **CLOSURE (`2026-07-19` `aof:continue 38/05`) — F-38.05 fixed; this addendum's `AOF_SESSION_ID:` mechanism is SUPERSEDED.** The
+  session_id producer is no longer a PTY marker at all — it is the transcript FILENAME (a **transcript-dir watch**, `defaultWatchTranscriptSessionId`),
+  which needs ZERO model cooperation (Claude Code writes the transcript regardless), so the fragile "the model must print a marker line"
+  premise is gone. NEEDS_INPUT keeps a sentinel, but now has a real producer: a worker-scoped `--append-system-prompt` (its real efficacy is
+  still the task-04 soak's to measure). **The DURABLE lesson (architect, at build — carry to the retro / graduate to an ADR): a fitness
+  function must pin the PRODUCER's EXISTENCE, not the consumer's current SHAPE. `acd-worker-driver-no-headless-print` invariant 4 had
+  required the phantom marker path and invariant 3 asserted an empty argv — so its GREEN was part of why F-38.05 shipped inert AND a barrier
+  to the fix. The rewritten fitness (invariant 4 = transcript-watch producer wired; NEW invariant 6 = the NEEDS_INPUT producer exists) now
+  goes RED if either producer is removed. This is ADR-008's producer-fed rule turned back on the FITNESS FUNCTION itself: the arch-test that
+  guards a foreign-producer seam must assert the producer is present and wired, or its green masks "green ≠ working" at exactly the seam it
+  was written to protect.**
+- **F-38.05c (QA, continue-review of story 05 — NON-BLOCKING, deferred): a command-less directive can HANG the driver.**
+  The handler degrades a blank `directive.command` to `null` by design (`mesh-worker-execution.mjs:1116`) and the driver then
+  types nothing; if the PTY also never exits and never emits the sentinel, `driveInteractiveClaudeSession` never settles — no
+  terminal frame, worktree never cleaned. Hermetically reproducible (`command:null` + a non-exiting fake PTY). NOT fixed this
+  pass: the fix is a watchdog/idle-timeout whose bound + terminal outcome is a design choice entangled with the "genuinely-stuck
+  real session" case the task-04 soak owns. **Owed: either reject a command-less directive upstream, or design a driver
+  idle/exit watchdog — decide at the task-04 soak alongside the producer.**
+- **⛔ SOAK-BLOCKER F-38.06 (QA + architect, at build review of story 06) — the terminal STREAM is unwired in production
+  AND rides a transport production never starts.** `mesh-relay.mjs`'s `serveRelay()`/`relayMode()` have NO production
+  call site (the m33 fabric-native redesign moved the live worker↔control transport to
+  `control-stream-server.mjs`/`worker-stream-client.mjs`); `mesh-launcher` does not wire `onOutputChunk` to any push
+  transport, and `aof mesh ui` (`cli.mjs`) never passes `terminalMirror`/`startTerminalRelaySubscriber` — so the mirror
+  never receives a live frame. The `@executable` lanes are honestly green against the REAL in-process `serveRelay()`
+  broker, but the SPEC objective (watch a worker's live terminal from the control node) is inert on a real two-machine
+  deploy. Architect adjudicated **sound-as-built at the `@executable` scope, owed at the task-03 soak** and wrote the
+  **ADR-014 AMENDMENT** naming the resolution: wire `relayMode()` into the control launcher OR pivot the bridge onto
+  `control-stream-server`/`worker-stream-client`. The dev deliberately did NOT wire a transport to a broker no role starts.
+  **Owed at `aof:verify 38` task-03 soak.**
+- **ADR-014 was authored against a STALE `graphify` grounding (architect, at review — retro-worthy).** Its
+  codebase-graph grounding block cited `serveRelay`/`relayMode` as "a persistent cross-machine mesh transport [that]
+  already exists" (no production call site) and two modules `mesh-presence-subscriber`/`mesh-presence-cache` as "the
+  existing in-memory-cache subscriber" (both DELETED three milestones earlier at m33/`f3a4283`). The grounding was not
+  re-verified against the live tree at authoring time. **Lesson: when an ADR's grounding cites specific modules/seams as
+  "existing," build the graph FRESH and run `graph impact` on those exact names before ratifying — a decision that rides a
+  retired transport ships a feature green in-process but inert on a real deploy (this is the ROOT of F-38.06).**
+- **Broad-blast lesson (story-05 dev, at build): replacing a bounded default with an UNBOUNDED one is a whole-SUITE
+  hazard, not just the story's own tests.** Swapping the worker driver's `claude -p` (bounded one-shot) default for a real
+  interactive `claude` PTY silently changed EVERY pre-existing test that reached the driver without a `spawnRuntime`
+  override from "slow but bounded" to "hangs forever" (real `claude` on PATH). Two pre-existing story-01 tests hung; the
+  dev audited all 19 unoverridden call sites and patched the 2 unsafe ones. **Lesson: when you change a production DEFAULT,
+  audit every caller of that default across the whole suite, not just the story's new tests.** (This also bit two review
+  agents that ran a driver test and STALLED — the review harness must never run a worker-execution test.)
+- **F-QA3 (QA, refine nit — NON-BLOCKING): story-08 task-01's "an off-topic query recalls nothing new" scenario is not a
+  universal recall guarantee.** `rankRecords` (`src/memory/local-retrieval.mjs`) has no relevance floor, so a `lesson`'s
+  type-boost tiebreaker fills the default `--limit 5` window regardless of content match when the corpus has ≤5 records.
+  The dev's handling was FAITHFUL + intent-preserving (a realistic 5-baseline-lesson corpus, deterministic by stable-sort,
+  no `.feature` edit). **Owed at next refine: amend the `.feature`'s `Then`/`Given` to state the corpus precondition, OR
+  raise a separate enhancement to give `recall` a relevance floor.** Same class as the deferred task-00 unsatisfiable-outline
+  nuance — route the same way.
+- **A date-blind fixture is a TIME-BOMB in the baseline (found at this pass's integrating suite — infra, NOT this
+  milestone).** `test/doctor-coherence-completeness.test.mjs` (+ `doctor-freshness-structural`) hardcode
+  `updated: "2026-06-19"` and pin no `now`, so they use the real clock — as of `2026-07-19` (exactly the 30-day stale
+  window) five `doctor/00`+`doctor/01` cases flip to failing on an unexpected `stale-updated` finding. The doctor
+  subsystem is untouched by m38. **Route to the stabilisation chore (alongside `mesh-reclaim-scheduler/06`,
+  `mesh-coordination-launcher/03`≡`global-work-propagation/03`, the `memory-integration` LLM-extraction flake, and the
+  hardcoded `:4182` port): a date-sensitive fixture must pin `now`, never read the wall clock.**
+
+- **⛔ SOAK-BLOCKER F-38.06 (the transport-reachability class — the milestone's `green ≠ working` thesis at a THIRD seam) + the three defects its review surfaced.** Story 06's terminal stream was green against an in-process broker but INERT on a real deploy (no production call site fed a frame). Distilled lessons (carry forward / graduate to ADRs):
+  - **A cross-machine transport ADR must include an explicit BIND-ADDRESS / reachability check at source — the call/dependency graph does NOT surface it.** The architect first chose option (a) grounded in the import graph (which shows coupling), but the KILLING fact — `serveRelay` binds loopback (`listen(port,"127.0.0.1")`) while the fabric transport binds the fabric self-address — is a runtime networking property no import graph reveals. Green fitness + green lanes said "wired"; the feature could not cross machines.
+  - **A producer-wiring fitness can flip GREEN on an inert feature if it pins the WRONG transport (unreachable for that leg).** The first `acd-terminal-stream-transport-wired` pinned "the relay push is wired" and went green on option (a) — unreachable cross-machine. Arming a producer-wiring fitness is NECESSARY but not SUFFICIENT: it must pin the transport actually REACHABLE for the leg, or it green-lights inertness (F-38.05 in a new dress).
+  - **F17 — a STATED control that reads as implemented but whose wiring drops it (the identity re-stamp), with green fitnesses whose "clean" baselines ENCODED the vulnerable form.** The ADR + a green behavioural test both said the routing id is the connection-bound nodeId; production pushed the raw self-declared frame → cross-node spoofing. Lesson: an "identity re-stamp" invariant needs an END-TO-END fitness (the id REACHING the consumer is the connection id, exercised THROUGH the mismatch), never merely "the sink is HANDED it" — an arg the consumer is free to ignore.
+  - **A config field that silently breaks a feature on its most INTUITIVE value is a footgun; remove the wrong degree of freedom by CONSTRUCTION (force-loopback) rather than document it.** `config.mesh.relay.url` was overloaded (control-stream endpoint + relay dial); a fabric-hosted value (the natural choice) silently killed the terminal legs with no error. Fixed by forcing the relay dial to loopback — the only correct value — not by a doc note.
+  - **A structural (source-text-scanning) detector must extract the FUNCTION BODY, not the param-list default braces — else it matches `options = {}` and self-passes vacuously.** The architect's persist-check caught this in its own non-vacuous self-check (the milestone's own defect class attacking the fitness written to prevent it).
+
 ## Verification
 
 <!-- Pointers, not restatements. -->
 - [x] `@executable` suite green — `node scripts/test.mjs` exit 0, 0 not-ok (2495 ok; tasks 00–05 story 00, 00–03 story 01, **00–04 story 02**)
 - [x] Fitness functions green — the 6 story-00 + F1/F2/`acd-worker-checkout-reuses-worktree` story-01 + **F5 `acd-clone-app-key-not-relayed` / F6 `acd-minted-token-scoped-single-repo` / F7 `acd-clone-credential-provider-config-driven` story-02** arch-tests (armed at build, non-vacuous)
 - [ ] `@manual` signed off — story-00 task 06 soak + story-01 task 04 private-clone soak + **story-02 task 05 real-App-mint soak**; closed at `aof:verify 38`
+- [x] `@executable` lanes green (build `2026-07-18`) — stories **03** (00–02), **04** (00–03), **07** (00–02); fitness `acd-cross-org-key-isolation` / `acd-fleet-face-single-mutation-route` / `acd-write-token-scoped-to-push` + rewritten `acd-minted-token-scoped-single-repo`
+- [x] `@executable` lanes green (build `2026-07-19`) — stories **05** (00–03, 42 assn), **06** (00–02, 59 focused), **08** (00–01); fitness `acd-worker-driver-no-headless-print` / `acd-fleet-terminal-mirror-read-only` / `acd-memory-index-never-on-mesh` (all non-vacuous, landing-asserted); `acd-mesh-ui-single-server` WIDENED for the ADR-014 read-only `/ws/terminal-view` carve-out. Integrating suite 2883 ok / 8 not-ok (all pre-existing/external — see Progress `2026-07-19`)
+- [x] F-38.06 build closure (`aof:continue 38/06`, `2026-07-19`) — story **06** terminal-stream transport PRODUCER-WIRED (hybrid: fabric worker→control + loopback control→UI); new fitness `acd-terminal-stream-transport-wired` (inv.5/6/7 + F-38.06b loopback-dial clause) + security fitness `acd-fleet-terminal-frame-connection-identity` (F17); +`sendTerminalFrame`/driver-`onOutputChunk` behavioural coverage. Fitness sweep **39/0**, no cross-story regression, registration clean
+- [ ] `@manual` signed off — story-03 task 03 two-org soak + story-04 task 04 real-UI soak + story-05 task 04 subscription soak (**F-38.05 CLOSED `2026-07-19` via `aof:continue 38/05` — producer built; soak now measures real-`claude` efficacy of the `--append-system-prompt` NEEDS_INPUT + the transcript-watch capture rate**) + story-06 task 03 stream soak (**F-38.06 CLOSED `2026-07-19` via `aof:continue 38/06` — hybrid transport wired (fabric worker→control, loopback control→UI); F17 spoofing + F-38.06b config footgun fixed; fitness sweep 39/0. Soak now measures real cross-machine efficacy + T14 on-screen-credential inspection**) + story-07 task 03 push soak + story-08 task 02 end-to-end mesh soak; all closed at `aof:verify 38`

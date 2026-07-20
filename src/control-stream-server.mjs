@@ -27,6 +27,12 @@ import {
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
 import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
+// milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER F-38.06) —
+// the NEW opaque `terminal-frame` kind the worker sends UP its stream client (the
+// cross-machine leg). This server BRANCHES it BEFORE applyStreamFrame into an injected
+// onTerminalFrame sink and NEVER store-applies it (ADR-014 inv.3: terminal frames are
+// a live view, never persisted). The single source of the kind literal.
+import { TERMINAL_FRAME_KIND } from "./mesh-terminal-relay-bridge.mjs";
 
 // isRevokedLocal(registry, nodeId) — milestone 35 / ADR-002, story 01 task 01
 // (SECURITY T2). A deliberate LOCAL re-implementation of mesh-registry.mjs's
@@ -603,11 +609,22 @@ export function freshnessLabel({ connected, everConnected, lastHeartbeatAt, now,
   return label === "disconnected" ? "stale" : label;
 }
 
-// buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at }) — the down-frame
-// (milestone 35 / ADR-002, story 01 task 00). A pure projection — exactly five keys,
-// no clock read other than the injected `at`.
-export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at }) {
-  return { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
+// buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command }) — the
+// down-frame (milestone 35 / ADR-002, story 01 task 00). A pure projection — the
+// original five keys, no clock read other than the injected `at`.
+//
+// MILESTONE 38 / STORY 05 (ADR-013 invariant 2) — `command` is a NEW, ADDITIVE,
+// OPTIONAL sixth key (included only when a non-empty string is supplied — the SAME
+// conditional-inclusion pattern buildCloneCredentialFrame's own optional `code`
+// already uses, never breaking a consumer that destructures only the original five):
+// the assignment's WHOLE command string (`/aof:refine <ref> --autonomous`,
+// `/aof:continue`, `/aof:verify <ref>`) the worker types into its interactive
+// session's PTY stdin (mesh-worker-execution.mjs). This frame is otherwise
+// byte-identical to its pre-story-05 shape.
+export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command }) {
+  const frame = { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
+  if (typeof command === "string" && command.length > 0) frame.command = command;
+  return frame;
 }
 
 // createDirectiveTargetRegistry() — milestone 35 / ADR-002, story 01 task 00: the
@@ -792,6 +809,18 @@ export async function startControlStreamServer({
   // residual). NEVER the same function reference as mintCloneCredential — that would
   // collapse the two-token model this story exists to keep apart.
   mintWriteCredential = defaultMintWriteCredential,
+  // onTerminalFrame(frame, { nodeId }) — milestone 38 / story 06 (ADR-014 AMENDMENT
+  // 2026-07-19, closing BLOCKER F-38.06): the injected sink for the NEW opaque
+  // `terminal-frame` kind. A worker's live PTY chunk rides UP its stream connection as
+  // this kind (the cross-machine leg — the mesh-relay broker binds loopback only, so a
+  // worker cannot reach it off-host); the message handler branches it BEFORE
+  // applyStreamFrame and hands it here, WITHOUT any store apply (ADR-014 inv.3:
+  // terminal frames are a live view, never persisted). `nodeId` is the CONNECTION-bound
+  // identity (never the worker's self-declared frame.nodeId — the SAME T6 discipline
+  // every apply* function keeps). Default no-op — a caller (mesh-launcher.mjs) supplies
+  // the real fabric->loopback bridge; a pre-existing caller that wires none gets
+  // byte-identical behaviour (a terminal-frame is simply dropped, never store-applied).
+  onTerminalFrame = () => {},
 } = {}) {
   const registry = createStreamRegistry();
   const directiveTargets = createDirectiveTargetRegistry();
@@ -855,6 +884,25 @@ export async function startControlStreamServer({
       }
       if (frame?.kind === "heartbeat") {
         registry.markHeartbeat(nodeId, now());
+        return;
+      }
+      // milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER
+      // F-38.06) — the CROSS-MACHINE terminal leg's control-side receiver. A worker's
+      // live PTY chunk rides UP this SAME fabric connection as a NEW opaque
+      // terminal-frame kind. BRANCH it BEFORE applyStreamFrame and hand it to the
+      // injected onTerminalFrame sink WITHOUT a store apply — terminal frames are a
+      // live VIEW, NEVER persisted (ADR-014 inv.3). The nodeId is the CONNECTION-bound
+      // identity (`nodeId` = meta.nodeId, resolved at admission), NEVER the worker's
+      // self-declared frame.nodeId — the SAME T6 discipline applyAssignmentStatusFrame /
+      // applyCloneCredentialRequestFrame keep (a frame on worker-a's socket is
+      // attributed to worker-a no matter what it self-declares). A sink fault must never
+      // crash the accept loop (the never-crash discipline every branch here keeps).
+      if (frame?.kind === TERMINAL_FRAME_KIND) {
+        try {
+          onTerminalFrame(frame, { nodeId });
+        } catch {
+          // never-crash: a terminal-bridge sink fault is swallowed, the connection lives on.
+        }
         return;
       }
       const receivedAt = now();

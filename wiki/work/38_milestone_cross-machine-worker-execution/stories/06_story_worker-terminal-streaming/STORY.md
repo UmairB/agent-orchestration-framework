@@ -4,10 +4,10 @@ number: 06
 slug: worker-terminal-streaming
 title: "Stream a worker's live terminal into the control node's fleet view"
 parent: 38
-status: in-progress
+status: in-review
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -49,15 +49,15 @@ control node's fleet view, routed by (nodeId, sessionId).
      READ-ONLY MIRROR only this story; read-WRITE is deferred (Phase 2). Tasks 00–02 `@executable` over fake
      relay/PTY/mirror seams; task 03 the real-second-machine `@manual` soak. -->
 
-- [ ] `tasks/00_pty-bytes-ride-relay-signal.feature` — `@executable` — the worker's `/ws/terminal` PTY byte
+- [x] `tasks/00_pty-bytes-ride-relay-signal.feature` — `@executable` — the worker's `/ws/terminal` PTY byte
   stream rides the FROZEN `mesh-relay.mjs` envelope as a new opaque `signal` kind, routed by (nodeId, sessionId)
   (sessionId inside the signal payload); the relay envelope is byte-unchanged (opaque payload — the m26
   leasing / frozen-envelope property). Scenario Outline over the routing-key matrix incl. same-node multiplex.
-- [ ] `tasks/01_fleet-terminal-view-mirror.feature` — `@executable` — the fleet face gains a read-only
+- [x] `tasks/01_fleet-terminal-view-mirror.feature` — `@executable` — the fleet face gains a read-only
   terminal-VIEW route serving an IN-MEMORY EPHEMERAL mirror of the relayed bytes (never a system of record;
   rebuild starts empty); it MULTIPLEXES multiple (nodeId, sessionId) streams and discovers "which session
   belongs to which assignment" via the surfaced `session_id`; an unresolvable frame is dropped.
-- [ ] `tasks/02_mirror-read-only-in-fact.feature` — `@executable` — fitness `acd-fleet-terminal-mirror-read-only`:
+- [x] `tasks/02_mirror-read-only-in-fact.feature` — `@executable` — fitness `acd-fleet-terminal-mirror-read-only`:
   a STRUCTURAL absent-input-path (a planted forwarding path TRIPS the fitness), server→browser-only at runtime,
   and credential MATERIAL never in the stream (the signal is sourced only from `term.onData`). (T14 — the
   on-screen-print residual is T14's accepted residual, routed to the task-03 soak inspection.)

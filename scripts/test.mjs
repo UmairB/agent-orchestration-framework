@@ -132,6 +132,66 @@ import { meshCloneCredentialAppIdentityPerWorkspaceTests } from "../test/mesh-cl
 import { meshCloneCredentialCrossOrgIsolationTests } from "../test/mesh-clone-credential-cross-org-isolation.test.mjs";
 import { meshCloneCredentialAppKeyDefaultDirTests } from "../test/mesh-clone-credential-app-key-default-dir.test.mjs";
 import { archTests as acdCrossOrgKeyIsolationTests } from "../test/arch/acd-cross-org-key-isolation.test.mjs";
+// milestone 38 / story 05 — terminal-driven-worker-execution (ADR-013): `claude -p`
+// replaced by an interactive `claude` PTY session resolved through the EXISTING
+// terminal-providers seam (task 00), the directive's whole command string typed into
+// that ONE session's PTY stdin (task 01), an explicit NEEDS_INPUT sentinel yielding a
+// THIRD `needs-input` outcome that retains its worktree (task 02), and the session's
+// `session_id` captured + surfaced rather than discarded (task 03). Task 04 is the
+// @manual real-interactive-claude-on-subscription soak, deferred to aof:verify 38 —
+// no test file here. Armed: acd-worker-driver-no-headless-print.
+import { meshWorkerDriverInteractivePtyTests } from "../test/mesh-worker-driver-interactive-pty.test.mjs";
+import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
+import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
+import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
+import { archTests as acdWorkerDriverNoHeadlessPrintTests } from "../test/arch/acd-worker-driver-no-headless-print.test.mjs";
+// milestone 38 / story 06 — worker-terminal-streaming (ADR-014; SECURITY T14): the
+// worker's PTY byte stream rides the FROZEN mesh-relay.mjs envelope as a NEW opaque
+// "terminal-frame" kind, routed by (nodeId, sessionId) (task 00); the fleet face
+// gains a read-only GET /ws/terminal-view carve-out over an in-memory ephemeral
+// mirror, multiplexing streams, dropping unresolvable frames (task 01); the
+// acd-fleet-terminal-mirror-read-only fitness arms the read-only-in-fact invariant
+// (task 02). Task 03 is the @manual real-second-machine soak, deferred to
+// aof:verify 38 — no test file here.
+import { meshTerminalRelayBridgeTests } from "../test/mesh-terminal-relay-bridge.test.mjs";
+import { meshFleetTerminalViewMirrorTests } from "../test/mesh-fleet-terminal-view-mirror.test.mjs";
+import { archTests as acdFleetTerminalMirrorReadOnlyTests } from "../test/arch/acd-fleet-terminal-mirror-read-only.test.mjs";
+// milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER F-38.06):
+// the transport is a HYBRID (an option-(a) draft was falsified at source — serveRelay
+// binds LOOPBACK ONLY, so a worker cannot reach it off-host). Each leg on the bind it
+// fits: the CROSS-MACHINE leg (worker -> control) rides the FABRIC (the worker sends a
+// terminal-frame UP its stream client; control-stream-server branches it to an
+// onTerminalFrame sink BEFORE applyStreamFrame — never persisted); the SAME-MACHINE
+// leg (control -> the SEPARATE aof mesh ui process) is a LOOPBACK relay on the KNOWN
+// port named in config.mesh.relay.url. acd-terminal-stream-transport-wired makes that
+// hybrid producer wiring structurally REQUIRED (onOutputChunk -> client.sendTerminalFrame,
+// control's onTerminalFrame + a known-port broker, the fleet's loopback subscriber), so
+// the feature cannot ship inert again. The build lands in src/worker-stream-client.mjs
+// (sendTerminalFrame), src/mesh-launcher.mjs (the worker fabric producer + the control
+// known-port broker + onTerminalFrame bridge), src/control-stream-server.mjs (the
+// terminal-frame branch), and src/cli.mjs (the loopback subscriber).
+// meshTerminalStreamRelayTransportWiredTests is the PRODUCER-FED behavioural companion:
+// a REAL worker-stream-client -> a REAL control-stream-server (fabric leg; onTerminalFrame
+// gets the connection-bound nodeId, the store stays empty) -> a REAL serveRelay loopback
+// broker -> a REAL createTerminalMirror -> a REAL serveMeshUi /ws/terminal-view client
+// observes the exact bytes end-to-end, and an unroutable frame is dropped over the same
+// real chain.
+import { archTests as acdTerminalStreamTransportWiredTests } from "../test/arch/acd-terminal-stream-transport-wired.test.mjs";
+import { meshTerminalStreamRelayTransportWiredTests } from "../test/mesh-terminal-stream-relay-transport-wired.test.mjs";
+// The driver's onOutputChunk producer link (the FIRST link — term.onData ->
+// onOutputChunk(chunk, capturedSessionId), driven from a real scripted PTY, incl. the
+// pre-capture null-session chunk) — the shipped producer path, previously asserted only
+// structurally by acd-terminal-stream-transport-wired.
+import { meshWorkerDriverOutputChunkTests } from "../test/mesh-worker-driver-output-chunk.test.mjs";
+// SECURITY T14 concern #2 / finding F17 (as-built review, story 06 hybrid, 2026-07-19):
+// the terminal-frame's routing nodeId must be RE-STAMPED with the connection-bound
+// identity (meta.nodeId) before the loopback push — never the worker's self-declared
+// frame.nodeId. acd-fleet-terminal-frame-connection-identity pins this (gate (a) is
+// RED-until-fixed: mesh-launcher.mjs:719 pushes the raw frame, so a malicious admitted
+// worker can target another node's fleet card; the developer's one-line re-stamp flips
+// it green) + moves T14 concern #1's credential-source pin onto the LIVE sendTerminalFrame
+// path (the retired wireTerminalBridge is dead), which is already green.
+import { archTests as acdFleetTerminalFrameConnectionIdentityTests } from "../test/arch/acd-fleet-terminal-frame-connection-identity.test.mjs";
 // milestone 38 / story 07 — durable worker pushback (ADR-015): a REAL branch, not
 // detached (task 00), push BEFORE the worktree is force-removed, over a real local
 // bare origin (task 01), the two-token write scope (task 02) + the REQUIRED
@@ -145,6 +205,19 @@ import { meshWorkerPushBeforeRemoveTests } from "../test/mesh-worker-push-before
 import { meshCloneCredentialPushMintScopedTests } from "../test/mesh-clone-credential-push-mint-scoped.test.mjs";
 import { meshWorkerWriteCredentialPullTests } from "../test/mesh-worker-write-credential-pull.test.mjs";
 import { archTests as acdWriteTokenScopedToPushTests } from "../test/arch/acd-write-token-scoped-to-push.test.mjs";
+// milestone 38 / story 08 — worker-verified-memory-syncback (ADR-016): durable
+// knowledge rides GIT on story-07's merge (no wire protocol) — task 00 pins the
+// OBSERVABLE frame-vocabulary contract (no builder carries an index slot) + the
+// git-observable index facts (committed markdown, gitignored/derived graphify-out/);
+// task 01 drives a REAL local git merge + the REAL `local` backend ingest/recall so a
+// worker-authored RETROSPECTIVE/ADR becomes recallable on the control node
+// (absent-before / recallable-after, immune to the graphify-extraction LLM
+// non-determinism by construction — no graphify binary is ever invoked). Task 02 is
+// the @manual real-mesh worker-verified-recall soak, deferred to aof:verify 38 — no
+// test file here. Armed: acd-memory-index-never-on-mesh.
+import { meshMemorySyncbackGitNotMeshTests } from "../test/mesh-memory-syncback-git-not-mesh.test.mjs";
+import { meshMemorySyncbackControlReingestTests } from "../test/mesh-memory-syncback-control-reingest.test.mjs";
+import { archTests as acdMemoryIndexNeverOnMeshTests } from "../test/arch/acd-memory-index-never-on-mesh.test.mjs";
 // milestone 38 / story 04 — ui-driven-assignment (ADR-012; SECURITY T13): the
 // read-only fleet face's FIRST live write route, POST /api/mesh/assign, wrapping
 // the existing assignWork verb VERBATIM. Task 00 the route + real-store mint
@@ -1703,6 +1776,22 @@ export const tests = [
   ...meshCloneCredentialCrossOrgIsolationTests,
   ...meshCloneCredentialAppKeyDefaultDirTests,
   ...acdCrossOrgKeyIsolationTests,
+  // milestone 38 / story 05 — terminal-driven-worker-execution (ADR-013, tasks 00-03
+  // traceability modules + the acd-worker-driver-no-headless-print fitness function)
+  ...meshWorkerDriverInteractivePtyTests,
+  ...meshWorkerDriverDirectiveCommandTests,
+  ...meshWorkerDriverNeedsInputTests,
+  ...meshWorkerDriverSessionIdTests,
+  ...acdWorkerDriverNoHeadlessPrintTests,
+  // milestone 38 / story 06 — worker-terminal-streaming (ADR-014, tasks 00-02
+  // traceability modules + the acd-fleet-terminal-mirror-read-only fitness function)
+  ...meshTerminalRelayBridgeTests,
+  ...meshFleetTerminalViewMirrorTests,
+  ...acdFleetTerminalMirrorReadOnlyTests,
+  ...acdTerminalStreamTransportWiredTests,
+  ...meshTerminalStreamRelayTransportWiredTests,
+  ...meshWorkerDriverOutputChunkTests,
+  ...acdFleetTerminalFrameConnectionIdentityTests,
   // milestone 38 / story 07 — durable worker pushback (ADR-015, tasks 00-02
   // traceability modules + the write-credential wire + acd-write-token-scoped-to-push)
   ...meshWorktreeBranchNotDetachedTests,
@@ -1710,6 +1799,11 @@ export const tests = [
   ...meshCloneCredentialPushMintScopedTests,
   ...meshWorkerWriteCredentialPullTests,
   ...acdWriteTokenScopedToPushTests,
+  // milestone 38 / story 08 — worker-verified-memory-syncback (ADR-016, tasks 00-01
+  // traceability modules + acd-memory-index-never-on-mesh)
+  ...meshMemorySyncbackGitNotMeshTests,
+  ...meshMemorySyncbackControlReingestTests,
+  ...acdMemoryIndexNeverOnMeshTests,
   // milestone 38 / story 04 — ui-driven-assignment (ADR-012; SECURITY T13): the
   // fleet face's ONE mutation carve-out, POST /api/mesh/assign
   ...meshUiAssignRouteTests,

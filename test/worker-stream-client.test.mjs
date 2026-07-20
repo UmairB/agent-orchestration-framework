@@ -65,6 +65,30 @@ function manualTicker() {
   };
 }
 
+// throwingTerminalTransport() — milestone 38 / story 06 (ADR-014 AMENDMENT): a
+// transport whose send() throws ONLY when armed (so an initial snapshot can succeed to
+// establish a LIVE connection, then a subsequent terminal-frame send can be scripted to
+// throw). Records `closeCalls` so a test can prove markDropped() (which closes the
+// handle) was NEVER entered by a swallowed terminal-frame send fault.
+function throwingTerminalTransport() {
+  const frames = [];
+  let connectCalls = 0;
+  let closeCalls = 0;
+  let throwNext = false;
+  return {
+    frames,
+    get connectCalls() { return connectCalls; },
+    get closeCalls() { return closeCalls; },
+    armThrow() { throwNext = true; },
+    async connect() { connectCalls += 1; return { id: connectCalls }; },
+    async send(_handle, frame) {
+      if (throwNext) { throwNext = false; throw new Error("terminal send failed on a live-but-flaky socket"); }
+      frames.push(frame);
+    },
+    close() { closeCalls += 1; },
+  };
+}
+
 const NOW = "2026-07-05T10:00:00.000Z";
 
 export const workerStreamClientTests = [
@@ -198,6 +222,71 @@ export const workerStreamClientTests = [
       assert.equal(localWriteResult.ok, true, "the local run record is written and the command reports success");
       assert.equal(warnings.length, 1, "the stream fault surfaces only as a warning");
       assert.equal(warnings[0].code, "worker-stream-send-failed");
+    },
+  },
+
+  // milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19) — sendTerminalFrame's
+  // load-bearing "off the reconnect path" discipline (worker-stream-client.mjs): a
+  // live PTY emits many frames/second and a terminal frame is a pure best-effort live
+  // VIEW (no durable floor), so it must NEVER touch the sendFrame/markDropped
+  // reconnect/drop bookkeeping. A future refactor routing it through sendFrame would
+  // keep every OTHER lane green while destabilising the worker's actual reconnect
+  // state (the milestone's green-not-working class) — these two lanes make that
+  // behavioural, not merely structural.
+  {
+    name: "worker-stream-client/38-06 sendTerminalFrame while DISCONNECTED returns {sent:false} without warning, without attempting to connect, and touches NO reconnect/snapshot bookkeeping",
+    async run() {
+      const transport = fakeTransport();
+      const warnings = [];
+      const client = createWorkerStreamClient({ transport, nodeId: "worker-a", workspaceId: "ws-1", now: () => NOW, onWarning: (w) => warnings.push(w) });
+
+      // A fresh client is disconnected (connected=false, handle=null, needsSnapshot=true).
+      assert.equal(client.connected, false);
+      assert.equal(client.needsSnapshot, true);
+
+      const result = await client.sendTerminalFrame("sess-1", "bytes emitted before the socket is up\n");
+
+      assert.equal(result.sent, false, "a terminal-frame emitted while disconnected returns {sent:false}");
+      assert.equal(warnings.length, 0, "no warning — sendTerminalFrame is OFF the sendFrame/onWarning path");
+      assert.equal(transport.connectCalls, 0, "sendTerminalFrame does NOT ensureConnected — a disconnected terminal frame is simply dropped (the live tail has no replay)");
+      assert.equal(transport.frames.length, 0, "nothing was sent");
+      // Bookkeeping is untouched — no drop path, no snapshot re-arm.
+      assert.equal(client.connected, false, "connected is unchanged");
+      assert.equal(client.needsSnapshot, true, "needsSnapshot is unchanged — no reconnect/snapshot bookkeeping was touched");
+      assert.equal(client.consecutiveDrops, 0, "no drop was recorded");
+    },
+  },
+  {
+    name: "worker-stream-client/38-06 a throwing terminal-frame send is swallowed to {sent:false} and NEVER enters markDropped — the live connection stays up and the next work-state send is still a DELTA (needsSnapshot not reset)",
+    async run() {
+      const transport = throwingTerminalTransport();
+      const warnings = [];
+      const client = createWorkerStreamClient({ transport, nodeId: "worker-a", workspaceId: "ws-1", now: () => NOW, onWarning: (w) => warnings.push(w) });
+
+      // Establish a LIVE connection with an initial snapshot (needsSnapshot -> false).
+      await client.sendSnapshot([{ ref: "38/06/00", status: "in-progress" }]);
+      assert.equal(client.connected, true, "the session is live after the initial snapshot");
+      assert.equal(transport.connectCalls, 1);
+
+      // The next (terminal) send throws — it must be swallowed WITHOUT entering the drop path.
+      transport.armThrow();
+      const result = await client.sendTerminalFrame("sess-1", "bytes over a live-but-flaky socket\n");
+      assert.equal(result.sent, false, "a throwing terminal send is swallowed to {sent:false}");
+      assert.equal(warnings.length, 0, "a terminal-frame send fault NEVER warns (off the sendFrame/markDropped path)");
+
+      // markDropped was NOT taken: it would have closed the handle, set connected=false,
+      // and re-armed needsSnapshot.
+      assert.equal(client.connected, true, "the session stays connected — markDropped was NOT taken");
+      assert.equal(transport.closeCalls, 0, "the handle was NOT closed — markDropped was NOT taken");
+      assert.equal(client.consecutiveDrops, 0, "no drop was recorded by the terminal send fault");
+
+      // The strongest proof: the next work-state send goes over the SAME connection as a
+      // DELTA — needsSnapshot was NEVER reset to true (markDropped would have forced the
+      // next frame to be a snapshot). So the drop path was never entered.
+      const next = await client.sendDelta([{ ref: "38/06/00", status: "done" }]);
+      assert.equal(next.sent, true, "the next work-state send succeeds over the still-live connection");
+      assert.equal(transport.connectCalls, 1, "no reconnect — the same live connection was reused");
+      assert.equal(transport.frames.at(-1).kind, "delta", "the next frame is a DELTA (needsSnapshot was not reset) — the terminal send fault never entered the drop path");
     },
   },
 ];

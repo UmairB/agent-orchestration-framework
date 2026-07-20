@@ -47,6 +47,10 @@ surfaces**.
   > mutation affordance, the assign-to-node control on the work-item card (ADR-012). It does **not**
   > overturn the read-only posture; the surface stays a monitor and the carve-out reads as a quiet,
   > subordinate control. See **§Surface 2**.
+  > **Story 06 (2026-07-19) carves out a SECOND exception — a READ one, not a mutation** — the read-only
+  > terminal-VIEW that mirrors a worker's live PTY onto the fleet face (ADR-014). The fleet face previously
+  > served NO terminal upgrade; it now serves a server→browser mirror. It adds NO write path: read-only IN
+  > FACT and IN LOOK. See **§Surface 3**.
 - **Reuse the existing ramps / tokens — invent no fleet-local vocabulary.** The `working` state reads
   in the **run-state ramp's** two tokens it already touches: **active work = `primary`** (the same
   emphasis `running N runs` carries), **no work = `muted`** (the same `idle` reads). It does **not**
@@ -126,6 +130,17 @@ The corrected rules are **S1 / S6 / S7 / S9 / S11** below.
 > **§Surface 2**, and **§Surface 2 BECOMES the conformance baseline `aof:verify` judges the assign
 > affordance against.** No mock is owed (binding-checklist-only, as for §Surface 1). Absent a handed
 > render, the assign affordance's verdict is **INCONCLUSIVE** — see §Surface 2 Review status.
+
+> **Story 06 addendum — 2026-07-19.** Story 06 opens carve-out #2 on the read-only fleet face — a
+> **READ-ONLY terminal-VIEW** that mirrors a worker's live PTY (ADR-014). It is a DIFFERENT surface from
+> §Surface 1 (node card) and §Surface 2 (work-item card): a NEW live-stream view. Its binding checklist is
+> authored below as **§Surface 3**, and **§Surface 3 BECOMES the conformance baseline `aof:verify` judges
+> the terminal-view against.** No mock is owed (binding-checklist-only). **NO browser surface was built this
+> pass** — story 06's three `@executable` tasks (00–02) delivered the BACKEND only (relay bridge
+> `src/mesh-terminal-relay-bridge.mjs`, in-memory mirror `src/mesh-terminal-mirror.mjs`, the read-only
+> `/ws/terminal-view` route on `src/mesh-ui-serve.mjs`); the on-screen terminal-view is deferred to the
+> `@manual` soak (task 03). Absent a built component AND a handed render, the terminal-view's verdict is
+> **INCONCLUSIVE** — see §Surface 3 Review status.
 
 ---
 
@@ -244,7 +259,7 @@ current-work region**:
 | **running** | `running N run(s)` | `primary` | ≥1 running task-run. Correctly pluralised (`running 1 run`). **Unchanged baseline.** |
 | **working-session** | `working · <repo> (session)` | `primary` | ≥1 live session, no run in that workspace. **NEW.** |
 | **two-repos** | `working · repoA, repoB (session)` | `primary` | live sessions in ≥2 workspaces without runs. One `working ·` prefix, comma-joined, **alphabetical**, `(session)` **once**. **NEW.** |
-| **run + cross-workspace session** | TWO lines: `running N run(s)` **over** `working · <repo> (session)` | both `primary` | a run in workspace A **and** a live session in workspace B. A's own session is subsumed; B's renders. The run line reads **first**. **NEW — §Correction 2.** |
+| **run + cross-workspace session** | TWO lines: `running N run(s)` **over** `working · <repo> (session)` | both `primary` | a run in workspace A **and** a live session in workspace B. A's own session is subsumed; B's renders. The run line reads **first**. **NEW.** |
 | **stale-expired** | `idle` | `muted` | a session past its TTL. Dropped by the aggregate before the surface sees it — **never a stuck `working`**, no ghost, **even while the dead session record is still on disk.** |
 
 Notes binding the review:
@@ -372,6 +387,132 @@ below; it is **not** a fidelity verdict.)
 
 ---
 
+## Surface 3 — the fleet terminal-VIEW mirror (NEW — story 06, 2026-07-19)
+
+**This is the milestone's SECOND fleet-face carve-out — a READ one, not a mutation — and the conformance
+baseline for story 06's on-screen render.** Authored 2026-07-19; it did not exist before this pass.
+`aof:verify 38` judges the terminal-view **region-by-region against V1–V9 and the terminal-view States
+table** below. **There is no mock** (binding-checklist-only, as §Surface 1/§Surface 2).
+
+**NO browser surface was built this pass.** Story 06's three `@executable` tasks (00–02) delivered the
+BACKEND only: a relay bridge (`src/mesh-terminal-relay-bridge.mjs`), an in-memory mirror
+(`src/mesh-terminal-mirror.mjs`), and a READ-ONLY `/ws/terminal-view?nodeId=&sessionId=` route on the fleet
+face (`src/mesh-ui-serve.mjs`). **Confirmed at source:** grep `terminal-view` across `ui/` = **0 matches**;
+`ui/src/fleet/Fleet.tsx` has **no** terminal reference; the existing `ui/src/board/TerminalDock.tsx`
+connects to the pre-existing **board-side `/ws/terminal`** (story 05's LOCAL interactive PTY — a different
+route, a different surface). There is **no `ui/` terminal-view component**. The on-screen rendering is part
+of the deferred `@manual` soak (task 03). Absent a built component AND a handed render, the verdict is
+**INCONCLUSIVE** (see Review status).
+
+**Governs:** the fleet view at `?mode=fleet` — the **read-only terminal-VIEW** that mirrors a worker's live
+PTY byte stream, fed by the `/ws/terminal-view` route (`src/mesh-ui-serve.mjs`) over the in-memory ephemeral
+mirror (`src/mesh-terminal-mirror.mjs`). **This is NOT §Surface 1's node card and NOT §Surface 2's work-item
+card** — it is a NEW live-stream view, discovered by resolving an assignment's (nodeId, sessionId) via the
+ADR-013 `session_id` (opening an assignment's card resolves its stream and subscribes).
+
+**The binding rail this carves out (a READ carve-out, NOT a mutation):** m25 / §Surface-1 pinned a read-only
+rail; §Surface 2 (story 04) carved out ONE mutation (assign). Story 06 carves out a NEW READ surface — the
+fleet face, which previously served NO `/ws/terminal` and destroyed every upgrade (ADR-006), now serves a
+server→browser terminal-VIEW. **This does NOT add a second mutation.** The terminal-view is read-only IN
+FACT (ADR-014 invariant 1 / SECURITY T14): server→browser only, no mesh→PTY input path. Read-WRITE control
+(keystrokes from the fleet) is a Phase-2 concern, structurally absent. **The design consequence: the view
+must READ as view-only** — no input box, no send control, no type-into cursor — so the operator is never
+misled into believing a keystroke reaches the worker.
+
+### The terminal-view's anatomy — regions, in order (what a reviewer ticks against)
+
+1. **Stream-identity header** — WHICH stream this is: the `nodeId` + the resolved assignment/session (the ADR-013 `session_id`, surfaced as the human assignment/ref it belongs to where possible, not a raw id alone). The operator must never be in doubt whose terminal they are watching. Judged against **V1**.
+2. **READ-ONLY posture indicator** — an explicit, quiet `read-only` / `view only` marker so the view-only posture is legible by LABEL, not merely by the absence of an input box. Judged against **V2/V6**.
+3. **The live terminal byte stream** — the worker's `/ws/terminal` PTY output rendered as terminal text, in the SAME terminal rendering idiom the board-side `TerminalDock` already uses (mono, xterm-style) — no fleet-local terminal chrome. Live-tail-forward from subscribe; the mirror is ephemeral, so there is no disk scrollback. Judged against **V3/V4/V7**.
+4. **NO input region** — there is NO text input, NO send button, NO keystroke-capturing cursor affordance. The row a read-write terminal would spend on an input box is **absent, not disabled** (a greyed input would falsely promise "coming soon" and invite the mis-read that you could type). Judged against **V2/V5**.
+
+### The binding rules (V1–V9)
+
+| # | Binding rule | |
+| --- | --- | --- |
+| **V1** | **The view always names its stream.** The header identifies the (nodeId, sessionId) being mirrored, resolved to the human assignment/ref where possible (ADR-013 `session_id`). A terminal with no visible owner is forbidden — the operator must know whose output this is at a glance. | ADR-013 |
+| **V2** | **Read-only IN FACT and IN LOOK — no input affordance exists.** No text input, no send/submit control, no type-into cursor. The absence is structural (mirrors ADR-014 invariant 1: no mesh→PTY input path) and must be VISIBLE as read-only — the surface reads as a monitor, never as an attachable shell. | **load-bearing** · T14 |
+| **V3** | **Reuse the existing terminal rendering — invent no fleet-local terminal vocabulary.** The bytes render in the board `TerminalDock`'s terminal idiom (mono, xterm-style), not a new fleet-specific terminal chrome, colour, or frame. | mirrors S5 |
+| **V4** | **Live-tail-forward off an EPHEMERAL mirror — no fabricated backlog.** The mirror is in-memory and never a system of record (ADR-014); the view shows the live tail from the moment it subscribes. It must NOT fabricate scrollback, replay from disk, or imply durable history — kill the mirror and the view is empty, not wrong. | ADR-014 |
+| **V5** | **A keystroke does NOT reach the worker — proven, not asserted.** The read-only-in-fact expectation: typing while the view is focused produces NO terminal-input frame toward the worker PTY. This is the load-bearing invariant the `@manual` soak proves LIVE (task 03) — the view may not even accept focus-to-type; if it does, the keystroke is inert. | T14 · ADR-014 inv.1 |
+| **V6** | **Colour AND label travel together (read-only posture).** The read-only state is signalled by an explicit label (V2's marker), never by colour/icon alone — the same m25 rail §Surface 1 S4 pins. | m25 rail |
+| **V7** | **Empty / rebuild-starts-empty is an HONEST state, not a spinner-forever nor an error.** Before any byte arrives — a fresh subscribe, or the mirror rebuilt empty — the view shows an honest waiting/empty state (e.g. `waiting for output` / `no live output yet`), NOT an infinite spinner, NOT a fabricated line, NOT a red error. An empty mirror is the NORMAL cold-start, not a failure. | |
+| **V8** | **Multiplex is keyed by (nodeId, sessionId); streams NEVER cross-wire.** Multiple workers/sessions are multiplexed by (nodeId, sessionId) — the view for one stream renders ONLY that stream's bytes; a frame with no resolvable (nodeId, sessionId) is dropped, never bled into an unrelated view (ADR-014 invariant 4). Opening a second assignment's terminal shows a SEPARATE stream, correctly labelled (V1). | ADR-014 inv.4 |
+| **V9** | **Stream-ended is legible — no frozen pretend-live.** When the session ends or the stream drops, the view says so (e.g. `stream ended` / `disconnected`) rather than freezing on the last frame as if still live. A dead stream must not masquerade as a live one — the same anti-ghost discipline §Surface 1 S8 pins for expired sessions. | mirrors S8 |
+
+RATIONALE for **V2/V5** (the rules the review exists to enforce): a worker terminal that LOOKS interactive
+but silently swallows keystrokes is a worse lie than no terminal — the operator would believe they answered
+a `needs-input` prompt when nothing reached the worker. Read-write is Phase-2; until then the honest surface
+is a MONITOR that visibly cannot type, and the "does a keystroke reach the worker" question is un-fakeable,
+so it is the soak's central assertion (task 03).
+
+RATIONALE for **V3/V4**: the fleet already borrows the board's terminal rendering; a second terminal
+vocabulary would be the fourth-ramp mistake §Surface 1 S5 exists to prevent. And the mirror is DERIVED
+liveness, not data (ADR-014) — presenting it as durable scrollback would tell the operator the fleet
+remembers what it explicitly does not.
+
+RATIONALE for **V7/V9**: the mirror's ephemerality means empty-on-cold-start and empty-on-rebuild are the
+DESIGNED normal, not errors; and a stream that ended must read as ended, mirroring the milestone's core
+anti-lie discipline (never show a liveness the source no longer asserts, §Surface 1 S8).
+
+### States (the terminal-view's own state axis — the story-06 state set)
+
+| State | View reads | When |
+| --- | --- | --- |
+| **empty / cold-start** | honest `waiting for output` / `no live output yet`; read-only marker present | subscribed, no byte received yet; OR the mirror was rebuilt (starts empty) |
+| **streaming (live)** | the live PTY tail, terminal idiom; read-only marker present | frames flowing for this (nodeId, sessionId) |
+| **multiplexed** | each open stream is its OWN correctly-labelled view; no cross-wiring | ≥2 (nodeId, sessionId) streams open |
+| **ended / disconnected** | `stream ended` / `disconnected` — not a frozen pretend-live frame | session ended or the stream dropped |
+| **unresolvable** | the view is not shown / the frame is dropped — never bled into another card | a frame with no resolvable (nodeId, sessionId) (ADR-014 inv.4) |
+
+### Design ramp for the terminal-view
+
+- **Terminal bytes = the board `TerminalDock` rendering idiom** (mono, xterm-style) — reused, not reinvented (V3).
+- **Read-only posture = an explicit quiet marker + the ABSENCE of any input affordance** — legible by label, not colour alone (V2/V6).
+- **Empty / ended = honest text states**, never a spinner-forever or a red error for the NORMAL cold-start/ended cases (V7/V9). A genuine transport failure is the existing fleet read-failure token (`destructive`), reused — no terminal-local error primitive.
+- **No new fleet-local terminal chrome, colour, badge, or "streaming" accent.** The review flags any
+  terminal-view-specific primitive as a gap (mirrors S5/A9).
+
+### RATIONALE
+
+- **Why a read-only MONITOR that visibly cannot type (not a disabled interactive shell):** read-write is
+  Phase-2 (ADR-014). A terminal that looks attachable but is inert teaches the operator to distrust the
+  surface — worse than showing nothing. The honest move is a view that IS a monitor and SAYS so.
+- **Why reuse the board terminal idiom (V3):** the fleet already renders a terminal (board-side); a second
+  terminal look would be a fourth vocabulary. One terminal idiom, spoken on two surfaces.
+- **Why empty is normal, not an error (V7):** the mirror is ephemeral and never a system of record — a
+  cold or rebuilt mirror is EXPECTED to be empty; painting that as a failure would lie about the design.
+
+### Review status — Surface 3 (2026-07-19) — **INCONCLUSIVE**
+
+**INCONCLUSIVE — no browser surface was built this pass, no mock pre-existed, and no render was handed.**
+Story 06's three `@executable` tasks delivered the BACKEND only (relay bridge, in-memory mirror, read-only
+`/ws/terminal-view` route); **there is no `ui/` terminal-view component to render** (confirmed at source,
+above). This checklist IS the baseline, authored today — there is nothing on screen to judge a screenshot
+against yet, and none was handed. Per the ACD design-conformance contract the honest verdict is
+**INCONCLUSIVE**, and the remedy is to **build the on-screen terminal-view and render it**, then judge
+region-by-region against **V1–V9 + the States table** — NOT to infer CONFORMS/GAPS from the backend
+relay/mirror/route code. (Reading the source CONFIRMED no UI exists and INFORMED this checklist + the DG
+findings below; it is **not** a fidelity verdict — the honest shortcut this milestone's ADR-008 / §Correction
+1 discipline forbids is inferring a fidelity verdict from component code.)
+
+**What's owed at `aof:verify` (the deferred `@manual` soak — task 03):**
+- The **on-screen terminal-view component** (the deferred `ui/` work) built against the `/ws/terminal-view`
+  route, then a **render** of it in each state: (a) **empty / rebuild-starts-empty** (V7), (b) **streaming
+  live** (V3/V4), (c) **multiplexed** across two workers (V8), (d) **stream-ended** (V9) — screenshotted via
+  **headless Chromium** (the cached `ms-playwright` build driven directly; `npx playwright` is policy-blocked
+  — see work memory "design render via headless Chromium"). **The orchestration renders and hands the
+  screenshots; the designer judges.** Running the browser is QA/orchestration's job, NOT the designer's.
+- The **`@manual` outsider soak** (task 03) is the un-fakeable human gate ADR-008 requires: a REAL worker's
+  live terminal appears in the REAL control-node fleet view within the heartbeat window, routed to the
+  correct node/session; **a keystroke typed into the fleet view does NOT reach the worker** (V5 / read-only
+  confirmed LIVE); live multiplex across two workers (V8); no on-screen secret (T14). Closed at
+  `aof:verify 38`.
+- Carried from §Surface 1/2's NOT-ASSESSED note: **judge at 1280** as the practical breakpoint until a
+  narrow-viewport strategy exists.
+
+---
+
 ## Design-conformance review — status (2026-07-12, second pass)
 
 Judged from **three live, producer-fed 1280px renders** of **Surface 1a** (`GlobalNodePanel`,
@@ -489,6 +630,49 @@ run record, real presence daemon, real `/api/mesh/status`. **No fixtures.** Fram
 - **Action:** developer adds the liveness annotation to the option label, sourced from the same `freshness`
   fact `nodePanelFacts` already carries; small; does not block the visual verdict. **Deferred.**
 
+### DG-6 — the terminal-view has NO built UI and NO render; the whole on-screen surface is deferred (NEW, m38 / story-06)
+
+- **Observed (confirmed at source):** story 06 delivered the BACKEND only — relay bridge, in-memory mirror,
+  read-only `/ws/terminal-view` route. There is **no `ui/` terminal-view component** (grep `terminal-view`
+  in `ui/` = 0 matches; `Fleet.tsx` has no terminal reference). §Surface 3 is therefore authored from
+  ADR-014 intent, **un-rendered** — a baseline with nothing on screen to judge against yet.
+- **Why it matters:** an INCONCLUSIVE with no render is the honest verdict, but it must be CLOSED — skipping
+  the render+judge leaves the read-only-in-fact (V2/V5), empty/rebuild-starts-empty (V7), multiplex (V8) and
+  stream-ended (V9) claims **unwitnessed**, exactly the "confident CONFORMS on an unseen surface" trap
+  §Correction 1 exists to prevent.
+- **The correct answer (developer builds; designer judges):** build the on-screen terminal-view component,
+  render it in the V7 / streaming / multiplex / ended states, and judge region-by-region against **V1–V9**.
+- **Resolution:** closed at `aof:verify 38` via the task-03 `@manual` soak + a render pass handed to the
+  designer. **Deferred — the render is the missing input.**
+
+### DG-7 — read-only legibility: absence-of-input is not self-evidently "read-only" (NEW, m38 / story-06, load-bearing-adjacent)
+
+- **Observed (structural, from ADR-014 + §Surface 3 intent — NOT a render verdict):** a terminal that
+  renders live output but silently ignores keystrokes can be mistaken for a BROKEN interactive shell. V2
+  pins that the read-only posture must be legible by an explicit marker, but the exact treatment (a `read-only`
+  badge vs. a banner vs. a non-typeable cursor state vs. the view simply not accepting focus) is the open
+  half of the rule.
+- **Why it matters:** the worse-than-no-terminal lie — the operator believes they answered a `needs-input`
+  prompt when nothing reached the worker (the whole reason V5 is the soak's central un-fakeable assertion).
+- **The correct answer (designer owns it):** an explicit read-only affordance; **pick the treatment at the
+  render, against V2.**
+- **Resolution:** a DESIGN.md rule picking the treatment **plus a `@uat` scenario** (a person tries to type,
+  confirms the view says read-only, and confirms nothing reaches the worker). **Deferred.**
+
+### DG-8 — the multiplex disclosure model is unpinned: how the fleet shows MORE than one worker terminal at once (NEW, m38 / story-06)
+
+- **Observed (structural):** ADR-014 routes by (nodeId, sessionId) and pins "opening an assignment card
+  resolves its stream", and V8 pins the no-cross-wire invariant — but the DISCLOSURE model for N
+  simultaneous streams (one-at-a-time per card vs. tabbed vs. a herdr-style multi-pane wall — RESEARCH
+  §4.3/§4.5) is a design decision the backend does not settle.
+- **Why it matters:** herdr's whole value is watching several workers at once; a one-at-a-time model may be
+  honest but under-delivers the operator's stated end-state (STORY §Background).
+- **The correct answer (designer owns it):** **pick the multiplex disclosure model** — per-card single
+  stream for this story (with the multi-pane wall noted as future work), OR a wall now — and **state it, not
+  leave it implicit.**
+- **Resolution:** a DESIGN.md rule + a `@uat` scenario (a person opens two workers' terminals and judges the
+  presentation). **Deferred.**
+
 ---
 
 ## Documented defaults (decided here, not blocking)
@@ -508,8 +692,9 @@ run record, real presence daemon, real `/api/mesh/status`. **No fixtures.** Fram
 5. **All un-subsumed repos show on one comma-joined session line**, one `working ·` prefix, one trailing
    `(session)`, **alphabetical**; trailing truncation on a narrow card is acceptable.
 6. **No new mock; the binding checklist is the conformance source of truth, judged against the CURRENT
-   render of the surfaces production actually mounts** — §Surface 1a (web) and §Surface 1b (desktop), and
-   now §Surface 2 (the story-04 assign affordance on the work-item card).
+   render of the surfaces production actually mounts** — §Surface 1a (web) and §Surface 1b (desktop),
+   §Surface 2 (the story-04 assign affordance on the work-item card), and §Surface 3 (the story-06 read-only
+   terminal-view).
    ~~"…judged against the current NodeCard render."~~ — **WRONG, corrected 2026-07-12; §Correction 1.**
 7. **`NodeCard` is NOT a conformance surface.** Unreachable in every scope (§Correction 1); never again a
    baseline, never evidence that the surface is correct.
@@ -529,6 +714,12 @@ run record, real presence daemon, real `/api/mesh/status`. **No fixtures.** Fram
     read-only rail is not overturned by story 04 — it is carved out by exactly one affordance, which reads
     subordinate at rest (muted picker, low-emphasis primary action) and reuses the m35 assignment ramp for
     its result. No new colour/chip/toast for "assignable" or "just assigned." **(§Surface 2, A2/A8/A9.)**
+13. **The fleet terminal-VIEW is a READ carve-out, not a mutation — read-only IN FACT and IN LOOK.** The
+    fleet face gains a server→browser terminal-VIEW (story 06 / ADR-014) but adds NO write path: NO input
+    box, NO send control, NO type-into cursor (the input region is **absent, not disabled**). Read-write
+    terminal control is Phase-2, out of scope. The bytes reuse the board terminal idiom (no fleet-local
+    terminal vocabulary); the mirror is ephemeral, so empty-on-cold-start / rebuild-starts-empty is the
+    NORMAL state, not an error, and a stream that ends reads as ended. **(§Surface 3, V2/V4/V5/V7/V9.)**
 
 ---
 
@@ -553,6 +744,13 @@ here. This design fixes the look/feel; the features fix what happens.
   `@executable` over the real route/verb; the VISUAL fidelity is §Surface 2, judged at `aof:verify`.
 - **The picker annotates target liveness** (DG-5 / the open half of A6) — a small task-feature outcome on
   the option label.
+- **The worker's live PTY streams cross-machine into the fleet terminal-view, routed by (nodeId, sessionId),
+  and a fleet-side keystroke does NOT reach the worker** (story 06; ADR-014 / SECURITY T14) — the BEHAVIOUR
+  (relay bridge over the frozen envelope, in-memory ephemeral mirror, read-only route, multiplex by
+  (nodeId, sessionId), unresolvable-frame drop) is proven by tasks 00–02's `@executable` over the fake
+  relay/PTY/mirror seams + the `acd-fleet-terminal-mirror-read-only` fitness; the VISUAL fidelity of the
+  on-screen terminal-view is **§Surface 3**, judged at `aof:verify` **after the deferred `ui/` component is
+  built + rendered** (the `@manual` soak, task 03).
 - **A `@uat` visual-review scenario for the new region** — a person judges, on **both** surfaces (web +
   Rust desktop):
   1. a **running** node **beside** a working node (peer emphasis witnessed, not asserted);
@@ -566,3 +764,9 @@ here. This design fixes the look/feel; the features fix what happens.
   judges, on a **full board of milestone cards**: (a) the affordance reads as a quiet carve-out, not a
   control panel (A2 / DG-3 disclosure); (b) the empty-roster, one-node and many-node picker states (A4–A6);
   (c) assigning a real item and confirming the result is legible without re-checking (A7/A8 / DG-4).
+- **A `@uat` visual-review scenario for the terminal-view** (story 06; §Surface 3, DG-7/DG-8) — a person
+  judges: (a) the view NAMES its stream (V1) and reads as read-only, and a typed keystroke does NOT reach
+  the worker (V2/V5 / DG-7); (b) the empty/cold-start and rebuild-starts-empty states are honest, not
+  spinner-forever (V7); (c) two workers multiplexed, correctly labelled, no cross-wiring (V8 / DG-8); (d) a
+  stream that ends reads as ended (V9). Hand this to the developer/product-owner as a candidate task
+  `.feature`.

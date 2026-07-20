@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 38
-updated: 2026-07-16
+updated: 2026-07-19
 ---
 <!--
   Milestone VERIFICATION.md — the record of aof:verify 38. Written by the orchestration (verify owns
@@ -425,3 +425,274 @@ strength of its passing tests alone would be exactly the mistake this milestone 
   if unwanted.
 - **One unexplained transient:** during the TTL poll, a single `/api/mesh/status` response came back without a
   `nodes` key, then self-recovered; both daemons stayed up. Not reproduced. Logged, not diagnosed.
+
+---
+
+## Verify pass `2026-07-19` — stories 03–08 landscape (milestone still NOT accepted)
+
+_This VERIFICATION.md above was written at the `2026-07-16` pass, which predates stories 03–08 (added
+`2026-07-18`, built `2026-07-18`/`2026-07-19`). This section records the current pass over the newly-built
+span. Story-level status: **00 done, 02 done; 01, 03, 04, 05, 06, 07, 08 all `in-review`** with unrun
+soaks. A milestone accepts only when **all nine** stories are done — so 38 stays `in-progress`._
+
+### Automated foundation — GREEN (re-confirmed this pass)
+
+- **All 22 m38 fitness-function arch-tests pass — fresh `node --test` run this session, 22/22, 0 fail.**
+  The story-00/01/02 set (session presence, TTL, aggregation, reconciliation, clone-target-scoped, no-credential-persisted,
+  worktree-reuse, provider-config-driven, app-key-not-relayed, minted-token-scoped) plus the story-03–08 additions
+  (`acd-cross-org-key-isolation`, `acd-fleet-face-single-mutation-route`, `acd-write-token-scoped-to-push`,
+  `acd-worker-driver-no-headless-print`, `acd-fleet-terminal-mirror-read-only`, `acd-memory-index-never-on-mesh`,
+  `acd-work-insert-command-bundle-parity`, `acd-captured-producer-fixture`, `acd-clone-credential-pull-not-pushed`,
+  `acd-presence-write-scope`). verifies → the fitness units named in each STORY.md.
+- **Full integrating suite** recorded `2026-07-19` (STATE `## Verification`): **2883 ok / 8 not-ok** — the 8 are the
+  pre-existing/external flakes already routed to the stabilisation chore (`mesh-reclaim-scheduler/06`,
+  `mesh-coordination-launcher/03`≡`global-work-propagation/03`, the `memory-integration` LLM-extraction flake, the
+  `doctor` date-blind fixtures now inside the 30-day stale window, and the hardcoded-`:4182` bind). **Not re-run in full
+  this session, deliberately:** a **live two-machine mesh** holds `:4182` (finding **F13** collision would crash the run —
+  the running daemon must NOT be disrupted mid-soak), and the worker-driver modules hang on a real `claude` if run without
+  a `spawnRuntime` override (STATE broad-blast lesson — "the review harness must never run a worker-execution test").
+
+### Findings — two deliberately-deferred SOAK-BLOCKERS, confirmed STILL OPEN at source
+
+Both were raised at the build review of stories 05/06 and **intentionally not fixed** — deferred to this verify soak
+(STATE `## Feedback (for retro)`). Confirmed at the source this pass; both gate their story's `@manual` soak and are
+**`aof:continue`-class (build the missing producer/transport), not verify-class** — a soak run now would exercise inert
+production code.
+
+| id | observed (confirmed at source) | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F-38.05** | The `NEEDS_INPUT` / `AOF_SESSION_ID:` **producer is unwired.** [`mesh-worker-execution.mjs:857-860`](../../../src/mesh-worker-execution.mjs#L857-L860) types **only** `brief.command` into the PTY (`term.write(\`${command}\n\`)`); no prompt preamble instructs a real `claude` to emit either marker (ADR-013 decision-4). The sentinels exist only as consumer-side scanners (`buffer.includes(NEEDS_INPUT_SENTINEL)`, line 735). ⇒ in production the `needs-input` outcome (task 02) can never fire and `session_id` (task 03) is always `null`. The F4 class at the sentinel seam. | correctness (inertness) | **BLOCKER (soak)** | build the driver prompt preamble + measure how an interactive session surfaces its `session_id` BEFORE the soak | `aof:continue 38/05` | **FIXED `2026-07-19` (`aof:continue 38/05`) — producer-wired: session_id via transcript-dir watch, NEEDS_INPUT via worker-scoped `--append-system-prompt`; ADR-013 amended + fitness rewritten to pin the PRODUCER (inv 4/6); architect + QA both GO; story-05 lanes+fitness 27/0. Awaiting re-verify at the task-04 `@manual` soak (real-`claude` efficacy + snapshot-race capture rate — un-`@executable`).** |
+| **F-38.06** | The terminal **stream transport is unwired** AND rides a transport production never starts. The only `serveRelay`/`relayMode` reference in [`mesh-launcher.mjs:21`](../../../src/mesh-launcher.mjs#L21) is a **comment**; no production call site wires `relayMode()`/`terminalMirror`/`onOutputChunk` into the launcher, and `aof mesh ui` never passes `startTerminalRelaySubscriber`. ⇒ the mirror receives no live frame on a real two-machine deploy (SPEC "watch a worker's live terminal" is inert). `@executable` lanes are honestly green against the in-process `serveRelay()` broker only. | correctness (inertness) | **BLOCKER (soak)** | wire the transport per the **ADR-014 amendment** (wire `relayMode()` into the control launcher OR pivot the bridge onto `control-stream-server`/`worker-stream-client`) BEFORE the soak | `aof:continue 38/06` | **OPEN** |
+
+### Human / environment gates outstanding — the `@manual`/`@uat` soaks (per in-review story)
+
+None of these are agent-runnable in this session: each needs a **real two-machine mesh** (which is live now), and/or a
+**real private repo**, **real (per-org) GitHub App(s)**, a widened **`contents:write`** credential, or a **human observer**.
+They are the SPEC's outsider-verifiable acceptance and are the operator's "works in a real-world scenario" bar.
+
+| story | soak owed | needs | blocked by |
+| --- | --- | --- | --- |
+| **01** worker-repo-checkout | task 04 private-clone soak | 2nd machine + real **private** repo + SECURITY R1/R2/R4 sign-off | — |
+| **03** per-org-credential-scoping | tasks 00/01/03 two-org soak | **two real per-org GitHub Apps** (distinct keys/installations) | — |
+| **04** ui-driven-assignment | tasks 00/02/04 real-UI soak (+ design conformance, UI surface) | live board + assignment to a worker + human | — |
+| **05** terminal-driven-worker-execution | task 04 subscription soak | live worker PTY | **F-38.05 (build first)** |
+| **06** worker-terminal-streaming | task 03 stream soak | 2-machine live PTY relay | **F-38.06 (build first)** |
+| **07** durable-worker-pushback | tasks 00–03 push soak | real branch + push + **`contents:write`** credential (re-opens SECURITY T9) + 2 machines | — |
+| **08** worker-verified-memory-syncback | task 02 end-to-end mesh soak + `@uat` recall | full worker→control `git pull` + `memory ingest` chain + human recall sign-off | dep 07 |
+
+### F-38.05 producer measurement (the deferred precondition) — DONE this pass
+
+The step the build review deferred to this verify ("measure how an interactive session surfaces its
+`session_id` BEFORE building the producer") is now measured on this machine — read-only, no build:
+
+- **`session_id` is surfaced as the transcript FILENAME:** `~/.claude/projects/<cwd-slug>/<session_id>.jsonl`.
+  Proven live — this verify session is `d014c661-…` (matches its own scratchpad path), and **real prior
+  worker runs left worktree-keyed transcript dirs on disk** (`C--…-aof-mesh-worktrees-asg-00-gap-a-local-wins/`
+  et al., each holding a `<uuid>.jsonl`). So a worker spawning interactive `claude` (cwd = worktree,
+  empty-args via `terminal-providers`) gets a deterministic `~/.claude/projects/<slug(worktreeCwd)>/<session_id>.jsonl`
+  whose slug it can compute and whose directory it can watch — zero cooperation from the model.
+- **The as-built capture has NO producer.** [`mesh-worker-execution.mjs:713-732`](../../../src/mesh-worker-execution.mjs#L713-L732)
+  scans the PTY output for an `AOF_SESSION_ID:` marker that nothing emits; ADR-013 decision-4's premise
+  (Claude Code "sets `CLAUDE_SESSION_ID`" / "asks the driven session to surface its id onto its own terminal")
+  is unproducer'd — claude does not print its session_id and the model can't self-report it. Same F4/F-38.05 class.
+- **Build direction for `aof:continue 38/05`:** replace the PTY-marker capture with a transcript-dir watch
+  (deterministic), and give the `NEEDS_INPUT` instruction a real home. ADR-013 decision-4 + RESEARCH §4.3 to be
+  corrected to the transcript-filename mechanism at build.
+- **SCOPE FINDING (this pass): the fix is architect+developer `aof:continue`, not a contained producer tweak —
+  the fitness function `acd-worker-driver-no-headless-print` STRUCTURALLY PINS the producerless mechanism.**
+  Verified at source ([`test/arch/acd-worker-driver-no-headless-print.test.mjs`](../../../test/arch/acd-worker-driver-no-headless-print.test.mjs)):
+  invariant 3's behavioural check asserts `spawnCalls[0].args === []` (no launch arg) **and**
+  `ptys[0].writes === [`\`${command}\n`\`]` (exactly ONE pty.write, only the command) — so the `NEEDS_INPUT`
+  preamble has **nowhere to go** (not a typed write, not a launch arg); invariant 4 requires
+  `extractSessionIdFromOutput` + the `AOF_SESSION_ID:` marker → sessionId, i.e. it pins the exact producerless
+  path F-38.05 must remove. **The green fitness function is itself part of why F-38.05 shipped inert.** Closing
+  F-38.05 therefore requires the ARCHITECT to rewrite ADR-013 decision-3/4 + this fitness function to the
+  transcript mechanism (and choose the `NEEDS_INPUT` instruction's home — likely inside the typed `/aof:*` bundle
+  command's own prompt), THEN the developer builds the producer + rewrites tasks 02/03's tests — a proper
+  `aof:continue 38/05`, provable only at the task-04 soak. A new lesson for the retro: **a fitness function armed
+  at build against an as-built shape can LOCK IN a producerless consumer, turning green into a barrier to the fix.**
+
+### Accept decision — Milestone 38 **NOT accepted; stays `in-progress`**
+
+- **Automated lanes GREEN** (22/22 m38 fitness fresh; integrating suite 2883/8-flakes recorded today) — but a green suite
+  is not evidence a feature works: **this milestone proved that six times** (F1/F4/F6/F7/F8/F12). The two soak-blockers
+  below are that exact class, still armed.
+- **Two blocker findings are OPEN** (F-38.05, F-38.06): stories 05 and 06 carry **inert production code** — soaking them now
+  would soak nothing. Both must go back to `aof:continue` to build the missing producer/transport **before** their soaks.
+- **Seven stories (01, 03, 04, 05, 06, 07, 08) have unrun live human/environment soaks** — the operator's real-world bar.
+  Not agent-runnable this session.
+- No story can be honestly closed on its passing tests alone. Milestone `SPEC.md` `status` stays **`in-progress`**.
+
+## Story-05 · terminal-driven-worker-execution — verify & **DECLINE** (`aof:verify 38/05`, 2026-07-19)
+
+Story-level verify of `38/05` (status `in-review`). **Not accepted — an open BLOCKER finding stands** (F-38.05),
+so `STORY.md` `status` stays `in-review`. The `@executable` lanes are green, but this milestone has proved six
+times that green is not evidence, and F-38.05 is that exact class at the sentinel seam.
+
+### Verification evidence — `@executable` suite + fitness (GREEN, re-confirmed fresh this session)
+
+- **Story-05 `@executable` tasks 00–03 green, isolated re-run this pass:** the four focused task modules
+  (`mesh-worker-driver-interactive-pty` / `-directive-command` / `-needs-input` / `-session-id`) → **4/4 ok, 0
+  not-ok** under `AOF_GLOBAL_HOME=$(mktemp -d)`. Covers: interactive `claude` resolved through the
+  `terminal-providers` seam (empty-args launch, never `claude -p`); the directive's whole command typed as ONE
+  newline-terminated `pty.write` into ONE long-lived session; the `NEEDS_INPUT` sentinel → a THIRD `needs-input`
+  outcome NOT re-mapped to `done`, worktree RETAINED; `session_id` captured/surfaced, empty/absent degrading to
+  null. verifies → `tasks/00_*`–`tasks/03_*`.
+- **Fitness `acd-worker-driver-no-headless-print` green** (isolated `node --test`, 1/1 ok) — the structural +
+  injected-seam-behavioural guard that no `-p`/`--print`/`--output-format` token survives in the spawned worker
+  argv. verifies → the story's `## Fitness units`.
+- **No UI surface** (`@cli @work @distribution`) and **no `@uat` scenario** in this story, so no design-conformance
+  and no human sign-off lane apply.
+
+### Findings — the blocker is OPEN, confirmed at the source this pass
+
+| id | observed (confirmed at source, this pass) | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F-38.05** | The `NEEDS_INPUT` / `AOF_SESSION_ID:` **producer is still unwired.** [`driveInteractiveClaudeSession`](../../../src/mesh-worker-execution.mjs#L886-L896) types **only** `brief.command` into the PTY (`term.write(\`${command}\n\`)`); no preamble/prompt instructs a real `claude` to emit either marker. The sentinels exist ONLY as consumer-side scanners ([`containsNeedsInputSentinel`](../../../src/mesh-worker-execution.mjs#L761), [`extractSessionIdFromOutput`](../../../src/mesh-worker-execution.mjs#L739)). ⇒ in production the `needs-input` outcome (task 02) can NEVER fire and `session_id` (task 03) is ALWAYS `null`. The `2026-07-19` continue-review fast-follow hardened the **consumer** half only (line-anchored sentinel, whitespace-terminated id, real fixture dispose) — the **producer** was deliberately not built. This is the F4 green-≠-working class at the sentinel seam. | correctness (inertness) | **BLOCKER** | **`aof:continue 38/05`** (architect + developer, NOT verify-class): rewrite ADR-013 decision-3/4 + the `acd-worker-driver-no-headless-print` fitness function — its invariants 3/4 STRUCTURALLY PIN the producerless mechanism (assert `ptys[0].writes === [\`${command}\n\`]` and the `AOF_SESSION_ID:` marker path), so a green fitness function is itself part of why F-38.05 shipped inert — then build the producer as a **transcript-dir watch** (`~/.claude/projects/<slug(worktreeCwd)>/<session_id>.jsonl`, the deterministic mechanism measured at the `2026-07-19` pass) and choose the `NEEDS_INPUT` instruction's home. | `aof:continue 38/05` | **FIXED `2026-07-19` (`aof:continue 38/05`) — producer-wired: session_id via transcript-dir watch, NEEDS_INPUT via worker-scoped `--append-system-prompt`; ADR-013 amended + fitness rewritten to pin the PRODUCER (inv 4/6); architect + QA both GO; story-05 lanes+fitness 27/0. Awaiting re-verify at the task-04 `@manual` soak (real-`claude` efficacy + snapshot-race capture rate — un-`@executable`).** |
+
+### Gate
+
+- `aof work validate 38` → **PASS — 38 is well-formed** (folder↔frontmatter, closed tag vocabulary, depends
+  graph), exit 0.
+
+### Deferred — task 04 `@manual` subscription soak (the milestone gate, not run here)
+
+`tasks/04_terminal-run-subscription-soak.feature` (`@manual`) is the outsider proof: a REAL worker runs a REAL
+assigned command as interactive `claude` in a PTY on the worker's **subscription** (no `-p`, no
+`ANTHROPIC_API_KEY`), a mid-run judgment ends `needs-input` with the worktree retained + `session_id` surfaced,
+and a human `claude --resume <session_id>` continues the SAME session. It requires a live worker PTY → not
+agent-runnable → the milestone's **deferred human gate**, closed at `aof:verify 38`. It is additionally **gated on
+F-38.05**: soaking it now would exercise inert production code. INCONCLUSIVE at this story level by construction.
+
+### Accept decision — story-05
+
+**Story-05 `terminal-driven-worker-execution` — NOT ACCEPTED (blocked, not failed).** Its `@executable` lanes and
+fitness function are green and were re-confirmed fresh this session, but a **blocker finding (F-38.05) is open**:
+the interactive driver ships the CONSUMER half of the `NEEDS_INPUT`/`session_id` contract with **no producer at
+all**, so tasks 02/03's behaviour is inert in production. Accepting on the strength of the green lanes alone would
+be exactly the mistake this milestone spent itself teaching (green ≠ working). Routed back to **`aof:continue
+38/05`** to build the producer (and rewrite the ADR + fitness function that pin the producerless shape) BEFORE the
+task-04 soak. `STORY.md` `status` stays **`in-review`**; the milestone remains `in-progress`.
+
+## Story-05 · terminal-driven-worker-execution — RE-VERIFY & **ACCEPT** (`aof:verify 38/05`, 2026-07-19, after the F-38.05 fix)
+
+Re-verify of `38/05` after the DECLINE above was remediated. The DECLINE was **conditional** — "routed back to
+`aof:continue 38/05` to build the producer" — and that build has since landed (`aof:continue 38/05`, STATE
+`2026-07-19`). This pass confirms the fix **at the source** (not on the strength of the record note), re-runs the
+lanes + fitness fresh, and — the sole blocker now closed — **accepts** the story. Task-04 remains the milestone's
+deferred human gate, exactly as story-02's task-05 was when story-02 accepted.
+
+### F-38.05 remediation — confirmed at the SOURCE this pass (the producer is real, not a record claim)
+
+The blocker was "the `NEEDS_INPUT`/`session_id` producer is unwired — the consumer half ships inert." Both producers
+now exist, read directly in [src/mesh-worker-execution.mjs](../../../src/mesh-worker-execution.mjs):
+- **`session_id` producer — the transcript-dir watch.** `defaultWatchTranscriptSessionId`
+  ([mesh-worker-execution.mjs:792](../../../src/mesh-worker-execution.mjs#L792)) snapshots
+  `<claudeProjectsDir(worktreeCwd)>/*.jsonl` before spawn and resolves the FIRST NEW `<session_id>.jsonl` basename —
+  Claude Code itself is the producer, zero model cooperation; never throws, abort-aware, `maxWaitMs`-bounded, degrades
+  to `null`. Wired as the default of the injected `options.watchTranscriptSessionId` seam
+  ([:918](../../../src/mesh-worker-execution.mjs#L918)); the resolved id is threaded onto the driver's own outcome
+  (`finish` awaits the aborted watch, [:984-1000](../../../src/mesh-worker-execution.mjs#L984-L1000)). The retired
+  `AOF_SESSION_ID:` PTY marker / `extractSessionIdFromOutput` / `SESSION_ID_MARKER` are gone.
+- **`NEEDS_INPUT` producer — a worker-scoped launch arg.** `resolveInteractiveDriverLaunch`
+  ([:892](../../../src/mesh-worker-execution.mjs#L892)) appends `--append-system-prompt NEEDS_INPUT_INSTRUCTION` to
+  the interactive launch ([:899](../../../src/mesh-worker-execution.mjs#L899)); `NEEDS_INPUT_INSTRUCTION`
+  ([:769](../../../src/mesh-worker-execution.mjs#L769)) embeds `${NEEDS_INPUT_SENTINEL}` so producer + detector share
+  the one literal. Worker-only BY CONSTRUCTION — the human `/ws/terminal` route calls `resolveProvider` directly and
+  never reaches this function, so it can never false-fire on a human session.
+- **The fitness function now PINS the producer, not the producerless shape.** [`acd-worker-driver-no-headless-print`](../../../test/arch/acd-worker-driver-no-headless-print.test.mjs)
+  invariant 4 requires the transcript-watch wiring (`claudeProjectsDir` imported+called, the seam defined+wired) and
+  invariant 6 requires the `--append-system-prompt NEEDS_INPUT_INSTRUCTION` producer to EXIST; both self-checks land
+  (`assert.notEqual(planted, source)` before asserting the trip) — so a revert to producerless trips CI. This closes
+  the SCOPE FINDING (*a fitness function must pin the PRODUCER's existence, not the consumer's current shape*).
+
+### Verification evidence — `@executable` lanes + fitness (GREEN, fresh isolated re-run this session)
+
+- **Story-05 tasks 00–03 + the fitness function: 27 ok / 0 not-ok**, run isolated under `AOF_GLOBAL_HOME=$(mktemp -d)`
+  via a focused runner over the four task suites + `archTests` (the full `scripts/test.mjs` deliberately NOT run — a
+  live two-machine mesh holds `:4182` (finding F13 would crash the run) and the worker-driver modules hang on a real
+  `claude` without a `spawnRuntime` override; every focused test drives INJECTED `ptySpawn`/`which`/`watchTranscriptSessionId`
+  seams — no real `claude`, no PTY, no network). The three invariants the DECLINE recorded as failing are **now green**:
+  invariant 4 (session_id via transcript-dir watch, real producer), invariant 6 (the `NEEDS_INPUT` `--append-system-prompt`
+  producer), and invariant 3's behavioural argv check (`launchArgs[0] === "--append-system-prompt"`, exactly one
+  `pty.write` of the command). Includes the review-fast-follow hardening (whole-line sentinel, whitespace-terminated id,
+  real fixture `dispose`) and the hermetic real-temp-fs `defaultWatchTranscriptSessionId` block (snapshot-excludes-preexisting
+  / deadline-null / abort-null). verifies → `tasks/00_*`–`tasks/03_*` + the story's `## Fitness units`.
+- **No UI surface** (`@cli @work @distribution`) and **no `@uat` scenario** in this story → no design-conformance and no
+  human sign-off lane apply.
+
+### Gate
+
+- `aof work validate 38` → **PASS — 38 is well-formed** (folder↔frontmatter, closed tag vocabulary, depends graph),
+  exit 0. Agent-layer checks hold: `@executable` test-traceability satisfied by the 27/0 focused run + the fitness/task
+  modules registered in `scripts/test.mjs` (invariant-8 asserts the registration); litmus clean — task-04's `@manual`
+  tag is honest (a real subscription worker PTY + a human `claude --resume` is not `@executable`-coverable).
+
+### Deferred — task 04 `@manual` subscription soak (the milestone gate, unchanged)
+
+`tasks/04_terminal-run-subscription-soak.feature` (`@manual`) stays the milestone's deferred human gate, closed at
+`aof:verify 38`: a REAL worker runs a REAL command as interactive `claude` on **subscription** (no `-p`, no
+`ANTHROPIC_API_KEY`), a mid-run judgment ends `needs-input` with the worktree retained + `session_id` surfaced, and a
+human `claude --resume <session_id>` continues the SAME session. Not agent-runnable (needs a live subscription worker
+PTY + a human). The `@executable` build proves DETECTION + producer WIRING; the soak measures what no injected test can —
+**NEEDS_INPUT real EFFICACY** (does a live `claude` obey the `--append-system-prompt` and emit the sentinel) and the
+**session_id snapshot-race CAPTURE RATE** on a real fast session. INCONCLUSIVE at this story level by construction, never
+inferred from the code.
+
+### Note — the verified fix is in the WORKING TREE, uncommitted
+
+The story-05 producer fix (`src/mesh-worker-execution.mjs` modified; `src/work-observe.mjs` +
+`test/arch/acd-worker-driver-no-headless-print.test.mjs` + the rewritten `test/mesh-worker-driver-session-id.test.mjs`
+untracked) and the story 06/08 work all live in the working tree — the last commit (`221fae0`) covers stories 03/04/07
+only. Verify accepts the verified working-tree state; **committing + pushing is the downstream `aof:code-review` step**,
+not a verify concern. Recorded so the accept is read against the right build state.
+
+### Accept decision — story-05
+
+**Story-05 `terminal-driven-worker-execution` — ACCEPTED.** The sole blocker (F-38.05) is **FIXED and confirmed at the
+source** (both producers wired; fitness rewritten to pin the producer, green + non-vacuous); the `@executable` lanes +
+fitness are 27/0 green and producer-WIRED (no longer the inert consumer the DECLINE found); `aof work validate 38` is
+PASS; there is no UI surface and no `@uat` scenario; and **no blocker finding remains open** against it. Its sole
+remaining check — task-04's subscription soak — is the milestone's deferred human gate (real-`claude` efficacy +
+capture-rate), not a story-level check, exactly as story-02's task-05 was when story-02 accepted. `STORY.md` `status` →
+**`done`**; the box is ticked in `SPEC.md` `## Stories`. **The milestone stays `in-progress`** — 3 of 9 stories done
+(00, 02, 05); 01/03/04/06/07/08 remain `in-review` pending their own `@manual` soaks + accept at `aof:verify 38`.
+
+## Verify pass `2026-07-19` (re-invocation) — state re-checked at source; **NOT accepted** (unchanged)
+
+`aof:verify 38` re-invoked. Only the lanes runnable without a human / real infrastructure were exercised this
+pass; the record above already documents the full landscape — this is the honest re-confirmation, not a new verdict.
+
+- **Automated foundation GREEN, re-run this pass:** `node --test test/arch/*.test.mjs` → **217 ok / 0 fail**
+  (isolated under `AOF_GLOBAL_HOME=$(mktemp -d)`), covering all 22 m38 fitness functions — no regression.
+  `aof work validate 38` → **PASS — well-formed.** The full integrating `scripts/test.mjs` was **deliberately
+  NOT run** (unchanged reasons): a **live two-machine mesh holds `:4182`** (finding **F13** collision would crash
+  the run mid-soak) and the worker-driver modules hang on a real `claude` without a `spawnRuntime` override. Last
+  recorded full run stands: 2883 ok / 8 pre-existing-or-external flakes (all routed to the stabilisation chore).
+- **F-38.06 re-confirmed OPEN — at the source directly, not on the record note.** `mesh-launcher.mjs` carries
+  **zero** `onOutputChunk` / terminal / bridge wiring; `control-stream-server.mjs`'s only `terminal` references are
+  assignment-**state** (F16), not terminal-frame streaming; `worker-stream-client.mjs` has **no** terminal-frame
+  push at all. The worker-side `mesh-terminal-relay-bridge.mjs` and fleet-face `mesh-terminal-mirror.mjs` modules
+  exist (mirror is wired into `mesh-ui-serve.mjs`), but **nothing in production pushes a `terminal-frame` over the
+  cross-machine transport** — so the fleet mirror receives no live frame on a real two-machine deploy, exactly the
+  inert-on-real-deploy condition F-38.06 records. Story 06 is **`aof:continue 38/06`-class (build the transport per
+  the ADR-014 amendment), NOT soak-ready** — its task-03 stream soak would exercise inert code.
+- **No story could be accepted this pass.** 6 of 9 remain `in-review`, each gated on a `@manual`/`@uat` soak that is
+  **not agent-runnable in a non-interactive session** — and story 06 additionally carries an open build blocker:
+
+  | story | why it cannot close this pass |
+  | --- | --- |
+  | **01** worker-repo-checkout | 2nd machine + real **private** repo + SECURITY R1/R2/R4 operator sign-off |
+  | **03** per-org-credential-scoping | **two** real per-org GitHub Apps (distinct keys/installations) |
+  | **04** ui-driven-assignment | live board UI + assignment to a worker + human observer; design-conformance render **INCONCLUSIVE** (no `work.ui.baseUrl`, no `--url`; live daemon not poked mid-soak) |
+  | **06** worker-terminal-streaming | **F-38.06 CLOSED `2026-07-19` via `aof:continue 38/06`** — hybrid transport wired (fabric worker→control, loopback control→UI); review also fixed F17 (cross-node spoofing) + F-38.06b (config footgun); fitness sweep 39/0. Now soak-ready: task-03 2-machine PTY-relay soak measures real efficacy + T14 on-screen-credential inspection |
+  | **07** durable-worker-pushback | real branch + push + `contents:write` credential (re-opens SECURITY T9/T15; needs operator App-widening attestation) + 2 machines |
+  | **08** worker-verified-memory-syncback | dep 07; full worker→control `git pull` + `memory ingest` chain + human recall `@uat` sign-off |
+
+### Accept decision — Milestone 38 **NOT accepted; stays `in-progress`** (unchanged)
+
+A milestone accepts only when **all nine** stories are done. 3 are (00, 02, 05); 6 remain `in-review`. The
+automated foundation is green, but — as this milestone proved six times — green is not evidence the feature works;
+the outsider proof for the remaining six is their real-world soak, none of which is agent-runnable here, and story
+06 is not even soak-ready (F-38.06). Next steps are the operator's: close F-38.06 via `aof:continue 38/06`, then
+drive the real-infrastructure soaks with a human observer.

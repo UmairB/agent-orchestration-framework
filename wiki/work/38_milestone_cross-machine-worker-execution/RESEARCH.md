@@ -734,6 +734,21 @@ actionable, and non-support stated plainly rather than guessed):
   session id up to the fleet UI for the "log in and resume" path to be usable — a small, concrete piece
   of net-new work (capture the id our code already receives, publish it on the presence/assignment
   record, render it on the node card).
+  - **CORRECTED (2026-07-19 verify pass, F-38.05):** the claim above — "the `session_id` [is] already surfaced
+    in the `--output-format json` output" — is the `-p`-era mechanism, and it does NOT carry over to the
+    INTERACTIVE `claude` the worker actually drives (ADR-013). An interactive session has no `--output-format
+    json` result to read, and a real `claude` does NOT print its session id to the terminal — so the as-built
+    PTY-output `AOF_SESSION_ID:` marker scan had NO producer (`session_id` was always `null` in production; the
+    same F4/green-≠-working class this milestone kept hitting). MEASURED live at the verify pass: the
+    interactive-mode `session_id` is surfaced as the transcript FILENAME —
+    `~/.claude/projects/<projectSlug(cwd)>/<session_id>.jsonl` (honouring `CLAUDE_CONFIG_DIR`). A worker
+    spawning interactive `claude` with `cwd = worktree` therefore reads its session id DETERMINISTICALLY, with
+    zero model cooperation, by snapshotting that directory before spawn and taking the first new `<uuid>.jsonl`
+    basename to appear. This transcript-dir-watch is the mechanism ADR-013's 2026-07-19 AMENDMENT adopts
+    (decision bullet 3, reusing `work-observe.mjs`'s `projectSlug`/`claudeProjectsDir`), replacing the
+    producerless marker scan. (The `NEEDS_INPUT` sentinel is likewise given a real producer there — a
+    worker-scoped `--append-system-prompt` on the interactive launch — since the model must be INSTRUCTED to
+    emit it; its efficacy stays the task-04 `@manual` soak's deliverable.)
 - **AUTH / BILLING — the constraint that decides between the two shapes (researched this session, docs-
   grounded).** The Agent SDK **cannot authenticate with a Claude subscription (Pro/Max)** — Anthropic's
   Agent SDK overview explicitly disallows claude.ai-login/subscription auth for third-party SDK agents and

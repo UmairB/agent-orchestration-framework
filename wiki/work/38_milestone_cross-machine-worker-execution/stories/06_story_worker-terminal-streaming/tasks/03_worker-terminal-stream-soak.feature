@@ -34,3 +34,16 @@ Feature: SOAK — a REAL worker's LIVE terminal appears in the REAL control-node
     When both workers produce live output at once
     Then each assignment's card shows ITS OWN worker's stream — the two live streams never cross-talk
     And closing one card's view does not disturb the other's live stream
+
+  # ADR-014 AMENDMENT (2026-07-19, the HYBRID transport) — the best-effort-under-adversity property.
+  # The stream is a LIVE TAIL, never a durable transcript: a dropped/slow frame is a GAP in the mirror,
+  # NEVER a stall or a rollback of the worker's own PTY (worker-stream-client.sendTerminalFrame is off the
+  # reconnect/drop bookkeeping path; the mirror holds zero past bytes). Pairs with the hermetic unit
+  # coverage of sendTerminalFrame's off-the-reconnect-path discipline (worker-stream-client.test.mjs).
+  Scenario: the fleet mirror is killed/slowed mid-stream — the worker's live PTY is UNAFFECTED and the live tail resumes on re-attach with NO replay
+    Given the worker's session is producing live output visible in the control-node fleet view
+    When the control-node fleet view (or its relay subscriber) is killed or badly slowed mid-stream
+    Then the worker's own interactive `claude` session keeps running unaffected — no stall, no backpressure, no crash of the worker daemon (a dropped terminal frame is a gap in the live view, never a fault on the worker)
+    And the worker's OWN work-state stream (snapshot/heartbeat) stays healthy — the terminal stream's adversity never destabilises the worker's reconnect/drop bookkeeping
+    When the operator re-attaches the fleet view to the SAME assignment card
+    Then the live tail resumes from the CURRENT output onward, with NO replay of the bytes missed while the view was down (the mirror is a live tail, never a system of record — a persisted transcript is out of scope)

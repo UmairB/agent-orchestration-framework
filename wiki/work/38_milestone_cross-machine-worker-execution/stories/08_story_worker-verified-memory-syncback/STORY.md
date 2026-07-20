@@ -4,10 +4,10 @@ number: 08
 slug: worker-verified-memory-syncback
 title: "A milestone/story verified on a worker updates the control node's memory"
 parent: 38
-status: in-progress
+status: in-review
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -48,12 +48,12 @@ worker-`done` assignment whose record docs changed).
      future option). Tasks 00–01 `@executable` over a real local checkout + the real `ingest`/`recall` (no
      mesh); task 02 the real-mesh end-to-end `@manual` soak. Depends on story 07 (durable output first). -->
 
-- [ ] `tasks/00_knowledge-rides-git-not-mesh.feature` — `@executable` — the sync-back payload is plain committed
+- [x] `tasks/00_knowledge-rides-git-not-mesh.feature` — `@executable` — the sync-back payload is plain committed
   markdown; NO index/graph bytes (`graphify-out/graph.json`) cross ANY mesh frame — fitness
   `acd-memory-index-never-on-mesh`; the index stays gitignored + derived + machine-local. A structural Outline
   enumerates the mesh frame vocabulary (`directive` + the additive `clone-credential`/`clone-url` down-frames,
   the `{kind,nodeId,signal}` up-envelope, `{type}` control-frames) asserting none has a slot the index could ride.
-- [ ] `tasks/01_control-reingests-own-checkout.feature` — `@executable` — after a worker-verified branch merges
+- [x] `tasks/01_control-reingests-own-checkout.feature` — `@executable` — after a worker-verified branch merges
   into the control node's checkout, the documented `git pull` + `aof work memory ingest` step rebuilds the
   CONTROL node's OWN index from the now-shared markdown; a lesson/ADR authored on the WORKER becomes present in
   the control's rebuilt index (absent-before / recallable-after, over a real local checkout + real ingest/recall).

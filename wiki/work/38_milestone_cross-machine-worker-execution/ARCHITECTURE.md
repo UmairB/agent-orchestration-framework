@@ -902,6 +902,122 @@ during the soak's provisioning:
 - **DOCUMENTED DEFAULTS for STATE.md:** one long-lived interactive `claude` per ASSIGNMENT; terminal-state via an explicit `NEEDS_INPUT` sentinel constant → a new `needs-input` outcome (three states: done/failed/needs-input).
 - **`acd-worker-driver-no-headless-print` is SPEC, armed at BUILD** — the interactive driver does not exist yet; armed against the real seam. (The `@manual` soak proves subscription-billing + native ask, which no `@executable` test can.)
 
+### AMENDMENT (2026-07-19, `aof:continue 38/05` closing BLOCKER F-38.05 — decision bullets 3 & 4 CORRECTED, the as-built mechanism was producerless)
+
+**This amendment CHANGES two decisions above; it does not merely ratify them.** The 2026-07-19 story-05 verify
+pass (VERIFICATION.md §"F-38.05 producer measurement") confirmed at source that the `session_id` and
+`NEEDS_INPUT` decisions shipped their CONSUMER halves with NO PRODUCER — the milestone's defining F4
+"green ≠ working" class, recurring at the sentinel seam. `extractSessionIdFromOutput`
+(`mesh-worker-execution.mjs:739`) scans PTY output for an `AOF_SESSION_ID:` marker nothing emits (a real
+`claude` does not print its session id), so `session_id` is ALWAYS `null` in production; and
+`driveInteractiveClaudeSession` (`:807-897`) types ONLY `brief.command` into the PTY with no instruction that
+makes a real `claude` emit `NEEDS_INPUT`, so the `needs-input` outcome can NEVER fire. The `@executable` lanes
+were green because the TESTS emit the markers the real producer was never instructed to emit — and
+`acd-worker-driver-no-headless-print` had STRUCTURALLY PINNED that producerless shape (invariant 4 required
+`extractSessionIdFromOutput`; invariant 3 asserted an empty argv `spawnCalls[0].args === []`), so its green was
+itself part of why the defect shipped inert. Both decisions are corrected below; the fitness function is
+rewritten in lockstep to REQUIRE the producer, not lock in its absence.
+
+**Codebase-graph grounding (fresh, this amendment — `aof graph build src`, 2026-07-19: `builtAt` today, 2002
+nodes / 4855 edges, 4 files re-extracted).** `aof graph impact src/mesh-worker-execution.mjs` → dependents ← 4
+(`commands/mesh-repo`, `global-node-registry`, `mesh-clone-credential-provider`, `mesh-launcher`); dependencies
+→ 9, now GAINING a tenth edge to `src/work-observe.mjs`. `aof graph impact src/work-observe.mjs` → dependents ←
+1 (`cli.mjs` only), dependencies → 0 (a pure node-builtin leaf: fs/os/path) — so reusing its
+`projectSlug`/`claudeProjectsDir` adds ONE edge into a genuine leaf that does NOT import the worker driver: no
+cycle, the sanctioned reuse over a re-implemented slug. `resolveInteractiveDriverLaunch` is worker-scoped as
+ACTUAL structure, not inference: `aof graph impact` shows the fleet/human `/ws/terminal` path reaching
+`terminal-providers.mjs` via `terminal-ws.mjs`, which calls `resolveProvider` DIRECTLY and never calls
+`resolveInteractiveDriverLaunch` — so a launch arg appended there is worker-only, never on a human session. The
+graph informs; the decision is the architect's call.
+
+**Decision bullet 3 — CORRECTED. `session_id` is captured by a TRANSCRIPT-DIR WATCH, not a PTY-output marker.**
+The original bullet 3 ("the `session_id` is CAPTURED") rested on a phantom `AOF_SESSION_ID:` marker the model
+was never able to emit. REPLACE it with a deterministic mechanism requiring ZERO model cooperation: a worker
+spawning interactive `claude` with `cwd = worktreeCwd` makes Claude Code ITSELF (the real producer) write its
+transcript to `~/.claude/projects/<projectSlug(worktreeCwd)>/<session_id>.jsonl` (honouring `CLAUDE_CONFIG_DIR`),
+measured live at the verify pass. The worker computes that directory with the EXISTING
+`claudeProjectsDir({ cwd: worktreeCwd })` / `projectSlug` helpers in `work-observe.mjs` (reused, never
+re-implemented), snapshots the dir's existing `*.jsonl` basenames BEFORE spawn, and the FIRST NEW
+`<session_id>.jsonl` basename to appear NAMES the session. Absent/degrade is UNCHANGED from the original task-03
+contract: if no transcript appears (the watch times out, the dir never materializes, the watch is aborted),
+`session_id` degrades to `null`, never a crash. `AOF_SESSION_ID:` / `SESSION_ID_MARKER` /
+`extractSessionIdFromOutput` are RETIRED (they had no producer).
+
+**Decision bullet 4 — CORRECTED. The `NEEDS_INPUT` instruction's home is a worker-scoped
+`--append-system-prompt` on the interactive launch (option C).** The original bullet 4 said "the driver PROMPT
+instructs the agent" without pinning WHERE that prompt lives — and nothing was built, so no real `claude` was
+ever instructed. Three homes were weighed:
+- **(A) worker-typed preamble** — type an instruction line into the PTY before the command. REJECTED: it breaks
+  the "exactly one `term.write`" shape (invariant 3), a conversational preamble is a weak, turn-wasting
+  instruction (Claude answers it AS a turn — it is not a standing directive), and it races the command line.
+- **(B) inside the shared `/aof:*` bundle commands** — a standing "if autonomous with no human, emit
+  `NEEDS_INPUT`" clause in the driven directive. REJECTED: those commands are ALSO run by humans (where
+  `AskUserQuestion` is correct), so the clause would false-fire on human sessions unless conditioned on a
+  worker-only env; it couples the contract across every bundle and touches the CLI↔bundle-parity surface.
+- **(C) CHOSEN — a worker-scoped `--append-system-prompt` launch arg.** `resolveInteractiveDriverLaunch`
+  appends `["--append-system-prompt", NEEDS_INPUT_INSTRUCTION]` to the interactive launch args.
+  **Why (C):** the command stays EXACTLY one typed PTY line (invariant 3's single-write shape is UNCHANGED); a
+  session-wide directive belongs in a system prompt, not a fragile conversational turn; it is worker-scoped by
+  construction (the human `/ws/terminal` path never calls `resolveInteractiveDriverLaunch`, graph-confirmed
+  above), so it can never false-fire on a human session the way (B) would; and there is NO coupling to shared
+  bundle commands. **Trade-off accepted:** the interactive launch args are no longer strictly empty (invariants
+  1/2b/3's argv assertions are ADJUSTED to ALLOW `--append-system-prompt` while STILL forbidding any
+  `-p`/`--print`/`--output-format`), and whether `--append-system-prompt` takes effect in interactive
+  (non-`-p`) mode is UNMEASURED — acceptable, because ALL of `NEEDS_INPUT`'s real efficacy is soak-territory.
+
+The sentinel DETECTION mechanism is UNCHANGED — `containsNeedsInputSentinel` (the whole-line PTY scan hardened
+by the 2026-07-19 fast-follow) still owns detection; this amendment adds the missing PRODUCER, it does not
+re-do detection. `NEEDS_INPUT_INSTRUCTION` MUST embed the sentinel via `${NEEDS_INPUT_SENTINEL}` so producer
+and detector share one literal.
+
+**`NEEDS_INPUT`'s real efficacy remains the task-04 `@manual` soak's deliverable.** Whether a real interactive
+`claude` on a real subscription actually emits the sentinel on a genuine judgment call cannot be proven by any
+`@executable` test — that is, and always was, task 04's job. This build ships an HONEST PRODUCER (a real launch
+arg, not a phantom marker) and keeps the `@executable` lanes over INJECTED fake-PTY / fake-watch seams.
+
+**Source anchors the developer builds to (stable names; the fitness rewrite pins these verbatim).**
+- **`session_id` capture:** `import { claudeProjectsDir } from "./work-observe.mjs"`; a default producer
+  `defaultWatchTranscriptSessionId({ cwd, env, signal }) => Promise<string|null>` (never throws, abort-aware,
+  computes `claudeProjectsDir({ cwd, env })`, resolves the first new `<session_id>.jsonl` basename or `null`);
+  the injected seam `options.watchTranscriptSessionId`, wired as
+  `options.watchTranscriptSessionId ?? defaultWatchTranscriptSessionId`; the driver kicks the watch off at
+  spawn, ABORTS it at `finish`, and threads its AWAITED (null-degraded) result onto the SAME resolved
+  `{ outcome, sessionId }` object (so the value is deterministic, not race-dependent). `capturedSessionId`
+  stays the mid-stream variable the story-06 `onOutputChunk(chunk, capturedSessionId)` bridge reads (populated
+  by the watch's resolution rather than the retired marker scan). The handler
+  `createMeshWorkerExecutionHandler` FORWARDS `watchTranscriptSessionId` into `spawnRuntime(...)`'s options
+  (exactly like `ptySpawn`/`which`/`onOutputChunk`) so task-03's test can inject a fake through the one handler
+  entry point.
+- **`NEEDS_INPUT` producer:** an exported `NEEDS_INPUT_INSTRUCTION` template literal that embeds the sentinel
+  via `${NEEDS_INPUT_SENTINEL}` (so producer + detector share one literal) — with NO `//` or `/*` sequence
+  inside the template (the fitness function strips comments); `resolveInteractiveDriverLaunch` builds
+  `const args = [...provider.buildArgs(), "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];`.
+- **Surfacing (UNCHANGED, already correct):** `sessionId` rides the `done` frame
+  (`sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId })`) and the `needs-input`
+  frame (`sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId, code:
+  "needs-input" })`).
+
+**Structural invariants (SUPERSEDE the four above; armed by the rewritten `acd-worker-driver-no-headless-print`).**
+1. No `claude -p` / `--output-format json` one-shot for the `claude` driver (UNCHANGED).
+2. The interactive launch resolves through the `terminal-providers` seam (UNCHANGED).
+3. The command to run is TYPED into the PTY stdin as exactly ONE `term.write`; the launch argv MAY carry
+   `--append-system-prompt <NEEDS_INPUT_INSTRUCTION>` but NEVER `-p`/`--print`/`--output-format`.
+4. `session_id` is captured by the transcript-dir watch (`claudeProjectsDir` + the
+   `defaultWatchTranscriptSessionId` seam) — NOT a PTY-output marker — and surfaced on the `done` +
+   `needs-input` frames.
+5. A `needs-input` outcome retains the worktree (UNCHANGED).
+6. **(NEW) The `NEEDS_INPUT` PRODUCER EXISTS** — `NEEDS_INPUT_INSTRUCTION` embeds `${NEEDS_INPUT_SENTINEL}` and
+   is appended to the interactive launch as `--append-system-prompt`. A revert to "no producer" trips the
+   detector.
+
+**Consequences.**
+- The producerless `AOF_SESSION_ID:` path is removed; `session_id` is deterministic and model-cooperation-free.
+- `NEEDS_INPUT` has a real, worker-scoped home that never false-fires on a human session; its efficacy is
+  proven at the task-04 soak, not by a marker the test emits.
+- The fitness function now FAILS if either producer is removed — a green fitness function is no longer a barrier
+  to the fix (the F-38.05 retro lesson: a fitness function armed at build against an as-built shape can lock in
+  a producerless consumer).
+
 ---
 
 ## ADR-014: The cross-machine terminal BRIDGE relays the worker's `/ws/terminal` PTY bytes over the FROZEN `mesh-relay.mjs` envelope as a NEW `kind` (opaque `signal`, routed by (nodeId, sessionId)) into a READ-ONLY fleet-face mirror — an in-memory ephemeral tail (the mesh-presence-subscriber pattern), NEVER a system of record. NO input-frame path from the fleet face back to the worker PTY exists in this story
@@ -931,6 +1047,210 @@ during the soak's provisioning:
 - The frozen relay envelope and stateless-broker guarantees survive — the bridge is additive, byte-for-byte opaque, and never persists.
 - **DOCUMENTED DEFAULT for STATE.md:** the fleet terminal-VIEW route is read-only (server→browser); read-write terminal control is Phase-2, out of scope. Security (T14) owns the "agent terminal with credentials/shell exposed to the control node" threat and whether the stream is read-only in fact, not just intent.
 - **`acd-fleet-terminal-mirror-read-only` is SPEC, armed at BUILD** — the bridge does not exist yet; armed against the real relay-frame + fleet-route wiring.
+
+### AMENDMENT (2026-07-19, structural review of story 06 as-built — RATIFICATION, no decision changed)
+
+The decision above **stands unchanged and shipped**. The bridge/mirror as-built HONOUR every ADR-014 structural
+invariant — verified at source and by `acd-fleet-terminal-mirror-read-only`: the PTY bytes ride the frozen
+`{ kind, nodeId, signal }` envelope as an opaque `terminal-frame` kind with `sessionId` INSIDE the signal
+(`mesh-terminal-relay-bridge.mjs:34-40`, invariant 2); the bridge subscribes ONLY to `term.onData` and there is
+no `term.write`/mesh→PTY sink, and the fleet `/ws/terminal-view` upgrade block deliberately registers NO
+`ws.on("message", …)` (`mesh-ui-serve.mjs:382-400`, invariant 1); the mirror is a pure in-memory live-tail with
+no fs/store import and no durable write (`mesh-terminal-mirror.mjs`, invariant 3); frames route by
+(nodeId, sessionId) and an unresolvable frame is dropped (invariant 4). The fleet face keeps EXACTLY one
+`http.createServer` and ONE mutation route — the terminal-VIEW is a read-only upgrade carve-out, not a second
+write route (`acd-fleet-face-single-mutation-route` stays green). This block records two premises in the
+decision's own framing that the review found STALE, and the one runtime gap that follows — so a future reader
+does not mis-read the shipped bridge as riding a transport that is actually live in production.
+
+- **The graph-grounding modules the ADR cites were RETIRED, not existing.** ADR-014's grounding block names
+  `mesh-presence-subscriber.mjs` / `mesh-presence-cache.mjs` as "the existing in-memory-cache subscriber
+  (m23/ADR-004)". Both were DELETED at m33 (commit `f3a4283`, "mesh relay/transport redesign (fabric-native)":
+  `-244` / `-138` lines; neither exists in the tree today). The as-built recovers only their retired DISCIPLINE
+  — an in-memory ephemeral tail that writes no durable record — from git history, and `mesh-terminal-mirror.mjs`
+  says so at its head. The DISCIPLINE transfer is legitimate and correctly applied; only the "existing" tense of
+  the citation was wrong.
+
+- **The transport the bridge is decided to ride — `mesh-relay.mjs`'s `serveRelay()`/`relayMode()` — is NOT
+  wired into any production serve entry point, so a real two-machine deploy has NO live relay for the bridge.**
+  A git-history audit (recorded in the story-06 build report and flagged in-source at
+  `mesh-worker-execution.mjs:1061-1073`) found no production call site, ever, for `serveRelay()`/`relayMode()`.
+  Since m33/34 the ACTUAL live worker↔control transport is `control-stream-server.mjs` /
+  `worker-stream-client.mjs` (a different module, a different envelope — graph-confirmed: `mesh-launcher.mjs`
+  imports `startControlStreamServer`, never `serveRelay`/`relayMode`). Consequently the developer DELIBERATELY
+  did not auto-wire the bridge to a broker no role starts: the worker driver's `onOutputChunk` hook is a real,
+  tested, production-shaped extension point but the launcher supplies it no push transport
+  (`createHandler({…})` at `mesh-launcher.mjs:727-755` passes `requestCloneCredential`/`requestCloneUrl`/
+  `requestWriteCredential` as literal keys but NO `onOutputChunk`), and the fleet face's optional
+  `startTerminalRelaySubscriber` seam is likewise not supplied by the `aof mesh ui` CLI (`cli.mjs:1112`). Wiring
+  a transport pointed at a broker nothing starts would be misleading "wiring", not a working pipe — declining to
+  do so is the correct call, not a defect. The bridge/mirror end-to-end is exercised IN-PROCESS by the
+  @executable lanes against the real `serveRelay()` broker + `mirror.apply`, which is why they are green.
+
+**What is OWED (at the @manual two-machine soak, task 03 — NOT a build-review blocker).** Before the live
+cross-machine terminal VIEW can actually carry a frame, ONE of two transport decisions must be made and wired,
+then proven at the soak: (a) start `relayMode()`/`serveRelay()` from the control launcher and point the worker's
+`createTerminalRelayPushTransport` + the fleet's `createTerminalMirrorSubscriberTransport` at
+`config.mesh.relay.url`; OR (b) PIVOT the bridge onto the already-live `control-stream-server.mjs` /
+`worker-stream-client.mjs` fabric transport (the m33/34-native path) as a new opaque frame kind, retiring the
+`mesh-relay` dependency for this feature. This is a Phase-2 / soak-owed transport-wiring decision that the
+@executable gate structurally cannot prove (a two-machine live relay is inherently `@manual`); it does not
+change any invariant above, and the shipped modules are the correct, contract-honouring building blocks for
+either choice.
+
+### AMENDMENT (2026-07-19, `aof:continue 38/06` closing BLOCKER F-38.06 — the transport is DECIDED as a HYBRID: the FABRIC carries the cross-machine leg, a LOOPBACK relay carries the same-machine control→UI leg. An earlier option-(a) draft was FALSIFIED at source before it shipped)
+
+**This amendment supersedes the (a)/(b) choice ADR-014 left open, and CORRECTS an option-(a) decision drafted
+earlier in this same continue that a source fact falsified before it shipped.** It changes NO ADR-014
+structural invariant 1-4 (read-only-in-fact, the frozen `{ kind, nodeId, signal }` envelope, the in-memory
+mirror, (nodeId, sessionId) routing all stand); it resolves only WHICH transport carries EACH leg, and it arms
+a fitness so the producer wiring is structurally REQUIRED (the F-38.05 lesson: a fitness that pins only the
+read-only half lets the feature ship inert).
+
+**Why NOT pure option (a) — the `serveRelay` LOOPBACK-BIND fact (verified at source this session).** `serveRelay`
+binds loopback ONLY: `src/mesh-relay.mjs:622` is `server.listen(port, "127.0.0.1", …)` (its own comment: "Bind
+loopback (the pre-auth posture, ADR-001)") and it reports `ws://127.0.0.1:<port>/…` (`:628`). There is NO
+fabric-address bind path and NO injectable `bindAddress` parameter on `serveRelay`. So a worker on another
+machine literally cannot reach the relay broker — it is unreachable off-host BY CONSTRUCTION. Meanwhile the
+LIVE fabric transport binds the fabric-resolved self-address ON PURPOSE (`control-stream-server.mjs:749`
+`server.listen(port, bindAddress, …)`, review-fixed to default loopback ONLY as a fallback and NEVER
+"0.0.0.0", `:764-766`). That asymmetry is deliberate — it is precisely why m33 moved the worker↔control
+transport ONTO the fabric. Consequence: **option (a) cannot carry a terminal frame between two machines — the
+entire SPEC objective of story 06.** (I searched for a tunnel/forward that would make the loopback relay
+reachable cross-machine — a fabric address in `config.mesh.relay.url` forwarded to loopback; there is none, and
+`serveRelay` has no bind parameter that could accept one. Option (a) is dead for the cross-machine leg. The
+draft (a) build also bound the broker to an EPHEMERAL port to dodge the live-mesh `:4182` fixture collision
+while the clients dial the fixed `config.mesh.relay.url` — a second reason it could not connect even
+same-machine.)
+
+**DECISION — a HYBRID: each transport used for the leg its BIND fits.**
+- **Cross-machine leg (worker → control): the FABRIC.** The worker relays its PTY bytes as a NEW opaque
+  `terminal-frame` kind UP its EXISTING `worker-stream-client` → `control-stream-server` connection — the ONLY
+  transport reachable off-host. The frame is the frozen `{ kind: "terminal-frame", nodeId, signal: { sessionId,
+  bytes } }` envelope (reusing `buildTerminalFrameEnvelope` / `TERMINAL_FRAME_KIND`), opaque to the fabric.
+  `control-stream-server` BRANCHES `terminal-frame` BEFORE `applyStreamFrame` and hands it to an injected
+  `onTerminalFrame` sink — it is NEVER store-applied, NEVER persisted (ADR-014 inv.3; `applyStreamFrame` gains
+  NO terminal-frame branch). Routing identity is the CONNECTION-bound nodeId (`meta.nodeId`), re-stamped
+  control-side, never the worker's self-declared `frame.nodeId` (the T6 discipline the credential path keeps).
+- **Same-machine leg (control → the SEPARATE `aof mesh ui` process): a LOOPBACK relay.** The control launcher
+  (same process as `control-stream-server`) runs `serveRelay` bound to the KNOWN loopback port named in
+  `config.mesh.relay.url`; `onTerminalFrame` PUSHES each fabric-received frame INTO that loopback broker
+  (control-side `createTerminalRelayPushTransport(config)`, a loopback client of its own broker). The SEPARATE
+  `aof mesh ui` process subscribes to the loopback broker via the UNCHANGED
+  `createTerminalMirrorSubscriberTransport(config)` + `startTerminalMirrorSubscriber` → `mirror.apply`.
+  **`serveRelay`'s loopback bind — which DISQUALIFIES it from the cross-machine leg — is exactly what QUALIFIES
+  it for this same-machine leg.**
+
+**Why this over pure (b).** Pure option (b) (terminal-frames on the fabric AND a bespoke new control→UI
+fan-out) is unnecessary: the fabric already carries the cross-machine leg, and the same-machine fan-out the
+split-process topology needs (graph fact: `mesh-ui-serve.mjs`'s dependencies → 6 do NOT include
+`control-stream-server.mjs`; there is no push channel between the two processes) is PRECISELY what `serveRelay`
+(a loopback broker) already is. So the hybrid reuses BOTH as-built mirror seams and adds no bespoke fan-out
+server — it is the minimal honest shape the two bind-addresses force.
+
+**Operational constraint (documented, not accidental).** The `aof mesh ui` fleet face subscribes over LOOPBACK,
+so it must run on the SAME machine as the control node's `aof mesh serve --serve` (mission-control lives on the
+control node). A cross-machine fleet UI is a Phase-2 concern (it would dial the control node's fabric address —
+another future), out of scope here, recorded so it cannot silently regress.
+
+**The frozen envelope survives BOTH legs (inv.2).** `{ kind, nodeId, signal }` rides the fabric (branched by
+`kind`; `signal` never parsed) and then the loopback relay (forwarded byte-for-byte; `signal` opaque)
+UNCHANGED end-to-end. The mirror (`mesh-terminal-mirror.mjs`) is transport-agnostic and does not change.
+
+**The exact production wiring (the developer builds this; the fitness `acd-terminal-stream-transport-wired`
+REQUIRES it). This REWORKS the earlier option-(a) draft — the fleet-consumer leg survives; the worker + control
+legs move.**
+- **Worker fabric send — `src/worker-stream-client.mjs` (NEW method).** Add `sendTerminalFrame(sessionId, bytes)`
+  (imports `buildTerminalFrameEnvelope` / `TERMINAL_FRAME_KIND` from `mesh-terminal-relay-bridge.mjs`), exported
+  on the client's returned object. BEST-EFFORT, fire-and-forget: send ONLY when already connected (`connected &&
+  handle != null`), swallow faults, and NEVER call `markDropped()`/`warn()` — a dropped terminal frame is a gap
+  in the LIVE view, never a correctness fault, and must not thrash the reconnect state on a high-frequency
+  stream (so it is NOT routed through `sendFrame`).
+- **Worker PRODUCER — `src/mesh-launcher.mjs`, worker branch, the `createHandler({...})` call site.** KEEP
+  `onOutputChunk` as a LITERAL key (the F12 / F-38.05 discipline), but re-point it from the loopback push to the
+  FABRIC send: `onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),`.
+  REMOVE the worker-side `terminalPush = createTerminalRelayPushTransport(config)` (the worker no longer pushes
+  to the loopback relay — it cannot reach it off-host). `sessionId` is the driver's `capturedSessionId`
+  (2nd arg); an early null-session frame is dropped downstream (inv.4).
+- **Control fabric→loopback bridge — `src/control-stream-server.mjs`.** Import `TERMINAL_FRAME_KIND`; in
+  `ws.on("message")`, BEFORE `applyStreamFrame`, branch `frame.kind === TERMINAL_FRAME_KIND` → call injected
+  `onTerminalFrame(frame, { nodeId: meta.nodeId })` (re-stamp the connection nodeId), then return WITHOUT a
+  store apply. Add `onTerminalFrame` to `startControlStreamServer`'s params (default a no-op). `applyStreamFrame`
+  is UNCHANGED — it gains NO terminal-frame kind, so a terminal frame can never be store-applied (inv.3).
+- **Control launcher — `src/mesh-launcher.mjs`, control branch.** Start the loopback broker on the KNOWN port:
+  `serveRelay`/`relayMode(config, { port: <the port parsed from config.mesh.relay.url> })` — NEVER an ephemeral
+  `port: 0`/`?? 0`. Construct the control-side loopback push `const controlTerminalPush =
+  createTerminalRelayPushTransport(config)`, and pass `onTerminalFrame: (frame) => controlTerminalPush?.push(frame)`
+  as a LITERAL key to the `startServer({...})` call. Options-gated (`options?.relay !== false`), clean-degrade on
+  bind fault; both disposed on `handle.stop()`. **Test isolation from the live-mesh `:4182` collision is via
+  `options.relay === false` (skip the bind) or an injected `serveRelay`/`relayMode`/`startServer` seam — NEVER
+  production code binding a random port to protect fixtures.**
+- **Fleet CONSUMER — `src/cli.mjs`, `meshUiCommand` (~1124). SURVIVES the earlier draft UNCHANGED.** Keep
+  `startTerminalRelaySubscriber: (mirror) => startTerminalMirrorSubscriber({ transport: createTerminalMirrorSubscriberTransport(config), mirror }),`
+  as a LITERAL key; `config` resolved best-effort via `loadWorkspace(projectDir)` (degrade to no-subscriber off
+  a mesh workspace). `config.mesh.relay.url` is now the LOOPBACK broker url on the control machine.
+- **Config keys (pre-existing; no new schema).** `config.mesh.relay.url` = the LOOPBACK broker url on the control
+  node (e.g. `ws://127.0.0.1:<knownPort>/ws/relay`), naming the KNOWN port `serveRelay` binds AND the loopback
+  port the fleet subscriber dials; `config.mesh.relay.controlNode` / `config.mesh.nodeId` gate the broker role.
+  The CROSS-machine leg needs NO relay config — it rides the fabric the worker already dials.
+
+**Structural invariants ADDED by this amendment (armed by `acd-terminal-stream-transport-wired`; ADR-014
+invariants 1-4 stay armed by `acd-fleet-terminal-mirror-read-only`, unweakened).**
+5. **The worker producer sends over the FABRIC.** `onOutputChunk` is a LITERAL key at the production
+   `createHandler({...})` call site AND the launcher references `client.sendTerminalFrame` (the fabric send) AND
+   `worker-stream-client.mjs` EXPOSES `sendTerminalFrame` — a revert to no-`onOutputChunk`, or a wiring to the
+   loopback-only `serveRelay` push instead of the fabric send, TRIPS CI.
+6. **The control node bridges fabric→loopback WITHOUT persisting, on a KNOWN port.** `control-stream-server.mjs`
+   branches `terminal-frame` to an `onTerminalFrame` sink; `applyStreamFrame` carries NO terminal-frame kind
+   (never a store apply — inv.3); the launcher passes `onTerminalFrame` at the `startServer({...})` call site,
+   starts a `serveRelay()`/`relayMode()` broker, and binds it to the port derived from `config.mesh.relay.url`
+   (NOT an ephemeral `?? 0`) — a missing branch, a persisted terminal-frame, an unwired sink, or an ephemeral
+   bind each TRIPS CI.
+7. **The fleet consumer subscribes over loopback.** `startTerminalRelaySubscriber` is a LITERAL key at the
+   production `serveMeshUi({...})` call site in `cli.mjs` AND the CLI references
+   `createTerminalMirrorSubscriberTransport` — a revert to `serveMeshUi({ projectDir, port, scope })` TRIPS CI.
+
+**Consequences.**
+- The terminal VIEW carries a frame on a REAL two-machine deploy: worker → (FABRIC) → `control-stream-server`
+  → (loopback relay) → fleet mirror; F-38.06 is closed at the transport that is actually reachable off-host.
+- The producer wiring is STRUCTURALLY required — a green suite can no longer coexist with an inert bridge (the
+  milestone's defining F4/F-38.05 class, closed at this seam).
+- inv.3 is HARDER: terminal-frames branch before the store apply and never persist; `applyStreamFrame` stays
+  store-only.
+- **Deferred to the task-03 `@manual` two-machine soak (un-fakeable):** the real cross-machine fabric leg
+  carrying PTY bytes, the loopback control→UI hop on a real control node, the T14 no-credential-on-screen
+  inspection, and reconnect/backpressure under a real high-frequency stream. The `@executable` lanes drive the
+  REAL `worker-stream-client` → REAL `control-stream-server` (asserting the frame reaches `onTerminalFrame` and
+  NEVER the store) and the REAL `serveRelay` loopback broker → REAL mirror in-process (producer-fed, never a
+  convenience fake).
+
+**Finding F-38.06b (structural-review ratification, 2026-07-19 — the `config.mesh.relay.url` double-duty
+footgun): RULED — force the relay dial to LOOPBACK.** As-built, `config.mesh.relay.url` does DOUBLE DUTY: its
+PORT + PATH drive the fabric control-stream endpoint (`configuredServicePort` / `configuredServiceUrlForAddress`,
+which SUBSTITUTE the peer's fabric host and IGNORE the url's own host), while the control-side push
+(`createTerminalRelayPushTransport`, `mesh-terminal-relay-bridge.mjs:114`) and the fleet subscriber
+(`createTerminalMirrorSubscriberTransport`, `mesh-terminal-mirror.mjs:210`) dial the RAW url host. Because
+`RELAY_PATH === DEFAULT_CONTROL_STREAM_PATH === "/ws/relay"` and both services share `servicePort`, the loopback
+relay broker binds `127.0.0.1:<servicePort>` while the control-stream binds `<fabric-ip>:<servicePort>`
+(coexisting). The hybrid connects end-to-end ONLY IF `relay.url` is LOOPBACK-hosted; an operator who sets it to
+the control node's FABRIC address silently points the relay push + fleet subscriber at the control-stream server
+(wrong protocol → the `{type:'joined'}` ack never arrives → both transports clean-degrade to NO frames, NO
+error surfaced). That silent-break-on-the-most-intuitive-value is the exact silent-inertness class this
+milestone exists to kill (F1/F4/F6/F-38.06). **Ruled (b), minimal hardening — APPLIED as built (FIX 2,
+2026-07-19):** the relay dial does NOT trust the url host — a shared `loopbackRelayUrl(config)`
+(`mesh-terminal-relay-bridge.mjs:43`) derives only the PORT + PATH from `config.mesh.relay.url` and FORCES the
+host to `127.0.0.1`; BOTH `createTerminalRelayPushTransport` (`:146`) and `createTerminalMirrorSubscriberTransport`
+(`mesh-terminal-mirror.mjs:215`) dial THAT, so the raw `config.mesh.relay.url` read is confined to the helper.
+Rationale: `serveRelay` binds loopback BY CONSTRUCTION and the fleet UI runs on the control node BY DESIGN (the
+Phase-2 note above), so there is NO legitimate non-loopback relay dial — the url's host is a config degree of
+freedom that can only ever be wrong for the relay leg; forcing loopback also makes the host component
+consistently ignored (matching `configuredServiceUrlForAddress`), resolving a latent inconsistency. No new
+config key, no schema change. **Pinned:** `acd-terminal-stream-transport-wired`'s F-38.06b clause asserts both
+factories dial `loopbackRelayUrl` and never the raw `config.mesh.relay.url` host — RED-if-reverted, so the
+footgun cannot silently return. **DESIGN/VERIFICATION requirement to document:** the fleet
+UI (`aof mesh ui`) runs on the control node, and `config.mesh.relay.url` is loopback-hosted
+(`ws://127.0.0.1:<servicePort>/ws/relay`, its port = the control service port); the cross-machine leg needs no
+relay config (it rides the fabric).
 
 ---
 
@@ -1158,6 +1478,30 @@ function, not a Gherkin scenario):
     `graphify-out/` stays gitignored + derived (rebuildable from the `.md`, m10/ADR-005); the syncback trigger
     re-ingests the control node's OWN checkout (`git pull` + `aof work memory ingest`), never fetches a peer's
     cache. Plant: an index payload on a mesh frame builder; a de-gitignored index; a remote-index fetch — each trips.
+
+**Added at the ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06` closing BLOCKER F-38.06 — the HYBRID
+transport: FABRIC cross-machine, LOOPBACK relay same-machine; a COMPANION to `acd-fleet-terminal-mirror-read-only`,
+which keeps the read-only / stateless half unweakened):**
+
+20. `acd-terminal-stream-transport-wired` (ADR-014 AMENDMENT 2026-07-19; invariants 5/6/7) — the terminal
+    bridge's PRODUCER is structurally wired for the HYBRID, so it cannot ship inert (the F-38.05 lesson at this
+    seam): (5) the worker branch supplies `onOutputChunk` as a LITERAL key at the production `createHandler({...})`
+    call site in `mesh-launcher.mjs` (never reachable only through the `workerExecutionOptions` test spread — the
+    F12 discipline) wired to `client.sendTerminalFrame` (the FABRIC send, NOT the loopback-only `serveRelay`
+    push), and `worker-stream-client.mjs` EXPOSES `sendTerminalFrame`; (6) `control-stream-server.mjs` branches
+    `terminal-frame` to an `onTerminalFrame` sink with `applyStreamFrame` carrying NO terminal-frame kind (never
+    persisted — inv.3), the launcher passes `onTerminalFrame` at the `startServer({...})` call site, starts a
+    `serveRelay()`/`relayMode()` broker, and binds it to the KNOWN port derived from `config.mesh.relay.url`
+    (never an ephemeral `?? 0`); (7) the `aof mesh ui` production `serveMeshUi({...})` call site in `cli.mjs`
+    supplies `startTerminalRelaySubscriber` (the loopback subscribe) as a LITERAL key and the CLI references
+    `createTerminalMirrorSubscriberTransport`. Plant (synthesized, non-vacuous, CRLF-safe): a `createHandler`
+    with no `onOutputChunk`; an `onOutputChunk` wired to a loopback push with no fabric `sendTerminalFrame`; a
+    control server with no `onTerminalFrame`; a `terminal-frame` branch INSIDE `applyStreamFrame` (would persist);
+    a broker bound to an ephemeral `?? 0` port; a `serveMeshUi({ projectDir, port, scope })` with no subscriber —
+    each trips; the correctly-wired hybrid shapes stay clean. **RED-until-wired BY DESIGN:** the fabric-send +
+    control-bridge real-source gates fail on the inert option-(a) tree that the F-38.06 draft shipped, and go
+    green only when the developer reworks to the hybrid; the fleet-consumer gate already passes (that leg
+    survives the rework); the synthesized self-check proves the detectors correct regardless of tree state.
 
 (ADR-006's `acd-worker-checkout-reuses-worktree` re-arms the m35 worktree-scope invariant; noted for completeness.
 The twelve armed above + the three ADR-010 SPEC entries (F5/F6/F7) + the six ADR-011–016 SPEC entries (all armed at

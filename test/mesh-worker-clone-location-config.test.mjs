@@ -14,6 +14,7 @@ import {
   createStatusRecorder,
   createRecordingCloneExec,
   scriptedPushExec,
+  scriptedSpawnRuntime,
 } from "./support/mesh-worker-clone-fixture.mjs";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { resolveWorkspaceCloneUrl } from "../src/mesh-presence.mjs";
@@ -198,6 +199,14 @@ export const meshWorkerCloneLocationConfigTests = [
         sendAssignmentStatus: status.sendAssignmentStatus,
         cloneExec: cloneExec.exec,
         globalWorkStoreOptions: { env },
+        // milestone 38 / story 05 (ADR-013) — this scenario's clone SUCCEEDS (a
+        // scripted-success cloneExec), so the handler proceeds past the repo guard
+        // into the REAL addWorktree + driver step; a scripted spawnRuntime here is
+        // required so this clone-resolution test never reaches the REAL interactive
+        // claude driver (which would spawn a genuine, un-terminating PTY session on
+        // any machine with `claude` on PATH — the SAME "@executable always injects a
+        // scripted spawnRuntime" discipline this suite already keeps everywhere else).
+        spawnRuntime: scriptedSpawnRuntime("done"),
       });
       await handler({ assignmentId: "asg-00-gap-a-fallback", itemRef, workspaceId });
 
@@ -229,6 +238,10 @@ export const meshWorkerCloneLocationConfigTests = [
         sendAssignmentStatus: status.sendAssignmentStatus,
         cloneExec: cloneExec.exec,
         globalWorkStoreOptions: { env },
+        // milestone 38 / story 05 (ADR-013) — SAME reasoning as the fallback scenario
+        // above: this clone also SUCCEEDS, so a scripted spawnRuntime is required to
+        // keep this test off the REAL interactive claude driver.
+        spawnRuntime: scriptedSpawnRuntime("done"),
       });
       await handler({ assignmentId: "asg-00-gap-a-local-wins", itemRef, workspaceId });
 

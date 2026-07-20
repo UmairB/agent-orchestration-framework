@@ -80,17 +80,59 @@
 // holder gates as the clone pull (T6 connection-bound node, F15 frame-workspace match,
 // F16 active-assignment). What remains for task 03's `@manual` soak is the real
 // two-machine GitHub push over that wire, not the wiring itself.
+//
+// MILESTONE 38 / STORY 05 (terminal-driven-worker-execution, ADR-013, tasks 00-03) —
+// `claude -p` is GONE from the worker driver path: the worker now runs interactive
+// `claude` in a node-pty PTY resolved through the EXISTING `terminal-providers` seam
+// (task 00), driven by the assignment directive's WHOLE command string typed into
+// that ONE long-lived session's PTY stdin as a single `pty.write` (task 01, never a
+// `-p` prompt argv). An explicit `NEEDS_INPUT_SENTINEL` observed in the session's own
+// PTY output yields a THIRD outcome, `needs-input` — distinct from, and never
+// re-mapped to, `done` — which RETAINS its worktree exactly as `failed` already does
+// (task 02, closing the RESEARCH §4.3 gap where a question-ended turn read as
+// `done`). The session's `session_id` (discarded before this story) is threaded onto
+// every `sendAssignmentStatus` call so a human can `claude --resume` it (task 03); a
+// run that never resolves one degrades to null, never a crash.
+//
+// ADR-013 AMENDMENT (F-38.05, 2026-07-19) — BOTH of task 02/03's original mechanisms
+// shipped their CONSUMER half with NO PRODUCER (a fitness function armed against the
+// as-built, producerless shape had locked that gap in green). Corrected here:
+// `session_id` is now resolved by a TRANSCRIPT-DIR WATCH (`defaultWatchTranscriptSessionId`
+// below, reusing `claudeProjectsDir` from `work-observe.mjs`) — a real `claude`
+// process, given `cwd = worktreeCwd`, writes its OWN transcript to
+// `<claudeProjectsDir>/<session_id>.jsonl` with zero model cooperation required; the
+// FIRST NEW `*.jsonl` basename to appear after spawn names the session, never a
+// phantom PTY marker nothing emitted. `NEEDS_INPUT` now has a real producer too: a
+// worker-scoped `--append-system-prompt NEEDS_INPUT_INSTRUCTION` on the interactive
+// launch (`resolveInteractiveDriverLaunch` below) — never a human-session `/ws/terminal`
+// concern, since that path never calls this launch resolver. See
+// `driveInteractiveClaudeSession`/`resolveInteractiveDriverLaunch` below — armed by
+// fitness `acd-worker-driver-no-headless-print`.
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { findWork, loadWorkspace } from "./work.mjs";
+// milestone 38 / story 05 (ADR-013 AMENDMENT, F-38.05) — `claudeProjectsDir` is the
+// EXISTING slug/projects-dir seam (work-observe.mjs, milestone observability): reused
+// VERBATIM (never re-implemented) so the session_id transcript-dir watch below
+// resolves EXACTLY the directory a real interactive `claude` session (cwd =
+// worktreeCwd) writes its own transcript into.
+import { claudeProjectsDir } from "./work-observe.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
 import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
 import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./mesh-presence.mjs";
+// milestone 38 / story 05 (ADR-013) — the interactive-`claude`-PTY driver reuses the
+// EXISTING terminal infrastructure verbatim: `resolveProvider` is the SAME seam
+// `/ws/terminal` resolves its own launch through (terminal-providers.mjs), and
+// `createTerminalSpawn(loadNodePty)` is the SAME node-pty factory `terminal-ws.mjs`
+// spawns through (its own SEA-vs-dev loader branch) — never a second, hand-rolled
+// spawn path or a re-implemented provider table.
+import { resolveProvider } from "./terminal-providers.mjs";
+import { createTerminalSpawn, loadNodePty } from "./terminal-ws.mjs";
 
 function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -637,10 +679,16 @@ export async function cloneRepoForWorkspace(ws, { workspaceId, nodeId, assignmen
 
 // ------------------------------------------------------- the headless driver ----
 
-// The documented default driver (RESEARCH.md §2/§3, STORY.md build notes): `claude -p
-// --output-format json`, spawned with cwd = the worktree path, for ONE non-interactive
-// turn. DRIVER-PLUGGABLE — `options.driver` names an alternate ("codex") the caller
-// resolves via buildDriverCommand.
+// buildDriverCommand(driver, brief) — RETIRED for `claude` (milestone 38 / story 05,
+// ADR-013): the interactive PTY path below (resolveInteractiveDriverLaunch /
+// driveInteractiveClaudeSession) replaces the old `claude -p <prompt>
+// --output-format json` one-shot entirely — `defaultSpawnRuntime` below never calls
+// this function for the `claude` driver any more. `codex` keeps its OWN pre-existing
+// headless-print form UNCHANGED (ADR-013 is scoped to `claude`; codex was never the
+// §4.3 problem — it never had a subscription-billing / human-in-the-loop story to
+// begin with, and no task in this story touches it). Any OTHER driver name resolves
+// to `null` — a caller must route it through the interactive path or fail closed,
+// never silently fall back to a headless print form for `claude`.
 export function buildDriverCommand(driver, brief) {
   const prompt = `Drive work item ${brief.itemRef} to a terminal state (done or failed) in this worktree. ${brief.task ?? ""}`.trim();
   if (driver === "codex") {
@@ -649,36 +697,391 @@ export function buildDriverCommand(driver, brief) {
       args: ["exec", "--json", "-o", "last-message.txt", "--sandbox", "workspace-write", "--ask-for-approval", "never", prompt],
     };
   }
-  return { bin: "claude", args: ["-p", prompt, "--output-format", "json"] };
+  return null;
 }
 
-// defaultSpawnRuntime(brief, options) — the PRODUCTION runtime-spawn default: a real
-// child process, cwd = brief.worktreeCwd. THE INVARIANT: the returned promise
-// resolves ONLY once the child has FULLY EXITED (execFile's callback fires on
-// process exit, never merely on stdout drain) — the sequencing task 03's
-// cleanup-after-terminal safety depends on. Never exercised by @executable coverage
-// (every test injects a scripted spawnRuntime); real only at the task-05 @manual soak.
+// ============================================================================
+// MILESTONE 38 / STORY 05 — terminal-driven-worker-execution (ADR-013, tasks 00-03)
+// ============================================================================
+//
+// `claude -p` is GONE from the worker driver path (RESEARCH §4.3 MEASURED: it cannot
+// pause to ask a human — a question-ended turn reports `terminal_reason: "completed"`,
+// indistinguishable from real completion; the Agent SDK path that COULD ask forces
+// off-subscription per-token billing). The worker now runs interactive `claude` in a
+// node-pty PTY, resolved through the EXISTING `terminal-providers` seam
+// (`resolveProvider("claude")` — the SAME empty-args interactive launch
+// `terminal-ws.mjs`'s `/ws/terminal` route uses, terminal-providers.mjs:23) and
+// spawned via the SAME node-pty factory (`createTerminalSpawn(loadNodePty)`,
+// terminal-ws.mjs) — never a hand-rolled second spawn path. cwd = the worktree
+// (task 00).
+//
+// THE WHOLE DIRECTIVE COMMAND STRING (`/aof:refine <ref> --autonomous`,
+// `/aof:continue`, `/aof:verify <ref>`) is typed into that ONE session's PTY stdin as
+// a SINGLE newline-terminated `pty.write` — never baked into the spawn argv as a `-p`
+// prompt (task 01). ONE long-lived interactive session per assignment:
+// driveInteractiveClaudeSession spawns exactly once and resolves exactly once, for
+// the assignment's whole run — never re-spawned to deliver a second command line.
+//
+// TERMINAL-STATE DETECTION reads the PTY's OWN output stream (there is no `-p` JSON
+// result to parse). An explicit NEEDS_INPUT_SENTINEL (task 02) observed in the
+// accumulated output resolves a THIRD outcome, `needs-input` — distinct from, and
+// NEVER re-mapped to, `done` (closing the exact §4.3 gap where a question-ended
+// `completed` turn read as `done`). Absent that sentinel, the outcome is read off the
+// PTY's own process exit: a clean (0) exit is `done`, anything else is `failed`.
+//
+// SESSION_ID capture — ADR-013 AMENDMENT (F-38.05, 2026-07-19). The ORIGINAL task-03
+// design asked the driven session to print a documented `AOF_SESSION_ID:` marker line
+// onto its own PTY output — but nothing ever instructed a real `claude` to emit it, so
+// `session_id` was ALWAYS null in production (a consumer with no producer). CORRECTED:
+// a TRANSCRIPT-DIR WATCH requiring ZERO model cooperation. A real interactive `claude`
+// process, spawned with `cwd = worktreeCwd`, writes its OWN transcript to
+// `<claudeProjectsDir({ cwd: worktreeCwd })>/<session_id>.jsonl` (measured live at the
+// F-38.05 verify pass) — Claude Code itself is the producer, not the model. The worker
+// snapshots that directory's existing `*.jsonl` basenames BEFORE the session can write
+// one (the directory may not yet exist — treated as an empty snapshot, never a throw),
+// then watches for the FIRST NEW `*.jsonl` basename to appear; that basename, minus its
+// extension, NAMES the session (`defaultWatchTranscriptSessionId` below). The watch is
+// abort-aware (a caller aborts it once this invocation's own outcome is known — see
+// `driveInteractiveClaudeSession`'s `finish` below) and bounded by a max wait, so a
+// transcript that never appears degrades to a null sessionId, never a crash, never an
+// unbounded loop (task 03's Examples, unchanged).
+//
+// NEEDS_INPUT producer — ADR-013 AMENDMENT (F-38.05). The original task-02 design typed
+// only `brief.command` into the PTY, with no instruction that would make a real
+// `claude` ever emit the sentinel — the SAME producerless gap. CORRECTED: a
+// worker-scoped `--append-system-prompt NEEDS_INPUT_INSTRUCTION` on the interactive
+// launch (`resolveInteractiveDriverLaunch` below) instructs an autonomous, human-absent
+// session to emit the sentinel on a genuine judgment call rather than guess. This is
+// worker-only by construction — the human `/ws/terminal` route (terminal-ws.mjs) calls
+// `resolveProvider` directly and never calls `resolveInteractiveDriverLaunch`, so it can
+// never false-fire on a human session. `containsNeedsInputSentinel`'s DETECTION below
+// is UNCHANGED — this amendment adds the missing PRODUCER, not a new detector.
+export const NEEDS_INPUT_SENTINEL = "NEEDS_INPUT";
+
+// NEEDS_INPUT_INSTRUCTION — the producer text (ADR-013 amendment, option C). Embeds
+// NEEDS_INPUT_SENTINEL via a template interpolation so the producer and
+// `containsNeedsInputSentinel`'s detector always share the ONE literal. NOTE: this
+// template's body must contain no `//` and no `/*` sequence — the
+// `acd-worker-driver-no-headless-print` fitness function strips JS comments out of the
+// whole source file before scanning it, and either sequence inside this string would
+// be stripped right along with real comments, corrupting both the instruction and (for
+// an unbalanced `/*`) everything textually after it.
+export const NEEDS_INPUT_INSTRUCTION = `You are running autonomously on a worker machine with no human present to answer
+questions in real time. If you reach a genuine judgment call you cannot safely
+resolve on your own — one where guessing risks doing the wrong thing and a human would
+need to weigh in — do not guess and do not stall silently. Instead, print the exact
+line ${NEEDS_INPUT_SENTINEL} on its own line, with nothing else on that line, then
+stop. Only use this for a real, blocking judgment call; keep working through every
+task you can complete confidently without it.`;
+
+// defaultWatchTranscriptSessionId({ cwd, env, signal, maxWaitMs }) => Promise<string|null>
+// — the REAL production transcript-dir watch (ADR-013 amendment). Registers its
+// `signal`-abort listener SYNCHRONOUSLY, before any async fs call ever runs, so a
+// caller that aborts immediately after kicking this off (the common case: the driven
+// session already exited before any transcript ever appeared) is guaranteed to resolve
+// promptly — never stalls out to `maxWaitMs` waiting on a poll tick that was already
+// moot. NEVER throws (every fs fault degrades to "nothing new this tick", never a
+// rejection) and NEVER loops forever (bounded by `maxWaitMs`, in addition to the
+// abort-signal short-circuit). `maxWaitMs` is an OPTIONAL override (default the
+// production constant below) — it exists purely so a hermetic, real-fs test can prove
+// the deadline-degrade path fast, without waiting out the real 10-minute production
+// bound; production callers never pass it.
+const WATCH_TRANSCRIPT_POLL_MS = 200;
+const WATCH_TRANSCRIPT_MAX_WAIT_MS = 10 * 60 * 1000;
+
+export async function defaultWatchTranscriptSessionId({ cwd, env, signal, maxWaitMs = WATCH_TRANSCRIPT_MAX_WAIT_MS } = {}) {
+  const dir = claudeProjectsDir({ cwd, env });
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    // `existing` stays null until the FIRST readdir tick completes (successfully or
+    // not) — that tick's result (or an empty set, on a not-yet-existing directory) IS
+    // the "before the session writes one" snapshot; only a `*.jsonl` basename seen on
+    // a LATER tick that was absent from this snapshot counts as "new".
+    let existing = null;
+
+    const onAbort = () => finish(null);
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      if (timer != null) clearTimeout(timer);
+      try { signal?.removeEventListener?.("abort", onAbort); } catch { /* non-EventTarget signal double */ }
+      resolve(value);
+    }
+
+    // Registered BEFORE any await/async fs call below — an abort fired the instant
+    // after this function is called (e.g. a session that exits before the first poll
+    // tick even runs) is never missed.
+    if (signal?.aborted) {
+      finish(null);
+      return;
+    }
+    try { signal?.addEventListener?.("abort", onAbort); } catch { /* non-EventTarget signal */ }
+
+    const deadline = Date.now() + maxWaitMs;
+
+    const poll = () => {
+      if (settled) return;
+      readdir(dir)
+        .then((names) => names.filter((name) => name.endsWith(".jsonl")))
+        .catch(() => [] /* dir absent or unreadable — nothing new this tick, never a throw */)
+        .then((jsonlNames) => {
+          if (settled) return;
+          if (existing == null) {
+            existing = new Set(jsonlNames);
+          } else {
+            const fresh = jsonlNames.find((name) => !existing.has(name));
+            if (fresh != null) {
+              finish(fresh.slice(0, -".jsonl".length));
+              return;
+            }
+          }
+          if (Date.now() > deadline) {
+            finish(null);
+            return;
+          }
+          timer = setTimeout(poll, WATCH_TRANSCRIPT_POLL_MS);
+        });
+    };
+    poll();
+  });
+}
+
+// review fix (m38/05, confirmed defect #1): the ORIGINAL `buffer.includes(...)` was
+// an UNANCHORED substring match — a clean run whose output merely NARRATES the word
+// "NEEDS_INPUT" inside a longer line (or a longer token like "NEEDS_INPUTS") false-
+// fired, killing a healthy live PTY (:841-844) and mis-reporting a needs-input
+// outcome for what was actually a `done` run. The sentinel is now matched ONLY as a
+// COMPLETE line — the accumulated buffer's own terminated lines (everything except
+// the LAST element of the `\n` split, which is the still-in-flight, not-yet-
+// terminated partial line) trimmed and compared for EQUALITY against
+// NEEDS_INPUT_SENTINEL — mirroring the sentinel's own documented "one line" shape.
+// A sentinel split across two onData chunks (e.g. "NEEDS_I" + "NPUT\n") is still
+// detected exactly once, the moment the newline actually completes the line;
+// "NEEDS_INPUTS" (or "...says NEEDS_INPUT to the user...") never matches, since
+// neither trims down to an exact "NEEDS_INPUT" line.
+function containsNeedsInputSentinel(buffer) {
+  const lines = buffer.split("\n");
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (lines[i].trim() === NEEDS_INPUT_SENTINEL) return true;
+  }
+  return false;
+}
+
+// defaultPtySpawn — the REAL production PTY factory: EXACTLY the seam
+// terminal-ws.mjs's own `/ws/terminal` route spawns through (createTerminalSpawn +
+// loadNodePty), imported rather than re-implemented, so a real run resolves node-pty
+// through the ONE existing loader (the SEA-vs-dev branch terminal-ws.mjs already
+// owns) — never a second, drifting spawn path. node-pty itself is loaded lazily
+// INSIDE loadNodePty (never at this module's own top-level import), so importing
+// mesh-worker-execution.mjs never requires the native addon either.
+const defaultPtySpawn = createTerminalSpawn(loadNodePty);
+
+// resolveInteractiveDriverLaunch(driver, options) — task 00's seam: resolves the
+// interactive launch EXCLUSIVELY through terminal-providers.mjs's `resolveProvider`
+// (`buildArgs()` — the empty-args interactive form; `buildEnv()`), never a hand-built
+// argv. Returns null (never throws) on an unknown provider id or an unresolvable
+// binary — the caller turns that into a coded `failed` outcome, the SAME
+// honest-degrade discipline terminal-ws.mjs's own provider gate keeps.
+//
+// ADR-013 AMENDMENT (F-38.05, option C) — the interactive launch APPENDS a
+// worker-scoped `--append-system-prompt NEEDS_INPUT_INSTRUCTION`: this is the
+// NEEDS_INPUT sentinel's real producer. Worker-only by construction — the human
+// `/ws/terminal` route (terminal-ws.mjs) calls `resolveProvider` directly and never
+// calls this function, so a human session's system prompt is never touched.
+export function resolveInteractiveDriverLaunch(driver, options = {}) {
+  const providerId = typeof driver === "string" && driver.length > 0 ? driver : "claude";
+  const provider = resolveProvider(providerId, options.which);
+  if (!provider) return null;
+  const env = options.env ?? process.env;
+  const bin = provider.resolveBinaryPath(env);
+  if (bin === null) return null;
+  const args = [...provider.buildArgs(), "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];
+  const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
+  return { bin, args, env: sessionEnv, providerId };
+}
+
+// driveInteractiveClaudeSession(brief, options) — the ADR-013 driver: ONE long-lived
+// interactive session for `brief`'s whole run. `brief` carries { itemRef,
+// worktreeCwd, task, command } — `command` is the directive's WHOLE command string
+// (task 01, typed as ONE `pty.write`); `worktreeCwd` is the PTY's cwd.
+// `options.ptySpawn` is the INJECTED spawn seam (default `defaultPtySpawn`, the REAL
+// node-pty factory above); `options.which` is the INJECTED provider-binary-
+// resolution seam (default real PATH lookup, the SAME terminal-providers.mjs
+// default); `options.watchTranscriptSessionId` is the INJECTED transcript-dir-watch
+// seam (ADR-013 amendment; default `defaultWatchTranscriptSessionId` above). Resolves
+// `{ outcome: "done"|"failed"|"needs-input", sessionId, failureReason? }` — NEVER
+// throws (an unresolvable provider/binary or a spawn fault is a coded `failed`
+// outcome, matching the OLD defaultSpawnRuntime's own never-throw contract).
+export async function driveInteractiveClaudeSession(brief, options = {}) {
+  const ptySpawn = options.ptySpawn ?? defaultPtySpawn;
+  const watchTranscriptSessionId = options.watchTranscriptSessionId ?? defaultWatchTranscriptSessionId;
+  const launch = resolveInteractiveDriverLaunch(options.driver, options);
+  if (launch == null) {
+    return { outcome: "failed", failureReason: "agent_error", sessionId: null };
+  }
+
+  let term;
+  try {
+    term = await ptySpawn(launch.bin, launch.args, {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd: brief.worktreeCwd,
+      env: launch.env,
+    });
+  } catch {
+    return { outcome: "failed", failureReason: "agent_error", sessionId: null };
+  }
+
+  // ADR-013 AMENDMENT — the transcript-dir watch is kicked off ALONGSIDE the spawned
+  // session (never awaited here: the watch and the driven session run concurrently).
+  // `watchController` lets `finish` below stop the watch the moment THIS invocation's
+  // own outcome is known — a session that exits (or hits the sentinel) before any
+  // transcript ever appears must not leave the watch polling past the point anyone
+  // still cares. `watchPromise` NEVER rejects (the seam's own never-throw contract,
+  // re-guarded here too) — it resolves the watch's own `string|null` result and, on a
+  // non-null resolution, also updates `capturedSessionId` so the story-06
+  // `onOutputChunk(chunk, capturedSessionId)` bridge below carries the id on any
+  // LATER chunk (mirroring the pre-amendment mid-stream-capture behaviour, now sourced
+  // from the watch instead of a PTY marker).
+  const watchController = new AbortController();
+  let capturedSessionId = null;
+  // The seam CALL ITSELF is guarded, not just its returned promise — an injected test
+  // double (or a future producer) that throws SYNCHRONOUSLY rather than returning a
+  // rejected promise must never crash this function; `Promise.resolve(...)` alone
+  // cannot help against a throw that happens before a promise even exists.
+  let watchCallResult;
+  try {
+    watchCallResult = watchTranscriptSessionId({ cwd: brief.worktreeCwd, env: launch.env ?? process.env, signal: watchController.signal });
+  } catch {
+    watchCallResult = null;
+  }
+  const watchPromise = Promise.resolve(watchCallResult)
+    .then((resolved) => {
+      if (typeof resolved === "string" && resolved.length > 0) capturedSessionId = resolved;
+      return resolved ?? null;
+    })
+    .catch(() => null);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let buffer = "";
+    let dataSub = null;
+    let exitSub = null;
+
+    const cleanupSubs = () => {
+      try { dataSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
+      try { exitSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
+    };
+
+    // finish(result) — settles this invocation EXACTLY once. Aborts the transcript
+    // watch (it has nothing left to serve once the outcome is known) and threads the
+    // AWAITED, null-degraded session id onto the resolved object: `capturedSessionId`
+    // if the watch already resolved one, otherwise whatever the (now-aborting) watch
+    // promise itself settles to — deterministic, never race-dependent on which of
+    // "the session ended" vs "the watch found a transcript" happened to win first.
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanupSubs();
+      watchController.abort();
+      (async () => {
+        let sessionId = capturedSessionId;
+        if (sessionId == null) {
+          try {
+            sessionId = await watchPromise;
+          } catch {
+            sessionId = null;
+          }
+        }
+        resolve({ ...result, sessionId });
+      })();
+    };
+
+    dataSub = term.onData?.((chunk) => {
+      buffer += String(chunk);
+      // milestone 38 / story 06 (ADR-014) — the cross-machine terminal BRIDGE's
+      // ONLY hook into this driver: an OPTIONAL, ADDITIVE `options.onOutputChunk`
+      // called with EXACTLY the raw chunk `term.onData` itself just emitted, plus
+      // whatever sessionId has been captured so far (possibly still null on an
+      // early chunk — ADR-014 invariant 4: an unresolvable frame is dropped
+      // downstream, never delivered to the wrong card). This is the SAME "the
+      // signal is sourced ONLY from term.onData" discipline SECURITY T14 pins —
+      // no credential env, no askpass file, no mint reply is ever read here.
+      // Absent by default (every pre-story-06 caller stays byte-identical).
+      try {
+        options.onOutputChunk?.(chunk, capturedSessionId);
+      } catch {
+        // a bridge fault must never crash/backpressure the driven session itself.
+      }
+      // task 02 — the NEEDS_INPUT sentinel yields the THIRD outcome BEFORE any exit
+      // is ever observed: a "turn end" is not a process exit, so this driver must
+      // detect it from the OUTPUT stream, never wait on onExit for it. Once detected,
+      // THIS invocation's job is done — kill the PTY (a human resumes via a FRESH
+      // `claude --resume <session_id>` later; RESEARCH §4.3 measured that resume
+      // attaches a NEW process to the SAME persisted conversation, never reattaches
+      // to a still-running one) and resolve `needs-input`, never `done`.
+      if (containsNeedsInputSentinel(buffer)) {
+        try { term.kill(); } catch { /* already-exited guard (win32) */ }
+        finish({ outcome: "needs-input" });
+      }
+    }) ?? null;
+
+    exitSub = term.onExit?.(({ exitCode }) => {
+      finish(exitCode === 0 ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
+    }) ?? null;
+
+    // task 01 — the directive's WHOLE command string, typed as ONE newline-
+    // terminated pty.write into THIS ONE session — never a `-p` prompt argv.
+    const command = typeof brief.command === "string" ? brief.command : null;
+    if (command != null && command.length > 0) {
+      try {
+        term.write(`${command}\n`);
+      } catch {
+        // an already-exited PTY write races nothing observable here — onExit above
+        // still resolves the outcome for a process that died before the write landed.
+      }
+    }
+  });
+}
+
+// defaultSpawnRuntime(brief, options) — the PRODUCTION runtime-spawn default.
+// `codex` keeps its UNCHANGED headless one-shot child-process form (a real child,
+// cwd = brief.worktreeCwd; the returned promise resolves only once that child has
+// FULLY EXITED — execFile's callback fires on process exit, never merely on stdout
+// drain, the invariant task 03/milestone-35 cleanup-after-terminal safety depends
+// on). Every OTHER driver (`claude`, the default) routes through
+// driveInteractiveClaudeSession above — the ADR-013 interactive PTY path, which
+// resolves under the SAME "child fully exited or a detected NEEDS_INPUT sentinel
+// before any cleanup runs" discipline. Never exercised against a REAL binary by
+// `@executable` coverage (every test injects a scripted `spawnRuntime`, or — for
+// tasks 00-03's OWN driver-level coverage — a scripted `ptySpawn`/`which`); real
+// only at the task-04 @manual soak.
 export function defaultSpawnRuntime(brief, options = {}) {
   const driver = options.driver ?? "claude";
-  const { bin, args } = buildDriverCommand(driver, brief);
-  return new Promise((resolve) => {
-    execFile(bin, args, { cwd: brief.worktreeCwd, windowsHide: true, timeout: options.timeoutMs ?? 10 * 60 * 1000 }, (error, stdout) => {
-      // A non-zero exit or a spawn fault is a `failed` outcome (never an unhandled
-      // rejection out of this seam) — the caller completes the run accordingly.
-      if (error) {
-        resolve({ outcome: "failed", failureReason: "agent_error" });
-        return;
-      }
-      try {
-        const parsed = JSON.parse(String(stdout ?? ""));
-        const terminal = parsed.terminal_reason ?? parsed.stop_reason ?? null;
-        const ok = terminal === "completed" || terminal === "end_turn";
-        resolve(ok ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
-      } catch {
-        resolve({ outcome: "failed", failureReason: "agent_error" });
-      }
+  if (driver === "codex") {
+    const { bin, args } = buildDriverCommand(driver, brief);
+    return new Promise((resolve) => {
+      execFile(bin, args, { cwd: brief.worktreeCwd, windowsHide: true, timeout: options.timeoutMs ?? 10 * 60 * 1000 }, (error, stdout) => {
+        // A non-zero exit or a spawn fault is a `failed` outcome (never an unhandled
+        // rejection out of this seam) — the caller completes the run accordingly.
+        if (error) {
+          resolve({ outcome: "failed", failureReason: "agent_error" });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(String(stdout ?? ""));
+          const terminal = parsed.terminal_reason ?? parsed.stop_reason ?? null;
+          const ok = terminal === "completed" || terminal === "end_turn";
+          resolve(ok ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
+        } catch {
+          resolve({ outcome: "failed", failureReason: "agent_error" });
+        }
+      });
     });
-  });
+  }
+  return driveInteractiveClaudeSession(brief, options);
 }
 
 // ------------------------------------------------------- the orchestration ----
@@ -783,6 +1186,25 @@ function logAssignmentFailure(assignmentId, code, detail) {
 //                                      none makes no resolution attempt (an
 //                                      unauthenticated push, exactly the clone path's
 //                                      own no-resolver default).
+//   ptySpawn(bin, args, opts)       — milestone 38 story 05 (ADR-013): the INJECTED
+//                                      node-pty spawn seam forwarded straight through
+//                                      to spawnRuntime's OWN options (default absent,
+//                                      so driveInteractiveClaudeSession falls to ITS
+//                                      OWN default — the real
+//                                      createTerminalSpawn(loadNodePty) factory,
+//                                      EXACTLY the seam terminal-ws.mjs's `/ws/terminal`
+//                                      spawns through). `@executable` coverage ALWAYS
+//                                      injects a scripted ptySpawn (no real node-pty,
+//                                      no real `claude`) — real only at the task-04
+//                                      @manual soak.
+//   which(bin, env)                 — story 05's INJECTED provider-binary-resolution
+//                                      seam, forwarded straight through to
+//                                      spawnRuntime's options (default absent, so
+//                                      resolveInteractiveDriverLaunch falls to
+//                                      terminal-providers.mjs's OWN real-PATH default).
+//                                      `@executable` coverage injects a stubbed-
+//                                      present/absent binary, mirroring
+//                                      terminal-ws.mjs's OWN `which` injection idiom.
 //
 // Returns a handler `(directive) => Promise<void>` — never throws (a fault inside the
 // handler streams a `failed` frame rather than crashing the worker's stream loop; the
@@ -803,6 +1225,37 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     cloneExec,
     pushExec,
     requestWriteCredential,
+    // milestone 38 / story 05 (ADR-013) — forwarded VERBATIM into spawnRuntime's own
+    // options object (below) so a test can drive the REAL defaultSpawnRuntime /
+    // driveInteractiveClaudeSession through this ONE handler entry point (the SAME
+    // "test through the real production seam, only the leaf spawn/PATH-lookup is
+    // faked" discipline every other collaborator here keeps).
+    ptySpawn,
+    which,
+    // milestone 38 / story 05 (ADR-013 AMENDMENT, F-38.05) — the session_id
+    // transcript-dir-watch seam, forwarded VERBATIM into spawnRuntime's own options
+    // object (below) beside ptySpawn/which — the SAME single handler entry point a
+    // test injects a fake watch through, no second injection surface.
+    watchTranscriptSessionId,
+    // milestone 38 / story 06 (ADR-014, AMENDMENT 2026-07-19 — the HYBRID transport,
+    // closing BLOCKER F-38.06) — the cross-machine terminal BRIDGE hook, forwarded
+    // VERBATIM into spawnRuntime's own options object (below), exactly like
+    // ptySpawn/which above: an OPTIONAL `(chunk, sessionId) => void` called for EVERY
+    // PTY output chunk driveInteractiveClaudeSession observes (:1002-1017). Absent by
+    // default — every pre-story-06 caller (every existing test, and a caller that
+    // passes `workerExecution` options with no onOutputChunk) is byte-identical.
+    //
+    // AS-BUILT WIRING (the F-38.05/F-38.06 amendment resolved the open transport
+    // question): mesh-launcher.mjs's worker branch NOW wires this as a LITERAL key at
+    // the production createHandler call site to `client.sendTerminalFrame(sessionId,
+    // String(chunk))` (mesh-launcher.mjs:846) — the CROSS-MACHINE leg rides the FABRIC
+    // (worker-stream-client -> control-stream-server), the ONLY off-host-reachable
+    // transport (serveRelay binds loopback only, so the worker CANNOT push straight to
+    // the relay broker). control-stream-server branches the terminal-frame to its
+    // onTerminalFrame sink and the CONTROL launcher fans it into a loopback relay for
+    // the same-machine fleet-UI process. `createTerminalRelayPushTransport` is now
+    // CONTROL-SIDE ONLY (the loopback push into that relay), never the worker's leg.
+    onOutputChunk,
     // resolveWorkspaceCloneUrl — INJECTED (the same idiom as every other
     // collaborator here), default the real mesh-presence.mjs seam. Reads the
     // WORKER's OWN local registry — kept as a last-resort, defense-in-depth check
@@ -838,6 +1291,13 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     const assignmentId = directive?.assignmentId;
     const itemRef = directive?.itemRef;
     const workspaceId = directive?.workspaceId;
+    // milestone 38 / story 05 (ADR-013 invariant 2) — the directive's WHOLE command
+    // string, a first-class field on the wire frame (buildDirectiveFrame,
+    // control-stream-server.mjs), read here and threaded down to spawnRuntime's
+    // `brief.command` below — the ONLY place this handler ever reads it. A directive
+    // carrying no command (or a blank one) degrades to null, never a crash — the
+    // interactive session below is still spawned, simply with nothing typed into it.
+    const directiveCommand = typeof directive?.command === "string" && directive.command.length > 0 ? directive.command : null;
     if (typeof assignmentId !== "string" || assignmentId.length === 0) return;
     if (seenAssignmentIds.has(assignmentId)) return; // duplicate directive — already held/acted on, ignore
     seenAssignmentIds.add(assignmentId);
@@ -987,14 +1447,44 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // runId is this run's id (the ADR-004 link the frame carries).
       await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId });
 
-      // Drive the ref to a terminal state via the BOUNDED headless runtime (the
-      // INJECTED spawn seam). THE INVARIANT: spawnRuntime resolves only after the
-      // child has fully exited — cleanup below never races a live child whose cwd is
-      // inside the worktree.
+      // Drive the ref to a terminal state via the driver (the INJECTED spawn seam) —
+      // milestone 38 / story 05, ADR-013: the directive's WHOLE command string
+      // (`brief.command`) is what the interactive session types into its own PTY
+      // stdin (never a `-p` prompt argv). THE INVARIANT (unchanged from the old
+      // headless driver): spawnRuntime resolves only after the session has reached a
+      // terminal-FOR-THIS-INVOCATION state (fully exited, OR a detected NEEDS_INPUT
+      // sentinel that this invocation deliberately ends on) — cleanup below never
+      // races a live child whose cwd is inside the worktree.
       const outcome = await spawnRuntime(
-        { itemRef, worktreeCwd: worktreePath, task: item?.title ?? itemRef },
-        { driver },
+        { itemRef, worktreeCwd: worktreePath, task: item?.title ?? itemRef, command: directiveCommand },
+        { driver, ptySpawn, which, onOutputChunk, watchTranscriptSessionId },
       );
+      // task 03 (ADR-013 amendment) — the session_id the driver resolved via its
+      // transcript-dir watch (`defaultWatchTranscriptSessionId`, never a PTY-output
+      // marker). A run whose transcript never appears (or whose watch was aborted
+      // before one did) degrades to null here, never a crash.
+      const sessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
+
+      // task 02 (ADR-013 invariant 4) — a `needs-input` outcome branches out BEFORE
+      // completeRun is ever called: run-store's OWN closed transition table (19/
+      // ADR-001) legalizes only running->done/failed/cancelled — there is no
+      // running->needs-input edge, and there should not be one: the underlying run
+      // genuinely IS still running (paused pending a human), so forcing a run-store
+      // transition here would misrepresent that. The worktree takes the SAME
+      // retain branch `failed` already does (never `removeWorktree(..., {force:true})`
+      // — that call site is reached ONLY from the `done` branch below). The
+      // assignment-status frame stays within the ALREADY-legal "running" state (a
+      // literal "needs-input" string is not in assignment-record.mjs's OWN closed
+      // ASSIGNMENT_STATE_PRODUCERS enum — sending it as `state` would risk a
+      // control-side assignment-state-invalid throw on a real deployment); the
+      // sentinel instead rides the frame's OPTIONAL `code` key (mirroring the
+      // failure-code pattern every other frame in this system already uses),
+      // alongside the captured sessionId so a human can `claude --resume` it.
+      if (outcome.outcome === "needs-input") {
+        await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId, code: "needs-input" });
+        onCleanup(assignmentId, "needs-input", worktreePath);
+        return;
+      }
 
       const completed = await completeRun(item, {
         runId: runRecord.runId,
@@ -1030,17 +1520,17 @@ export function createMeshWorkerExecutionHandler(options = {}) {
             writeCredential = typeof resolved === "string" && resolved.length > 0 ? resolved : null;
           }
           await pushWorktreeBranch(ws.projectRoot, worktreePath, branch, { credential: writeCredential, pushExec });
-          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId });
+          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId });
           await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
           onCleanup(assignmentId, "done", worktreePath);
         } catch (pushError) {
           const code = pushError?.code ?? "push-failed";
           logAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
-          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code });
+          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
           onCleanup(assignmentId, "failed", worktreePath);
         }
       } else {
-        await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId });
+        await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId, sessionId });
         onCleanup(assignmentId, "failed", worktreePath);
       }
     } catch (error) {

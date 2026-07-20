@@ -68,6 +68,16 @@ import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-
 // global-work-store/global-node-registry module is imported (ADR-012 inv.2/4).
 import { loadWorkspace } from "./work.mjs";
 import { assignWork } from "./commands/mesh-assign.mjs";
+// milestone 38 / story 06 (ADR-014) — the fleet face's SECOND carve-out: a
+// READ-ONLY terminal-VIEW upgrade route, `GET /ws/terminal-view?nodeId=&sessionId=`.
+// `WebSocketServer` (noServer) mirrors terminal-ws.mjs's / mesh-relay.mjs's own
+// "one http.createServer, route the upgrade by pathname" shape (no second server).
+// `createTerminalMirror` is the in-memory, ephemeral, live-tail mirror
+// (src/mesh-terminal-mirror.mjs) — constructed as a LITERAL default here (never
+// reachable only through a test-injection spread), so a real `aof mesh ui`
+// genuinely stands up a mirror even before any relay subscriber is wired to it.
+import { WebSocketServer } from "ws";
+import { createTerminalMirror } from "./mesh-terminal-mirror.mjs";
 
 // The default fleet port (task 00, DEV flag): 4181 — the next free port directly
 // above the board (4180), distinct from all of assets-ui 4177/4178 + board 4180
@@ -95,9 +105,25 @@ export async function serveMeshUi({
   repoRoot,
   scope = "global",
   globalStoreOptions,
+  // milestone 38 / story 06 (ADR-014) — the terminal-VIEW carve-out's collaborators.
+  // `terminalMirror` defaults to a FRESH createTerminalMirror() (a literal
+  // construction at THIS production call site, never reachable only via a test's
+  // own injection) — an in-memory, ephemeral, live-tail projection, never a
+  // durable record. `startTerminalRelaySubscriber`, when supplied, is an ASYNC
+  // `(mirror) => Promise<{ stop() }>` this function calls once the server is
+  // listening and disposes on close — the seam a real `aof mesh ui` wires a live
+  // relay subscription through (src/mesh-terminal-mirror.mjs's
+  // createTerminalMirrorSubscriberTransport + startTerminalMirrorSubscriber);
+  // absent by default so a caller with no relay configured gets a mirror that
+  // simply never receives a live frame (the same clean-degrade posture every
+  // other relay collaborator in this codebase keeps).
+  terminalMirror,
+  startTerminalRelaySubscriber,
 } = {}) {
   const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
   const boardServers = new Map();
+  const mirror = terminalMirror ?? createTerminalMirror();
+  let terminalSubscriberHandle = null;
 
   // The board's friendly build-missing refusal, mirrored verbatim onto the fleet
   // verb (task 00): a missing ui/dist is a caught { code:"ui-build-missing" }
@@ -311,23 +337,73 @@ export async function serveMeshUi({
       });
   });
 
-  // Read-only: the fleet face serves NO /ws/terminal (and no WebSocket upgrade at
-  // all — ADR-004; task 05). Refuse every upgrade cleanly (destroy the socket) so
-  // an operator's muscle-memory /ws/terminal attempt is a clean refusal, never a
-  // hang and never a terminal session. (There is NO WebSocketServer here — the
-  // board's per-item terminal is one level down, in aof work ui.)
-  server.on("upgrade", (_request, socket) => {
+  // milestone 38 / story 06 (ADR-014, carve-out #2) — the ONE upgrade path this
+  // face now answers: GET /ws/terminal-view?nodeId=&sessionId=, a READ-ONLY
+  // server->browser mirror of the relayed terminal-frame signals. Every OTHER
+  // upgrade pathname (including the board's own /ws/terminal — ADR-004; task 05)
+  // is STILL destroyed unconditionally, byte-identical to the pre-story-06
+  // posture. There is still exactly ONE http.createServer (ADR-003/ADR-012
+  // inv.4) — this WebSocketServer rides the SAME server via noServer + the
+  // upgrade event, the terminal-ws.mjs/mesh-relay.mjs precedent.
+  const terminalViewWss = new WebSocketServer({ noServer: true });
+  server.on("upgrade", (request, socket, head) => {
+    let pathname;
+    let searchParams;
     try {
-      socket.destroy();
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      pathname = requestUrl.pathname;
+      searchParams = requestUrl.searchParams;
     } catch {
-      /* the socket may already be closed — refusing an upgrade never crashes */
+      socket.destroy();
+      return;
     }
+    if (pathname !== "/ws/terminal-view") {
+      try {
+        socket.destroy();
+      } catch {
+        /* the socket may already be closed — refusing an upgrade never crashes */
+      }
+      return;
+    }
+    const nodeId = searchParams.get("nodeId");
+    const sessionId = searchParams.get("sessionId");
+    // A card with no (nodeId, sessionId) yet (ADR-014 invariant 4 / task 01
+    // scenario 2 — "an assignment with no session_id surfaced yet ... never
+    // subscribes to a guessed or wrong session") is refused the SAME way an
+    // unknown pathname is — no upgrade, no socket left dangling.
+    if (!nodeId || !sessionId) {
+      try {
+        socket.destroy();
+      } catch {
+        /* already closed */
+      }
+      return;
+    }
+    terminalViewWss.handleUpgrade(request, socket, head, (ws) => {
+      // subscribe() delivers ONLY frames whose (nodeId, sessionId) matches this
+      // tuple (no cross-talk — task 01's multiplex scenario); unsubscribe on
+      // close/error so a dropped browser tab leaves no dangling listener.
+      const unsubscribe = mirror.subscribe(nodeId, sessionId, (bytes) => {
+        try {
+          ws.send(bytes);
+        } catch {
+          /* the socket may already be closing */
+        }
+      });
+      ws.on("close", unsubscribe);
+      ws.on("error", unsubscribe);
+      // SECURITY T14 / ADR-014 invariant 1 — DELIBERATELY no `ws.on("message", ...)`
+      // handler here: this WebSocket is server->browser ONLY. There is no sink
+      // that could ever forward a browser-typed keystroke toward a worker's PTY
+      // (the structural absence the fitness acd-fleet-terminal-mirror-read-only,
+      // task 02, arms against a planted input-forwarding path).
+    });
   });
 
   const originalClose = server.close.bind(server);
   server.close = function closeWithBoardServers(callback) {
     return originalClose((error) => {
-      closeBoardServers(boardServers).finally(() => {
+      Promise.all([closeBoardServers(boardServers), Promise.resolve(terminalSubscriberHandle?.stop?.())]).finally(() => {
         if (typeof callback === "function") callback(error);
       });
     });
@@ -343,12 +419,27 @@ export async function serveMeshUi({
       resolve();
     });
   });
+
+  // milestone 38 / story 06 — once the server is listening, start the OPTIONAL
+  // live relay subscriber (absent by default; a caller supplies one — e.g. wired
+  // through createTerminalMirrorSubscriberTransport — to feed `mirror` from a
+  // REAL relay). A subscriber fault must never fail server startup (the SAME
+  // clean-degrade posture every other relay collaborator keeps): the fleet face
+  // still serves; the terminal-VIEW route simply carries no live frames yet.
+  if (typeof startTerminalRelaySubscriber === "function") {
+    try {
+      terminalSubscriberHandle = await startTerminalRelaySubscriber(mirror);
+    } catch {
+      terminalSubscriberHandle = null;
+    }
+  }
+
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}/`;
   // `url` ends with "/", so this yields e.g. http://127.0.0.1:PORT/?mode=fleet —
   // the same single bundle, the fleet mode (task 00 DEV note; ADR-003 decision 4).
   const fleetUrl = `${url}?mode=fleet`;
-  return { server, url, fleetUrl };
+  return { server, url, fleetUrl, terminalMirror: mirror };
 }
 
 async function boardUrlForWorkspace(boardServers, workspace, { repoRoot, ref } = {}) {

@@ -76,6 +76,9 @@ const workerSourcePath = path.join(repoRoot, "src", "mesh-worker-execution.mjs")
 
 // The FROZEN directive down-frame (35/ADR-002) — "a pure projection, exactly five keys".
 // ADR-009 does NOT break it: the credential rides its own frame kind, pulled on demand.
+// m38/ADR-013 (story 05) adds an ADDITIVE, ABSENT-IS-BENIGN `command` key (the whole slash-command
+// typed into the worker PTY) — a directive WITH a command is 7 keys, not a regression; this freeze
+// baseline is the no-command shape, and the credential smuggle guard below is unaffected either way.
 const FROZEN_DIRECTIVE_KEYS = ["kind", "to", "assignmentId", "itemRef", "workspaceId", "at"];
 
 // The legacy STATIC credential option — the F12 seam itself. ADR-009 mandates DELETING it in

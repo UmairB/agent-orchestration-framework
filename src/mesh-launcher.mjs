@@ -39,8 +39,26 @@ import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
 import { createMeshWorkerExecutionHandler, resolveCloneUrl } from "./mesh-worker-execution.mjs";
-import { createEnrollmentHttpHandler } from "./mesh-relay.mjs";
+import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
+// milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
+// closing BLOCKER F-38.06 — the HYBRID transport). An option-(a) draft (push the
+// worker's frames straight at the mesh-relay broker) was FALSIFIED at source:
+// `serveRelay` binds LOOPBACK ONLY (mesh-relay.mjs:622), so a worker on ANOTHER
+// machine cannot reach it. The transport is therefore a HYBRID, each leg on the
+// bind it fits:
+//   - CROSS-MACHINE (worker → control): the FABRIC. The worker sends a terminal-frame
+//     UP its stream client (client.sendTerminalFrame, worker branch below) — the only
+//     off-host-reachable transport. This launcher references NO push transport on the
+//     worker side (the fabric client carries it).
+//   - SAME-MACHINE (control → the SEPARATE `aof mesh ui` process): a LOOPBACK relay.
+//     The control launcher runs the mesh-relay broker on the KNOWN port named in
+//     config.mesh.relay.url and bridges each fabric-received terminal-frame into it
+//     (the `onTerminalFrame` sink at the startServer call site, control branch below);
+//     the fleet-UI process subscribes over loopback (cli.mjs, unchanged).
+// `createTerminalRelayPushTransport` is used ONLY on the CONTROL side (the loopback
+// push into the broker) — never on the worker side.
+import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
 // milestone 35 / ADR-008 — the control-side dispatch/reclaim driver's DATA-LAYER
 // orchestrator (owns the ONE store-open for both the dispatch scan AND the ADR-005
 // reclaim call — this launcher module itself imports NO SQLite-store module
@@ -619,6 +637,12 @@ export async function startLauncher(ws, options = {}) {
   // Verify follow-up (34/story 04): does this worker hold a LIVE transport (vs the
   // stream-degraded state)? Only a truly-connected worker runs the stream-sync ticker.
   let workerStreamHasTransport = false;
+  // milestone 38 / story 06 — ADR-014 AMENDMENT (HYBRID): the loopback relay BROKER
+  // and its CONTROL-side push transport (control branch, below) — the same-machine
+  // control→fleet-UI leg. Both disposed in stop(). (The worker's cross-machine leg
+  // needs no launcher-held handle — it rides the existing stream client.)
+  let relayBroker = null;
+  let controlTerminalPush = null;
   if (role === "control" && options?.streamServer !== false) {
     const startServer = options?.startControlStreamServer ?? startControlStreamServer;
     const peers = await resolvePeers(config, { ...options, roster: await readNodeRecords(ws) });
@@ -657,6 +681,25 @@ export async function startLauncher(ws, options = {}) {
       resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
       resolveWorkspaceAppIdentity: createResolveWorkspaceAppIdentity(ws, options),
     });
+    // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
+    // closing BLOCKER F-38.06 — the HYBRID transport's SAME-MACHINE leg). The
+    // cross-machine leg is the FABRIC (the worker sends a terminal-frame UP its stream
+    // client; this control server branches it to onTerminalFrame — below — never a
+    // store apply). `onTerminalFrame` then fans each fabric-received frame into a
+    // LOOPBACK relay broker that the SEPARATE `aof mesh ui` process (on THIS machine)
+    // subscribes to over config.mesh.relay.url. `controlTerminalPush` is the
+    // lazily-connected loopback push into that broker — constructed HERE (before the
+    // startServer call, so onTerminalFrame can close over it) only when a relay is
+    // actually configured + enabled. Gated on `options?.relay !== false` (the test-
+    // isolation seam — a fixture passes `relay:false` to skip the real bind) AND a
+    // CONFIGURED config.mesh.relay.url (no url -> the fleet subscriber
+    // createTerminalMirrorSubscriberTransport returns null, so a broker would have no
+    // subscriber — a clean no-start, which also keeps every fixture that sets no
+    // relay.url byte-identical).
+    const relayEnabled = options?.relay !== false && configuredRelayUrl(config) != null;
+    if (relayEnabled) {
+      controlTerminalPush = createTerminalRelayPushTransport(config);
+    }
     streamServer = await startServer({
       ...(boundAddress ? { bindAddress: boundAddress } : {}),
       ...(servicePort != null ? { port: servicePort } : {}),
@@ -665,8 +708,51 @@ export async function startLauncher(ws, options = {}) {
       httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
       mintCloneCredential: resolvedMintCloneCredential,
       mintWriteCredential: resolvedMintWriteCredential,
+      // ADR-014 AMENDMENT — the fabric->loopback terminal BRIDGE sink, a LITERAL key
+      // at the production call site (the F12/F-38.05 discipline: a bridge reachable
+      // only through the controlStreamServerOptions test spread would be production-
+      // dead). control-stream-server branches a terminal-frame BEFORE applyStreamFrame
+      // (never a store apply — ADR-014 inv.3) and hands it here; this pushes it into
+      // the loopback broker for the fleet-UI process. A clean no-op when no relay is
+      // configured (controlTerminalPush stays null). Fire-and-forget — a push fault is
+      // swallowed by the transport (never stalls the accept loop).
+      //
+      // SECURITY T14 concern #2 / finding F17 — RE-STAMP the routing nodeId with the
+      // CONNECTION-bound identity (the 2nd arg, `= meta.nodeId`, resolved at admission)
+      // and DISCARD the worker's self-declared `frame.nodeId`. Without this re-stamp a
+      // curious-but-admitted worker could send a raw
+      // { kind:"terminal-frame", nodeId:"<victim>", … } up its OWN authenticated socket
+      // and inject bytes onto ANOTHER node's fleet card (the mirror routes by
+      // envelope.nodeId). The re-stamp is the SAME T6 discipline the credential path
+      // keeps (control-stream-server.mjs's apply* functions all attribute by
+      // meta.nodeId, never a self-declared frame.nodeId).
+      onTerminalFrame: (frame, { nodeId }) => controlTerminalPush?.push({ ...frame, nodeId }),
       ...(options?.controlStreamServerOptions ?? {}),
     });
+
+    // Start the loopback relay BROKER on the KNOWN port named in config.mesh.relay.url
+    // (`servicePort`, parsed via configuredRelayUrl) — NEVER an ephemeral `?? 0`, so
+    // the fleet subscriber's FIXED dial (createTerminalMirrorSubscriberTransport, the
+    // same url) matches. `relayMode` SELF-GATES on
+    // config.mesh.relay.controlNode === config.mesh.nodeId (mesh-relay.mjs:656-666) —
+    // no new nomination logic; a non-nominated node gets a clean null. Started AFTER
+    // startServer so the fabric-addressed control-stream server claims its
+    // (fabric-ip, port) bind FIRST; the relay then binds (127.0.0.1, port) — distinct
+    // addresses coexist, and in the degraded (loopback-only) case the relay's own bind
+    // simply faults into the catch below rather than pre-empting the stream server.
+    // Test isolation is `options.relay === false` (skip) or an injected
+    // `options.relayMode` seam — the production code never binds a random port to
+    // protect a fixture. Wrapped so a bind fault never crashes the daemon; disposed in
+    // stop().
+    if (relayEnabled) {
+      const startRelayMode = options?.relayMode ?? relayMode;
+      try {
+        relayBroker = await startRelayMode(config, { port: servicePort });
+      } catch (error) {
+        emitWarning(launcherWarnings, { code: error?.code ?? "relay-broker-start-failed", message: error?.message ?? "The mesh-relay broker failed to start.", path: null }, options);
+        relayBroker = null;
+      }
+    }
   } else if (role === "worker" && options?.streamClient !== false) {
     // review fix P1.7: assemble + connect the worker's dial (deferred: the
     // per-mutation delta feed from the run lifecycle and the real two-machine
@@ -750,6 +836,24 @@ export async function startLauncher(ws, options = {}) {
         // stream-client.mjs). Called ONLY at the push seam
         // (pushWorktreeBranch/mesh-worker-execution.mjs), never speculatively.
         requestWriteCredential: (request) => client.requestWriteCredential(request),
+        // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
+        // F-38.06 — the HYBRID transport): THE FIX — the worker terminal-bridge
+        // PRODUCER, a LITERAL key HERE (never reachable only through the
+        // workerExecutionOptions test-injection spread below — the F12/F-38.05
+        // discipline generalised to this seam too), wired to the FABRIC send:
+        // `client.sendTerminalFrame` streams each live PTY chunk UP this worker's OWN
+        // stream connection as a terminal-frame (control-stream-server branches it to
+        // its onTerminalFrame sink — never persisted). The FABRIC, not the loopback
+        // serveRelay push: a worker on ANOTHER machine cannot reach the control node's
+        // loopback-bound broker, so the cross-machine leg MUST ride the fabric client
+        // (the only off-host-reachable transport). `sessionId` is the driver's OWN 2nd
+        // onOutputChunk argument (mesh-worker-execution.mjs's capturedSessionId,
+        // populated by the ADR-013-amendment transcript watch) — an early null-session
+        // frame still rides; the fleet mirror simply drops it (ADR-014 invariant 4).
+        // Best-effort + fire-and-forget: sendTerminalFrame sends only on a live socket,
+        // swallows faults, and NEVER touches the reconnect/drop bookkeeping (a
+        // high-frequency PTY stream must not thrash the worker's backoff state).
+        onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });
@@ -900,7 +1004,9 @@ export async function startLauncher(ws, options = {}) {
   // all tickers (peer poll + propagation + optional stream sync + optional control
   // dispatch/reclaim) cleanly, plus the stream server/client when this node started
   // one. No half-published record — the presence publish already completed before
-  // this handle was returned.
+  // this handle was returned. milestone 38 / story 06 (ADR-014 AMENDMENT, HYBRID):
+  // also disposes the control node's loopback relay BROKER and its loopback push
+  // transport, when either was started/constructed above.
   const stop = () => {
     peerPollTicker.stop(peerPollHandle);
     propagationTicker.stop(propagationHandle);
@@ -908,6 +1014,8 @@ export async function startLauncher(ws, options = {}) {
     if (controlTickHandle != null) controlDispatchReclaimTicker.stop(controlTickHandle);
     streamServer?.stop?.();
     streamClient?.stop?.();
+    relayBroker?.stop?.();
+    controlTerminalPush?.close?.();
   };
 
   return {

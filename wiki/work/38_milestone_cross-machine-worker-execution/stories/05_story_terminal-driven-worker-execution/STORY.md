@@ -4,10 +4,10 @@ number: 05
 slug: terminal-driven-worker-execution
 title: "A worker runs assigned work as an interactive terminal agent, driven by whole commands"
 parent: 38
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-19
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -50,19 +50,19 @@ control node — that's story-06.
      Tasks 00–03 `@executable` over an injected pty/provider/worktree-remove seam; task 04 the real
      interactive-`claude`-on-subscription `@manual` soak (measured un-fakeable, RESEARCH §4.3). -->
 
-- [ ] `tasks/00_pty-driver-replaces-headless-print.feature` — `@executable` — the worker resolves interactive
+- [x] `tasks/00_pty-driver-replaces-headless-print.feature` — `@executable` — the worker resolves interactive
   `claude` via the `terminal-providers` seam (empty-args launch), NOT `claude -p`; a Scenario Outline pins the
   forbidden headless-print argv tokens (`-p`, `--print`, `--output-format`) absent from the spawned form —
   fitness `acd-worker-driver-no-headless-print`.
-- [ ] `tasks/01_directive-command-typed-into-pty.feature` — `@executable` — the assignment directive's whole
+- [x] `tasks/01_directive-command-typed-into-pty.feature` — `@executable` — the assignment directive's whole
   command string (`/aof:refine <ref> --autonomous`, `/aof:continue`, `/aof:verify <ref>` — Scenario Outline)
   is written into the PTY stdin as one whole newline-terminated line; ONE long-lived interactive session per
   assignment (not a fresh spawn per command).
-- [ ] `tasks/02_needs-input-outcome-and-worktree-retention.feature` — `@executable` — a `NEEDS_INPUT` sentinel
+- [x] `tasks/02_needs-input-outcome-and-worktree-retention.feature` — `@executable` — a `NEEDS_INPUT` sentinel
   yields a THIRD outcome `needs-input`, DISTINCT from `done`/`failed` and explicitly NOT re-mapped to `done`
   (the §4.3 gap where `claude -p` reported `completed` for a question-ended turn); a `needs-input` session
   RETAINS its worktree (never the `done` force-remove), like the `failed`-retention path.
-- [ ] `tasks/03_session-id-captured-and-surfaced.feature` — `@executable` — the `session_id` the session emits
+- [x] `tasks/03_session-id-captured-and-surfaced.feature` — `@executable` — the `session_id` the session emits
   (DISCARDED today at `mesh-worker-execution.mjs:580-581`) is captured and surfaced on the assignment/presence
   record for a human's `claude --resume <session_id>`; a run with no session_id degrades to absent, not a crash.
 - [ ] `tasks/04_terminal-run-subscription-soak.feature` — `@manual` — the real-producer outsider check (ADR-008;

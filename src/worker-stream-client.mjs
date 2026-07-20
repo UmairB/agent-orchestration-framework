@@ -29,6 +29,15 @@
 // THE BACKOFF SCHEDULE (pure function, no wall clock): attempt n (1-based, the COUNT
 // of consecutive drops so far) → delaySeconds = min(2^(n-1), 30). n=1→1s, 2→2s,
 // 3→4s, 9→30s (the STORY.md examples, verbatim).
+//
+// milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER F-38.06):
+// the CROSS-MACHINE terminal leg rides THIS fabric client (sendTerminalFrame, below)
+// as a NEW opaque `terminal-frame` kind — the ONLY off-host-reachable transport (the
+// mesh-relay broker binds loopback only, so a worker cannot reach it from another
+// machine). The frozen envelope is built by the bridge module (the single source of
+// the `terminal-frame` kind + shape).
+import { buildTerminalFrameEnvelope } from "./mesh-terminal-relay-bridge.mjs";
+
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
   return Math.min(2 ** (n - 1), 30);
@@ -51,14 +60,25 @@ export function buildPresenceFrame(nodeId, presence, now) {
   return { kind: "presence", nodeId, presence: presence && typeof presence === "object" ? { ...presence } : {}, at: now };
 }
 
-// buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now }) — milestone
-// 35 / ADR-002, story 01 task 02: the up-frame a worker streams to report a lifecycle
-// transition (`accepted`/`running`/`done`/`failed`). `runId` is included only when
-// supplied (the "running" transition's ADR-004 run link) — a pure projection, same
-// shape family as the other frame builders.
-export function buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now } = {}) {
+// buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code,
+// now }) — milestone 35 / ADR-002, story 01 task 02: the up-frame a worker streams to
+// report a lifecycle transition (`accepted`/`running`/`done`/`failed`). `runId` is
+// included only when supplied (the "running" transition's ADR-004 run link) — a pure
+// projection, same shape family as the other frame builders.
+//
+// MILESTONE 38 / STORY 05 (ADR-013 invariant 3) — `sessionId` and `code` are NEW,
+// ADDITIVE, OPTIONAL keys (included only when a non-empty string is supplied — the
+// SAME conditional-inclusion pattern `runId` already uses): `sessionId` is the
+// interactive session's own `session_id` (mesh-worker-execution.mjs, previously
+// discarded), surfaced so a human can `claude --resume <session_id>`; `code` is an
+// optional status-refinement (e.g. `needs-input`) riding alongside an
+// already-legal `state`. Both are additive-only — a consumer reading only
+// {assignmentId, state, runId} sees byte-identical frames.
+export function buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, now } = {}) {
   const frame = { kind: "assignment-status", nodeId, assignmentId, state, at: now };
   if (typeof runId === "string" && runId.length > 0) frame.runId = runId;
+  if (typeof sessionId === "string" && sessionId.length > 0) frame.sessionId = sessionId;
+  if (typeof code === "string" && code.length > 0) frame.code = code;
   return frame;
 }
 
@@ -367,13 +387,48 @@ export function createWorkerStreamClient({
     return sendFrame(buildPresenceFrame(nodeId, presence, resolveNow()));
   }
 
-  // sendAssignmentStatus(assignmentId, state, { runId }) — milestone 35 / ADR-002,
-  // story 01 task 02: the up-frame emitter Story 02 calls to stream
+  // sendAssignmentStatus(assignmentId, state, { runId, sessionId, code }) — milestone
+  // 35 / ADR-002, story 01 task 02: the up-frame emitter Story 02 calls to stream
   // accepted -> running -> done|failed back up the SAME persistent socket. Reuses
   // the SAME failure-isolation seam every other send goes through (sendFrame) — a
-  // transport fault here is a warning, never a rethrow (ADR-004).
-  async function sendAssignmentStatus(assignmentId, state, { runId } = {}) {
-    return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, now: resolveNow() }));
+  // transport fault here is a warning, never a rethrow (ADR-004). `sessionId`/`code`
+  // (milestone 38 / story 05, ADR-013) are forwarded VERBATIM to
+  // buildAssignmentStatusFrame's own optional keys — this is the LITERAL production
+  // call site mesh-launcher.mjs's `sendAssignmentStatus: (...args) =>
+  // client.sendAssignmentStatus(...args)` closes over, so a real worker's captured
+  // session_id genuinely reaches the wire, never reachable only through a test's own
+  // recorder.
+  async function sendAssignmentStatus(assignmentId, state, { runId, sessionId, code } = {}) {
+    return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, now: resolveNow() }));
+  }
+
+  // sendTerminalFrame(sessionId, bytes) — milestone 38 / story 06 (ADR-014 AMENDMENT
+  // 2026-07-19, closing BLOCKER F-38.06): the CROSS-MACHINE terminal leg. A worker's
+  // live PTY chunk rides UP the SAME already-open fabric connection this client holds,
+  // as a NEW opaque `terminal-frame` kind (control-stream-server branches it to its
+  // onTerminalFrame sink BEFORE any store apply — never persisted, ADR-014 inv.3).
+  //
+  // DELIBERATELY OFF the sendFrame path (unlike every other up-frame). A live PTY
+  // emits many frames/second, and a terminal frame is a pure best-effort LIVE VIEW —
+  // there is NO durable floor (a dropped frame is a gap in the mirror, never a
+  // correctness fault, ADR-014). So it must NEVER touch the reconnect/drop
+  // bookkeeping sendFrame keeps: never markDropped(), never consecutiveDrops±, never
+  // warn(). A high-frequency stream that thrashed the backoff state on every transient
+  // hiccup would destabilise the worker's actual work-state reconnect. It sends ONLY
+  // when the socket is genuinely up (connected && handle != null) and swallows any
+  // fault; a frame emitted while disconnected is simply dropped (there is no terminal
+  // replay log — the mirror is a live tail, ADR-014).
+  async function sendTerminalFrame(sessionId, bytes) {
+    if (!connected || handle == null) return { sent: false };
+    try {
+      await transport.send(handle, buildTerminalFrameEnvelope(nodeId, sessionId, bytes));
+      return { sent: true };
+    } catch {
+      // best-effort: a terminal-frame send fault is swallowed here — never
+      // markDropped()/warn()/consecutiveDrops, so a live PTY stream can never thrash
+      // the worker's reconnect/drop bookkeeping (the sendFrame path owns that).
+      return { sent: false };
+    }
   }
 
   // requestCloneCredential({ assignmentId, workspaceId }) — milestone 38 / ADR-009:
@@ -593,6 +648,7 @@ export function createWorkerStreamClient({
     sendDelta,
     sendPresence,
     sendAssignmentStatus,
+    sendTerminalFrame,
     requestCloneCredential,
     requestCloneUrl,
     requestWriteCredential,

@@ -6,7 +6,7 @@ title: "Cross-machine worker execution & session presence — workers that can t
 status: in-progress
 owner: product-owner
 created: 2026-07-10
-updated: 2026-07-18
+updated: 2026-07-19
 depends: [34, 35, 36]
 schema: 1
 aofVersion: 0.1.0
@@ -120,7 +120,7 @@ independently-verifiable stories (research + decisions: `RESEARCH.md § 4`), in 
 - [ ] [`04_story_ui-driven-assignment`](stories/04_story_ui-driven-assignment/STORY.md) — assign a
   milestone/story to a worker node FROM the fleet/board UI (a security-reviewed mutation carve-out on the
   read-only fleet face, ADR-006, wrapping the existing `aof mesh assign` verb). No CLI. Entry point.
-- [ ] [`05_story_terminal-driven-worker-execution`](stories/05_story_terminal-driven-worker-execution/STORY.md)
+- [x] [`05_story_terminal-driven-worker-execution`](stories/05_story_terminal-driven-worker-execution/STORY.md)
   — the worker runs assigned work as **interactive `claude` in a PTY** (the existing
   `terminal-ws`/`terminal-providers`/`terminal-sessions` subsystem, on the worker's subscription), driven
   by whole commands the control node writes into it (`/aof:refine <ref> --autonomous`, `/aof:continue`) —

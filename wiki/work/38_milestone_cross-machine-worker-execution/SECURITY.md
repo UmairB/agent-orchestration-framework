@@ -616,6 +616,52 @@ above). ADRs are referenced loosely ("the story-NN ADR") — a parallel architec
   T13/R5 (operator-attested bind + tailnet relay) + the **`@manual`** soak inspection (no secret visible
   in the mirrored stream on a real run).
 
+- **⚠ AS-BUILT REVIEW (story 06 HYBRID transport, `aof:continue 38/06` closing F-38.06, 2026-07-19) —
+  GO-WITH-FIXES. One control the ADR CLAIMS is not implemented (F17); the other four T14 concerns HOLD at
+  source.** The hybrid moved the cross-machine leg onto the FABRIC (`worker-stream-client.sendTerminalFrame`
+  → `control-stream-server`'s `onTerminalFrame` branch) and the same-machine leg onto a loopback `serveRelay`
+  broker. Verified at source:
+  - **Concern #1 (no credential in the stream) — HOLDS, but the structural pin drifted off the live path.**
+    The live frame builder is now `worker-stream-client.sendTerminalFrame(sessionId, bytes)`, fed by
+    `mesh-launcher`'s `onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk))`,
+    fed by `mesh-worker-execution.mjs`'s `term.onData` (`:1002-1014`) — every hop carries ONLY the PTY chunk;
+    no askpass file, no `process.env`, no mint reply is read in. The accepted T14 residual (a secret the agent
+    PRINTS to its own terminal) IS the only residual; the wiring introduced no new leak. **BUT** the T14
+    credential-source detector in `acd-fleet-terminal-mirror-read-only` still scans the RETIRED
+    `wireTerminalBridge` (now dead — no production import), NOT the live `sendTerminalFrame` path. Closed this
+    review by the new fitness `acd-fleet-terminal-frame-connection-identity` (green clause: the live builder +
+    `onOutputChunk` fold no credential material).
+  - **Concern #2 (routing identity cannot be spoofed) — VIOLATED (F17, High-ish). The ADR-014 AMENDMENT's
+    "re-stamped control-side" invariant is NOT implemented.** `control-stream-server` correctly resolves the
+    CONNECTION-bound `nodeId = meta.nodeId` and passes it to the sink (`onTerminalFrame(frame, { nodeId })`,
+    `:900-906`) — but the frame it hands still carries the worker's self-declared `frame.nodeId`, and
+    `mesh-launcher.mjs:719` DISCARDS the connection identity and pushes the RAW frame:
+    `onTerminalFrame: (frame) => controlTerminalPush?.push(frame)`. The loopback broker forwards it verbatim
+    and `mesh-terminal-mirror.apply` routes by `envelope.nodeId` — the SELF-DECLARED value. A malicious-but-
+    admitted worker that sends a raw `{ kind:"terminal-frame", nodeId:"<victim>", signal:{ sessionId, bytes } }`
+    up its OWN authenticated fabric socket injects arbitrary bytes onto the VICTIM node's fleet card — cross-node
+    impersonation/tampering of the operator's view, the exact spoof the T6 discipline exists to prevent. It does
+    NOT disclose another node's stream (a worker cannot subscribe to the loopback broker off-host), persist, or
+    give RCE — but it can also corrupt the very @manual on-screen-secret inspection T14 leans on (inject a fake
+    secret → false alarm; flood → mask a real leak). **Fix (developer, one line): re-stamp control-side —
+    `onTerminalFrame: (frame, { nodeId }) => controlTerminalPush?.push({ ...frame, nodeId })` (or re-stamp inside
+    control-stream-server before the sink call).** Pinned RED-until-fixed by the new fitness (below).
+  - **Concern #3 (read-only IN FACT) — HOLDS.** `mesh-ui-serve.mjs`'s `/ws/terminal-view` upgrade block
+    (`:349-401`) is server→browser only: it registers NO `ws.on("message", …)` and calls no `term.write`; the
+    bridge/mirror modules have no `term.write`/PTY-stdin sink. Pinned by `acd-fleet-terminal-mirror-read-only`
+    (structural + behavioural). No mesh→PTY input path exists.
+  - **Concern #4 (no persistence) — HOLDS. inv.3 is HARDER now.** The terminal-frame branch in
+    `control-stream-server` returns BEFORE `applyStreamFrame` (no store apply, `:900-907`); `applyStreamFrame`
+    carries no terminal-frame kind; the bridge/mirror import no fs/store seam and write nothing. Pinned by
+    `acd-terminal-stream-transport-wired` inv.6 + `acd-fleet-terminal-mirror-read-only` inv.3.
+  - **Concern #5 (loopback broker exposure) — HOLDS.** `serveRelay` binds `127.0.0.1` ONLY
+    (`mesh-relay.mjs:622`, no injectable bind address), so a non-loopback peer literally cannot reach the
+    terminal fan-out; the group-vs-loopback auth gate is unchanged (loopback trusted, an unreachable group path
+    stays fail-closed). The broker shares `servicePort` (parsed from `config.mesh.relay.url`) with the
+    fabric-bound control-stream server, but on a DISTINCT bind address (`127.0.0.1` vs the fabric self-address)
+    — no admission ambiguity; the only same-port edge is a clean EADDRINUSE degrade when the control server has
+    itself fallen back to loopback (relay simply does not start — a functional degrade, not an exposure).
+
 ### T15 — Widened write-scoped mint for push-back — RE-OPENS T9 · `AuthZ` · sev **High** (story 07)
 
 - **NEW surface (least-privilege deliberately widened for `git push`).** Durable push-back (story 07,
@@ -744,6 +790,16 @@ above). ADRs are referenced loosely ("the story-NN ADR") — a parallel architec
   (T9), un-cached, and strictly better than the static PAT's unbounded life (T4). No code control can
   shorten it; accepted as the by-construction floor. Not a soak blocker — the token is dead within ~1h
   regardless of the operator.
+- **R9 — OPEN (story 06, F17, GO-WITH-FIXES). The terminal-frame routing identity is NOT re-stamped
+  control-side — a soak BLOCKER for the T14 read-only-mirror claim until the developer's one-line fix
+  lands.** `mesh-launcher.mjs:719` pushes the raw self-declared frame (`onTerminalFrame: (frame) =>
+  controlTerminalPush?.push(frame)`), so `mesh-terminal-mirror` routes by the worker's own `frame.nodeId`
+  rather than the connection-bound `meta.nodeId` the control server computed. A malicious admitted worker can
+  inject bytes onto another node's fleet card. This is NOT accepted — it is a fix owed by the developer
+  (re-stamp: `(frame, { nodeId }) => controlTerminalPush?.push({ ...frame, nodeId })`), pinned RED-until-fixed
+  by `acd-fleet-terminal-frame-connection-identity` (F8). Until it lands, the task-03 `@manual` soak's
+  on-screen-secret inspection is itself spoofable (an attacker could inject a fake secret to fake a leak, or
+  flood to mask a real one), so the soak's T14 inspection is only trustworthy AFTER F17 closes.
 
 ### What the OPERATOR must attest at `aof:verify` before the private-repo soak (R1/R4)
 
@@ -812,6 +868,7 @@ failing CI on violation.
 | F4 | `acd-clone-credential-relay-not-logged` **(NEW this review)** | T3 (re-derived on the relay frame) | Neither the control send-side (`buildCloneCredentialFrame`/mint) nor the worker receive-side (`requestCloneCredential`) passes a `credential` value into a `console.*`/`logger.*`/`warn`/`onWarning` sink — the credential rides the wire (`ws.send`) only, never a log. | **Source-analysis** over `src/control-stream-server.mjs` + `src/worker-stream-client.mjs`. Self-check: a `console.log(frame.credential)`, a `logger.debug(minted)`, and an `onWarning({message: credential})` all trip; the real `warn(code, error)` failure-isolation shape stays clean. | GREEN (added) |
 | F5 | `acd-clone-app-key-not-relayed` **(SPEC — story 02, armed at BUILD)** | **T8, T11** | The GitHub App **private key** (the PEM / configured key material) never (a) crosses the relay — it appears on NO frame builder (`buildCloneCredentialFrame` and every `sendDirective`/`ws.send` payload carry only the minted token, never the key), and (b) reaches no `console.*`/`logger.*`/`warn`/`onWarning`/`Error(...)` message sink. It flows ONLY into the JWT signer (`node:crypto` `createSign`/`sign`). EXTENDS F4 (the minted TOKEN) to the KEY (and to the mint-time App JWT, T11). | **Source-analysis** over the NEW `github-app` provider module + `src/control-stream-server.mjs`. Self-check (spec below). | SPEC — armed at build |
 | F6 | `acd-minted-token-scoped-single-repo` **(SPEC — story 02, armed at BUILD)** | **T9, T4** | The `github-app` mint's installation-token request names EXACTLY the ONE assigned repo — a **single-element** `repositories`/`repository_ids` derived from the mint's `workspaceId` arg (never omitted, never >1) — and `permissions` EXACTLY `{ contents: "read" }` (never omitted, never `write`, never a broader set). The **code-enforcement that closes T4**. | **Source-analysis** over the NEW `github-app` provider module (the request-body shape at the `access_tokens` call). Self-check (spec below). | SPEC — armed at build |
+| F8 | `acd-fleet-terminal-frame-connection-identity` **(NEW this review — T14 concern #2 + #1)** | **T14** | (a) The terminal-frame's routing `nodeId` is RE-STAMPED with the **connection-bound identity** (`meta.nodeId`) before the loopback push — accepts EITHER fix location (control-side `onTerminalFrame({ ...frame, nodeId }, …)` OR launcher-side `(frame, { nodeId }) => push({ ...frame, nodeId })`); trips when NEITHER re-stamps, so a worker cannot target another node's fleet card via a self-declared `frame.nodeId` (the T6 discipline the credential path keeps). (b) The LIVE fabric builder (`worker-stream-client.sendTerminalFrame` + the launcher `onOutputChunk` wiring) folds NO credential material into the streamed bytes — moving concern #1's structural pin off the retired `wireTerminalBridge` onto the real path. | **Source-analysis** over `src/mesh-launcher.mjs` + `src/control-stream-server.mjs` + `src/worker-stream-client.mjs`. Self-check: synthesized control/launcher shapes — a re-stamp (either side) is clean, the raw-push defect trips, a `frame.nodeId` regression on the control side trips; a `process.env` token folded into the live builder / `onOutputChunk` trips. | **(a) RED — pins finding F17 until the developer's one-line re-stamp lands; (b) GREEN — live path clean** |
 
 **F5 + F6 are SPEC-only until story 02 builds — deliberately, per the milestone's hard lesson.**
 The `github-app` provider module does not exist yet (story `not-started`); authoring a detector now

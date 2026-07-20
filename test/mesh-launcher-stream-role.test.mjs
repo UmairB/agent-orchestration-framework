@@ -140,6 +140,12 @@ export const meshLauncherStreamRoleTests = [
           platform: "linux",
           ticker: manualTicker(),
           peerPollTicker: manualTicker(),
+          // milestone 38 / story 06 (ADR-014 AMENDMENT) — this control fixture sets a
+          // fixed relay.url (ws://control-node.test:4182), so the launcher would
+          // otherwise start a REAL loopback relay broker on that port. `relay: false`
+          // is the production test-isolation seam (skip the real bind) — this test
+          // asserts the control-STREAM server wiring, not the terminal relay leg.
+          relay: false,
           startControlStreamServer: async (args) => {
             startServerArgs = args;
             return { stop() {}, updatePeers() {} };
@@ -426,6 +432,10 @@ export const meshLauncherStreamRoleTests = [
           ticker: manualTicker(),
           peerPollTicker: manualTicker(),
           streamSyncTicker,
+          // ADR-014 AMENDMENT — skip the real loopback relay bind (see the sibling
+          // control test above): this fixture's fixed relay.url would otherwise start a
+          // real broker on :4182.
+          relay: false,
           startControlStreamServer: async () => ({ stop() {}, updatePeers() {} }),
         });
         assert.equal(handle.role, "control");
