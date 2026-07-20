@@ -20,10 +20,16 @@ import { invoke, getCommand } from "./command-core.mjs";
 import { serveStdio } from "./graph-mcp-server.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
+import { observeMilestone, observabilityEnabled } from "./work-observe.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
+// milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
+// F-38.06, option (a)): the fleet CONSUMER seam — a real relay subscription,
+// wired as a LITERAL `startTerminalRelaySubscriber` key at the production
+// `serveMeshUi({...})` call site below (meshUiCommand).
+import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
 import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
 import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
 // milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
@@ -325,6 +331,17 @@ async function workCommand(args) {
 
   if (subcommand === "validate") {
     await workValidateCommand(rest);
+    return;
+  }
+
+  // `aof work observe <ref>` — a CLI-only diagnostic face (the mesh-desktop /
+  // mesh-session idiom: deliberately OUTSIDE the work:* command registry, since it
+  // reads Claude Code session transcripts rather than the work store). Mines
+  // per-agent time/token spend + stall gaps for a milestone and (with --write)
+  // drops an `observability/` folder into it. Not registry-registered => the
+  // acd-work-command-cli-bijection guard (registry -> CLI) does not require it.
+  if (subcommand === "observe") {
+    await workObserveCommand(rest);
     return;
   }
 
@@ -1107,9 +1124,30 @@ async function meshUiCommand(args) {
   const projectDir = path.resolve(options.target ?? process.cwd());
   const scope = options.local ? "local" : "global";
 
+  // milestone 38 / story 06 — ADR-014 AMENDMENT: resolve `config` best-effort —
+  // `aof mesh ui` requires NO mesh-enabled workspace to START (ADR-006's
+  // existing global-by-default posture), so a `loadWorkspace` fault (cwd is not
+  // a workspace at all, no aof.config.json, …) degrades to `config: undefined`
+  // rather than refusing the command. `createTerminalMirrorSubscriberTransport`
+  // already returns `null` for an undefined/unconfigured relay (no
+  // `config.mesh.relay.url`), so `startTerminalMirrorSubscriber` cleanly
+  // degrades to `{ connected:false }` — the mirror simply never receives a live
+  // frame; every other route on the fleet face still serves.
+  let config;
+  try {
+    ({ config } = await loadWorkspace(projectDir, options.config));
+  } catch {
+    config = undefined;
+  }
+
   let session;
   try {
-    session = await serveMeshUi({ projectDir, port, scope });
+    session = await serveMeshUi({
+      projectDir,
+      port,
+      scope,
+      startTerminalRelaySubscriber: (mirror) => startTerminalMirrorSubscriber({ transport: createTerminalMirrorSubscriberTransport(config), mirror }),
+    });
   } catch (error) {
     if (error.code === "ui-build-missing") {
       console.error(error.message);
@@ -1656,6 +1694,53 @@ async function workValidateCommand(args) {
   console.log(command.cli.render(result, { scope }));
   // A non-empty findings list is a non-zero exit (today's CLI behaviour).
   if (result.findings.length > 0) process.exitCode = 1;
+}
+
+// `aof work observe <ref> [--write] [--json] [--stall <min>]` — mine Claude Code
+// session transcripts for the milestone's per-agent time/token spend + stall gaps.
+// A READ by default; `--write` drops `wiki/work/<folder>/observability/{report.md,
+// agents.json}` into the milestone. The config opt-in (`work.observability.enabled`)
+// gates AUTOMATIC generation by the lifecycle — an explicit invocation here always
+// runs (an operator asked for it directly).
+async function workObserveCommand(args) {
+  const options = parseOptions(args);
+  const ref = options._[0];
+  if (!ref) {
+    throw new Error('Usage: aof work observe <milestone-ref> [--write] [--json] [--stall <minutes>] [--if-enabled]');
+  }
+  // `--if-enabled` self-gates on the opt-in config flag (work.observability.enabled)
+  // and no-ops when off. This is the form the lifecycle (aof:retrospective) calls, so
+  // the bundle instruction can invoke observe unconditionally and the CLI decides —
+  // deterministic, rather than asking the agent to branch on config. A DIRECT
+  // `aof work observe` (no --if-enabled) always runs: an operator asked for it.
+  if (options.ifEnabled) {
+    const workspace = await loadWorkspace(process.cwd(), options.config);
+    if (!observabilityEnabled(workspace.config)) {
+      if (!options.json) console.log("observability disabled (set work.observability.enabled to enable) — skipped.");
+      return;
+    }
+  }
+  const stallMs = options.stall != null ? Number(options.stall) * 60 * 1000 : undefined;
+  const result = await observeMilestone({
+    cwd: process.cwd(),
+    ref,
+    stallMs,
+    // Stamp with the caller's wall clock (Date.now is fine in the CLI process).
+    generatedAt: Date.now(),
+    write: Boolean(options.write),
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result.json, null, 2));
+  } else {
+    console.log(result.report);
+    if (!result.found) {
+      console.log(`\n(no Claude Code transcripts found under ${result.projectsDir})`);
+    }
+    if (result.written) {
+      console.log(`\nWrote ${path.relative(process.cwd(), result.written.reportPath)} + agents.json`);
+    }
+  }
 }
 
 // The shared insert-top-level face (milestone 41 / story 02, ADR-002/004) —
@@ -2794,7 +2879,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve", "yes", "changelog"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve", "yes", "changelog", "write", "ifEnabled"].includes(key)) {
       options[key] = true;
       continue;
     }
