@@ -1,0 +1,6 @@
+{
+  "event": "SessionStart",
+  "matcher": "startup|resume|clear",
+  "type": "command",
+  "command": "aof session start --assistant codex"
+}

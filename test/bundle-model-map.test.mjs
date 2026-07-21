@@ -9,9 +9,12 @@
 import assert from "node:assert/strict";
 import { loadBundle, renderBundleOutputs } from "../src/work-bundle.mjs";
 
-// The locked default map (STORY.md "Locked intent"): opus for the roles that
-// decide "what's correct" (author / gate / review), sonnet for the roles that
-// execute or gather against a locked target.
+// The default model map (STORY.md "Locked intent", REVISED): opus for every role
+// that decides "what's correct" (author / gate / review) AND for the developer —
+// implementing against strict arch-tests is the hardest, most iterative role, and a
+// weaker model there grinds fix-test-rerun loops (observed: 511-turn story builds,
+// 56 full-suite runs). Only the read-only researcher (gathering against a locked
+// target) stays on sonnet.
 const DEFAULT_MODEL_BY_ROLE = {
   "aof-architect": "opus",
   "aof-security": "opus",
@@ -19,7 +22,7 @@ const DEFAULT_MODEL_BY_ROLE = {
   "aof-product-owner": "opus",
   "aof-qa": "opus",
   "aof-designer": "opus",
-  "aof-developer": "sonnet",
+  "aof-developer": "opus",
   "aof-researcher": "sonnet"
 };
 
@@ -55,22 +58,24 @@ function claudeAgentContent(byPath, role) {
 export const bundleModelMapTests = [
   // ====================================================================
   // Scenario Outline: each ACD role's shipped default renders into its
-  // generated agent file (both Examples tables — 6 opus, 2 sonnet).
+  // generated agent file (both Examples tables — 7 opus, 1 sonnet).
   // ====================================================================
   {
-    name: "bundle-model-map: each ACD role's shipped default renders into its generated .claude/agents file (6 opus, 2 sonnet)",
+    name: "bundle-model-map: each ACD role's shipped default renders into its generated .claude/agents file (7 opus, 1 sonnet)",
     run: async () => {
       const byPath = renderedClaudeAgents();
       for (const [role, model] of Object.entries(DEFAULT_MODEL_BY_ROLE)) {
         const value = renderedModelValue(claudeAgentContent(byPath, role));
         assert.equal(value, model, `${role} renders "${model}" as its model frontmatter`);
       }
-      // The two tiers split exactly 6 opus / 2 sonnet across the 8 frozen roles.
+      // The two tiers split exactly 7 opus / 1 sonnet across the 8 frozen roles
+      // (aof-developer moved opus: implementing against strict arch-tests is the
+      // hardest, most iterative role — the weaker model grinds fix-test-rerun loops).
       const rendered = Object.keys(DEFAULT_MODEL_BY_ROLE).map((role) =>
         renderedModelValue(claudeAgentContent(byPath, role))
       );
-      assert.equal(rendered.filter((m) => m === "opus").length, 6, "6 roles default to opus");
-      assert.equal(rendered.filter((m) => m === "sonnet").length, 2, "2 roles default to sonnet");
+      assert.equal(rendered.filter((m) => m === "opus").length, 7, "7 roles default to opus");
+      assert.equal(rendered.filter((m) => m === "sonnet").length, 1, "1 role defaults to sonnet");
     }
   },
 
