@@ -37,7 +37,7 @@ export const archTests = [
         process.chdir(tmp);
         const descriptorCount = readDescriptor().members.length;
         const bundle = loadBundle();
-        const loaded = bundle.resources.length + bundle.templates.length;
+        const loaded = bundle.resources.length + bundle.hooks.length + bundle.templates.length;
         assert.equal(loaded, descriptorCount, "full member set resolves from an unrelated cwd");
         // The resolved root is inside the source tree, not the cwd.
         assert.ok(!bundleRoot().startsWith(tmp), "bundle root is not derived from cwd");

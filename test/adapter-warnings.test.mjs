@@ -88,7 +88,7 @@ async function warnsForUnsupportedHookFields() {
   assert.equal(warnings.length, 2);
   assert.ok(warnings.every((item) => item.code === ADAPTER_WARNING_CODES.skippedRuntimeOutput));
   assert.ok(warnings.some((item) => item.runtime === "claude" && item.generatedPath === ".claude/settings.json"));
-  assert.ok(warnings.some((item) => item.runtime === "codex" && item.generatedPath === ".codex/config.toml"));
+  assert.ok(warnings.some((item) => item.runtime === "codex" && item.generatedPath === ".codex/hooks.json"));
   assert.match(warnings[0].reason, /"timeout"/);
 }
 

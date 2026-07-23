@@ -28,8 +28,8 @@ export function bundleVersion() {
 // plus template outputs (runtime-independent, comment-stamped). Templates are
 // rendered to the fixed bundle location once.
 export async function planDesiredOutputs(bundle, installableResources, runtimes, targetDir) {
-  const config = { resources: installableResources, workflows: [], packages: [] };
-  const memberKinds = new Set(["agent", "command", "skill"]);
+  const config = { resources: installableResources, hooks: bundle.hooks ?? [], workflows: [], packages: [] };
+  const memberKinds = new Set(["agent", "command", "skill", "hooks"]);
   const resourceOutputs = (await createRenderPlan(config, { targetDir, runtimes }))
     .filter((output) => memberKinds.has(output.resource?.kind));
   // Output objects carry TWO path conventions intentionally: `path` is the logical

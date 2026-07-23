@@ -5,7 +5,8 @@
 // so the installed CLI finds the same bundle from any working directory.
 // ADR-003: the loader presents the bundle as a standard aof `config`-shaped
 // object so `renderConfigOutputs` / `createRenderPlan` consume it UNCHANGED.
-// ADR-006: each member declares its target runtimes per the capability matrix.
+// ADR-006: each member (resource, hook, or template) declares its target
+// runtimes per the capability matrix.
 // ADR-007: command members carry `commandNamespace: "aof"`, a declared data
 // property the (general) adapter rule keys on — not a bundle branch in the engine.
 //
@@ -73,6 +74,7 @@ export function loadBundle() {
   const descriptor = readDescriptor();
   const resources = [];
   const templates = [];
+  const hooks = [];
 
   for (const member of descriptor.members) {
     if (member.kind === "agent" || member.kind === "command") {
@@ -97,6 +99,15 @@ export function loadBundle() {
       resources.push(resource);
       continue;
     }
+    if (member.kind === "hook") {
+      const source = JSON.parse(readAssetText("bundle", member.file));
+      hooks.push({
+        ...source,
+        id: member.id,
+        runtimes: member.runtimes
+      });
+      continue;
+    }
     if (member.kind === "template") {
       templates.push({
         id: member.id,
@@ -109,7 +120,7 @@ export function loadBundle() {
     throw new Error(`Unknown bundle member kind "${member.kind}" for "${member.id}".`);
   }
 
-  return { resources, templates, descriptor };
+  return { resources, hooks, templates, descriptor };
 }
 
 // --- template rendering (ADR-005, comment-form stamp) -----------------------
@@ -152,8 +163,8 @@ export function renderBundleTemplateOutputs(bundle, options = {}) {
 // functions. Resource outputs come from the UNCHANGED render engine.
 export function renderBundleOutputs(bundle, options = {}) {
   const resources = installableBundleResources(bundle.resources, options.runtimes ?? ["claude"]);
-  const config = { resources, workflows: [], packages: [] };
-  const memberKinds = new Set(["agent", "command", "skill"]);
+  const config = { resources, hooks: bundle.hooks ?? [], workflows: [], packages: [] };
+  const memberKinds = new Set(["agent", "command", "skill", "hooks"]);
   const resourceOutputs = renderConfigOutputs(config, {
     runtimes: options.runtimes,
     targetDir: options.targetDir

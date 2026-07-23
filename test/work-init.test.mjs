@@ -470,10 +470,21 @@ export const workInitTests = [
         assert.ok(existsSync(refineSkill), "refine command procedure rendered as a codex skill");
         const content = await readFile(refineSkill, "utf8");
         assert.match(content, /^name: aof-refine$/m, "codex skill has a stable skill name");
-        assert.match(content, /Use this skill when the user asks for `\$aof-refine <item ref - NN or slug> \[--autonomous\]`/);
+        assert.match(content, /Use this skill when the user asks for `\$aof-refine <item ref - NN or slug> \[--autonomous\] \[--solo\]`/);
         assert.match(content, /Where this procedure mentions `\$ARGUMENTS`, use the text the user supplied after the skill name\./);
         assert.match(content, /Where it mentions Claude slash command `\/aof:refine`/);
         // no command file written under .codex (any namespace)
+        const hooks = JSON.parse(await readFile(p(repo, ".codex", "hooks.json"), "utf8"));
+        assert.equal(
+          hooks.hooks.SessionStart[0].hooks[0].command,
+          "aof session start --assistant codex",
+          "Codex starts AOF session presence"
+        );
+        assert.equal(hooks.hooks.SessionStart[0].matcher, "startup|resume|clear", "compaction does not reset presence");
+        assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].command, "aof session ping --assistant codex");
+        assert.equal(hooks.hooks.Stop[0].hooks[0].command, "aof session ping --assistant codex");
+        assert.equal(hooks.hooks.SessionEnd, undefined, "Codex has no native SessionEnd event; TTL ends presence");
+        assert.equal(hooks.hooks.Stop[0].hooks[0].type, "command", "native nested handler schema");
         assert.ok(!existsSync(p(repo, ".codex", "commands", "aof", "refine.md")), "no namespaced codex command file");
         assert.ok(!existsSync(p(repo, ".codex", "commands", "refine.md")), "no flat codex command file");
         // not force-written under ANY runtime root

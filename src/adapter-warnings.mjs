@@ -169,12 +169,14 @@ function normalizeRequestedRuntimes(runtimes) {
 
 function runtimeHookPath(runtime) {
   if (runtime === "claude") return portablePath(".claude", "settings.json");
-  if (runtime === "codex") return portablePath(".codex", "config.toml");
+  if (runtime === "codex") return portablePath(".codex", "hooks.json");
   return null;
 }
 
 function runtimeSettingsPath(runtime) {
-  return runtimeHookPath(runtime);
+  if (runtime === "claude") return portablePath(".claude", "settings.json");
+  if (runtime === "codex") return portablePath(".codex", "config.toml");
+  return null;
 }
 
 function generatedResourcePath(resource, runtime, options = {}) {

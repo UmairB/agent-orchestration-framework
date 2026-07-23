@@ -13,7 +13,21 @@ doc: state
 
 ## Progress
 
-**ACCEPTED `2026-07-16`** via `aof:verify 41` — all three stories `done`, milestone `done`.
+**RE-ACCEPTED `2026-07-19`** (`done`). Claude command surface gap closed: authored **four**
+`src/bundle/commands/insert-*.md` wrappers (milestone/story/uat/chore — `insert-chore` had the identical
+defect, so the fix spans the whole insert family), declared them in `bundle.json`, regenerated
+`manifest.json` (73 entries) — each renders a `/aof:insert-*` Claude command + a codex `aof-insert-*` skill.
+Added the registry-derived fitness function `acd-work-insert-command-bundle-parity` (every `work:insert-*`
+CLI command must have a bundle wrapper, no carve-out) + updated the brittle command-count tripwires
+(`bundle.test.mjs`, `acd-command-namespace`) 17→21 commands. 126 focused assertions green, and proven live:
+`aof work update` on an install lacking the commands reports exactly `4 created`. Evidence in VERIFICATION.
+
+**RE-OPENED `2026-07-18`** (`in-progress`). The 2026-07-16 acceptance covered only the CLI + engine;
+the milestone never shipped the **Claude command surface** for the insert commands — `src/bundle/commands/`
+carried only the `add-*` docs, so `aof work update` rendered nothing for `/aof:insert-*` and the feature was
+undiscoverable/unusable through the ACD command surface in a consumer repo (root lesson RETROSPECTIVE R5).
+
+**ACCEPTED (CLI/engine) `2026-07-16`** via `aof:verify 41` — all three stories `done`.
 
 - Framed + broken down `2026-07-16` (`aof:refine 41` → architect `ARCHITECTURE.md`, 5 ADRs + a
   reconciling ADR-006); all three stories' task `.feature`s authored in one cascaded Three-Amigos pass

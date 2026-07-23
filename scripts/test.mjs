@@ -192,6 +192,43 @@ import { meshWorkerDriverOutputChunkTests } from "../test/mesh-worker-driver-out
 // it green) + moves T14 concern #1's credential-source pin onto the LIVE sendTerminalFrame
 // path (the retired wireTerminalBridge is dead), which is already green.
 import { archTests as acdFleetTerminalFrameConnectionIdentityTests } from "../test/arch/acd-fleet-terminal-frame-connection-identity.test.mjs";
+// milestone 38 / story 06 / task 04 — BLOCKER F-38.06c (raised at aof:verify 38): the
+// transport was reachable but had NO CONSUMER SURFACE. The ADR-013 `session_id` join
+// key reached nowhere a browser could read it — a THREE-LINK break: the control side
+// read only `runId` off the worker's assignment-status frame and `global_assignments`
+// had no session_id column (PERSIST); `projectAssignment` carried eight keys, none of
+// them the session id (SURFACE); and `terminal-view` matched 0 files under `ui/`
+// (RENDER). This module is the traceability wiring for the close: the REAL frame
+// handler over a REAL store (incl. the in-place, idempotent PRAGMA-checked column
+// migration), the REAL /api/mesh/status shaping, and the framework-free
+// ui/src/fleet/terminal-view/*.mjs helpers FleetTerminalView.tsx itself imports —
+// stream resolution (ADR-014 inv.4) + the honest waiting/streaming/ended/disconnected
+// ramp (DESIGN §Surface 3 V7/V9) — plus a multiplex lane over the REAL serveMeshUi
+// /ws/terminal-view route. acd-fleet-terminal-mirror-read-only gains the BROWSER half
+// of its read-only invariant (V2/V5/V6, whole-fleet-surface + presence pins).
+import { fleetTerminalViewSurfaceTests } from "../test/fleet-terminal-view-surface.test.mjs";
+// milestone 38 / story 06 — ARMED RED-UNTIL-FIXED BY DESIGN (the F17 precedent). Two
+// open findings from the 2026-07-23 reviews, each pinned so a known-inert seam cannot
+// read green: (a) ADR-013 inv.7 — the captured session id is REPORTED only when the run
+// reaches a terminal state, so the fleet card resolves `no-session` for the whole live
+// run; (b) ADR-014 inv.8 / BLOCKER F-38.06e — the terminal-frame protocol has NO
+// end-of-stream marker and the route unsubscribes only on the BROWSER's close, so
+// DESIGN V9's `ended` is unreachable from a real session end and an open view sits on
+// `streaming`/live forever. The two REAL-SOURCE lanes fail today and go GREEN when the
+// producers land (RED again if reverted); the two SYNTHESIZED self-check lanes pass
+// regardless of tree state, proving the detectors correct rather than merely red.
+import { archTests as acdTerminalViewLiveObservableTests } from "../test/arch/acd-terminal-view-live-observable.test.mjs";
+// milestone 38 / story 06 / task 04 — the PRODUCER-FED half (QA, 2026-07-23; findings
+// F-38.06d + F-38.06e). The module above proves each LINK against a payload the TEST
+// chooses; this one drives the REAL createMeshWorkerExecutionHandler / REAL frame
+// builder / REAL applyStreamFrame / REAL /api/mesh/status / REAL resolver over the
+// house leaf doubles only, and asks the question at the moment that matters — WHILE
+// the run is live. F-38.06d (the join key arrived only at a terminal state) is closed
+// by the ADR-013 invariant-7 mid-run `running` frame (mesh-worker-execution.mjs).
+// F-38.06e (nothing ever tells an open terminal-view its session ENDED — the ramp has
+// no end-of-stream producer) is a SEPARATE finding, owned elsewhere: its lane is
+// EXPECTED RED until that producer lands, and is deliberately not weakened here.
+import { fleetTerminalViewProducerFedTests } from "../test/fleet-terminal-view-producer-fed.test.mjs";
 // milestone 38 / story 07 — durable worker pushback (ADR-015): a REAL branch, not
 // detached (task 00), push BEFORE the worktree is force-removed, over a real local
 // bare origin (task 01), the two-token write scope (task 02) + the REQUIRED
@@ -438,6 +475,7 @@ import { cliFaceContractTests } from "../test/cli-face-contract.test.mjs";
 import { boardFaceContractTests } from "../test/board-face-contract.test.mjs";
 import { archTests as acdWorkCommandRouteCoverageTests } from "../test/arch/acd-work-command-route-coverage.test.mjs";
 import { archTests as acdWorkCommandCliBijectionTests } from "../test/arch/acd-work-command-cli-bijection.test.mjs";
+import { archTests as acdWorkInsertCommandBundleParityTests } from "../test/arch/acd-work-insert-command-bundle-parity.test.mjs";
 import { archTests as acdWorkUiNoCoreImportTests } from "../test/arch/acd-work-ui-no-core-import.test.mjs";
 import { archTests as acdWorkCommandNoSubprocessTests } from "../test/arch/acd-work-command-no-subprocess.test.mjs";
 // milestone 09 — graphify command core (story 00: the three graph:* commands + the
@@ -1471,6 +1509,7 @@ export const tests = [
   ...boardFaceContractTests,
   ...acdWorkCommandRouteCoverageTests,
   ...acdWorkCommandCliBijectionTests,
+  ...acdWorkInsertCommandBundleParityTests,
   ...acdWorkUiNoCoreImportTests,
   ...acdWorkCommandNoSubprocessTests,
   ...graphCommandCoreTests,
@@ -1792,6 +1831,15 @@ export const tests = [
   ...meshTerminalStreamRelayTransportWiredTests,
   ...meshWorkerDriverOutputChunkTests,
   ...acdFleetTerminalFrameConnectionIdentityTests,
+  // task 04 — BLOCKER F-38.06c: the (nodeId, sessionId) join key reaches the browser
+  // (persist → surface → render) and the fleet gains its read-only terminal-VIEW
+  ...fleetTerminalViewSurfaceTests,
+  // task 04 / F-38.06e — RED-until-fixed: the join key must arrive mid-run (ADR-013
+  // inv.7) and the stream's END must be produced (ADR-014 inv.8)
+  ...acdTerminalViewLiveObservableTests,
+  // task 04 — the same chain asked of its REAL producers, WHILE the run is live
+  // (F-38.06d, closed; F-38.06e's end-of-stream lane stays red pending its own pass)
+  ...fleetTerminalViewProducerFedTests,
   // milestone 38 / story 07 — durable worker pushback (ADR-015, tasks 00-02
   // traceability modules + the write-credential wire + acd-write-token-scoped-to-push)
   ...meshWorktreeBranchNotDetachedTests,

@@ -36,6 +36,10 @@ export function codexConfigToml({ mcpServers = [], hooks = [], settings = {} } =
   return toToml(body);
 }
 
+export function codexHooksJson(hooks = []) {
+  return jsonContent({ hooks: codexHooks(hooks) });
+}
+
 export function projectDocContent(target, docs) {
   const sorted = sortById(docs).filter((doc) => doc.targets.includes(target));
   return [
@@ -132,11 +136,14 @@ function codexHooks(hooks) {
   for (const hook of sortById(hooks)) {
     const group = byEvent[hook.event] ?? [];
     group.push(withoutEmpty({
-      id: hook.id,
       matcher: hook.matcher,
-      type: hook.type,
-      command: hook.command,
-      ...runtimeExtension(hook, "codex")
+      hooks: [
+        withoutEmpty({
+          type: hook.type,
+          command: hook.command,
+          ...runtimeExtension(hook, "codex")
+        })
+      ]
     }));
     byEvent[hook.event] = group;
   }

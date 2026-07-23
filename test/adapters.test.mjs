@@ -231,12 +231,13 @@ async function rendersExpandedDslRuntimeOutputs() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 7);
+    assert.equal(writes.length, 8);
 
     const claudeMcp = await readFile(path.join(targetDir, ".mcp.json"), "utf8");
     const claudeSettings = await readFile(path.join(targetDir, ".claude", "settings.json"), "utf8");
     const codexConfig = await readFile(path.join(targetDir, ".codex", "config.toml"), "utf8");
     const agents = await readFile(path.join(targetDir, "AGENTS.md"), "utf8");
+    const codexHooks = JSON.parse(await readFile(path.join(targetDir, ".codex", "hooks.json"), "utf8"));
     const claudeDoc = await readFile(path.join(targetDir, "CLAUDE.md"), "utf8");
 
     assert.match(claudeMcp, /"docs"/);
@@ -244,7 +245,11 @@ async function rendersExpandedDslRuntimeOutputs() {
     assert.match(claudeSettings, /"hooks"/);
     assert.match(claudeSettings, /"PostToolUse"/);
     assert.match(codexConfig, /\[mcp_servers\.docs\]/);
-    assert.match(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
+    assert.doesNotMatch(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
+    assert.equal(codexHooks.hooks.PostToolUse[0].matcher, "Write");
+    assert.deepEqual(codexHooks.hooks.PostToolUse[0].hooks, [
+      { type: "command", command: "npm test" }
+    ]);
     assert.match(codexConfig, /approval_policy = "on-request"/);
     assert.match(agents, /Use generated guidance/);
     assert.match(claudeDoc, /Use generated guidance/);

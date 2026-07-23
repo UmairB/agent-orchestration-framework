@@ -9,6 +9,7 @@ import {
   claudeSettingsJson,
   codexConfigToml,
   projectDocContent,
+  codexHooksJson,
   projectDocOutputPath,
   targetForProjectDocRuntime
 } from "./runtime-config.mjs";
@@ -108,14 +109,25 @@ function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, option
     ));
   }
 
-  if (codexMcpServers.length > 0 || codexHooks.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
+  if (codexMcpServers.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
     outputs.push(renderedRuntimeConfig(
       targetDir,
       path.join(".codex", "config.toml"),
       "codex",
       "settings",
       "codex-config",
-      codexConfigToml({ mcpServers: codexMcpServers, hooks: codexHooks, settings: config.settings })
+      codexConfigToml({ mcpServers: codexMcpServers, settings: config.settings })
+    ));
+  }
+
+  if (codexHooks.length > 0) {
+    outputs.push(renderedRuntimeConfig(
+      targetDir,
+      path.join(".codex", "hooks.json"),
+      "codex",
+      "hooks",
+      "codex-hooks",
+      codexHooksJson(codexHooks)
     ));
   }
 

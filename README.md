@@ -64,7 +64,7 @@ The unit of independence is the **story** — boundaries follow real coupling so
 
 ### Assistant commands and skills (`/aof:*`, `$aof-*`)
 
-`aof work init --runtime claude` renders the lifecycle as Claude slash-commands into `.claude/commands/aof/`; `--runtime codex` renders the same ACD procedures as Codex skills under `.codex/skills/aof-*/`. Drive a milestone from a planning PRD all the way to accepted:
+`aof work init --runtime claude` renders the lifecycle as Claude slash-commands into `.claude/commands/aof/`; `--runtime codex` renders the same ACD procedures as Codex skills under `.codex/skills/aof-*/`. Codex also receives project lifecycle hooks in `.codex/hooks.json`: `SessionStart` starts AOF session presence, while `UserPromptSubmit` and `Stop` refresh it. Codex has no native `SessionEnd` hook, so presence expires through AOF's idle TTL after the thread closes. Review and trust project hooks with `/hooks` before relying on them. Drive a milestone from a planning PRD all the way to accepted:
 
 | Claude command / Codex skill | What it does |
 |---|---|
@@ -79,6 +79,7 @@ The unit of independence is the **story** — boundaries follow real coupling so
 | `/aof:add-milestone` · `/aof:add-story` · `/aof:add-task` · `/aof:add-uat` / `$aof-add-milestone` · `$aof-add-story` · `$aof-add-task` · `$aof-add-uat` | scaffold a milestone / story / task / cross-milestone UAT gate |
 | `/aof:feedback` / `$aof-feedback` | capture a mistake, blocker, or UAT observation the instant it's noticed (any actor) |
 | `/aof:recent` / `$aof-recent` | scan the work stream chronologically (catch up / filter by type, status, milestone) |
+| `/aof:insert-milestone` · `/aof:insert-story` · `/aof:insert-chore` · `/aof:insert-uat` / `$aof-insert-milestone` · `$aof-insert-story` · `$aof-insert-chore` · `$aof-insert-uat` | insert a work item before or after an existing item while preserving stream ordering and references |
 
 The commands/skills spawn a team of read-/write-scoped **subagents** (rendered into `.claude/agents/` and `.codex/agents/`):
 

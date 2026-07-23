@@ -27,7 +27,7 @@ Feature: AOF DSL rendering
     Then the command should succeed
     And file `.mcp.json` should exist
     And file `.codex/config.toml` should contain `[mcp_servers.docs]`
-    And file `.codex/config.toml` should contain `[[hooks.PostToolUse]]`
+    And file `.codex/hooks.json` should contain `"PostToolUse"`
     And file `.claude/settings.json` should contain `"hooks"`
     And file `AGENTS.md` should contain `Included guidance`
     And file `CLAUDE.md` should contain `Included guidance`

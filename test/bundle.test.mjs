@@ -52,6 +52,10 @@ const COMMAND_IDS = [
   "code-review",
   "continue",
   "feedback",
+  "insert-chore",
+  "insert-milestone",
+  "insert-story",
+  "insert-uat",
   "migrate",
   "recent",
   "refine",
@@ -62,6 +66,7 @@ const COMMAND_IDS = [
 ];
 const TEMPLATE_IDS = ["chore", "milestone", "spike", "story", "task", "uat"];
 
+const HOOK_IDS = ["codex-session-prompt-ping", "codex-session-start", "codex-session-stop-ping"];
 function descriptorMembers() {
   return readDescriptor().members;
 }
@@ -76,16 +81,18 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 17 commands, 6 templates)",
+    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 21 commands, 6 templates)",
     run: async () => {
       const ids = new Set(memberIds());
       for (const id of AGENT_IDS) assert.ok(ids.has(id), `missing agent ${id}`);
       for (const id of COMMAND_IDS) assert.ok(ids.has(id), `missing command ${id}`);
       for (const id of TEMPLATE_IDS) assert.ok(ids.has(id), `missing template ${id}`);
       const byKind = (kind) => descriptorMembers().filter((m) => m.kind === kind).length;
+      for (const id of HOOK_IDS) assert.ok(ids.has(id), `missing hook ${id}`);
       assert.equal(byKind("agent"), 8, "8 agents");
-      assert.equal(byKind("command"), 17, "17 commands");
+      assert.equal(byKind("command"), 21, "21 commands (incl. the 4 insert-* placement twins)");
       assert.equal(byKind("template"), 6, "milestone/story/task/uat/spike/chore templates");
+      assert.equal(byKind("hook"), 3, "3 Codex session-presence lifecycle hooks");
     }
   },
   {
@@ -155,12 +162,12 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 17 commands, 6 templates",
+    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 21 commands, 6 templates",
     run: async () => {
       const members = descriptorMembers();
       for (const member of members) {
         assert.ok(typeof member.id === "string" && member.id.length > 0, "member has id");
-        assert.ok(["agent", "command", "template"].includes(member.kind), `member ${member.id} has a valid kind`);
+        assert.ok(["agent", "command", "hook", "template"].includes(member.kind), `member ${member.id} has a valid kind`);
       }
       assert.deepEqual(
         members.filter((m) => m.kind === "agent").map((m) => m.id).sort(),
@@ -170,7 +177,12 @@ export const bundleTests = [
       assert.deepEqual(
         members.filter((m) => m.kind === "command").map((m) => m.id).sort(),
         [...COMMAND_IDS].sort(),
-        "17 commands declared"
+        "21 commands declared"
+      );
+      assert.deepEqual(
+        members.filter((m) => m.kind === "hook").map((m) => m.id).sort(),
+        [...HOOK_IDS].sort(),
+        "3 Codex lifecycle hooks declared"
       );
       assert.deepEqual(
         members.filter((m) => m.kind === "template").map((m) => m.id).sort(),
@@ -183,7 +195,7 @@ export const bundleTests = [
     name: "bundle/descriptor: every resource member (agent + command) names one or more target runtimes",
     run: async () => {
       const resourceMembers = descriptorMembers().filter((m) => m.kind === "agent" || m.kind === "command");
-      assert.equal(resourceMembers.length, 25, "25 resource members");
+      assert.equal(resourceMembers.length, 29, "29 resource members (8 agents + 21 commands)");
       for (const member of resourceMembers) {
         assert.ok(Array.isArray(member.runtimes) && member.runtimes.length >= 1, `${member.id} declares >=1 runtime`);
       }
@@ -238,6 +250,7 @@ export const bundleTests = [
       const descriptorIds = memberIds();
       const loadedIds = [
         ...bundle.resources.map((r) => r.id),
+        ...bundle.hooks.map((h) => h.id),
         ...bundle.templates.map((t) => t.id)
       ];
       assert.equal(loadedIds.length, descriptorIds.length, "member count matches descriptor");
@@ -272,6 +285,7 @@ export const bundleTests = [
           const bundle = loadBundle();
           const loaded = [
             ...bundle.resources.map((r) => r.id),
+            ...bundle.hooks.map((h) => h.id),
             ...bundle.templates.map((t) => t.id)
           ].sort();
           assert.deepEqual(loaded, baseline, `member set stable from cwd ${cwd}`);
@@ -290,7 +304,7 @@ export const bundleTests = [
       const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-bundle-proc-"));
       const loaderUrl = pathToFileUrl(path.join(repoRoot, "src", "work-bundle.mjs"));
       try {
-        const script = `import { loadBundle } from ${JSON.stringify(loaderUrl)}; const b = loadBundle(); process.stdout.write(String(b.resources.length + b.templates.length));`;
+        const script = `import { loadBundle } from ${JSON.stringify(loaderUrl)}; const b = loadBundle(); process.stdout.write(String(b.resources.length + b.hooks.length + b.templates.length));`;
         const out = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
           cwd: tmp,
           encoding: "utf8"

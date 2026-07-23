@@ -6,7 +6,7 @@ title: "Work-item insertion & re-index"
 status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-16
+updated: 2026-07-19
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -39,6 +39,12 @@ In scope:
 - **Three insert commands** — `insert-milestone`, `insert-story`, `insert-uat` — that scaffold a
   framed item at a caller-given target position, reusing the framing logic of their `add-*`
   counterparts; they differ only in *placement*, not in what they scaffold.
+- **The corresponding Claude command surface** *(re-open 2026-07-18)* — a bundled `/aof:insert-*`
+  command doc for each insert command (`src/bundle/commands/insert-milestone.md`, `insert-story.md`,
+  `insert-uat.md`), mirroring its `add-*` twin, so the feature is discoverable and usable through the
+  ACD command surface after `aof work init` / `aof work update` — not only via the raw CLI. Adding a
+  `work:*` command *implies* its Claude command; the CLI+engine is not the whole deliverable (see
+  RETROSPECTIVE R5).
 - **Integrity-preserving re-index** of every item at/after the insertion point: rename the
   `NN_type_slug` folders, bump frontmatter `number`, and rewrite all **machine** references —
   `depends` edges, `parent`, milestone→story checklist bullets, and ROADMAP.md rows — so nothing
@@ -83,9 +89,40 @@ the two number spaces plus their shared engine. Stories 02 ∥ 03 are independen
   preserve; it defines "did the re-index stay honest".
 - **ROADMAP.md** — the roadmap index whose numbered rows must stay consistent after a shift.
 
+## Acceptance criteria — Claude command surface (re-open 2026-07-18)
+
+Verifiable by an outsider, in addition to the original validate-green bar:
+- **One bundle command doc per insert command** — `src/bundle/commands/insert-milestone.md`,
+  `insert-story.md`, and `insert-uat.md` exist, each mirroring the structure of its `add-*` twin and
+  describing *placement at a target position* (`--at`, and `--under` for the story axis) rather than
+  append.
+- **Rendered by init/update** — after `aof work init` (or `aof work update` against a prior install)
+  in a consumer repo, each `/aof:insert-*` command is present in the rendered command surface for the
+  installed runtime(s); a repo already on an older bundle picks them up via `work update` with no
+  manual step.
+- **Parity is guarded** — a fitness function asserts that every `work:insert-*` CLI command registered
+  in `src/cli.mjs` has a matching `src/bundle/commands/insert-*.md`, so a future insert command cannot
+  ship CLI-only and silently skip its Claude command again.
+
 ## Accept decision
 
-**ACCEPTED — `aof:verify 41` (2026-07-16).** All three stories `done`. The single lane in scope
+**RE-ACCEPTED — 2026-07-19.** The Claude command surface gap is closed. Delivered: four
+`src/bundle/commands/insert-*.md` wrappers (`insert-milestone`, `insert-story`, `insert-uat`, and
+`insert-chore` — the 4th insert command carried the identical defect, so the fix covers the whole insert
+family), declared in `src/bundle/bundle.json` and regenerated into `manifest.json`; each renders BOTH a
+`/aof:insert-*` Claude command and a codex `aof-insert-*` skill. Guarded by a new registry-derived fitness
+function `acd-work-insert-command-bundle-parity` (every `work:insert-*` CLI command must have a matching
+bundle wrapper — no carve-out). Verified against the acceptance criteria above: 126 green across every
+guard the change touches (bundle membership/manifest-hashes/namespace/parity + render-path), AND proven
+end-to-end in a throwaway consumer repo — `aof work init` renders all four, and `aof work update` on an
+install that lacked them reports exactly `4 created`. See VERIFICATION "Claude command surface (re-open)".
+
+**RE-OPENED — 2026-07-18.** The 2026-07-16 acceptance verified the CLI + engine but the milestone shipped
+**no Claude command surface** for the insert commands (`src/bundle/commands/` carried only the `add-*`
+docs), so the feature was undiscoverable/unusable via `aof work update` in a consumer repo — the CLI+engine
+was mistaken for the whole deliverable (root lesson: RETROSPECTIVE R5).
+
+**ACCEPTED (CLI/engine only) — `aof:verify 41` (2026-07-16).** All three stories `done`. The single lane in scope
 (`@executable`) is green — `node scripts/test.mjs` → exit 0, 2576 ok / 0 not-ok, both m41 fitness
 functions armed+green — and `aof work validate 41` → PASS. No `@manual`/`@uat` lane exists (foundational
 CLI/engine milestone, no UI). Two deferred non-blocker findings (F-4101 pad-width non-uniformity across

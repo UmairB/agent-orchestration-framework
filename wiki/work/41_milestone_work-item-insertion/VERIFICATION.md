@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 41
-verified: 2026-07-16
+verified: 2026-07-19
 verifier: aof:verify
 verdict: accept
 ---
@@ -56,6 +56,30 @@ documented in m41's own STATE `## Feedback`. m41's reindex engine was **never ru
 stream** (only against isolated test fixtures), so it did not cause this. Flagged for the m38 owner;
 **not a m41 blocker**. Scoped `validate 41` is clean.
 
+## Re-verification — Claude command surface (re-open 2026-07-19)
+
+The 2026-07-16 acceptance verified the CLI + engine but missed that the milestone shipped **no bundle
+command surface** for the insert commands, so the feature was unusable via `aof work update` (RETROSPECTIVE
+R5). Re-opened, fixed, and re-verified against the SPEC "Acceptance criteria — Claude command surface":
+
+- **Wrappers authored + declared** — four `src/bundle/commands/insert-{milestone,story,uat,chore}.md`
+  (the whole insert family — `insert-chore` had the identical defect), each mirroring its `add-*` twin and
+  describing placement via the mechanical `aof work insert-*` CLI (ADR-002). Declared in `bundle.json`;
+  `manifest.json` regenerated (73 entries). Each renders BOTH a `/aof:insert-*` Claude command and a codex
+  `aof-insert-*` skill (capability matrix, ADR-006). *verifies →* acceptance criterion 1.
+- **Parity guarded** — new registry-derived fitness function `acd-work-insert-command-bundle-parity`:
+  every `work:insert-*` command in the registry must have a matching bundle command member under the `aof`
+  namespace — no carve-out, so a future insert command cannot ship CLI-only again. *verifies →* criterion 3.
+- **Focused suites green (126 assertions / 0 not-ok)** — the new parity test + every guard the change
+  touches: `acd-bundle-membership`, `acd-bundle-manifest-hashes`, `acd-command-namespace` (count tripwire
+  17→21), `acd-capability-delegation`, `acd-work-command-cli-bijection`, `bundle.test.mjs` (command set +
+  resource count 25→29), `command-core-contract`, plus the render-path suites (`roundtrip-install-proof`,
+  `work-init`, `roundtrip-harness`, `bundle-spike-chore-membership`).
+- **Proven end-to-end in a consumer repo** (criterion 2 — reachable via `aof work update`, not just green
+  tests; memory: green tests ≠ running system) — `aof work init` into a throwaway repo renders all four
+  `/aof:insert-*` commands + codex skills; `aof work update` on an install that lacked them reports exactly
+  **`4 created`** (idempotent no-op when already present). The user's original complaint, observed fixed.
+
 ## Findings
 
 Both findings below were surfaced at the build/craft-review gate and deferred there; recorded here as
@@ -70,7 +94,12 @@ the canonical findings home. My verify run surfaced no new defects.
 
 ## Accept decision
 
-**ACCEPT.** The only lane in scope — `@executable` — is fully satisfied: suite green (2576 ok / 0
+**RE-ACCEPT (2026-07-19).** The re-opened Claude command surface gap is closed and verified per the
+section above — four bundle wrappers shipped + rendered on both runtimes, guarded by a registry-derived
+parity fitness function, 126 focused assertions green, and proven end-to-end (`aof work update` → `4
+created`). No blocker. The milestone is accepted again → `done`.
+
+**ACCEPT (2026-07-16, CLI/engine).** The only lane in scope — `@executable` — is fully satisfied: suite green (2576 ok / 0
 not-ok) with both m41 fitness functions armed and green, the 13 task features traced 1:1 through the
 green registry guards, and `aof work validate 41` PASS. No `@manual`/`@uat` lane exists (foundational
 CLI/engine milestone, no UI), so no human sign-off and no design conformance apply. Both open findings

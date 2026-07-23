@@ -25,7 +25,7 @@ export const archTests = [
       const bundle = loadBundle();
       const outputs = renderBundleOutputs(bundle, { runtimes: ["claude"] });
       const commandIds = bundle.resources.filter((r) => r.kind === "command").map((r) => r.id);
-      assert.equal(commandIds.length, 17, "17 command members");
+      assert.equal(commandIds.length, 21, "21 command members (incl. the 4 insert-* placement twins, m41 R5)");
 
       const byId = new Map(outputs.filter((o) => o.resource.kind === "command").map((o) => [o.resource.id, o]));
       for (const id of commandIds) {
