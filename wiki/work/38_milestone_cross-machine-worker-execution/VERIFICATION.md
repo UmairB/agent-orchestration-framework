@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 38
-updated: 2026-07-19
+updated: 2026-07-23
 ---
 <!--
   Milestone VERIFICATION.md — the record of aof:verify 38. Written by the orchestration (verify owns
@@ -694,5 +694,224 @@ pass; the record above already documents the full landscape — this is the hone
 A milestone accepts only when **all nine** stories are done. 3 are (00, 02, 05); 6 remain `in-review`. The
 automated foundation is green, but — as this milestone proved six times — green is not evidence the feature works;
 the outsider proof for the remaining six is their real-world soak, none of which is agent-runnable here, and story
-06 is not even soak-ready (F-38.06). Next steps are the operator's: close F-38.06 via `aof:continue 38/06`, then
+06 is not even soak-ready (F-38.06).
+
+---
+
+## Verify pass `2026-07-23` — F-38.06's transport confirmed closed, a NEW blocker one seam further on; **NOT accepted**
+
+`aof:verify 38` re-invoked after `b123fd2` (m38 stories 05/06/08 + the F-38.06 terminal-stream transport) and
+`736e78b`. The operator elected at this pass to **drive the live soaks** rather than record-and-stop, so this
+section carries the automated re-confirmation, the **deploy preflight** the soaks must clear first, and the
+**new blocker that removes story 06 from the soak chain**.
+
+### Automated foundation — GREEN in m38's own scope, re-run fresh this pass
+
+- **All 22 m38 fitness-function arch-tests green:** `node --test test/arch/*.test.mjs` → **219 ok / 0 fail**,
+  isolated under `AOF_GLOBAL_HOME=$(mktemp -d)`. Includes the story-06 additions confirmed present on disk —
+  `acd-terminal-stream-transport-wired`, `acd-fleet-terminal-frame-connection-identity`,
+  `acd-fleet-terminal-mirror-read-only`. verifies → the fitness units named in each STORY.md.
+- **Full integrating suite re-run this pass (the first full run since `2026-07-19`):** `node scripts/test.mjs`
+  → **2896 ok / 16 not-ok, exit 1.** **Every m38 module is green** — measured directly over the run log:
+  `session` 89/0, `presence` 50/0, `terminal` 82/0, `clone-credential` 32/0, `mesh-launcher` 14/0,
+  `control-stream` 17/0, `worker-stream` 13/0, `mesh-worker` 2/0, `memory-syncback` 12/0 (**311 m38-module
+  assertions ok, 0 not-ok**).
+- **The 16 red are all OUTSIDE m38, attributed from their own failure text (not assumed):**
+  - **10 · bundle/distribution family — count drift from work in flight, not a defect in either milestone.**
+    `bundle/source-tree` fails `22 !== 21` ("21 commands (incl. the 4 insert-* placement twins)") and
+    `bundle-asset-manifest-complete/00` fails `50 !== 42` — the bundle grew past both frozen counts as the
+    **uncommitted milestone-41 `insert-*` work** (`src/work-bundle.mjs`, `src/adapters.mjs`,
+    `src/runtime-config.mjs`, `src/work-bundle-synthesis.mjs`, `scripts/test.mjs` all modified in the tree) and
+    `736e78b`'s `assimilate-code` command landed without the counts being regenerated.
+    `agent-model-override` fails `'opus' !== 'sonnet'` — `736e78b` moved `aof-developer`'s shipped default to
+    opus and its test still pins sonnet. The siblings (`bundle/descriptor`, `bundle/loader`,
+    `work-init/runtime`, `arch/ADR-007`, `single-entry-two-mode/00`, `build-sea-recipe-guards/F14`) are the
+    same family.
+  - **5 · the recorded date-blind fixture TIME-BOMB, now firmly tripped.** All five `doctor/00`+`doctor/01`
+    failures are an unexpected `stale-updated` finding. Confirmed at source:
+    `test/doctor-coherence-completeness.test.mjs:51` hardcodes `updated: "2026-06-19"` and pins no `now`, so at
+    `2026-07-23` the fixture is **34 days old** — past the 30-day stale window. STATE recorded this on
+    `2026-07-19` (then exactly AT the boundary) and routed it to the stabilisation chore; it is now
+    unconditionally red and will stay red until the fixture pins `now`.
+  - **1 · the recorded `memory-integration` LLM-extraction flake** (`374 !== 381`), already routed.
+  - **Method note (recorded so the number is read honestly):** a clean-`HEAD` git-worktree baseline was
+    attempted to attribute the 16 and **discarded as invalid** — a fresh worktree carries no untracked build
+    outputs (`ui/dist`, generated manifests), so it fails 147 tests for reasons unrelated to the diff. The
+    attribution above rests on each failure's own assertion text instead.
+- **`aof work validate 38` → PASS — 38 is well-formed** (folder↔frontmatter, closed tag vocabulary, depends
+  graph), exit 0.
+
+### F-38.06 remediation — CONFIRMED AT THE SOURCE this pass (not on the record note)
+
+The `2026-07-19` record claimed the hybrid transport was wired by `aof:continue 38/06`. Read directly, both legs
+exist in production code — the claim holds:
+- **Worker → control (cross-machine, the FABRIC leg).** `sendTerminalFrame(sessionId, bytes)` is defined on the
+  worker stream client ([worker-stream-client.mjs:421](../../../src/worker-stream-client.mjs#L421), exported at
+  [:651](../../../src/worker-stream-client.mjs#L651)) and **wired at a real production call site** — the worker
+  branch of the launcher passes
+  `onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk))`
+  ([mesh-launcher.mjs:856](../../../src/mesh-launcher.mjs#L856)). The control side branches the `terminal-frame`
+  kind **before** `applyStreamFrame` ([control-stream-server.mjs:892](../../../src/control-stream-server.mjs#L892)).
+- **Control → UI (loopback leg).** `relayMode` is imported and started for real
+  ([mesh-launcher.mjs:748](../../../src/mesh-launcher.mjs#L748) — `options?.relayMode ?? relayMode`), and
+  `aof mesh ui` passes the subscriber as a LITERAL production key
+  ([cli.mjs:1149](../../../src/cli.mjs#L1149) — `startTerminalRelaySubscriber`). The `2026-07-19` condition
+  ("the only `serveRelay`/`relayMode` reference in `mesh-launcher.mjs` is a comment") no longer holds.
+
+F-38.06 is **CLOSED**. The transport is real.
+
+### Findings — one NEW blocker
+
+| id | observed (confirmed at source this pass) | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F-38.06c** | **The fleet terminal-VIEW has no browser surface — the mirror has no consumer, so story 06's soak cannot be run at all.** The READ-ONLY route is served (`GET /ws/terminal-view?nodeId=&sessionId=`, [mesh-ui-serve.mjs:360](../../../src/mesh-ui-serve.mjs#L360)) and the transport now feeds the mirror (F-38.06, closed above) — but `terminal-view` has **ZERO matches anywhere under [`ui/`](../../../ui/)**. The only terminal WebSocket consumer in the UI is [`TerminalDock.tsx:389`](../../../ui/src/board/TerminalDock.tsx#L389), which dials the board-side `/ws/terminal` (story 05's LOCAL interactive PTY) — a different route on a different surface. ⇒ task-03's two core scenarios are **structurally unrunnable**: "the output appears in the control-node fleet view's terminal panel" has no panel, and "a keystroke typed into the fleet-view terminal panel does not reach the worker" has nothing to type into. DESIGN §Surface 3 declared this on `2026-07-19` ("**NO browser surface was built this pass**") and it still holds at HEAD — `b123fd2` closed the TRANSPORT and left the CONSUMER unbuilt. **This is the milestone's own recurring class advanced one seam: F-38.05 was a consumer with no producer; F-38.06 was a producer on an unreachable transport; F-38.06c is a reachable producer with no consumer surface.** | correctness (inertness) | **BLOCKER (soak)** | build the fleet terminal-view component against DESIGN §Surface 3's V1–V9 binding checklist, THEN run the task-03 soak | `aof:continue 38/06` | **OPEN** |
+
+### Deploy preflight for the live soaks — the mesh is NOT in a soakable state
+
+The operator elected to run the soaks, so the live environment was checked first. It does **not** meet the
+precondition, and soaking as-is would repeat soak-run-1's exact mistake (measuring the old build):
+
+| node | role | last heartbeat | verdict |
+| --- | --- | --- | --- |
+| `umairs-msi` (this host) | control | `2026-07-22T09:21:29Z` | **`stale: true` — daemon down**; nothing listening on :4181–4183 |
+| `umairs-mac-mini` | worker | `2026-07-23T13:44:39Z` (16s before the check) | alive, **but publishing a PRE-m38 build** |
+
+- **The worker is on an old build — proven, not inferred.** Its live presence record is the FOUR-key
+  `{nodeId, heartbeatAt, activeRuns, aofVersion}`, with **no `sessions` key**. The current code emits that key
+  unconditionally — `assemblePresenceRecord` returns `sessions: sessions ?? []`
+  ([mesh-presence.mjs:277](../../../src/mesh-presence.mjs#L277)) — so a record without it cannot have come from
+  an m38 build. (The control node's own record, by contrast, carries `sessions: []`.) **Not a code defect — a
+  deploy step**, recorded so any soak result is read against the right build.
+- **Precondition for every soak below:** the current build installed on BOTH machines, both daemons up, and
+  `aof mesh status --json` showing a `sessions` key on BOTH presence records.
+
+### Soak lanes — what this pass could and could not close
+
+`@manual`/`@uat` scenarios exist ONLY on the six soak tasks (every other `@manual` string in the milestone's
+`.feature` files is prose inside a comment — checked this pass). None is agent-runnable without the operator's
+hardware; story 06's is now unrunnable outright.
+
+| story | soak owed | still blocked by |
+| --- | --- | --- |
+| **01** worker-repo-checkout | task 04 private-clone soak | 2nd machine on the current build + a real **private** repo + SECURITY R1/R2/R4 operator sign-off |
+| **03** per-org-credential-scoping | task 03 two-org soak | **two** real per-org GitHub Apps (distinct keys + installations) |
+| **04** ui-driven-assignment | task 04 real-UI soak (+ §Surface 2 A1–A11 design conformance) | live fleet UI + a live worker in the roster + a human at the browser |
+| **06** worker-terminal-streaming | task 03 stream soak | **F-38.06c — no fleet terminal-view surface exists to soak** (`aof:continue 38/06` first) |
+| **07** durable-worker-pushback | task 03 push soak | real branch + push + a `contents:write` App + operator T15 sign-off |
+| **08** worker-verified-memory-syncback | task 02 end-to-end soak + `@uat` recall | dep 07; worker→control `git pull` + `memory ingest` + human recall sign-off |
+
+Stories **02** and **05** are already accepted; their own deferred soaks (task 05 / task 04) also come due at the
+milestone gate and are unchanged by this pass.
+
+### Accept decision — Milestone 38 **NOT accepted; stays `in-progress`**
+
+- **3 of 9 stories are done** (00, 02, 05); **6 remain `in-review`** (01, 03, 04, 06, 07, 08). A milestone accepts
+  only when ALL its stories are.
+- **F-38.06 is closed** — the terminal transport is genuinely wired, confirmed at source, and that is real
+  forward progress since the last pass.
+- **F-38.06c is open** — and it is a *build* blocker, not a verify one: story 06 cannot be soaked because the
+  surface its user story promises ("watch a dispatched run progress in real time") was never built. Routed to
+  `aof:continue 38/06`.
+- **No story could close on the automated lanes alone.** The m38 scope is green (311/0 + 22/22 fitness) and
+  `validate` is PASS — but this milestone has now demonstrated **seven** times (F1, F4, F6, F7, F8, F12, and the
+  F-38.05/06/06c chain) that green is not evidence a feature works. The outsider proof for the remaining six is
+  their live soak.
+- **The live mesh is not yet in a soakable state** (control daemon down; worker on a pre-m38 build) — the
+  operator is bringing it up. The five runnable soaks chain as **04 → 01 → 05 → 07 → 08**, with **03** separate
+  (needs a second org's App) and **06** withdrawn from the chain pending F-38.06c. Next steps are the operator's: close F-38.06 via `aof:continue 38/06`, then
 drive the real-infrastructure soaks with a human observer.
+
+---
+
+## Verify pass `2026-07-23` (re-invocation) — F-38.06c CLOSED; all six remaining stories now soak-ready; **NOT accepted**
+
+`aof:verify 38` re-invoked after `aof:continue 38/06` remediated the F-38.06c blocker raised at the pass above.
+Only the lanes runnable without a human / real infrastructure were exercised; the verdict is unchanged (milestone
+stays `in-progress`), but the last **build** blocker in the milestone is now gone — the six remaining stories are
+blocked only by their live soaks, not by any inert seam.
+
+### F-38.06c — CONFIRMED CLOSED at the source (not on the record note)
+
+The prior section raised F-38.06c: the terminal transport reached the fleet mirror, but `grep terminal-view ui/`
+returned **zero** matches — a reachable producer with **no browser consumer**, so story 06's task-03 soak was
+structurally unrunnable. Read directly at HEAD + working tree, the consumer surface now exists and is mounted:
+- **The component exists** — [`ui/src/fleet/terminal-view/`](../../../ui/src/fleet/terminal-view/):
+  `FleetTerminalView.tsx` (thin consumer) over framework-free `stream.mjs` + `view-state.mjs` helpers (each with a
+  `.d.mts` companion, the house pattern that F2 was raised for).
+- **It is mounted on the work-item card** — [`Fleet.tsx:6`](../../../ui/src/fleet/Fleet.tsx#L6) imports
+  `FleetTerminalView`; [`Fleet.tsx:530`](../../../ui/src/fleet/Fleet.tsx#L530) renders it under
+  `{assignment ? <FleetTerminalView … /> : null}`. The `2026-07-23` DESIGN §Surface 3 "NO browser surface was
+  built this pass" condition no longer holds.
+- **The armed fitness now goes GREEN at the source** — the new
+  [`acd-terminal-view-live-observable`](../../../test/arch/acd-terminal-view-live-observable.test.mjs) (F17-shaped,
+  RED-until-fixed) pins ADR-013 inv.7 (the `(nodeId, sessionId)` join key reaches control **mid-run**, not only at
+  end — closing the deeper **F-38.06d**) and ADR-014 inv.8 (the stream END is producer-emitted, not inferred —
+  closing **F-38.06e**). It is **green** on today's tree with both self-checks landing, alongside the two new
+  behavioural surface tests (`test/fleet-terminal-view-surface.test.mjs`,
+  `test/fleet-terminal-view-producer-fed.test.mjs`): **3/3 ok** isolated.
+
+F-38.06c (and the F-38.06d/F-38.06e defects the fix's review surfaced beneath it) is **CLOSED**. Story 06 now has
+a real, producer-fed browser surface — its task-03 two-machine stream soak is finally runnable once the hardware
+is up. **The milestone carries no open build/inertness blocker.** *(The fix is in the working tree, uncommitted —
+`ui/src/fleet/terminal-view/` + the three new tests + the `06/tasks/04_bug-fleet-terminal-view-surface.feature`
+`@bug @finding-F-38.06c` task are untracked; committing is the downstream `aof:code-review` step, not a verify
+concern. Recorded so the accept is read against the right build state.)*
+
+### Automated foundation — GREEN, re-run fresh this pass (isolated)
+
+- **All m38 fitness-function arch-tests green:** `node --test test/arch/*.test.mjs` (under
+  `AOF_GLOBAL_HOME=$(mktemp -d)`) → **220 ok / 0 fail**, up from 219 last pass by exactly the new
+  `acd-terminal-view-live-observable`. The story-06 set on disk —
+  `acd-terminal-stream-transport-wired`, `acd-fleet-terminal-frame-connection-identity`,
+  `acd-fleet-terminal-mirror-read-only`, `acd-terminal-view-live-observable` — all pass. verifies → the fitness
+  units named in each STORY.md.
+- `aof work validate 38` → **PASS — well-formed** (folder↔frontmatter, closed tag vocabulary, depends graph).
+- The full integrating `scripts/test.mjs` was **not re-run this pass** — its result is unchanged from the pass
+  above (2896 ok / 16 not-ok, every red **outside** m38: the m41-in-flight bundle-count drift, the
+  `agent-model-override` opus/sonnet pin, the date-blind `doctor` fixture time-bomb, the `memory-integration`
+  flake — all routed to the stabilisation chore). No m38 module changed since; the m38 scope stood 311/0.
+
+### Deploy preflight — the live mesh is STILL not soakable (unchanged, re-checked read-only this pass)
+
+| node | role | last heartbeat | presence keys | verdict |
+| --- | --- | --- | --- | --- |
+| `umairs-mac-mini` (worker) | worker | `2026-07-23T17:48:07Z` (alive) | `nodeId, heartbeatAt, activeRuns, aofVersion` (**4 — no `sessions`**) | **on a PRE-m38 build** |
+| `umairs-msi` (control) | control | `2026-07-22T09:21:29Z` | (5-key) | **`stale: true` — daemon down** |
+
+The current (uncommitted) build is not deployed on either machine: the worker publishes the 4-key record the
+current `assemblePresenceRecord` cannot emit (it returns `sessions: sessions ?? []` unconditionally), and the
+control daemon is down. **Precondition for every soak: the current build installed on BOTH machines, both daemons
+up, `aof mesh status --json` showing a `sessions` key on BOTH.** Not a code defect — a deploy step (the operator's
+flow); recorded so any soak result is read against the right build.
+
+### Soak lanes — none closeable this pass (unchanged), but story 06 is no longer withdrawn
+
+`@manual`/`@uat` scenarios exist only on the six soak tasks; none is agent-runnable without the operator's
+hardware + a human observer. The one change from the prior pass: **06 is back in the chain** (F-38.06c closed).
+
+| story | soak owed | still blocked by |
+| --- | --- | --- |
+| **01** worker-repo-checkout | task 04 private-clone soak | 2nd machine on current build + real **private** repo + SECURITY R1/R2/R4 sign-off |
+| **03** per-org-credential-scoping | task 03 two-org soak | **two** real per-org GitHub Apps (distinct keys + installations) |
+| **04** ui-driven-assignment | task 04 real-UI soak (+ §Surface 2 A1–A11 design conformance) | live fleet UI + a live worker + a human at the browser |
+| **06** worker-terminal-streaming | task 03 stream soak | live 2-machine PTY relay + a human (F-38.06c **now closed** — surface exists) |
+| **07** durable-worker-pushback | task 03 push soak | real branch + push + a `contents:write` App + operator T15 sign-off |
+| **08** worker-verified-memory-syncback | task 02 end-to-end soak + `@uat` recall | dep 07; worker→control `git pull` + `memory ingest` + human recall sign-off |
+
+Stories **02** and **05** are accepted; their own deferred soaks (task 05 / task 04) also come due at the
+milestone gate and are unchanged.
+
+### Accept decision — Milestone 38 **NOT accepted; stays `in-progress`**
+
+- **3 of 9 stories done** (00, 02, 05); **6 remain `in-review`** (01, 03, 04, 06, 07, 08). A milestone accepts only
+  when ALL its stories are.
+- **F-38.06c is closed** — the fleet terminal-view surface is built, mounted, and producer-fed; its armed fitness
+  is green at source. Story 06 is soak-ready, and **no open build/inertness blocker remains anywhere in the
+  milestone** — real forward progress since the last pass.
+- **No story could close on the automated lanes alone.** The m38 scope is green (220/220 fitness; validate PASS) —
+  but this milestone has demonstrated **seven** times that green is not evidence a feature works. The outsider
+  proof for the remaining six is their live soak, and **none is agent-runnable in this non-interactive session.**
+- **The live mesh is not in a soakable state** (control daemon down; worker on a pre-m38 build) — the current
+  build must be deployed to both machines first. Next steps are the operator's: deploy the current build to both
+  nodes, bring both daemons up, then drive the runnable soaks (chain **04 → 01 → 05 → 07 → 08**; **03** separate on
+  a second org's App; **06** now joins once the relay is live) with a human observer.

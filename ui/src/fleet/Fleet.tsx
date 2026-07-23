@@ -3,6 +3,7 @@ import { fleetApi } from "./api";
 import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, GlobalWorkspace, GlobalWorkItem, GlobalNode, FleetStatus, WorkAssignment } from "./api";
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
 import { assignmentChip, assignmentSummary } from "./assignments.mjs";
+import { FleetTerminalView } from "./terminal-view/FleetTerminalView";
 import { fleetCurrentWorkLines } from "./runs.mjs";
 import { StatusRing, StatusChip, StatusDot } from "../board/status";
 import type { WorkStatus } from "../board/api";
@@ -517,6 +518,16 @@ function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: Fleet
       </button>
 
       <AssignAffordance ref={m.item.ref} nodes={nodes} />
+
+      {/* milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 + ADR-014,
+          DESIGN §Surface 3) — the READ-ONLY terminal-VIEW for THIS card's
+          assignment. A sibling of the drill-in button (never nested inside it: a
+          terminal is interactive chrome and an HTML <button> may not contain
+          another interactive element). The component itself renders NOTHING when
+          the assignment carries no resolvable (nodeId, sessionId) tuple — an
+          assignment whose worker has not captured a session yet shows no terminal
+          and opens no socket (ADR-014 invariant 4). */}
+      {assignment ? <FleetTerminalView assignment={assignment} itemRef={m.item.ref} /> : null}
     </div>
   );
 }

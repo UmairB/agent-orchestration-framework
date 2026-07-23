@@ -105,6 +105,14 @@ export type GlobalWorkspace = {
 // attaches onto item/node rows (task 00). Carries the ADR-001 record's
 // chip-anatomy fields VERBATIM (no label/token/mark applied at the read layer —
 // that mapping is the pure `assignmentChip` helper, ./assignments.mjs).
+//
+// milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ARCHITECTURE ADR-013 +
+// ADR-014) — `sessionId` is ADDITIVE: the worker-captured interactive session id
+// that, together with `targetNodeId`, forms the (nodeId, sessionId) tuple the
+// read-only `/ws/terminal-view` mirror routes by. OPTIONAL by design — an
+// assignment whose worker has not captured a session yet omits the key entirely
+// ("absent, not false"), and a card with no resolvable tuple opens NO socket
+// (ADR-014 invariant 4: never a guessed or defaulted session).
 export type WorkAssignment = {
   assignmentId: string;
   state: string;
@@ -114,6 +122,7 @@ export type WorkAssignment = {
   assignedAt: string;
   updatedAt: string;
   reclaimedAt: string | null;
+  sessionId?: string;
 };
 
 // A work item row, carrying its owning workspace id. The global API keeps the

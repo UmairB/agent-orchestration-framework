@@ -383,7 +383,30 @@ export async function serveMeshUi({
       // subscribe() delivers ONLY frames whose (nodeId, sessionId) matches this
       // tuple (no cross-talk — task 01's multiplex scenario); unsubscribe on
       // close/error so a dropped browser tab leaves no dangling listener.
-      const unsubscribe = mirror.subscribe(nodeId, sessionId, (bytes) => {
+      const unsubscribe = mirror.subscribe(nodeId, sessionId, (bytes, meta) => {
+        // ADR-014 AMENDMENT (2026-07-23, structural invariant 8; BLOCKER F-38.06e)
+        // — the worker's END-OF-STREAM marker for THIS tuple. The route answers it
+        // by CLOSING the browser socket, which is what makes the browser's already
+        // correct `socket.onclose -> terminalViewOnClose -> ENDED` reducer reachable
+        // from a REAL session end (DESIGN §Surface 3 V9: a dead stream must not
+        // masquerade as a live one).
+        //
+        // A TRANSPORT close, never an in-band control message written into the byte
+        // stream, for two load-bearing reasons: (1) the browser writes these bytes
+        // STRAIGHT into xterm, so sniffing control content out of terminal bytes
+        // would turn a dumb painter into a parser (the shape inv.2 forbids in
+        // spirit); (2) SECURITY T14 — a worker's OWN PTY output could then FORGE an
+        // end by simply printing the marker, closing the operator's view at will and
+        // defeating the on-screen-secret inspection. At the transport layer that
+        // forgery is structurally impossible.
+        if (meta?.end === true) {
+          try {
+            ws.close();
+          } catch {
+            /* the socket may already be closing */
+          }
+          return;
+        }
         try {
           ws.send(bytes);
         } catch {

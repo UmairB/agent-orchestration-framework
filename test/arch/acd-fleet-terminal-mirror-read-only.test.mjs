@@ -34,8 +34,19 @@
 // mutation-route convention) — each plant asserts it LANDED
 // (`assert.notEqual(planted, clean)`) before asserting the detector trips on it
 // and stays quiet on the clean baseline.
+//
+// EXTENDED at milestone 38 / story 06 / task 04 (BLOCKER F-38.06c) — the invariant
+// now has a BROWSER CONSUMER to police. Until this task the fleet had NO
+// terminal-view surface at all (`terminal-view` matched 0 files under `ui/`), so
+// the structural "no mesh->PTY input path" gate could only ever look at the server
+// side. It now also polices `ui/src/fleet/` — the ONE surface a browser-originated
+// frame could enter from — with BOTH halves R5(m03) demands: the NEGATIVE
+// (no input path exists anywhere on the fleet surface) AND the POSITIVE (the
+// read-only consumer + its explicit read-only LABEL genuinely EXIST — the absence
+// of a violation in an absent component is not evidence, which is precisely how
+// F-38.06c hid).
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,6 +59,15 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const BRIDGE = path.join(repoRoot, "src", "mesh-terminal-relay-bridge.mjs");
 const MIRROR = path.join(repoRoot, "src", "mesh-terminal-mirror.mjs");
 const MESH_UI_SERVE = path.join(repoRoot, "src", "mesh-ui-serve.mjs");
+// The BROWSER half of the invariant (task 04): the whole fleet UI surface, and the
+// read-only terminal-VIEW component that lives on it.
+const FLEET_UI_DIR = path.join(repoRoot, "ui", "src", "fleet");
+const FLEET_TERMINAL_VIEW = path.join(FLEET_UI_DIR, "terminal-view", "FleetTerminalView.tsx");
+// The board dock — scanned, never modified: it is the surface that legitimately
+// DOES wire browser->PTY input (a human logged into their OWN machine's board),
+// so it proves the detectors below are non-vacuous against a real, shipped,
+// input-forwarding terminal.
+const BOARD_TERMINAL_DOCK = path.join(repoRoot, "ui", "src", "board", "TerminalDock.tsx");
 // task 02 scenario 2's OTHER half — "the worker's OWN local /ws/terminal stays
 // bidirectional ... this invariant governs the MESH/fleet path only". Scanned
 // (never modified) to prove this story's read-only additions did NOT regress
@@ -167,6 +187,115 @@ function credentialSourceProblems(bridgeSource) {
     problems.push("wireTerminalBridge does not build its signal from String(chunk) — the onData callback's own parameter");
   }
   return problems;
+}
+
+// --- detector #4 (task 04) — the fleet's BROWSER terminal-VIEW is a MONITOR ---
+//
+// The two halves, per R5(m03) ("a fitness asserts the presence of what SHOULD
+// exist, not merely the absence of what shouldn't"):
+//
+//   NEGATIVE — no browser-originated frame can travel UP the terminal-view socket,
+//   and no terminal INPUT SOURCE is wired: no `.send(` on the socket, no
+//   `onData`->socket path (the direction the board dock DOES wire), no text input /
+//   textarea / contenteditable / send-labelled control. The input row a read-write
+//   terminal would spend is ABSENT, not disabled (DESIGN §Surface 3 V2/V5).
+//
+//   POSITIVE — the read-only consumer genuinely EXISTS and is read-only IN LOOK:
+//   it dials the sanctioned `/ws/terminal-view` seam, constructs its xterm with
+//   `disableStdin: true` (read-only IN FACT at the widget, not merely un-wired),
+//   carries an explicit read-only LABEL (never colour alone, V2/V6), and reuses the
+//   board's `@xterm/xterm` idiom rather than inventing a fleet-local terminal (V3).
+//
+// NOTE on `terminal.write(...)` in the browser: that is the RENDER direction —
+// server-sent bytes painted into an xterm SCREEN. There is no PTY, no child
+// process and no stdin on the browser side, so ADR-014 invariant 1's `term.write`
+// clause (which governs a source feeding a WORKER's PTY stdin — the bridge, the
+// mirror, the route, all covered by detector #1 above) cannot bind here. What binds
+// on this surface is the browser->socket direction, which is what this detector
+// polices.
+
+// WIDENED at the architect's structural review (S2, 2026-07-23) — both detectors
+// were NARROWER than the failure messages they print, measured by exhaustive probe.
+//
+//   `BROWSER_SOCKET_SEND` used to be an alternation of RECEIVER NAMES
+//   (socket|ws|websocket|conn|connection|channel). It caught `socket.send` /
+//   `ws.send` / `view.socket.send` but EVADED `socketRef.current.send`,
+//   `wsRef.current.send` (the React-ref shape this very component would use if it
+//   ever held its socket in a ref), `mirrorSocket.send`, and `this.sock.send`. A
+//   detector that a rename defeats is not an invariant. It is now RECEIVER-AGNOSTIC
+//   — ANY `.send(` — qualified by the file NAMING a `WebSocket`, which is what makes
+//   it a socket-send rather than a mail/analytics/postMessage send. (Comments are
+//   stripped before these run, so a file that merely MENTIONS WebSocket in prose —
+//   e.g. fleet/Fleet.tsx's "the client opens no WebSocket" — is not armed by it.)
+//
+//   `TERMINAL_INPUT_SOURCE` used to be `.onData(` alone — the ONE xterm input event
+//   the board dock happens to use. xterm exposes three more ways to read the
+//   keyboard (`onKey`, `onBinary`, and `attachCustomKeyEventHandler`), each of which
+//   would carry a keystroke off the widget just as effectively, and each of which
+//   the old regex waved through.
+const SOCKET_NAMED = /\bWebSocket\b/;
+const ANY_SEND_CALL = /\.\s*send\s*\(/;
+const TERMINAL_INPUT_SOURCE = /\.\s*(?:onData|onKey|onBinary)\s*\(|\battachCustomKeyEventHandler\s*\(/;
+const TEXT_INPUT_AFFORDANCE = /<\s*(?:input|textarea)\b|contentEditable|role\s*=\s*["']textbox["']/i;
+const SEND_CONTROL_AFFORDANCE = /(?:aria-label|title|placeholder)\s*=\s*["'][^"']*\bsend\b/i;
+
+// browserSocketSend(source) — "this file holds a WebSocket AND calls .send() on
+// something". The two halves together are what make it a browser->server frame; a
+// file with neither, or with only one, is quiet.
+function browserSocketSend(source) {
+  return SOCKET_NAMED.test(source) && ANY_SEND_CALL.test(source);
+}
+
+function fleetTerminalViewProblems(source) {
+  const problems = [];
+  // ── the NEGATIVE half ──
+  if (browserSocketSend(source)) {
+    problems.push("the fleet terminal-view sends on its socket — a browser-originated frame up the terminal-view socket (the route is server->browser ONLY)");
+  }
+  if (TERMINAL_INPUT_SOURCE.test(source)) {
+    problems.push("the fleet terminal-view wires a terminal input source (onData/onKey/onBinary/attachCustomKeyEventHandler) — the direction the board dock forwards to its PTY");
+  }
+  if (TEXT_INPUT_AFFORDANCE.test(source)) {
+    problems.push("the fleet terminal-view renders a text input / textarea / contenteditable — the input row must be ABSENT, not disabled");
+  }
+  if (SEND_CONTROL_AFFORDANCE.test(source)) {
+    problems.push("the fleet terminal-view renders a send/submit control");
+  }
+  // ── the POSITIVE half ──
+  if (!/terminalViewSocketUrl|\/ws\/terminal-view/.test(source)) {
+    problems.push("the fleet terminal-view does not resolve the sanctioned read-only /ws/terminal-view seam");
+  }
+  if (/["'`]\/ws\/terminal["'`]|\/ws\/terminal\?/.test(source)) {
+    problems.push("the fleet terminal-view dials the board's BIDIRECTIONAL /ws/terminal route — the fleet face serves only the read-only mirror");
+  }
+  if (!/resolveTerminalStream/.test(source)) {
+    problems.push("the fleet terminal-view does not resolve its tuple through the sanctioned resolver — a card must never assemble a (nodeId, sessionId) itself (ADR-014 inv.4: no guessed, defaulted or sibling session)");
+  }
+  if (!/disableStdin:\s*true/.test(source)) {
+    problems.push("the fleet terminal-view's xterm is not constructed read-only (disableStdin: true) — read-only must hold IN FACT, not merely by omission");
+  }
+  if (!/readOnlyLabel|read-only/.test(source)) {
+    problems.push("the fleet terminal-view carries no explicit read-only LABEL — the posture may not rest on colour or the absence of an input box alone");
+  }
+  if (!/@xterm\/xterm/.test(source)) {
+    problems.push("the fleet terminal-view does not reuse the board dock's xterm rendering idiom");
+  }
+  return problems;
+}
+
+// listSourceFiles(dir) — every .ts/.tsx/.mjs file under a UI directory, recursively.
+// The WHOLE-SURFACE scope R5(m03) calls for: "no input path exists outside the
+// sanctioned seam" is only an invariant if it is asked of the entire surface, not
+// of the one file we happen to remember to scan.
+async function listSourceFiles(dir) {
+  const found = [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...(await listSourceFiles(full)));
+    else if (/\.(?:tsx?|mjs)$/.test(entry.name) && !entry.name.endsWith(".d.mts")) found.push(full);
+  }
+  return found;
 }
 
 export const archTests = [
@@ -289,6 +418,220 @@ export const archTests = [
       const plantedAskpassRead = 'const sub = term.onData((chunk) => { const askpass = loadOneShotSecretFile(); push(buildTerminalFrameEnvelope(nodeId, sessionId, String(chunk) + askpass)); });';
       assert.notEqual(plantedAskpassRead, clean, "the plant actually differs from the clean synthesized shape");
       assert.ok(credentialSourceProblems(plantedAskpassRead).length > 0, "self-check: a planted askpass-file read trips the detector");
+    },
+  },
+
+  // ══ invariant #1, BROWSER half (task 04 / F-38.06c) — the fleet's terminal-VIEW
+  // component is a MONITOR: no input affordance exists in it ══
+  {
+    name: "arch/38 ADR-014 inv.1 + T14 (task 04): the fleet terminal-VIEW component opens its socket read-only — no browser-originated frame, no onData input source, no input affordance — and SAYS it is read-only",
+    async run() {
+      const viewSource = await realSource(FLEET_TERMINAL_VIEW);
+      assert.deepEqual(
+        fleetTerminalViewProblems(viewSource),
+        [],
+        "the REAL fleet terminal-view component is clean: read-only in fact (no send, no onData, no input affordance, disableStdin) AND read-only in look (an explicit label)",
+      );
+
+      // A clean SYNTHESIZED baseline carrying every sanctioned marker — each plant
+      // below is a hand-written mutation of THIS shape (never a string-replace on
+      // the real file), and asserts it LANDED before asserting the detector trips.
+      const clean = stripComments(`
+        import { Terminal } from "@xterm/xterm";
+        import { resolveTerminalStream, terminalViewSocketUrl } from "./stream.mjs";
+        export function FleetTerminalView({ assignment }) {
+          const stream = resolveTerminalStream(assignment);
+          const terminal = new Terminal({ disableStdin: true, cursorBlink: false });
+          const socket = new WebSocket(terminalViewSocketUrl(stream, location));
+          socket.onmessage = (event) => { terminal.write(event.data); };
+          return (<section><header>{header.label} <span>{header.readOnlyLabel}</span></header><div ref={viewportRef} /></section>);
+        }
+      `);
+      assert.deepEqual(fleetTerminalViewProblems(clean), [], "the clean synthesized fleet-view shape stays quiet");
+
+      // PLANT — a browser-originated frame pushed up the terminal-view socket.
+      const plantedSocketSend = clean.replace(
+        "socket.onmessage = (event) => { terminal.write(event.data); };",
+        "socket.onmessage = (event) => { terminal.write(event.data); };\n          socket.send(pendingInput);",
+      );
+      assert.notEqual(plantedSocketSend, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(
+        fleetTerminalViewProblems(plantedSocketSend).length > 0,
+        "self-check: a planted browser->socket send trips the detector — ADDING one FAILS CI",
+      );
+
+      // PLANT — the board dock's OWN input direction (onData -> socket), moved onto
+      // the fleet view. This is the exact regression the read-only carve-out forbids.
+      const plantedOnData = clean.replace(
+        "socket.onmessage",
+        "terminal.onData((input) => { socket.send(input); });\n          socket.onmessage",
+      );
+      assert.notEqual(plantedOnData, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(
+        fleetTerminalViewProblems(plantedOnData).length > 0,
+        "self-check: a planted onData->socket input path trips the detector",
+      );
+
+      // PLANT — a text input row (the "looks attachable, silently swallows
+      // keystrokes" lie V2/V5 exist to prevent), and its disabled twin (a greyed
+      // input falsely promising "coming soon" is ALSO forbidden — absent, not
+      // disabled).
+      const plantedInputRow = clean.replace("<div ref={viewportRef} />", '<div ref={viewportRef} /><input type="text" />');
+      assert.notEqual(plantedInputRow, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedInputRow).length > 0, "self-check: a planted text input row trips the detector");
+
+      const plantedDisabledInputRow = clean.replace("<div ref={viewportRef} />", '<div ref={viewportRef} /><input disabled type="text" />');
+      assert.notEqual(plantedDisabledInputRow, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedDisabledInputRow).length > 0, "self-check: even a DISABLED input row trips — the row must be absent, not greyed");
+
+      // PLANT — a send control.
+      const plantedSendControl = clean.replace("<div ref={viewportRef} />", '<div ref={viewportRef} /><button aria-label="Send to worker">↵</button>');
+      assert.notEqual(plantedSendControl, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedSendControl).length > 0, "self-check: a planted send control trips the detector");
+
+      // PLANT (the POSITIVE half, R5/m03) — the read-only LABEL removed: a view
+      // that is read-only in fact but says nothing reads as an attachable shell.
+      const plantedNoLabel = clean.replace("<span>{header.readOnlyLabel}</span>", "<span />");
+      assert.notEqual(plantedNoLabel, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedNoLabel).length > 0, "self-check: dropping the explicit read-only label trips the detector");
+
+      // PLANT (the POSITIVE half) — the xterm widget made keystroke-accepting.
+      const plantedStdinEnabled = clean.replace("disableStdin: true", "cursorBlink: true");
+      assert.notEqual(plantedStdinEnabled, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedStdinEnabled).length > 0, "self-check: an xterm constructed WITHOUT disableStdin trips the detector");
+
+      // PLANT (the POSITIVE half) — the component quietly re-pointed at the board's
+      // BIDIRECTIONAL /ws/terminal route instead of the read-only mirror.
+      const plantedWrongRoute = clean
+        .split("terminalViewSocketUrl")
+        .join("boardTerminalUrl")
+        .replace("boardTerminalUrl(stream, location)", 'boardTerminalUrl("/ws/terminal")');
+      assert.notEqual(plantedWrongRoute, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(fleetTerminalViewProblems(plantedWrongRoute).length > 0, "self-check: dialling anything but the sanctioned read-only seam trips the detector");
+
+      // PLANT (the POSITIVE half) — the tuple hand-assembled from raw row fields
+      // instead of resolved: the shape in which a "helpful" default or a sibling
+      // session leaks in (ADR-014 inv.4).
+      const plantedHandAssembledTuple = clean
+        .split("resolveTerminalStream")
+        .join("guessStream")
+        .replace(
+          "terminalViewSocketUrl(stream, location)",
+          "`ws://${location.host}/ws/terminal-view?nodeId=${assignment.targetNodeId}&sessionId=${assignment.sessionId ?? lastKnownSession}`",
+        );
+      assert.notEqual(plantedHandAssembledTuple, clean, "the plant actually differs from the clean synthesized shape");
+      assert.ok(
+        fleetTerminalViewProblems(plantedHandAssembledTuple).length > 0,
+        "self-check: hand-assembling the (nodeId, sessionId) tuple (the shape a defaulted/sibling session leaks through) trips the detector",
+      );
+
+      // ── S2 (architect's structural review, 2026-07-23) — the detectors are WIDER
+      // than the one shape the board dock happens to use. Every send below EVADED
+      // the previous receiver-name alternation, and every input event below evaded
+      // the previous `.onData(`-only regex; each is a hand-written synthesized
+      // snippet (never a mutation written into a real file). ──
+      for (const send of [
+        "socketRef.current.send(pendingInput);",
+        "wsRef.current.send(pendingInput);",
+        "mirrorSocket.send(pendingInput);",
+        "this.sock.send(pendingInput);",
+        "sendRef.current?.send(pendingInput);",
+      ]) {
+        const planted = clean.replace(
+          "socket.onmessage = (event) => { terminal.write(event.data); };",
+          `socket.onmessage = (event) => { terminal.write(event.data); };\n          ${send}`,
+        );
+        assert.notEqual(planted, clean, `the plant (${send}) actually differs from the clean synthesized shape`);
+        assert.ok(
+          fleetTerminalViewProblems(planted).length > 0,
+          `self-check: a browser->socket send written as \`${send}\` trips — the detector is receiver-AGNOSTIC, so a rename cannot defeat it`,
+        );
+      }
+      for (const input of [
+        "terminal.onKey(({ key }) => { socketRef.current.send(key); });",
+        "terminal.onBinary((data) => { socketRef.current.send(data); });",
+        "terminal.attachCustomKeyEventHandler((event) => { socketRef.current.send(event.key); return false; });",
+      ]) {
+        const planted = clean.replace("socket.onmessage", `${input}\n          socket.onmessage`);
+        assert.notEqual(planted, clean, `the plant (${input}) actually differs from the clean synthesized shape`);
+        assert.ok(
+          fleetTerminalViewProblems(planted).length > 0,
+          `self-check: the xterm input event \`${input.slice(0, 28)}…\` trips — onData is not the only way to read the keyboard`,
+        );
+      }
+
+      // …and the WebSocket qualifier still discriminates: a `.send(` on a file that
+      // holds no socket at all (a mail/analytics/postMessage send) is NOT a
+      // browser->server terminal frame and must stay quiet, or the detector would
+      // be noise rather than an invariant.
+      assert.equal(
+        browserSocketSend(stripComments("export function report(beacon) { beacon.send({ event: 'card-opened' }); }")),
+        false,
+        "self-check: a .send( on a file that names no WebSocket is not a socket send — the qualifier keeps the detector honest",
+      );
+      assert.equal(
+        browserSocketSend(stripComments("const socket = new WebSocket(url); socket.onmessage = (e) => paint(e.data);")),
+        false,
+        "self-check: holding a WebSocket without ever sending on it is exactly the read-only shape — quiet",
+      );
+    },
+  },
+
+  // ══ invariant #1, WHOLE-SURFACE half (task 04 / F-38.06c) — the mesh->PTY input
+  // path exists NOWHERE on the fleet browser surface, and the read-only consumer
+  // that surface is supposed to HAVE genuinely exists ══
+  {
+    name: "arch/38 ADR-014 inv.1 (task 04, whole-surface): NO file under ui/src/fleet wires a terminal input source or sends on a socket — and the read-only terminal-VIEW consumer EXISTS and is mounted",
+    async run() {
+      const files = await listSourceFiles(FLEET_UI_DIR);
+      assert.ok(files.length > 0, "the fleet UI surface is found");
+
+      // ── NEGATIVE: whole-surface scope, not just the file we remembered to scan ──
+      const offenders = [];
+      const routeConsumers = [];
+      for (const file of files) {
+        const source = await realSource(file);
+        const relative = path.relative(repoRoot, file);
+        if (TERMINAL_INPUT_SOURCE.test(source)) offenders.push(`${relative} wires a terminal input source (onData/onKey/onBinary/attachCustomKeyEventHandler)`);
+        if (browserSocketSend(source)) offenders.push(`${relative} sends on a socket — the fleet face originates no frame`);
+        if (/terminalViewSocketUrl|\/ws\/terminal-view|TERMINAL_VIEW_PATH/.test(source)) routeConsumers.push(relative);
+      }
+      assert.deepEqual(offenders, [], "no mesh->PTY input path exists ANYWHERE on the fleet browser surface");
+
+      // ── NON-VACUITY, against a REAL shipped file (no plant needed): the SAME two
+      // detectors DO fire on the board dock, which legitimately wires
+      // onData -> socket.send for a human typing into their OWN machine's PTY. A
+      // detector that stays quiet on the fleet surface only because it is quiet
+      // everywhere would be worthless — this proves it is not. ──
+      const dockSource = await realSource(BOARD_TERMINAL_DOCK);
+      assert.ok(TERMINAL_INPUT_SOURCE.test(dockSource), "non-vacuous: the board dock's REAL onData input source is detected");
+      assert.ok(browserSocketSend(dockSource), "non-vacuous: the board dock's REAL socket.send is detected");
+
+      // ── POSITIVE (R5/m03): what SHOULD exist does. F-38.06c was not a violation
+      // in the code — it was the ABSENCE of the code, which a purely negative
+      // invariant scores as a pass. So pin the consumer's existence, its home, and
+      // its mount. ──
+      assert.ok(
+        routeConsumers.length > 0,
+        "the fleet surface HAS a /ws/terminal-view consumer (its absence is exactly how F-38.06c passed a read-only-only gate)",
+      );
+      assert.deepEqual(
+        routeConsumers.map((relative) => relative.split(path.sep).join("/")).sort(),
+        ["ui/src/fleet/terminal-view/FleetTerminalView.tsx", "ui/src/fleet/terminal-view/stream.mjs"],
+        "the terminal-view seam lives in EXACTLY the sanctioned module pair — the .mjs helper holding the logic and the thin .tsx consumer",
+      );
+      const fleetPage = await realSource(path.join(FLEET_UI_DIR, "Fleet.tsx"));
+      assert.ok(/FleetTerminalView/.test(fleetPage), "the fleet page MOUNTS the terminal view — an unmounted component is the same hole one layer in");
+
+      // And the read-only route is the ONLY terminal route the fleet surface names:
+      // the board's bidirectional /ws/terminal must never appear here.
+      for (const file of files) {
+        const source = await realSource(file);
+        assert.ok(
+          !/["'`]\/ws\/terminal["'`]|\/ws\/terminal\?/.test(source),
+          `${path.relative(repoRoot, file)} must not dial the board's BIDIRECTIONAL /ws/terminal route`,
+        );
+      }
     },
   },
 

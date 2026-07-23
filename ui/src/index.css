@@ -43,12 +43,27 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
+/* DESIGN §Surface 3 GAP-2 (milestone 38 / story 06 / task 04, 2026-07-23) — the
+   hand-written `button, input, select, textarea { font: inherit }` reset that used
+   to live HERE is DELETED, not moved, because Tailwind v4's own preflight already
+   ships it verbatim inside `@layer base`
+   (`button,input,select,optgroup,textarea{font:inherit;…}` — confirmed in the built
+   bundle). Keeping a second, UNLAYERED copy was not redundant-but-harmless: an
+   unlayered rule outranks EVERY layered one regardless of specificity, and all
+   Tailwind v4 utilities live in `@layer utilities`. So the duplicate silently
+   defeated every `text-*` / `font-*` utility on every <button> in the app.
+
+   MEASURED in headless Chromium against the built `ui/dist` stylesheet, on the
+   fleet terminal-view header's own markup: the identity span computed 11px/400 and
+   the READ-ONLY pill 10px/600 (their classes applied), while the toggle BUTTON —
+   asking for exactly `text-[11px] font-semibold` — computed **16px/400**, i.e. the
+   inherited root size. That is why the toggle read LOUDER than the stream identity
+   it belongs to (DESIGN §Surface 3 V12's hierarchy clause: identity > read-only >
+   state > toggle). Buttons that declare no font utility are unaffected — preflight
+   still makes them inherit.
+
+   If a button reset is ever wanted again, it MUST be written inside `@layer base`
+   so utilities can still override it. */
 
 code,
 pre,

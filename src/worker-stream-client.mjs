@@ -36,7 +36,7 @@
 // mesh-relay broker binds loopback only, so a worker cannot reach it from another
 // machine). The frozen envelope is built by the bridge module (the single source of
 // the `terminal-frame` kind + shape).
-import { buildTerminalFrameEnvelope } from "./mesh-terminal-relay-bridge.mjs";
+import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-terminal-relay-bridge.mjs";
 
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
@@ -431,6 +431,31 @@ export function createWorkerStreamClient({
     }
   }
 
+  // sendTerminalEnd(sessionId) — milestone 38 / story 06 / task 04 (ADR-014
+  // AMENDMENT 2026-07-23, structural invariant 8; BLOCKER F-38.06e): the END of the
+  // cross-machine terminal leg. The LAST frame of a stream, sent when the driver's
+  // one settle point fires — the same opaque `terminal-frame` kind, so it rides the
+  // SAME single control-side branch the byte frames do and is likewise never
+  // persisted (inv.3). It carries no bytes: the marker lives inside `signal`
+  // (`buildTerminalEndEnvelope`).
+  //
+  // EXACTLY the sendTerminalFrame posture, deliberately: off the sendFrame path,
+  // send only when the socket is genuinely up, swallow any fault, and NEVER
+  // markDropped()/consecutiveDrops±/warn(). A lost end frame leaves a stale live
+  // view (the operator sees a last frame that stopped moving), never a correctness
+  // fault — and it must not thrash a worker's reconnect bookkeeping at the exact
+  // moment its run is settling.
+  async function sendTerminalEnd(sessionId) {
+    if (!connected || handle == null) return { sent: false };
+    try {
+      await transport.send(handle, buildTerminalEndEnvelope(nodeId, sessionId));
+      return { sent: true };
+    } catch {
+      // best-effort, for the same reason sendTerminalFrame is.
+      return { sent: false };
+    }
+  }
+
   // requestCloneCredential({ assignmentId, workspaceId }) — milestone 38 / ADR-009:
   // sends the clone-credential-request up-frame over the SAME sendFrame
   // failure-isolation seam, then awaits the matching clone-credential down-frame
@@ -649,6 +674,7 @@ export function createWorkerStreamClient({
     sendPresence,
     sendAssignmentStatus,
     sendTerminalFrame,
+    sendTerminalEnd,
     requestCloneCredential,
     requestCloneUrl,
     requestWriteCredential,

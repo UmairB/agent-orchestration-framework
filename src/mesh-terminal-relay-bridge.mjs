@@ -68,6 +68,35 @@ export function buildTerminalFrameEnvelope(nodeId, sessionId, bytes) {
   };
 }
 
+// buildTerminalEndEnvelope(nodeId, sessionId) — the END-OF-STREAM marker (ADR-014
+// AMENDMENT 2026-07-23, structural invariant 8; BLOCKER F-38.06e). A SIBLING of the
+// builder above, on the SAME FROZEN envelope and the SAME EXISTING
+// `TERMINAL_FRAME_KIND` — the marker rides INSIDE the opaque `signal` (`end: true`),
+// beside the sessionId that routes it, and NEVER as a fourth top-level key (inv.2)
+// and NEVER as a second `kind`.
+//
+// WHY INSIDE `signal` (the architect's ruling): a second `kind` would need a new
+// branch at THREE kind-switching hops — control-stream-server's terminal-frame
+// branch, the control-side loopback push, and the mirror's own kind guard — and each
+// is a place a future refactor drops one and re-inerts this seam (this milestone's
+// whole failure history). Riding inside `signal` means the control path needs ZERO
+// new branches: the existing branch forwards it verbatim with the F17 nodeId
+// re-stamp, and the mirror's `routingKey(nodeId, signal.sessionId)` routes it to
+// exactly that stream's subscribers, so inv.4 holds BY CONSTRUCTION.
+//
+// It carries NO bytes at all: an end is a fact about the stream, never terminal
+// content (an in-band marker written into the byte stream would be forgeable by the
+// worker's OWN printed output — SECURITY T14; the fleet route answers this marker by
+// CLOSING the browser socket, which a PTY cannot fake). A pure projection of its
+// inputs — no fs, no clock, no network.
+export function buildTerminalEndEnvelope(nodeId, sessionId) {
+  return {
+    kind: TERMINAL_FRAME_KIND,
+    nodeId,
+    signal: { sessionId: sessionId ?? null, end: true },
+  };
+}
+
 // wireTerminalBridge(term, { nodeId, sessionId, push }) → { dispose() }.
 //
 // Subscribes to `term.onData` (duck-typed EXACTLY like terminal-ws.mjs's

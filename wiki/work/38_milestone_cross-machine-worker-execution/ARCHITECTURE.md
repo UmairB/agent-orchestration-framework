@@ -1018,6 +1018,85 @@ arg, not a phantom marker) and keeps the `@executable` lanes over INJECTED fake-
   to the fix (the F-38.05 retro lesson: a fitness function armed at build against an as-built shape can lock in
   a producerless consumer).
 
+### AMENDMENT (2026-07-23, structural review of story 06 / task 04 closing BLOCKER F-38.06c — invariant 3's HOME is ratified; its REPORTING MOMENT is CORRECTED)
+
+**This amendment RATIFIES where the `session_id` lives (a decision the as-built made and only a code comment
+recorded) and CORRECTS *when* it is reported (a defect the as-built inherited from story 05).** Invariant 3
+said the captured `session_id` is "surfaced on the assignment/presence record" and stopped there — it pinned
+neither the HOME nor the MOMENT. Task 04 supplied the home; the moment is still wrong, and the two together are
+what decide whether ADR-014's mirror can ever be watched LIVE.
+
+**Codebase-graph grounding (fresh, this amendment — `aof graph build src`, 2026-07-23: 2009 nodes / 4859 edges,
+12 files re-extracted).** `aof graph impact src/assignment-record.mjs` → dependents ← 4 (`commands/mesh-assign`,
+`control-stream-server`, `global-mesh-query`, `mesh-assignment-reclaim`), dependencies → **0** — a genuine leaf,
+so widening its row→record mapper reaches exactly those four readers and nothing else.
+`aof graph impact src/global-work-store.mjs` → dependents ← **11** (`commands/mesh-assign`, `commands/mesh-repo`,
+`commands/mesh-session`, `control-stream-server`, `global-mesh-query`, `global-node-registry`,
+`global-work-publisher`, `mesh-assignment-reclaim`, `mesh-launcher`, `mesh-presence`, `mesh-worker-execution`) —
+the **god-node of this milestone's persistence**, which is exactly why the column had to arrive by an idempotent
+in-place `ALTER`, never a recreate: eleven modules open that database, on control nodes AND worker nodes.
+`aof graph impact src/global-mesh-query.mjs` → dependents ← **1** (`mesh-ui-serve.mjs` only) — the read shape has
+a single consumer, so the SURFACE half of the change is genuinely contained. The `ui/` half is OUTSIDE the built
+graph (the build was scoped to `src`), so its coupling below is grep-and-infer, stated as such. The graph informs;
+the decision is the architect's call.
+
+**RATIFIED — the join key's HOME is a `global_assignments.session_id` column + an ADDITIVE key on the READ
+mapper, and DELIBERATELY NOT on the frozen mint.** ADR-001 freezes `assembleAssignmentRecord` at ten keys, in
+order (`acd-assignment-record-frozen`), which made the naive reading of invariant 3 ("put it on the record")
+impossible to satisfy without breaking a frozen invariant. The as-built resolves that tension correctly, and it
+is a real decision that deserves recording:
+- **The MINT shape stays frozen at ten.** `assembleAssignmentRecord` is a CONTROL-side dispatch record, minted
+  when nothing about a worker session exists yet; a `sessionId` there could only ever be `null`.
+- **The READ shape is additive.** `mapAssignmentRow` (`assignment-record.mjs:100-115`) gains an eleventh key,
+  `sessionId: row.session_id ?? null` — the row→record mapper every reader already shares, so the value travels
+  identically through `readAssignment` / `findActiveAssignment` / `listAssignmentsForItem` / `listAllAssignments`
+  without a second shape.
+- **The PROJECTION is additive AND absent-not-empty.** `projectAssignment` (`global-mesh-query.mjs:115-131`)
+  appends `sessionId` AFTER the eight m35 keys and OMITS the key entirely when uncaptured — an assignment with
+  no session yet must not be expressible as "a stream you can open".
+- **Only the HOLDER may write it.** The capture rides `applyAssignmentStatusFrame`, BEHIND the pre-existing
+  T6 holder gate (`existing.target_node_id !== connectionNodeId` → refuse, `control-stream-server.mjs:226-228`),
+  with the connection-bound `options.nodeId` — the SAME discipline F17 restored for terminal frames. It follows
+  `runId`'s absent-is-not-a-clear rule (`options.sessionId !== undefined ? … : existing.session_id`), so a later
+  state-only frame can never erase a captured id.
+- **The PRESENCE record is untouched.** Invariant 3's "assignment/presence" was an either; the assignment
+  record is the one chosen, and ADR-001's four-key presence freeze stays byte-unchanged.
+
+**CORRECTED — invariant 3's REPORTING MOMENT. The worker must report the session id WHEN IT IS CAPTURED, not
+only when the run ENDS.** Verified at source this review: `capturedSessionId` is populated MID-RUN, the instant
+the transcript-dir watch resolves (`mesh-worker-execution.mjs:949,962`), and every terminal-frame from that
+moment carries it (`:1014`). But the only `sendAssignmentStatus` calls that carry `sessionId` are
+`needs-input` (`:1484`), `done` (`:1523`), `failed` (`:1529`) and the completed branch (`:1533`). The `running`
+transition that OPENS the run (`:1448`) is sent BEFORE the driver spawns and carries `{ runId }` only — correctly,
+since no session exists yet — and **nothing sends another status frame for the whole life of the run.**
+Consequence: for an ordinary run, `global_assignments.session_id` stays NULL until the run REACHES A TERMINAL
+STATE, so `projectAssignment` omits the key, `resolveTerminalStream` returns `no-session`, and the fleet card
+renders no terminal and opens no socket **for exactly the interval an operator wants to watch**. The worker is
+streaming PTY bytes into the mirror the entire time, keyed by an id no browser can learn until there is nothing
+left to watch. (The `needs-input` case IS covered — that frame carries the id mid-flight — which is why
+ADR-014's named consequence "a human can SEE what a `needs-input` session is asking" holds while the SPEC
+objective "watch a dispatched run progress in real time" does not.)
+
+**Structural invariant 7 (NEW; SUPERSEDES nothing — invariants 1-6 above stand unchanged).**
+7. **The captured `session_id` is REPORTED WHILE THE RUN IS LIVE.** The worker sends a session-id-carrying
+   assignment-status frame at the moment `capturedSessionId` first resolves — not only on the
+   `needs-input`/`done`/`failed` frames. A run that reaches the control node with a session id ONLY at a
+   terminal state does not satisfy invariant 3, because the join key it surfaces can no longer be used to watch
+   anything. The natural shape is a second `running` frame (`{ runId, sessionId }`) emitted from the watch's
+   resolution callback, which the control node's absent-is-not-a-clear writer already accepts idempotently.
+
+**Consequences.**
+- The join key has ONE home, and the ADR-001 ten-key mint freeze and the eleven-key read shape are no longer in
+  apparent conflict — a future reader will not "fix" one by breaking the other.
+- **Invariant 7 is SPEC, armed at the FIX** — the mid-run report does not exist yet. The milestone's own F17
+  precedent (a fitness armed RED to pin an open finding until the one-line fix lands) is the available shape;
+  arming it is the orchestrator's call, not this review's, since it would make the suite red on a tree that is
+  otherwise green.
+- **This is the milestone's defining class recurring a FOURTH time, one seam further along:** F-38.05 was a
+  consumer with no producer; F-38.06 a producer on an unreachable transport; F-38.06c a reachable producer with
+  no consumer surface; and now a consumer surface whose join key arrives too late to use. The pattern is not
+  "the wiring is missing" — it is "each link was proven in isolation and never against the clock of the run".
+
 ---
 
 ## ADR-014: The cross-machine terminal BRIDGE relays the worker's `/ws/terminal` PTY bytes over the FROZEN `mesh-relay.mjs` envelope as a NEW `kind` (opaque `signal`, routed by (nodeId, sessionId)) into a READ-ONLY fleet-face mirror — an in-memory ephemeral tail (the mesh-presence-subscriber pattern), NEVER a system of record. NO input-frame path from the fleet face back to the worker PTY exists in this story
@@ -1251,6 +1330,177 @@ footgun cannot silently return. **DESIGN/VERIFICATION requirement to document:**
 UI (`aof mesh ui`) runs on the control node, and `config.mesh.relay.url` is loopback-hosted
 (`ws://127.0.0.1:<servicePort>/ws/relay`, its port = the control service port); the cross-machine leg needs no
 relay config (it rides the fabric).
+
+### AMENDMENT (2026-07-23, structural review of story 06 / task 04 closing BLOCKER F-38.06c — RATIFICATION of the BROWSER consumer; invariants 1-4 unchanged, invariant 1's `term.write` clause SCOPED, invariant 3 clarified against the new persistence)
+
+**The decision and invariants 1-7 above stand unchanged and shipped.** Task 04 added the browser CONSUMER the
+mirror never had (`ui/src/fleet/terminal-view/{stream,view-state}.mjs` + `FleetTerminalView.tsx`, mounted from
+`Fleet.tsx`'s work-item card). Verified at source and by the extended
+`acd-fleet-terminal-mirror-read-only`: the component registers no `onData`, calls `.send(...)` on no socket,
+renders no input/textarea/contenteditable/send control, constructs its xterm with `disableStdin: true`, and
+carries an explicit `read-only` LABEL (inv.1 + T14 + DESIGN V2/V5/V6); it resolves only through
+`resolveTerminalStream` and dials only `/ws/terminal-view`, so a half-tuple yields NO url, NO header and NO
+socket (inv.4 + V1/V8). This block records the three readings a future reader would otherwise get wrong.
+
+**Codebase-graph grounding (fresh, this amendment — same build as the ADR-013 amendment above, 2026-07-23:
+2009 nodes / 4859 edges).** `aof graph impact src/mesh-ui-serve.mjs` → dependencies → 6, now including
+`src/mesh-terminal-mirror.mjs` and `src/global-mesh-query.mjs` — so the fleet face is the ONE module that holds
+both halves of the join (the read shape that surfaces the tuple and the mirror that routes by it), which is why
+the consumer belongs on its surface and nowhere else. `aof graph impact src/mesh-terminal-relay-bridge.mjs` →
+dependents ← 4 (`control-stream-server`, `mesh-launcher`, `mesh-terminal-mirror`, `worker-stream-client`),
+dependencies → **0** — the envelope builder stays a leaf, untouched by this task, so inv.2's frozen envelope is
+structurally out of the blast radius. The `ui/` tree is OUTSIDE the built graph (the build was scoped to `src`);
+the browser-side coupling asserted here is grep-and-infer, and it is instead pinned mechanically by the
+whole-`ui/src/fleet`-surface clause of `acd-fleet-terminal-mirror-read-only`. The graph informs; the decision is
+the architect's call.
+
+- **Invariant 1's `term.write` clause is SERVER-SIDE ONLY — SCOPED here so a naive grep never mis-reads the
+  browser.** `FleetTerminalView.tsx` DOES call `terminal.write(...)`: that is the RENDER direction — bytes the
+  server already sent, painted into a browser-side xterm SCREEN. There is no PTY, no child process and no stdin
+  on that side of the wire. Invariant 1's clause governs a source that feeds a WORKER's PTY stdin (the bridge,
+  the mirror, the route) and structurally cannot bind to a browser. What DOES bind on the browser surface is the
+  browser→socket direction, and that is what the fitness polices. **Any future re-reading of invariant 1 must
+  keep this split** — collapsing it would either false-fire on every terminal renderer or, worse, invite someone
+  to "fix" the false positive by weakening the clause that guards the real sink.
+
+- **Invariant 3 is NOT breached by persisting the `session_id` — the mirror still writes nothing.** Task 04 adds
+  a durable column, which reads at a glance like persistence arriving in the terminal story. It is not: what is
+  persisted is the ADR-001 dispatch record's JOIN KEY (which session an assignment launched — a fact about the
+  ASSIGNMENT, durable exactly as `runId` is), never terminal-frame CONTENT. The mirror
+  (`mesh-terminal-mirror.mjs`) remains a pure in-memory ephemeral tail; `applyStreamFrame` still carries no
+  terminal-frame kind and the terminal-frame branch still returns before any store apply
+  (`control-stream-server.mjs:910-917`). Kill the mirror and the fleet loses the live view, not data — unchanged.
+
+- **The view is OPT-IN — a `Watch terminal` toggle — which SUPERSEDES the decision's "opening an assignment's
+  card … subscribes" prose.** The decision's Multiplexing bullet described discovery, not a binding invariant,
+  and auto-subscribing every rendered card would open one socket per assignment on a fleet-wide board. As built,
+  a card with a RESOLVED tuple renders its identity header (V1) and a toggle; the socket opens only on the
+  operator's click. That is the better shape and is ratified here as the decision, so it is not later "restored"
+  to auto-subscribe. A card with an UNRESOLVED tuple renders nothing at all — no header, no toggle.
+
+**Accepted residuals (named, not fixed — neither is a regression introduced by this task).**
+- **The routing tuple's TRUST SPLIT is asymmetric, and that is what makes it safe.** The `nodeId` half is
+  CONTROL-authored (`target_node_id`, set at mint, never writable by any worker frame) and, on the frame side,
+  re-stamped from the connection identity (F17, `mesh-launcher.mjs:729`). The `sessionId` half is
+  WORKER-reported, but only by the assignment's holder. So a worker can at worst mis-point its OWN card at
+  another session ON ITS OWN NODE; it can never target another node's card — the cross-node spoof F17 closed
+  stays closed, and the new persist path opens no equivalent hole.
+- **`routingKey` is a `::`-joined string (`mesh-terminal-mirror.mjs:42`), mirrored client-side by
+  `terminalStreamKey`.** Pre-existing (story 06), but task 04 changes its exposure: the `sessionId` half now
+  reaches the operator's subscribe AUTOMATICALLY rather than only by a hand-typed url. A node id containing
+  `::` could therefore alias two distinct tuples. Derived node ids are `[a-z0-9-]+` (`node-identity.mjs`
+  `sanitizeHostname`) so this is unreachable by derivation; only an OPERATOR-SET verbatim `config.mesh.nodeId`
+  could contain `::`, and the worst outcome is one card mislabelling another node's bytes to an operator already
+  authorized to view both. Accepted; the cheap hardening if it ever matters is to encode each half before the
+  join, in `routingKey` and `terminalStreamKey` together.
+
+### AMENDMENT (2026-07-23, BLOCKER F-38.06e — the terminal-frame protocol gains an END-OF-STREAM marker INSIDE the opaque `signal`, emitted from the driver's ONE settle point; the fleet route CLOSES the browser socket rather than injecting an in-band control message)
+
+**This amendment ADDS a mechanism; it changes no decision and weakens no invariant 1-7.** QA's F-38.06e is
+CONFIRMED at source: the terminal-frame protocol has **no end-of-stream signal at all**
+(`buildTerminalFrameEnvelope`, `mesh-terminal-relay-bridge.mjs:63-69`, emits only `signal: { sessionId, bytes }`),
+and the fleet route unsubscribes ONLY on the **browser's** own close/error (`mesh-ui-serve.mjs:393-394`). Nothing
+in the system ever tells a watching browser that the session it is mirroring has ended. So
+`TERMINAL_VIEW_STATES.ENDED` is **unreachable from a real session end**: after the worker's PTY exits, an open
+view sits on `streaming` / `live: true` / `motion: "pulse"` indefinitely. That is DESIGN §Surface 3 **V9's exact
+forbidden state** — "a dead stream must not masquerade as a live one" — and it is the F-38.05 class (a consumer
+with no producer) relocated onto the state axis. It passed the task-04 review because the V9 contract row was
+discharged by calling the `terminalViewOnClose` reducer DIRECTLY, never by a transition a real stream caused.
+
+**Codebase-graph grounding (fresh, this amendment — `aof graph build src`, 2026-07-23: 2009 nodes / 4859 edges).**
+`aof graph impact src/mesh-terminal-relay-bridge.mjs` → dependents ← 4 (`control-stream-server`, `mesh-launcher`,
+`mesh-terminal-mirror`, `worker-stream-client`), dependencies → **0** — the envelope builder is a pure leaf that
+ALL FOUR hops already import, so a sibling builder added there is visible to every hop with no new edge and no
+new module. `aof graph impact src/worker-stream-client.mjs` → dependents ← **1** (`mesh-launcher.mjs` only),
+dependencies → 1 (that same bridge leaf) — the worker send seam is a private, single-consumer surface, so adding
+a send method there cannot leak into any other role. `aof graph impact src/mesh-terminal-mirror.mjs` → dependents
+← 2 (`cli.mjs`, `mesh-ui-serve.mjs`) — the mirror has exactly two consumers, so widening its listener contract is
+a two-call-site change. This is what makes the ruling below cheap: the whole end-to-end path already exists and
+every hop already imports the leaf that would carry the marker. The graph informs; the decision is the
+architect's call.
+
+**THE DECIDING SOURCE FACT — `finish()` is the ONE settle point, and it covers `needs-input` TOO.**
+`driveInteractiveClaudeSession`'s `finish(result)` (`mesh-worker-execution.mjs:984-1000`) settles EXACTLY once
+for ALL THREE outcomes and calls `cleanupSubs()`, disposing `dataSub` — i.e. **`onOutputChunk` stops being called
+at precisely that line**, which is the literal definition of "this stream has ended". `done`/`failed` reach it via
+`term.onExit` (`:1031-1033`); `needs-input` reaches it via the sentinel branch, which **`term.kill()`s the PTY
+first** (`:1025-1028`) because — the driver's own comment at `:1021-1024`, citing RESEARCH §4.3 — a human resumes
+via a FRESH `claude --resume` process on a NEW session, never by reattaching to a still-running one. So a
+`needs-input` session's stream is **genuinely over**, and `finish` also resolves the `sessionId` deterministically
+(`capturedSessionId ?? await watchPromise`, `:990-997`), guaranteeing the end frame has a tuple to route on.
+
+**RULING — (a), shaped as an end marker INSIDE the opaque `signal` on the EXISTING kind. (b) is REJECTED. (c) is
+ADOPTED only as a subordinate backstop.**
+
+- **(a) CHOSEN — a real end-of-stream signal, emitted from `finish()`, riding INSIDE `signal` on the EXISTING
+  `TERMINAL_FRAME_KIND`.** A sibling builder `buildTerminalEndEnvelope(nodeId, sessionId)` →
+  `{ kind: TERMINAL_FRAME_KIND, nodeId, signal: { sessionId, end: true } }`. **Inside `signal`, NOT a new `kind`
+  and NOT a fourth top-level key** (inv.2 is honoured either way, but the choice is deliberate): a second `kind`
+  would need a new branch at THREE hops that switch on kind — `control-stream-server`'s
+  `frame.kind === TERMINAL_FRAME_KIND` branch, the loopback push, and `mirror.apply`'s kind guard — and every one
+  of those is a place a future refactor drops a branch and re-inerts the seam, which is this milestone's entire
+  failure history. Riding inside `signal` means the control path needs **zero** new branches: the existing branch
+  forwards it verbatim with the F17 nodeId re-stamp, and `routingKey(envelope.nodeId, signal.sessionId)` routes it
+  to exactly that stream's subscribers, so inv.4 holds **by construction** with no new routing surface. The signal
+  is already the sanctioned home for "routing metadata the fleet needs" (decision bullet 1).
+- **The PRODUCER is `finish()`, via a SEPARATE optional hook wired as a LITERAL key.** `finish` calls
+  `options.onSessionEnd?.(capturedSessionId)` — a hook DISTINCT from `onOutputChunk` (never a sentinel smuggled
+  through the byte hook — see the in-band ruling below) — wired at the SAME production `createHandler({...})`
+  call site in `mesh-launcher.mjs` that already carries `onOutputChunk` as a literal key, to
+  `client.sendTerminalEnd(sessionId)`. Best-effort fire-and-forget on the fabric, EXACTLY like
+  `sendTerminalFrame`: send only when connected, swallow faults, and NEVER `markDropped()`/`warn()` — a lost end
+  frame is a stale view, never a correctness fault, and must not thrash the reconnect state (the inv.5 discipline).
+- **The fleet route CLOSES the browser socket; it does NOT inject an in-band control message.** `mirror.apply`
+  delivers the end to that tuple's subscribers distinctly (an additive second listener argument, e.g.
+  `listener(signal.bytes, { end: true })` — the two consumers are `cli.mjs` and `mesh-ui-serve.mjs`, per the
+  graph), and the terminal-VIEW listener responds with `ws.close()`. **TWO reasons this must be a transport close
+  and never a marker in the byte stream:** (1) the browser writes received bytes STRAIGHT into xterm, so making it
+  sniff control content out of terminal bytes is the "JSON-parse-then-branch on terminal content" shape inv.2
+  forbids in spirit and turns the dumb painter into a parser; (2) **security** — a worker's own PTY output would
+  then be able to FORGE an end by printing the marker, letting an agent (or anything it runs) close the operator's
+  view at will and defeat the T14 `@manual` on-screen-secret inspection. At the transport layer that forgery is
+  structurally impossible.
+- **The browser needs NO change.** `socket.onclose` → `terminalViewOnClose(current)` → `ENDED`
+  (`ui/src/fleet/terminal-view/view-state.mjs:88-92`), and its already-shipped rule that an
+  ALREADY-`DISCONNECTED` view stays disconnected keeps a transport failure from being laundered into a clean
+  finish. The reducer was always correct; it simply never received the event. **This amendment makes the existing
+  reducer REACHABLE rather than replacing it** — which is also why the V9 lane must be re-driven end-to-end and
+  not by calling the reducer.
+- **(b) REJECTED — the mirror must NOT close subscribers off the assignment's terminal state.** It would require
+  `mesh-terminal-mirror.mjs` to READ assignment state, putting a store/registry dependency into the one module
+  inv.3 deliberately keeps store-free and transport-agnostic (the 2026-07-19 ratification's own words: "a pure
+  in-memory live-tail with no fs/store import and no durable write"). That inverts inv.3 to fix V9. It is also
+  semantically wrong: the assignment's terminal state is a CONTROL-side fact arriving on a DIFFERENT transport at
+  a DIFFERENT time from the PTY's actual exit, and it gets `needs-input` exactly backwards — that assignment
+  state is `running`, so (b) would keep painting "live" forever on the one case where a human is being waited on.
+- **(c) ADOPTED AS A SUBORDINATE BACKSTOP ONLY — never the mechanism.** A card MAY degrade its view from the
+  assignment state it already holds, to cover the UN-SIGNALLED death (worker crash, machine off, fabric partition)
+  where no end frame is ever emitted and no terminal status frame ever arrives either. It is derived, lagging and
+  lossy, and on `needs-input` it is actively wrong (see above), so it can never stand in for (a). It composes
+  with, and does not pre-empt, the designer's V10 state-aware-copy ruling.
+- **EXPLICITLY REJECTED — a client-side inactivity timeout.** "No bytes for N seconds ⇒ ended" would invent an
+  `ended` the source never asserted, which is V9's own rule run backwards. A distinct `stale` state that says
+  literally "no output for N s" would be honest, but it is NOT `ended` and is NOT this fix.
+
+**Structural invariant 8 (NEW; invariants 1-7 stand unchanged).**
+8. **The stream's END is PRODUCED, not inferred.** A terminal-frame end marker exists inside the opaque `signal`
+   on the EXISTING `TERMINAL_FRAME_KIND` (never a fourth top-level envelope key, never a second `kind`); it is
+   emitted from the driver's single `finish()` settle point for ALL THREE outcomes (`done`/`failed`/`needs-input`)
+   through a hook DISTINCT from `onOutputChunk`, wired as a LITERAL key at the production `createHandler({...})`
+   call site; the mirror routes it by the SAME (nodeId, sessionId) tuple (inv.4 unchanged) and never persists it
+   (inv.3 unchanged); and the fleet terminal-VIEW route responds by CLOSING the browser socket — it never sends
+   an in-band control message down the byte stream, so a worker's PTY output can never forge a stream end. A
+   protocol with no end marker, an end emitted anywhere but the settle point, an unwired hook, or an in-band
+   marker each TRIP.
+
+**Consequences.**
+- V9 becomes reachable from a REAL session end, for all three outcomes, with **no change to the browser state
+  machine** and **no new branch on the control path** — the smallest honest shape the existing hops allow.
+- inv.3 is protected from the (b) shortcut that would have coupled the ephemeral mirror to the system of record.
+- **The V9 acceptance lane must be re-driven END-TO-END** (real driver `finish` → real fabric → real mirror →
+  real `/ws/terminal-view` → an observed browser-side close), because "call the reducer and assert it returns
+  `ended`" is precisely the evidence shape that let F-38.06e ship.
+- **Armed RED now** by `acd-terminal-view-live-observable` clause (b) — see the fitness register.
 
 ---
 
@@ -1502,6 +1752,88 @@ which keeps the read-only / stateless half unweakened):**
     control-bridge real-source gates fail on the inert option-(a) tree that the F-38.06 draft shipped, and go
     green only when the developer reworks to the hybrid; the fleet-consumer gate already passes (that leg
     survives the rework); the synthesized self-check proves the detectors correct regardless of tree state.
+
+**Extended at the ADR-013 + ADR-014 AMENDMENTS (2026-07-23, story 06 / task 04 closing BLOCKER F-38.06c — the
+BROWSER consumer surface; no existing clause weakened):**
+
+17b. `acd-fleet-terminal-mirror-read-only` gains its **BROWSER half** (two entries; the four server-side clauses
+    above are untouched). (a) COMPONENT-level: the real `FleetTerminalView.tsx` is asserted CLEAN first, then
+    eight hand-written plants on a synthesized baseline each assert they LANDED before asserting the trip —
+    a browser→socket `.send`, an `onData`→socket path, a live input row, a DISABLED input row (absent, not
+    greyed), a send control, the read-only LABEL removed, `disableStdin` removed, the sanctioned seam swapped
+    for the board's bidirectional `/ws/terminal`, and a hand-assembled tuple bypassing `resolveTerminalStream`.
+    (b) WHOLE-SURFACE: every `.ts/.tsx/.mjs` under `ui/src/fleet` is scanned for an input source or socket send,
+    and — per prior lesson R5(m03) — the PRESENCE half is pinned too (the `/ws/terminal-view` consumer EXISTS,
+    lives in exactly the sanctioned `.mjs`+`.tsx` pair, and `Fleet.tsx` MOUNTS it), because F-38.06c was the
+    ABSENCE of code, which a purely negative invariant scores as a pass. Non-vacuity is proven against a REAL
+    shipped file rather than a plant: the same two detectors DO fire on `ui/src/board/TerminalDock.tsx`, which
+    legitimately wires `onData`→`socket.send` for a human at their own machine. **Known narrowness (SHOULD-FIX,
+    recorded so it is not mistaken for coverage):** `BROWSER_SOCKET_SEND` is receiver-NAME-bound
+    (`socket|ws|websocket|conn|connection|channel`), so `socketRef.current.send(…)` / `wsRef.current.send(…)` /
+    `mirrorSocket.send(…)` evade it, and `TERMINAL_INPUT_SOURCE` matches only `.onData(`, so xterm's `onKey` /
+    `attachCustomKeyEventHandler` / `onBinary` evade it. The load-bearing guarantee does NOT rest on these —
+    the ROUTE registers no `ws.on("message")` sink at all (clause #1, server-side), so a browser frame reaches
+    no PTY even if one were sent — but the browser clauses should be widened to a receiver-agnostic
+    `\.send\s*\(` on a file that names a WebSocket, plus the three other xterm input events.
+17c. `acd-vibeyard-attribution` is WIDENED by one file — `ui/src/fleet/terminal-view/FleetTerminalView.tsx` is
+    added to `ADAPTED_FILES` because DESIGN V3 requires reusing the dock's vibeyard-derived xterm pane wiring,
+    and the attribution travels with the derivation. Every entry in that list must carry an
+    "Adapted from … vibeyard … (MIT)" notice, so an added entry is an ADDED assertion: nothing was removed and
+    no assertion loosened. **Widened, not weakened.**
+
+**Added at the ADR-013 + ADR-014 AMENDMENTS (2026-07-23 — armed RED-until-fixed by design, the F17 /
+`acd-fleet-terminal-frame-connection-identity` precedent this milestone already set. BOTH CLAUSES CLOSED GREEN
+the same day; the entry is kept in full because the RED it pinned is the reason the producers exist):**
+
+21. `acd-terminal-view-live-observable` (ADR-013 inv.7 + ADR-014 inv.8; DESIGN §Surface 3 V7/V9) — the fleet
+    terminal-VIEW is observable ACROSS THE WHOLE LIFE OF A RUN, not merely at its edges. **Clause (a), ADR-013
+    inv.7 — GREEN (was RED at arming):** the transcript-watch resolution in `mesh-worker-execution.mjs` must REPORT the captured
+    session id (a live-report seam invoked from the resolution chain) AND that seam must be supplied as a
+    LITERAL key at the production `createHandler({...})` call site in `mesh-launcher.mjs` (the F12 discipline),
+    with the pre-existing terminal-state reports still carrying `sessionId` (the live report is ADDITIVE, never
+    a move). **Clause (b), ADR-014 inv.8 / BLOCKER F-38.06e — GREEN (was RED at arming):** `buildTerminalEndEnvelope` exists on the
+    bridge leaf, reuses the EXISTING `TERMINAL_FRAME_KIND`, carries the marker INSIDE `signal`, and adds no
+    fourth top-level envelope key (inv.2 checked positively, by extracting the returned literal's top-level
+    keys); `worker-stream-client.mjs` exposes `sendTerminalEnd`; the driver's ONE `finish()` settle point emits
+    it through a hook DISTINCT from `onOutputChunk`; the launcher wires that hook as a LITERAL key to
+    `client.sendTerminalEnd`; `mirror.apply` delivers the end distinctly to the tuple's subscribers; and the
+    `/ws/terminal-view` listener CLOSES the browser socket rather than sending an in-band control literal.
+    NEGATIVE clauses that must STAY true: `control-stream-server.mjs` branches `TERMINAL_FRAME_KIND` EXACTLY
+    once (the end rides the existing branch, adding none) and `applyStreamFrame` still carries no terminal-frame
+    kind (inv.3 — never persisted). Plants (synthesized, hand-written, CRLF-safe, each asserting it LANDED): a
+    watch resolution that reports to nobody; an unwired report hook; a "moved" report that drops the terminal
+    one; a protocol with no end builder; the marker as a fourth top-level key; an end emitted anywhere but the
+    settle point; an unwired end hook; an IN-BAND control message instead of a close; a route that never closes;
+    a SECOND control-path branch; a mirror that still delivers bytes only — each trips. The two SYNTHESIZED
+    self-check lanes pass REGARDLESS of tree state, so the arming red was provably a finding about the TREE and
+    not a broken detector; both failure messages carried the exact fix.
+    **STATUS — BOTH CLAUSES CLOSED GREEN (2026-07-23), verified at source by this review, not on report.** All
+    four lanes green; QA's `test/fleet-terminal-view-producer-fed.test.mjs` 4/4; the arch sweep moved 683→685
+    pass and 11→9 fail, i.e. exactly the two armed reds flipping with zero collateral. The as-built follows the
+    ADR-014 amendment's ruling verbatim: `buildTerminalEndEnvelope(nodeId, sessionId)` →
+    `{ kind: TERMINAL_FRAME_KIND, nodeId, signal: { sessionId, end: true } }`
+    (`mesh-terminal-relay-bridge.mjs:92`); `sendTerminalEnd` in `sendTerminalFrame`'s best-effort posture
+    (`worker-stream-client.mjs:448`, exported `:677`); produced from the ONE `finish()` settle point via an
+    `onSessionEnd` hook DISTINCT from `onOutputChunk` (`mesh-worker-execution.mjs:1051`), wired as a LITERAL key
+    at the production call site (`mesh-launcher.mjs:876`); `mirror.apply` passing
+    `meta = { end: signal.end === true }` (`mesh-terminal-mirror.mjs:85`); the route calling `ws.close()`
+    (`mesh-ui-serve.mjs:404`) rather than any in-band marker; and **`control-stream-server.mjs` UNTOUCHED — still
+    exactly ONE `TERMINAL_FRAME_KIND` branch**, which was the whole point of putting the marker inside `signal`.
+    QA added a FOURTH producer-fed lane for the `needs-input` end case this review identified: the assignment
+    stays `running` while the view reads `ENDED` — the precise divergence that made option (b) (closing off the
+    assignment's terminal state) wrong, now pinned by a test rather than by an argument.
+    **Each clause goes RED again if its producer is reverted** — that is the entry's standing job now that the
+    findings are closed: the detectors are unchanged, so removing the live report, the end builder, the
+    `finish()` emission, either literal-key wiring, the mirror's `meta`, or the route's close re-trips
+    immediately, and an in-band marker or a second control-path branch trips too.
+    **Caveat recorded with the arming — IT STILL STANDS, and outlives these two findings.** This tree carries 9
+    unrelated RED arch tests: 4 stale ones reading the m33-deleted `src/mesh-sync.mjs` (`acd-sync-root-set`,
+    `acd-claim-relay-independent`, `acd-fleet-reclaim-guarded` — all still REGISTERED in `scripts/test.mjs`, so
+    they are gates that can never pass), plus `acd-command-namespace` from the concurrent m41 changeset. A RED
+    that hides in a field of REDs pins nothing; RED-until-fixed only works while red is RARE. These two clauses
+    were closed within the day, so the technique held this time — but that is not evidence it will next time.
+    The stale set is being routed separately for triage/retirement; until it is, treat "the arch suite is red" as
+    carrying no information and read the named lanes instead.
 
 (ADR-006's `acd-worker-checkout-reuses-worktree` re-arms the m35 worktree-scope invariant; noted for completeness.
 The twelve armed above + the three ADR-010 SPEC entries (F5/F6/F7) + the six ADR-011–016 SPEC entries (all armed at

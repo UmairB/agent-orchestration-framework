@@ -182,7 +182,8 @@ function migrateSchema(db, existingVersion) {
         run_id TEXT,
         assigned_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        reclaimed_at TEXT
+        reclaimed_at TEXT,
+        session_id TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_global_assignments_item ON global_assignments(workspace_id, item_ref);
     `);
@@ -199,6 +200,26 @@ function migrateSchema(db, existingVersion) {
       .some((column) => column.name === "clone_url");
     if (!hasCloneUrlColumn) {
       db.exec("ALTER TABLE global_workspace_descriptors ADD COLUMN clone_url TEXT");
+    }
+
+    // milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 + ADR-014
+    // invariant 4) — the SAME idempotent, PRAGMA-checked ALTER TABLE idiom as
+    // clone_url above, for the assignment record's `session_id`. ADR-013 says the
+    // captured `session_id` is "surfaced on the assignment record"; it was being
+    // dropped at the control node (the worker DOES send it on its
+    // assignment-status frame), so the fleet had no (nodeId, sessionId) join key
+    // to open a terminal-VIEW with. The column is the join key's home.
+    //
+    // Why an explicit ALTER and not just the CREATE TABLE column above: every
+    // pre-v4-era database ALREADY on a real machine has a global_assignments
+    // table, and `CREATE TABLE IF NOT EXISTS` never adds a column to an existing
+    // table. The migration is IN PLACE — the table is never dropped, recreated,
+    // or wiped, so a live fleet's dispatch history survives the upgrade (an
+    // assignment row is operator/worker-CREATED state, unrecoverable if lost).
+    const hasSessionIdColumn = db.prepare("PRAGMA table_info(global_assignments)").all()
+      .some((column) => column.name === "session_id");
+    if (!hasSessionIdColumn) {
+      db.exec("ALTER TABLE global_assignments ADD COLUMN session_id TEXT");
     }
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {

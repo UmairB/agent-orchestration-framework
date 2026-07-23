@@ -854,6 +854,44 @@ export async function startLauncher(ws, options = {}) {
         // swallows faults, and NEVER touches the reconnect/drop bookkeeping (a
         // high-frequency PTY stream must not thrash the worker's backoff state).
         onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),
+        // milestone 38 / story 06 / task 04 — ADR-014 AMENDMENT (2026-07-23,
+        // structural invariant 8; BLOCKER F-38.06e): the END of that same stream,
+        // a LITERAL key HERE for the SAME F12 reason `onOutputChunk` is one line
+        // above — an end producer reachable only through the
+        // workerExecutionOptions test-injection spread is an inert producer, which
+        // is the defect class this whole story is scarred by.
+        //
+        // The driver calls this ONCE from its single `finish()` settle point, for
+        // ALL THREE outcomes (`done`/`failed` via onExit, and `needs-input` via the
+        // sentinel branch that kills the PTY — a human resumes on a NEW session, so
+        // that stream is genuinely over even though the assignment stays
+        // `running`). `client.sendTerminalEnd` puts the marker on the SAME fabric
+        // leg the bytes rode, on the SAME opaque terminal-frame kind (the marker
+        // lives INSIDE `signal`), so the control node needs NO new branch: it fans
+        // the frame into the loopback relay exactly as it does a byte frame, the
+        // fleet mirror routes it by the SAME (nodeId, sessionId) tuple, and the
+        // /ws/terminal-view route answers it by CLOSING the browser socket — which
+        // is what finally makes DESIGN V9's `stream ended` reachable from a REAL
+        // session end. Best-effort + fire-and-forget, exactly like the byte send.
+        onSessionEnd: (sessionId) => client.sendTerminalEnd(sessionId),
+        // milestone 38 / story 06 / task 04 — ADR-013 AMENDMENT (2026-07-23,
+        // structural invariant 7; BLOCKER F-38.06d): the LIVE join-key report, a
+        // LITERAL key HERE for exactly the F12 reason the four keys above are — a
+        // producer that exists only inside the handler's own default (or only
+        // through the workerExecutionOptions test-injection spread) is one revision
+        // away from being inert in production without a single test noticing.
+        //
+        // The worker used to surface its captured `session_id` ONLY on terminal
+        // frames, so `global_assignments.session_id` was NULL for the entire live
+        // run and the fleet card resolved `no-session` for precisely the interval an
+        // operator wants to watch. This sends a SECOND `running` frame — same runId,
+        // plus the freshly-captured sessionId — the moment the driver's transcript
+        // watch resolves one, up this worker's OWN stream connection (the SAME
+        // up-channel emitter every other assignment-status frame uses, so the T6
+        // holder gate and the F17 connection-identity re-stamp both still apply).
+        // No new frame kind: the control node's absent-is-not-a-clear writer accepts
+        // `running` -> `running` idempotently.
+        onSessionIdCaptured: (sessionId, { assignmentId, runId } = {}) => client.sendAssignmentStatus(assignmentId, "running", { runId, sessionId }),
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });

@@ -87,6 +87,16 @@ export function assembleAssignmentRecord(input = {}) {
   };
 }
 
+// mapAssignmentRow(row) — the ONE row→record mapper every reader shares.
+//
+// milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013) — `sessionId` is
+// an ADDITIVE eleventh key here, read off the `session_id` column
+// (global-work-store.mjs's idempotent ALTER TABLE). It is deliberately NOT part
+// of `assembleAssignmentRecord`'s FROZEN ten (acd-assignment-record-frozen): the
+// assembler mints a CONTROL-side dispatch record, and the session id is a
+// WORKER-reported fact that only ever arrives later, on an assignment-status
+// frame. A row that has never carried one maps to `null` — never "", never a
+// fabricated placeholder.
 function mapAssignmentRow(row) {
   if (!row) return null;
   return {
@@ -100,6 +110,7 @@ function mapAssignmentRow(row) {
     assignedAt: row.assigned_at,
     updatedAt: row.updated_at,
     reclaimedAt: row.reclaimed_at,
+    sessionId: row.session_id ?? null,
   };
 }
 
@@ -109,8 +120,8 @@ function mapAssignmentRow(row) {
 export function insertAssignment(store, record) {
   store.db.prepare(`
     INSERT INTO global_assignments
-      (assignment_id, item_ref, workspace_id, target_node_id, issuer, state, run_id, assigned_at, updated_at, reclaimed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (assignment_id, item_ref, workspace_id, target_node_id, issuer, state, run_id, assigned_at, updated_at, reclaimed_at, session_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.assignmentId,
     record.itemRef,
@@ -122,6 +133,16 @@ export function insertAssignment(store, record) {
     record.assignedAt,
     record.updatedAt,
     record.reclaimedAt ?? null,
+    // A freshly ASSIGNED record has no session yet (the worker captures it when it
+    // launches the interactive session, ADR-013). The ONLY caller of this writer
+    // (commands/mesh-assign.mjs) is fed by `assembleAssignmentRecord`, whose FROZEN
+    // ten keys contain no `sessionId` — so today this is null on EVERY insert, and
+    // there is no round-trip path through here. The `?? null` is a shape defence,
+    // not a supported feature: it keeps the bound-parameter count correct for any
+    // record shape rather than binding `undefined`. The session id's real write
+    // path is `updateAssignmentState`'s `options.sessionId` (below), off a
+    // worker-reported assignment-status frame.
+    record.sessionId ?? null,
   );
   return record;
 }
@@ -131,9 +152,17 @@ export function insertAssignment(store, record) {
 // restamping updatedAt; touches no other row. `options.runId` sets the run link
 // (the "running" transition); `options.reclaimedAt` stamps the reclaim path. Every
 // other key (assignmentId/itemRef/workspaceId/targetNodeId/issuer/assignedAt) is
-// byte-unchanged — this writer updates ONLY state/runId/updatedAt/reclaimedAt.
+// byte-unchanged — this writer updates ONLY state/runId/updatedAt/reclaimedAt and
+// (since ADR-013/F-38.06c, below) session_id.
 // Returns null (a benign miss, fabricates nothing) when no row exists for the id —
 // the "withdraw a never-assigned ref" contract (ADR-001/withdraw verb).
+//
+// milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013) — `options.sessionId`
+// captures the worker-reported interactive session id (the ADR-014 (nodeId, sessionId)
+// join key). It follows the SAME absent-is-not-a-clear discipline `runId` already
+// keeps: `!== undefined ? … : existing.session_id`, so a later state-only frame
+// (`done`, `failed`) can NEVER erase a session id an earlier frame captured. Passing
+// an explicit `null` is the ONE way to clear it.
 export function updateAssignmentState(store, assignmentId, state, options = {}) {
   if (!Object.prototype.hasOwnProperty.call(ASSIGNMENT_STATE_PRODUCERS, state)) {
     throw assignmentError(`"${state}" is not a valid assignment state.`, "assignment-state-invalid", 400, { state });
@@ -144,12 +173,13 @@ export function updateAssignmentState(store, assignmentId, state, options = {}) 
 
   const runId = options.runId !== undefined ? options.runId : existing.run_id;
   const reclaimedAt = options.reclaimedAt !== undefined ? options.reclaimedAt : existing.reclaimed_at;
+  const sessionId = options.sessionId !== undefined ? options.sessionId : existing.session_id;
 
   store.db.prepare(`
     UPDATE global_assignments
-    SET state = ?, run_id = ?, updated_at = ?, reclaimed_at = ?
+    SET state = ?, run_id = ?, updated_at = ?, reclaimed_at = ?, session_id = ?
     WHERE assignment_id = ?
-  `).run(state, runId ?? null, now, reclaimedAt ?? null, assignmentId);
+  `).run(state, runId ?? null, now, reclaimedAt ?? null, sessionId ?? null, assignmentId);
 
   return mapAssignmentRow(store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId));
 }
@@ -188,8 +218,10 @@ export function listAssignmentsForItem(store, workspaceId, itemRef) {
 // the seam `queryGlobalMeshStatus` (global-mesh-query.mjs) threads through to
 // attach assignment rows onto the `/api/mesh/status` item/node rows — a plain
 // SELECT, never a git/lease read, never a second copy of the mapAssignmentRow
-// shape (the SAME mapper insertAssignment/readAssignment/listAssignmentsForItem
-// already use, so the ADR-001 ten-key shape travels identically everywhere).
+// shape (the SAME mapper readAssignment/findActiveAssignment/listAssignmentsForItem
+// already use, so the READ shape — ADR-001's ten keys plus ADR-013's additive
+// eleventh, `sessionId` — travels identically everywhere; only the MINT
+// (`assembleAssignmentRecord`) stays frozen at ten).
 export function listAllAssignments(store) {
   return store.db.prepare(`
     SELECT * FROM global_assignments ORDER BY assigned_at DESC

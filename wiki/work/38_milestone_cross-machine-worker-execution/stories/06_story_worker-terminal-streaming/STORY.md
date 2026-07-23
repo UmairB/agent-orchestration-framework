@@ -7,7 +7,7 @@ parent: 38
 status: in-review
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-19
+updated: 2026-07-23
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -61,6 +61,14 @@ control node's fleet view, routed by (nodeId, sessionId).
   a STRUCTURAL absent-input-path (a planted forwarding path TRIPS the fitness), server→browser-only at runtime,
   and credential MATERIAL never in the stream (the signal is sourced only from `term.onData`). (T14 — the
   on-screen-print residual is T14's accepted residual, routed to the task-03 soak inspection.)
+- [x] `tasks/04_bug-fleet-terminal-view-surface.feature` — `@bug @finding-F-38-06c` — `@executable` — **the fleet
+  RENDERS the terminal-view.** Added `2026-07-23` at `aof:continue 38/06`, closing the BLOCKER `aof:verify 38`
+  raised: the transport is wired (F-38.06) but the mirror has NO consumer, so the task-03 soak is structurally
+  unrunnable. Confirmed at source, the break is a THREE-LINK chain — the ADR-013 `session_id` is **not actually
+  surfaced anywhere a browser can read it**: the control node DROPS it off the assignment-status frame
+  (`control-stream-server.mjs:231-232`; no column on `global_assignments`), so `projectAssignment` cannot carry
+  it, so no card could resolve its stream even if a component existed. Persist → surface → render, judged against
+  DESIGN §Surface 3's V1–V9.
 - [ ] `tasks/03_worker-terminal-stream-soak.feature` — `@manual` — the real-producer outsider check (ADR-008;
   streaming a live PTY cross-machine is un-fakeable): a REAL worker's live terminal output appears in the REAL
   control-node fleet view within the heartbeat window, routed to the correct node/session; a keystroke typed

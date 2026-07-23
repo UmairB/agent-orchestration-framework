@@ -101,9 +101,20 @@ function pickItemAssignment(rows) {
 // the chip-anatomy fields VERBATIM off the ADR-001 record — state and
 // reclaimedAt travel byte-for-byte so a `reclaimed` row keeps its provenance for
 // task 01's helper to read.
+// milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 + ADR-014) —
+// `sessionId` is an ADDITIVE key appended AFTER the eight pre-existing ones,
+// every one of which keeps its m35 meaning byte-for-byte. It is the OTHER half
+// of the ADR-014 (nodeId, sessionId) routing tuple — the projected row already
+// carried `targetNodeId`, so with the session id the browser can finally resolve
+// WHICH `/ws/terminal-view` stream this card should open.
+//
+// "ABSENT, NOT FALSE" — the same house rule the `assignment`/`assignments`
+// attachments below keep: an assignment with no session id yet OMITS the key
+// entirely rather than shipping a fabricated `""`/placeholder, so a card can
+// never mistake "not captured yet" for "a stream you can open".
 function projectAssignment(row) {
   if (!row) return null;
-  return {
+  const projected = {
     assignmentId: row.assignmentId,
     state: row.state,
     targetNodeId: row.targetNodeId,
@@ -113,6 +124,10 @@ function projectAssignment(row) {
     updatedAt: row.updatedAt,
     reclaimedAt: row.reclaimedAt,
   };
+  if (typeof row.sessionId === "string" && row.sessionId.length > 0) {
+    projected.sessionId = row.sessionId;
+  }
+  return projected;
 }
 
 // Shape the two query results into the ONE global status payload. Kept a pure

@@ -74,9 +74,18 @@ export function createTerminalMirror() {
       if (key == null) return false;
       const listeners = listenersByKey.get(key);
       if (listeners == null || listeners.size === 0) return false;
+      // ADR-014 AMENDMENT (2026-07-23, structural invariant 8; BLOCKER F-38.06e) —
+      // the END-OF-STREAM marker rides INSIDE this same opaque `signal`, on this
+      // same kind, and is therefore routed by the SAME (nodeId, sessionId) tuple
+      // above (inv.4 by construction, no new routing surface). It is delivered as a
+      // SECOND, ADDITIVE listener argument so a subscriber can tell an end from a
+      // byte WITHOUT parsing terminal content: `listener(bytes, { end })`. The
+      // mirror itself makes NO decision about it — it does not close anything, does
+      // not read assignment state, and still persists nothing (inv.3).
+      const meta = { end: signal.end === true };
       for (const listener of listeners) {
         try {
-          listener(signal.bytes);
+          listener(signal.bytes, meta);
         } catch {
           // a listener fault must never break delivery to the OTHER listeners, nor
           // crash the mirror's own apply() — the never-crash discipline every

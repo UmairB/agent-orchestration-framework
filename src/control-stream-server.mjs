@@ -229,7 +229,17 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
 
   const now = options.now ?? new Date().toISOString();
   const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : undefined;
-  const updated = updateAssignmentState(store, assignmentId, state, { now, runId });
+  // milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 invariant 3 +
+  // ADR-014 invariant 4) — the worker ALREADY sends its captured `session_id` on
+  // this frame (`worker-stream-client.mjs` buildAssignmentStatusFrame's optional
+  // `sessionId` key, a literal production call site); the control node used to read
+  // ONLY `runId` off it and drop the join key on the floor, so the fleet could
+  // never resolve WHICH (nodeId, sessionId) stream an assignment's card should
+  // open. Read with the SAME shape-guard + absent-is-not-a-clear discipline as
+  // `runId`: `undefined` (no session id on this frame) leaves any
+  // previously-captured value intact in updateAssignmentState.
+  const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : undefined;
+  const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId });
   return { applied: updated != null, assignment: updated };
 }
 

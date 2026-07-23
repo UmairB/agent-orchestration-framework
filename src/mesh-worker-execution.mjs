@@ -909,7 +909,14 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
 // node-pty factory above); `options.which` is the INJECTED provider-binary-
 // resolution seam (default real PATH lookup, the SAME terminal-providers.mjs
 // default); `options.watchTranscriptSessionId` is the INJECTED transcript-dir-watch
-// seam (ADR-013 amendment; default `defaultWatchTranscriptSessionId` above). Resolves
+// seam (ADR-013 amendment; default `defaultWatchTranscriptSessionId` above);
+// `options.onSessionIdCaptured(sessionId)` is the OPTIONAL live-report hook (ADR-013
+// AMENDMENT 2026-07-23, invariant 7 — called at most ONCE, the moment the watch
+// first resolves a real id, i.e. MID-RUN; absent by default);
+// `options.onSessionEnd(sessionId)` is the OPTIONAL END-OF-STREAM hook (ADR-014
+// AMENDMENT 2026-07-23, invariant 8 — called ONCE from the single `finish()` settle
+// point, for ALL THREE outcomes, after the session id is resolved; absent by
+// default, and DISTINCT from `onOutputChunk` by construction). Resolves
 // `{ outcome: "done"|"failed"|"needs-input", sessionId, failureReason? }` — NEVER
 // throws (an unresolvable provider/binary or a spawn fault is a coded `failed`
 // outcome, matching the OLD defaultSpawnRuntime's own never-throw contract).
@@ -945,6 +952,16 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
   // `onOutputChunk(chunk, capturedSessionId)` bridge below carries the id on any
   // LATER chunk (mirroring the pre-amendment mid-stream-capture behaviour, now sourced
   // from the watch instead of a PTY marker).
+  //
+  // ADR-013 AMENDMENT (2026-07-23, structural invariant 7 — BLOCKER F-38.06d): that
+  // SAME resolution is also the moment the id must be REPORTED, while the run is
+  // still live. `options.onSessionIdCaptured(sessionId)` is the OPTIONAL, ADDITIVE
+  // seam the caller (createMeshWorkerExecutionHandler) hangs a live `running` frame on.
+  // Called AT MOST ONCE — the watch chain's `.then` runs exactly once by construction,
+  // and only for a genuinely non-empty resolution, so a run whose transcript never
+  // appears reports NOTHING (it degrades to a null sessionId exactly as before, never
+  // a bogus frame, never a crash). Absent by default: every pre-invariant-7 caller is
+  // byte-identical.
   const watchController = new AbortController();
   let capturedSessionId = null;
   // The seam CALL ITSELF is guarded, not just its returned promise — an injected test
@@ -958,8 +975,21 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     watchCallResult = null;
   }
   const watchPromise = Promise.resolve(watchCallResult)
-    .then((resolved) => {
-      if (typeof resolved === "string" && resolved.length > 0) capturedSessionId = resolved;
+    .then(async (resolved) => {
+      if (typeof resolved === "string" && resolved.length > 0) {
+        capturedSessionId = resolved;
+        // The LIVE report (invariant 7). AWAITED inside the watch chain — `finish`
+        // below awaits that same chain, so the mid-run frame is fully sent BEFORE
+        // this invocation resolves and its caller sends any terminal frame; the two
+        // can never land out of order (a `running` frame applied AFTER `done` would
+        // resurrect a finished assignment). A reporting fault is swallowed: a broken
+        // up-channel must never crash or stall the driven session itself.
+        try {
+          await options.onSessionIdCaptured?.(resolved);
+        } catch {
+          /* a report fault is never the run's problem */
+        }
+      }
       return resolved ?? null;
     })
     .catch(() => null);
@@ -981,21 +1011,53 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     // if the watch already resolved one, otherwise whatever the (now-aborting) watch
     // promise itself settles to — deterministic, never race-dependent on which of
     // "the session ended" vs "the watch found a transcript" happened to win first.
+    //
+    // The watch chain is awaited UNCONDITIONALLY (invariant 7, F-38.06d): it now also
+    // carries the live `options.onSessionId` report, so settling it here is what
+    // ORDERS the mid-run `running` frame strictly before the caller's terminal frame.
+    // When the watch already resolved an id this is an already-settled promise (one
+    // microtask), so the pre-invariant-7 timing is otherwise unchanged.
     const finish = (result) => {
       if (settled) return;
       settled = true;
       cleanupSubs();
       watchController.abort();
       (async () => {
-        let sessionId = capturedSessionId;
-        if (sessionId == null) {
-          try {
-            sessionId = await watchPromise;
-          } catch {
-            sessionId = null;
-          }
+        let watched = null;
+        try {
+          watched = await watchPromise;
+        } catch {
+          watched = null;
         }
-        resolve({ ...result, sessionId });
+        const endedSessionId = capturedSessionId ?? watched;
+        // milestone 38 / story 06 / task 04 (ADR-014 AMENDMENT 2026-07-23,
+        // structural invariant 8; BLOCKER F-38.06e) — THE END OF THE STREAM,
+        // PRODUCED. `cleanupSubs()` above just disposed `dataSub`, i.e.
+        // `onOutputChunk` will never be called again for this session: that IS the
+        // definition of "this stream has ended", and this is the ONE place it is
+        // true for ALL THREE outcomes — `done`/`failed` (via term.onExit) AND
+        // `needs-input` (via the sentinel branch below, which term.kill()s the PTY
+        // first, because a human resumes with a FRESH `claude --resume` on a NEW
+        // session; that stream really is over even though the assignment stays
+        // `running`). Emitted AFTER the session id is resolved, so the end frame
+        // always has the SAME (nodeId, sessionId) tuple to route on that the bytes
+        // had (a null-session end would simply be dropped by the mirror, inv.4).
+        //
+        // A hook DISTINCT from `onOutputChunk` (never a sentinel smuggled through
+        // the byte hook — a control message inside terminal bytes is forgeable by
+        // the PTY's own output, SECURITY T14), and BEST-EFFORT fire-and-forget: a
+        // reporting fault is swallowed and never delays or fails this settle.
+        try {
+          const ended = options.onSessionEnd?.(endedSessionId);
+          if (ended && typeof ended.catch === "function") {
+            ended.catch(() => {
+              // a lost end frame is a stale live view, never a correctness fault.
+            });
+          }
+        } catch {
+          // a synchronous end-report fault is never the run's problem either.
+        }
+        resolve({ ...result, sessionId: endedSessionId });
       })();
     };
 
@@ -1256,6 +1318,52 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // the same-machine fleet-UI process. `createTerminalRelayPushTransport` is now
     // CONTROL-SIDE ONLY (the loopback push into that relay), never the worker's leg.
     onOutputChunk,
+    // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
+    // 2026-07-23, structural invariant 7) — the LIVE join-key report seam:
+    // `(sessionId, { assignmentId, runId }) => void|Promise`, called ONCE, MID-RUN,
+    // the moment the driver's transcript watch first resolves a session id.
+    //
+    // WHY IT EXISTS. The `running` frame that OPENS the run is sent BEFORE the driver
+    // spawns and carries `{ runId }` only (correctly — no session exists yet), and
+    // every OTHER session-carrying frame this handler sends is terminal
+    // (`done`/`failed`; `needs-input` aside, which already reports mid-flight). So
+    // `global_assignments.session_id` stayed NULL for the whole life of an ordinary
+    // run: `projectAssignment` omitted the key, the fleet card resolved `no-session`,
+    // and the join key landed only once the stream was dead.
+    //
+    // The DEFAULT is the report itself — a SECOND `running` frame (the shape the
+    // amendment names) on this handler's OWN `sendAssignmentStatus` emitter, so the
+    // T6 holder gate and the F17 connection-identity re-stamp both still apply, no
+    // new frame kind exists, and the control node's absent-is-not-a-clear writer
+    // takes it idempotently (`running` -> `running` re-stamps updatedAt and fills in
+    // the session id; a later state-only frame can never erase it). Production
+    // (mesh-launcher.mjs) ALSO supplies this as a LITERAL key at the createHandler
+    // call site — deliberately equivalent to the default, and deliberately not only
+    // the default: the F12/ADR-013-inv.7 discipline is that a producer must be wired
+    // in the production call site's own text, never reachable ONLY through the
+    // workerExecutionOptions test-injection spread.
+    onSessionIdCaptured = (sessionId, { assignmentId, runId } = {}) => sendAssignmentStatus?.(assignmentId, "running", { runId, sessionId }),
+    // milestone 38 / story 06 / task 04 (BLOCKER F-38.06e; ADR-014 AMENDMENT
+    // 2026-07-23, structural invariant 8) — the END-OF-STREAM seam:
+    // `(sessionId) => void|Promise`, forwarded VERBATIM into spawnRuntime's own
+    // options object (below) beside `onOutputChunk`, whose SIBLING it is: the byte
+    // hook says "more output", this one says "there will be no more".
+    //
+    // WHY IT EXISTS. The terminal-frame protocol had no end signal at all and the
+    // fleet route unsubscribed only on the BROWSER's own close, so after a worker's
+    // PTY exited an open terminal-view sat on `streaming`/`live:true`/`motion:
+    // "pulse"` forever — DESIGN §Surface 3 V9's exact forbidden state ("a dead
+    // stream must not masquerade as a live one"). The driver's `finish()` is the ONE
+    // place that fact is known for all three outcomes.
+    //
+    // NO DEFAULT (unlike onSessionIdCaptured, whose default is a status frame this
+    // handler can send itself): the end rides the TERMINAL-FRAME transport, not the
+    // assignment-status one, so only the launcher — which holds the worker's stream
+    // client — can wire it. Production (mesh-launcher.mjs) supplies it as a LITERAL
+    // key at the createHandler({...}) call site, exactly like onOutputChunk (the F12
+    // discipline: a producer reachable only through the workerExecutionOptions
+    // test-injection spread is one revision from being inert in production).
+    onSessionEnd,
     // resolveWorkspaceCloneUrl — INJECTED (the same idiom as every other
     // collaborator here), default the real mesh-presence.mjs seam. Reads the
     // WORKER's OWN local registry — kept as a last-resort, defense-in-depth check
@@ -1457,7 +1565,27 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // races a live child whose cwd is inside the worktree.
       const outcome = await spawnRuntime(
         { itemRef, worktreeCwd: worktreePath, task: item?.title ?? itemRef, command: directiveCommand },
-        { driver, ptySpawn, which, onOutputChunk, watchTranscriptSessionId },
+        {
+          driver,
+          ptySpawn,
+          which,
+          onOutputChunk,
+          watchTranscriptSessionId,
+          // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
+          // 2026-07-23, structural invariant 7) — REPORT THE JOIN KEY WHILE THE RUN
+          // IS LIVE. The driver calls this the instant its transcript watch resolves
+          // a session id — mid-run, ONCE, and only for a real id (a run whose
+          // transcript never appears reports nothing and still degrades to null).
+          // THIS is the only place the per-directive context the report needs
+          // (`assignmentId`, and the runId minted just above) is in scope, so the
+          // handler-level seam above is bound to it here.
+          onSessionIdCaptured: (sessionId) => onSessionIdCaptured?.(sessionId, { assignmentId, runId: runRecord.runId }),
+          // milestone 38 / story 06 / task 04 (BLOCKER F-38.06e; ADR-014 AMENDMENT
+          // 2026-07-23, structural invariant 8) — forwarded VERBATIM (no per-
+          // directive context is needed: the end frame routes on the (nodeId,
+          // sessionId) tuple the bytes already rode, never on the assignment).
+          onSessionEnd,
+        },
       );
       // task 03 (ADR-013 amendment) — the session_id the driver resolved via its
       // transcript-dir watch (`defaultWatchTranscriptSessionId`, never a PTY-output
