@@ -176,6 +176,24 @@ function safeStringArray(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
 }
 
+// The presence record's ADR-001 additive fifth key. A worker's live-session
+// projection ({ workspaceId, repo, assistant, lastPingAt }) is ALREADY TTL-filtered
+// by the publisher (assembleCurrentPresenceRecord) before it rides the fabric, so —
+// exactly like activeRuns — the control carries it through VERBATIM and never
+// re-derives it (it holds no session records of its own; the worker is the single
+// filtering authority, and a dead worker's whole record is gated stale anyway).
+// WHY THIS EXISTS: applyPresenceFrame originally rebuilt only the m23 four keys, so a
+// REMOTE node's `sessions` was silently dropped as its presence crossed the fabric —
+// the node read `idle` on the control's fleet even while actively worked on (SPEC
+// objective (a), this milestone's own headline, failing across the very boundary the
+// milestone is named for). The single-machine soaks never hit this path: the control's
+// OWN presence is written by assemblePresenceRecord, never through here.
+function safeSessionArray(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => entry != null && typeof entry === "object" && !Array.isArray(entry))
+    : [];
+}
+
 export async function applyPresenceFrame(store, frame, options = {}) {
   const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
   const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
@@ -188,6 +206,8 @@ export async function applyPresenceFrame(store, frame, options = {}) {
     nodeId,
     heartbeatAt,
     activeRuns: safeStringArray(presence.activeRuns),
+    // ADR-001 key order: sessions BEFORE the trailing aofVersion provenance string.
+    sessions: safeSessionArray(presence.sessions),
     aofVersion: typeof presence.aofVersion === "string" ? presence.aofVersion : "",
   };
   const workspace = options.presenceWorkspace ?? { globalMeshRoot: store?.paths?.meshRoot };

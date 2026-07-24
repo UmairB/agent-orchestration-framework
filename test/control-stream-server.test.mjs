@@ -292,11 +292,57 @@ export const controlStreamServerTests = [
       await withGlobalHome(async ({ env }) => {
         const store = await openGlobalWorkProjectionStore({ env });
         try {
-          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" };
+          // Producer-shaped: the exact 5-key record assemblePresenceRecord emits,
+          // INCLUDING a live session (ADR-001). The prior 4-key fixture here is what
+          // let the cross-node `sessions`-drop ship — it had no sessions key to lose.
+          const sessions = [{ workspaceId: "ws-9db1", repo: "aof", assistant: "claude-code", lastPingAt: NOW }];
+          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], sessions, aofVersion: "1.2.3" };
           await applyStreamFrame(store, { kind: "presence", nodeId: "worker-a", presence, at: NOW }, { now: NOW });
 
           const saved = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "worker-a");
-          assert.deepEqual(saved, presence, "the control node stores the worker's durable presence in the same seam the UI reads");
+          assert.deepEqual(saved, presence, "the control node stores the worker's durable presence — INCLUDING the ADR-001 sessions key — in the same seam the UI reads");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "control-stream-server/02 a REMOTE worker's live sessions survive the fabric — the ADR-001 `sessions` key is never dropped on ingest (cross-node SPEC objective a)",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          // The regression this pins: applyPresenceFrame used to rebuild ONLY the m23
+          // four keys, so a remote node's live-session projection was silently dropped
+          // as its presence crossed the fabric — the worker read `idle` on the control's
+          // fleet while actively being worked on. Measured live on a real two-machine
+          // mesh (the control held a fresh but 4-key presence for the mac worker) before
+          // this was fixed. Only a REMOTE node's presence flows through here; the
+          // control's own is written by assemblePresenceRecord, which is why every
+          // single-machine soak stayed green.
+          const sessions = [
+            { workspaceId: "ws-beta", repo: "pay-guard-portal", assistant: "claude-code", lastPingAt: NOW },
+          ];
+          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: [], sessions, aofVersion: "1.2.3" };
+          await applyStreamFrame(
+            store,
+            { kind: "presence", nodeId: "worker-a", presence, at: NOW },
+            { now: NOW, nodeId: "worker-a" }
+          );
+
+          const saved = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "worker-a");
+          assert.ok(saved, "the remote worker's presence was persisted");
+          assert.deepEqual(
+            saved.sessions,
+            sessions,
+            "the worker's live sessions crossed the fabric INTACT — the node can read `working · <repo> (session)` on the control's fleet"
+          );
+          assert.deepEqual(
+            Object.keys(saved),
+            ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"],
+            "the stored record is the full ADR-001 five-key shape, sessions before aofVersion"
+          );
         } finally {
           store.close();
         }
@@ -316,7 +362,7 @@ export const controlStreamServerTests = [
           const savedSpoofed = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "spoofed-node");
           assert.deepEqual(
             savedWorker,
-            { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], aofVersion: "1.2.3" },
+            { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], sessions: [], aofVersion: "1.2.3" },
             "presence is stored for the admitted connection identity"
           );
           assert.equal(savedSpoofed, null, "the self-declared frame node cannot create another node's presence record");
