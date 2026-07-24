@@ -122,7 +122,7 @@ import { claudeProjectsDir } from "./work-observe.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
 import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
-import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore, workspaceIdFor } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
 import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./mesh-presence.mjs";
 // milestone 38 / story 05 (ADR-013) — the interactive-`claude`-PTY driver reuses the
@@ -1496,6 +1496,33 @@ export function createMeshWorkerExecutionHandler(options = {}) {
 
     // accepted — the repo guard passed; the directive is genuinely being acted on.
     await sendAssignmentStatus?.(assignmentId, "accepted", {});
+
+    // ── milestone 38 / story 01 fix — live two-machine soak 2026-07-24 (VERIFICATION
+    // F23) ── The repo the worker RUNS is scoped by workspaceId, NOT by the daemon's
+    // launch cwd. `ws` here is the LAUNCHER's OWN launch workspace (mesh-launcher.mjs
+    // wires `loadWs = () => ws`); for a FOREIGN workspace (any workspaceId that is not
+    // this launcher's own) the repo lives at the clone-on-miss seam
+    // `meshCheckoutPath(workspaceId)` — never `ws.projectRoot`. Running the flow below
+    // against `ws.projectRoot` either (a) fails "not a git repository" when the daemon
+    // was launched outside a repo (the loud soak symptom), or (b) WORSE, adds a worktree
+    // of the launcher's OWN repo and runs the WRONG work off a correct-looking
+    // assignment. Repoint `ws` to the scoped checkout so every downstream seam
+    // (addWorktree / resolveRefInWorktree / findWork / pushWorktreeBranch /
+    // removeWorktree) operates on the ASSIGNED workspace's own tree. This covers BOTH
+    // the cloned-this-run case AND a checkout already present from a prior run
+    // (workerHasRepo can pass without cloning). The launcher's own-workspace assignment
+    // is untouched: its projectRoot already IS its repo and it has no scoped clone.
+    const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+    if (workspaceId !== ownWorkspaceId) {
+      const checkoutPath = meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {});
+      try {
+        ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });
+      } catch (error) {
+        logAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
+        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
+        return;
+      }
+    }
 
     let worktreePath;
     let runRecord;
