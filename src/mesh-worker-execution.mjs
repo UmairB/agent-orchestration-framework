@@ -139,6 +139,37 @@ function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+// ── the LIVE worktree registry (VERIFICATION, 2026-07-25) ────────────────────
+//
+// A worker streams its LAUNCH workspace's work-state up the fabric on a ticker, but an
+// assignment's real work happens in a per-assignment WORKTREE — so everything an agent
+// produces was invisible to the control node until the run finished, committed and pushed,
+// and the board read a scaffolded milestone as "0 stories" over a fully broken-down one.
+// Reading the pushed BRANCH is not an answer: it cannot show work in flight, and it makes
+// committing a precondition for visibility.
+//
+// This registry is how the worker streams its OWN worktree instead: the driver records the
+// worktree the moment it materializes one and clears it the moment the run settles, and the
+// launcher's stream ticker reads the registry each tick and streams those items up the
+// connection it already holds. Module-level because the driver and the ticker are separate
+// call paths in the SAME worker process; entries are ephemeral (never persisted) and are
+// removed on every settle path, so a finished run stops streaming immediately.
+const activeWorktrees = new Map();
+
+export function registerActiveWorktree(assignmentId, entry) {
+  if (typeof assignmentId !== "string" || assignmentId.length === 0) return;
+  activeWorktrees.set(assignmentId, { assignmentId, ...entry });
+}
+
+export function clearActiveWorktree(assignmentId) {
+  activeWorktrees.delete(assignmentId);
+}
+
+// listActiveWorktrees() — the launcher's read: every worktree currently being worked in.
+export function listActiveWorktrees() {
+  return [...activeWorktrees.values()];
+}
+
 // resolveWorkspaceWorkDir(projectRoot, workDir, worktreePath) — the SAME work.mjs
 // resolution the primary checkout uses, re-rooted at the worktree: workDir is always
 // `projectRoot` joined with the configured (default "./wiki/work") relative segment,
@@ -1590,7 +1621,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     now = () => new Date().toISOString(),
     exec,
     driver,
-    onCleanup = () => {},
+    onCleanup: onCleanupObserver = () => {},
     openStore,
     globalWorkStoreOptions,
     requestCloneCredential,
@@ -1703,6 +1734,15 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // (mesh-launcher.mjs), a test may override it via workerExecutionOptions.
     requestCloneUrl,
   } = options;
+
+  // VERIFICATION (live worktree streaming, 2026-07-25) — the ONE place a run's worktree
+  // stops being live. Every settle path in the handler already calls `onCleanup`, so
+  // wrapping it here releases the worktree from the streaming registry on done, failed,
+  // needs-input AND every early refusal, with no per-call-site bookkeeping to forget.
+  const onCleanup = (assignmentId, outcome, worktreePath) => {
+    clearActiveWorktree(assignmentId);
+    return onCleanupObserver(assignmentId, outcome, worktreePath);
+  };
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
@@ -1872,6 +1912,19 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       worktreePath = baseBranch != null
         ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, baseBranch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
+
+      // VERIFICATION (live worktree streaming, 2026-07-25) — from HERE the agent's output
+      // lands in this worktree, so from here the worker streams it. Registered the moment
+      // the worktree exists (not when the run ends) so the control node sees the work AS
+      // IT IS PRODUCED — uncommitted, unpushed, no branch read required. Released on every
+      // settle path by the onCleanup wrapper above.
+      registerActiveWorktree(assignmentId, {
+        worktreePath,
+        workspaceId,
+        itemRef,
+        projectRoot: ws.projectRoot,
+        workDir: worktreeWorkDir(ws.projectRoot, ws.workDir, worktreePath),
+      });
 
       // T3b / F4b — the ref resolves INSIDE the worktree's OWN checkout via
       // enumerate-then-filter; a traversal ref yields no item there. This is the

@@ -15,7 +15,7 @@ import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } from "../src/assignment-record.mjs";
 import { setItemBranch } from "../src/mesh-assignment-directive.mjs";
 import { readExecutionOverlay, applyExecutionOverlay } from "../src/board-mesh-execution.mjs";
-import { readBranchItems, resolveBranchRef, mergeBranchItems } from "../src/board-branch-stream.mjs";
+import { mergeWorkerItems } from "../src/board-worker-stream.mjs";
 import { listCommand } from "../src/commands/list.mjs";
 
 const WS = "ws-board-1";
@@ -132,85 +132,58 @@ export const boardMeshExecutionTests = [
     }),
   },
 
-  // ── the BRANCH-STREAM half (operator: "no stories are coming through") ──────
+  // ── the WORKER's own view (operator: "no stories are coming through") ───────
   //
-  // With the execution overlay in place the board correctly named the node and the
-  // branch — and still showed "No stories in this milestone yet · 0 stories" over a
-  // milestone the refine had broken into SEVEN stories. All of it lives on the mesh
-  // branch; this checkout is on main and carries only the original SPEC.md.
+  // The board showed "0 stories" over a milestone the agent had broken into seven,
+  // because this checkout holds only the pre-run scaffold. The truth comes from the
+  // WORKER — which streams the work-state of the worktree it is actually working in,
+  // continuously, over the fabric — NOT from a git branch: a branch exists only after a
+  // run commits and pushes, so branch-reading is blind for the whole run.
   {
-    name: "board-branch-stream: mergeBranchItems REPLACES the milestone row (the branch status wins) and splices its stories in after it, leaving neighbours untouched",
+    name: "worker-view: the worker's own rows REPLACE the local ones (its status/title win) and its EXTRA stories are inserted under the milestone — the breakdown this checkout has never seen",
     run: async () => {
       const local = [
-        { ref: "17", type: "milestone", status: "done", title: "Prior" },
-        { ref: "18", type: "milestone", status: "not-started", title: "Homedata" },
-        { ref: "20", type: "milestone", status: "not-started", title: "Later" },
+        { ref: "18", type: "milestone", slug: "homedata", status: "not-started", title: "Homedata", parent: null, dir: "/x/18" },
+        { ref: "20", type: "milestone", slug: "other", status: "not-started", title: "Other", parent: null, dir: "/x/20" },
       ];
-      const branchRows = [
-        { ref: "18", type: "milestone", status: "in-progress", title: "Homedata", fromBranch: "aof/mesh/18-x" },
-        { ref: "18/00", type: "story", status: "not-started", title: "S0", parent: "18", fromBranch: "aof/mesh/18-x" },
-        { ref: "18/01", type: "story", status: "not-started", title: "S1", parent: "18", fromBranch: "aof/mesh/18-x" },
-      ];
-      const merged = mergeBranchItems(local, branchRows);
-      assert.deepEqual(merged.map((r) => r.ref), ["17", "18", "18/00", "18/01", "20"], "the stories land directly after their milestone; neighbours keep their positions");
-      assert.equal(merged.find((r) => r.ref === "18").status, "in-progress", "the BRANCH status wins over the local not-started — the whole point");
-      assert.equal(merged.find((r) => r.ref === "17").status, "done", "an unrelated item is untouched");
+      const worker = new Map([
+        ["18", { ref: "18", type: "milestone", slug: "homedata", status: "in-progress", title: "Homedata", parent: null }],
+        ["18/00", { ref: "18/00", type: "story", slug: "alpha", status: "in-review", title: "Alpha", parent: "18", sourcePath: "/wt/wiki/work/18_m/stories/00_story_alpha/STORY.md" }],
+        ["18/01", { ref: "18/01", type: "story", slug: "beta", status: "not-started", title: "Beta", parent: "18", sourcePath: "/wt/wiki/work/18_m/stories/01_story_beta/STORY.md" }],
+      ]);
+      const overlay = new Map([["18", { nodeId: "umairs-mac-mini", active: true }]]);
+      const merged = mergeWorkerItems(local, worker, overlay);
+
+      assert.deepEqual(merged.map((r) => r.ref), ["18", "18/00", "18/01", "20"], "the worker's stories land under their milestone; unrelated items keep their place");
+      assert.equal(merged[0].status, "in-progress", "the WORKER's status wins over the local not-started");
+      assert.equal(merged[0].fromWorker, true, "…and the row is marked as the worker's view");
+      assert.equal(merged[1].title, "Alpha");
+      assert.equal(merged[1].reportedBy, "umairs-mac-mini", "an inserted story names the node that reported it");
+      assert.equal(merged[3].status, "not-started", "an item the worker says nothing about is untouched");
     },
   },
   {
-    name: "board-branch-stream: a local story the branch also carries is REPLACED, never duplicated",
+    name: "worker-view: no worker rows ⇒ the local rows pass through byte-identical (local-first for every non-mesh item and workspace)",
+    run: async () => {
+      const local = localRows();
+      assert.deepEqual(mergeWorkerItems(local, new Map(), new Map()), local);
+      assert.deepEqual(mergeWorkerItems(local, null, new Map()), local);
+    },
+  },
+  {
+    name: "worker-view: a story the worker reports that ALSO exists locally is replaced, never duplicated",
     run: async () => {
       const local = [
-        { ref: "18", type: "milestone", status: "not-started" },
-        { ref: "18/00", type: "story", status: "not-started", title: "stale local" },
+        { ref: "18", type: "milestone", status: "not-started", dir: "/x/18" },
+        { ref: "18/00", type: "story", status: "not-started", title: "stale local", parent: "18", dir: "/x/18/00" },
       ];
-      const branchRows = [
-        { ref: "18", type: "milestone", status: "in-progress" },
-        { ref: "18/00", type: "story", status: "in-review", title: "from branch" },
-      ];
-      const merged = mergeBranchItems(local, branchRows);
+      const worker = new Map([
+        ["18", { ref: "18", status: "in-progress" }],
+        ["18/00", { ref: "18/00", status: "in-review", title: "from worker", parent: "18" }],
+      ]);
+      const merged = mergeWorkerItems(local, worker, new Map());
       assert.equal(merged.filter((r) => r.ref === "18/00").length, 1, "no duplicate row");
-      assert.equal(merged.find((r) => r.ref === "18/00").status, "in-review", "the branch row wins");
-    },
-  },
-  {
-    name: "board-branch-stream: an unresolvable ref yields NO branch stream (null) — the caller keeps the local rows, and a blank branch is never even probed",
-    run: async () => {
-      const exec = async () => ({ status: 1, stdout: "", stderr: "unknown revision" });
-      assert.equal(await resolveBranchRef("/x", "aof/mesh/nope", { exec }), null);
-      assert.equal(await readBranchItems("/x", "aof/mesh/nope", { itemRef: "18", exec }), null);
-      assert.equal(await readBranchItems("/x", "", { itemRef: "18", exec }), null, "a blank branch is never probed");
-    },
-  },
-  {
-    name: "board-branch-stream: reads the milestone + its stories from the ref, scoped to THAT milestone only, each row carrying its branch provenance",
-    run: async () => {
-      const tree = [
-        "wiki/work/18_milestone_homedata/SPEC.md",
-        "wiki/work/18_milestone_homedata/stories/00_story_alpha/STORY.md",
-        "wiki/work/18_milestone_homedata/stories/01_story_beta/STORY.md",
-        "wiki/work/20_milestone_other/SPEC.md",
-        "wiki/work/20_milestone_other/stories/00_story_gamma/STORY.md",
-      ].join("\n");
-      const docs = {
-        "wiki/work/18_milestone_homedata/SPEC.md": "---\ntype: milestone\nstatus: in-progress\ntitle: Homedata\n---\n",
-        "wiki/work/18_milestone_homedata/stories/00_story_alpha/STORY.md": "---\ntype: story\nstatus: in-review\ntitle: Alpha\n---\n",
-        "wiki/work/18_milestone_homedata/stories/01_story_beta/STORY.md": "---\ntype: story\nstatus: not-started\ntitle: Beta\n---\n",
-      };
-      const exec = async (args) => {
-        if (args[0] === "rev-parse") return { status: 0, stdout: "abc123\n", stderr: "" };
-        if (args[0] === "ls-tree") return { status: 0, stdout: tree, stderr: "" };
-        if (args[0] === "show") {
-          const file = args[1].split(":").slice(1).join(":");
-          return docs[file] ? { status: 0, stdout: docs[file], stderr: "" } : { status: 1, stdout: "", stderr: "" };
-        }
-        return { status: 1, stdout: "", stderr: "" };
-      };
-      const rows = await readBranchItems("/x", "aof/mesh/18-x", { itemRef: "18", exec });
-      assert.deepEqual(rows.map((r) => r.ref), ["18", "18/00", "18/01"], "milestone first, then its stories in order — and NOTHING from milestone 20");
-      assert.equal(rows[0].status, "in-progress");
-      assert.equal(rows[1].title, "Alpha");
-      assert.ok(rows.every((r) => r.fromBranch === "aof/mesh/18-x"), "every row carries its branch provenance");
+      assert.equal(merged.find((r) => r.ref === "18/00").status, "in-review", "the worker's row wins");
     },
   },
 ];

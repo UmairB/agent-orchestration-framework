@@ -38,7 +38,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1090,6 +1090,36 @@ export async function startLauncher(ws, options = {}) {
       await streamClient.sendSnapshot(items);
       if (typeof streamClient.sendPresence === "function") {
         await streamClient.sendPresence(presence);
+      }
+      await pushActiveWorktreeState();
+    };
+
+    // VERIFICATION (live worktree streaming, 2026-07-25) — THE FIX for "the control node
+    // cannot see what the worker is doing". The snapshot above is this worker's LAUNCH
+    // workspace; an assignment's real output lands in a per-assignment WORKTREE, which was
+    // never streamed at all — so an agent could break a milestone into seven stories and
+    // the control node would still read the pre-run scaffold, with the work only becoming
+    // visible after a commit+push. Reading the pushed branch is not an answer: it cannot
+    // show work in flight and makes committing a precondition for visibility.
+    //
+    // Each tick, every worktree the driver currently has open is read AT ITS OWN work dir
+    // and streamed up the connection this worker already holds — as a DELTA, never a
+    // snapshot, so it MERGES into the workspace's rows (by ref) instead of replacing the
+    // set. Scoped to the assignment's OWN item subtree, so a worktree can only ever speak
+    // for the item it was created for. Best-effort throughout: a worktree that has been
+    // removed, or a workspace that will not load, is skipped silently — this must never
+    // disturb the presence/snapshot stream it rides beside.
+    const pushActiveWorktreeState = async () => {
+      for (const active of listActiveWorktrees()) {
+        try {
+          const worktreeWs = await loadWorkspace(active.worktreePath, undefined, { env: options?.globalWorkStoreOptions?.env });
+          const result = await readWorkspaceProjectionItems(worktreeWs);
+          const milestone = String(active.itemRef ?? "").split("/")[0];
+          const rows = (result?.rows ?? []).filter((row) => row.ref === active.itemRef || row.ref === milestone || row.parent === milestone);
+          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems: items });
+        } catch {
+          // best-effort: a vanished worktree simply stops contributing.
+        }
       }
     };
     streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch(() => {}));
