@@ -38,7 +38,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, meshDebug, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1116,21 +1116,14 @@ export async function startLauncher(ws, options = {}) {
     // now REPORTED through the launcher's own warning channel rather than silently dropped:
     // best-effort must mean "does not crash the daemon", never "fails invisibly".
     const pushActiveWorktreeState = async (fullItems = []) => {
-      const active_ = listActiveWorktrees();
-      meshDebug("stream", `tick: ${active_.length} active worktree(s)`);
-      for (const active of active_) {
+      for (const active of listActiveWorktrees()) {
         try {
           const worktreeWs = await loadWorkspace(active.worktreePath, undefined, { env: options?.globalWorkStoreOptions?.env });
           const result = await readWorkspaceProjectionItems(worktreeWs);
           const milestone = String(active.itemRef ?? "").split("/")[0];
           const rows = (result?.rows ?? []).filter((row) => row.ref === active.itemRef || row.ref === milestone || row.parent === milestone);
-          meshDebug("stream", `${active.assignmentId}: read ${result?.rows?.length ?? 0} row(s) from ${worktreeWs.workDir}, ${rows.length} in scope for item ${active.itemRef}`);
-          if (rows.length > 0) {
-            const sent = await streamClient.sendDelta(rows, { fullItems });
-            meshDebug("stream", `${active.assignmentId}: sendDelta -> ${JSON.stringify(sent)} refs=${rows.map((r) => r.ref).join(",")}`);
-          }
+          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems });
         } catch (error) {
-          meshDebug("stream", `${active?.assignmentId}: FAILED ${error?.stack ?? error?.message ?? error}`);
           emitWarning(launcherWarnings, {
             code: "worker-worktree-stream-failed",
             message: `streaming the worktree for assignment ${active?.assignmentId} failed: ${error?.message ?? error}`,

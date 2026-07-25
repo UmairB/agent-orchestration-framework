@@ -156,28 +156,13 @@ function isPlainObject(value) {
 // removed on every settle path, so a finished run stops streaming immediately.
 const activeWorktrees = new Map();
 
-// meshDebug(scope, message) — the OPT-IN worker trace (`AOF_DEBUG_MESH=1`), the same
-// env-gated shape the PTY debugging used. The cross-machine paths (worktree registration,
-// the state stream, the run bracket) are otherwise SILENT on success and best-effort on
-// failure, which meant diagnosing a live worker cost a full assign/observe cycle per guess.
-// Off by default: zero output, zero cost, nothing to remove afterwards.
-export function meshDebug(scope, message) {
-  if (!process.env.AOF_DEBUG_MESH) return;
-  try {
-    console.error(`[aof-debug ${scope}] ${message}`);
-  } catch {
-    /* a logging fault must never disturb the caller */
-  }
-}
-
 export function registerActiveWorktree(assignmentId, entry) {
   if (typeof assignmentId !== "string" || assignmentId.length === 0) return;
   activeWorktrees.set(assignmentId, { assignmentId, ...entry });
-  meshDebug("worktree", `registered ${assignmentId} item=${entry?.itemRef} path=${entry?.worktreePath} workDir=${entry?.workDir}`);
 }
 
 export function clearActiveWorktree(assignmentId) {
-  if (activeWorktrees.delete(assignmentId)) meshDebug("worktree", `released ${assignmentId}`);
+  activeWorktrees.delete(assignmentId);
 }
 
 // listActiveWorktrees() — the launcher's read: every worktree currently being worked in.
