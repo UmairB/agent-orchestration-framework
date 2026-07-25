@@ -110,7 +110,8 @@
 // fitness `acd-worker-driver-no-headless-print`.
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { mkdir, rm, writeFile, readFile, rename, readdir } from "node:fs/promises";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { findWork, loadWorkspace } from "./work.mjs";
 // milestone 38 / story 05 (ADR-013 AMENDMENT, F-38.05) — `claudeProjectsDir` is the
@@ -896,9 +897,51 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
   const env = options.env ?? process.env;
   const bin = provider.resolveBinaryPath(env);
   if (bin === null) return null;
-  const args = [...provider.buildArgs(), "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];
+  // milestone 38 / story 05 fix (live two-machine soak 2026-07-25, VERIFICATION F24) —
+  // run the worker session in `--permission-mode auto`, NOT bypassPermissions: a genuine
+  // tool-permission pause STILL surfaces as NEEDS_INPUT for a human to answer remotely
+  // (the terminal-stream + notify loop this milestone exists to enable), but the mode
+  // never blocks on the routine approvals a headless run must clear. This is DISTINCT
+  // from the one-time folder-TRUST dialog (cleared pre-spawn by ensureWorktreeTrusted
+  // below) — trust fires BEFORE the system prompt is read, so no in-session mode can
+  // catch it.
+  const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];
   const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
   return { bin, args, env: sessionEnv, providerId };
+}
+
+// ensureWorktreeTrusted(worktreeCwd, options) — milestone 38 / story 05 fix (live
+// two-machine soak 2026-07-25, VERIFICATION F24). claude shows a one-time "Do you trust
+// the files in this folder?" dialog the FIRST time it runs in a directory, and that
+// dialog fires BEFORE it reads the worker system prompt — so a fresh per-assignment
+// worktree HANGS the autonomous run forever with no human at the worker to accept it
+// (measured: the run sat in `running`, no session, no transcript, nothing for the
+// story-06 terminal view to bind to). Pre-write the SAME fact the dialog would set —
+// projects[<absolute worktree path>].hasTrustDialogAccepted — into the user's
+// ~/.claude.json BEFORE the spawn, so the dialog never appears. This is the TRUST gate
+// only; the session still runs in `--permission-mode auto`, so a genuine tool pause
+// still surfaces as NEEDS_INPUT for a human. Trust is a per-machine, per-ABSOLUTE-PATH
+// LOCAL fact (never repo-committable — a repo cannot declare itself trusted), keyed by
+// the exact cwd, so EACH worktree must be trusted individually. BEST-EFFORT: a missing /
+// locked / malformed ~/.claude.json is swallowed and claude falls back to its own
+// (blocking) dialog exactly as before — this never throws. Injected as a launcher seam
+// (never called in tests), so no test run ever writes a real ~/.claude.json.
+export async function ensureWorktreeTrusted(worktreeCwd, options = {}) {
+  if (typeof worktreeCwd !== "string" || worktreeCwd.length === 0) return;
+  const home = options.homedir ?? os.homedir();
+  const cfgPath = path.join(home, ".claude.json");
+  try {
+    const cfg = JSON.parse(await readFile(cfgPath, "utf8"));
+    cfg.projects = cfg.projects ?? {};
+    if (cfg.projects[worktreeCwd]?.hasTrustDialogAccepted === true) return; // already trusted — no rewrite
+    cfg.projects[worktreeCwd] = { ...(cfg.projects[worktreeCwd] ?? {}), hasTrustDialogAccepted: true };
+    // temp-then-rename so a crash mid-write can never truncate the user's real config.
+    const tmp = `${cfgPath}.aof-trust-${randomUUID()}`;
+    await writeFile(tmp, JSON.stringify(cfg, null, 2));
+    await rename(tmp, cfgPath);
+  } catch {
+    // best-effort — leave claude's own dialog in place (the pre-fix behavior).
+  }
 }
 
 // driveInteractiveClaudeSession(brief, options) — the ADR-013 driver: ONE long-lived
@@ -926,6 +969,19 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
   const launch = resolveInteractiveDriverLaunch(options.driver, options);
   if (launch == null) {
     return { outcome: "failed", failureReason: "agent_error", sessionId: null };
+  }
+
+  // Pre-trust the worktree so claude's one-time folder-TRUST dialog never blocks this
+  // autonomous run (VERIFICATION F24). Worker-only by construction — this driver is the
+  // worker path; the human /ws/terminal route never calls it. An INJECTED seam (the
+  // launcher wires the real ensureWorktreeTrusted; every test omits it, so no test run
+  // ever touches a real ~/.claude.json). Best-effort — never throws out of the driver.
+  if (typeof options.trustWorktree === "function") {
+    try {
+      await options.trustWorktree(brief.worktreeCwd);
+    } catch {
+      // leave claude's own (blocking) dialog in place — the pre-fix behavior.
+    }
   }
 
   let term;
@@ -1287,6 +1343,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     cloneExec,
     pushExec,
     requestWriteCredential,
+    // milestone 38 / story 05 fix (VERIFICATION F24) — the pre-spawn worktree-trust
+    // seam, forwarded VERBATIM into spawnRuntime's options object (below). Production
+    // (mesh-launcher) wires the real ensureWorktreeTrusted as a LITERAL key; a test
+    // omits it, so no test run ever touches a real ~/.claude.json.
+    trustWorktree,
     // milestone 38 / story 05 (ADR-013) — forwarded VERBATIM into spawnRuntime's own
     // options object (below) so a test can drive the REAL defaultSpawnRuntime /
     // driveInteractiveClaudeSession through this ONE handler entry point (the SAME
@@ -1596,6 +1657,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           driver,
           ptySpawn,
           which,
+          trustWorktree,
           onOutputChunk,
           watchTranscriptSessionId,
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT

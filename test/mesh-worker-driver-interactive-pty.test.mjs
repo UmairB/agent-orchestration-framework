@@ -30,14 +30,16 @@ export const meshWorkerDriverInteractivePtyTests = [
       );
       assert.equal(spawnCalls.length, 1, "the interactive claude session is spawned exactly once");
       assert.equal(spawnCalls[0].bin, "/fake/bin/claude", 'the spawned binary is the claude path resolved via resolveProvider("claude") (the interactive launch)');
-      // the provider's OWN interactive-launch args (buildArgs()) are empty — the ONLY
-      // argv this launch ever carries is the ADR-013-amendment worker-scoped
-      // --append-system-prompt (the NEEDS_INPUT producer, F-38.05) — never a one-shot
-      // prompt argv.
-      assert.equal(spawnCalls[0].args.length, 2, "the spawned argv is buildArgs() (empty) plus exactly one --append-system-prompt pair — no one-shot prompt argv");
-      assert.equal(spawnCalls[0].args[0], "--append-system-prompt", "the FIRST (and only) launch arg is --append-system-prompt");
-      assert.equal(typeof spawnCalls[0].args[1], "string", "the appended system-prompt instruction is a string arg");
-      assert.ok(spawnCalls[0].args[1].includes(NEEDS_INPUT_SENTINEL), "the appended system-prompt instruction embeds the NEEDS_INPUT sentinel");
+      // the provider's OWN interactive-launch args (buildArgs()) are empty. Milestone 38
+      // / story 05 fix (VERIFICATION F24): the launch now carries the worker-scoped
+      // `--permission-mode auto` (NEVER bypassPermissions — a genuine pause still
+      // surfaces as NEEDS_INPUT) followed by the ADR-013-amendment `--append-system-prompt`
+      // (the NEEDS_INPUT producer, F-38.05) — never a one-shot prompt argv.
+      assert.deepEqual(spawnCalls[0].args.slice(0, 2), ["--permission-mode", "auto"], "the launch runs in --permission-mode auto (NOT bypassPermissions)");
+      assert.equal(spawnCalls[0].args.length, 4, "the spawned argv is buildArgs() (empty) + the --permission-mode auto pair + exactly one --append-system-prompt pair");
+      assert.equal(spawnCalls[0].args[2], "--append-system-prompt", "the --append-system-prompt token follows the permission-mode pair");
+      assert.equal(typeof spawnCalls[0].args[3], "string", "the appended system-prompt instruction is a string arg");
+      assert.ok(spawnCalls[0].args[3].includes(NEEDS_INPUT_SENTINEL), "the appended system-prompt instruction embeds the NEEDS_INPUT sentinel");
       assert.equal(result.outcome, "done", "a clean exit resolves done");
     },
   },

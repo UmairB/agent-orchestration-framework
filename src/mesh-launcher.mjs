@@ -38,7 +38,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, resolveCloneUrl } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, resolveCloneUrl, ensureWorktreeTrusted } from "./mesh-worker-execution.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
@@ -892,6 +892,15 @@ export async function startLauncher(ws, options = {}) {
         // No new frame kind: the control node's absent-is-not-a-clear writer accepts
         // `running` -> `running` idempotently.
         onSessionIdCaptured: (sessionId, { assignmentId, runId } = {}) => client.sendAssignmentStatus(assignmentId, "running", { runId, sessionId }),
+        // milestone 38 / story 05 fix (live soak 2026-07-25, VERIFICATION F24) — the
+        // pre-spawn worktree-trust producer, a LITERAL key HERE for the SAME F12 reason
+        // as the seams above: pre-writing projects[<worktree>].hasTrustDialogAccepted
+        // into ~/.claude.json clears claude's one-time folder-trust dialog that would
+        // otherwise HANG a headless per-assignment worktree with no human to accept it.
+        // A test overrides via the workerExecutionOptions spread; production supplies it
+        // so the autonomous run never blocks pre-session. Paired with the driver's own
+        // `--permission-mode auto` (NOT bypassPermissions — a real pause still surfaces).
+        trustWorktree: ensureWorktreeTrusted,
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });

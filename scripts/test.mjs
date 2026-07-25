@@ -141,6 +141,7 @@ import { archTests as acdCrossOrgKeyIsolationTests } from "../test/arch/acd-cros
 // @manual real-interactive-claude-on-subscription soak, deferred to aof:verify 38 —
 // no test file here. Armed: acd-worker-driver-no-headless-print.
 import { meshWorkerDriverInteractivePtyTests } from "../test/mesh-worker-driver-interactive-pty.test.mjs";
+import { meshWorkerTrustWorktreeTests } from "../test/mesh-worker-trust-worktree.test.mjs";
 import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
 import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
 import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
@@ -267,6 +268,26 @@ import { meshUiAssignGatesTests } from "../test/mesh-ui-assign-gates.test.mjs";
 import { meshUiAssignReadOnlyPostureTests } from "../test/mesh-ui-assign-read-only-posture.test.mjs";
 import { fleetAssignAffordanceTests } from "../test/fleet-assign-affordance.test.mjs";
 import { archTests as acdFleetFaceSingleMutationRouteTests } from "../test/arch/acd-fleet-face-single-mutation-route.test.mjs";
+// milestone 38 / story 04 — ADR-012 AMENDMENT (2026-07-24, BLOCKER F21): the
+// assign route targets the ITEM's own workspace, never the daemon's launch dir.
+// A COMPANION file, so the four inv.1-4 clauses above stay untouched and green.
+// ARMED RED-until-fixed by design (the entry-21 precedent).
+import { archTests as acdFleetAssignTargetsItemWorkspaceTests } from "../test/arch/acd-fleet-assign-targets-item-workspace.test.mjs";
+// milestone 38 / story 04 — task 05 (BLOCKER F21's own contract, driven in a
+// TWO-workspace fixture: a single-workspace one structurally cannot express the
+// failure) + task 06 (F22's acknowledgment — the `Sent` hold and the ONE extra
+// silent re-load, driven through the REAL production <Fleet/> tree as well as
+// the pure helper, per STATE.md's F-38.06e lesson).
+import { meshUiAssignItemWorkspaceTests } from "../test/mesh-ui-assign-item-workspace.test.mjs";
+import { fleetAssignAcknowledgmentTests } from "../test/fleet-assign-acknowledgment.test.mjs";
+// milestone 38 / story 04 — task 07 (DG-13 / F-38.04g, from the REAL-assign
+// render of 2026-07-24): the assign row's BINDING GEOMETRY — a fixed action
+// width, a picker floor that never collapses to a bare chevron, the message slot
+// as the element that yields (with the full server sentence in its `title`),
+// copy ranked outcome > holder > all else, and region 5's chip naming its target
+// in FULL. A separate file from task 06 because it is not the affordance's state
+// axis: it binds every state at once and reaches into region 5's footer.
+import { fleetAssignRowGeometryTests } from "../test/fleet-assign-row-geometry.test.mjs";
 // milestone 41 — work-item insertion & re-index (ADR-001/ADR-003, refine-stage
 // fitness functions, GREEN today): resolution is folder-derived so re-index-by-rename
 // is sufficient (no index to rebuild), and the renumber WRITER stays OUT of the
@@ -1818,6 +1839,7 @@ export const tests = [
   // milestone 38 / story 05 — terminal-driven-worker-execution (ADR-013, tasks 00-03
   // traceability modules + the acd-worker-driver-no-headless-print fitness function)
   ...meshWorkerDriverInteractivePtyTests,
+  ...meshWorkerTrustWorktreeTests,
   ...meshWorkerDriverDirectiveCommandTests,
   ...meshWorkerDriverNeedsInputTests,
   ...meshWorkerDriverSessionIdTests,
@@ -1859,6 +1881,10 @@ export const tests = [
   ...meshUiAssignReadOnlyPostureTests,
   ...fleetAssignAffordanceTests,
   ...acdFleetFaceSingleMutationRouteTests,
+  ...acdFleetAssignTargetsItemWorkspaceTests,
+  ...meshUiAssignItemWorkspaceTests,
+  ...fleetAssignAcknowledgmentTests,
+  ...fleetAssignRowGeometryTests,
   // milestone 41 — work-item insertion & re-index (refine-stage fitness functions)
   ...acdReindexResolutionFolderDerivedTests,
   ...acdReindexEngineBlastRadiusTests,
