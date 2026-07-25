@@ -39,6 +39,10 @@
 import { WebSocket } from "ws";
 import { DEFAULT_MAX_FRAME_BYTES, resolveMaxFrameBytes } from "./mesh-relay.mjs";
 import { TERMINAL_FRAME_KIND, loopbackRelayUrl } from "./mesh-terminal-relay-bridge.mjs";
+// VERIFICATION (relay-subscriber reconnect, 2026-07-25) — the SAME growing/capped
+// backoff ladder the worker's own stream client reconnects on (1s, 2s, 4s … 30s),
+// IMPORTED rather than re-derived so the two never drift.
+import { backoffDelaySeconds } from "./worker-stream-client.mjs";
 
 export { resolveMaxFrameBytes };
 
@@ -261,7 +265,35 @@ export function parseInboundTerminalFrame(data, maxFrameBytes = DEFAULT_MAX_FRAM
 // degrade — { connected:false, stop(){} }, no crash. A connect() that throws
 // (relay down/unreachable) is caught → connected:false; the fleet face still
 // serves its terminal-VIEW route, simply with nothing flowing through it yet.
-export async function startTerminalMirrorSubscriber({ transport, mirror, maxFrameBytes = DEFAULT_MAX_FRAME_BYTES } = {}) {
+//
+// VERIFICATION (relay-subscriber reconnect, live soak 2026-07-25) — …but a degrade
+// must not be PERMANENT. This function used to connect EXACTLY ONCE and, on a failure,
+// set `connected:false` forever: no retry, no reconnect, no drop handler. MEASURED
+// consequence, repeatedly: the fleet UI and the relay broker live in TWO processes
+// (`aof mesh ui` and `aof mesh serve --serve`), and every deploy restarts both. The UI
+// boots in ~1s while the broker must bind the fabric + open the store first, so the UI
+// reliably LOST the race, gave up, and every terminal view read `waiting for output`
+// until someone restarted the UI by hand — indistinguishable, to the operator, from the
+// terminal feature being broken. The same one-shot flaw also meant a broker that
+// restarted LATER was never re-subscribed.
+//
+// So the subscriber now RETRIES: the initial connect is attempted on the SAME growing/
+// capped backoff the worker's own stream client already uses (worker-stream-client.mjs's
+// backoffDelaySeconds — 1s, 2s, 4s … capped at 30s), and a post-open DROP (the
+// transport's new onDrop) re-enters that same loop. `connected` reflects the CURRENT
+// state; `stop()` ends the loop and disposes the socket, so a stopped subscriber never
+// reconnects. Retries are unbounded BY DESIGN — a control node whose broker is down is
+// expected to recover on its own whenever the broker returns, with no operator action.
+export async function startTerminalMirrorSubscriber({
+  transport,
+  mirror,
+  maxFrameBytes = DEFAULT_MAX_FRAME_BYTES,
+  // INJECTED so a test drives the retry loop with no wall clock (the ticker-injection
+  // idiom every other mesh module keeps). Defaults to real timers.
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+  backoffSeconds = backoffDelaySeconds,
+} = {}) {
   if (transport == null) {
     return { connected: false, stop() {} };
   }
@@ -276,16 +308,51 @@ export async function startTerminalMirrorSubscriber({ transport, mirror, maxFram
   });
 
   let connected = false;
-  try {
-    await transport.connect();
-    connected = true;
-  } catch {
-    connected = false;
+  let stopped = false;
+  let attempts = 0;
+  let retryTimer = null;
+
+  const scheduleRetry = () => {
+    if (stopped || retryTimer != null) return;
+    attempts += 1;
+    const delayMs = backoffSeconds(attempts) * 1000;
+    retryTimer = setTimeoutFn(() => {
+      retryTimer = null;
+      attemptConnect();
+    }, delayMs);
+    // A retry timer must never hold the process open (the daemon's own lifetime owns it).
+    retryTimer?.unref?.();
+  };
+
+  async function attemptConnect() {
+    if (stopped || connected) return;
+    try {
+      await transport.connect();
+      if (stopped) { try { transport.close?.(); } catch { /* noop */ } return; }
+      connected = true;
+      attempts = 0; // a healthy connection resets the ladder
+    } catch {
+      connected = false;
+      scheduleRetry();
+    }
   }
 
+  // A post-open drop re-enters the SAME loop — this is what makes a broker restart
+  // recoverable without touching the fleet UI process.
+  transport.onDrop?.(() => {
+    connected = false;
+    if (!stopped) scheduleRetry();
+  });
+
+  await attemptConnect();
+
   return {
-    connected,
+    // A getter, not a snapshot: the value changes as the loop connects/drops, so a
+    // caller (or a test) reads the CURRENT state rather than the boot-time one.
+    get connected() { return connected; },
     stop() {
+      stopped = true;
+      if (retryTimer != null) { clearTimeoutFn(retryTimer); retryTimer = null; }
       try {
         transport.close?.();
       } catch {
@@ -317,6 +384,7 @@ export function createTerminalMirrorSubscriberTransport(config, { timeoutMs = 30
 
   let socket = null;
   let handler = null;
+  let dropHandler = null;
 
   return {
     onMessage(fn) {
@@ -349,16 +417,28 @@ export function createTerminalMirrorSubscriberTransport(config, { timeoutMs = 30
           }
         });
         ws.on("error", (error) => {
-          if (!settled) { settled = true; clearTimeout(timer); reject(error); }
+          if (!settled) { settled = true; clearTimeout(timer); reject(error); return; }
+          // A POST-open error is a DROP, not a connect fault — bridged to dropHandler
+          // so the subscriber can reconnect (the worker stream client's own idiom).
+          if (socket === ws) { socket = null; dropHandler?.(); }
         });
         ws.on("close", () => {
           if (!settled) {
             settled = true;
             clearTimeout(timer);
             reject(new Error("terminal mirror subscribe: socket closed before the join ack"));
+            return;
           }
+          if (socket === ws) { socket = null; dropHandler?.(); }
         });
       });
+    },
+    // onDrop(fn) — VERIFICATION (relay-subscriber reconnect, 2026-07-25): registers the
+    // ONE handler invoked when the CURRENT connected socket closes/errors post-open,
+    // mirroring createWorkerWsTransport's own onDrop. Without it the subscriber could
+    // never learn the broker went away (see startTerminalMirrorSubscriber's reconnect).
+    onDrop(fn) {
+      dropHandler = typeof fn === "function" ? fn : null;
     },
     close() {
       try { socket?.close(); } catch { /* already closing */ }

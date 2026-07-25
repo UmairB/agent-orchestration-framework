@@ -938,6 +938,24 @@ function containsNeedsInputSentinel(buffer) {
 // omits it or injects a double and no test run reads a real transcript.
 const COMPLETION_POLL_MS = 1500;
 
+// COMPLETION_IDLE_MS — VERIFICATION (premature-done, live soak 2026-07-25). `end_turn`
+// means "the MODEL finished speaking", NOT "the WORK is finished". This watch originally
+// settled after the outcome was seen on two consecutive stable-mtime ticks — ~3 SECONDS of
+// transcript silence — which is far below the quiet period a real autonomous run produces.
+// MEASURED: a `/aof:continue 18` whose agent had just said "Waiting for 3 background agents
+// to finish" ended its turn, went quiet while those agents worked, and was declared `done`
+// at 14.7 min — the PTY killed and a PARTIAL diff committed and pushed mid-flight.
+//
+// A finished turn that is merely WAITING resumes the moment its background work reports
+// back, so the transcript moves again. The distinguishing signal is therefore the LENGTH of
+// the silence, and it must be far longer than a background build's quiet stretch. A settled
+// outcome must now hold with an UNCHANGED transcript mtime for this whole window before the
+// session is called finished. This trades a few minutes of latency on a genuinely-complete
+// run for never truncating a live one — the correct direction (a premature `done` destroys
+// work and reports success; a late `done` only costs time). Injectable, so a test drives it
+// on a controllable clock rather than a wall-clock wait.
+export const COMPLETION_IDLE_MS = 5 * 60 * 1000;
+
 // readTranscriptTerminalOutcome(file) => { outcome } | null — the transcript's SETTLED
 // outcome, or null while the session is still working. Scans the jsonl from the end for
 // the last assistant record: `stop_reason: "end_turn"` means the turn is DONE (the
@@ -983,20 +1001,29 @@ async function readTranscriptTerminalOutcome(file) {
   return null;
 }
 
-// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs }) =>
+// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs, idleMs, now }) =>
 // Promise<{ outcome }|null> — polls the session's transcript for the settled outcome
-// above, confirming it across two consecutive stable-mtime ticks so a mid-write
-// end_turn line is never read half-formed. Resolves null on abort (the driver's
-// finish() aborts it via the SAME watchController the session-id watch uses, the moment
-// any outcome is known first) — never throws.
-export async function defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs = COMPLETION_POLL_MS } = {}) {
+// above and fires ONLY once that outcome has held with an UNCHANGED transcript mtime for
+// the WHOLE `idleMs` window (COMPLETION_IDLE_MS — see its note: a turn that merely ended
+// while waiting on background work resumes and moves the file again, so the length of the
+// silence is the signal; the pre-fix ~3s confirmation truncated a live run mid-flight).
+// Resolves null on abort (the driver's finish() aborts it via the SAME watchController the
+// session-id watch uses, the moment any outcome is known first) — never throws.
+export async function defaultWatchTranscriptCompletion({
+  cwd, env, sessionId, signal,
+  pollMs = COMPLETION_POLL_MS,
+  idleMs = COMPLETION_IDLE_MS,
+  now = () => Date.now(),
+} = {}) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return null;
   const file = path.join(claudeProjectsDir({ cwd, env }), `${sessionId}.jsonl`);
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
     let lastMtimeMs = -1;
-    let pending = null;
+    // The instant the transcript's mtime last CHANGED — the start of the current quiet
+    // stretch. A settled outcome only counts once this stretch reaches `idleMs`.
+    let stableSince = null;
     // NOT named `finish` — the driver's own `finish()` is the anchor
     // acd-terminal-view-live-observable's inv.8 detector pins by the FIRST
     // `const finish =` in this file; a second one here would shadow it.
@@ -1020,14 +1047,19 @@ export async function defaultWatchTranscriptCompletion({ cwd, env, sessionId, si
         mtimeMs = -1;
       }
       const outcome = await readTranscriptTerminalOutcome(file);
-      // Fire only once the SAME settled outcome has been seen on two consecutive ticks
-      // whose mtime did not move — proof the turn is finished, not mid-write.
-      if (outcome != null && pending != null && mtimeMs >= 0 && mtimeMs === lastMtimeMs) {
+      // ANY movement in the transcript restarts the quiet stretch — the session is alive
+      // (a background agent reported back, a new turn began, a tool ran).
+      if (mtimeMs !== lastMtimeMs) {
+        lastMtimeMs = mtimeMs;
+        stableSince = now();
+      }
+      // Fire only once a settled outcome has held across a FULLY QUIET `idleMs` window —
+      // proof the session is finished, not merely between turns or waiting on background
+      // work (the premature-done defect this window exists to close).
+      if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= idleMs) {
         settleWatch(outcome);
         return;
       }
-      pending = outcome;
-      lastMtimeMs = mtimeMs;
       if (!settled) timer = setTimeout(tick, pollMs);
     };
     timer = setTimeout(tick, pollMs);
