@@ -39,6 +39,10 @@ import { TERMINAL_FRAME_KIND } from "./mesh-terminal-relay-bridge.mjs";
 // connection-bound nodeId every other apply* uses). The DOWN-frame + tick live in
 // mesh-recovery-push.mjs; only the result-apply is dispatched here.
 import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
+// VERIFICATION (continue-on-existing-branch, 2026-07-25) — when a worker reports a `done`
+// carrying the branch it pushed, record it as the item's active mesh branch so the next
+// continue/verify dispatch reuses it (the work accumulates on ONE branch per item).
+import { setItemBranch } from "./mesh-assignment-directive.mjs";
 
 // isRevokedLocal(registry, nodeId) — milestone 35 / ADR-002, story 01 task 01
 // (SECURITY T2). A deliberate LOCAL re-implementation of mesh-registry.mjs's
@@ -266,6 +270,15 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // previously-captured value intact in updateAssignmentState.
   const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : undefined;
   const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId });
+  // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a `done` means the worker's
+  // push succeeded (it sends done only AFTER the push); record the branch it reported as
+  // this item's active branch, keyed by the assignment ROW's OWN workspace/item (never a
+  // self-reported id — the SAME T6 discipline the holder check above keeps). The next
+  // continue/verify for this item reuses it. Absent branch (a pre-upgrade worker) is a
+  // no-op, byte-identical to before.
+  if (state === "done" && typeof frame?.branch === "string" && frame.branch.length > 0) {
+    setItemBranch(store, existing.workspace_id, existing.item_ref, frame.branch, { now });
+  }
   return { applied: updated != null, assignment: updated };
 }
 
@@ -658,9 +671,17 @@ export function freshnessLabel({ connected, everConnected, lastHeartbeatAt, now,
 // `/aof:continue`, `/aof:verify <ref>`) the worker types into its interactive
 // session's PTY stdin (mesh-worker-execution.mjs). This frame is otherwise
 // byte-identical to its pre-story-05 shape.
-export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command }) {
+// VERIFICATION (continue-on-existing-branch, 2026-07-25) — `baseBranch` is a NEW,
+// ADDITIVE, OPTIONAL seventh key (same conditional-inclusion pattern as `command`): the
+// EXISTING mesh branch a continue/verify must run ON (the item's active branch, resolved
+// control-side from global_item_branches). When present the worker checks that branch out
+// into the assignment's worktree instead of branching a fresh one from HEAD, so the work
+// accumulates on ONE branch per item. Absent (a refine, or an item with no prior push) ⇒
+// the worker's own fresh-branch default, byte-identical to before.
+export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command, baseBranch }) {
   const frame = { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
   if (typeof command === "string" && command.length > 0) frame.command = command;
+  if (typeof baseBranch === "string" && baseBranch.length > 0) frame.baseBranch = baseBranch;
   return frame;
 }
 

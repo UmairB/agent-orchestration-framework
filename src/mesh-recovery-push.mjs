@@ -44,6 +44,10 @@
 // frame builder from here (the ONE contract home) without dragging sqlite into the
 // transport leaf.
 import { meshWorkerBranchName } from "./mesh-worktree.mjs";
+// VERIFICATION (continue-on-existing-branch, 2026-07-25) — a successful recovery push is
+// also a successful push: record the pushed branch as the item's active branch so a later
+// continue/verify reuses it.
+import { setItemBranch } from "./mesh-assignment-directive.mjs";
 
 // THE DOWN- and UP-frame kinds (the single source of both literals — imported by
 // worker-stream-client.mjs's receive branch and control-stream-server.mjs's dispatch,
@@ -212,6 +216,15 @@ export function applyRecoveryPushResultFrame(store, frame, options = {}) {
     ? frame.code
     : (typeof frame?.branch === "string" && frame.branch.length > 0 ? `branch ${frame.branch}` : null);
   const updated = markRecoveryPushState(store, assignmentId, state, { now, detail });
+  // A successful recovery push landed a real branch home — record it as the item's active
+  // branch (keyed by the assignment ROW's own workspace/item), so the next continue/verify
+  // reuses it. The branch is derived when the worker did not echo one (an older worker).
+  if (frame?.ok === true) {
+    const branch = typeof frame?.branch === "string" && frame.branch.length > 0
+      ? frame.branch
+      : meshWorkerBranchName(assignment.item_ref, assignmentId);
+    setItemBranch(store, assignment.workspace_id, assignment.item_ref, branch, { now });
+  }
   return { applied: updated != null, state, assignmentId };
 }
 

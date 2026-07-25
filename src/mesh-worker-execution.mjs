@@ -121,7 +121,7 @@ import { findWork, loadWorkspace } from "./work.mjs";
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
-import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore, workspaceIdFor } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
@@ -1820,19 +1820,26 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     let item;
     // story 07 task 00 (ADR-015) — the REAL branch this assignment's worktree is
     // checked out on, computed BEFORE addWorktree so both the checkout call and the
-    // eventual push (below) name the SAME branch. Distinct per assignmentId by
-    // construction (meshWorkerBranchName embeds it), so two assignments for the same
-    // itemRef never collide.
-    const branch = meshWorkerBranchName(itemRef, assignmentId);
+    // eventual push (below) name the SAME branch.
+    //
+    // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify carries
+    // `directive.baseBranch` (the item's EXISTING active branch, resolved control-side): it
+    // runs ON that branch, so the work accumulates on ONE branch per item across refine →
+    // continue → verify (no fresh branch off main — a fresh worktree from main lacks the
+    // refine's contract). A refine (or an item with no prior push) has no baseBranch and
+    // gets its own per-assignment branch, byte-identical to before. The worktree PATH stays
+    // assignmentId-keyed either way (SECURITY F4 untouched).
+    const baseBranch = typeof directive.baseBranch === "string" && directive.baseBranch.length > 0 ? directive.baseBranch : null;
+    const branch = baseBranch ?? meshWorkerBranchName(itemRef, assignmentId);
     try {
       // task 00 — materialize the dedicated worktree at the ONE seam, ON the REAL
-      // branch above (ADR-015: HEAD lands on `branch`, never detached — CONTRAST the
-      // pre-story-07 `--detach` form). "HEAD" is the target commitish — the assignment
-      // always targets the current tip of the branch the control node dispatched from
-      // (no ref negotiation this milestone; a future story could carry an explicit
-      // commit).
+      // branch above (ADR-015: HEAD lands on `branch`, never detached). A reused base
+      // branch is checked out via reuseWorktreeOnBranch (release any holder + prune, then
+      // check out the existing branch); a fresh branch is `-b <branch>` off the commitish.
       const commitish = directive.commit ?? "HEAD";
-      worktreePath = await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
+      worktreePath = baseBranch != null
+        ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, baseBranch, { exec })
+        : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
 
       // T3b / F4b — the ref resolves INSIDE the worktree's OWN checkout via
       // enumerate-then-filter; a traversal ref yields no item there. This is the
@@ -1981,7 +1988,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
             writeCredential = typeof resolved === "string" && resolved.length > 0 ? resolved : null;
           }
           await pushWorktreeBranch(ws.projectRoot, worktreePath, branch, { credential: writeCredential, pushExec });
-          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId });
+          // VERIFICATION (continue-on-existing-branch, 2026-07-25) — report the ACTUAL
+          // pushed branch on the done frame so control records this item's active branch
+          // (the next continue/verify reuses it). For a reused base branch this IS that
+          // branch; for a refine it is the fresh per-assignment branch.
+          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId, branch });
           await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
           onCleanup(assignmentId, "done", worktreePath);
         } catch (pushError) {

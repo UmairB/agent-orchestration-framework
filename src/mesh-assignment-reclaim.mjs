@@ -28,6 +28,11 @@ import { updateAssignmentState, isActiveAssignmentState, listAllAssignments } fr
 // acd-global-publisher-single-seam — the launcher reaches the global store only
 // through a sanctioned seam, never the SQLite store module itself).
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+// VERIFICATION (UI phase selection, 2026-07-25) — the per-assignment phase directive
+// (which lifecycle command the worker runs). The dispatch call site below reads the
+// operator-chosen phase from the additive side-table and maps it to the command string;
+// the refine default above delegates to the SAME mapper.
+import { readAssignmentPhase, assignmentDirectiveCommand, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
 
 // The PRODUCTION row source: every assignment row for `workspaceId`, off the SAME
 // bulk reader story 03's status shape already uses (no second query surface).
@@ -36,18 +41,22 @@ function defaultListAssignments(store, workspaceId) {
 }
 
 // defaultAssignmentDirectiveCommand(itemRef) — milestone 38 / story 05 (ADR-013): the
-// DOCUMENTED DEFAULT whole command string dispatched with every directive. The
-// control side has no operator-facing command-SELECTION UI yet (a later story's
-// concern — this milestone's assignment record stays FROZEN at its ten-key shape,
-// acd-assignment-record-frozen, so this default is computed here rather than stored),
-// so every dispatch names the first phase of the full lifecycle,
-// `/aof:refine <ref> --autonomous`, exactly ADR-013's own worked example. This is what
-// makes buildDirectiveFrame's new `command` field a REAL, non-empty production value
-// (never reachable only through a test's own injected directive) — the worker types
-// EXACTLY this string into its interactive session's PTY stdin
+// DOCUMENTED DEFAULT whole command string dispatched with a directive when the operator
+// chose NO explicit phase. Every dispatch names the first phase of the full lifecycle,
+// `/aof:refine <ref> --autonomous`, exactly ADR-013's own worked example — the worker
+// types EXACTLY this into its interactive session's PTY stdin
 // (mesh-worker-execution.mjs's driveInteractiveClaudeSession).
+//
+// VERIFICATION (UI phase selection, 2026-07-25) — the "later story's concern" the
+// original comment named has arrived: the operator can now pick refine/continue/verify
+// in the UI, persisted per-assignment in the additive `global_assignment_directives`
+// side-table (mesh-assignment-directive.mjs — the assignment record stays FROZEN, so the
+// phase never lives on it). The dispatch call site below reads that phase and maps it via
+// `assignmentDirectiveCommand`; this default is the fallback when a row is absent (a CLI
+// `aof mesh assign` with no phase), delegating to the SAME mapper's refine case so the
+// two paths can never drift.
 function defaultAssignmentDirectiveCommand(itemRef) {
-  return `/aof:refine ${itemRef} --autonomous`;
+  return assignmentDirectiveCommand(DEFAULT_ASSIGNMENT_PHASE, itemRef);
 }
 
 // The documented default run-heartbeat staleness threshold (ms) — the SAME m20
@@ -193,12 +202,27 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       // go out was NEVER retried — the row sat "assigned" forever with no further
       // attempt, indistinguishable from a hung/misbehaving worker. Found live: a
       // real assignment stuck for 24h+ despite a confirmed-connected, healthy worker.
+      // VERIFICATION (UI phase selection, 2026-07-25) — read the operator-chosen phase
+      // for THIS assignment from the additive side-table and map it to the whole command
+      // string; absent (a CLI assign, or a legacy row) falls back to the refine default.
+      const phase = readAssignmentPhase(store, row.assignmentId);
+      const command = phase != null
+        ? assignmentDirectiveCommand(phase, row.itemRef)
+        : defaultAssignmentDirectiveCommand(row.itemRef);
+      // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify runs on
+      // the item's EXISTING active branch (the refine's), so its commits accumulate there
+      // rather than on a fresh branch off main. A refine (or an item with no prior push,
+      // readItemBranch → null) carries no baseBranch and the worker branches fresh.
+      const baseBranch = phase === "continue" || phase === "verify"
+        ? readItemBranch(store, row.workspaceId, row.itemRef)
+        : null;
       const result = streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
         assignmentId: row.assignmentId,
         itemRef: row.itemRef,
         workspaceId: row.workspaceId,
         at: now,
-        command: defaultAssignmentDirectiveCommand(row.itemRef),
+        command,
+        baseBranch,
       }));
       if (result?.sent) {
         dispatchedIds.add(row.assignmentId);

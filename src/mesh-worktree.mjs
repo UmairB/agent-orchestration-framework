@@ -172,6 +172,64 @@ export async function addWorktree(projectRoot, assignmentId, commitish, options 
   return worktreePath;
 }
 
+// reuseWorktreeOnBranch(projectRoot, assignmentId, baseBranch, options) — VERIFICATION
+// (continue-on-existing-branch, 2026-07-25). Materialize this assignment's worktree
+// checked out ON an EXISTING mesh branch `baseBranch` (the item's active branch, carried
+// on the directive), so a continue/verify runs on the refine's own branch and its commits
+// accumulate there — never a fresh branch off main. The worktree PATH is still
+// assignmentId-keyed (meshWorktreePath — the SECURITY F4 invariant is untouched: the path
+// is never composed from the branch/ref text); only the checked-out branch is reused.
+//
+// A git branch can be checked out in at most ONE worktree, so this first RELEASES any
+// worktree still holding `baseBranch` (the refine's own, if it survived) and prunes stale
+// metadata, then adds THIS assignment's worktree on the branch:
+//   - `git fetch origin <baseBranch>` (best-effort — brings the latest pushed tip; a
+//     local-only branch or an unreachable origin is not fatal, the local branch stands);
+//   - `git worktree prune` + remove any worktree whose checked-out branch IS baseBranch;
+//   - if the branch resolves locally → `git worktree add <path> <baseBranch>`; else (a
+//     re-cloned checkout that has it only on origin) → `git worktree add -b <baseBranch>
+//     <path> origin/<baseBranch>` (a local branch tracking the pushed one).
+// Returns the materialized path. A non-zero `worktree add` is a thrown coded fault (the
+// caller decides how to surface it — the never-swallow discipline addWorktree keeps).
+export async function reuseWorktreeOnBranch(projectRoot, assignmentId, baseBranch, options = {}) {
+  const exec = resolveExec(options);
+  const worktreePath = meshWorktreePath(projectRoot, assignmentId);
+  // The exec seam may be sync (a test double) or async (production `git` spawn), so every
+  // best-effort step is `await exec(...)` inside a try/catch — never `.catch()` on the
+  // return (which a sync double does not carry). A best-effort step's fault is swallowed.
+  const tryExec = async (args) => {
+    try { return await exec(args, { cwd: projectRoot }); } catch { return { status: 1, stdout: "", stderr: "" }; }
+  };
+
+  // Best-effort refresh of the branch from origin — a fault here (local-only branch,
+  // origin unreachable) never blocks the reuse; the local branch, if present, is used.
+  await tryExec(["fetch", "origin", baseBranch]);
+
+  // Release any worktree still holding the branch (the refine's), then prune stale admin
+  // metadata so a later add at this path is never blocked (RESEARCH §4's prunable note).
+  const refName = `refs/heads/${baseBranch}`;
+  let holders = [];
+  try {
+    holders = (await listWorktrees(projectRoot, { exec })).filter((entry) => entry.branch === refName);
+  } catch {
+    holders = [];
+  }
+  for (const holder of holders) {
+    await tryExec(["worktree", "remove", "--force", holder.path]);
+  }
+  await tryExec(["worktree", "prune"]);
+
+  const hasLocal = (await tryExec(["rev-parse", "--verify", "--quiet", refName])).status === 0;
+  const args = hasLocal
+    ? ["worktree", "add", worktreePath, baseBranch]
+    : ["worktree", "add", "-b", baseBranch, worktreePath, `origin/${baseBranch}`];
+  const result = await exec(args, { cwd: projectRoot });
+  if (result.status !== 0) {
+    throw gitError(`git worktree add (reuse branch "${baseBranch}") failed for assignment "${assignmentId}": ${result.stderr || result.stdout}`, "worktree-reuse-failed", { assignmentId, worktreePath, baseBranch, stderr: result.stderr });
+  }
+  return worktreePath;
+}
+
 // removeWorktree(projectRoot, assignmentId, options) — `git worktree remove` (NEVER a
 // bare rm — RESEARCH.md §4: a bare rm leaves `.git/worktrees/<name>` behind as
 // prunable metadata that blocks a later `add` at the same path; `git worktree remove`

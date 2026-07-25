@@ -81,11 +81,16 @@ export function buildPresenceFrame(nodeId, presence, now) {
 // optional status-refinement (e.g. `needs-input`) riding alongside an
 // already-legal `state`. Both are additive-only — a consumer reading only
 // {assignmentId, state, runId} sees byte-identical frames.
-export function buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, now } = {}) {
+export function buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, branch, now } = {}) {
   const frame = { kind: "assignment-status", nodeId, assignmentId, state, at: now };
   if (typeof runId === "string" && runId.length > 0) frame.runId = runId;
   if (typeof sessionId === "string" && sessionId.length > 0) frame.sessionId = sessionId;
   if (typeof code === "string" && code.length > 0) frame.code = code;
+  // VERIFICATION (continue-on-existing-branch, 2026-07-25) — the ACTUAL branch this
+  // assignment pushed home, reported on a `done` frame so control can record the item's
+  // active branch (a continue that REUSED a base branch pushes that branch, not a
+  // per-assignment one — the worker is the authority on what it actually pushed).
+  if (typeof branch === "string" && branch.length > 0) frame.branch = branch;
   return frame;
 }
 
@@ -418,8 +423,8 @@ export function createWorkerStreamClient({
   // client.sendAssignmentStatus(...args)` closes over, so a real worker's captured
   // session_id genuinely reaches the wire, never reachable only through a test's own
   // recorder.
-  async function sendAssignmentStatus(assignmentId, state, { runId, sessionId, code } = {}) {
-    return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, now: resolveNow() }));
+  async function sendAssignmentStatus(assignmentId, state, { runId, sessionId, code, branch } = {}) {
+    return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, branch, now: resolveNow() }));
   }
 
   // sendTerminalFrame(sessionId, bytes) — milestone 38 / story 06 (ADR-014 AMENDMENT

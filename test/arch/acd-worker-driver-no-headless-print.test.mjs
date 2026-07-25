@@ -261,8 +261,13 @@ export const archTests = [
       // SURFACING half — GREEN NOW (the done + needs-input frames already carry sessionId).
       assert.equal(surfacesSessionIdOnStatusFrames(stripped), true, "sessionId is surfaced on BOTH the done and needs-input status frames");
       // Self-check: revert the done frame to the pre-story-05 discard shape.
+      // The done frame carries `sessionId` (this invariant) alongside an optional
+      // `branch` (VERIFICATION 2026-07-25, continue-on-existing-branch — the pushed
+      // branch reported so control records the item's active branch); the plant matches
+      // the current shape (sessionId, then any trailing keys) and reverts to the
+      // pre-story-05 discard shape to prove the detector trips.
       const plantedDiscard = stripped.replace(
-        /sendAssignmentStatus\?\.\(\s*assignmentId,\s*["']done["'],\s*\{\s*runId:\s*runRecord\.runId,\s*sessionId\s*\}\s*\)/,
+        /sendAssignmentStatus\?\.\(\s*assignmentId,\s*["']done["'],\s*\{\s*runId:\s*runRecord\.runId,\s*sessionId[^}]*\}\s*\)/,
         'sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId })',
       );
       assert.notEqual(plantedDiscard, stripped, "the plant actually changed the source text");

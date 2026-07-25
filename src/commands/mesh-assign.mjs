@@ -23,6 +23,11 @@ import {
   listAssignmentsForItem,
   updateAssignmentState,
 } from "../assignment-record.mjs";
+// VERIFICATION (UI phase selection, 2026-07-25) — the operator-chosen lifecycle phase
+// (refine/continue/verify) rides an additive side-table keyed by assignmentId; it cannot
+// live on the FROZEN assignment record. Written here right after the mint, within the
+// SAME open store.
+import { isAssignmentPhase, setAssignmentPhase, DEFAULT_ASSIGNMENT_PHASE } from "../mesh-assignment-directive.mjs";
 
 function assignError(message, code, status = 400, extra = {}) {
   const error = new Error(message);
@@ -136,7 +141,17 @@ export async function assignWork(workspace, ref, nodeId, ctx = {}) {
       assignmentId: ctx.assignmentId,
     });
     insertAssignment(store, record);
-    return { ok: true, ...record };
+    // VERIFICATION (UI phase selection) — record the operator-chosen lifecycle phase for
+    // this assignment so the dispatch tick runs `/aof:continue`/`/aof:verify` instead of
+    // the refine default. Written only for an explicit NON-default phase: a CLI assign
+    // (no phase) or an explicit `refine` writes NO row, so the dispatch tick's own refine
+    // fallback applies and legacy behaviour is byte-identical. The phase can NEVER live on
+    // the frozen record — it rides the additive side-table (mesh-assignment-directive.mjs).
+    const phase = isAssignmentPhase(ctx.phase) ? ctx.phase : DEFAULT_ASSIGNMENT_PHASE;
+    if (phase !== DEFAULT_ASSIGNMENT_PHASE) {
+      setAssignmentPhase(store, record.assignmentId, phase, { now });
+    }
+    return { ok: true, phase, ...record };
   } finally {
     store.close?.();
   }
