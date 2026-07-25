@@ -24,7 +24,7 @@ export const meshUiAssignRouteTests = [
       await withAssignRouteFixture(async ({ url, home, workspaceId }) => {
         await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
 
-        const res = await sameOriginAssign(url, "38/04", "worker-a");
+        const res = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.equal(res.status, 200, "the same-origin json request passes the guard and reaches the verb");
 
         const rows = await readAssignmentRows({ home }, workspaceId, "38/04");
@@ -45,7 +45,9 @@ export const meshUiAssignRouteTests = [
         const res = await postAssign(url, {
           origin: "SAME",
           contentType: "application/json",
-          rawBody: JSON.stringify({ ref: "38/04", nodeId: "worker-a", state: "done", assignmentId: "forged-1", issuer: "attacker" }),
+          // The wire's THREE required fields (ADR-012 AMENDMENT) plus the forged
+          // extras — every one of which must ride no further than this route.
+          rawBody: JSON.stringify({ ref: "38/04", nodeId: "worker-a", workspaceId, state: "done", assignmentId: "forged-1", issuer: "attacker" }),
         });
         assert.equal(res.status, 200);
 
@@ -67,7 +69,7 @@ export const meshUiAssignRouteTests = [
           await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
           await seedTargetNode({ home }, { nodeId: "worker-b", workspaceId, member: true, published: true });
 
-          const res = await sameOriginAssign(url, "38/04", nodeId);
+          const res = await sameOriginAssign(url, "38/04", nodeId, "OWN");
           assert.equal(res.status, 200, `assigning to "${nodeId}" succeeds`);
 
           const rows = await readAssignmentRows({ home }, workspaceId, "38/04");

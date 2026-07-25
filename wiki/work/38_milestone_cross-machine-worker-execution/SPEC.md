@@ -117,7 +117,7 @@ operator's bar: *"I'm not signing off this milestone until it actually works in 
 even if you need to create 100 more stories."* The mega-scope is decomposed into five focused,
 independently-verifiable stories (research + decisions: `RESEARCH.md § 4`), in dependency order:
 
-- [ ] [`04_story_ui-driven-assignment`](stories/04_story_ui-driven-assignment/STORY.md) — assign a
+- [x] [`04_story_ui-driven-assignment`](stories/04_story_ui-driven-assignment/STORY.md) — assign a
   milestone/story to a worker node FROM the fleet/board UI (a security-reviewed mutation carve-out on the
   read-only fleet face, ADR-006, wrapping the existing `aof mesh assign` verb). No CLI. Entry point.
 - [x] [`05_story_terminal-driven-worker-execution`](stories/05_story_terminal-driven-worker-execution/STORY.md)

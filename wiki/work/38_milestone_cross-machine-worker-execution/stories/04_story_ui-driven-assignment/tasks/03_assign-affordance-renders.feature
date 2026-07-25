@@ -46,6 +46,24 @@ Feature: The work-item card's "assign to node" affordance renders from the REAL 
     And it offers NO node option and NO invented "any" / placeholder target the verb would refuse
     # ADR-008 F9 — the branch the REAL empty payload mounts, never a fixture-populated one
 
+  # ADDED 2026-07-24 (`aof:continue 38/04` review fix QA-a) — reproduced end-to-end in Chromium at review and confirmed at
+  # source: the affordance remembered its selection in component state and never re-synced it when the roster changed under it.
+  # The fleet face is a LONG-LIVED monitor that re-polls every poll interval, so when the selected node left the picker the
+  # <select>'s DOM value coerced to the first surviving option while the state kept the DEPARTED id — the row DISPLAYED one
+  # target and POSTED another, and the `Sent` acknowledgment then sat beside the wrong name (region 6 contradicting region 5 on
+  # the same card). This is BLOCKER F21's defect class relocated to the NODE axis, and its lesson generalised: a seam whose
+  # defect is a WRONG TARGET must be exercised with ≥2 candidates where the chosen one can STOP BEING VALID.
+  Scenario: the target the row NAMES is the target the POST carries — a roster change under a mounted picker never splits the two
+    Given the REAL production <Fleet/> mounted against the REAL fleet face, its picker producer-fed with TWO candidate nodes
+    And the node the row is resting on then LEAVES the roster while the row stays mounted (its registry descriptor stops resolving)
+    When the next poll lands and the operator clicks "Assign →"
+    Then the value the picker renders is one of the options the picker renders — never a departed id held behind a coerced display
+    And the POST the app actually sent carries the node the row NAMED
+    And the REAL minted record targets that same node when read back through the REAL store
+    And the departed node was still ASSIGN-ELIGIBLE at that moment (a mis-dispatch to it would have returned a plausible 200)
+    # the picker is fed by queryGlobalRegistry (which drops a node whose descriptor no longer resolves) while the verb's
+    # node-known gate reads global_nodes DIRECTLY — so a stale target is accepted, not refused, which is what makes it silent
+
   Scenario: the resulting `assigned` chip renders from the REAL minted record — the m35/story-03 read shape, closing the loop
     Given a REAL assign has minted an `assigned` record for "38/04" on "worker-a" (through the real route, task 00)
     When the work-item card derives its assignment chip from the REAL GET /api/mesh/status payload

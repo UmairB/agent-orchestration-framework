@@ -5,6 +5,13 @@ Feature: The mutation carve-out is EXACTLY one route — every other fleet-face 
   still stands up its one loopback-bound http.createServer with no /ws/terminal, and a cross-site POST is refused — so a malicious
   page auto-POSTing to http://127.0.0.1 cannot mint work the operator never authorized (SECURITY T13's CSRF vector).
 
+  # AMENDED 2026-07-24 (`aof:continue 38/04` review fix QA-d) — the WIRE SHAPE below is `{ ref, nodeId, workspaceId }`, all three
+  # REQUIRED, per the ARCHITECTURE ADR-012 AMENDMENT (BLOCKER F21). The CSRF Outline previously posted `{ ref, nodeId }`, which
+  # under the amendment is a `400 invalid-workspace` — making its `same-origin + json ⇒ ACCEPTED` row factually false as written
+  # (it passed only because the fixture silently supplied the workspaceId). WHAT THIS TASK ASSERTS IS OTHERWISE UNCHANGED — the
+  # per-row admission VERDICT, the 405/404 matrix, the single loopback listener, the destroyed upgrade and the no-ungated-mint
+  # clause all stand verbatim. The ACCEPTED row now carries the item's own workspaceId, the value a real card carries.
+
   # ARCHITECTURE 38/ADR-006 (the read-only fleet face — GET-only, POST 405, every upgrade destroyed) + 38/ADR-012 invariant #4
   # (the face stays OTHERWISE read-only: one loopback http.createServer, no low-level writer import, no /ws/terminal this story,
   # only the write-isolation invariant flips to "exactly ONE bounded mutation route") + #1 (exactly one mutation route).
@@ -44,7 +51,7 @@ Feature: The mutation carve-out is EXACTLY one route — every other fleet-face 
     # the LIVE deployed bind interface is the operator's R5 attestation (task 04 soak), out of this executable's reach
 
   Scenario Outline: the CSRF posture — only a same-origin JSON write is admitted; a cross-origin / forgeable write is refused
-    When a POST /api/mesh/assign with body { ref: "38/04", nodeId: "worker-a" } is sent with <origin> and content-type <contentType>
+    When a POST /api/mesh/assign with body { ref: "38/04", nodeId: "worker-a", workspaceId: <this workspace> } is sent with <origin> and content-type <contentType>
     Then the write is <verdict>
     And on a REFUSED row the response is a coded 4xx and NO global_assignments row was minted
     And on an ACCEPTED row the response is 200 and EXACTLY ONE assigned row was minted

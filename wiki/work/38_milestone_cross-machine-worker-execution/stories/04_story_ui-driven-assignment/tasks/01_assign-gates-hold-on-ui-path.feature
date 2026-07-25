@@ -6,6 +6,14 @@ Feature: The UI assign path re-runs the verb's OWN gates — an unknown / inelig
   assignment-target-unknown, an ineligible node hits assignment-repo-unavailable, a duplicate hits assignment-already-active, a
   typo'd ref hits ref-not-found — each minting NOTHING.
 
+  # AMENDED 2026-07-24 (`aof:continue 38/04` review fix QA-d) — the WIRE SHAPE below is `{ ref, nodeId, workspaceId }`, all three
+  # REQUIRED, per the ARCHITECTURE ADR-012 AMENDMENT (BLOCKER F21). This narrative previously spelled every POST `{ ref, nodeId }`;
+  # under the amendment each of those returns `400 invalid-workspace` rather than the gate code its Examples claim, so the wire
+  # spelling is corrected throughout. WHAT THIS TASK ASSERTS IS OTHERWISE UNCHANGED — the gate codes, the "coded non-200, never a
+  # 200", the "mints nothing", and the CLI-parity clause all stand verbatim; `workspaceId` merely SELECTS the workspace the verb is
+  # handed (it is the item's own, the value a real card carries), and every row below holds it VALID so that the ONE flipped
+  # trigger is still the gate the row is about. The workspace-TARGETING contract itself is task 05's.
+
   # ARCHITECTURE 38/ADR-012 decision — "the UI path re-runs the verb's OWN gates … the route MUST surface the verb's structured
   # { ok:false, code } as a coded HTTP error, never a 200, never a second success path around the gates"; invariant #3 (a gate
   # miss is surfaced, never swallowed — never a 200 for a refusal). SECURITY T13 control (a) — "refused IDENTICALLY to the CLI;
@@ -25,7 +33,7 @@ Feature: The UI assign path re-runs the verb's OWN gates — an unknown / inelig
 
   Scenario Outline: a gate miss on the UI path is a coded non-200 that mints nothing — identically to the CLI
     Given the store is seeded as <seed>
-    When a same-origin application/json POST /api/mesh/assign with body { ref: <ref>, nodeId: <nodeId> } is sent
+    When a same-origin application/json POST /api/mesh/assign with body { ref: <ref>, nodeId: <nodeId>, workspaceId: <this workspace> } is sent
     Then the response status is a coded non-200 (a 4xx, never a 200)
     And the response body code is <code>
     And NO global_assignments row was minted for the item (the store's assignment row-count is unchanged)
@@ -42,16 +50,16 @@ Feature: The UI assign path re-runs the verb's OWN gates — an unknown / inelig
     # verb's own, surfaced verbatim) + "non-200, never 200" + "nothing minted".
 
   Scenario: the single-runner uniqueness invariant holds on the UI path — a second assign is refused, minting no second row
-    Given a first same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a" } has minted the active assignment (200)
-    When a SECOND same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a" } is sent
+    Given a first same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a", workspaceId: <this workspace> } has minted the active assignment (200)
+    When a SECOND same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a", workspaceId: <this workspace> } is sent
     Then the response status is a coded non-200 with code "assignment-already-active"
     And still EXACTLY ONE active assignment row exists for "38/04" (no second row was minted)
     And the refusal names the current holder "worker-a" (the verb's own holder field, surfaced faithfully)
 
   Scenario: the uniqueness invariant is the ITEM's, not the node's — a second assign to a DIFFERENT eligible node is refused too
-    Given a first same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a" } has minted the active assignment (200)
+    Given a first same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-a", workspaceId: <this workspace> } has minted the active assignment (200)
     And a second known worker node "worker-b" that also holds the workspace's published repo
-    When a same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-b" } is sent
+    When a same-origin POST /api/mesh/assign { ref: "38/04", nodeId: "worker-b", workspaceId: <this workspace> } is sent
     Then the response status is a coded non-200 with code "assignment-already-active"
     And still EXACTLY ONE active assignment row exists for "38/04", held by "worker-a" (the item already has a runner)
     # findActiveAssignment keys on (workspaceId, itemRef) — the UI path cannot double-assign an item around the CLI's arbitration

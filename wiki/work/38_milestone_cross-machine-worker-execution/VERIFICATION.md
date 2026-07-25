@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 38
-updated: 2026-07-23
+updated: 2026-07-24
 ---
 <!--
   Milestone VERIFICATION.md — the record of aof:verify 38. Written by the orchestration (verify owns
@@ -915,3 +915,356 @@ milestone gate and are unchanged.
   build must be deployed to both machines first. Next steps are the operator's: deploy the current build to both
   nodes, bring both daemons up, then drive the runnable soaks (chain **04 → 01 → 05 → 07 → 08**; **03** separate on
   a second org's App; **06** now joins once the relay is live) with a human observer.
+
+---
+
+## Verify pass `2026-07-24` — live two-machine mesh STOOD UP; a new blocker found **and fixed**; the recorded automated evidence **corrected**
+
+The preflight was finally cleared: the current build is installed on BOTH machines, both daemons are up, and the
+fabric is genuinely connected (control `:4182` LISTENING with multiple ESTABLISHED connections from the worker over
+Tailscale). Standing it up immediately exposed a blocker that every prior pass had missed — and, separately, that
+the automated evidence recorded by those passes was **vacuous**.
+
+### F18 (NEW, **BLOCKER** — FIXED this pass) — cross-node presence DROPS the `sessions` key
+
+**Observed live, at source.** With both nodes on the current build and the fabric connected, the control node held a
+**fresh but FOUR-key** presence record for the worker (`~/.aof/mesh/presence/umairs-mac-mini.json` — mtime seconds
+old, `{nodeId, heartbeatAt, activeRuns, aofVersion}`), while the worker's OWN self-view was the correct five-key
+record. The `sessions` key was being destroyed in transit.
+
+**Root cause, confirmed at source.** [`applyPresenceFrame`](../../../src/control-stream-server.mjs#L187) — the
+control's fabric-ingestion of a *peer's* presence — rebuilt the record from only the original m23 four keys:
+```js
+const record = { nodeId, heartbeatAt, activeRuns: …, aofVersion: … };   // no `sessions`
+```
+The worker SENDS its full five-key record (`{ ...presence }`,
+[worker-stream-client.mjs:60](../../../src/worker-stream-client.mjs#L60)); the control cherry-picked the old four and
+never carried ADR-001's additive fifth key, then persisted that four-key result.
+
+**Consequence — SPEC objective (a) failed for every node that is not the control itself.** A remote worker could
+only ever read `idle` on the fleet, however actively it was being worked on: the milestone's headline bug, still
+live across the exact boundary the milestone is *named for*.
+
+**Why seven prior passes missed it.** The control's OWN presence is written by `assemblePresenceRecord` (five-key) —
+the only path a single-machine soak ever exercises. Only a REMOTE node's presence flows through
+`applyPresenceFrame`, and presence had never been soaked two-machine. Worse, the existing test
+(`control-stream-server/02`) fed a **four-key fixture** and asserted a round-trip — it had no `sessions` key to
+lose. That is the same fixture-fed pattern as F1/F4/F6–F9, at an eighth address.
+
+**Fix (committed `d7fa8d5`).** `applyPresenceFrame` now carries `sessions` through **verbatim** (the worker is the
+single TTL-filtering authority — it holds the session records; a dead worker's whole record is gated stale anyway),
+in ADR-001 key order. The fixture-fed test was made producer-shaped (a real five-key record with a live session), and
+a dedicated cross-node regression now pins both the surviving `sessions` and the full five-key shape.
+**Proven non-vacuous:** all three presence cases go RED without the fix (the new one with `+ undefined` for the
+dropped key) and GREEN with it.
+
+**Live end-to-end proof — the first cross-machine demonstration of SPEC objective (a) in this milestone.** A real
+session started on the **Mac worker** (`aof session start --workspace f693d197edbbb992 --repo aof --assistant
+claude-code`) crossed the fabric and landed on the **control**:
+```
+sessions: [{ workspaceId: "f693d197edbbb992", repo: "aof", assistant: "claude-code", lastPingAt: … }]
+fleetCurrentWorkLines(presence) → { lines: ["working · aof (session)"], token: "primary", state: "working" }
+```
+Before the fix that array did not exist at all. **Status: FIXED, verified at source, in test, and live.**
+
+### F19 (NEW, process) — the automated evidence recorded by prior passes is **VACUOUS**
+
+Every pass above records the automated foundation as e.g. *"`node --test test/arch/*.test.mjs` → 219 ok / 0 fail"*.
+**That command runs nothing.** These test files export **case arrays** (`export const archTests = [...]`) and register
+**zero** `node:test` tests, so `node --test` reports one trivially-passing test **per FILE** with 0 subtests.
+`ls test/arch/*.test.mjs | wc -l` = **220** — precisely the "220 tests" figure. The `2026-07-19` (217), `2026-07-23`
+(219) and the earlier `2026-07-24` (220) numbers are **file counts, not test results**, and they masked **9 genuinely
+red arch cases**. Cases only execute via `scripts/test.mjs`'s own runner
+([scripts/test.mjs:2024](../../../scripts/test.mjs#L2024)) or an equivalent case-array runner.
+
+**The milestone's own thesis, turned on its verification:** the evidence proving "green" was itself a green that
+proved nothing.
+
+### Automated foundation — RE-ESTABLISHED honestly (real case-array runner, per-case isolated `AOF_GLOBAL_HOME`)
+
+- **Full arch/fitness sweep: 220 files → 694 REAL cases → 685 ok / 9 not ok.** **No m38 fitness function is red.**
+  The 9 reds are all pre-existing and already routed to the stabilisation chore (STATE `2026-07-23`): `acd-sync-root-set`
+  (4), `acd-claim-relay-independent` (3) and `acd-fleet-reclaim-guarded` (1) all read `src/mesh-sync.mjs`, **deleted at
+  m33**; `acd-command-namespace` (1) is the m41 `insert-*` command-count drift. They were invisible precisely because
+  the vacuous command never ran them.
+- **Focused presence + terminal-view suite: 64 ok / 0 not ok** — `control-stream-server`, the presence suites,
+  `worker-stream-client`, both `fleet-terminal-view-*` surfaces and `acd-terminal-view-live-observable`. This is also the
+  first REAL execution of the story-06 terminal-view cases: **they genuinely pass** (the F-38.06c fix is sound — only the
+  earlier *verification method* was worthless).
+- The full integrating `scripts/test.mjs` remains un-runnable here: the live mesh daemon holds `:4182` (finding **F13**).
+
+### Deploy state at this pass
+
+Both machines now run the current build. The control node's SEA was rebuilt and installed via a new
+`scripts/install-local.mjs` (the local-build twin of `install.ps1`, which only ever fetched a signed *release*);
+the prior binary was preserved as `aof.exe.bak.<timestamp>`. The Rust desktop app was rebuilt and confirmed
+**already current** — cargo `Finished` with no recompile and no `.rs` newer than the binary, so its Jul-13 date
+reflects an unchanged Rust source (all later m38 work was JS/TS), NOT a stale build. An earlier note in this
+document calling it stale was wrong.
+
+### Accept decision — Milestone 38 **NOT accepted; stays `in-progress`**
+
+- **3 of 9 stories done** (00, 02, 05); 6 remain `in-review` (01, 03, 04, 06, 07, 08), each gated on its live soak.
+- **F18 is fixed** and, for the first time, SPEC objective (a) is demonstrated **across machines** — real forward
+  progress, and the strongest evidence yet that the remaining soaks must actually be run rather than inferred.
+- **F19 means no prior pass's "automated foundation GREEN" claim can be relied on as written.** The foundation is
+  green *when measured properly* (685/694, 9 known pre-existing reds), but every accept decision that leaned on the
+  vacuous figure should be read with that correction.
+
+### Soak 04 (story 04 · task 04, `@manual`) — **RUN `2026-07-24`, and it FAILED.** Two new findings
+
+The first soak of this milestone to actually run on a live two-machine mesh. Every precondition was met, which is
+what makes the result meaningful rather than environmental:
+
+- Control + worker both on the current build; fabric LISTENING on `:4182` with ESTABLISHED connections from the worker.
+- Serve-face `:4181` bound to **`127.0.0.1` only** — the **R5 loopback bind attestation, measured** (`:4182` is on the
+  Tailscale address by necessity — that is the fabric, not the serve face).
+- A real target milestone (`18 · Homedata Live Property Data`) created in `let-shield-portal`, committed and pushed
+  (`origin/main e542436`), and published into the projection (`lastPublishedAt 2026-07-24T12:40:55Z`, 61 items).
+- The worker's stale checkout renamed aside so clone-on-miss would fire, and its workspace deliberately unregistered.
+- The **assign affordance rendered** — every milestone card carried a live node picker + `Assign →`. §Surface 2's
+  affordance exists on screen (the one thing this pass can positively report for story 04).
+
+**What happened.** The operator clicked `Assign →` on let-shield's milestone 18, targeting `umairs-mac-mini`, with **no
+CLI touched**. The route returned `200 ok` — and minted this:
+```
+assignmentId: da6d78ff-…   itemRef: "18"   targetNodeId: "umairs-mac-mini"
+workspaceId:  9db1fd84f5895e38        ← the CONTROL's OWN (aof) workspace, NOT let-shield-portal (1f164bd03ea535da)
+state: assigned → failed (1.5s later)
+```
+`ref 18` in the control's own workspace is a **completely different milestone** — *"Per-folder integration descriptor —
+a co-located `.integrations.json` routes each work item to its external tool(s)"*. The operator clicked *"Homedata Live
+Property Data"* and the mesh dispatched something else entirely.
+
+| id | observed (confirmed at source) | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F21** | **The fleet assign route ignores the item's workspace and always resolves the ref against the CONTROL's own.** [`mesh-ui-serve.mjs:242`](../../../src/mesh-ui-serve.mjs#L242) does `loadWorkspace(resolvedProjectDir, …)` — the **daemon's own project dir** — then `assignWork(assignWorkspace, ref, nodeId, …)`. The POST body carries only `{ ref, nodeId }` (the code says so verbatim: *"ONLY { ref, nodeId } is lifted off the body"*), so **there is no `workspaceId` on the wire** and the route structurally CANNOT target another workspace. But the fleet face is **global** — it lists items from every workspace (102 milestones across 5 here). So a card from any non-control workspace is mis-assigned: where the ref COLLIDES it **silently dispatches different work** (measured live above); where it does not, it fails. The danger is not the failure — it is the silent wrong-work dispatch: on a worker holding the control's repo this would have executed **real, unintended work** off a correct-looking `200 ok`. This is the **ADR-010 "Gap A" class** (resolve per-assigned-workspace, never globally from the control's own config) that story 03 fixed for the App identity — repeated at the assign seam, unnoticed. | correctness (wrong-target dispatch) | **BLOCKER** | put `workspaceId` on the wire and resolve the item's OWN workspace (mirroring ADR-010 Gap A); a producer-fed test must assign an item belonging to a **non-control** workspace — the shape no existing test covers | `aof:continue 38/04` | **OPEN** |
+| **F22** | **The assign affordance reports nothing on success.** A `200 ok` produced no transition, no pending/loading indicator and no `assigned` chip on the card; the operator only knew the call had succeeded by reading the raw API response. §Surface 2's A1–A11 binding checklist is the baseline for exactly this and was recorded INCONCLUSIVE at the build review pending this render. | design-gap / feedback | non-blocker | designer sets the A1–A11 states (pending → assigned → failed), then build | `aof:continue 38/04` (+ `aof-designer`) | **OPEN** |
+
+**Why the `@executable` lanes never caught F21.** Story 04's tasks 00–03 drive the route against the server's *own*
+workspace — the only workspace a single-workspace fixture has. The mis-targeting is invisible unless the test asserts an
+item belonging to a **different** workspace than the server's, which nothing does. Same defect class as F1/F4/F6–F9/F18:
+a seam exercised only in the configuration where it cannot fail.
+
+**Soak-chain consequence.** The chain died at its first link. The worker never cloned (no new checkout, no logs on the
+Mac) — it failed in ~1.5s because the mis-targeted workspace has no resolvable `cloneUrl` on the worker. So **01
+(clone-on-miss), 02 (real App mint) and 05 (terminal execution) were NOT exercised** by this run; they remain unrun.
+
+**Incidental observation (recorded, not a finding):** workspace ids are **path-derived**, so the same repo carries a
+DIFFERENT id per machine (control's aof `9db1fd84f5895e38` vs the worker's `f693d197edbbb992`). Any fix that puts a
+workspaceId on the wire has to reckon with the fact that a worker cannot resolve a control-authored workspace id to its
+own checkout by identity alone.
+
+**Story 04 — NOT ACCEPTED.** Its affordance renders, but the one outsider check it exists for dispatched the wrong work.
+
+---
+
+## Story-04 · ui-driven-assignment — verify & **DECLINE** (`aof:verify 38/04`, 2026-07-24, after the F21/F22 fix)
+
+Story-level verify of `38/04` (status `in-review`), run on the **post-fix working tree** — the `aof:continue 38/04`
+build that closed **F21** (wrong-workspace dispatch), **F22** (no acknowledgment), **F-38.04a/GAP-S2-3** (the stale
+selection), **F-B** (the issuer), and the two designer rules **DG-13** (binding geometry) / **DG-14** (the timed-out
+row). **Not accepted.** The automated lanes are green and the two blocker findings that re-opened this story are
+closed at source and in pixels — but the story's own design surface came back **GAPS** with two BUILD defects, and
+**the `@manual` soak the story was re-opened by has not been re-run**. `STORY.md` `status` stays `in-review`.
+
+### Verification evidence — `@executable` lanes + fitness (GREEN, fresh this session, producer-fed)
+
+- **Story-04 focused surface: 68 cases → 68 ok / 0 not ok**, run through a **real case-array runner** with a
+  per-case isolated `AOF_GLOBAL_HOME` (the **F19** discipline — `node --test` on these modules executes ZERO cases).
+  Covers task 00 (4) · 01 (3) · 02 (4) · 03 (6) · 05 (9) · 06 (19) · 07 (9), plus both fitness functions
+  `acd-fleet-face-single-mutation-route` (5) and `acd-fleet-assign-targets-item-workspace` (9).
+  verifies → `tasks/00_*`–`tasks/03_*`, `tasks/05_*`–`tasks/07_*` and the story's `## Fitness units`.
+- **Full arch/fitness sweep, honest measurement: 221 files → 703 REAL cases → 694 ok / 9 not ok.** **No m38 fitness
+  function is red, and no story-04 lane regressed.** The 9 reds are the *same* pre-existing set recorded at the
+  earlier `2026-07-24` pass and already routed to the stabilisation chore: `acd-sync-root-set` (4) /
+  `acd-claim-relay-independent` (3) / `acd-fleet-reclaim-guarded` (1) — all three read `src/mesh-sync.mjs`, **deleted
+  at m33** — plus `acd-command-namespace` (1), the concurrent m41 `insert-*` command-count drift. No new red.
+- **Blast radius: 34 mesh-ui / fleet / assignment suites in one process → 225 ok / 0 not ok.** The neighbouring
+  read-only fleet contracts (`acd-mesh-ui-read-only`, `acd-mesh-ui-write-isolation`, `acd-mesh-ui-single-server`,
+  `acd-fleet-terminal-mirror-read-only`, the m35 chip + assignment-shape suites, both story-06 terminal-view
+  surfaces) are unaffected by the mutation carve-out's amendment.
+- **`npm run ui:build` (`tsc -b && vite build`) green** — the **F2** discipline holds: `assign-affordance.mjs` ships
+  with its `.d.mts` companion, so the `.tsx` consumer type-checks.
+- **The full integrating `scripts/test.mjs` was NOT run, deliberately and for the same reason as prior passes:** a
+  **live two-machine mesh** holds `:4182` (control fabric LISTENING on the Tailscale address with ESTABLISHED worker
+  connections) and finding **F13** turns that collision into a process **crash**, not a test failure. Disrupting the
+  live daemon would also destroy the very environment the owed soak needs.
+
+### Design conformance — §Surface 2 re-render → **GAPS at 1280** (the story's own surface)
+
+The re-render **DG-13/DG-14 owed** was produced this pass and judged by `aof-designer` (ADR-001 hand-off — the
+orchestration rendered and handed the frames; the designer judged them and never ran the browser).
+
+- **Provenance.** **13 frames at 1280 only** (390/768 are effectively unrenderable for this page — §Surface 2's own
+  recorded reason), from the **real built `ui/dist`** rebuilt this session (post-DG-12, so the pixels are not void),
+  served by the **real `serveMeshUi`** over an **isolated** global store carrying **two published workspaces**, driven
+  by **real synthetic clicks** producing **real `POST /api/mesh/assign` calls** that minted **real
+  `global_assignments` rows read back from the real store**. **Nothing hand-seeded.**
+- **Two of the three prior gaps CLOSED outright.** **GAP-S2-2/DG-14 — CLOSED:** a hung POST times out at a measured
+  **10057 ms** (= 2 × `POLL_MS`) into the existing `refused` presentation verbatim, reading `no answer — timed out`,
+  re-click permitted. **GAP-S2-3 — CLOSED:** the frozen picker, region 5's chip and the **real store row** all read
+  `umairs-msi` — three independent readings, one node, on a node that is *not* the alphabetical default. The target
+  is derived, not remembered.
+- **GAP-S2-1/DG-13 — CLOSED as filed** (action **83.06px in all eight** states; row **360.66 × 38px** in all eight; the
+  picker never a bare chevron, **124.66px** at its narrowest; the message is the element that yields, full sentence in
+  its native `title`) — **but three narrower successors opened at its edges** (below).
+- **F21 re-witnessed in pixels:** two cards carry the identical `ref 18`; the mint landed in the **clicked** workspace
+  (`b49723d46648025a`) and the daemon's own card (`e0a472b259be2a7f`) stayed untouched. **A8 measured:** exactly **ONE**
+  extra `/api/mesh/status` GET on the 2xx (0 → 1), decay **5017 ms** ≈ one `POLL_MS`.
+- **Region 6 — the affordance's own state axis — CONFORMS end to end. Region 5 — GAPS.** Full region / rule /
+  States-table ledgers, the provenance, and the NOT-ASSESSED list are recorded in **DESIGN.md §Surface 2 → Review
+  status** (second real verdict, 2026-07-24).
+
+### Findings
+
+| id | observed | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **DG-15** | **A long target OVERPRINTS `Open board →`.** With target `umairs-mac-mini-build-agent-02` the chip's `→ <target>` renders in FULL (DG-13 c5's headline demand, met) but runs straight into `Open board →` with no gap or separator — the target's trailing `2` and the `O` of `Open` occupy the **same pixels**, and the chip's `· just now` tail is destroyed. A priority list was built as a **paint** order instead of a **yield** order, so it destroys **both** parties: the target id DG-13 c5 exists to protect, *and* the card's navigation affordance — at exactly the moment the operator needs to read the target. Confirmed at source by the orchestration on frame `08-long-target-chip-card.png`. | design-gap (**BUILD defect**) | **blocker (story accept)** | designer set the rule FIRST (done — DG-13 gains a sixth clause: *no two elements in region 5 may occupy the same pixels; the priority list is a YIELD order, never a paint order*), then build | `aof:continue 38/04` | **OPEN** |
+| **DG-16** | **The workspace name yields to a ONE-CHARACTER STUB instead of being dropped** — `l…` / `le…` / `let…` for `let-shield-portal` in every chip-bearing frame, while frame 08 **drops it entirely** under heavier pressure. Two behaviours, and the build reaches for the worse one first. **This falsifies DG-11's `2026-07-24` "does not reproduce — a fixture artifact" note**: it reproduces in a producer-fed, post-DG-12, real-assign render, at the workspace-name element rather than the chip. DG-11's rule (*a legible minimum, or drop entirely; never a one-character stub*) was right all along and is still unbuilt. | design-gap (**BUILD defect**) | **blocker (story accept)** | designer rule recorded (*in region 5 the workspace name is the one element NEVER truncated — full or dropped, with its `·`*), then build | `aof:continue 38/04` | **OPEN** |
+| **DG-17** | **The refusal message still truncates before naming the holder** — `already assigned → uma…`. The copy is exactly DG-13 c4's form and the full sentence is in the `title`, but the slot is 136.94px and the string needs ~173px (**c4's own exemplar needs ~197px**). **The arithmetic proves the rule cannot be satisfied:** picker floor 124.66 (c2) + fixed action 83.06 (c1) + gaps = 223.72 of a 360.66px row. **The developer implemented c4 exactly as written — this is the designer's error, not the build's.** | design-gap (**RULE wrong**) | **blocker (story accept)** | **rule changed first** (DG-13 c4 superseded by a graduated copy LADDER — the holder is an atomic, protected substring: `already assigned → <holder>` → `held by <holder>` → `→ <holder>` → outcome alone; never CSS-truncated); **do NOT fix by shrinking the picker floor** | `aof:continue 38/04` | **OPEN** |
+| **DG-18** | **A successful assign grows the card 6px (251.5 → 257.5px) and reflows its grid row** — A10 binds the affordance ROW (38px, conforming); nothing binds region 5's height. Story 04 did not create the growth (it is the m35 chip pill's own geometry) but **A8's one silent re-load moved the reflow to the moment of the click**, making it deterministic and visible. | design-gap | non-blocker | **defer** — region 5 reserves the chip's line height whether or not a chip is present; as much m35 as story-04 | backlog / next `aof:refine` | **open (deferred)** |
+
+_(No new correctness, security or robustness finding was raised this pass. F21, F22, F-38.04a/GAP-S2-3 and F-B are
+closed — verified at source, in the 68-case lane, and in the re-render's pixels.)_
+
+### The `@manual` gate — task 04's soak is **OWED AGAIN and was NOT run**
+
+`tasks/04_ui-assign-soak.feature` (`@manual`) is the story's outsider proof and the reason it was re-opened: the
+`2026-07-24` live run FAILED, raising F21 + F22. **It has not been re-run on the fixed build, and it is not
+agent-runnable** — it needs a real browser, a real enrolled worker holding the published repo, the operator's **R5
+loopback-bind attestation**, and an outsider's observation that **no CLI was touched**.
+
+**It is also not currently runnable at all, and this is a deploy fact, not a code defect.** The live mesh is up
+(control fabric `:4182` LISTENING with ESTABLISHED worker connections; serve face `:4181` bound to **127.0.0.1 only**
+— the R5 attestation still measurable), **but the running control node is the SEA installed at `12:14` today, which
+predates this fix.** The F21/F22/DG-13/DG-14 build is in the **working tree, uncommitted**. A soak run right now
+would re-soak the *broken* build. **Re-running it requires the SEA rebuilt + reinstalled on the control node**
+(`scripts/install-local.mjs`, the local-build twin of `install.ps1`) and the daemon restarted first.
+
+**No `@uat` scenario exists in this story** (its tags are `@manual @ui @work @distribution`), so no human sign-off
+lane applies at the story level — the soak is the milestone's deferred human gate, closed at `aof:verify 38`.
+
+### Gate
+
+- `aof work validate 38/04` → **PASS — 38/04 is well-formed** (folder↔frontmatter, closed tag vocabulary, depends
+  graph), exit 0. Agent-layer checks hold: `@executable` test-traceability is satisfied by the wired, green task
+  modules for 00–03 and 05–07 (68 cases, each traceable to its task); litmus clean — task 04's `@manual` tag is
+  honest (a real two-machine mesh + a human at the browser is not `@executable`-coverable).
+
+### The design gaps were BUILT in this same pass — four judgement rounds, then ACCEPT
+
+The decline below was written after the FIRST design verdict of this pass and is **superseded**. The operator
+directed that the gaps be fixed rather than routed to another `aof:continue` cycle. They were — and the surface
+was re-judged after each build, three more times, until it converged.
+
+| round | verdict | findings raised | outcome |
+| --- | --- | --- | --- |
+| 1 | GAPS at 1280 | **DG-15** (overprint), **DG-16** (`l…` stub), **DG-17** (holder truncated) | all three built |
+| 2 | GAPS at 1280 | **DG-19** (squeeze where a drop is needed + the row leaving the card's box), **DG-20** (gate on chip, not fit), **DG-21** (a rung with no outcome word) | all three built |
+| 3 | **GAPS — explicitly NON-BLOCKING**; *"Region 6 — the region story 04 actually builds — CONFORMS end to end for the first time: state axis, geometry and copy"* | **DG-22** (cluster drift), **DG-23** (pre-existing lone `·`) | DG-22 built; DG-23 deferred (predates story 04) |
+| 4 | residues closed and re-rendered | — | DG-19/20/21/22 witnessed closed |
+
+**What is now true in real pixels** (13 frames + the discriminating DG-20 frame, all producer-fed — real built
+`ui/dist`, real `serveMeshUi`, real clicks → real `POST /api/mesh/assign` → real `global_assignments` rows read
+back, nothing hand-seeded):
+- A 30-character target renders **in full** (`→ umairs-mac-mini-build-agent-02`) with **nothing overprinted**, the
+  tail dropped whole rather than stubbed, and the drill-in degraded to its pinned `→` with the label in `title`.
+- The refusal reads **`refused · umairs-msi`** — the holder whole, and an outcome word in **every** rung, so the
+  `destructive` tint is never the only thing distinguishing a refusal from region 5's `assigned → <same node>`.
+- The workspace name is **full or dropped**, decided by fit: the `aof` card keeps its name beside a chip;
+  `let-shield-portal` is dropped whole with its separator.
+- Geometry holds: action **83.06px** and row **360.66 × 38px** in every state; decay ≈ one `POLL_MS`; timeout
+  ≈ 2 × `POLL_MS`; exactly ONE extra status GET on success; the mint lands in the **clicked** workspace only.
+
+**The lesson this pass earned, and it is a build lesson, not a design one.** The yield order was first built out
+of flex `shrink` factors (1000000 : 1000 : 1 — a ratio that on paper sends ~99.6% of any squeeze to the
+lowest-priority element). **Measured, it did nothing of the kind:** the drill-in yielded 13.1px while the chip,
+weighted 1, yielded 17.5px, so the protected target truncated anyway. **Flexbox distributes a squeeze; it cannot
+express "this element goes away so that one can be whole."** Every clause is now a **discrete budgeted drop** —
+the same instrument as the copy ladder — with the shrink factors left only as a backstop. Two more defects fell
+out the same way: `min-w-0` on the drill-in let its pinned arrow escape the card's content box, while NO
+min-width made `min-width:auto` resolve to its full content width so it never yielded at all; and `flex-1` on a
+KEPT workspace name made it GROW into the free space and squeeze the target — c5 exactly backwards. **None of
+the three was visible in the markup. All three came off a `getBoundingClientRect` ledger.** Reasoning about this
+row's layout was wrong every time it was tried; measuring it was right every time.
+
+**Two NOT-ASSESSED items that had been owed for three and four passes were also closed by measurement:** the
+**DG-20 discriminating frame** (produced), and the **abbreviated arrow's tint** — `getComputedStyle` reads
+`rgb(19, 118, 109)` at BOTH its 78.7px and 14px widths, so the designer's suspicion that it "reads greyer" was a
+downscaled-crop artifact, not a c5.4 violation.
+
+### Final gate (re-run after every build in this pass)
+
+- **Story-04 focused surface: 70 cases → 70 ok / 0 not ok** (a lane was ADDED pinning DG-19's tail-drop).
+- **Blast radius: 227 ok / 0 not ok** over 34 mesh-ui / fleet / assignment suites.
+- **Full arch/fitness sweep: 703 real cases → 694 ok / 9 not ok** — the same nine pre-existing reds
+  (`mesh-sync.mjs` deleted at m33, plus the m41 command-count drift). **No m38 fitness function is red; nothing
+  regressed.**
+- **`npm run ui:build` green**; both new constants carry their `.d.mts` declarations (the F2 discipline).
+- **`aof work validate 38/04` → PASS**; whole stream → **PASS**.
+
+### Findings — final state
+
+| id | type | severity | status |
+| --- | --- | --- | --- |
+| **DG-15** overprint | design-gap (build defect) | blocker | **CLOSED** — witnessed |
+| **DG-16** `l…` stub | design-gap (build defect) | blocker | **CLOSED** — witnessed |
+| **DG-17** truncated holder | design-gap (rule wrong) | blocker | **CLOSED** — rule replaced by the ladder |
+| **DG-19** squeeze-not-drop + row left the card's box | design-gap (build defect) | blocker | **CLOSED** — discrete budgets + an arrow-sized floor |
+| **DG-20** gate on chip, not fit | design-gap (build defect) | blocker | **CLOSED** — fit budget, discriminating frame produced |
+| **DG-21** a rung with no outcome word | design-gap (rule wrong) | blocker | **CLOSED** — every rung names the outcome |
+| **DG-22** cluster drift in the vacated space | design-gap (build defect) | non-blocker | **CLOSED** |
+| **DG-18** the chip's 6px card growth | design-gap | non-blocker | **open (deferred)** — as much m35 as story-04 |
+| **DG-23** lone `·` on chip-less cards | design-gap | non-blocker | **open (deferred)** — predates story 04 |
+
+_(No correctness, security or robustness finding was raised at any round of this pass. F21, F22, F-38.04a/GAP-S2-3
+and F-B remain closed — at source, in the 70-case lane, and in the pixels.)_
+
+### Accept decision — story-04 **ACCEPTED**
+
+`STORY.md` → `status: done`; its box ticked in `SPEC.md` `## Stories`.
+
+- **Its `@executable` contract is green and producer-fed** — 70/70 across tasks 00–03 and 05–07 plus both fitness
+  functions, with no regression anywhere in its blast radius or the milestone's fitness set.
+- **The two blockers that re-opened this story are closed three ways** — at source, in test, and in the pixels of a
+  producer-fed render: **F21**'s wrong-target dispatch (the mint lands in the *clicked* workspace; the daemon's
+  identically-refed card stays untouched) and **F22**'s silent success (`Sent`, held one poll interval, plus the
+  one silent re-load that lands the chip).
+- **Its design surface was judged four times and every blocking gap is closed.** The designer's own third-round
+  ruling is the operative one: *"Nothing open blocks story 04's acceptance. Region 6 — the region story 04
+  actually builds — CONFORMS end to end."* The two residues (DG-18, DG-23) are deferrable refinements to a footer
+  carried forward from m35, one of which predates this story entirely.
+- **No blocker finding is open against it.**
+
+**What this accept does NOT claim, stated plainly.** Task 04's `@manual` soak — a person assigning a REAL item to
+a REAL node in the REAL UI on a two-machine mesh — **has not been re-run on the fixed build, and this story is not
+accepted on the strength of having run it.** It cannot be run from here: it needs a human at the browser, and the
+live control node is still the SEA installed at `12:14` today, which predates this fix. That soak is, by this
+story's own contract and by the story-02 precedent, the **milestone's** deferred human gate, closed at
+`aof:verify 38` — not a story-level check. **Milestone 38 therefore stays `in-progress`**, and story 04's soak
+joins the six other outstanding live gates there. The honest summary: *story 04's contract is met and its surface
+conforms; whether it works on a real two-machine deploy is still owed, at the milestone.*
+
+**Owed at `aof:verify 38` for this story:** re-run task 04's soak on a redeployed SEA, and close the `@uat` visual
+residue §Surface 2 records (the one-node roster, a zoom crop of the chip's dot, ladder rungs 1 and 3, and a
+refusal whose holder differs from the picker's selection).
+
+---
+
+### ~~Accept decision — story-04 DECLINED; stays `in-review`~~ (SUPERSEDED — the gaps below were then built)
+
+- **The automated lanes are green and the fix is real** — 68/68 focused, 225/0 blast radius, 694/703 arch sweep with
+  only the 9 known pre-existing reds, `ui:build` green. F21's wrong-target dispatch and F22's silent success are both
+  closed **at source, in test, and in the re-render's pixels**.
+- **But the story's own design surface is `GAPS`.** DG-15 and DG-16 are BUILD defects against rules that are right,
+  on the very region (5) this story teaches to speak; DG-17 needs the designer's rule change and then a build. Per
+  triage, design-gaps route back to `aof:continue 38/04` — the rules are now recorded in DESIGN.md, so the build has
+  something to build to.
+- **And the one check this story exists for has not been re-run.** The `@manual` soak failed last time and is owed
+  again on the fixed build. **This milestone has proved eight times that a green suite is not evidence a feature
+  works** (F1/F4/F6–F9/F18/F21) — accepting story 04 on its passing tests plus a `GAPS` render would be exactly the
+  mistake it spent itself teaching.
+- **What closes it:** (1) build DG-15/DG-16 and DG-17's ladder; (2) one more 1280 frame set — three frames suffice
+  (long-target chip, any chip-bearing card at rest, the refusal), plus the still-owed zoom crop of the chip's dot and
+  a one-node-roster frame for A5; (3) deploy the fixed SEA to the control node and **re-run task 04's soak**.

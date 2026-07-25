@@ -21,7 +21,14 @@
 import assert from "node:assert/strict";
 import { assignableNodeOptions } from "../ui/src/fleet/scope.mjs";
 import { assignmentChip } from "../ui/src/fleet/assignments.mjs";
-import { withPublishedAssignFixture, sameOriginAssign } from "./support/mesh-ui-assign-fixture.mjs";
+import { POLL_MS } from "../ui/src/fleet/assign-affordance.mjs";
+import {
+  withPublishedAssignFixture,
+  sameOriginAssign,
+  dropNodeFromRoster,
+  readAssignmentRows,
+} from "./support/mesh-ui-assign-fixture.mjs";
+import { withFleetApp } from "./support/fleet-app-harness.mjs";
 
 async function fetchStatus(url) {
   const res = await fetch(new URL("/api/mesh/status", url));
@@ -92,12 +99,88 @@ export const fleetAssignAffordanceTests = [
     },
   },
 
+  // ══ Scenario: the target the row NAMES is the target the POST carries ══
+  //
+  // REVIEW FIX QA-a (2026-07-24) — F21's defect class, relocated to the NODE
+  // axis, reproduced end-to-end in Chromium by QA and confirmed at source. The
+  // fleet face is a LONG-LIVED monitor that re-polls every POLL_MS, so the
+  // roster under a mounted picker changes while the row sits there. Remembered
+  // selection alone went stale: the <select>'s DOM value coerced to the first
+  // surviving option while React state kept the DEPARTED id, so the row
+  // displayed one target and POSTed another — and `Sent` then sat beside the
+  // wrong name.
+  //
+  // F21's lesson, generalised: a seam whose defect is a WRONG TARGET must be
+  // exercised with ≥2 candidates where the chosen one can STOP BEING VALID. The
+  // roster change is the codebase's own documented producer, not an invented
+  // one: queryGlobalRegistry drops a `global_nodes` row whose descriptor file no
+  // longer resolves, while assignWork's node-known gate reads `global_nodes`
+  // DIRECTLY — so a node can leave the picker and remain assign-eligible, which
+  // is exactly what makes the mis-dispatch SILENT rather than refused.
+  {
+    name: "fleet-assign-affordance/03 the target the row NAMES is the target the POST carries — when the roster changes under a mounted picker, the departed node is neither displayed nor dispatched",
+    async run() {
+      await withPublishedAssignFixture(async ({ url, home, workspaceId }) => {
+        await withFleetApp({ url }, async (app) => {
+          const atRest = app.affordance("38");
+          assert.deepEqual(
+            atRest.options,
+            ["aaa-first-node", "zzz-second-node"],
+            "the REAL roster feeds BOTH candidates into the picker (the ≥2-candidate configuration the defect needs)",
+          );
+          assert.equal(atRest.selectedNode, "aaa-first-node", "the row rests on the first option, untouched by the operator");
+
+          // The roster CHANGES under the mounted row, through its own producer.
+          await dropNodeFromRoster({ home }, "aaa-first-node");
+          await app.advance(POLL_MS);
+
+          const after = app.affordance("38");
+          assert.deepEqual(after.options, ["zzz-second-node"], "the poll dropped the departed node from the picker");
+          assert.ok(
+            after.options.includes(after.selectedNode),
+            `the value the row renders must be one of the options it renders — got ${JSON.stringify(after.selectedNode)} against ${JSON.stringify(after.options)}; a select whose value is not among its options DISPLAYS the first surviving one while holding the other, which is a row naming one target and dispatching another`,
+          );
+          assert.equal(after.selectedNode, "zzz-second-node", "…so the row NAMES the surviving node");
+
+          await after.click();
+
+          // What the app ACTUALLY sent — the app's own request body, not a
+          // hand-built one: the store row alone cannot say whether the CLIENT or
+          // the route chose the target.
+          const posted = app.requests().filter((entry) => entry.url.includes("/api/mesh/assign"));
+          assert.equal(posted.length, 1, "exactly one assign POST left the app");
+          assert.equal(
+            posted[0].body?.nodeId,
+            after.selectedNode,
+            `the POST carries the node the row NAMED — got ${JSON.stringify(posted[0].body)}`,
+          );
+
+          const rows = await readAssignmentRows({ home }, workspaceId, "38");
+          assert.equal(rows.length, 1, "the click minted exactly one record");
+          assert.equal(rows[0].target_node_id, "zzz-second-node", "the REAL minted record targets the node the operator could read");
+        });
+
+        // NON-VACUITY: the departed node was still fully ASSIGN-ELIGIBLE at the
+        // moment of the click — proven through the REAL route on a second item.
+        // So a mis-dispatch to it would have returned a plausible `200 ok` and
+        // minted, exactly as the live defect did; nothing about this lane's pass
+        // is owed to a gate catching the wrong target.
+        const stillEligible = await sameOriginAssign(url, "38/04", "aaa-first-node", "OWN");
+        assert.equal(
+          stillEligible.status,
+          200,
+          "the node that LEFT THE PICKER is still accepted by the verb — the picker and the gate read different tables, which is what makes a stale target silent",
+        );
+      }, { nodes: ["aaa-first-node", "zzz-second-node"] });
+    },
+  },
+
   // ══ Scenario: the resulting `assigned` chip renders from the REAL minted record ══
   {
     name: "fleet-assign-affordance/03 the resulting assigned chip renders from the REAL minted record — the m35/story-03 read shape, closing the loop",
     async run() {
       await withPublishedAssignFixture(async ({ url }) => {
-        const assignRes = await sameOriginAssign(url, "38/04", "worker-a");
+        const assignRes = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.equal(assignRes.status, 200, "the REAL route mints the assignment (task 00) — the published node is both visible and eligible");
 
         const status = await fetchStatus(url);

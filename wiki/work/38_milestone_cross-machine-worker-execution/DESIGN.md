@@ -322,7 +322,8 @@ Draws from the **run-state ramp's tokens already in play** — it invents nothin
 **This is the milestone's first MUTATION affordance and the conformance baseline for story 04.** Authored
 2026-07-18; it did not exist before this pass. `aof:verify 38` judges the assign affordance **region-by-region
 against A1–A11 and the affordance States table** below. **There is no mock** (binding-checklist-only, as
-§Surface 1). Absent a handed render the verdict is **INCONCLUSIVE** (see Review status).
+§Surface 1). Judged 2026-07-24 against TWO REAL-assign renders — the first, and the re-render taken after the
+DG-13/DG-14 build — **GAPS at 1280** in both (see Review status).
 
 **Governs:** the web app at `?mode=fleet` (global scope), the **work-item (milestone) card** —
 `FleetMilestoneCard`, `ui/src/fleet/Fleet.tsx`. **This is NOT §Surface 1's node card.** §Surface 1 governs
@@ -362,11 +363,159 @@ control panel (A2).
 | **A4** | **Empty roster ⇒ DISABLED, not hidden, not phantom.** No worker node ⇒ the picker renders **disabled** with a single honest placeholder (`No worker nodes yet`) and the action **disabled**. Never a selectable option, never an invented `any` target, never a blank/crash. This is the affordance's own empty state. | |
 | **A5** | **One node ⇒ preselected, still a picker.** A single-node roster preselects that node but stays a picker (not collapsed to static text) so the operator SEES the target before committing. | |
 | **A6** | **Many nodes (live + stale) ⇒ all known nodes are options**, first preselected, deterministic order. Liveness does not filter the picker; it **should annotate** the option so the choice is informed — today it does not (**DG-5**, deferred, the open half of this rule). | |
-| **A7** | **The action's transient states are all rendered.** `Assign →` (at rest) → `Assigning…` (disabled, in flight) → on success **no local chip** (the confirmation surfaces in region 5 via the existing 5s poll, A8); on a verb gate-miss an **inline `destructive` error** renders in the affordance row — never a silent no-op, never a 200-plus-phantom. | ADR-012 |
-| **A8** | **The result is the m35/story-03 chip, VERBATIM — no new assign-result vocabulary.** The `assigned` confirmation is the existing `AssignmentChip` (`assigned` = **`muted` + a hollow dot + `→ <targetNodeId>`**), climbing the m35 §4 assignment ramp (assigned→accepted→running→done/failed). The affordance mints **no chip, badge, toast, or accent of its own.** | m35 §4 |
-| **A9** | **No new colour primitive.** The affordance uses ONLY existing theme tokens — `muted` (picker), a `primary` tint (action), `destructive` (inline error) — the same tokens the card and the assignment ramp already speak. No fleet-local palette, no hex, no "assignable" accent. | mirrors S5 |
-| **A10** | **Spacing/rhythm native to the card.** The row reuses the card's divider+padding idiom (`border-t border-border pt-3`, `mt-3`, `gap-2`, `text-xs`) — the SAME rhythm the footer uses — so it reads as a native region, not a bolted-on widget. | |
+| **A7** | **The action's transient states are all rendered — INCLUDING the SUCCESS path.** `Assign →` (at rest) → `Assigning…` (disabled, in flight) → on a 2xx the SAME button reads **`Sent`** — `muted`, disabled, the picker **frozen on the chosen node** — **held 5s (one poll interval), then the row returns to rest**. The button never passes back through `Assign →` between `Assigning…` and `Sent` (a local POST returns in milliseconds, so `Assigning…` alone is NOT an acknowledgment — it may be sub-perceptual). The transient reports **the CALL, never the assignment's state**: the lifecycle stays region 5's (A8). On a verb gate-miss an **inline `destructive` error** renders in the affordance row (no hold; the action re-enables at once) — never a silent no-op, never a 200-plus-phantom. A POST that never answers is a **REFUSAL, not a limbo**: it times out at **10s (2 × POLL_MS)** into the `refused` state — see Amendment 2026-07-24 (b). *(success path amended 2026-07-24 — F22, live soak. Was: "on success **no local chip**".)* | ADR-012 |
+| **A8** | **The result is the m35/story-03 chip, VERBATIM — no new assign-result vocabulary — and it must ARRIVE PROMPTLY.** The `assigned` confirmation is the existing `AssignmentChip` (`assigned` = **`muted` + a hollow dot + `→ <targetNodeId>`**), climbing the m35 §4 assignment ramp (assigned→accepted→running→done/failed). **On a 2xx the surface fires exactly ONE additional SILENT keep-last-good re-load** (the same load the ⟳ control triggers) so the chip lands within a round trip instead of up to 5s later; the 5s poll remains the steady state — no second cadence, no retry ladder. The affordance still mints **no chip, badge, toast, or accent of its own** — A7's `Sent` is a **state of the affordance's OWN control**, not a second vocabulary, and the boundary is exact: it lives in **region 6 only**, it **decays inside one poll interval**, it carries **no mark, colour or shape**, and it **never claims the assignment's STATE**. *(amended 2026-07-24 — F22, live soak.)* | m35 §4 |
+| **A9** | **No new colour primitive.** The affordance uses ONLY existing theme tokens — `muted` (picker, and the `Sent` acknowledgment), a `primary` tint (action at rest), `destructive` (inline error) — the same tokens the card and the assignment ramp already speak. No fleet-local palette, no hex, no "assignable" accent, no success green. | mirrors S5 |
+| **A10** | **Spacing/rhythm native to the card.** The row reuses the card's divider+padding idiom (`border-t border-border pt-3`, `mt-3`, `gap-2`, `text-xs`) — the SAME rhythm the footer uses — so it reads as a native region, not a bolted-on widget. **No state of the row may change its height or its rhythm** — the acknowledgment is a label swap inside the existing control, nothing more. **"Rhythm" is binding geometry:** the action reserves a constant width sized to its longest label (`Assigning…`) in every state, and the picker keeps a floor of ≥14ch + chevron. **No state may collapse the picker or move the action** — the message slot is the element that yields. *(bound 2026-07-24 — F-38.04g / DG-13.)* | |
 | **A11** | **Click isolation reads visually.** The affordance's controls must not trigger the card's Open-board navigation (they stop propagation), and must read as **clearly OUTSIDE** the Open-board clickable region (below its border) so the picker is never mistaken for part of the drill-in. | |
+
+> **Amendment 2026-07-24 (F22, live soak).** The first real two-machine soak clicked `Assign →`, got a
+> `200 ok`, and **the surface said nothing**: no transition, no pending indicator, no chip. The operator
+> only knew the call had succeeded by reading the raw API response. **A7/A8 as written are what produced
+> that** — this is not a build that ignored the design, it is the design's own answer failing contact with
+> a real operator. The answer is amended above and in the States table below.
+>
+> **What F21 explains, and what it does not.** Part of "no `assigned` chip appeared" is downstream of the
+> sibling BLOCKER **F21**: the assign was resolved against the CONTROL's own workspace, so the record was
+> minted against a **different item in a different workspace** — the chip legitimately appeared on another
+> card, and that record went `assigned → failed` 1.5s later. **Once F21 is fixed, the chip will land on the
+> card that was clicked.** Three things are NOT explained by F21 and remain design gaps:
+> 1. **An up-to-5-second window in which a real, successful mutation is completely unacknowledged** — the
+>    confirmation waits for the next scheduled poll, whose phase relative to the click is arbitrary.
+> 2. **`Assigning…` is unobservable in practice.** A local POST returns in milliseconds, so A7's only
+>    click-time signal never renders long enough to be seen. The design's acknowledgment was, by
+>    construction, invisible.
+> 3. **On a monitor, "nothing changed" reads identically to "nothing happened."** Every other signal on
+>    this surface arrives by itself on a 5s poll; a click that produces no local change is
+>    indistinguishable from a click that did nothing. A2's "the surface stays a monitor" cuts BOTH ways —
+>    *on a passive surface an action needs an answer AT the action.*
+>
+> This is **DG-4**, predicted structurally on 2026-07-18 and now **witnessed live**. It is decided here.
+>
+> **DECISION — BOTH treatments, because they do two different jobs.**
+> **(a) The real chip arrives IMMEDIATELY** — on a 2xx the surface re-loads once, silently, so region 5's
+> m35 chip lands within a round trip instead of up to 5s later (A8). **(b) The affordance acknowledges the
+> CALL locally and TRANSIENTLY** — the same button reads `Sent`, `muted`, disabled, picker frozen on the
+> chosen node, for 5s, then the row returns to rest (A7). Nothing is minted: no chip, no badge, no toast,
+> no accent, no token outside A9's three.
+>
+> **Why not (a) alone** (the pure-A8 answer — change nothing visual, just make the chip fast): it puts the
+> entire acknowledgment in the region the operator is NOT looking at (region 5, *above* the click target),
+> in the QUIETEST token on the card (`assigned` = muted + hollow dot), on a surface where things change by
+> themselves every five seconds. A muted chip quietly appearing two regions up is indistinguishable from
+> routine poll churn. It also fails badly whenever the re-load is late, silently unsuccessful
+> (keep-last-good swallows it) or the record has not yet landed — which returns the operator to the soak's
+> exact experience.
+>
+> **Why not (b) alone** (a transient in region 6, chip left to the 5s poll): the operator would learn the
+> outcome from the BUTTON and stop reading region 5 — which is precisely how a second vocabulary takes
+> root (§Surface 1 S5's fourth-ramp mistake; A8's rail). The transient is only safe **because** a durable
+> chip follows it promptly. Without (a) it silently becomes the confirmation.
+>
+> **Why `Sent` and not `Assigned`.** `assigned` is the m35 ramp's word for a STATE of the assignment; a
+> button that also says "assigned" is a second utterance of ONE fact — exactly what A8 forbids. `Sent` is
+> a **different fact that no other region reports**: *the route accepted your request.* It therefore cannot
+> duplicate the chip and cannot contradict it — a dispatch can be sent and the assignment can then fail
+> (which is literally what the soak saw at +1.5s) and both statements remain true on screen. **The
+> affordance reports the CALL; region 5 reports the ASSIGNMENT.** That boundary is what keeps this one
+> vocabulary. (`✓` is likewise not borrowed: it is the m35 ramp's mark for `done`.)
+>
+> **Why 5 seconds.** It is one poll interval (`POLL_MS`, `ui/src/fleet/Fleet.tsx`). The worst case for the
+> next scheduled poll landing after a click is exactly one interval, so a 5s hold guarantees there is
+> **never a moment between the click and a confirmation in which the surface says nothing** — even if the
+> success re-load fails silently. It doubles as a re-click guard: with the action disabled for the window,
+> the operator cannot fire a second dispatch into a projection that has not caught up and collect a
+> `destructive` "already active" refusal one second after a success.
+>
+> **The mechanism, precisely (so no second round-trip is needed to build it):**
+> - **Region 6 · the affordance row.** On a 2xx the `<select>` stays **disabled with the chosen node still
+>   selected** — so the row reads `Sent` beside `umairs-mac-mini` and the target is named **for free**,
+>   nothing is added to say it — and the SAME `<button>` reads **`Sent`** in the `muted` ramp: the
+>   `primary/10` fill, `primary/40` border and `text-primary` are **DROPPED, not added to.** The
+>   acknowledgment is the **quietest state the row ever renders**. No mark, no glyph, no toast, no motion,
+>   no height change, same type and rhythm (A10).
+> - **No gap, no flicker.** `Assign →` → `Assigning…` → `Sent`, never returning to `Assign →` in between.
+> - **Duration 5s, then the TERMINAL RESTING STATE:** picker enabled, **the same node still selected**
+>   (nothing resets), `Assign →` back in its low-emphasis `primary` tint, message slot empty. **Nothing of
+>   the acknowledgment persists.** The durable record is region 5's chip and only that.
+> - **Region 5 · the footer attention cluster.** Unchanged in vocabulary and placement — but it must be
+>   REACHED promptly: on a 2xx the surface fires **exactly one** additional **silent, keep-last-good**
+>   re-load, the same one the ⟳ control triggers (`load(scope, { silent: true })`, `Fleet.tsx`), handed
+>   down to the affordance as an `onAssigned` callback. **It must be the SILENT load** — a non-silent load
+>   flips the page into its loading state and unmounts the board, which is a far worse answer than saying
+>   nothing — and it is **one** load, not a new cadence and not a retry ladder. If the record is not yet
+>   visible, the existing 5s poll picks it up; that is the window the `Sent` hold is sized to cover. *(This
+>   is a data-TIMING decision the design is taking deliberately, because the operator's confidence in a
+>   mutation depends on it.)*
+> - **The failure legs, placed where they belong.** A **refused POST** (verb gate-miss, transport) is
+>   unchanged: inline `destructive` in region 6, action re-enabled at once, **no hold, no `Sent`**. A
+>   **lifecycle failure after a successful dispatch** (`assigned → failed`, incl. `· reclaimed`) belongs to
+>   **region 5's m35 chip alone** — the affordance never mirrors it. A spent control must not re-report a
+>   lifecycle it no longer owns; that would be the second vocabulary by another route.
+> - **If no chip appears by the end of the window, the surface is telling the truth** — nothing was
+>   assigned to *this* item (the F21 mis-target class). The affordance must **not** paper over that with a
+>   persistent "assigned" claim. The missing chip is the evidence.
+>
+> **What the eventual render must capture** (so this amendment is judgeable, not merely intended). Per the
+> milestone's earned lesson it must come from a **REAL assign against a real roster on a post-F21 build**,
+> never a hand-seeded assignment record: the claim here is about the **click → confirmation** path, and a
+> seeded fixture cannot exhibit it — it would judge the chrome and never the feature.
+> 1. **t < 5s after a real click** — region 6 shows `Sent`, muted, disabled, picker frozen on the target.
+> 2. **the same card after the success re-load** — region 5 carries the m35 `assigned` chip `→ <node>`.
+> 3. **t > 5s** — region 6 back at rest, `Assign →` in its `primary` tint, selection preserved, nothing
+>    left over, card height unchanged throughout.
+> 4. **a refused assign** — inline `destructive` in region 6, no `Sent`, no hold.
+>
+> This **ADDS** to what §Surface 2's render owes. **The Review-status verdict is untouched and stays
+> INCONCLUSIVE** — no render has been handed for this surface, and nothing in this amendment is a fidelity
+> judgement. *(That render was produced later the same day; see Amendment (b) and the Review status.)*
+
+> **Amendment 2026-07-24 (b) — F-38.04g / F-38.04f, judged from the REAL-assign render.** The render this
+> checklist had been owed since 2026-07-18 was produced this day and judged (Review status: **GAPS at 1280**).
+> Two findings came back with it, and both resolve as DESIGN rules rather than build accidents.
+>
+> **DG-13 (F-38.04g) — geometry: the row may not go anonymous.** In the refused frame the picker
+> (`flex-1 min-w-0 truncate`) collapses to a **bare chevron** (~26px, from ~284px) while the error takes the
+> row — the target is unnamed at the exact moment the operator must re-aim — and the error truncates before
+> naming the holder. The same disease is visible in the success frame: the action narrows from 67px to 44px on
+> the `Sent` label swap and the picker absorbs the difference, so the row reflows on every state change. Five
+> binding clauses:
+> 1. **The action's width is FIXED**, sized to its longest label (`Assigning…`), in every state including
+>    disabled. **A label swap may not move another element.** That is what A10's "or its rhythm" means.
+> 2. **The picker has a FLOOR and never yields to the message** — a minimum width rendering ≥14ch of the node
+>    id plus the chevron. **A picker collapsed to a bare chevron is FORBIDDEN**: a control the operator must
+>    re-aim may not be anonymous at the moment they re-aim it.
+> 3. **The message slot is the element that yields** — it takes what is left, truncates, and carries the full
+>    text in its native `title` (the idiom DG-10 already uses for the session id).
+> 4. **The message may not re-state what the card already says.** `Item "18" already has an active
+>    assignment …` spends its width on the ref (region 1) and truncates away the only fact no other region
+>    carries — the holder. Copy priority: **outcome > holder > all else**, e.g. `already assigned →
+>    umairs-mac-mini`.
+> 5. **Region 5 width priority: chip label + `→ <target>` in FULL > `Open board →` > the workspace name.** The
+>    workspace name yields first (it is already in the workspaces strip); the target id truncates **last**, and
+>    if it still cannot render in full the workspace name is **dropped**, not the id. **A target that cannot be
+>    read is a chip that has not spoken.**
+>
+> **DG-14 (F-38.04f) — a hung POST is a REFUSAL, not a limbo.** `runAssign` awaits with no timeout and only
+> `sent` schedules a decay, so a POST that never answers holds `Assigning…` **forever** — picker frozen, action
+> disabled, no error, recoverable only by reloading the page. It lands in the existing `refused` state reusing
+> `destructive` — no new vocabulary — with one correction to the obvious copy:
+> 1. **Timeout = 10s = 2 × `POLL_MS`** — derived from the one constant the surface already speaks in (the
+>    `Sent` hold is 1 × `POLL_MS` for the same reason). One interval is too eager for a cross-machine POST; two
+>    is past the point any answer is still useful.
+> 2. **At t=10s the row reads the existing `refused` presentation VERBATIM** — picker re-enabled with the
+>    selection kept, action back to `Assign →` in its `primary` tint, inline `destructive` message. No `Sent`,
+>    no hold.
+> 3. **Copy: `no answer — timed out`.** NOT "not sent", NOT "failed to assign" — **a timed-out POST may have
+>    succeeded server-side.** The affordance reports the CALL (A7); region 5 stays the sole authority on whether
+>    anything was assigned, and the 5s poll keeps running underneath, so the chip appears on its own if the
+>    record landed. Same discipline as the "no chip by the end of the window" row.
+> 4. **Resting state:** the message stands until the next attempt; re-click is permitted. If the dispatch DID
+>    land, the re-click draws the ordinary `already assigned → <node>` refusal — a correct answer, not a new
+>    failure mode.
+> 5. **A late 2xx is TERMINAL for the affordance** — it must not resurrect `Sent` or clear the error
+>    (`destructive` and `Sent` may never co-exist). It is honoured only by firing A8's one silent
+>    keep-last-good re-load so region 5 gets its chip. A late non-2xx changes nothing.
 
 ### States (the assign affordance's own state axis — the story-04 state set)
 
@@ -375,15 +524,22 @@ control panel (A2).
 | **empty-roster** | disabled · `No worker nodes yet` · muted | disabled | roster carries no worker node |
 | **one-node** | single node preselected · muted | enabled `Assign →` | exactly one node |
 | **many-nodes (live + stale)** | all known nodes · first preselected · muted | enabled `Assign →` | ≥2 nodes; stale nodes still offered |
-| **assigning** | selection frozen · disabled | `Assigning…` · disabled | POST in flight |
-| **refused** | selection kept | `Assign →` re-enabled + **inline `destructive` error** | verb gate-miss (unknown/ineligible node, already-active, unresolvable ref) |
-| **assigned (confirmation)** | *(unchanged)* | *(unchanged)* | on success the **`assigned` chip appears in region 5** (footer attention cluster) after the 5s poll — the m35 ramp, muted hollow dot, `→ <node>` |
+| **assigning** | selection frozen · disabled | `Assigning…` · disabled | POST in flight. **Sub-perceptual on a local POST (milliseconds)** — an honest state for a slow/cross-machine call, but **never the acknowledgment**; it flows straight into **sent** without returning to rest. *(amended 2026-07-24 — F22)* |
+| **sent (LOCAL ACKNOWLEDGMENT — TRANSIENT)** | selection frozen **on the chosen node** · disabled (so the row reads `Sent` beside the target — it is named for free) | **`Sent`** · disabled · **`muted`** (the `primary` tint is DROPPED — the action has spent itself). No mark, no glyph, no motion, no height change | the POST returned 2xx. **Held 5s (= one poll interval, `POLL_MS`), then the row returns to rest**: picker enabled, same node still selected, `Assign →` back in its `primary` tint, message slot empty. **Nothing persists.** *(NEW 2026-07-24 — F22)* |
+| **refused** | selection kept | `Assign →` re-enabled + **inline `destructive` error** | verb gate-miss (unknown/ineligible node, already-active, unresolvable ref) — or transport failure. **No hold, no `Sent`;** the error stands until the next attempt. *(clarified 2026-07-24 — F22)* |
+| **timed out (no answer) — a leg of `refused`** | selection kept · re-enabled | `Assign →` re-enabled + inline `destructive` **`no answer — timed out`** | the POST has not answered after **10s (2 × POLL_MS)**. No `Sent`, no hold. The copy reports the **CALL only** — it never claims nothing was assigned; region 5's chip remains the sole authority and the 5s poll still runs. A late 2xx must not resurrect `Sent`; it fires A8's one silent re-load and nothing else. *(NEW 2026-07-24 — F-38.04f)* |
+| **assigned (CONFIRMATION — region 5, DURABLE)** | *(at rest)* | *(at rest)* | the **success re-load** (A8 — within a round trip of the 2xx), or the next 5s poll if that misses, lands the record and region 5's footer attention cluster renders the m35 `assigned` chip (muted, hollow dot, `→ <node>`). **This — not the transient — is the record of the assignment.** *(amended 2026-07-24 — F22; was "after the 5s poll")* |
+| **lifecycle change / failure (region 5, DURABLE)** | *(at rest)* | *(at rest)* | after dispatch the assignment climbs or falls the m35 ramp (`accepted` → `running` → `done`, or **`failed`** = `destructive` + `!`, incl. `· reclaimed`). **Region 5 speaks it alone; the affordance never mirrors it** — a spent control must not re-report a lifecycle it no longer owns. *(NEW 2026-07-24 — F22: the triage's `failed` leg, placed where it belongs)* |
+| **no chip by the end of the window** | *(at rest)* | *(at rest)* | a 2xx whose record never appears on THIS card. The surface is being **truthful** — nothing was assigned to this item (the F21 mis-target class). The affordance must not mask it with a persistent "assigned" claim; **the missing chip is the evidence.** *(NEW 2026-07-24 — F22)* |
 
 ### Design ramp for the affordance
 
 - **picker at rest = `muted`** — the surface is a monitor first; the control is quiet until engaged.
 - **action = LOW-emphasis `primary` tint** — found, not shouting; never a solid filled primary on every card.
 - **in-flight = disabled + `Assigning…`** — the action states itself; no spinner primitive is invented.
+- **acknowledged (success) = disabled + `Sent`, `muted`, 5s, then gone** — the tint is **dropped, not
+  added**: the quietest state the row ever renders, reporting the CALL and decaying inside one poll
+  interval. No mark, no glyph, no toast, no motion. *(2026-07-24 — F22.)*
 - **error = `destructive`, inline** — the same token every fleet read-failure uses.
 - **result = the m35 assignment ramp, verbatim** (`assigned` = muted hollow dot). **The review flags any
   assign-result-specific primitive (badge / toast / accent) as a gap.**
@@ -400,15 +556,264 @@ control panel (A2).
 - **Why the result reuses the m35 chip (A8):** the assignment lifecycle already owns a ramp. A fresh
   "just assigned" badge would be a **second vocabulary for one fact** — the very fourth-ramp mistake
   §Surface 1 S5 exists to prevent. One assignment ramp, spoken once.
+- **Why the affordance may nonetheless say `Sent` (2026-07-24 — F22):** A8 forbids a second **vocabulary
+  for one fact**, not an acknowledgment. `assigned` is the ramp's word for the assignment's STATE; `Sent`
+  is the affordance's word for the CALL — a different fact, reported by no other region, confined to
+  region 6, decaying inside one poll interval, carrying no mark or colour of its own. The live soak proved
+  the alternative: on a passive monitor an unanswered click reads as a click that did nothing. See the
+  Amendment above.
 
-### Review status — Surface 2 (2026-07-18) — **INCONCLUSIVE**
+### Review status — Surface 2 — **CONFORMS on region 6; region 5 CLOSED at the FOURTH pass (2026-07-24)**
 
-**INCONCLUSIVE — no render handed, and no baseline pre-existed this pass.** This checklist IS the baseline,
+**Judged four times in one day, each on a fresh producer-fed render.** The surface converged: verdict 1 **GAPS**
+(DG-13, DG-14, GAP-S2-3) → verdict 2 **GAPS** (DG-15, DG-16, DG-17) → verdict 3 **GAPS** (DG-19, DG-20, DG-21) →
+verdict 4 **GAPS, explicitly NON-BLOCKING**, with the designer's own recommendation: *"Nothing open blocks story
+04's acceptance. Region 6 — the region story 04 actually builds — CONFORMS end to end for the first time: state
+axis, geometry and copy."* The residues it left were then **built and re-rendered in the same session**; what
+remains is recorded below.
+
+**What closed, and where.** DG-13 c1–c3 (fixed action width, picker floor, message yields) and DG-14 (the
+timed-out row) and GAP-S2-3 (the frozen picker's target) closed at verdict 2. DG-15 (the overprint), DG-16 (the
+`l…` stub) and DG-17 (the truncated holder) closed at verdict 3. **DG-19, DG-20, DG-21 and DG-22 closed after
+verdict 4** — built, re-rendered and witnessed:
+- **DG-21** — every rung of the refusal ladder now names the OUTCOME (`refused · umairs-msi`), so the
+  `destructive` tint is never the only thing distinguishing a refusal from region 5's `assigned → <same node>`.
+- **DG-20** — the workspace name is gated on FIT, and the **discriminating frame was finally produced**
+  (`09-DG20-short-name-with-chip`): the `aof` card carries a chip **and keeps its name**, while
+  `let-shield-portal` is dropped whole. The two candidate gates are no longer observationally identical.
+- **DG-19** — the tail now DROPS whole instead of stubbing to `· just…`, `Open board →` degrades to its pinned
+  `→`, and the row stays inside the card's content box.
+- **DG-22** — the leading group is left-aligned once the name is dropped; only the drill-in is right-aligned.
+- **c5.4 (the abbreviated arrow's tint) — CLOSED by measurement, not impression.** `getComputedStyle` reads
+  `rgb(19, 118, 109)` for the arrow at BOTH its 78.7px full width and its 14px abbreviated width. The suspicion
+  that the degraded arrow "reads greyer" was a downscaled-crop artifact; the tint is byte-identical.
+
+**The methodological lesson this surface earned, and it is not a design lesson.** The yield order was first built
+out of flex `shrink` factors — 1000000 : 1000 : 1, a ratio that on paper sends ~99.6% of any squeeze to the
+lowest-priority element. **Measured, it did nothing of the kind:** the drill-in yielded 13.1px while the chip,
+weighted 1, yielded 17.5px, so the protected target truncated anyway. **Flexbox distributes a squeeze; it cannot
+express "this element goes away so that one can be whole."** A priority list written as shrink factors is a
+*preference*; the rules in this section are *absolutes*. Every clause is therefore now a **discrete budgeted
+drop** — the same instrument as region 6's copy ladder — with the shrink factors left underneath only as a
+backstop. Two further defects were caught the same way and by the same means: `min-w-0` on the drill-in let its
+pinned arrow escape the card's box, while NO min-width made `min-width:auto` resolve to its full content width so
+it never yielded at all (fixed by an explicit arrow-sized floor — the picker-floor idiom one element to the
+right); and `flex-1` on a KEPT workspace name made it GROW into the row's free space and squeeze the target,
+which is c5 exactly backwards. **None of these three was visible in the markup; all three came off a
+`getBoundingClientRect` ledger.** Reasoning about this row's layout was wrong every single time it was tried.
+
+**Remaining, all recorded and none blocking:** **DG-18** (the chip's 6px card growth) and **DG-23** (the lone `·`
+placeholder on chip-less cards — pre-existing, m35's footer idiom) stay **deferred**. Still **NOT ASSESSED** and
+owed at `aof:verify 38`'s `@uat`: the one-node roster (A5), a zoom crop of the `assigned` chip's dot
+(hollow-vs-filled), ladder rungs 1 and 3, a refusal whose holder differs from the picker's selection, the
+`<select>` OPEN state, 390/768, the `Assigning…` → `Sent` no-flicker clause, DG-14 clause 5 (a late 2xx),
+region 7, region 5's post-`assigned` lifecycle states, A11's behavioural half, and the `@manual` soak.
+
+---
+
+#### SUPERSEDED — the SECOND real verdict (2026-07-24) — kept, because it was true when written
+
+~~**GAPS at 1280 (SECOND real verdict, 2026-07-24 — the DG-13/DG-14 re-render)**~~ — **SUPERSEDED by the third and
+fourth verdicts above.** Its three findings (DG-15/16/17) were built and closed. Its text stands below.
+
+### Review status — Surface 2 — ~~**GAPS at 1280 (SECOND real verdict, 2026-07-24 — the DG-13/DG-14 re-render)**~~
+
+**Two of the three prior gaps are CLOSED outright; the third is closed in the substance it was filed on and
+leaves three narrower successors.** **Region 6 — the affordance's own state axis — now CONFORMS end to end:**
+the action's width is fixed, the picker never goes anonymous, the message is the element that yields, the hung
+POST has a state, and the `Sent` acknowledgment names the node the operator actually chose. **Every remaining
+divergence is a WIDTH-PRIORITY failure** — two in region 5 (**DG-15**, **DG-16**, both **BUILD defects against
+rules that are right**) and one that is a rule of the designer's own which **does not fit the row it governs**
+(**DG-17** — there, the rule is what must change, not the build). The verdict is therefore **GAPS at 1280**, on a
+materially smaller surface than the first pass.
+
+**Provenance of the judged re-render (this is what makes the verdict worth having).** **Thirteen frames at 1280
+only** (§Surface 2's own recorded reason: 390/768 are effectively unrenderable for this page), from the **real
+built `ui/dist`** rebuilt this session (`npm run ui:build` green — **post-DG-12, so these pixels are NOT void**),
+served by the **real `serveMeshUi`** over an isolated global store with **two published workspaces**, driven by
+**real synthetic clicks** producing **real `POST /api/mesh/assign` calls** that minted **real `global_assignments`
+rows read back from the real store**. **Nothing is hand-seeded** — the condition Amendment (F22) set, and the
+milestone's earned lesson, are satisfied again. The pointer is parked off-card before every capture, so no
+`hover:` ramp contaminates a frame. The judged card is **`18 · Homedata Live Property Data` (workspace
+`let-shield-portal`)** — a card that does **not** belong to the daemon's own workspace, which is what makes the
+F21 cross-check meaningful. Frames: `01-empty-roster` · `02-rest` (card+page) · `03-in-flight` ·
+`04-sent-and-chip` · `04b-sent-both-cards` · `05-decayed-rest` · `06-refused` (card+page) · `07-timed-out`
+(card+page) · `08-long-target-chip` (card+page). Measured off the same rendered tree: **action box 83.06px in all
+eight states**; **row 360.66 × 38px in all eight**; picker 269.59 at rest/sending/sent/decayed, **124.66 under the
+refusal**, 140.36 under the timeout; decay **5017 ms** ≈ 1 × POLL_MS; timeout **10057 ms** ≈ 2 × POLL_MS; exactly
+**ONE** extra `/api/mesh/status` GET on success (0 → 1); the mint landed in the **clicked** workspace
+(`b49723d46648025a`), not the daemon's own (`e0a472b259be2a7f`).
+
+#### Region ledger (this pass)
+
+| Region | Verdict | Evidence |
+| --- | --- | --- |
+| **1 · identity line** | **CONFORMS** | Every frame: `StatusRing` + mono `18` + `MILESTONE` tag + right-aligned `in-progress` chip. Unchanged across all eight affordance states. |
+| **2 · title** | **CONFORMS** | `Homedata Live Property Data` (h3), unchanged in every state. |
+| **3 · progress row + track** | **CONFORMS** | `stories done` · `2 / 4` + the track, unchanged. |
+| **4 · story dots + count** | **CONFORMS** | Four dots + `4 stories`, unchanged. |
+| **5 · footer / attention cluster** | **GAPS** | Vocabulary and placement conform (the m35 `assigned` muted pill, `→ <target>`, the `· just now` / `· 5s ago` tail), and **DG-13 c5's headline is MET — the target now renders in FULL**, including a 30-character id (04: `→ umairs-msi`; 08: `→ umairs-mac-mini-build-agent-02`). **F21 re-witnessed in pixels (04b):** two cards share `ref 18` and only the CLICKED one carries the chip. But the **yield mechanism** is broken twice: in 08 the full target **collides with `Open board →`** — the trailing `2` and the leading `O` occupy the same pixels and the chip's `· just now` tail is destroyed (**DG-15**); in 04/04b/05/06/07 the workspace name renders as a **1–3 glyph stub** (`l…` / `le…` / `let…`) instead of being dropped (**DG-16**). |
+| **6 · assign affordance row** | **CONFORMS on its whole state axis · GAPS on ONE message clause** | A4/A6/A7 (all eight states) + A8/A9/A10 conform in real pixels. The single divergence: the refusal message still truncates before naming the holder — `already assigned → uma…` (**DG-17**). |
+| **7 · terminal-view** | **NOT ASSESSED** | No assignment in these fixtures carries a `sessionId`, so **no panel renders** — which is the CORRECT behaviour (V12 / ADR-014 inv.4), but it means region 7 is not exercised. Not inferred either way. |
+
+#### Rule ledger (this pass)
+
+| Rule | Ruling | What I saw |
+| --- | --- | --- |
+| **A1** | **CONFORMS** | The row is its own `border-t` row **below** the footer, a sibling of `Open board →` and never nested in it; all five carried-forward regions render verbatim (02/06/07 pages). |
+| **A2** | **CONFORMS** | Picker `bg-muted`, mono, quiet; action = primary text on a faint primary fill with a `primary/40` border, 11px semibold — boxed but not solid, found without shouting. **Observation, NOT a gap:** the boxed action still out-weighs the bare-text `Open board →` above it. That is **DG-3's `@uat` question**, unchanged from the first pass. |
+| **A3** | **CONFORMS (the half a render can judge)** | Options are exactly `["build-box-01","umairs-mac-mini","umairs-msi"]` — precisely the three nodes the page's own NODES region lists. No invented `any`, no placeholder, no dropped node. The **OPEN** dropdown stays NOT ASSESSED (OS chrome). |
+| **A4** | **CONFORMS** | Frame 01: picker disabled with the single honest placeholder `No worker nodes yet`, action disabled — **and still reserving its full 83.06px**, so DG-13 c1 holds in the disabled state too. No selectable option, no phantom target, no blank. |
+| **A5** | **NOT ASSESSED** | No one-node-roster frame in this pass. Nothing in the DG-13/DG-14 build touches the one-node path; the first pass's CONFORMS is not disturbed, but it is not re-witnessed here either. |
+| **A6** | **CONFORMS in letter** | 3-node roster; the **stale** `build-box-01` (hollow dot, `last seen 30m ago` in the NODES region) is still offered **and** is the preselected first option, in deterministic node-id order. Liveness does not filter. **DG-5 re-witnessed and still open:** the picker offers that stale node with **no cue at all**. |
+| **A7** | **CONFORMS** | All four transient legs in real pixels: `Assign →` (02) → `Assigning…` disabled with the picker frozen (03) → **`Sent`** muted + disabled (04) → **rest after 5017 ms** (05). The refusal re-enables at once with **no hold and no `Sent`** (06). The hung POST **times out at 10057 ms into the existing `refused` presentation** (07). The `Assigning…` → `Sent` **no-flicker** clause stays NOT ASSESSED — two stills cannot witness it. |
+| **A8** | **CONFORMS** | The result is the m35 `AssignmentChip` **verbatim** (`assigned`, muted pill, `→ <target>`) — the affordance mints **no** chip, badge, toast or accent of its own. **Exactly ONE extra `/api/mesh/status` GET fired on the 2xx (0 → 1)**: one silent keep-last-good re-load, **not** a new cadence and **not** a retry ladder — and the board never flipped into its loading state (the milestone list is intact in 04/04b). The chip's **dot hollow-vs-filled** is still below crop resolution — **NOT ASSESSED**, third pass running, still owed a zoom crop. |
+| **A9** | **CONFORMS** | Tokens observed across thirteen frames: `muted` (picker at rest, and the `Sent` acknowledgment), a low-emphasis `primary` tint (action at rest), `destructive` (both inline messages), and the m35 muted pill. **No success green, no hex, no fleet-local accent, no new primitive.** |
+| **A10** | **CONFORMS — both halves, height AND rhythm** | Height: the row is **38px** and the action **83.06px** in **all eight** measured states. Rhythm (the DG-13 amendment): the action's width is now **fixed to its longest label** and **no label swap moves another element** — witnessed side-by-side in ONE image (04b: the left card's `Sent` box and the right card's `Assign →` box are the same size). *(The CARD grows 6px when the chip lands — that is region 5's geometry, not the row's; recorded as **DG-18**, deferred.)* |
+| **A11** | **CONFORMS in its VISUAL half** | The row sits below the footer's own divider, on its own bordered row, unmistakably outside the `Open board →` clickable region — a reader cannot mistake the picker for part of the drill-in. The behavioural half (stop-propagation) is **not a pixel fact**; it is a task scenario, not a fidelity verdict. |
+
+#### States-table ledger (this pass)
+
+| State | Ruling | Evidence |
+| --- | --- | --- |
+| **empty-roster** | **CONFORMS** | 01 — disabled picker, `No worker nodes yet`, disabled action at full reserved width. |
+| **one-node** | **NOT ASSESSED** | no frame in this pass. |
+| **many-nodes (live + stale)** | **CONFORMS** | 02 / 06-page / 07-page — three nodes, the stale one offered and preselected, node-id order. |
+| **assigning** | **CONFORMS** | 03 — picker frozen on `umairs-msi` + disabled, `Assigning…` + disabled, geometry unchanged. |
+| **sent** | **CONFORMS — and load-bearing** | 04 / 04b — `Sent`, `muted` (the tint **dropped**, not added to), disabled, picker frozen. **The operator chose `umairs-msi`, which is NOT the alphabetical default `build-box-01`** — so "frozen on the CHOSEN node" is witnessed, not a coincidence of ordering. No mark, no glyph, no motion. |
+| **refused** | **CONFORMS as a state** | 06 — selection kept and legible, `Assign →` re-enabled in its primary tint, inline `destructive`, no hold. *(Its message clause is DG-17.)* |
+| **timed out (no answer)** | **CONFORMS** | 07 — copy **`no answer — timed out`** verbatim at a measured **10057 ms**, the existing `refused` presentation reused with **no new vocabulary**, selection kept, action re-enabled (re-click permitted), no `Sent`, no hold. Its `title` says the request **may still have succeeded** and names region 5 as the authority — exactly DG-14 c3's discipline. **Clause 5 (a LATE 2xx) NOT ASSESSED** — the held POST was never answered. |
+| **assigned (region 5, durable)** | **CONFORMS in vocabulary, placement and TIMING · GAPS in width behaviour** | 04/05/06/07/08 — the chip lands within a round trip of the 2xx via the one silent re-load. Width behaviour: DG-15 / DG-16. |
+| **lifecycle change / failure (region 5)** | **NOT ASSESSED** | no assignment left `assigned` in these frames. |
+| **no chip by the end of the window** | **NOT ASSESSED as a state — but its healthy NEGATIVE is witnessed** | 04b: the daemon's own identically-refed card correctly carries **no** chip, because nothing was assigned to it. |
+
+#### The three prior gaps — the verdict on each, judged from these pixels
+
+- **GAP-S2-1 (→ DG-13) — CLOSED as filed; three narrower successors opened at its edges.**
+  - **c1 (fixed action width) — CLOSED.** 83.06px in **all eight** states including disabled, and visible
+    side-by-side in a single image (04b). A label swap no longer moves anything.
+  - **c2 (picker floor · no bare chevron) — CLOSED on its forbidden condition.** The picker is **never** a bare
+    chevron; under **both** message states it names `umairs-msi` in full with its chevron (06/07). At its
+    narrowest — **124.66px** — it renders ≈14.8ch of the select's mono glyph plus the chevron, satisfying the
+    ≥14ch floor. *(Its behaviour under a message longer than these two is **NOT ASSESSED**: no frame presses the
+    picker below 124.66px, so I cannot tell whether that value is the floor or merely the remainder.)*
+  - **c3 (the message is the element that yields) — CLOSED, and the arithmetic proves it.** Refused:
+    124.66 + 83.06 + 136.94 + 16 = **360.66** — the picker sits at its floor while the message is clamped well
+    below its ~173px natural width. Timed-out: 140.36 + 83.06 + 121.23 + 16 = **360.65** — the message takes its
+    content width and the **picker** absorbs the remainder. Both messages carry the full text in a native `title`.
+  - **c4 (copy priority) — CLOSED IN COPY, NOT IN PIXELS.** The string is exactly c4's form
+    (`already assigned → umairs-msi`) and no longer spends its width restating the ref — but it still renders
+    **`already assigned → uma…`**. → **DG-17**.
+  - **c5 (region 5 names the target in full) — CLOSED ON ITS HEADLINE, BROKEN IN MECHANISM.** The target renders
+    in FULL, including a 30-character id. But `Open board →` never yields, so the two **collide** (**DG-15**),
+    and the workspace name **stubs** instead of dropping (**DG-16**).
+- **GAP-S2-2 (→ DG-14) — CLOSED.** Clauses 1–4 all witnessed in frame 07: the 10s (2 × POLL_MS) timeout measured
+  at 10057 ms, the existing `refused` presentation reused verbatim, the copy `no answer — timed out` (never "not
+  sent"), and a resting state that permits re-click. The hung POST no longer wedges the row; the surface's most
+  confusing possible state now has a described, rendered answer.
+- **GAP-S2-3 — CLOSED.** Frame 04: the frozen picker reads `umairs-msi`, region 5's chip reads `→ umairs-msi`,
+  and the real store row reads `target_node_id: umairs-msi` — **three independent readings, one node.** Frame 08
+  repeats it on a second, longer target (`umairs-mac-mini-build-agent-02` in the picker AND the chip). In **both**
+  the chosen node is not the alphabetical default, so the agreement cannot be an artefact of ordering. The target
+  is **derived, not remembered**, and `Sent`'s warrant — "the target is named for free" — is honest again.
+
+#### NEW findings from this pass
+
+- **DG-15 · region 5 · a long target OVERPRINTS `Open board →`** — **BUILD defect against DG-13 c5. The rule is
+  right and must NOT be amended to match the pixels.**
+- **DG-16 · region 5 · the workspace name yields to a one-character stub instead of being dropped** — **BUILD
+  defect against DG-11's already-recorded rule ("never a one-character stub") and DG-13 c5. Do not amend.**
+- **DG-17 · region 6 · the refusal message truncates before naming the holder** — **the RULE is wrong against
+  reality.** DG-13 c2's picker floor and c4's own exemplar copy cannot coexist in a 360.66px row; the developer
+  implemented c4 exactly as written. The designer owns the tightened rule.
+- **DG-18 · region 5 · a successful assign grows the card 6px and reflows its grid row** — small, deferred.
+
+All four are recorded in full under **§Deferred design-gap findings**.
+
+#### NOT ASSESSED — do not infer a verdict for any of these
+
+The `<select>` in its **OPEN** state (a native dropdown is OS chrome, outside the page compositor — the option
+set was verified textually instead, which is what A3 is judged on); **390 / 768** (§Surface 2's own recorded
+reason); **A5 / the one-node roster** (no frame); the **`Assigning…` → `Sent` transition** (two stills cannot
+witness the no-flicker clause); the m35 chip's **dot hollow-vs-filled** (still below crop resolution — A8's dot
+is unjudged for a third pass and is owed a zoom crop); the **picker floor under a message longer than these two**
+(no frame presses it below 124.66px, so 124.66 may be the floor or merely the remainder); **DG-14 clause 5** —
+a LATE 2xx arriving after the timeout (the held POST was never answered, so none was delivered); **region 7**
+(no resolvable `sessionId` in these fixtures); **region 5's lifecycle states** (`accepted` / `running` / `done` /
+`failed` / `· reclaimed` — nothing left `assigned`); **A11's behavioural half** (stop-propagation is not a pixel
+fact — it is a task scenario); the **full-board disclosure** question (two cards is not a board — DG-3); and the
+**`@manual` outsider soak**.
+
+#### What's owed now
+
+- **The DG-15 / DG-16 / DG-17 fixes, then ONE more 1280 frame set** — it need only be three frames: the
+  long-target chip (DG-15), any chip-bearing card at rest (DG-16), and the refusal (DG-17). Plus, still
+  outstanding from the first pass, **a zoom crop of the `assigned` chip's dot** so A8's hollow-vs-filled clause
+  can finally be judged.
+- **A one-node-roster frame** (A5) whenever the next set is rendered — cheap, and it closes a NOT-ASSESSED.
+- The **`@manual` outsider soak** (story-04 task 04) — a person assigns a REAL item to a REAL node in the REAL
+  UI and confirms the chip — remains the human gate, closed at `aof:verify 38`.
+- **The orchestration renders and hands the screenshots; the designer judges.** Running the browser is
+  QA/orchestration's job, **not** the designer's.
+
+---
+
+#### SUPERSEDED — the FIRST real verdict (2026-07-24, first pass) — kept, because it was TRUE when written and the gaps it named have been acted on
+
+~~**GAPS at 1280 (first real verdict, 2026-07-24, second pass).**~~ — **SUPERSEDED 2026-07-24 by the re-render
+verdict above.** Its three gaps were decided as DESIGN rules (DG-13, DG-14) and one BUILD fix (GAP-S2-3), built as
+story-04 tasks 06/07, and re-judged above. Its **"What's owed at `aof:verify`"** list below is **discharged except
+for the `@manual` soak** — superseded by "What's owed now".
+
+~~**INCONCLUSIVE — no render handed, and no baseline pre-existed this pass.** This checklist IS the baseline,
 authored today; there is nothing to judge a screenshot against yet, and **no screenshot was handed** to this
 pass. Per the ACD design-conformance contract the honest verdict is **INCONCLUSIVE**, and the remedy is to
 **produce the render** and judge it region-by-region against **A1–A11 + the affordance States table** — NOT
 to infer CONFORMS/GAPS from the component code. (Reading the code INFORMED this checklist and the DG findings
-below; it is **not** a fidelity verdict.)
+below; it is **not** a fidelity verdict.)~~ — **SUPERSEDED 2026-07-24, and KEPT: it was TRUE from 2026-07-18 to
+2026-07-24, and the six days of INCONCLUSIVE are the discipline working. The remedy it named has been carried
+out.**
+
+**Provenance of the judged render (this is what makes the verdict worth having).** Twelve frames at **1280**,
+from the **real built `ui/dist`** rebuilt **after** the DG-12 CSS fix (so unlike the 2026-07-23 pixels these are
+**not void**), served by the **real `serveMeshUi`** over an isolated global store, driven by a **real click** →
+a **real `POST /api/mesh/assign`** → a **real `global_assignments` row read back**. **No assignment record was
+hand-seeded** — the condition Amendment (F22) set, and the milestone's earned lesson ("a design render built on
+a hand-seeded fixture can only judge the CHROME, never the FEATURE") is therefore satisfied.
+
+**Region ledger.** Regions 1–4 (identity / title / progress / story dots) **CONFORM** — carried forward verbatim
+in all twelve frames. **Region 5 (footer / attention cluster) — GAPS:** vocabulary and placement conform (the
+`assigned` muted pill; `failed` as `destructive` + `!`; and — the F21 fix in pixels — the chip on the **clicked
+card only**, the daemon's own identically-refed card untouched), but **the target truncates in every frame that
+has one** (`→ umairs-m…`, `→ aaa-firs…`). **Region 6 (the affordance row) — GAPS:** A4/A5/A6/A7-states/A8/A9 all
+conform; the **geometry** does not, and one frame names the wrong target.
+
+**Rule ledger.** **A1, A3, A4, A5, A8, A9, A11 CONFORM.** **A2 CONFORMS post-DG-12** (picker `bg-muted` mono;
+action = primary text on a faint primary fill, `primary/40` border, 11px semibold) — with one observation that is
+**not** a gap: the boxed action now out-weighs the bare-text `Open board →` above it, which is DG-3's `@uat`
+question, not an A2 miss. **A6 conforms in letter, and DG-5 is now witnessed in real pixels** — the node panel
+shows `build-box-01` as hollow-dot / `last seen 30m ago` while the picker offers it with **no cue at all**.
+**A7 SPLIT** — the states conform (measured decay **4968 ms**), the geometry fails, and the hung leg was
+unspecified. **A10 SPLIT** — height conforms (38px in every state; sibling card heights match), rhythm does not.
+
+**Gaps.**
+- **GAP-S2-1 (→ DG-13) · regions 6+5 · A10 "or its rhythm" + A8** — the picker collapses to a bare chevron in
+  the refused state and the row reflows on every label swap; region 5 never names the target in full. Decided in
+  Amendment (b).
+- **GAP-S2-2 (→ DG-14) · region 6 · no States row** — a hung POST wedges `Assigning…` forever. Decided in
+  Amendment (b).
+- **GAP-S2-3 · a BUILD DEFECT, not a rule change** — one frame shows the frozen picker reading
+  `zzz-second-node` while the chip reads `→ aaa-firs…`: one card, two targets, one dispatch. The `sent` row's
+  whole warrant is "selection frozen **on the chosen node** … the target is named for free." **This is the
+  developer's to fix; the rule must NOT be amended to match the pixels.**
+
+**NOT-ASSESSED — do not infer a verdict for any of these.** The `<select>` in its **OPEN** state (a native
+dropdown is OS chrome, outside the page compositor, so headless Chromium cannot capture it — the option set was
+verified textually instead: `["build-box-01","umairs-mac-mini","umairs-msi"]` in node-id order, which is what A3
+is judged on); **390 / 768** (§Surface 2's own recorded reason); the **`Assigning…` → `Sent` transition** (two
+stills cannot witness the no-flicker clause); the m35 chip's **dot hollow-vs-filled** (below crop resolution —
+A8's dot is unjudged, owed a zoom crop); **region 7** beneath the row (no resolvable session in these fixtures);
+the **full-board disclosure** question (two cards is not a board); and the **`@manual` soak**.
 
 **What's owed at `aof:verify`:**
 - A **render of the work-item card carrying the affordance**, from the **built `ui/dist`** served against a
@@ -826,7 +1231,7 @@ and it closes the honest doubt rather than carrying it silently.
   heavier panel — V12. That is a precedent for this decision, not a decision of it. Note also that the
   affordance's true weight has only been visible since the DG-12 CSS fix.)*
 
-### DG-4 — action and confirmation are spatially + temporally disjoint (NEW, m38 / story-04)
+### DG-4 — action and confirmation are spatially + temporally disjoint (NEW, m38 / story-04) — **DECIDED 2026-07-24 (F22, live soak)**
 
 - **Observed (structural):** the operator ACTS in region 6 (the card foot) but the `assigned` confirmation
   appears in region 5 (the footer attention cluster, above) **after the 5s poll** (A7/A8 — no bespoke
@@ -838,9 +1243,15 @@ and it closes the honest doubt rather than carrying it silently.
 - **The correct answer (designer owns it):** either (a) an **in-row transient success acknowledgement** in
   region 6 (e.g. `Assigned →` settling to muted) that hands off to the region-5 chip on the next poll, or
   (b) an explicit design decision that the region-5 chip after ≤5s IS the acknowledgement and the transient
-  `Assigning…` bridges the gap — **stated, not left implicit.**
+  `Assigning…` bridges the gap — **stated, not left implicit.** — **DECIDED 2026-07-24, at the live soak
+  (F22), and the answer is (a) PLUS a repaired (b): a transient in-row `Sent` (muted, disabled, 5s, then
+  gone) AND a success re-load so region 5's real chip arrives within a round trip instead of up to 5s.
+  The word is `Sent`, not `Assigned` — the affordance reports the CALL, the chip reports the ASSIGNMENT.**
+  Bound in **A7/A8** and the §Surface 2 States table; see **§Surface 2 · Amendment 2026-07-24**.
+- **This was predicted structurally on 2026-07-18 and WITNESSED live on 2026-07-24:** the operator clicked,
+  got `200 ok`, and the surface said nothing — they read the raw API response to learn it had worked.
 - **Resolution:** a DESIGN.md rule + a `@uat` scenario (a person clicks assign and judges whether the result
-  is legible without re-checking). **Deferred.**
+  is legible without re-checking). **Rule DECIDED; the `@uat` scenario and the render remain owed.**
 
 ### DG-5 — the picker gives the operator no liveness cue (NEW, m38 / story-04, small)
 
@@ -964,6 +1375,17 @@ and it closes the honest doubt rather than carrying it silently.
 - **Note:** a **§Surface 2** finding seen incidentally in §Surface 3's renders; NOT part of the
   terminal-view verdict. May also be an artifact of the fixture's narrow footer content — confirm against a
   producer-fed, post-DG-12 render before acting. **Deferred.**
+- **RE-SCOPED 2026-07-24, NOT closed.** Confirmed against the producer-fed, post-DG-12 render: the `a…`
+  one-character stub **does not reproduce** — it was the fixture artifact this note suspected. But the defect it
+  was pointing at **does** reproduce: **region 5 never names the assignment's target in full** (`→ umairs-m…`,
+  `→ aaa-firs…` in every frame carrying a chip). The finding survives and moves to **DG-13** clause 5.
+- **RE-OPENED 2026-07-24 (the DG-13/DG-14 re-render) — the "does not reproduce" line above is WRONG.**
+  ~~"the `a…` one-character stub **does not reproduce** — it was the fixture artifact this note suspected"~~ —
+  **FALSIFIED by real pixels.** The stub reproduces in the producer-fed, post-DG-12, real-assign re-render — at the
+  **workspace-name** element rather than at the chip (`l…` / `le…` / `let…`, frames 04 / 04b / 05 / 06 / 07). It was
+  never a fixture artifact; it was a narrow enough footer. **DG-11's own correct answer — *a legible minimum, or
+  drop the element entirely; never a one-character stub* — was right all along and is STILL UNBUILT.** It is now
+  carried, with a concrete fix, as **DG-16**.
 
 ### DG-12 — an unlayered CSS rule made EVERY button in the app ignore its own type classes (NEW 2026-07-23, app-wide, cross-milestone)
 
@@ -996,6 +1418,199 @@ and it closes the honest doubt rather than carrying it silently.
 - **Resolution:** a DESIGN.md rule (b, above) **plus a `@uat` visual-review pass** over the re-rendered
   surfaces. Not a code patch alone — the patch is already in; the *judgement* is what is owed. **Deferred to
   the owning milestones.**
+
+### DG-13 — the affordance row goes ANONYMOUS under an error, and the row reflows on every label swap (NEW 2026-07-24, m38 / story-04, from the REAL-assign render) — **DECIDED**
+
+- **Observed (real pixels, post-DG-12 build):** in the refused frame the picker (`flex-1 min-w-0 truncate`)
+  collapses to a **bare chevron** — ~26px, down from ~284px — while the inline error takes the row. The
+  operator cannot see which node is selected at the exact moment they must re-aim, and the error truncates
+  before naming the holder (`Item "18" already has an active assignment …`). In the success frame the action
+  narrows 67px → 44px on the `Sent` label swap and the picker absorbs the difference, so the row reflows on
+  every state change. Region 5's chip target truncates in every frame that has one (**DG-11 re-scoped here**).
+- **Why it matters:** A10's "rhythm" was written as a spacing idiom and read as one. These pixels show it is
+  also **geometry** — and that a control which cannot name its target has lost the one thing A7's `Sent`
+  claims to give "for free".
+- **The correct answer (designer owns it): DECIDED — the five binding clauses in Amendment 2026-07-24 (b).**
+  Fixed action width sized to `Assigning…`; a picker floor of ≥14ch + chevron that never yields; the message
+  slot as the yielding element with the full text in `title`; copy priority **outcome > holder > all else**;
+  and region 5's width priority **chip + `→ <target>` in full > `Open board →` > workspace name**.
+- **Resolution:** a DESIGN.md rule (A10 amended + Amendment (b)) **plus** the §Surface 2 `@uat` scenario
+  clause (e). Build-owed to story 04.
+
+### DG-14 — a hung dispatch has no state, so the row wedges forever (NEW 2026-07-24, m38 / story-04, from F-38.04f) — **DECIDED**
+
+- **Observed:** `runAssign` awaits with no timeout and only `sent` schedules a decay, so a POST that never
+  answers holds `Assigning…` indefinitely — picker frozen, action disabled, message slot empty, no error —
+  recoverable only by reloading the page. Reproduced by holding the request at the network layer.
+- **Why it matters:** the States table had no row for it, so the surface's most confusing possible state was
+  the one state the design never described. On a passively-refreshing monitor a frozen control reads as a
+  broken page.
+- **The correct answer (designer owns it): DECIDED — the six clauses in Amendment 2026-07-24 (b).** Timeout at
+  **10s (2 × `POLL_MS`)** into the existing `refused` presentation, copy **`no answer — timed out`** (never
+  "not sent" — a timed-out POST may have succeeded server-side), re-click permitted, and a late 2xx honoured
+  only by A8's one silent re-load, never by resurrecting `Sent`.
+- **Resolution:** a DESIGN.md rule (A7 amended + the new States row + Amendment (b)) **plus** the §Surface 2
+  `@uat` scenario clause (d). Build-owed to story 04.
+- **CLOSED 2026-07-24 (the DG-13/DG-14 re-render).** Frame `07-timed-out` witnesses clauses 1–4 in real pixels: a
+  measured **10057 ms** timeout, the existing `refused` presentation reused verbatim (picker re-enabled on the same
+  node, `Assign →` back in its primary tint, inline `destructive`), the copy **`no answer — timed out`**, and a
+  resting state that permits re-click. The `title` reports the CALL only and names region 5 as the authority.
+  **Clause 5 (a LATE 2xx must not resurrect `Sent`) is NOT ASSESSED** — the held POST was never answered.
+
+### DG-15 — region 5: a long target OVERPRINTS `Open board →` (NEW 2026-07-24, m38 / story-04, from the DG-13/DG-14 re-render) — **BUILD DEFECT**
+
+- **Observed (frames `08-long-target-chip-card.png` / `-page.png`, 1280, real minted record):** with the target
+  `umairs-mac-mini-build-agent-02` the chip's `→ <target>` renders in FULL — DG-13 c5's headline demand, **met** —
+  but it runs straight into `Open board →` with **no gap and no separator**: the target's trailing `2` and the `O`
+  of `Open` occupy the same pixels, and the chip's `· just now` tail is destroyed outright. Neither the id's last
+  glyph nor the action's first is cleanly readable. The workspace name **was** correctly dropped in this frame, so
+  the drop half of c5 fired — and was **not enough**, because `Open board →` never yielded.
+- **Expected vs observed.** Expected (DG-13 c5): a **yield order** — when the chip + target need the width,
+  `Open board →` gives up space (it ranks below the chip+target and above the workspace name). Observed:
+  `Open board →` keeps its full width and is **painted over**. A priority list was implemented as a *paint* order
+  rather than a *yield* order.
+- **Why it matters:** this is §Surface 3 **V11's lesson at a new address** — *chrome that destroys the content it
+  annotates is worse than no chrome.* Here it destroys **both** parties: the target id (the very fact DG-13 c5
+  exists to protect) **and** the card's own navigation affordance. And it fires exactly when the operator most
+  needs to read the target — the moment a long-named node has just been assigned.
+- **This is a BUILD DEFECT, not a rule that needs softening. The rule is right; it must NOT be amended to match
+  the pixels.**
+- **The concrete fix (developer):** region 5 is one flex row. Give every shrinkable child `min-w-0`; give the
+  chip + `→ <target>` group the highest priority (`shrink-0`, or a basis that yields last); give `Open board →`
+  `min-w-0 truncate` **plus an abbreviated form — `→` alone, with the full label in its native `title`** (the DG-10
+  idiom); and drop the workspace name from the FLOW rather than truncating it (DG-16). **No element in region 5
+  may be positioned outside the row's flow.**
+- **The design rule this adds (designer owns it): DG-13 clause 5 gains a SIXTH clause — *no two elements in region
+  5 may occupy the same pixels.* The priority list is a YIELD order, not a paint order: a lower-priority element
+  gives up space (truncate → abbreviate → drop); it never stays put and gets overprinted.** Mirrors V11.
+- **Resolution:** a DESIGN.md rule (the clause above) **plus** a §Surface 2 `@uat` visual-review clause — a person
+  confirms a long node id **and** `Open board →` are both legible on one card. Build-owed to story 04.
+
+### DG-16 — region 5: the workspace name yields to a ONE-CHARACTER STUB instead of being dropped (NEW 2026-07-24, m38 / story-04) — **BUILD DEFECT, and it RE-OPENS DG-11**
+
+- **Observed (frames 04, 04b, 05, 06, 07):** whenever region 5 carries a chip, the mono workspace name
+  `let-shield-portal` renders as **`l…` / `le…` / `let…`** — one to three glyphs plus an ellipsis. Frame 08 shows
+  the same element **dropped entirely** under heavier pressure, so the build has two behaviours and reaches for the
+  worse one first. The sibling card's short name `aof` renders in full, which is why the defect shows only on the
+  long one.
+- **Expected vs observed.** Expected — **DG-11's already-recorded correct answer, verbatim:** *"the cluster must
+  either render a legible minimum … or **drop the element entirely** when it cannot render legibly — never a
+  one-character stub."* Plus DG-13 c5's *"the workspace name yields first."* Observed: it yields to a stub that
+  spends ~20px of the row's scarcest resource and communicates **nothing**.
+- **This falsifies DG-11's 2026-07-24 re-scope note**, which recorded the `a…` stub as a fixture artifact that
+  *"does not reproduce."* **It reproduces** — in a producer-fed, post-DG-12, real-assign render, at the
+  workspace-name element rather than the chip. See the correction appended to DG-11.
+- **This is a BUILD DEFECT. DG-11's rule is right and must NOT be amended.**
+- **The concrete fix (developer):** the workspace name renders **IN FULL or not at all** — never truncated. When it
+  cannot render in full, remove it **and its `·` separator** from the flow (`hidden`, not `truncate`). It costs the
+  operator nothing: the full workspace name is already carried, in full, by the WORKSPACES strip at the top of the
+  same page.
+- **The design rule (designer owns it): in region 5 the workspace name is the one element that is NEVER
+  truncated — it renders in full or it is dropped.** Truncation is reserved for elements whose PREFIX still
+  carries meaning; a workspace name's prefix does not.
+- **Resolution:** a DESIGN.md rule (above) **plus** the §Surface 2 `@uat` clause. Build-owed to story 04.
+
+### DG-17 — region 6: the refusal message STILL truncates before naming the holder (NEW 2026-07-24, m38 / story-04) — **the RULE is wrong against reality, not the build**
+
+- **Observed (frames `06-refused-card.png` / `-page.png`):** the copy is exactly DG-13 c4's form —
+  `already assigned → umairs-msi`, outcome first, no restatement of the ref — and the full sentence is carried in
+  the element's `title`. But the slot is **136.94px** and the rendered text is **`already assigned → uma…`**. The
+  **holder — the one fact no other region carries** — is still cut, which is the precise defect DG-13 was filed on.
+- **The arithmetic shows the rule cannot be satisfied.** The row is 360.66px: picker floor 124.66 (DG-13 c2)
+  + action 83.06 (DG-13 c1) + two 8px gaps = 223.72, leaving **136.94px** for the message. The rendered copy needs
+  ~173px. **DG-13 c4's OWN exemplar — `already assigned → umairs-mac-mini` — needs ~197px.** The designer wrote a
+  floor (c2), a fixed width (c1) and an exemplar copy (c4) that **cannot coexist in one 360.66px row** at 1280 in a
+  two-column grid. **The developer implemented c4 exactly as written. This is the designer's error, and the rule is
+  what changes.**
+- **The tightened rule (designer owns it): the holder is an ATOMIC, PROTECTED substring — it renders in full or it
+  is not shown at all. The message is a graduated copy LADDER, not one string handed to CSS `truncate`:**
+  1. fits → `already assigned → <holder>`
+  2. narrower → `held by <holder>`
+  3. narrowest → `→ <holder>`
+  4. if even (3) does not fit → the **outcome alone** (`already assigned`), the holder **omitted rather than
+     mutilated**.
+  The `title` always carries the whole sentence. CSS `truncate` remains only as a last-resort backstop, never the
+  primary mechanism. **Rationale:** the `destructive` token plus the mere presence of a message already carries
+  *"this was refused"*; the **holder** is the fact that must survive — and a three-glyph prefix of a node id is
+  indistinguishable from three other node ids on the same roster, which is worse than saying nothing.
+- **The timed-out leg needs no ladder and is witnessed correct:** `no answer — timed out` is 121.23px and renders
+  in full (frame 07). The ladder is owed only where a node id is embedded in the copy.
+- **Do NOT "fix" this by shrinking the picker floor.** DG-13 c2 exists because a picker that cannot name its
+  target is the worse failure; c2 stands.
+- **Resolution:** a DESIGN.md rule (DG-13 c4 superseded by the ladder above) **plus** the §Surface 2 `@uat` clause.
+  Build-owed to story 04.
+
+### DG-18 — a successful assign grows the card 6px and reflows its grid row (NEW 2026-07-24, m38 / story-04, small) — **DEFERRED**
+
+- **Observed:** measured card height **251.5px** with no chip (frames 01, 02) → **257.5px** once region 5's
+  `assigned` chip lands (frames 04 onward). In a stretched grid row every sibling card grows with it, so the board
+  visibly jumps at the moment of the click.
+- **Why it is recorded:** A10 binds the **row** (38px — and it conforms); **no rule binds region 5's height.** The
+  milestone already polices this exact species elsewhere — **V11** (*"never costs the CARD height"*) and **DG-9**
+  (*"one open terminal inflates every sibling card in its grid row"*). Story 04 did not create the growth — the 6px
+  is the m35 chip pill's own geometry, region 5 carried forward verbatim — but **A8's one silent re-load moved the
+  reflow to the moment of the click**, where the operator is looking, and made it deterministic rather than
+  poll-phased.
+- **The correct answer (designer owns it):** region 5's attention cluster **reserves the chip's line height whether
+  or not a chip is present**, so a chip arriving never reflows the card or its row. One rule, region-5-local.
+- **Scope, honestly:** this is m35 chip geometry as much as story-04's, and 6px is small. **Deferred** — recorded so
+  it is not lost. It does **not** by itself move §Surface 2's verdict.
+
+### DG-19 — region 5's yield order SQUEEZED where it must DROP (NEW 2026-07-24, third verdict) — **CLOSED at the fourth pass**
+
+- **Observed:** at maximum pressure the LOWEST-priority element survived as an ellipsised fragment (`· just…`)
+  while a HIGHER-priority one — `Open board`'s words — rendered zero glyphs; and the row's right edge sat ~8–10px
+  past the card's content column, the pinned `→` having escaped its own box.
+- **Root cause, measured:** the order was expressed as flex `shrink` factors. **A squeeze cannot express a
+  terminal drop.** With a 1000:1 ratio the drill-in still yielded only 13.1px against the chip's 17.5px.
+- **Rule (designer): each step of region 5's priority list is a DISCRETE budgeted drop, not a shrink factor.**
+  An element that cannot render whole is removed from the flow with its separator; shrink factors remain only as
+  a backstop. **CLOSED** — tail budget `REGION5_CHIP_SLOT_BUDGET_CH`, drill-in abbreviation
+  `REGION5_DRILLIN_ABBREV_AT_CH`, and an explicit arrow-sized floor (`min-w-3.5`) that permits the shrink AND
+  bounds it, so nothing escapes the card.
+
+### DG-20 — the workspace name was gated on CHIP PRESENCE, not FIT (NEW 2026-07-24, third verdict) — **CLOSED, and WITNESSED**
+
+- **Observed:** absence-of-name became an accidental second signal for "this card has an assignment", a fact the
+  chip already states (A8's rail, in its quietest form).
+- **Rule (designer): the gate is FIT.** The chip only applies the pressure; a derived budget decides.
+- **CLOSED** — `REGION5_NAME_BUDGET_CH`, and the **discriminating frame was produced**
+  (`09-DG20-short-name-with-chip`): a chip-bearing card whose name is `aof` KEEPS it, while `let-shield-portal`
+  is dropped. The two candidate gates had been observationally identical in all thirteen frames of two prior
+  passes; they are not any more. **A second defect fell out of the same frame:** the kept name carried `flex-1`,
+  so it GREW into the free space and squeezed the chip's target — the name outranking the target, which is c5
+  backwards. It is now `shrink-0`; the fit budget already guarantees it is short.
+
+### DG-21 — every rung of the refusal ladder must name the OUTCOME (NEW 2026-07-24, third verdict) — **CLOSED**
+
+- **Observed:** DG-17's own middle rungs (`held by <holder>`, `→ <holder>`) carried no outcome word, so the row
+  read `held by umairs-msi` in red beside region 5's `assigned → umairs-msi` and the picker's `umairs-msi` — the
+  same node id three times, twice adjacent, with **only the colour** separating "someone else holds this" from
+  "your assign succeeded". **A9/S4's rail — colour and label always travel together, never colour alone —
+  broken by the designer's own copy.**
+- **Rule (designer): the ladder drops the HOLDER, never the OUTCOME:** `<outcome> → <holder>` →
+  `refused · <holder>` → `<outcome>` alone. **CLOSED** — witnessed as `refused · umairs-msi`, whole, at 115.47px.
+- **Accepted residual (recorded, not deferred):** the rung does not say the node is the *holder* rather than the
+  *refuser*. At 22ch there is no room for outcome + role; the `title` carries the whole sentence; under either
+  reading the operator's next action is identical. Judge at `@uat` on the case still unrendered — a refusal whose
+  holder differs from the picker's selection.
+
+### DG-22 — the attention cluster drifted in the space the dropped name vacated (NEW 2026-07-24, fourth verdict) — **CLOSED**
+
+- **Observed:** the `assigned` pill's left edge sat 7–58px in from the content edge, varying *inversely* with the
+  chip's width — the signature of centring — so the footer's leading edge, the column the eye scans for "what
+  state is this card in", moved card to card for a reason the reader cannot see, and made the drop look
+  unjustified.
+- **Rule (designer): the leading group is left-aligned; only the drill-in is right-aligned.** **CLOSED** — the
+  cluster switches to `justify-between` exactly when the name is dropped.
+
+### DG-23 — a separator renders with nothing on its left (NEW 2026-07-24, fourth verdict) — **DEFERRED**
+
+- **Observed:** a lone `·` hugging `Open board →` on every chip-less card, reading as a bullet on the link.
+- **Scope, honestly: this PREDATES story 04** — it is the m35 footer's placeholder idiom, named only now the
+  louder findings are gone. With the row justified apart, whitespace already is the separator. **Deferred** —
+  recorded so it is not lost; it does not move §Surface 2's verdict. *(Story 04 did fix the half it caused: the
+  placeholder no longer renders ALONGSIDE a chip, which §2a's own rule already required.)*
 
 ---
 
@@ -1038,6 +1653,10 @@ and it closes the honest doubt rather than carrying it silently.
     read-only rail is not overturned by story 04 — it is carved out by exactly one affordance, which reads
     subordinate at rest (muted picker, low-emphasis primary action) and reuses the m35 assignment ramp for
     its result. No new colour/chip/toast for "assignable" or "just assigned." **(§Surface 2, A2/A8/A9.)**
+    **Amended 2026-07-24 (F22):** a mutation must ANSWER AT THE POINT OF ACTION. The affordance may
+    acknowledge the CALL — a transient `Sent` on its own control, `muted`, 5s, then gone — and the surface
+    re-loads once on success so the m35 chip arrives promptly. That is not a second vocabulary: the
+    affordance reports the call, region 5 reports the assignment. **(§Surface 2 Amendment 2026-07-24, A7/A8.)**
 13. **The fleet terminal-VIEW is a READ carve-out, not a mutation — read-only IN FACT and IN LOOK.** The
     fleet face gains a server→browser terminal-VIEW (story 06 / ADR-014) but adds NO write path: NO input
     box, NO send control, NO type-into cursor (the input region is **absent, not disabled**). Read-write
@@ -1068,6 +1687,11 @@ and it closes the honest doubt rather than carrying it silently.
     and wording both come from `assignmentChip(row)`, so `withdrawn`, `reclaimed` and `stale` inherit the
     right copy without a second list to maintain. **(§Correction 3, V10; A8's rail at a new address;
     witnessed render F.)**
+18. **A silent success is a failure of the surface, not a virtue of it.** On a surface whose every other
+    signal arrives by itself on a poll, "nothing changed" reads exactly like "nothing happened" — so a
+    mutation must be acknowledged AT the action, and its durable confirmation must not wait for the next
+    scheduled poll. The acknowledgment decays; the record persists. **(§Surface 2 A7/A8, Amendment
+    2026-07-24; DG-4 decided; witnessed in the live soak, F22.)**
 
 ---
 
@@ -1090,6 +1714,12 @@ here. This design fixes the look/feel; the features fix what happens.
 - **The assign affordance's picker is producer-fed and its result closes the loop to the m35 chip** (story
   04; ADR-012 / ADR-008) — the DATA (roster options, minted record → chip) is proven by task 03's
   `@executable` over the real route/verb; the VISUAL fidelity is §Surface 2, judged at `aof:verify`.
+- **The assign affordance acknowledges the call and re-loads on success** (story 04; §Surface 2 A7/A8,
+  Amendment 2026-07-24 / F22) — the BEHAVIOUR is a task-feature outcome: on a 2xx the affordance holds a
+  transient `Sent` state for one poll interval and the surface fires exactly ONE additional silent
+  keep-last-good status re-load so the assignment record is read back immediately. **The wire contract does
+  not change**; what changes is when the surface reads, and what it says while it waits. The VISUAL
+  fidelity of both is §Surface 2, judged at `aof:verify` against the states named in the Amendment.
 - **The picker annotates target liveness** (DG-5 / the open half of A6) — a small task-feature outcome on
   the option label.
 - **The worker's live PTY streams cross-machine into the fleet terminal-view, routed by (nodeId, sessionId),
@@ -1117,7 +1747,12 @@ here. This design fixes the look/feel; the features fix what happens.
 - **A `@uat` visual-review scenario for the assign affordance** (story 04; §Surface 2, DG-3/DG-4) — a person
   judges, on a **full board of milestone cards**: (a) the affordance reads as a quiet carve-out, not a
   control panel (A2 / DG-3 disclosure); (b) the empty-roster, one-node and many-node picker states (A4–A6);
-  (c) assigning a real item and confirming the result is legible without re-checking (A7/A8 / DG-4).
+  (c) assigning a real item and confirming the result is legible without re-checking (A7/A8 / DG-4) —
+  **specifically: the click is answered AT the action (`Sent`, muted, ~5s), the m35 `assigned` chip appears
+  in the footer without waiting for a visible pause, the row returns to rest with nothing left over, and a
+  refused assign reads `destructive` inline with no `Sent`** (Amendment 2026-07-24 / F22); (d) **a HUNG
+  dispatch answers within 10s with `no answer — timed out` and the row is usable again — it never wedges**
+  (DG-14); (e) **the picker still names its target while an error is on screen** (DG-13).
   **Must be judged on a post-DG-12 build** — pre-fix pixels of `Assign →` are void.
 - **A `@uat` visual-review scenario for the terminal-view** (story 06; §Surface 3, DG-7/DG-8) — a person
   judges: (a) the view NAMES its stream (V1) and reads as read-only, and a typed keystroke does NOT reach
@@ -1138,4 +1773,3 @@ here. This design fixes the look/feel; the features fix what happens.
   after the DG-12 CSS fix** — the fleet node card's neighbours (§Surface 1), the assign affordance
   (§Surface 2 / A2), and the board surfaces owned by other milestones (`ActionsStrip`, `DetailPanel` tabs).
   The patch is already in; the **judgement** is what is owed.
-</content>

@@ -72,7 +72,7 @@ export const meshUiAssignGatesTests = [
           const { url, home, root, workspaceId, globalStoreOptions } = fx;
           await row.seed({ home, workspaceId });
 
-          const res = await sameOriginAssign(url, row.ref, row.nodeId);
+          const res = await sameOriginAssign(url, row.ref, row.nodeId, "OWN");
           assert.ok(res.status >= 400 && res.status < 500, `${row.case}: a coded non-200 (4xx), never a 200 — got ${res.status}`);
           const body = await res.json();
           assert.equal(body.code, row.code, `${row.case}: the response body code is "${row.code}"`);
@@ -99,10 +99,10 @@ export const meshUiAssignGatesTests = [
       await withAssignRouteFixture(async ({ url, home, workspaceId }) => {
         await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
 
-        const first = await sameOriginAssign(url, "38/04", "worker-a");
+        const first = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.equal(first.status, 200, "the first assign mints the active assignment");
 
-        const second = await sameOriginAssign(url, "38/04", "worker-a");
+        const second = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.ok(second.status >= 400 && second.status < 500, "the second assign is refused (a coded non-200)");
         const secondBody = await second.json();
         assert.equal(secondBody.code, "assignment-already-active");
@@ -122,10 +122,10 @@ export const meshUiAssignGatesTests = [
         await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
         await seedTargetNode({ home }, { nodeId: "worker-b", workspaceId, member: true, published: true });
 
-        const first = await sameOriginAssign(url, "38/04", "worker-a");
+        const first = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.equal(first.status, 200);
 
-        const second = await sameOriginAssign(url, "38/04", "worker-b");
+        const second = await sameOriginAssign(url, "38/04", "worker-b", "OWN");
         assert.ok(second.status >= 400 && second.status < 500);
         const secondBody = await second.json();
         assert.equal(secondBody.code, "assignment-already-active");

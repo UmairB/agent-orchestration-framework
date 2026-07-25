@@ -214,14 +214,40 @@ export type BoardUrlResponse = {
 // body contains path <the global mesh path>"). Carried onto the thrown Error so a
 // caller (Fleet.tsx) can render it even though the FAILED response never lands in
 // `status` state (a first-load failure has no prior status to attach it to).
+// milestone 38 / story 04 (DESIGN §Surface 2 Amendment 2026-07-24 (b), DG-13
+// clause 4) — the assign verb attaches EXTRA coded fields beside `code`
+// (`holder` on an already-active refusal, `target` on an ineligible node;
+// src/commands/mesh-assign.mjs), and the route forwards them byte-for-byte
+// (sendApiError's `extra`). They are carried onto the thrown Error here so the
+// AFFORDANCE can shape its message from the CODED ENVELOPE rather than printing
+// the raw server sentence — the sentence spends its width on the ref (which
+// region 1 already shows) and truncates away the holder, the one fact no other
+// region carries. The sentence itself is NOT discarded: it stays the Error's
+// `message` and becomes the message slot's `title`.
+export type FleetApiError = Error & {
+  code?: string;
+  status?: number;
+  path?: string | null;
+  holder?: string;
+  target?: string;
+};
+
 async function safeError(response: Response): Promise<Error> {
   try {
-    const body = (await response.json()) as { error?: string; code?: string; path?: string | null };
+    const body = (await response.json()) as {
+      error?: string;
+      code?: string;
+      path?: string | null;
+      holder?: string;
+      target?: string;
+    };
     const message = body.error ?? `Request failed (${response.status})`;
-    const error = new Error(message) as Error & { code?: string; status?: number; path?: string | null };
+    const error = new Error(message) as FleetApiError;
     error.code = body.code;
     error.status = response.status;
     error.path = body.path ?? null;
+    if (typeof body.holder === "string") error.holder = body.holder;
+    if (typeof body.target === "string") error.target = body.target;
     return error;
   } catch {
     return new Error(`Request failed (${response.status})`);
@@ -247,19 +273,29 @@ export const fleetApi = {
     return body.url;
   },
 
-  // milestone 38 / story 04 (ARCHITECTURE ADR-012) — the fleet face's ONE
-  // mutation route: a same-origin `POST /api/mesh/assign { ref, nodeId }`,
-  // wrapping the existing `assignWork` verb verbatim. A real browser's `fetch`
-  // sends the page's own Origin automatically (the route's same-origin
-  // admission guard, SECURITY T13) — this client sets no header itself. On a
-  // gate miss (unknown node / already-active / unresolvable ref) the coded
-  // { ok:false, code } envelope surfaces as a thrown Error (safeError), same
-  // shape as every other fleet read failure.
-  async assign(ref: string, nodeId: string): Promise<WorkAssignment> {
+  // milestone 38 / story 04 (ARCHITECTURE ADR-012 + its 2026-07-24 AMENDMENT) —
+  // the fleet face's ONE mutation route: a same-origin
+  // `POST /api/mesh/assign { ref, nodeId, workspaceId }`, wrapping the existing
+  // `assignWork` verb verbatim. A real browser's `fetch` sends the page's own
+  // Origin automatically (the route's same-origin admission guard, SECURITY
+  // T13) — this client sets no header itself. On a gate miss (unknown node /
+  // already-active / unresolvable ref) the coded { ok:false, code } envelope
+  // surfaces as a thrown Error (safeError), same shape as every other fleet read
+  // failure.
+  //
+  // `workspaceId` is REQUIRED and is the ITEM's OWN workspace — `m.item
+  // .workspaceId`, the SAME datum the drill-in beside it already passes to
+  // `boardUrl`. It closes BLOCKER F21: this face is GLOBAL (it lists items from
+  // every workspace on the machine) and the route used to resolve every ref
+  // against the DAEMON's own workspace, so a card from any other workspace was
+  // mis-assigned — and where the ref collided it dispatched entirely different
+  // work off a `200 ok`. There is no fallback: a blank/absent workspaceId is a
+  // coded 400 `invalid-workspace`, so a stale client fails VISIBLY.
+  async assign(ref: string, nodeId: string, workspaceId: string): Promise<WorkAssignment> {
     const response = await fetch("/api/mesh/assign", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ref, nodeId }),
+      body: JSON.stringify({ ref, nodeId, workspaceId }),
     });
     if (!response.ok) throw await safeError(response);
     return (await response.json()) as WorkAssignment;

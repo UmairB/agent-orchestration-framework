@@ -30,6 +30,14 @@
 // arbitration, no bespoke uniqueness/repo check. This is the SOLE, deliberate,
 // documented exception to the isolation guarantees below.
 //
+// milestone 38 / story 04 — ADR-012 AMENDMENT (2026-07-24, BLOCKER F21): the
+// write route's WIRE SHAPE is `{ ref, nodeId, workspaceId }`, all three
+// REQUIRED, and it resolves the ref against the ITEM's OWN workspace (through
+// the sanctioned queryGlobalMeshStatus → status.workspaces[] → projectRoot
+// seam) — NEVER against `resolvedProjectDir`, this daemon's own launch dir.
+// The face is GLOBAL, so resolving a per-item fact from its own local context
+// mis-dispatched real work off a `200 ok` (the ADR-010 "Gap A" class).
+//
 // The isolation guarantees are otherwise STRUCTURAL:
 //   - it imports the single global query surface plus the board launcher, not
 //     low-level work/run/mesh writers — PLUS the one `assignWork` verb door;
@@ -139,6 +147,37 @@ export async function serveMeshUi({
 
   const resolvedProjectDir = path.resolve(projectDir);
 
+  // milestone 38 / story 04 — REVIEW FIX F-B (architect, 2026-07-24). The
+  // CONTROL's OWN machine identity: the `issuer` every directive minted through
+  // this face is stamped with. Resolved from THIS daemon's launch workspace —
+  // deliberately OUTSIDE the assign branch, which may read no fact of its own
+  // launch dir (inv.5) — and memoised for the life of the process.
+  //
+  // WHY IT MAY NOT RIDE OFF THE TARGET WORKSPACE. `assignWork` derives TWO facts
+  // from the workspace OBJECT it is handed: the `workspaceId` it stamps (asserted
+  // pre-mint below, inv.6) and `issuer = ctx.issuer ?? workspace.config?.mesh
+  // ?.nodeId` (commands/mesh-assign.mjs). The second is a MACHINE-scoped fact,
+  // and after the AMENDMENT the workspace handed to the verb is the CLICKED
+  // CARD's, not this machine's. On the common path loadWorkspace overlays the
+  // machine-wide identity onto every workspace it loads, so the two agree; on a
+  // machine where the TARGET checkout still carries a LEGACY per-workspace
+  // identity sidecar (work.mjs's read-only back-compat fallback) they do NOT,
+  // and the mint would stamp the TARGET's id as the issuer of a directive THIS
+  // control issued. `issuer` is load-bearing — control-stream-server.mjs never
+  // routes a directive whose issuer is revoked — so it is passed EXPLICITLY.
+  //
+  // LAZY, never at startup: a GET-only session must load no workspace at all
+  // (the read routes stay untouched), and a machine's identity cannot change
+  // under a running daemon, so one read is one read.
+  let controlNodeIdMemo;
+  const controlNodeId = async () => {
+    if (controlNodeIdMemo === undefined) {
+      const ownWorkspace = await loadWorkspace(resolvedProjectDir, undefined, { env: globalStoreOptions?.env });
+      controlNodeIdMemo = ownWorkspace.config?.mesh?.nodeId ?? null;
+    }
+    return controlNodeIdMemo;
+  };
+
   const server = http.createServer(async (request, response) => {
     let requestUrl;
     try {
@@ -179,13 +218,23 @@ export async function serveMeshUi({
       return;
     }
 
-    // milestone 38 / story 04 (ADR-012) — the fleet face's FIRST and ONLY
-    // mutation route: POST /api/mesh/assign { ref, nodeId }. It wraps the
-    // EXISTING assignWork(workspace, ref, nodeId, ctx) core VERBATIM — no
-    // second uniqueness rule, no bespoke repo check, no arbitration of its
-    // own. Every OTHER method on this path (GET/PUT/DELETE/…) is a clean 405
-    // naming "POST" as the one allowed verb (the read-only-except-this-one-
-    // route posture, structural invariant #1/#4).
+    // milestone 38 / story 04 (ADR-012 + its 2026-07-24 AMENDMENT) — the fleet
+    // face's FIRST and ONLY mutation route:
+    // POST /api/mesh/assign { ref, nodeId, workspaceId }. It wraps the EXISTING
+    // assignWork(workspace, ref, nodeId, ctx) core VERBATIM — no second
+    // uniqueness rule, no bespoke repo check, no arbitration of its own. Every
+    // OTHER method on this path (GET/PUT/DELETE/…) is a clean 405 naming "POST"
+    // as the one allowed verb (the read-only-except-this-one-route posture,
+    // structural invariant #1/#4).
+    //
+    // BLOCKER F21 (measured live, VERIFICATION §"Soak 04" 2026-07-24): this
+    // route used to lift only { ref, nodeId } and resolve the ref against the
+    // DAEMON's own launch project dir. But this face is GLOBAL — the cards on
+    // screen come from EVERY workspace on the machine — so a card from a
+    // non-control workspace was mis-assigned, and on a ref COLLISION it
+    // dispatched entirely different work off a correct-looking `200 ok`. The
+    // ADR-012 AMENDMENT therefore makes `workspaceId` a REQUIRED third field
+    // and pins the resolution + assertion ORDER below (invariants 5 and 6).
     if (pathname === "/api/mesh/assign") {
       if (request.method !== "POST") {
         sendMethodNotAllowed(response, "POST");
@@ -219,28 +268,111 @@ export async function serveMeshUi({
         sendApiError(response, 400, "Malformed JSON body.", "invalid-body");
         return;
       }
-      // ONLY { ref, nodeId } is lifted off the body and passed into the verb —
-      // any other field a client posts (a forged state/assignmentId/issuer,
-      // task 00 scenario 2) rides no further; the verb assembles its own
-      // record shape (ADR-012 inv.2 — "adds no second uniqueness rule, no
+      // ONLY { ref, nodeId, workspaceId } is lifted off the body — the first
+      // two are passed into the verb, the third SELECTS the workspace the verb
+      // is handed. Any other field a client posts (a forged state/assignmentId/
+      // issuer, task 00 scenario 2) rides no further; the verb assembles its
+      // own record shape (ADR-012 inv.2 — "adds no second uniqueness rule, no
       // bespoke repo check").
       const ref = typeof body?.ref === "string" ? body.ref.trim() : "";
       const nodeId = typeof body?.nodeId === "string" ? body.nodeId.trim() : "";
+      const workspaceId = typeof body?.workspaceId === "string" ? body.workspaceId.trim() : "";
       if (!ref || !nodeId) {
         sendApiError(response, 400, "Both \"ref\" and \"nodeId\" are required.", "invalid-body");
         return;
       }
+      // ADR-012 AMENDMENT ruling 1 — workspaceId is REQUIRED, and a blank/absent
+      // one is a CODED refusal minting nothing. There is deliberately NO default
+      // and NO fallback anywhere on this path: the "intuitive" fallback (absent
+      // workspaceId ⇒ the daemon's own workspace) IS defect F21, so the degree of
+      // freedom is removed by construction (the milestone's own F-38.06b lesson).
+      // A stale client fails LOUDLY here instead of dispatching another
+      // workspace's milestone. The code/status reuse GET /api/mesh/board-url's
+      // existing spelling above — the face's two workspace-addressed routes speak
+      // ONE dialect.
+      if (!workspaceId) {
+        sendApiError(response, 400, "\"workspaceId\" is required.", "invalid-workspace");
+        return;
+      }
 
       try {
+        // ADR-012 AMENDMENT ruling 2 — resolution runs through the SANCTIONED
+        // seam: queryGlobalMeshStatus → status.workspaces[] → projectRoot, the
+        // EXACT two-step GET /api/mesh/board-url already performs above. That
+        // makes the resolution domain EQUAL the render domain by construction
+        // (every workspace the operator can click resolves, and nothing else
+        // does), costs ZERO new imports, and keeps "drill in to this card" and
+        // "assign this card" resolving the SAME id to the SAME project root
+        // through the SAME row. A store fault rides the catch below, coded —
+        // never a fallback.
+        //
+        // REVIEW FIX F-A (architect, 2026-07-24) — the call is BYTE-IDENTICAL to
+        // the board-url precedent above: UNNARROWED, then find the row. Passing
+        // `workspaceId` into the query as well was provably equivalent today,
+        // but that is a property of two query IMPLEMENTATIONS, not of this
+        // seam's contract — and that contract has already been carved
+        // non-uniformly once (queryGlobalRegistry deliberately does not narrow
+        // the node roster, since nodes are machine-wide). The degree of freedom
+        // is removed by construction; a loopback single-user server never needed
+        // the micro-optimisation.
+        const status = await queryGlobalMeshStatus({ ...globalStoreOptions });
+        const row = (status.workspaces ?? []).find((candidate) => candidate.workspaceId === workspaceId);
+        if (!row) {
+          sendApiError(response, 404, `Workspace "${workspaceId}" is not in the mesh projection.`, "workspace-not-found");
+          return;
+        }
+        // The reachability caveat, checked BEFORE loadWorkspace: workspace ids
+        // are path-derived, so a row published by ANOTHER machine into a synced
+        // projection carries a project_root that does not exist HERE. Without
+        // this probe loadWorkspace degrades to an empty config, findWork
+        // resolves nothing, and the operator gets "ref-not-found" — a refusal
+        // that names the WRONG cause. A refusal must name its own cause.
+        if (!row.projectRoot || !existsSync(row.projectRoot)) {
+          sendApiError(response, 409, `Workspace "${workspaceId}" is not checked out on this machine.`, "workspace-not-local");
+          return;
+        }
         // Loaded LAZILY, only for a request that already cleared the CSRF +
-        // shape guards above — mirroring the SEA/CLI's own `loadWorkspace(cwd)`
-        // per-invocation load (never cached across requests; the read routes
-        // above never trigger this at all, so a GET-only test never touches a
-        // workspace object it did not ask for). A malformed/absent config never
-        // throws — loadWorkspace degrades to an empty config (work.mjs's own
-        // contract) — findWork below just resolves nothing for it.
-        const assignWorkspace = await loadWorkspace(resolvedProjectDir, undefined, { env: globalStoreOptions?.env });
-        const result = await assignWork(assignWorkspace, ref, nodeId, { globalWorkStoreOptions: globalStoreOptions ?? {} });
+        // shape + resolution guards above — mirroring the SEA/CLI's own
+        // `loadWorkspace(cwd)` per-invocation load (never cached across
+        // requests; the read routes above never trigger this at all, so a
+        // GET-only test never touches a workspace object it did not ask for).
+        // The dir is the RESOLVED ROW's project root — the workspace the
+        // operator's card belongs to, NEVER this daemon's own launch dir.
+        const assignWorkspace = await loadWorkspace(row.projectRoot, undefined, { env: globalStoreOptions?.env });
+        // ADR-012 AMENDMENT ruling 3 / inv.6 — assert the mint's target BEFORE
+        // minting. assignWork does not take a workspaceId: it DERIVES the id it
+        // stamps from the workspace OBJECT it is handed (resolveItem,
+        // commands/mesh-assign.mjs). So "we resolved the row carefully" is NOT
+        // the same guarantee as "the minted record carries the id the operator
+        // clicked" — a config-level mesh.workspaceId override, a stale
+        // projection row pointing at a moved/re-keyed checkout, or a
+        // case/normalisation difference each diverge the two. Deriving with the
+        // VERB-IDENTICAL expression checks the very value the mint will stamp,
+        // not a lookalike, and makes minting against a workspace other than the
+        // one clicked structurally impossible rather than merely unlikely.
+        const ownWorkspaceId = assignWorkspace.config?.mesh?.workspaceId ?? workspaceIdForProjectRoot(assignWorkspace.projectRoot);
+        if (ownWorkspaceId !== workspaceId) {
+          sendApiError(response, 409, `The workspace resolved for "${workspaceId}" identifies itself as "${ownWorkspaceId}".`, "workspace-id-mismatch");
+          return;
+        }
+        // REVIEW FIX F-B — `issuer` is the CONTROL's own machine identity,
+        // passed EXPLICITLY so it can never fall out of the TARGET workspace's
+        // config (see `controlNodeId` at the top of serveMeshUi). A control that
+        // has no identity at all refuses BY NAME here rather than handing the
+        // verb a null that reaches `issuer TEXT NOT NULL` and surfaces as an
+        // uncoded 500 on a legitimately-clickable card — every other failure on
+        // this path names its own cause.
+        const issuer = await controlNodeId();
+        if (!issuer) {
+          sendApiError(
+            response,
+            409,
+            "This control node has no mesh identity yet — run `aof mesh identity` before dispatching work.",
+            "control-identity-unknown",
+          );
+          return;
+        }
+        const result = await assignWork(assignWorkspace, ref, nodeId, { globalWorkStoreOptions: globalStoreOptions ?? {}, issuer });
         if (!result.ok) {
           // The verb's OWN { ok:false, code } surfaces as a coded non-200 —
           // never a 200, never swallowed (ADR-012 inv.3). The HTTP NUMBER is

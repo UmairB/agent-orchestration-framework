@@ -136,7 +136,7 @@ export const meshUiAssignReadOnlyPostureTests = [
       for (const row of rows) {
         await withAssignRouteFixture(async ({ url, home, workspaceId }) => {
           await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
-          const res = await postAssign(url, { ref: "38/04", nodeId: "worker-a", origin: row.origin, contentType: row.contentType });
+          const res = await postAssign(url, { ref: "38/04", nodeId: "worker-a", workspaceId: "OWN", origin: row.origin, contentType: row.contentType });
           const rows2 = await readAssignmentRows({ home }, workspaceId, "38/04");
           if (row.verdict === "ACCEPTED") {
             assert.equal(res.status, 200, `${row.case} is ACCEPTED (200)`);
@@ -159,12 +159,12 @@ export const meshUiAssignReadOnlyPostureTests = [
       await withAssignRouteFixture(async ({ url, home, workspaceId }) => {
         await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
 
-        const refused = await postAssign(url, { ref: "38/04", nodeId: "ghost", origin: "SAME", contentType: "application/json" });
+        const refused = await postAssign(url, { ref: "38/04", nodeId: "ghost", workspaceId: "OWN", origin: "SAME", contentType: "application/json" });
         assert.ok(refused.status >= 400 && refused.status < 500, "the unknown-node assign is refused");
         const afterRefusal = await readAssignmentRows({ home }, workspaceId, "38/04");
         assert.equal(afterRefusal.length, 0, "NO global_assignments row exists for the item — there is no mint that skipped the gates");
 
-        const accepted = await postAssign(url, { ref: "38/04", nodeId: "worker-a", origin: "SAME", contentType: "application/json" });
+        const accepted = await postAssign(url, { ref: "38/04", nodeId: "worker-a", workspaceId: "OWN", origin: "SAME", contentType: "application/json" });
         assert.equal(accepted.status, 200, "a subsequent same-origin assign for the eligible \"worker-a\" succeeds");
         const afterAccept = await readAssignmentRows({ home }, workspaceId, "38/04");
         assert.equal(afterAccept.length, 1, "EXACTLY ONE gated row was minted");

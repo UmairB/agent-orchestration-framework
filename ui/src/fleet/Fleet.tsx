@@ -21,6 +21,22 @@ import {
   assignableNodeOptions,
 } from "./scope.mjs";
 import type { FleetMilestoneCard, Scope } from "./scope.d.mts";
+// milestone 38 / story 04 / task 06 (DESIGN §Surface 2 Amendment 2026-07-24, F22)
+// — the assign affordance's own state machine, in the house pure-helper pattern
+// (there is no React test harness in this repo): AssignAffordance below holds NO
+// transition logic of its own, it renders exactly what `assignAffordanceView`
+// returns and delegates the whole click to `runAssign`.
+import {
+  POLL_MS,
+  REGION5_NAME_BUDGET_CH,
+  REGION5_CHIP_SLOT_BUDGET_CH,
+  REGION5_DRILLIN_ABBREV_AT_CH,
+  assignAtRest,
+  assignAckExpired,
+  assignAffordanceView,
+  runAssign,
+} from "./assign-affordance.mjs";
+import type { AssignAffordanceState } from "./assign-affordance.d.mts";
 
 // The read-only "fleet mission-control" web surface (milestone 25 / story 02;
 // DESIGN surface 1 → the committed mock `mocks/Mesh.dc.html`). A slim top bar over
@@ -47,7 +63,11 @@ import type { FleetMilestoneCard, Scope } from "./scope.d.mts";
 
 // The client poll cadence (DESIGN default / PRD §7.3): visibility is poll /
 // relay-presence, NEVER a push event stream — the client opens no WebSocket / SSE.
-const POLL_MS = 5000;
+// It is imported from ./assign-affordance.mjs (which owns it beside
+// ASSIGN_SENT_HOLD_MS) because the poll interval and the F22 `Sent` hold are ONE
+// number by design — a hold of exactly one poll interval is what guarantees there
+// is never a moment between the click and a confirmation in which the surface
+// says nothing. Two copies of that number could drift; one cannot.
 // The freshness-label tick — advances the "refreshed Ns ago" age without a re-poll.
 const CLOCK_MS = 1000;
 
@@ -142,6 +162,19 @@ export function Fleet() {
   const nowIso = useMemo(() => new Date(nowMs).toISOString(), [nowMs]);
   const state = pageState({ loading, error, status });
 
+  // milestone 38 / story 04 / task 06 (DESIGN §Surface 2 A8, F22) — on a
+  // successful assign the surface fires EXACTLY ONE additional re-load, so
+  // region 5's m35 `assigned` chip lands within a round trip of the 2xx instead
+  // of up to one poll interval later. It is the SAME `load(scope, { silent:true })`
+  // the ⟳ control fires, handed DOWN to the affordance as `onAssigned`.
+  //
+  // It MUST be the SILENT load: a non-silent one flips the page into its
+  // loading state and UNMOUNTS the populated board, which is a far worse answer
+  // than saying nothing. And it is ONE load — no new cadence, no retry ladder;
+  // the existing POLL_MS poll remains the steady state, and the `Sent` hold is
+  // sized to cover exactly that window if the record is not yet visible.
+  const onAssigned = useCallback(() => void load(scope, { silent: true }), [load, scope]);
+
   return (
     // DESIGN GAP D1 (HIGH, review fix) — `overflow-x-hidden` here is the page-level
     // backstop: milestone cards and long workspace labels should shrink inside the
@@ -168,7 +201,7 @@ export function Fleet() {
         // scenario 1: "does not call the mesh broken or failed").
         <EmptyFleet scope={scope} />
       ) : isGlobalStatus(status) ? (
-        <GlobalScopeView status={status} />
+        <GlobalScopeView status={status} onAssigned={onAssigned} />
       ) : (
         // populated — the two LOCAL card grids. A stale node RENDERS (degraded
         // liveness, never dropped); a nodes-but-no-boards fleet shows the Boards
@@ -336,7 +369,7 @@ function RegionHeader({ label, summary }: { label: string; summary: string }) {
 // still the global-shaped payload — task 01 scenario 3); the CURRENT workspace
 // path is surfaced when the narrowing is active (DESIGN "--local … current
 // workspace path/name is visible").
-function GlobalScopeView({ status }: { status: GlobalMeshStatus }) {
+function GlobalScopeView({ status, onAssigned }: { status: GlobalMeshStatus; onAssigned: () => void }) {
   return (
     <main className="min-w-0 flex-1 px-4 py-7 sm:px-8">
       <div className="mx-auto flex w-full min-w-0 max-w-[1240px] flex-col gap-8">
@@ -346,7 +379,7 @@ function GlobalScopeView({ status }: { status: GlobalMeshStatus }) {
           </p>
         ) : null}
         <WorkspacesSummary workspaces={status.workspaces} />
-        <MilestonesList items={status.items} workspaces={status.workspaces} nodes={status.nodes} />
+        <MilestonesList items={status.items} workspaces={status.workspaces} nodes={status.nodes} onAssigned={onAssigned} />
         <GlobalNodePanel nodes={status.nodes} />
         <DiagnosticsRegion status={status} />
       </div>
@@ -389,7 +422,7 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
 // consumers and local filtering, but this overview intentionally stays at the
 // milestone level and reuses the work-board card language: status ring/chip,
 // progress track, and child story dots derived from the same flat item stream.
-function MilestonesList({ items, workspaces, nodes }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[]; nodes: GlobalNode[] }) {
+function MilestonesList({ items, workspaces, nodes, onAssigned }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[]; nodes: GlobalNode[]; onAssigned: () => void }) {
   const milestones = milestoneCardModels(items);
   const workspaceFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId) ?? null;
   const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
@@ -408,6 +441,7 @@ function MilestonesList({ items, workspaces, nodes }: { items: GlobalWorkItem[];
               milestone={milestone}
               workspace={workspaceFor(milestone.item.workspaceId)}
               nodes={nodes}
+              onAssigned={onAssigned}
             />
           ))}
         </div>
@@ -416,7 +450,7 @@ function MilestonesList({ items, workspaces, nodes }: { items: GlobalWorkItem[];
   );
 }
 
-function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null; nodes: GlobalNode[] }) {
+function GlobalMilestoneCard({ milestone, workspace, nodes, onAssigned }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null; nodes: GlobalNode[]; onAssigned: () => void }) {
   const m = milestone;
   const isDone = m.item.status === "done";
   const progressLabel = m.total === 0 ? "not started" : "stories done";
@@ -436,6 +470,12 @@ function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: Fleet
     }
   }, [m.item.workspaceId, m.item.ref]);
 
+  // DG-19: `·` is a PLACEHOLDER — it stands in for an absent token so the row
+  // is not empty. Once the chip occupies the cluster the row is not empty, and
+  // §2a's own rule already says the chip REPLACES the placeholder. The build
+  // rendered both, leaving a lone `·` floating between the chip and the drill-in
+  // and spending width the yield order then had to claw back.
+  const secondaryIsPlaceholder = !(m.inReview > 0) && !isDone;
   let secondaryAttention = <span className="text-muted-foreground">·</span>;
   if (m.inReview > 0) {
     secondaryAttention = <span className="text-accent">◔ {m.inReview} in review</span>;
@@ -449,10 +489,21 @@ function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: Fleet
   // replacing the muted `·` placeholder when the item carries one. It never
   // displaces the right-aligned "Open board →" drill-in.
   const assignment = m.item.assignment;
+  // DG-19, the last clause: `Open board →` gives up its WORDS whole once the
+  // chip's target alone needs the room. A discrete rule, not a shrink factor —
+  // measured, the 1000:1 ratio still let the target truncate (the drill-in
+  // yielded 13.1px, the chip 17.5px), because flexbox distributes a squeeze and
+  // cannot express "this element goes away so that one can be whole".
+  const abbreviateDrillIn = !!assignment
+    && `→ ${assignment.targetNodeId}`.length > REGION5_DRILLIN_ABBREV_AT_CH;
+  // DG-20's fit gate + DG-22's alignment consequence, decided once so the two
+  // cannot disagree: when the name goes, the cluster becomes the row's leading
+  // group and must be left-aligned, with only the drill-in pushed right.
+  const nameDropped = !!assignment && workspaceName.length > REGION5_NAME_BUDGET_CH;
   const attention = assignment ? (
     <>
       <AssignmentChip assignment={assignment} />
-      {secondaryAttention}
+      {secondaryIsPlaceholder ? null : secondaryAttention}
     </>
   ) : (
     secondaryAttention
@@ -508,16 +559,110 @@ function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: Fleet
           )}
         </div>
 
+        {/* Region 5 — the footer / attention cluster. DG-13 clause 5 (DESIGN
+            §Surface 2 Amendment 2026-07-24 (b); DG-11 re-scoped here) pins the
+            WIDTH PRIORITY: chip label + `→ <target>` in FULL > `Open board →` >
+            the workspace name. The judged render truncated the target in EVERY
+            frame that had one (`→ umairs-m…`, `→ aaa-firs…`) — "a target that
+            cannot be read is a chip that has not spoken" — because the name held
+            a content-sized basis and the cluster absorbed the shrink instead.
+            The name took a ZERO basis (`flex-1`) so it would be fed only what is
+            LEFT — but `flex-1` + `truncate` does not DROP, it STUBS, and the
+            re-render caught it rendering `l…` / `le…` / `let…` for
+            `let-shield-portal` in every chip-bearing frame (DG-16, which also
+            falsified DG-11's "does not reproduce" note). Meanwhile the cluster's
+            own `shrink-0` children overflowed their `min-w-0` wrapper and PAINTED
+            OVER `Open board →` (DG-15) — a priority list built as a PAINT order
+            where the rule demands a YIELD order.
+
+            The row is now an explicit yield order, and DG-13 clause 5 gains its
+            SIXTH clause: NO TWO ELEMENTS IN REGION 5 MAY OCCUPY THE SAME PIXELS.
+            A lower-priority element gives up space; it never stays put and gets
+            overprinted. In order of who yields first:
+              1. the workspace NAME — full or nothing (DG-16), decided by a fit
+                 budget (DG-20). Truncation is for elements whose PREFIX still
+                 carries meaning; a workspace name's does not. It is dropped WITH
+                 its separator, and it costs nothing: the WORKSPACES strip at the
+                 top of this same page carries it in full.
+              2. the chip's `· when · note` tail — dropped WHOLE on its own
+                 budget (DG-19), never ellipsised to a `· just…` fragment.
+              3. `Open board →` gives up its WORDS whole, degrading to its pinned
+                 `→` with the label in `title` — so the affordance is never
+                 invisible and never a mangled prefix.
+              4. the chip's `→ <target>` — clause 5's protected fact, which never
+                 gives way while anything above it still can.
+
+              Each step is a DISCRETE budgeted drop, not a shrink factor. That is
+              DG-19's real lesson, and it was measured rather than reasoned: with
+              a 1000:1 shrink ratio the drill-in still yielded only 13.1px while
+              the chip — weighted 1 — yielded 17.5, so the target truncated
+              anyway. Flexbox distributes a squeeze; it cannot express "this
+              element goes away so that one can be whole". The shrink factors
+              remain underneath as a backstop, but they are no longer the rule.
+
+              DG-22: and the leading group stays LEFT. When the name is dropped
+              the row's free space would otherwise sit in front of the chip under
+              `justify-end`, so the footer's leading edge — the column the eye
+              scans for "what state is this card in" — drifted card to card for a
+              reason the reader cannot see. Only the drill-in is right-aligned. */}
         <div className="mt-4 flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-          <span className="mono min-w-0 truncate text-muted-foreground" title={workspaceName}>{workspaceName}</span>
-          <span className="flex min-w-0 shrink items-center gap-3">
+          {/* The gate is FIT, not chip-presence (DG-20). Gating on `attention`
+              would drop the name permanently — the cluster is truthy on an idle
+              card too — and gating on the CHIP alone makes absence-of-name an
+              accidental second signal for "this card has an assignment", which
+              the chip already states. So the chip is only what applies the
+              PRESSURE; the budget below is what decides. A name that still fits
+              beside the chip keeps rendering (`aof` does); one that cannot is
+              dropped WHOLE, with its separator — never stubbed to `l…`.
+
+              It is `shrink-0`, NOT `flex-1`: `flex-1` carries `flex-grow:1`, so
+              a KEPT name expanded into the row's free space and squeezed the
+              cluster until the chip's target truncated — the name outranking the
+              target, which is c5 backwards. It no longer needs to grow or shrink,
+              because the fit budget above already guarantees it is short. */}
+          {nameDropped ? null : (
+            <span className="mono shrink-0 text-muted-foreground" title={workspaceName}>{workspaceName}</span>
+          )}
+          <span className={`flex min-w-0 flex-1 items-center gap-3 ${nameDropped ? "justify-between" : "justify-end"}`}>
             {attention}
-            <span className="shrink-0 font-semibold text-primary group-hover:underline">{opening ? "Opening board..." : openError ? "Open failed" : "Open board →"}</span>
+            {/* An EXPLICIT floor, sized to the arrow — the picker-floor idiom
+                (DG-13 c2) applied one element to the right, and the only shape
+                that satisfies DG-19 in both directions. `min-w-0` alone let this
+                box shrink to ZERO while its own pinned `→` overflowed it and sat
+                OUTSIDE the card's content box (the shrink-0-inside-min-w-0 shape
+                that caused DG-15). Removing `min-w-0` fixed the escape and
+                created the opposite defect: `min-width:auto` resolved to this
+                box's FULL content width, so it never yielded at all and the
+                chip's target truncated instead — measured, not reasoned:
+                78.7px wide with a 78.8px automatic minimum. An explicit
+                `min-w-3.5` (14px ≈ the arrow's 13.7px) permits the shrink AND
+                bounds it, so the words give way, the arrow always has its own
+                room, and nothing leaves the card. */}
+            <span
+              className="flex min-w-3.5 shrink-1000 items-baseline font-semibold text-primary group-hover:underline"
+              title={opening ? "Opening board..." : openError ? "Open failed" : "Open board"}
+            >
+              {abbreviateDrillIn && !opening && !openError ? null : (
+                <span className="min-w-0 truncate">{opening ? "Opening board..." : openError ? "Open failed" : "Open board"}</span>
+              )}
+              {/* `whitespace-pre` keeps the separating space: a flex item's own
+                  leading whitespace is otherwise collapsed, and the label would
+                  read `Open board→`. The space is part of the label's identity,
+                  not decoration. */}
+              {opening || openError ? null : <span className="shrink-0 whitespace-pre">{" →"}</span>}
+            </span>
           </span>
         </div>
       </button>
 
-      <AssignAffordance ref={m.item.ref} nodes={nodes} />
+      {/* milestone 38 / story 04 — ADR-012 AMENDMENT (BLOCKER F21): the
+          affordance is handed the ITEM's OWN workspaceId, the SAME value the
+          drill-in button above already passes to fleetApi.boardUrl. This face is
+          GLOBAL — every card on it may belong to a different workspace — so an
+          assign that did not carry it resolved the ref against the DAEMON's own
+          workspace and, on a ref collision, dispatched a completely different
+          milestone off a `200 ok`. */}
+      <AssignAffordance ref={m.item.ref} workspaceId={m.item.workspaceId} nodes={nodes} onAssigned={onAssigned} />
 
       {/* milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 + ADR-014,
           DESIGN §Surface 3) — the READ-ONLY terminal-VIEW for THIS card's
@@ -533,37 +678,82 @@ function GlobalMilestoneCard({ milestone, workspace, nodes }: { milestone: Fleet
 }
 
 // The "assign to node" affordance (milestone 38 / story 04; ARCHITECTURE
-// ADR-012) — a worker-node picker, PRODUCER-FED from the SAME real roster the
-// node panel renders (`assignableNodeOptions`, ./scope.mjs), and the "Assign"
-// action, which POSTs the ONE fleet-face mutation route (`fleetApi.assign`).
-// Empty roster ⇒ the picker is disabled (there is nothing to assign to yet) —
-// never an invented placeholder target. A gate refusal (unknown/ineligible
-// node, already-active item, …) surfaces as an inline error, coded by the verb
+// ADR-012 + its 2026-07-24 AMENDMENT; DESIGN §Surface 2 A1–A11) — a worker-node
+// picker, PRODUCER-FED from the SAME real roster the node panel renders
+// (`assignableNodeOptions`, ./scope.mjs), and the "Assign" action, which POSTs
+// the ONE fleet-face mutation route (`fleetApi.assign`). Empty roster ⇒ the
+// picker is disabled (there is nothing to assign to yet) — never an invented
+// placeholder target. A gate refusal (unknown/ineligible node, already-active
+// item, …) surfaces as an inline `destructive` error, coded by the verb
 // (ADR-012 inv.3) — this affordance re-implements no arbitration of its own.
-// On success, the assign is left to the existing 5s poll to reflect the
-// resulting `assigned` chip (AssignmentChip, above) — no bespoke refresh path.
-function AssignAffordance({ ref, nodes }: { ref: string; nodes: GlobalNode[] }) {
+//
+// F21 (BLOCKER, live soak 2026-07-24): the POST carries the ITEM's OWN
+// `workspaceId` — this face is GLOBAL, so without it the route resolved every
+// ref against the daemon's own workspace and mis-dispatched.
+//
+// F22 (live soak 2026-07-24; DESIGN §Surface 2 Amendment): a `200 ok` used to
+// produce NO transition, NO indicator and NO chip — the operator only knew it
+// had worked by reading the raw API response. Both halves of the designer's
+// answer are built here, and BOTH live in ./assign-affordance.mjs so they are
+// exercisable without a React harness:
+//   (a) on success the surface fires EXACTLY ONE additional SILENT re-load
+//       (`onAssigned`, wired in <Fleet> to `load(scope, { silent:true })`), so
+//       region 5's m35 `assigned` chip lands within a round trip;
+//   (b) the SAME button reads `Sent` — `muted`, disabled, the `primary` tint
+//       DROPPED, the picker frozen on the chosen node — held for exactly one
+//       poll interval, then decaying to the terminal resting state with nothing
+//       left over. It reports the CALL; region 5 reports the ASSIGNMENT.
+// This component holds NO transition logic of its own: every rendered fact
+// comes from `assignAffordanceView` and the click is `runAssign`.
+function AssignAffordance({ ref, workspaceId, nodes, onAssigned }: { ref: string; workspaceId: string; nodes: GlobalNode[]; onAssigned: () => void }) {
   const options = assignableNodeOptions(nodes);
   const [selected, setSelected] = useState(options[0] ?? "");
-  const [assigning, setAssigning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const disabled = options.length === 0;
+  const [ack, setAck] = useState<AssignAffordanceState>(assignAtRest);
+  // REVIEW FIX QA-a (2026-07-24) — F21's defect class, relocated to the NODE
+  // axis: the row must never NAME one target and POST another. This face is a
+  // long-lived monitor that re-polls every POLL_MS, so the roster under the
+  // picker CHANGES while the row is mounted (a node's registry descriptor stops
+  // resolving and `queryGlobalRegistry` drops it from the roster, while
+  // `assignWork`'s node-known gate reads `global_nodes` DIRECTLY — so a node can
+  // leave the picker and stay assign-eligible). Remembered state alone went
+  // stale: the <select>'s DOM value coerces to the first surviving option while
+  // React state kept the departed id, so the operator read one name and the POST
+  // carried another — and `Sent` then sat beside the WRONG name.
+  //
+  // So the target is DERIVED, not remembered: `selected` is the operator's
+  // preference and `target` is the only value this component renders OR sends.
+  // One value cannot disagree with itself.
+  const target = options.includes(selected) ? selected : (options[0] ?? "");
+  const view = assignAffordanceView({ phase: ack.phase, error: ack.error, detail: ack.detail, hasOptions: options.length > 0, selected: target });
+
+  // A7 — the acknowledgment is held for `view.holdMs` (exactly one poll
+  // interval) and then DECAYS to rest: picker enabled, the same node still
+  // selected, `Assign →` back in its `primary` tint, message slot empty.
+  // Nothing persists. A view with `holdMs === null` schedules nothing, which is
+  // what makes "no hold on a refusal" structural rather than remembered.
+  const holdMs = view.holdMs;
+  useEffect(() => {
+    if (holdMs == null) return;
+    const timer = setTimeout(() => setAck(assignAckExpired), holdMs);
+    return () => clearTimeout(timer);
+  }, [holdMs, ack.phase]);
 
   const onAssign = useCallback(
     async (event: React.MouseEvent) => {
       event.stopPropagation();
-      if (!selected) return;
-      setAssigning(true);
-      setError(null);
-      try {
-        await fleetApi.assign(ref, selected);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Assign failed");
-      } finally {
-        setAssigning(false);
-      }
+      if (!target) return;
+      await runAssign(
+        // REVIEW FIX F-F — bound to its own object rather than handed over
+        // unbound: `fleetApi.assign` is safe standalone today only because its
+        // body happens to touch no `this`, which is a property of the current
+        // implementation, not of the seam.
+        { assign: fleetApi.assign.bind(fleetApi), onAssigned, onState: setAck },
+        // QA-a — the SAME derived value the row renders. The name the operator
+        // reads and the id the route receives are one datum.
+        { ref, nodeId: target, workspaceId }
+      );
     },
-    [ref, selected]
+    [ref, workspaceId, target, onAssigned]
   );
 
   return (
@@ -571,15 +761,23 @@ function AssignAffordance({ ref, nodes }: { ref: string; nodes: GlobalNode[] }) 
       className="mt-3 flex min-w-0 items-center gap-2 border-t border-border pt-3 text-xs"
       onClick={(event) => event.stopPropagation()}
     >
+      {/* DG-13 clause 2 (DESIGN §Surface 2 Amendment 2026-07-24 (b)) — the
+          picker has a FLOOR and never yields to the message. The real-assign
+          render caught `min-w-0` letting it collapse to a BARE CHEVRON (~26px,
+          down from ~284px) in the refused frame, so the operator could not see
+          which node was selected at the exact moment they had to re-aim. The
+          floor is the helper's (≥14ch of the node id PLUS the select's own
+          chrome) and is phase-independent: no state can shrink it. */}
       <select
         aria-label={`Assign ${ref} to a worker node`}
-        value={selected}
-        disabled={disabled || assigning}
+        value={target}
+        disabled={view.pickerDisabled}
         onChange={(event) => setSelected(event.target.value)}
-        className="mono min-w-0 flex-1 truncate rounded-md border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground disabled:opacity-50"
+        style={{ minWidth: view.pickerMinWidth }}
+        className="mono flex-1 truncate rounded-md border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground disabled:opacity-50"
       >
-        {disabled ? (
-          <option value="">No worker nodes yet</option>
+        {view.pickerPlaceholder ? (
+          <option value="">{view.pickerPlaceholder}</option>
         ) : (
           options.map((nodeId) => (
             <option key={nodeId} value={nodeId}>
@@ -588,15 +786,38 @@ function AssignAffordance({ ref, nodes }: { ref: string; nodes: GlobalNode[] }) 
           ))
         )}
       </select>
+      {/* A9/A10 — the `muted` acknowledgment DROPS the low-emphasis `primary`
+          tint rather than adding anything to it (the quietest state the row ever
+          renders): same box, same padding, same type, same height — only the
+          label and the tint change. No mark, no glyph, no toast, no motion.
+
+          DG-13 clause 1 — and the same WIDTH. The render caught the action
+          narrowing 67px -> 44px on the `Sent` label swap, with the picker
+          absorbing the difference, so the row reflowed on every state change.
+          The inner span reserves the helper's constant width (sized to the
+          longest label the action ever reads, `Assigning…`) in EVERY state
+          including disabled, so a label swap can no longer move anything. It is
+          a sizing shell, not a second element in the row: the row's children
+          are still picker · action · message. */}
       <button
         type="button"
-        disabled={disabled || assigning || !selected}
+        disabled={view.actionDisabled}
         onClick={onAssign}
-        className="shrink-0 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+        className={
+          view.actionTone === "muted"
+            ? "shrink-0 rounded-md border border-border bg-muted px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition disabled:cursor-not-allowed"
+            : "shrink-0 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50"
+        }
       >
-        {assigning ? "Assigning…" : "Assign →"}
+        <span className="block whitespace-nowrap text-center" style={{ width: view.actionWidth }}>{view.actionLabel}</span>
       </button>
-      {error ? <span className="mono min-w-0 truncate text-[10.5px] text-destructive" title={error}>{error}</span> : null}
+      {/* DG-13 clause 3 — the message slot is the element that YIELDS: it takes
+          what is left, truncates, and carries the full server text in its native
+          `title` (the idiom DG-10 already uses for the session id). What it
+          RENDERS is the shaped, outcome-first copy (clause 4) — `already
+          assigned → <holder>`, not the sentence that spends its width on the ref
+          region 1 already shows. */}
+      {view.message ? <span className="mono min-w-0 shrink truncate text-[10.5px] text-destructive" title={view.messageTitle ?? view.message}>{view.message}</span> : null}
     </div>
   );
 }
@@ -985,6 +1206,13 @@ function AssignmentChip({ assignment }: { assignment: WorkAssignment }) {
   const check = chip.mark === "a ✓";
   const bang = chip.mark === "a !";
   const at = assignment.assignedAt ?? assignment.updatedAt;
+  // DG-19's substance: the tail is BUDGETED, not truncated. A squeeze (however
+  // lopsided the shrink factors) cannot express a terminal drop — it left the
+  // LOWEST-priority element alive as `· just…` while the drill-in's words, ranked
+  // above it, rendered zero glyphs. When the whole slot does not fit, the tail
+  // goes WHOLE and the target keeps the room; the `title` still carries all of it.
+  const tailText = `${at ? ` · ${relativeTime(at)}` : ""}${chip.note ? ` · ${chip.note}` : ""}`;
+  const slotFits = `→ ${assignment.targetNodeId}${tailText}`.length <= REGION5_CHIP_SLOT_BUDGET_CH;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <span
@@ -1010,11 +1238,33 @@ function AssignmentChip({ assignment }: { assignment: WorkAssignment }) {
           shrinkable/truncating element in the assignment attention-row cluster —
           the pill above and the sibling "Open board →" label both stay shrink-0
           (see GlobalMilestoneCard), so a long nodeId/time/note truncates here
-          instead of displacing or clipping the drill-in. */}
-      <span className="mono min-w-0 truncate text-[11px] text-muted-foreground" title={`→ ${assignment.targetNodeId}${at ? ` · ${relativeTime(at)}` : ""}${chip.note ? ` · ${chip.note}` : ""}`}>
-        → {assignment.targetNodeId}
-        {at ? ` · ${relativeTime(at)}` : ""}
-        {chip.note ? ` · ${chip.note}` : ""}
+          instead of displacing or clipping the drill-in.
+
+          DG-13 clause 5 (Amendment 2026-07-24 (b)) splits that ONE slot in two,
+          because "truncates here" was truncating the wrong half: the judged
+          render showed `→ umairs-m…` in every frame carrying a chip. The
+          `→ <target>` half is what the chip EXISTS to say and never truncates;
+          the `· <when> · <note>` tail is "all else" and is the half that yields.
+          `whitespace-pre` (rather than `truncate`'s `nowrap`) keeps the tail's
+          leading separator space, so the rendered text is byte-identical to the
+          single-slot version. The full string stays in the `title` on the
+          wrapper, so nothing is lost when the tail is cut.
+
+          DG-15 (2026-07-24 re-render) — the target half was `shrink-0` inside a
+          `min-w-0` wrapper with nothing clipping it, so a 30-character node id
+          OVERFLOWED the wrapper and PAINTED OVER the sibling `Open board →`:
+          the id's trailing glyph and the action's leading glyph occupied the
+          same pixels, destroying BOTH. Clause 5 outranks `Open board →` — but it
+          expresses that as a YIELD order, never a paint order. The target now
+          shrinks (factor 1) only after `Open board →` (factor 999) and the tail
+          (factor 9999) are exhausted, and when it finally must, it truncates
+          INSIDE its own box. The whole string is still in the wrapper's
+          `title`. */}
+      <span className="mono flex min-w-0 items-center text-[11px] text-muted-foreground" title={`→ ${assignment.targetNodeId}${at ? ` · ${relativeTime(at)}` : ""}${chip.note ? ` · ${chip.note}` : ""}`}>
+        <span className="min-w-0 shrink truncate whitespace-pre">→ {assignment.targetNodeId}</span>
+        {slotFits && tailText ? (
+          <span className="min-w-0 shrink-1000000 overflow-hidden text-ellipsis whitespace-pre">{tailText}</span>
+        ) : null}
       </span>
     </span>
   );

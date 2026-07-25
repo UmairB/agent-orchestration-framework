@@ -871,6 +871,199 @@ during the soak's provisioning:
 - **DOCUMENTED DEFAULT for STATE.md:** endpoint = `POST /api/mesh/assign` `{ ref, nodeId }`; admission = loopback-bound + same-origin local-admission, no auth token this story (a networked multi-operator face needs a real gate — explicitly out of scope). Security (T13) reviews whether local-admission suffices.
 - **`acd-fleet-face-single-mutation-route` is SPEC, armed at BUILD** — the route does not exist yet; armed against the real handler.
 
+### AMENDMENT (2026-07-24, `aof:continue 38/04` closing BLOCKER F21 — decision bullet 1's WIRE SHAPE is **CHANGED**: `workspaceId` becomes a REQUIRED third field and the route resolves the ref against the ITEM's OWN workspace. The daemon's own project dir is never again the workspace `assignWork` is handed. Invariants 1-4 stand unchanged; two NEW invariants are added)
+
+**This amendment CHANGES a decision — it does not ratify one.** Decision bullet 1 above says the body is
+`{ ref, nodeId }`. That is now WRONG and is superseded by this block. Everything else in ADR-012 — the
+verb-wrapping posture, the same-origin/loopback admission, the coded-non-200 discipline, the one-route
+read-only exception — stands verbatim.
+
+**What was falsified, confirmed at source (VERIFICATION §"Soak 04", 2026-07-24; the first live two-machine soak
+of this milestone).** The route lifts ONLY `{ ref, nodeId }` off the body (`mesh-ui-serve.mjs:222-232`) and then
+calls `loadWorkspace(resolvedProjectDir, …)` (`:242`) — **the daemon's own launch project dir** — before
+`assignWork(assignWorkspace, ref, nodeId, ctx)` (`:243`). But the fleet face is **GLOBAL**: `GET /api/mesh/status`
+serves `queryGlobalMeshStatus`, so the cards on screen come from EVERY workspace on the machine (102 milestones
+across 5 workspaces on the operator's control node), and every card renders an `Assign →`. There is therefore no
+`workspaceId` on the wire at all, and the route is **structurally incapable** of targeting the workspace the card
+belongs to. Measured live: the operator clicked *"Homedata Live Property Data"* (`ref 18`, `let-shield-portal`,
+workspace `1f164bd03ea535da`); the route returned **`200 ok`** and minted an assignment for `ref 18` in the
+CONTROL's OWN `aof` workspace (`9db1fd84f5895e38`) — an entirely different milestone. Where the ref collides it
+**silently dispatches the wrong work off a correct-looking 200**; where it does not, it fails. This is the
+**ADR-010 "Gap A" class** — *resolve per-assigned-workspace, never globally from the control's own config* —
+which story 03 closed for the App identity (ADR-011) and story 02 closed for `cloneUrl`, repeated unnoticed at
+the assign seam. The producer-fed discipline (ADR-008) did not catch it because story 04's tasks 00-03 drive the
+route against the server's OWN workspace, which is the only workspace a single-workspace fixture has: **a seam
+exercised only in the configuration where it cannot fail.**
+
+**Codebase-graph grounding (fresh, this amendment — `aof graph build src`, 2026-07-24: 2011 nodes / 4853 edges /
+94 communities, 8 files re-extracted).** `aof graph impact` gives the exact coupling, as ACTUAL structure, not
+inference:
+- `src/mesh-ui-serve.mjs` → dependents ← **3** (`src/cli.mjs`, the one production importer, plus two references
+  under `wiki/work/35_.../reference/retired-dispatch-tests/`); dependencies → **6** (`asset-base`, `board-serve`,
+  `commands/mesh-assign`, `global-mesh-query`, `mesh-terminal-mirror`, `work`). That six-edge import list IS
+  invariant 4 — every candidate below is judged first by what it does to that list.
+- `src/global-mesh-query.mjs` → dependents ← **1**: `mesh-ui-serve.mjs` itself, and nothing else. It is a
+  PRIVATE query surface for this face (dependencies → 4: `assignment-record`, `global-node-registry`,
+  `global-work-store`, `workspace`). Reaching further into it costs **zero** new edges and has a blast radius of
+  exactly one file — this face.
+- `src/mesh-presence.mjs` → dependents ← **10** (heartbeat, identity, run-start, `control-stream-server`,
+  `global-node-registry`, `mesh-assignment-reclaim`, `mesh-launcher`, `mesh-lease`, `mesh-worker-execution`, +1
+  retired); dependencies → **7**, including `commands/mesh-assign.mjs`, `global-work-store.mjs`,
+  `mesh-store.mjs`, `mesh-session.mjs`, `run-store.mjs`. It is a mesh-core **hub that owns presence WRITES**.
+- `src/commands/mesh-assign.mjs` → dependents ← **4** (`cli`, `global-work-publisher`, `mesh-presence`,
+  `mesh-ui-serve`) — the verb stays the one sanctioned door; nothing below adds a second mint path.
+
+The graph informs; the ruling is the architect's call.
+
+**RULING 1 — the wire shape is `{ ref, nodeId, workspaceId }`, all three REQUIRED. A missing `workspaceId` is a
+CODED REFUSAL, never a fallback to the server's own workspace.**
+
+The milestone's own F-38.06b lesson governs: *"a config field that silently breaks a feature on its most
+INTUITIVE value is a footgun; remove the wrong degree of freedom by CONSTRUCTION rather than document it."*
+Applied here, the "intuitive" fallback — *absent `workspaceId` ⇒ use the daemon's own workspace* — **IS the
+defect**, not a convenience beside it. An optional field would preserve F21 exactly for every client that
+forgets it, and would make the failure silent again. So the degree of freedom is removed by construction:
+
+- `workspaceId` is REQUIRED on the body. Blank/absent ⇒ **`invalid-workspace`, HTTP 400**, minting nothing.
+  (Route-level code, reusing the vocabulary `GET /api/mesh/board-url` already speaks for a blank workspaceId at
+  `:162-165` — the face's two workspace-addressed routes must not invent two dialects.)
+- **There is NO default and NO fallback anywhere on this path.** Not on an absent field, not on an unresolvable
+  id, not on a store fault. `resolvedProjectDir` — the daemon's own launch dir — is simply not a value the assign
+  branch may read; it remains correct for `GET /api/mesh/status`'s `?scope=local` narrowing, which is a genuinely
+  self-referential read.
+- **The blast radius of REQUIRED is deliberate and desirable:** the currently-shipped UI client
+  (`ui/src/fleet/api.ts:258`, `assign(ref, nodeId)`) will start receiving a loud 400 until it is updated. That is
+  the point — a stale client fails VISIBLY instead of dispatching the wrong milestone. The datum it must send
+  already exists on every card: `m.item.workspaceId`, which the drill-in button next to it already passes to
+  `fleetApi.boardUrl(m.item.workspaceId, m.item.ref)` (`ui/src/fleet/Fleet.tsx:431`). The affordance is one
+  prop away from correct; `AssignAffordance` is simply the one place on the card that was never handed it.
+
+**RULING 2 — resolution goes through candidate (a): `queryGlobalMeshStatus()` → `status.workspaces[]` →
+`projectRoot`, the EXACT seam `GET /api/mesh/board-url` already uses. Candidate (b) (`resolveWorkspaceProjectRoot`
+from `mesh-presence.mjs`) is REJECTED.**
+
+Both candidates resolve a `workspaceId` to a project root and both already ship. (a) wins on three grounds, in
+order of weight:
+
+1. **(b) would require WEAKENING invariant 4 to fix a bug.** Invariant 4's deny-list is
+   `./mesh-(store|presence|registry|sync).mjs` — `mesh-presence.mjs` is named in it explicitly, and the module
+   header's isolation guarantees ("it imports the single global query surface plus the board launcher, not
+   low-level work/run/mesh writers") say the same in prose. Per the graph, that import would hand the read-only
+   face an edge into a **10-dependent hub that owns presence writes** and itself pulls `mesh-store`,
+   `run-store`, `mesh-session`, `global-work-store` and a SECOND path to `commands/mesh-assign`. Carving an
+   exception into a pinned invariant, to close a defect, is how invariants stop meaning anything.
+2. **(a) makes the resolution domain EQUAL the render domain, by construction.** `status.workspaces[]` is the
+   UNION of the work-projection's `workspaces` rows and the registry descriptors (`global-mesh-query.mjs:168-196`),
+   and every card's item carries a `workspaceId` drawn from those same projection rows. So **every workspace the
+   operator can click resolves, and nothing else does** — the route can only target something the face actually
+   rendered. (b) resolves against `global_workspace_descriptors`, a DIFFERENT (overlapping, not identical) set —
+   i.e. a route that could target a workspace the UI never showed, and could fail to resolve one it did.
+3. **(a) costs zero new edges and makes the face's two workspace-addressed routes agree.** No import changes:
+   `queryGlobalMeshStatus` is already imported (`:61`), and the existence/identity checks below use `existsSync`
+   (`:50`) and the ALREADY-IMPORTED `workspaceIdForProjectRoot` (`:61`, which is `workspaceIdFor` re-exported —
+   `global-mesh-query.mjs:29`). Invariant 4's import list stays **byte-identical**. And "drill in to this card"
+   and "assign this card" then resolve the SAME id to the SAME project root through the SAME row — a divergence
+   between those two would be its own future F21.
+
+The shape, pinned: resolve `status.workspaces.find(w => w.workspaceId === requested)`, take that row's
+`projectRoot`, and `loadWorkspace(projectRoot, …)` — the same two-step `boardUrlForWorkspace` performs at
+`:174` → `:472`. `assignWork` is then handed THAT workspace object, verbatim, with no other change to the call.
+
+**RULING 3 — YES, the route MUST ASSERT the resolved workspace's own id equals the requested one, and refuse
+(coded) on mismatch. It is structurally impossible to mint against a workspace other than the one clicked.**
+
+`assignWork` does not take a workspaceId; it DERIVES the id it stamps from the workspace OBJECT it is handed —
+`resolveItem`: `workspace.config?.mesh?.workspaceId ?? workspaceIdFor(workspace.projectRoot)`
+(`src/commands/mesh-assign.mjs:88-91`). So "we resolved the row carefully" is NOT the same guarantee as "the
+minted record carries the id the operator clicked". The two diverge for real reasons: a workspace whose config
+sets an explicit `mesh.workspaceId` override that differs from its path-derived id; a stale projection row whose
+`project_root` now points at a moved/re-keyed checkout; a path whose case/normalization differs. In each case the
+un-asserted route mints against X while the operator clicked W — **F21's exact shape, one level down**. The
+assertion converts careful resolution into an impossibility:
+
+- Derive the resolved workspace's own id with the SAME expression the verb uses — `assignWorkspace.config?.mesh
+  ?.workspaceId ?? workspaceIdForProjectRoot(assignWorkspace.projectRoot)` — so the route checks the very value
+  the mint will stamp, not a lookalike. (`workspaceIdForProjectRoot` IS `workspaceIdFor`; one derivation in the
+  system, never two.)
+- If it does not `!==`-match the requested id: **`workspace-id-mismatch`, HTTP 409**, minting nothing. PRE-mint,
+  always — a post-mint check would be a mis-dispatch already committed.
+
+**The coded refusals this route owns, and their HTTP mapping.** These are ROUTE-level codes, sent directly with
+their pinned status through the existing `sendApiError` envelope — they are NOT added to `ASSIGN_GATE_STATUS`,
+which maps the VERB's codes and stays untouched:
+
+| code | HTTP | when |
+| --- | --- | --- |
+| `invalid-workspace` | **400** | `workspaceId` absent/blank on the body (the anti-fallback refusal) |
+| `workspace-not-found` | **404** | no `status.workspaces[]` row for that id — it is not in the mesh projection |
+| `workspace-not-local` | **409** | the row EXISTS but its `projectRoot` does not resolve on THIS machine |
+| `workspace-id-mismatch` | **409** | the loaded workspace's own derived id `!==` the requested id |
+
+`invalid-workspace`/`workspace-not-found` reuse the board-url route's existing spelling and status verbatim.
+The verb's own four gate codes (`ref-not-found` 404, `assignment-target-unknown` 404,
+`assignment-repo-unavailable` 409, `assignment-already-active` 409) are unchanged and still surface through
+`assignGateStatus`. Every refusal above mints nothing and returns; none is ever a 200 (invariant 3, unchanged).
+
+**The reachability caveat, RECORDED — and its scope, held.** Workspace ids are **path-derived**
+(`workspaceIdFor` = sha256 of the lower-cased resolved project root, `global-work-store.mjs:17-20`), so the same
+repo carries a DIFFERENT id per machine (the control's `aof` = `9db1fd84f5895e38`, the worker's =
+`f693d197edbbb992`). What that DOES mean here: the id on this wire is the **CONTROL-side** id, resolved against
+the CONTROL's own projection, to pick which local checkout the control reads the item from — that is all F21 is
+about, and it is fully closed by rulings 1-3. What it does NOT mean: this amendment does **not** touch how a
+WORKER resolves a control-authored workspaceId to its own checkout — that is the story 01/03 clone-on-miss +
+`global_node_workspaces` membership path (ADR-005/ADR-010/ADR-011), and widening into it here would be scope
+creep on a blocker fix. But the seam between the two is pinned explicitly: **a requested `workspaceId` whose
+stored `project_root` is a path that does not exist on THIS machine — the ordinary shape of a row published by
+ANOTHER machine into a synced projection — is a LOUD coded refusal (`workspace-not-local`, 409), checked BEFORE
+`loadWorkspace`, never a fallback and never a silent degrade.** Without that explicit check the case is not
+benign: `loadWorkspace` degrades a missing/absent config to an empty one (work.mjs's own contract), `findWork`
+then resolves nothing, and the operator gets `ref-not-found` — a refusal that names the WRONG cause and reads
+like a typo'd ref instead of "that repo is not on this machine". A refusal must name its own cause.
+
+**Ordering (normative).** same-origin guard → content-type guard → body parse → require `ref`/`nodeId`/
+`workspaceId` → `queryGlobalMeshStatus` lookup → `workspace-not-found` → project-root existence →
+`workspace-not-local` → `loadWorkspace(row.projectRoot)` → derived-id assertion → `workspace-id-mismatch` →
+`assignWork(assignWorkspace, ref, nodeId, ctx)` → the UNCHANGED `!result.ok` mapping → 200. A store fault in the
+lookup rides the EXISTING `catch` (a `globalStoreError` surfaces coded, e.g. `global-store-unavailable` 503) —
+never a fallback to the daemon's own workspace.
+
+**Structural invariants 5 and 6 (NEW; invariants 1-4 stand unchanged).**
+
+5. **The route resolves the ref against the ITEM's OWN workspace; the server's own project dir is NEVER the
+   workspace `assignWork` is handed.** `workspaceId` is lifted from the body and REQUIRED (blank ⇒ coded
+   `invalid-workspace`, never a fallback); it is resolved to a `projectRoot` through the sanctioned
+   `queryGlobalMeshStatus` → `status.workspaces[]` seam (a missing row ⇒ `workspace-not-found`; a project root
+   absent on this machine ⇒ `workspace-not-local`); and the identifier `resolvedProjectDir` (or any other
+   spelling of the daemon's own launch dir) appears NOWHERE inside the `POST /api/mesh/assign` branch. An assign
+   branch that reads the server's own project dir, that defaults an absent `workspaceId`, or that resolves the
+   workspace through any seam other than the sanctioned query surface, TRIPS.
+6. **The mint's target is ASSERTED, not assumed.** Before `assignWork` is called, the route derives the loaded
+   workspace's own id with the SAME expression the verb's `resolveItem` uses
+   (`config?.mesh?.workspaceId ?? workspaceIdForProjectRoot(projectRoot)`) and refuses coded
+   `workspace-id-mismatch` unless it equals the requested id — so minting against a workspace other than the one
+   the operator clicked is structurally impossible, not merely unlikely. A missing assertion, an assertion made
+   AFTER the mint, or a second/divergent id derivation TRIPS.
+
+**Consequences.**
+- The headline defect closes: a card from any workspace on the machine assigns THAT workspace's item, and a
+  wrong target can no longer hide behind a `200 ok`.
+- **The wire contract changes** — `POST /api/mesh/assign` now requires `{ ref, nodeId, workspaceId }`. STATE.md's
+  DOCUMENTED DEFAULT is updated accordingly. The shipped UI client and `ui/src/fleet/api.ts`'s `assign(ref,
+  nodeId)` signature must gain the third argument (the datum is already on the card); until they do, the
+  affordance fails LOUDLY at 400 rather than mis-dispatching.
+- Invariant 4's import list is untouched — this fix adds no import to the fleet face. The read-only posture,
+  the single mutation route and the single server all stay exactly as pinned.
+- **`acd-fleet-assign-targets-item-workspace` (new, entry 22 below) is armed RED-until-fixed**, structurally AND
+  behaviourally: its behavioural half is a TWO-workspace fleet face — the configuration in which the seam can
+  actually fail, which no existing test has — and it is the regression that F21 requires. The existing
+  `acd-fleet-face-single-mutation-route` is deliberately left untouched and green, so the new red names exactly
+  one thing.
+- **The generalised lesson, for the retrospective:** this is the THIRD appearance of the ADR-010 Gap A class in
+  one milestone (`cloneUrl`, App identity, now the assign target). Any seam on a GLOBAL, machine-wide surface
+  that resolves work from "the current workspace" is the same latent defect; the durable rule is *a global
+  surface may never resolve a per-item fact from its own local context* — and its test must be run in a
+  MULTI-workspace fixture, because a single-workspace fixture cannot express the failure.
+
 ---
 
 ## ADR-013: The worker's execution seam replaces `claude -p` with an INTERACTIVE `claude` PTY session — one long-lived interactive session PER ASSIGNMENT, driven by a whole command string typed into stdin, over the EXISTING `terminal-providers`/node-pty seam (on the worker's subscription). Terminal state is an explicit `NEEDS_INPUT` sentinel, not a one-shot JSON `terminal_reason`; the `session_id` is captured; a needs-input session RETAINS its worktree
@@ -1834,6 +2027,76 @@ the same day; the entry is kept in full because the RED it pinned is the reason 
     were closed within the day, so the technique held this time — but that is not evidence it will next time.
     The stale set is being routed separately for triage/retirement; until it is, treat "the arch suite is red" as
     carrying no information and read the named lanes instead.
+
+**Added at the ADR-012 AMENDMENT (2026-07-24, `aof:continue 38/04` closing BLOCKER F21 — armed RED-until-fixed by
+design, the entry-21 precedent; a COMPANION to `acd-fleet-face-single-mutation-route`, whose four invariants are
+left byte-untouched and green so the new red names exactly ONE thing):**
+
+22. `acd-fleet-assign-targets-item-workspace` (ADR-012 AMENDMENT, invariants 5 + 6) — the fleet assign route
+    targets the ITEM's own workspace, never the daemon's. **STRUCTURAL half** — the detector extracts the
+    `POST /api/mesh/assign` BRANCH BODY by brace-balancing from the `pathname === "/api/mesh/assign"` guard (and
+    ASSERTS the extraction landed: the block must be substantial and contain `assignWork(` — the STATE.md lesson
+    that a source-scanning detector which grabs a param-list `options = {}` self-passes vacuously), then splits it
+    at the `assignWork(` call into a PRE-MINT region, and requires there: `workspaceId` lifted off the body; a
+    blank-workspaceId refusal coded `invalid-workspace` 400; the `queryGlobalMeshStatus` → `workspaces.find`
+    resolution; `workspace-not-found` 404; an existence probe + `workspace-not-local` 409; the verb-identical id
+    derivation (`config?.mesh?.workspaceId` + `workspaceIdForProjectRoot(`) inside a `!==` guard refusing
+    `workspace-id-mismatch` 409 — plus the negative clause that `resolvedProjectDir` appears NOWHERE in the whole
+    assign branch, and that no refusal code is spelled only in the post-mint tail. **BEHAVIOURAL half** — the
+    REAL `serveMeshUi` stood up over an isolated `AOF_GLOBAL_HOME` with **TWO published workspaces** (the
+    configuration in which the seam can fail, which no story-04 test had): the server's OWN workspace A and a
+    foreign workspace B, BOTH carrying an item at the SAME ref `18` (the soak's exact collision) and BOTH with a
+    seeded, eligible target node — so a mis-target returns a plausible `200` and mints, exactly as it did live.
+    Asserts: a POST naming B mints in **B and NOT in A**; a POST with NO `workspaceId` is a 400
+    `invalid-workspace` that mints in NEITHER (the anti-fallback clause — the one assertion that would have
+    caught F21 on its own); an unknown id is 404 `workspace-not-found`; a published-then-deleted project root is
+    409 `workspace-not-local`, never `ref-not-found`. **RED at arming, by design** — proven non-vacuous by both
+    halves failing against the CURRENT (unfixed) tree with the exact defect named, while the SYNTHESIZED
+    self-check lane (a hand-written corrected shape, asserted clean, versus four hand-written plants — an absent
+    `workspaceId` lift, a `resolvedProjectDir` fallback, a missing mismatch assertion, a mismatch checked only
+    AFTER the mint — each asserted to have LANDED before asserting the trip, CRLF-normalised) passes REGARDLESS
+    of tree state, so the arming red is provably a finding about the TREE and not a broken detector.
+    **STATUS — CLOSED GREEN (2026-07-24), verified at source by the structural review, not on report.** The
+    as-built assign branch follows the amendment's normative ordering verbatim (`mesh-ui-serve.mjs:207-333`):
+    same-origin `:223` → content-type `:228` → parse `:235` → `ref`/`nodeId` `:249` → `workspaceId` REQUIRED ⇒
+    `invalid-workspace` 400 `:262-265` → `queryGlobalMeshStatus` + `workspaces.find` `:277-278` →
+    `workspace-not-found` 404 `:280` → `existsSync(row.projectRoot)` ⇒ `workspace-not-local` 409 `:289-291` →
+    `loadWorkspace(row.projectRoot)` `:300` → the VERB-IDENTICAL derivation
+    `assignWorkspace.config?.mesh?.workspaceId ?? workspaceIdForProjectRoot(assignWorkspace.projectRoot)` `:312`
+    ⇒ `workspace-id-mismatch` 409 `:313-315` → `assignWork` `:317` → the UNCHANGED `!result.ok` mapping
+    `:318-327` → 200. `ASSIGN_GATE_STATUS` is byte-untouched (`:608-613`, the verb's four codes only — the four
+    route codes are sent with their pinned statuses directly). `resolvedProjectDir` survives ONLY at its
+    declaration `:148` and in the `?scope=local` read `:369`/`:372` — nowhere in the assign branch (inv.5's
+    negative clause holds at source). Invariant 4's import list is unchanged as ACTUAL structure, not inference:
+    `aof graph build src` (2026-07-24 — 2011 nodes / 4851 edges / 91 communities, 1 file re-extracted) then
+    `aof graph impact src/mesh-ui-serve.mjs` → dependencies → **6** (`asset-base`, `board-serve`,
+    `commands/mesh-assign`, `global-mesh-query`, `mesh-terminal-mirror`, `work`), dependents ← 3 — the same six
+    and the same three the amendment pinned; `src/global-mesh-query.mjs` → dependents ← **1**
+    (`mesh-ui-serve.mjs` only), so reaching further into it cost exactly the zero new edges ruling 2 predicted.
+    **TWO RESIDUALS recorded so they are not lost** (neither blocks; both are SHOULD-FIX):
+    (i) the as-built passes `workspaceId` as a **query-narrowing parameter** (`queryGlobalMeshStatus({
+    ...globalStoreOptions, workspaceId })`, `:277`) where the sanctioned `GET /api/mesh/board-url` precedent
+    calls the SAME seam UNNARROWED (`:176`). Measured equivalent today — both underlying queries filter on the
+    same `workspace_id = ?` over `TEXT PRIMARY KEY` columns (binary collation, so SQL `=` ≡ JS `===`), and the
+    union branch (`global-mesh-query.mjs:185-196`) is computed over the NARROWED pair, so a **registry-only**
+    workspace still resolves: an isolated-home probe published a descriptor with NO work-projection rows and got
+    a byte-identical row narrowed and unnarrowed. But the equivalence is a property of two query
+    IMPLEMENTATIONS, not of the seam's contract, and that contract has already been carved non-uniformly once
+    (`queryGlobalRegistry` deliberately does NOT narrow the node roster — `global-node-registry.mjs:168-171`).
+    The amendment's own claim is that the resolution domain EQUALS the render domain; that is literally true
+    only for the unnarrowed call the render path itself makes. Prefer the byte-identical precedent call.
+    (ii) handing the verb a DIFFERENT workspace object changes EVERY fact the verb derives from it, not only the
+    one ruling 3 reasoned about: `assignWork` also derives `issuer = workspace.config?.mesh?.nodeId`
+    (`commands/mesh-assign.mjs:128`), which is a MACHINE-scoped fact, not a per-item one. It is correct on the
+    common path — `loadWorkspace` overlays the machine-wide `globalMeshPaths().identityPath` identity onto
+    `config.mesh.nodeId` with sidecar > committed precedence (`work.mjs:191-226`), and the route threads the
+    same `env` (`:300`) — but it degrades where that sidecar is absent: a legacy PER-WORKSPACE sidecar under the
+    TARGET workspace makes the target's id the issuer, and no identity at all yields `issuer: null` against an
+    `issuer TEXT NOT NULL` column (`global-work-store.mjs:180`), i.e. an uncoded 500 on a legitimately-clickable
+    card. `issuer` is load-bearing, not provenance decoration: a directive whose issuer is revoked never routes
+    (`control-stream-server.mjs:733`, `assignment-issuer-revoked`). The durable rule for the retrospective:
+    **when you change WHICH object a verb is handed, enumerate every fact the verb derives from it — asserting
+    one derived field is not asserting the object.**
 
 (ADR-006's `acd-worker-checkout-reuses-worktree` re-arms the m35 worktree-scope invariant; noted for completeness.
 The twelve armed above + the three ADR-010 SPEC entries (F5/F6/F7) + the six ADR-011–016 SPEC entries (all armed at

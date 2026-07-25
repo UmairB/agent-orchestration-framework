@@ -294,7 +294,7 @@ export const archTests = [
 
         // invariant #3 — a REAL gate miss (an unregistered node) is a REAL coded
         // non-200 that mints nothing.
-        const refused = await sameOriginAssign(url, "38/04", "ghost");
+        const refused = await sameOriginAssign(url, "38/04", "ghost", "OWN");
         assert.notEqual(refused.status, 200, "a real gate miss is never a 200");
         assert.ok(refused.status >= 400 && refused.status < 500, `a real gate miss is a coded 4xx — got ${refused.status}`);
         const refusedBody = await refused.json();
@@ -306,7 +306,7 @@ export const archTests = [
         // …and a REAL eligible assign still mints through the verb (the ONE
         // sanctioned path stays live even after every refusal above).
         await seedTargetNode({ home }, { nodeId: "worker-a", workspaceId, member: true, published: true });
-        const accepted = await sameOriginAssign(url, "38/04", "worker-a");
+        const accepted = await sameOriginAssign(url, "38/04", "worker-a", "OWN");
         assert.equal(accepted.status, 200, "the one sanctioned mutation route still mints for an eligible request");
         const mintedAfter = await readAssignmentRows({ home }, workspaceId, "38/04");
         assert.equal(mintedAfter.length, 1);
