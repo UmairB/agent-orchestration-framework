@@ -38,7 +38,12 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+// VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
+// tick drains recovery requests, mints the write credential, and dispatches a
+// recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
+// commit+push handler on the SAME client (createMeshRecoveryPushHandler, above).
+import { runRecoveryPushDispatchTick } from "./mesh-recovery-push.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
@@ -634,6 +639,12 @@ export async function startLauncher(ws, options = {}) {
   const workspaceId = config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
   let streamServer = null;
   let streamClient = null;
+  // VERIFICATION (live soak 2026-07-25) — the control-side write mint, hoisted to this
+  // outer scope so the control dispatch/reclaim ticker (below, a SEPARATE `role ===
+  // "control"` block) can hand it to runRecoveryPushDispatchTick. Assigned from the
+  // block-scoped `resolvedMintWriteCredential` inside the stream-server branch, the SAME
+  // provider the write-credential PULL uses — recovery mints through the identical seam.
+  let controlMintWriteCredential = null;
   // Verify follow-up (34/story 04): does this worker hold a LIVE transport (vs the
   // stream-degraded state)? Only a truly-connected worker runs the stream-sync ticker.
   let workerStreamHasTransport = false;
@@ -681,6 +692,9 @@ export async function startLauncher(ws, options = {}) {
       resolveWorkspaceCloneUrl: createResolveWorkspaceCloneUrl(ws, options),
       resolveWorkspaceAppIdentity: createResolveWorkspaceAppIdentity(ws, options),
     });
+    // Hoist for the control recovery-push dispatch tick (below) — recovery mints through
+    // the identical control-side write provider the PULL seam already resolved here.
+    controlMintWriteCredential = resolvedMintWriteCredential;
     // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
     // closing BLOCKER F-38.06 — the HYBRID transport's SAME-MACHINE leg). The
     // cross-machine leg is the FABRIC (the worker sends a terminal-frame UP its stream
@@ -912,6 +926,21 @@ export async function startLauncher(ws, options = {}) {
         ...(options?.workerExecutionOptions ?? {}),
       });
       client.onDirective(handler);
+
+      // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push handler,
+      // registered on the SAME client beside onDirective. A LITERAL sendRecoveryPushResult
+      // key (the F12 discipline the seams above keep — a producer reachable only through
+      // the workerExecutionOptions spread is one revision from inert). The
+      // workerExecutionOptions spread carries a test's own pushExec/exec through to it.
+      const createRecoveryHandler = options?.createMeshRecoveryPushHandler ?? createMeshRecoveryPushHandler;
+      const recoveryHandler = createRecoveryHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        nodeId,
+        sendRecoveryPushResult: (...args) => client.sendRecoveryPushResult(...args),
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        ...(options?.workerExecutionOptions ?? {}),
+      });
+      client.onRecoveryPush(recoveryHandler);
     }
 
     if (transport != null) {
@@ -1020,6 +1049,18 @@ export async function startLauncher(ws, options = {}) {
         dispatchedIds: dispatchedAssignmentIds,
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null }, options);
+      });
+      // VERIFICATION (live soak 2026-07-25) — drain any operator-requested recovery
+      // pushes on the SAME control tick: mint the write credential (the hoisted control
+      // provider) and dispatch a recovery-push DOWN-frame to each requested assignment's
+      // target worker. Runs beside the dispatch/reclaim tick (own store-open, own
+      // failure isolation) so a recovery drain fault never takes down the primary tick.
+      runRecoveryPushDispatchTick(streamServer, {
+        now: resolveNow(options),
+        storeOptions,
+        mintWriteCredential: controlMintWriteCredential,
+      }).catch((error) => {
+        emitWarning(launcherWarnings, { code: error?.code ?? "control-recovery-push-tick-failed", message: error?.message ?? "The control recovery-push dispatch tick failed.", path: null }, options);
       });
     });
   }

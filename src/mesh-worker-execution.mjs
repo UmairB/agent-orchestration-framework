@@ -121,7 +121,7 @@ import { findWork, loadWorkspace } from "./work.mjs";
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
-import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorkerBranchName } from "./mesh-worktree.mjs";
+import { addWorktree, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore, workspaceIdFor } from "./global-work-store.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
@@ -2005,6 +2005,91 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId });
       const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
       logAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
+    }
+  };
+}
+
+// createMeshRecoveryPushHandler(options) → handler(frame) — the function
+// `client.onRecoveryPush(handler)` registers (worker-stream-client.mjs). VERIFICATION
+// (control-driven recovery, live two-machine soak 2026-07-25). Story 07's push-home
+// runs only on the ACTIVE assignment's own `done` seam; when a worker STALLS or an
+// assignment is left terminal with its diff stranded in the worktree, there is no active
+// flow to push it. This handler is that missing flow: control dispatches a `recovery-push`
+// DOWN-frame (carrying a freshly minted one-shot write credential) and this commits +
+// pushes the assignment's OWN worktree, exactly reusing the done-path's two exported
+// seams (commitWorktreeChanges + pushWorktreeBranch), then replies with the result.
+//
+// It resolves the SAME projectRoot the assignment ran under — this worker's own
+// workspace, or the scoped foreign checkout at meshCheckoutPath(workspaceId) — mirroring
+// the driver's own repoint (:1806-1816), so the worktree/branch it acts on are byte-for-
+// byte the ones the assignment created. Every collaborator is INJECTED (the same idiom
+// as createMeshWorkerExecutionHandler):
+//   loadWs, nodeId, exec, pushExec, globalWorkStoreOptions — as in the driver above.
+//   sendRecoveryPushResult(assignmentId, { ok, code, branch }) — the worker-stream-client
+//                                      UP-reply emitter; tests inject a recorder.
+//
+// Never throws (the never-crash discipline — a fault is reported as a `recovery-push-result`
+// { ok:false, code }, never an unhandled rejection out of the transport message listener).
+export function createMeshRecoveryPushHandler(options = {}) {
+  const {
+    loadWs = () => loadWorkspace(process.cwd()),
+    nodeId,
+    sendRecoveryPushResult,
+    exec, // reserved for symmetry with the driver's worktree seam; the push uses pushExec
+    pushExec,
+    globalWorkStoreOptions,
+  } = options;
+  void exec;
+
+  return async (frame) => {
+    const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+    const itemRef = typeof frame?.itemRef === "string" && frame.itemRef.length > 0 ? frame.itemRef : null;
+    const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+    const branch = typeof frame?.branch === "string" && frame.branch.length > 0
+      ? frame.branch
+      : (itemRef != null && assignmentId != null ? meshWorkerBranchName(itemRef, assignmentId) : null);
+    const credential = typeof frame?.credential === "string" && frame.credential.length > 0 ? frame.credential : null;
+
+    if (assignmentId == null || branch == null) {
+      if (assignmentId != null) await sendRecoveryPushResult?.(assignmentId, { ok: false, code: "recovery-push-frame-invalid" });
+      return;
+    }
+
+    try {
+      // Repoint to the assignment's OWN checkout (own workspace vs scoped foreign clone),
+      // the SAME resolution the driver performs before it ever touches a worktree.
+      let ws = await loadWs();
+      const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+      if (workspaceId != null && workspaceId !== ownWorkspaceId) {
+        const checkoutPath = meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {});
+        ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });
+      }
+      const projectRoot = ws.projectRoot;
+      const worktreePath = meshWorktreePath(projectRoot, assignmentId);
+
+      // The worktree must still be on disk — a cleanly-`done` assignment force-removed
+      // it, so there is nothing to recover (a clear coded result, never a crash).
+      let worktreeExists = false;
+      try { worktreeExists = (await stat(worktreePath)).isDirectory(); } catch { worktreeExists = false; }
+      if (!worktreeExists) {
+        await sendRecoveryPushResult?.(assignmentId, { ok: false, code: "recovery-worktree-missing", branch });
+        return;
+      }
+
+      // COMMIT the stranded diff (a no-op if the agent/operator already committed), then
+      // PUSH — the EXACT two seams the done-path uses, so recovery and the normal path
+      // never drift. A commit-failed / push-failed throws a coded error, reported below.
+      await commitWorktreeChanges(worktreePath, {
+        message: `aof(mesh): ${itemRef ?? assignmentId} — recovery push\n\nControl-driven recovery of stranded worker output (assignment ${assignmentId}, node ${nodeId}).`,
+        node: nodeId,
+        pushExec,
+      });
+      await pushWorktreeBranch(projectRoot, worktreePath, branch, { credential, pushExec });
+      await sendRecoveryPushResult?.(assignmentId, { ok: true, branch });
+    } catch (error) {
+      const code = error?.code ?? "recovery-push-failed";
+      logAssignmentFailure(assignmentId, code, `recovery push of branch "${branch}" failed for assignment ${assignmentId}: ${String(error?.message ?? error)}`);
+      await sendRecoveryPushResult?.(assignmentId, { ok: false, code, branch });
     }
   };
 }

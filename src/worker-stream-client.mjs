@@ -37,6 +37,13 @@
 // machine). The frozen envelope is built by the bridge module (the single source of
 // the `terminal-frame` kind + shape).
 import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-terminal-relay-bridge.mjs";
+// VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. This client
+// RECEIVES the `recovery-push` DOWN-frame (dispatched by the control daemon, carrying a
+// one-shot write credential) and REPLIES with a `recovery-push-result` UP-frame. The
+// wire-kind literals + the result-frame builder live in ONE home (mesh-recovery-push.mjs,
+// the control-side owner); imported here so both sides share the contract, never a
+// re-spelled literal at this call site.
+import { RECOVERY_PUSH_KIND, buildRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
 
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
@@ -190,6 +197,10 @@ export function createWorkerStreamClient({
   // This story delivers/accepts frames; it does NOT run work — directiveHandler is
   // called and nothing else happens here.
   let directiveHandler = null;
+  // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push receive
+  // handler, a clean additive sibling to directiveHandler above. Registered via
+  // onRecoveryPush(handler); invoked with the PARSED recovery-push DOWN-frame (below).
+  let recoveryPushHandler = null;
   // milestone 38 / ADR-009 — pending clone-credential-request correlation, keyed by
   // assignmentId (per-clone, per-assignment: at most ONE clone-miss is ever in flight
   // for a given assignment). A bounded wait backstops a request that is refused,
@@ -285,6 +296,15 @@ export function createWorkerStreamClient({
     }
     if (frame?.kind === "directive") {
       directiveHandler?.(frame);
+      return;
+    }
+    // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push DOWN-frame:
+    // dispatched to THIS worker to commit + push a stranded worktree with the carried
+    // one-shot write credential. Handed to the registered recoveryPushHandler (which
+    // replies via sendRecoveryPushResult below); an unregistered handler drops it (never
+    // a crash), exactly like directive with no directiveHandler.
+    if (frame?.kind === RECOVERY_PUSH_KIND) {
+      recoveryPushHandler?.(frame);
       return;
     }
     if (frame?.kind === "clone-credential") {
@@ -626,6 +646,22 @@ export function createWorkerStreamClient({
     throw error;
   }
 
+  // sendRecoveryPushResult(assignmentId, { ok, code, branch }) — VERIFICATION (live
+  // soak 2026-07-25): the worker's UP-reply to a recovery-push DOWN-frame, over the SAME
+  // sendFrame failure-isolation seam every other up-frame goes through (a transport
+  // fault here is a warning, never a rethrow — ADR-004). Carries whether the commit+push
+  // succeeded (`ok`), an optional failure `code`, and the `branch` pushed.
+  async function sendRecoveryPushResult(assignmentId, { ok, code, branch } = {}) {
+    return sendFrame(buildRecoveryPushResultFrame(nodeId, assignmentId, { ok, code, branch, now: resolveNow() }));
+  }
+
+  // onRecoveryPush(handler) — VERIFICATION (live soak 2026-07-25): registers the ONE
+  // handler invoked with a PARSED recovery-push DOWN-frame, mirroring onDirective below.
+  // Additive — a caller that never registers one drops recovery-push frames silently.
+  function onRecoveryPush(handler) {
+    recoveryPushHandler = typeof handler === "function" ? handler : null;
+  }
+
   // onDirective(handler) — milestone 35 / ADR-002, story 01: registers the ONE
   // handler invoked with a PARSED directive frame when one arrives on the receive
   // listener above. Mirrors createWorkerWsTransport's onDrop(handler) shape
@@ -675,10 +711,12 @@ export function createWorkerStreamClient({
     sendAssignmentStatus,
     sendTerminalFrame,
     sendTerminalEnd,
+    sendRecoveryPushResult,
     requestCloneCredential,
     requestCloneUrl,
     requestWriteCredential,
     onDirective,
+    onRecoveryPush,
     notifyDrop,
     stop,
     get connected() { return connected; },

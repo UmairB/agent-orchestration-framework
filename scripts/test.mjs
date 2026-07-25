@@ -243,6 +243,7 @@ import { fleetTerminalViewProducerFedTests } from "../test/fleet-terminal-view-p
 import { meshWorktreeBranchNotDetachedTests } from "../test/mesh-worktree-branch-not-detached.test.mjs";
 import { meshWorkerPushBeforeRemoveTests } from "../test/mesh-worker-push-before-remove.test.mjs";
 import { meshWorkerCommitDiffTests } from "../test/mesh-worker-commit-diff.test.mjs";
+import { meshRecoveryPushTests } from "../test/mesh-recovery-push.test.mjs";
 import { meshCloneCredentialPushMintScopedTests } from "../test/mesh-clone-credential-push-mint-scoped.test.mjs";
 import { meshWorkerWriteCredentialPullTests } from "../test/mesh-worker-write-credential-pull.test.mjs";
 import { archTests as acdWriteTokenScopedToPushTests } from "../test/arch/acd-write-token-scoped-to-push.test.mjs";
@@ -1872,6 +1873,10 @@ export const tests = [
   ...meshWorktreeBranchNotDetachedTests,
   ...meshWorkerPushBeforeRemoveTests,
   ...meshWorkerCommitDiffTests,
+  // VERIFICATION (live soak 2026-07-25) — control-driven recovery push (aof mesh
+  // recover-push): the store surface + dispatch tick + result-apply holder gate, the
+  // REAL worker handler over a real bare origin, and the CLI resolve→request→poll→report.
+  ...meshRecoveryPushTests,
   ...meshCloneCredentialPushMintScopedTests,
   ...meshWorkerWriteCredentialPullTests,
   ...acdWriteTokenScopedToPushTests,

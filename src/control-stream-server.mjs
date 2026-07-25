@@ -33,6 +33,12 @@ import { updateAssignmentState, isActiveAssignmentState } from "./assignment-rec
 // onTerminalFrame sink and NEVER store-applies it (ADR-014 inv.3: terminal frames are
 // a live view, never persisted). The single source of the kind literal.
 import { TERMINAL_FRAME_KIND } from "./mesh-terminal-relay-bridge.mjs";
+// VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. This server
+// receives the worker's `recovery-push-result` UP-frame and settles the recovery
+// request row through applyRecoveryPushResultFrame (holder-gated on the SAME T6
+// connection-bound nodeId every other apply* uses). The DOWN-frame + tick live in
+// mesh-recovery-push.mjs; only the result-apply is dispatched here.
+import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
 
 // isRevokedLocal(registry, nodeId) — milestone 35 / ADR-002, story 01 task 01
 // (SECURITY T2). A deliberate LOCAL re-implementation of mesh-registry.mjs's
@@ -608,6 +614,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
   if (frame?.kind === "clone-url-request") return applyCloneUrlRequestFrame(store, frame, options);
   if (frame?.kind === "write-credential-request") return applyWriteCredentialRequestFrame(store, frame, options);
+  if (frame?.kind === RECOVERY_PUSH_RESULT_KIND) return applyRecoveryPushResultFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 

@@ -32,6 +32,7 @@ import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
 import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
 import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
+import { recoverPush } from "./commands/mesh-recover-push.mjs";
 // milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
 // nested-verb sub-group (the mesh-repo.mjs/mesh-assign.mjs `← 1 cli.mjs` shape).
 // Deliberately outside the mesh:* registry (see the meshCommand dispatch note below).
@@ -665,6 +666,14 @@ async function meshCommand(args) {
   // it is (correctly) OUTSIDE the flat acd-mesh-command-cli-bijection.
   if (subcommand === "assign") {
     await meshAssignCommand(rest);
+    return;
+  }
+  // VERIFICATION (live soak 2026-07-25) — the additive `aof mesh recover-push
+  // <assignmentId>` control-driven recovery verb. A CLI-ONLY nested verb like
+  // `assign`/`repo`/`ui` (its single-positional assignmentId + long poll don't fit the
+  // meshVerbCli face), so it too is OUTSIDE the flat acd-mesh-command-cli-bijection.
+  if (subcommand === "recover-push") {
+    await meshRecoverPushCommand(rest);
     return;
   }
   // milestone 36 / story 03 (ADR-003) — the additive `aof mesh desktop <install|run>`
@@ -1337,6 +1346,68 @@ async function meshAssignCommand(args) {
     return;
   }
   console.log(`Assigned "${ref}" to "${result.targetNodeId}" (assignmentId ${result.assignmentId}).`);
+}
+
+// `aof mesh recover-push <assignmentId>` — the control-driven recovery verb
+// (VERIFICATION, live two-machine soak 2026-07-25). Run on the CONTROL node to push a
+// stalled/terminal assignment's stranded worktree home. CLI-only (see the dispatch
+// branch note); core kept in commands/mesh-recover-push.mjs so it is unit-testable
+// without spawning the CLI. One `--json` envelope: `{ ok, code, ... }` — the SAME
+// single-shape discipline meshAssignCommand keeps. The target worker is determined
+// ENTIRELY by the assignment record (its own target_node_id), so the operator supplies
+// only the assignmentId; the command then blocks (polling the request row) until the
+// daemon+worker settle it pushed/failed, or reports it still-pending on timeout.
+const MESH_RECOVER_PUSH_FLAGS = new Set(["json"]);
+
+async function meshRecoverPushCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_RECOVER_PUSH_FLAGS.has(flag));
+  const options = parseOptions(args);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+
+  const assignmentId = options._[0];
+  if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+    emitMeshError(
+      options.json,
+      "`aof mesh recover-push` needs an assignmentId.\n\nUsage:\n  aof mesh recover-push <assignmentId>   commit + push a stalled assignment's stranded worktree home",
+      "invalid-input",
+    );
+    return;
+  }
+  if (options._.length > 1) {
+    emitMeshError(options.json, `"mesh recover-push" takes exactly one positional assignmentId (got "${options._[1]}").`, "invalid-input");
+    return;
+  }
+
+  if (!options.json) {
+    console.log(`Requesting recovery push for assignment "${assignmentId}" — minting a write credential and dispatching to its worker…`);
+  }
+
+  let result;
+  try {
+    result = await recoverPush(assignmentId, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (!result.ok) {
+    emitMeshError(options.json, result.error ?? `Recovery push ${result.code}${result.detail ? ` (${result.detail})` : ""}.`, result.code);
+    return;
+  }
+  console.log(`Pushed "${result.itemRef}" home from "${result.targetNodeId}" (assignment ${result.assignmentId}${result.detail ? `, ${result.detail}` : ""}).`);
 }
 
 // `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
