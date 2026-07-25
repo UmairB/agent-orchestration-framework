@@ -83,6 +83,11 @@ import { resolveCloneCredentialProvider, resolveWriteCredentialProvider } from "
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
 const DEFAULT_CONTROL_STREAM_PATH = "/ws/relay";
+// How often the control node re-reports the SAME refused-frame condition (per node +
+// workspace + code). A misaddressed worker streams on its own tick — reporting every
+// occurrence would bury the log; reporting once and never again would hide a condition
+// that is still live.
+const SKIPPED_FRAME_REPORT_INTERVAL_MS = 5 * 60 * 1000;
 
 function resolveCadenceSeconds(value) {
   if (typeof value !== "number") return DEFAULT_CADENCE_SECONDS;
@@ -654,6 +659,10 @@ export async function startLauncher(ws, options = {}) {
   // needs no launcher-held handle — it rides the existing stream client.)
   let relayBroker = null;
   let controlTerminalPush = null;
+  // VERIFICATION (2026-07-26) — the per-(node, workspace, code) throttle clock for the
+  // control server's refused-frame reports (wired below). Held on the launcher, not the
+  // server, so it lives exactly as long as this daemon does.
+  const skippedFrameReports = new Map();
   if (role === "control" && options?.streamServer !== false) {
     const startServer = options?.startControlStreamServer ?? startControlStreamServer;
     const peers = await resolvePeers(config, { ...options, roster: await readNodeRecords(ws) });
@@ -741,6 +750,23 @@ export async function startLauncher(ws, options = {}) {
       // keeps (control-stream-server.mjs's apply* functions all attribute by
       // meta.nodeId, never a self-declared frame.nodeId).
       onTerminalFrame: (frame, { nodeId }) => controlTerminalPush?.push({ ...frame, nodeId }),
+      // VERIFICATION (live worktree streaming, 2026-07-26) — a LITERAL key at the
+      // production call site (the same F12 discipline as onTerminalFrame above): a
+      // refused frame is a worker whose work this node is throwing away. Throttled per
+      // (node, workspace, code) so a permanently-misaddressed worker reports at a
+      // readable cadence instead of once every stream tick.
+      onFrameSkipped: (skip) => {
+        const key = `${skip?.nodeId ?? "?"}:${skip?.workspaceId ?? "?"}:${skip?.code ?? "?"}`;
+        const at = Date.parse(resolveNow(options));
+        const last = skippedFrameReports.get(key) ?? 0;
+        if (Number.isFinite(at) && at - last < SKIPPED_FRAME_REPORT_INTERVAL_MS) return;
+        skippedFrameReports.set(key, Number.isFinite(at) ? at : 0);
+        emitWarning(launcherWarnings, {
+          code: `stream-frame-refused:${skip?.code ?? "unknown"}`,
+          message: `Refused a ${skip?.kind ?? "stream"} frame from ${skip?.nodeId ?? "an unknown node"} for workspace ${skip?.workspaceId ?? "(none)"} — this node has no registered descriptor for that workspace, so the frame's items were DISCARDED.`,
+          path: null,
+        }, options);
+      },
       ...(options?.controlStreamServerOptions ?? {}),
     });
 
@@ -1115,14 +1141,29 @@ export async function startLauncher(ws, options = {}) {
     // nothing about it (found on the first real two-machine run of this code). A fault is
     // now REPORTED through the launcher's own warning channel rather than silently dropped:
     // best-effort must mean "does not crash the daemon", never "fails invisibly".
+    //
+    // The frame's workspaceId is the ASSIGNMENT's (`active.workspaceId`, the id control
+    // issued the directive under), NEVER this launcher's `workspaceId` — that one is
+    // derived from the daemon's own launch cwd, which on a worker is a completely
+    // different repo (measured 2026-07-26: the Mac daemon runs from its aof clone, so
+    // every frame it has ever sent was stamped `f693d197…` while the assignment, the
+    // control's descriptor and the board all speak `1f164bd0…`). The control refuses a
+    // frame whose workspaceId it holds no descriptor for, so every worktree delta was
+    // dropped on arrival. An entry with no workspaceId is REPORTED and skipped — falling
+    // back to the launch id is exactly the bug, and would merge one workspace's items
+    // into another's rows.
     const pushActiveWorktreeState = async (fullItems = []) => {
       for (const active of listActiveWorktrees()) {
         try {
+          const frameWorkspaceId = typeof active?.workspaceId === "string" && active.workspaceId.length > 0 ? active.workspaceId : null;
+          if (frameWorkspaceId == null) {
+            throw new Error("the active worktree entry carries no workspaceId — refusing to stream it under the launch workspace");
+          }
           const worktreeWs = await loadWorkspace(active.worktreePath, undefined, { env: options?.globalWorkStoreOptions?.env });
           const result = await readWorkspaceProjectionItems(worktreeWs);
           const milestone = String(active.itemRef ?? "").split("/")[0];
           const rows = (result?.rows ?? []).filter((row) => row.ref === active.itemRef || row.ref === milestone || row.parent === milestone);
-          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems });
+          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems, workspaceId: frameWorkspaceId });
         } catch (error) {
           emitWarning(launcherWarnings, {
             code: "worker-worktree-stream-failed",

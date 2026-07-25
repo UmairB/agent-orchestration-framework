@@ -110,6 +110,24 @@ export const workerStreamClientTests = [
     },
   },
   {
+    // VERIFICATION (live worktree streaming, 2026-07-26) — a worker's per-assignment
+    // worktree speaks for a DIFFERENT workspace than the daemon's launch cwd, and a
+    // frame stamped with the wrong id is refused outright by the control node.
+    name: "worker-stream-client/01 sendDelta stamps a caller-supplied workspaceId on the frame, and falls back to the client's own when none is given",
+    async run() {
+      const transport = fakeTransport();
+      const client = createWorkerStreamClient({ transport, nodeId: "worker-a", workspaceId: "ws-launch", now: () => NOW });
+      await client.sendSnapshot([{ ref: "34/04/00", status: "in-progress" }]);
+      await client.sendDelta([{ ref: "18", status: "in-progress" }], { workspaceId: "ws-assignment" });
+      await client.sendDelta([{ ref: "34/04/00", status: "done" }]);
+
+      assert.equal(transport.frames[0].workspaceId, "ws-launch", "the snapshot keeps the client's own workspace");
+      assert.equal(transport.frames[1].kind, "delta");
+      assert.equal(transport.frames[1].workspaceId, "ws-assignment", "the override addresses the delta at the assignment's workspace");
+      assert.equal(transport.frames[2].workspaceId, "ws-launch", "no override → byte-identical to the pre-existing behaviour");
+    },
+  },
+  {
     name: "worker-stream-client/01 the worker can send a durable presence frame over the established stream",
     async run() {
       const transport = fakeTransport();

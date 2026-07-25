@@ -879,6 +879,15 @@ export async function startControlStreamServer({
   // the real fabric->loopback bridge; a pre-existing caller that wires none gets
   // byte-identical behaviour (a terminal-frame is simply dropped, never store-applied).
   onTerminalFrame = () => {},
+  // onFrameSkipped({ code, nodeId, workspaceId, kind }) — VERIFICATION (live worktree
+  // streaming, 2026-07-26). applySnapshotFrame/applyDeltaFrame REFUSE a frame whose
+  // workspaceId has no registered descriptor, and that refusal used to be returned into
+  // a `.catch(() => {})` that nobody read: a worker could stream every 5s for days while
+  // this node discarded 100% of it and said nothing (it did — that is how the worktree
+  // stream stayed at zero rows without a single diagnostic). A refusal is now REPORTED.
+  // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs wires
+  // the daemon's own warning channel.
+  onFrameSkipped = () => {},
 } = {}) {
   const registry = createStreamRegistry();
   const directiveTargets = createDirectiveTargetRegistry();
@@ -977,6 +986,15 @@ export async function startControlStreamServer({
         directiveTargets,
         mintCloneCredential,
         mintWriteCredential,
+      }).then((result) => {
+        // A REFUSED frame (today: an unregistered workspaceId) is a real, silent data
+        // loss — surface it. Reporting must never crash the accept loop either.
+        if (result?.skipped !== true) return;
+        try {
+          onFrameSkipped({ code: result.code ?? "frame-skipped", nodeId, workspaceId: result.workspaceId ?? null, kind: frame?.kind ?? null });
+        } catch {
+          // a diagnostic sink fault is never fatal.
+        }
       }).catch(() => {
         // A store-apply fault must never crash the accept loop — the next frame
         // simply tries again (mirrors probeFabric's never-crash discipline).

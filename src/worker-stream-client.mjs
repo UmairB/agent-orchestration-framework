@@ -400,12 +400,23 @@ export function createWorkerStreamClient({
   // (re)connection is a full snapshot" holds even if the caller calls sendDelta()
   // first after a drop (the contract wins over the caller's requested kind; the
   // caller supplies `fullItems` for exactly this case — see the class doc-comment).
-  async function sendDelta(deltaItems, { fullItems } = {}) {
+  //
+  // VERIFICATION (live worktree streaming, 2026-07-26) — `options.workspaceId` is the
+  // PER-FRAME workspace override, and it is why the worktree stream never landed a
+  // single row. The client-level `workspaceId` is derived ONCE, at launch, from the
+  // daemon's own cwd workspace; but a worktree delta speaks for the ASSIGNMENT's
+  // workspace, which on a worker is a DIFFERENT id (the mesh checkout lives at a
+  // different path, and path-derived ids are per-machine). Stamped with the launch id,
+  // every worktree delta reached the control node as an id it holds no descriptor for
+  // and was refused `unknown-workspace` — silently, forever. A caller that passes no
+  // override keeps the client id byte-identically (the launch-workspace snapshot path).
+  async function sendDelta(deltaItems, { fullItems, workspaceId: frameWorkspaceId } = {}) {
     if (needsSnapshot) {
       const items = Array.isArray(fullItems) ? fullItems : deltaItems;
       return sendSnapshot(items);
     }
-    return sendFrame(buildDeltaFrame(nodeId, workspaceId, deltaItems, resolveNow()));
+    const target = typeof frameWorkspaceId === "string" && frameWorkspaceId.length > 0 ? frameWorkspaceId : workspaceId;
+    return sendFrame(buildDeltaFrame(nodeId, target, deltaItems, resolveNow()));
   }
 
   async function sendPresence(presence) {

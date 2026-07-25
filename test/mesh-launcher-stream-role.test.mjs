@@ -32,6 +32,10 @@ import { startLauncher } from "../src/mesh-launcher.mjs";
 import { workspaceIdFor } from "../src/global-work-store.mjs";
 import { DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "../src/control-stream-server.mjs";
 import { publishNodeRecord } from "../src/mesh-store.mjs";
+// VERIFICATION (live worktree streaming, 2026-07-26) — the driver-side registry the
+// stream ticker reads; a test drives it directly (the same module-level seam the real
+// execution handler writes through).
+import { registerActiveWorktree, clearActiveWorktree } from "../src/mesh-worker-execution.mjs";
 
 const CONTROL_ID = "control-node";
 const WORKER_ID = "worker-node";
@@ -412,6 +416,143 @@ export const meshLauncherStreamRoleTests = [
         assert.equal(transport.frames[3].kind, "presence", "the re-sync path refreshes durable worker presence too");
         handle.stop();
       } finally {
+        await cleanup(repo);
+      }
+    },
+  },
+  {
+    // VERIFICATION (live worktree streaming, 2026-07-26) — the defect this test pins:
+    // the worktree delta was stamped with the LAUNCH workspace's id (the daemon's own
+    // cwd repo), not the ASSIGNMENT's. On the real two-machine soak those are different
+    // repos entirely, the control node holds no descriptor for the launch id, and
+    // applyDeltaFrame refuses an unregistered workspaceId — so every worktree delta ever
+    // sent was discarded on arrival. Asserting the frame's workspaceId is the assignment's.
+    name: "mesh-launcher-stream-role/04 a worktree delta is stamped with the ASSIGNMENT's workspaceId, never the launcher's launch-cwd workspace",
+    async run() {
+      const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID, peers: [CONTROL_ID] });
+      const worktree = await mkdtemp(path.join(os.tmpdir(), "aof-launcher-worktree-"));
+      const ASSIGNMENT_WORKSPACE_ID = "1f164bd03ea535da";
+      try {
+        await mkdir(path.join(worktree, ".aof"), { recursive: true });
+        await writeFile(
+          path.join(worktree, ".aof", "aof.config.json"),
+          `${JSON.stringify({ name: "assigned", work: { dir: "./wiki/work" } }, null, 2)}\n`,
+          "utf8",
+        );
+        const worktreeWorkDir = path.join(worktree, "wiki", "work");
+        await mkdir(path.join(worktreeWorkDir, "18_milestone_homedata"), { recursive: true });
+        await writeFile(
+          path.join(worktreeWorkDir, "18_milestone_homedata", "SPEC.md"),
+          "---\ntype: milestone\nnumber: 18\nslug: homedata\nstatus: in-progress\ntitle: Homedata\n---\n",
+          "utf8",
+        );
+        // The breakdown the agent produced IN THE WORKTREE — the rows the control node
+        // is blind to until this stream works.
+        await mkdir(path.join(worktreeWorkDir, "18_milestone_homedata", "stories", "00_story_ingest"), { recursive: true });
+        await writeFile(
+          path.join(worktreeWorkDir, "18_milestone_homedata", "stories", "00_story_ingest", "STORY.md"),
+          "---\ntype: story\nnumber: 00\nslug: ingest\nparent: 18\nstatus: in-progress\ntitle: Ingest\n---\n",
+          "utf8",
+        );
+
+        const ws = await loadWorkspace(repo);
+        const exec = fixturedExec(statusFixtureFor(WORKER_ID, {
+          a: { HostName: CONTROL_ID, DNSName: `${CONTROL_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.90.249.80"], Online: true },
+        }));
+        const transport = fakeWorkerTransport();
+        const streamSyncTicker = manualTicker();
+        const handle = await startLauncher(ws, {
+          exec,
+          platform: "linux",
+          ticker: manualTicker(),
+          peerPollTicker: manualTicker(),
+          streamSyncTicker,
+          createWorkerWsTransport: () => transport,
+        });
+        // The driver materializes the assignment's worktree — registered under the
+        // workspaceId the DIRECTIVE carried (control's id for that repo).
+        registerActiveWorktree("asg-1", {
+          worktreePath: worktree,
+          workspaceId: ASSIGNMENT_WORKSPACE_ID,
+          itemRef: "18",
+          projectRoot: worktree,
+          workDir: worktreeWorkDir,
+        });
+        try {
+          await streamSyncTicker.fire(streamSyncTicker.handles[0]);
+        } finally {
+          clearActiveWorktree("asg-1");
+        }
+
+        const deltas = transport.frames.filter((frame) => frame.kind === "delta");
+        assert.equal(deltas.length, 1, "the tick streamed the active worktree's item subtree as a delta");
+        assert.equal(
+          deltas[0].workspaceId,
+          ASSIGNMENT_WORKSPACE_ID,
+          "the delta speaks for the ASSIGNMENT's workspace — a control node holds no descriptor for the worker's launch-cwd id and refuses the frame outright",
+        );
+        assert.notEqual(deltas[0].workspaceId, workspaceIdFor(ws.projectRoot), "never the launcher's own launch workspace id");
+        assert.deepEqual(
+          deltas[0].items.map((item) => item.ref).sort(),
+          ["18", "18/00"],
+          "the delta carries the item and the breakdown the agent produced in the worktree",
+        );
+        // The launch workspace's own snapshot is untouched by the override.
+        const snapshots = transport.frames.filter((frame) => frame.kind === "snapshot");
+        assert.ok(snapshots.length > 0 && snapshots.every((frame) => frame.workspaceId === workspaceIdFor(ws.projectRoot)), "the launch-workspace snapshot still publishes under the launcher's own id");
+        handle.stop();
+      } finally {
+        await rm(worktree, { recursive: true, force: true });
+        await cleanup(repo);
+      }
+    },
+  },
+  {
+    // The other half of the same rule: an entry with NO workspaceId must NOT fall back
+    // to the launch id (that silently merges one workspace's items into another's rows).
+    // It is skipped and REPORTED.
+    name: "mesh-launcher-stream-role/04 an active worktree with no workspaceId is refused and reported — never streamed under the launch workspace",
+    async run() {
+      const repo = await makeRepo({ nodeId: WORKER_ID, controlNode: CONTROL_ID, peers: [CONTROL_ID] });
+      const worktree = await mkdtemp(path.join(os.tmpdir(), "aof-launcher-worktree-"));
+      try {
+        await mkdir(path.join(worktree, ".aof"), { recursive: true });
+        await writeFile(
+          path.join(worktree, ".aof", "aof.config.json"),
+          `${JSON.stringify({ name: "assigned", work: { dir: "./wiki/work" } }, null, 2)}\n`,
+          "utf8",
+        );
+        await mkdir(path.join(worktree, "wiki", "work"), { recursive: true });
+
+        const ws = await loadWorkspace(repo);
+        const exec = fixturedExec(statusFixtureFor(WORKER_ID, {
+          a: { HostName: CONTROL_ID, DNSName: `${CONTROL_ID}.tail1a2b.ts.net.`, TailscaleIPs: ["100.90.249.80"], Online: true },
+        }));
+        const transport = fakeWorkerTransport();
+        const streamSyncTicker = manualTicker();
+        const handle = await startLauncher(ws, {
+          exec,
+          platform: "linux",
+          ticker: manualTicker(),
+          peerPollTicker: manualTicker(),
+          streamSyncTicker,
+          createWorkerWsTransport: () => transport,
+        });
+        registerActiveWorktree("asg-2", { worktreePath: worktree, itemRef: "18", projectRoot: worktree, workDir: path.join(worktree, "wiki", "work") });
+        try {
+          await streamSyncTicker.fire(streamSyncTicker.handles[0]);
+        } finally {
+          clearActiveWorktree("asg-2");
+        }
+
+        assert.equal(transport.frames.filter((frame) => frame.kind === "delta").length, 0, "nothing is streamed under a guessed workspace");
+        assert.ok(
+          handle.warnings.some((w) => w.code === "worker-worktree-stream-failed" && /workspaceId/.test(w.message)),
+          "the refusal is reported through the launcher's warning channel, never swallowed",
+        );
+        handle.stop();
+      } finally {
+        await rm(worktree, { recursive: true, force: true });
         await cleanup(repo);
       }
     },
