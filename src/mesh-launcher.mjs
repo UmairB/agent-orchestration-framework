@@ -1091,7 +1091,7 @@ export async function startLauncher(ws, options = {}) {
       if (typeof streamClient.sendPresence === "function") {
         await streamClient.sendPresence(presence);
       }
-      await pushActiveWorktreeState();
+      await pushActiveWorktreeState(items);
     };
 
     // VERIFICATION (live worktree streaming, 2026-07-25) — THE FIX for "the control node
@@ -1109,16 +1109,26 @@ export async function startLauncher(ws, options = {}) {
     // for the item it was created for. Best-effort throughout: a worktree that has been
     // removed, or a workspace that will not load, is skipped silently — this must never
     // disturb the presence/snapshot stream it rides beside.
-    const pushActiveWorktreeState = async () => {
+    // `fullItems` is the launch workspace's own row set, passed IN by the caller — it is a
+    // local of pushStreamSnapshot, and reaching for it as a free variable here threw a
+    // ReferenceError that the catch below then swallowed, so this streamed NOTHING and said
+    // nothing about it (found on the first real two-machine run of this code). A fault is
+    // now REPORTED through the launcher's own warning channel rather than silently dropped:
+    // best-effort must mean "does not crash the daemon", never "fails invisibly".
+    const pushActiveWorktreeState = async (fullItems = []) => {
       for (const active of listActiveWorktrees()) {
         try {
           const worktreeWs = await loadWorkspace(active.worktreePath, undefined, { env: options?.globalWorkStoreOptions?.env });
           const result = await readWorkspaceProjectionItems(worktreeWs);
           const milestone = String(active.itemRef ?? "").split("/")[0];
           const rows = (result?.rows ?? []).filter((row) => row.ref === active.itemRef || row.ref === milestone || row.parent === milestone);
-          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems: items });
-        } catch {
-          // best-effort: a vanished worktree simply stops contributing.
+          if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems });
+        } catch (error) {
+          emitWarning(launcherWarnings, {
+            code: "worker-worktree-stream-failed",
+            message: `streaming the worktree for assignment ${active?.assignmentId} failed: ${error?.message ?? error}`,
+            path: active?.worktreePath ?? null,
+          }, options);
         }
       }
     };
