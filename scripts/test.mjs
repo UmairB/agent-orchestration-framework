@@ -242,6 +242,7 @@ import { fleetTerminalViewProducerFedTests } from "../test/fleet-terminal-view-p
 // place (SECURITY T15/T9).
 import { meshWorktreeBranchNotDetachedTests } from "../test/mesh-worktree-branch-not-detached.test.mjs";
 import { meshWorkerPushBeforeRemoveTests } from "../test/mesh-worker-push-before-remove.test.mjs";
+import { meshWorkerCommitDiffTests } from "../test/mesh-worker-commit-diff.test.mjs";
 import { meshCloneCredentialPushMintScopedTests } from "../test/mesh-clone-credential-push-mint-scoped.test.mjs";
 import { meshWorkerWriteCredentialPullTests } from "../test/mesh-worker-write-credential-pull.test.mjs";
 import { archTests as acdWriteTokenScopedToPushTests } from "../test/arch/acd-write-token-scoped-to-push.test.mjs";
@@ -1870,6 +1871,7 @@ export const tests = [
   // traceability modules + the write-credential wire + acd-write-token-scoped-to-push)
   ...meshWorktreeBranchNotDetachedTests,
   ...meshWorkerPushBeforeRemoveTests,
+  ...meshWorkerCommitDiffTests,
   ...meshCloneCredentialPushMintScopedTests,
   ...meshWorkerWriteCredentialPullTests,
   ...acdWriteTokenScopedToPushTests,

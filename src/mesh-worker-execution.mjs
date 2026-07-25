@@ -521,6 +521,59 @@ export async function pushWorktreeBranch(projectRoot, worktreePath, branch, opti
   }
 }
 
+// commitWorktreeChanges(worktreePath, options) — story 07 COMPLETION (VERIFICATION
+// F-38.06i, live two-machine soak 2026-07-25). The autonomous agent produces its diff
+// in the worktree but does NOT commit it — the agent is commit-agnostic (it runs the
+// SAME whether local or on a worker; committing-to-sync-home is the mesh's concern,
+// not the agent's). So story 07's `pushWorktreeBranch` had nothing to carry: it pushed
+// the branch at its base commit and the worker's work stayed stranded, UNCOMMITTED, in
+// the worktree — the exact live-soak finding (a full refine, 7 stories + ADRs + ~180KB
+// of docs, that never left the Mac). This commits that diff, right before the push.
+//
+//   `git add -A`  — stages every change (honouring .gitignore, so a per-worktree
+//                   node_modules / build output — RESEARCH §4 — is never committed).
+//   `git reset -- .aof` — but NEVER commit aof's OWN config/state (`.aof/aof.config.json`
+//                   carries worker-local mesh settings; the milestone deliverables live
+//                   under wiki/work/ + the source tree, never under .aof/). Best-effort.
+//   `git commit`  — under a mesh identity (`-c user.*`, so a worker whose git identity
+//                   is unset still commits), `--no-verify` because this is a HEADLESS
+//                   autonomous commit on an ARBITRARY target repo whose commit hooks may
+//                   need a dev environment this worktree lacks; the diff is reviewed on
+//                   the pushed branch, never merged unseen.
+//
+// A CLEAN worktree (the agent committed already, or produced nothing) is a NO-OP →
+// { committed: false }, so a produce-nothing run is never a spurious empty commit and
+// the push still carries any commits the agent DID make. A non-zero git exit THROWS a
+// coded `commit-failed` — the caller (handleDirective) treats it exactly like a failed
+// push: loud coded `failed`, worktree RETAINED for inspection, never a silent clean
+// `done` over an uncommitted diff. Uses the SAME injected push-exec seam so a test
+// scripts commit + push through ONE fake git.
+export async function commitWorktreeChanges(worktreePath, { message, node, pushExec } = {}) {
+  const exec = resolvePushExec({ pushExec });
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", LANG: "C" };
+  const fail = (result, verb) => {
+    const error = new Error(`git ${verb} failed in worktree "${worktreePath}": ${result.stderr || result.stdout}`);
+    error.code = "commit-failed";
+    return error;
+  };
+
+  const add = await exec(["add", "-A"], { cwd: worktreePath, env });
+  if (add.status !== 0) throw fail(add, "add");
+  // Never sync aof's own config/state home — best-effort, its own outcome is not fatal.
+  await exec(["reset", "-q", "--", ".aof"], { cwd: worktreePath, env });
+
+  const staged = await exec(["diff", "--cached", "--name-only"], { cwd: worktreePath, env });
+  if (!String(staged.stdout ?? "").trim()) return { committed: false };
+
+  const name = `aof-mesh${typeof node === "string" && node.length > 0 ? ` (${node})` : ""}`;
+  const commit = await exec(
+    ["-c", `user.name=${name}`, "-c", "user.email=aof-mesh@users.noreply.github.com", "commit", "--no-verify", "-m", message],
+    { cwd: worktreePath, env },
+  );
+  if (commit.status !== 0) throw fail(commit, "commit");
+  return { committed: true };
+}
+
 // ------------------------------------------- task 01/02/03: the clone orchestration ----
 
 // writeNodeWorkspaceMembership(nodeId, workspaceId, options) — the WORKER's OWN
@@ -1910,6 +1963,18 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         // completed `done`, but an unpushed diff means the ASSIGNMENT is not cleanly
         // done, so the "done" status frame is sent ONLY after the push itself succeeds.
         try {
+          // story 07 COMPLETION (F-38.06i) — COMMIT the agent's diff BEFORE the push can
+          // carry it home. Without this the push moves nothing (the branch sits at its
+          // base commit) and the worker's work stays stranded in the worktree — the
+          // live-soak finding. A coded `commit-failed` is caught below exactly like a
+          // failed push (loud `failed`, worktree retained). A clean worktree is a no-op.
+          const directiveLabel = typeof directiveCommand === "string" && directiveCommand.length > 0 ? directiveCommand : `run ${itemRef}`;
+          await commitWorktreeChanges(worktreePath, {
+            message: `aof(mesh): ${itemRef} — ${directiveLabel}\n\nAutonomous worker output (assignment ${assignmentId}, run ${runRecord.runId}, node ${nodeId}).`,
+            node: nodeId,
+            pushExec,
+          });
+
           let writeCredential = null;
           if (typeof requestWriteCredential === "function") {
             const resolved = await requestWriteCredential({ assignmentId, workspaceId, branch });
