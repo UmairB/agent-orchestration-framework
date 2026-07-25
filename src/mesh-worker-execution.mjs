@@ -878,6 +878,16 @@ function containsNeedsInputSentinel(buffer) {
 // mesh-worker-execution.mjs never requires the native addon either.
 const defaultPtySpawn = createTerminalSpawn(loadNodePty);
 
+// milestone 38 / story 05 fix (live two-machine soak 2026-07-25, VERIFICATION F27) —
+// how long to wait after spawning the interactive claude session before typing the
+// directive command into its PTY, so the write lands AFTER claude's TUI is READY. A
+// t=0 write raced claude's startup: the keystrokes were LOST and claude sat idle at an
+// empty prompt forever, never starting a session (no transcript -> no sessionId ->
+// nothing for the story-06 terminal view to bind to). The driver itself defaults to 0
+// (immediate next-tick write) so the test suites stay fast; mesh-launcher wires THIS
+// value for the real run (the F12 "production supplies the real seam" discipline).
+export const INTERACTIVE_COMMAND_READY_DELAY_MS = 5000;
+
 // resolveInteractiveDriverLaunch(driver, options) — task 00's seam: resolves the
 // interactive launch EXCLUSIVELY through terminal-providers.mjs's `resolveProvider`
 // (`buildArgs()` — the empty-args interactive form; `buildEnv()`), never a hand-built
@@ -1055,10 +1065,14 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     let buffer = "";
     let dataSub = null;
     let exitSub = null;
+    // F27 — the timer for the READINESS-DELAYED directive-command write (below).
+    let commandWriteTimer = null;
 
     const cleanupSubs = () => {
       try { dataSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
       try { exitSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
+      // never let a queued command write land in an already-exited/settled PTY.
+      if (commandWriteTimer != null) { clearTimeout(commandWriteTimer); commandWriteTimer = null; }
     };
 
     // finish(result) — settles this invocation EXACTLY once. Aborts the transcript
@@ -1150,16 +1164,27 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       finish(exitCode === 0 ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
     }) ?? null;
 
-    // task 01 — the directive's WHOLE command string, typed as ONE newline-
-    // terminated pty.write into THIS ONE session — never a `-p` prompt argv.
+    // task 01 / F27 — the directive's WHOLE command string, typed as ONE newline-
+    // terminated pty.write into THIS ONE session (never a `-p` prompt argv), but only
+    // AFTER claude's interactive TUI is ready to receive it. Writing at t=0 (pre-fix)
+    // raced claude's startup: the keystrokes were LOST and claude sat idle at an empty
+    // prompt forever — never starting a session, so no transcript, no sessionId, and
+    // nothing for the story-06 terminal view to bind to (VERIFICATION F27; corroborated
+    // by a soak probe whose 5s-delayed write DID start a session). The delay is INJECTED
+    // (options.commandDelayMs) — production (mesh-launcher) supplies a real value; every
+    // test defaults to 0 (an immediate next-tick write that preserves the pre-fix timing
+    // the driver suites assert against). Cleared on finish (cleanupSubs) so a command is
+    // never typed into an already-exited PTY.
     const command = typeof brief.command === "string" ? brief.command : null;
     if (command != null && command.length > 0) {
-      try {
-        term.write(`${command}\n`);
-      } catch {
-        // an already-exited PTY write races nothing observable here — onExit above
-        // still resolves the outcome for a process that died before the write landed.
-      }
+      commandWriteTimer = setTimeout(() => {
+        try {
+          term.write(`${command}\n`);
+        } catch {
+          // an already-exited PTY write races nothing observable here — onExit above
+          // still resolves the outcome for a process that died before the write landed.
+        }
+      }, options.commandDelayMs ?? 0);
     }
   });
 }
@@ -1348,6 +1373,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // (mesh-launcher) wires the real ensureWorktreeTrusted as a LITERAL key; a test
     // omits it, so no test run ever touches a real ~/.claude.json.
     trustWorktree,
+    // milestone 38 / story 05 fix (VERIFICATION F27) — the injected delay before the
+    // directive command is typed into claude's PTY, forwarded into spawnRuntime's own
+    // options object (below). Production (mesh-launcher) wires the real value; a test
+    // omits it and gets an immediate next-tick write (the pre-fix timing).
+    commandDelayMs,
     // milestone 38 / story 05 (ADR-013) — forwarded VERBATIM into spawnRuntime's own
     // options object (below) so a test can drive the REAL defaultSpawnRuntime /
     // driveInteractiveClaudeSession through this ONE handler entry point (the SAME
@@ -1658,6 +1688,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           ptySpawn,
           which,
           trustWorktree,
+          commandDelayMs,
           onOutputChunk,
           watchTranscriptSessionId,
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT

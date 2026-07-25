@@ -38,7 +38,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, resolveCloneUrl, ensureWorktreeTrusted } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
@@ -901,6 +901,13 @@ export async function startLauncher(ws, options = {}) {
         // so the autonomous run never blocks pre-session. Paired with the driver's own
         // `--permission-mode auto` (NOT bypassPermissions — a real pause still surfaces).
         trustWorktree: ensureWorktreeTrusted,
+        // milestone 38 / story 05 fix (live soak 2026-07-25, VERIFICATION F27) — the
+        // production delay before the directive command is typed into claude's PTY, so
+        // the write lands AFTER claude's interactive TUI is ready. A t=0 write raced
+        // startup and left claude idle at an empty prompt — no session, no sessionId, no
+        // terminal view. A LITERAL key HERE (the F12 discipline): a test overrides via
+        // the workerExecutionOptions spread and the driver itself defaults to 0.
+        commandDelayMs: INTERACTIVE_COMMAND_READY_DELAY_MS,
         now: nowFn,
         ...(options?.workerExecutionOptions ?? {}),
       });
