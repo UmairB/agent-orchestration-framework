@@ -143,6 +143,7 @@ import { archTests as acdCrossOrgKeyIsolationTests } from "../test/arch/acd-cros
 import { meshWorkerDriverInteractivePtyTests } from "../test/mesh-worker-driver-interactive-pty.test.mjs";
 import { meshWorkerTrustWorktreeTests } from "../test/mesh-worker-trust-worktree.test.mjs";
 import { meshWorkerCommandTimingTests } from "../test/mesh-worker-command-timing.test.mjs";
+import { meshWorkerCompletionDetectionTests } from "../test/mesh-worker-completion-detection.test.mjs";
 import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
 import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
 import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
@@ -1842,6 +1843,7 @@ export const tests = [
   ...meshWorkerDriverInteractivePtyTests,
   ...meshWorkerTrustWorktreeTests,
   ...meshWorkerCommandTimingTests,
+  ...meshWorkerCompletionDetectionTests,
   ...meshWorkerDriverDirectiveCommandTests,
   ...meshWorkerDriverNeedsInputTests,
   ...meshWorkerDriverSessionIdTests,

@@ -110,7 +110,7 @@
 // fitness `acd-worker-driver-no-headless-print`.
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile, readFile, rename, readdir } from "node:fs/promises";
+import { mkdir, rm, writeFile, readFile, rename, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { findWork, loadWorkspace } from "./work.mjs";
@@ -869,6 +869,118 @@ function containsNeedsInputSentinel(buffer) {
   return false;
 }
 
+// TASK COMPLETION, DETECTED FROM THE TRANSCRIPT (VERIFICATION F-38.06h, live soak
+// 2026-07-25). An interactive `claude` session NEVER exits after finishing a slash
+// command — it returns to its idle prompt and stays alive — so `term.onExit` (the
+// driver's only `done` signal) never fires, and a completed directive reads `running`
+// FOREVER (measured live: a refine that finished at 14:00 was still `running` at 14:50,
+// its session parked). claude Code itself records the turn's end in the SAME transcript
+// the session-id watch already reads, with ZERO model cooperation: once the directive
+// is done, the last assistant record carries `message.stop_reason: "end_turn"`. This
+// watch settles the outcome from THAT clean signal — `done`, or `needs-input` when the
+// finished turn carries the sentinel (the same producer the PTY-scan path relies on,
+// read here off the clean transcript instead of the escape-laden full-screen PTY
+// stream, where line-delimited scanning is unreliable). Injected exactly like the
+// session-id watch (`options.watchTranscriptCompletion`, default below), so every test
+// omits it or injects a double and no test run reads a real transcript.
+const COMPLETION_POLL_MS = 1500;
+
+// readTranscriptTerminalOutcome(file) => { outcome } | null — the transcript's SETTLED
+// outcome, or null while the session is still working. Scans the jsonl from the end for
+// the last assistant record: `stop_reason: "end_turn"` means the turn is DONE (the
+// autonomous session has nothing left and is waiting) — `needs-input` if that turn's
+// own text carries the sentinel, else `done`. Any other stop_reason (`tool_use`, or a
+// not-yet-terminated streaming turn) is "still working" -> null. NEVER throws (an
+// absent or half-written file is simply "nothing settled yet").
+async function readTranscriptTerminalOutcome(file) {
+  let text;
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (line.length === 0) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const message = record?.message;
+    if (record?.type === "assistant" && message && typeof message === "object") {
+      const stop = message.stop_reason;
+      if (stop == null) return null;
+      if (stop !== "end_turn") return null;
+      let body = "";
+      const content = message.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block?.type === "text" && typeof block.text === "string") body += `${block.text}\n`;
+        }
+      } else if (typeof content === "string") {
+        body = content;
+      }
+      const needsInput = body.split("\n").some((l) => l.trim() === NEEDS_INPUT_SENTINEL);
+      return { outcome: needsInput ? "needs-input" : "done" };
+    }
+  }
+  return null;
+}
+
+// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs }) =>
+// Promise<{ outcome }|null> — polls the session's transcript for the settled outcome
+// above, confirming it across two consecutive stable-mtime ticks so a mid-write
+// end_turn line is never read half-formed. Resolves null on abort (the driver's
+// finish() aborts it via the SAME watchController the session-id watch uses, the moment
+// any outcome is known first) — never throws.
+export async function defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs = COMPLETION_POLL_MS } = {}) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+  const file = path.join(claudeProjectsDir({ cwd, env }), `${sessionId}.jsonl`);
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    let lastMtimeMs = -1;
+    let pending = null;
+    // NOT named `finish` — the driver's own `finish()` is the anchor
+    // acd-terminal-view-live-observable's inv.8 detector pins by the FIRST
+    // `const finish =` in this file; a second one here would shadow it.
+    const settleWatch = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timer != null) clearTimeout(timer);
+      try { signal?.removeEventListener?.("abort", onAbort); } catch { /* no signal */ }
+      resolve(value);
+    };
+    const onAbort = () => settleWatch(null);
+    if (signal?.aborted) { resolve(null); return; }
+    try { signal?.addEventListener?.("abort", onAbort, { once: true }); } catch { /* no signal */ }
+
+    const tick = async () => {
+      if (settled) return;
+      let mtimeMs = -1;
+      try {
+        mtimeMs = (await stat(file)).mtimeMs;
+      } catch {
+        mtimeMs = -1;
+      }
+      const outcome = await readTranscriptTerminalOutcome(file);
+      // Fire only once the SAME settled outcome has been seen on two consecutive ticks
+      // whose mtime did not move — proof the turn is finished, not mid-write.
+      if (outcome != null && pending != null && mtimeMs >= 0 && mtimeMs === lastMtimeMs) {
+        settleWatch(outcome);
+        return;
+      }
+      pending = outcome;
+      lastMtimeMs = mtimeMs;
+      if (!settled) timer = setTimeout(tick, pollMs);
+    };
+    timer = setTimeout(tick, pollMs);
+  });
+}
+
 // defaultPtySpawn — the REAL production PTY factory: EXACTLY the seam
 // terminal-ws.mjs's own `/ws/terminal` route spawns through (createTerminalSpawn +
 // loadNodePty), imported rather than re-implemented, so a real run resolves node-pty
@@ -1164,6 +1276,33 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       finish(exitCode === 0 ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
     }) ?? null;
 
+    // milestone 38 (VERIFICATION F-38.06h, live soak 2026-07-25) — COMPLETION FROM THE
+    // TRANSCRIPT. An interactive `claude` never exits when a directive finishes, so
+    // `exitSub` above would leave the run `running` forever (measured). The instant the
+    // session id is known, watch that session's transcript for its settled turn and
+    // settle THIS invocation on it — `done`, or `needs-input` when the finished turn
+    // carries the sentinel. `term.kill()` ends the parked session (a human resumes with
+    // a FRESH `claude --resume` on a new process, never by reattaching — the same
+    // discipline the sentinel branch keeps). Whichever of onExit / PTY-sentinel /
+    // transcript-completion fires FIRST wins; `finish` is idempotent and its
+    // `watchController.abort()` stops this watch. Absent-by-default seam: the launcher
+    // uses the real watch, tests omit or inject it (no real transcript is ever read).
+    const watchTranscriptCompletion = options.watchTranscriptCompletion ?? defaultWatchTranscriptCompletion;
+    watchPromise
+      .then((sid) => {
+        if (settled || typeof sid !== "string" || sid.length === 0) return;
+        return Promise.resolve(
+          watchTranscriptCompletion({ cwd: brief.worktreeCwd, env: launch.env ?? process.env, sessionId: sid, signal: watchController.signal }),
+        ).then((result) => {
+          if (settled || result == null) return;
+          try { term.kill(); } catch { /* already-exited guard (win32) */ }
+          finish({ outcome: result.outcome });
+        });
+      })
+      .catch(() => {
+        // a completion-watch fault never settles the run — onExit / the sentinel still can.
+      });
+
     // task 01 / F27 — the directive's WHOLE command string, typed as ONE newline-
     // terminated pty.write into THIS ONE session (never a `-p` prompt argv), but only
     // AFTER claude's interactive TUI is ready to receive it. Writing at t=0 (pre-fix)
@@ -1395,6 +1534,9 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // object (below) beside ptySpawn/which — the SAME single handler entry point a
     // test injects a fake watch through, no second injection surface.
     watchTranscriptSessionId,
+    // milestone 38 (F-38.06h) — the transcript COMPLETION watch, forwarded the same
+    // way: the driver defaults to the real poller, a test injects a double.
+    watchTranscriptCompletion,
     // milestone 38 / story 06 (ADR-014, AMENDMENT 2026-07-19 — the HYBRID transport,
     // closing BLOCKER F-38.06) — the cross-machine terminal BRIDGE hook, forwarded
     // VERBATIM into spawnRuntime's own options object (below), exactly like
@@ -1696,6 +1838,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           commandDelayMs,
           onOutputChunk,
           watchTranscriptSessionId,
+          watchTranscriptCompletion,
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
           // 2026-07-23, structural invariant 7) — REPORT THE JOIN KEY WHILE THE RUN
           // IS LIVE. The driver calls this the instant its transcript watch resolves

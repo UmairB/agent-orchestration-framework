@@ -18,7 +18,7 @@ import path from "node:path";
 import { WebSocket } from "ws";
 import { serveMeshUi, meshUiDist } from "../src/mesh-ui-serve.mjs";
 import { createTerminalMirror } from "../src/mesh-terminal-mirror.mjs";
-import { buildTerminalFrameEnvelope } from "../src/mesh-terminal-relay-bridge.mjs";
+import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "../src/mesh-terminal-relay-bridge.mjs";
 
 async function writeDist(dir) {
   await mkdir(path.join(dir, "assets"), { recursive: true });
@@ -105,7 +105,13 @@ export const meshFleetTerminalViewMirrorTests = [
   // --- Scenario: the mirror is in-memory + EPHEMERAL — it writes no durable
   //     record, and a rebuild starts empty ---
   {
-    name: "task01/38-06 the mirror is in-memory + EPHEMERAL — no durable record; a rebuild starts empty; a late subscriber gets no persisted history",
+    // REVISED at the live two-machine soak (2026-07-25 — VERIFICATION F-38.06g). The
+    // original scenario asserted a late subscriber saw NOTHING (the "hold no past
+    // bytes" stance), which made the fleet terminal-view blank on every refresh. The
+    // mirror now keeps a BOUNDED live tail and REPLAYS it on subscribe — so a
+    // reconnect reconstructs the recent screen. The other ADR-014 halves still hold:
+    // a rebuilt mirror starts empty, and there is no durable record anywhere.
+    name: "task01/38-06 the mirror is in-memory + BOUNDED-TAIL — no durable record; a rebuild starts empty; a late subscriber REPLAYS the recent tail (F-38.06g)",
     async run() {
       const mirror = createTerminalMirror();
       await withFleetServer(async ({ url }) => {
@@ -118,23 +124,64 @@ export const meshFleetTerminalViewMirrorTests = [
         assert.equal(client.frames[0], "hello live terminal\n");
         client.ws.close();
 
-        // Then discarding and recreating the mirror yields an EMPTY mirror.
-        const rebuilt = createTerminalMirror();
-        assert.equal(rebuilt.size, 0, "a freshly created mirror starts with zero live (nodeId,sessionId) subscriptions");
-
-        // And a client that subscribes AFTER frames have flowed is not served a
-        // persisted full history — the SAME mirror, a NEW subscriber for the SAME
-        // tuple, sees nothing from before it connected.
+        // A client that subscribes AFTER frames have flowed — the SAME mirror, a NEW
+        // subscriber for the SAME tuple — now REPLAYS the recent tail, so a refresh
+        // reconstructs the recent screen instead of a blank `waiting for output`.
         const lateClient = await openTerminalView(url, { nodeId: "node-a", sessionId: "sess-1" });
         assert.ok(lateClient.opened);
-        await settle();
-        assert.equal(lateClient.frames.length, 0, "a late subscriber is not served a persisted full history — the mirror is a live tail, never a system of record");
+        await waitFor(() => lateClient.frames.length >= 1, { label: "late subscriber replays the bounded tail" });
+        assert.equal(lateClient.frames[0], "hello live terminal\n", "the late subscriber replays the recent bytes — a live scrollback, not a blank pane (F-38.06g)");
         lateClient.ws.close();
       }, { terminalMirror: mirror });
 
-      // No durable record — mirror.apply() writes nothing (there is no fs handle
-      // anywhere on this module; the fitness acd-fleet-terminal-mirror-read-only
-      // (task 02) enforces this structurally over the real source).
+      // NOT a system of record: discarding and recreating the mirror yields an EMPTY
+      // one — the tail lives only in THAT mirror instance's memory, never on disk
+      // (there is no fs handle anywhere on this module; the fitness
+      // acd-fleet-terminal-mirror-read-only enforces it structurally over the source).
+      // A subscriber to a freshly-rebuilt mirror therefore replays NOTHING.
+      const rebuilt = createTerminalMirror();
+      assert.equal(rebuilt.size, 0, "a freshly created mirror starts with zero live (nodeId,sessionId) subscriptions");
+      const replayed = [];
+      const unsub = rebuilt.subscribe("node-a", "sess-1", (bytes) => replayed.push(bytes));
+      assert.equal(replayed.length, 0, "a rebuilt mirror has no tail to replay — the scrollback is per-instance memory, never a durable record");
+      unsub();
+    },
+  },
+  {
+    // The BOUND and the ENDED-replay halves of F-38.06g, driven directly against the
+    // mirror (no server needed for the buffer semantics). The tail is capped, and a
+    // stream that ended replays its tail THEN hands the subscriber an end — so a dead
+    // stream reads ENDED, never a frozen `streaming` (DESIGN §Surface 3 V9).
+    name: "task01/38-06 the replay tail is BOUNDED (oldest bytes evicted past the cap) and an ENDED stream replays its tail then delivers the end (F-38.06g)",
+    async run() {
+      // BOUND: feed well past the per-key cap; the late subscriber replays only the
+      // recent bytes, never the whole history — the last-fed marker survives, an
+      // early one does not.
+      const bounded = createTerminalMirror();
+      const filler = "x".repeat(64 * 1024);
+      bounded.apply(buildTerminalFrameEnvelope("node-a", "sess-1", "EARLIEST-MARKER\n"));
+      for (let i = 0; i < 6; i += 1) bounded.apply(buildTerminalFrameEnvelope("node-a", "sess-1", filler));
+      bounded.apply(buildTerminalFrameEnvelope("node-a", "sess-1", "LATEST-MARKER\n"));
+      const replayed = [];
+      bounded.subscribe("node-a", "sess-1", (bytes, meta) => { if (!meta?.end) replayed.push(bytes); });
+      const joined = replayed.join("");
+      assert.ok(joined.includes("LATEST-MARKER"), "the most recent bytes are in the replayed tail");
+      assert.ok(!joined.includes("EARLIEST-MARKER"), "the oldest bytes past the cap were evicted — a bounded tail, not an unbounded log");
+      assert.ok(Buffer.byteLength(joined) <= 256 * 1024, "the replayed tail respects the per-key byte cap");
+
+      // ENDED-replay: a stream that received bytes then ended replays its tail and
+      // THEN hands the new subscriber an end (route -> ws.close -> the browser ENDED
+      // state), so a dead stream never masquerades as live.
+      const ended = createTerminalMirror();
+      ended.apply(buildTerminalFrameEnvelope("node-a", "sess-2", "final screen\n"));
+      ended.apply(buildTerminalEndEnvelope("node-a", "sess-2"));
+      const events = [];
+      ended.subscribe("node-a", "sess-2", (bytes, meta) => events.push(meta?.end === true ? { end: true } : { bytes }));
+      assert.deepEqual(
+        events,
+        [{ bytes: "final screen\n" }, { end: true }],
+        "an ended stream replays its tail, then delivers the end — the view reads the final screen then ENDED, never a frozen streaming (V9)",
+      );
     },
   },
 

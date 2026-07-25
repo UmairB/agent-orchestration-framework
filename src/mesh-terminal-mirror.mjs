@@ -17,11 +17,20 @@
 // acd-fleet-terminal-mirror-read-only (task 02) enforces this discipline
 // structurally over this module's source.
 //
-// A LIVE TAIL, NEVER A REPLAY LOG (task 01 scenario 1): the mirror holds NO past
-// bytes at all — it only forwards each frame, as it arrives, to whichever
-// (nodeId, sessionId) subscribers are CURRENTLY subscribed. A client that
-// subscribes AFTER frames have flowed sees nothing that already passed; discarding
-// and recreating the mirror yields an empty mirror.
+// A BOUNDED LIVE-TAIL, REPLAYED ON SUBSCRIBE (task 01 scenario 1, REVISED at the
+// live two-machine soak 2026-07-25 — VERIFICATION F-38.06g). The original ADR-014
+// stance was "hold NO past bytes at all": a client subscribing AFTER frames had
+// flowed saw nothing. In practice that made the fleet terminal-view BLANK on every
+// browser refresh — an interactive `claude` session paints in bursts and then sits,
+// so a reconnect landed on an empty pane reading `waiting for output` even though the
+// worker was alive and mid-task. The REVISION: the mirror keeps a BOUNDED per-tuple
+// tail (the last MAX_TAIL_BYTES_PER_KEY bytes, over at most MAX_TAIL_KEYS tuples,
+// both LRU-evicted) and REPLAYS it to each new subscriber before live frames, so a
+// refresh reconstructs the recent screen. This stays within ADR-014's OTHER
+// invariants — still PURE IN-MEMORY (no fs, no durable write), still NEVER a system
+// of record (a rebuilt mirror starts empty; the bound is a live-terminal scrollback,
+// not a transcript), still tuple-routed, still drops unresolvable frames. It is a
+// scrollback, not a replay LOG: bounded, ephemeral, and authoritative for nothing.
 //
 // UNRESOLVABLE FRAMES ARE DROPPED, NEVER BROADCAST (ADR-014 invariant 4 / task 01
 // scenario 3): a frame whose (nodeId, sessionId) matches no open subscription is
@@ -32,6 +41,16 @@ import { DEFAULT_MAX_FRAME_BYTES, resolveMaxFrameBytes } from "./mesh-relay.mjs"
 import { TERMINAL_FRAME_KIND, loopbackRelayUrl } from "./mesh-terminal-relay-bridge.mjs";
 
 export { resolveMaxFrameBytes };
+
+// The bounded live-tail budget (VERIFICATION F-38.06g). Per tuple we keep at most
+// MAX_TAIL_BYTES_PER_KEY of the most recent bytes — enough that a `claude` TUI's
+// last full-screen repaint is virtually always inside it, so a reconnecting view
+// reconstructs the current screen rather than a blank pane. Across tuples we keep at
+// most MAX_TAIL_KEYS tails, LRU-evicted, so a control node that has relayed many
+// sessions never grows without bound (worst case ~MAX_TAIL_KEYS × MAX_TAIL_BYTES_PER_KEY
+// ≈ 16 MB). Both are a live scrollback, never a transcript of record.
+export const MAX_TAIL_BYTES_PER_KEY = 256 * 1024;
+export const MAX_TAIL_KEYS = 64;
 
 // routingKey(nodeId, sessionId) — the ONE (nodeId, sessionId) → string key both
 // apply() and subscribe() use, so the two sides can never drift on how a tuple is
@@ -50,6 +69,49 @@ function routingKey(nodeId, sessionId) {
 // for a future subscriber (the never-a-replay-log invariant).
 export function createTerminalMirror() {
   const listenersByKey = new Map();
+  // The bounded per-tuple scrollback (F-38.06g). key -> { chunks: string[], bytes,
+  // ended }. Insertion order in the Map IS the LRU order — a tuple that receives a
+  // frame is re-inserted (delete + set) so it moves to the most-recent end, and
+  // eviction always drops the least-recently-fed head. This is a live tail, not a
+  // record: a rebuilt mirror has an empty Map (the never-a-system-of-record half).
+  const tailsByKey = new Map();
+
+  function chunkBytes(text) {
+    return typeof text === "string" ? Buffer.byteLength(text) : 0;
+  }
+
+  // Keep the most recent bytes for a tuple, bounded. Whole chunks only (never split
+  // one — splitting could sever an ANSI escape mid-sequence); when over budget the
+  // oldest whole chunks are dropped, keeping at least the last one.
+  function keepTail(key, text) {
+    if (typeof text !== "string" || text.length === 0) return;
+    let tail = tailsByKey.get(key);
+    if (tail == null) {
+      if (tailsByKey.size >= MAX_TAIL_KEYS) {
+        const lruKey = tailsByKey.keys().next().value;
+        if (lruKey !== undefined) tailsByKey.delete(lruKey);
+      }
+      tail = { chunks: [], bytes: 0, ended: false };
+    } else {
+      // Refresh LRU position: re-insert at the most-recent end.
+      tailsByKey.delete(key);
+    }
+    tail.chunks.push(text);
+    tail.bytes += chunkBytes(text);
+    while (tail.bytes > MAX_TAIL_BYTES_PER_KEY && tail.chunks.length > 1) {
+      tail.bytes -= chunkBytes(tail.chunks.shift());
+    }
+    tailsByKey.set(key, tail);
+  }
+
+  // Mark a tuple's stream ended so a LATER subscriber, after replaying the tail, is
+  // handed the end too (route -> ws.close -> the browser's ENDED state) instead of
+  // reading `streaming` forever on a dead stream (DESIGN §Surface 3 V9). If no tail
+  // exists (an end with no prior bytes) there is nothing to replay, so nothing to do.
+  function markEnded(key) {
+    const tail = tailsByKey.get(key);
+    if (tail != null) tail.ended = true;
+  }
 
   return {
     // apply(envelope) → boolean (true iff the frame was delivered to at least one
@@ -72,6 +134,11 @@ export function createTerminalMirror() {
       if (signal == null || typeof signal !== "object") return false;
       const key = routingKey(envelope.nodeId, signal.sessionId);
       if (key == null) return false;
+      // BOUNDED SCROLLBACK (F-38.06g) — feed the tail BEFORE the listener check, so a
+      // frame that arrives while NO card is open is still there to replay when one
+      // opens later. This changes NOTHING about delivery or the return value below.
+      keepTail(key, signal.bytes);
+      if (signal.end === true) markEnded(key);
       const listeners = listenersByKey.get(key);
       if (listeners == null || listeners.size === 0) return false;
       // ADR-014 AMENDMENT (2026-07-23, structural invariant 8; BLOCKER F-38.06e) —
@@ -112,6 +179,28 @@ export function createTerminalMirror() {
         listenersByKey.set(key, set);
       }
       set.add(listener);
+      // REPLAY the bounded tail to THIS new listener only (F-38.06g) — the recent
+      // screen, so a refresh is not a blank pane. Delivered to this one subscriber,
+      // never fanned to the others; a `{ end }` at the tail's close reaches the route
+      // as a real end so a dead stream reads ENDED, not `streaming`. Guarded so one
+      // listener fault never breaks the subscribe (the mirror's never-crash rule).
+      const tail = tailsByKey.get(key);
+      if (tail != null) {
+        for (const chunk of tail.chunks) {
+          try {
+            listener(chunk, { end: false });
+          } catch {
+            /* a replay fault must not break the subscribe */
+          }
+        }
+        if (tail.ended) {
+          try {
+            listener(undefined, { end: true });
+          } catch {
+            /* the end marker is best-effort too */
+          }
+        }
+      }
       return () => {
         const current = listenersByKey.get(key);
         if (current == null) return;

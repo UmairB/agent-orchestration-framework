@@ -89,7 +89,10 @@ function resolvesThroughTerminalProviders(rawCode, strippedCode) {
 // ---------------------------------------------------------------- invariant 3 ----
 // The command is typed via term.write — never baked into the spawn call's argv.
 function typesCommandIntoPtyStdin(strippedCode) {
-  return /term\.write\(\s*`\$\{command\}\\n`\s*\)/.test(strippedCode) && /const\s+command\s*=\s*typeof\s+brief\.command/.test(strippedCode);
+  // SUBMIT with carriage-return `\r` (a real Enter keypress), not line-feed `\n`
+  // (VERIFICATION F27b, live soak 2026-07-25 — a trailing `\n` entered the text into
+  // claude's TUI input box but never submitted it, and the run went idle).
+  return /term\.write\(\s*`\$\{command\}\\r`\s*\)/.test(strippedCode) && /const\s+command\s*=\s*typeof\s+brief\.command/.test(strippedCode);
 }
 
 // ---------------------------------------------------------------- invariant 4 ----
@@ -203,7 +206,7 @@ export const archTests = [
       const stripped = stripComments(raw);
       assert.equal(typesCommandIntoPtyStdin(stripped), true, "the real source types brief.command into term.write, not a -p argv");
 
-      const planted = stripped.replace(/term\.write\(\s*`\$\{command\}\\n`\s*\);/, "/* command intentionally not written */");
+      const planted = stripped.replace(/term\.write\(\s*`\$\{command\}\\r`\s*\);/, "/* command intentionally not written */");
       assert.notEqual(planted, stripped, "the plant actually changed the source text");
       assert.equal(typesCommandIntoPtyStdin(planted), false, "a driver that never types the command into stdin trips the detector");
 
@@ -221,14 +224,18 @@ export const archTests = [
       const launchArgs = spawnCalls[0].args;
       // The NEEDS_INPUT producer rides the launch argv as a worker-scoped
       // --append-system-prompt (option C) — the command itself NEVER rides the argv.
-      assert.equal(launchArgs[0], "--append-system-prompt", "the interactive launch appends the NEEDS_INPUT system-prompt instruction as a worker-scoped launch arg");
-      assert.equal(typeof launchArgs[1], "string", "the appended system-prompt instruction is a string arg");
-      assert.ok(launchArgs[1].includes(NEEDS_INPUT_SENTINEL), "the appended system prompt instructs the agent to emit the NEEDS_INPUT sentinel (producer + detector share the literal)");
+      // Located by INDEX rather than assumed at [0]: F24 (live soak) prepends
+      // `--permission-mode auto` ahead of it, so the append flag is no longer first —
+      // its PRESENCE + the instruction it carries is the invariant, not its position.
+      const appendIdx = launchArgs.indexOf("--append-system-prompt");
+      assert.ok(appendIdx !== -1, "the interactive launch appends the NEEDS_INPUT system-prompt instruction as a worker-scoped launch arg");
+      assert.equal(typeof launchArgs[appendIdx + 1], "string", "the appended system-prompt instruction is a string arg");
+      assert.ok(launchArgs[appendIdx + 1].includes(NEEDS_INPUT_SENTINEL), "the appended system prompt instructs the agent to emit the NEEDS_INPUT sentinel (producer + detector share the literal)");
       assert.ok(
         !launchArgs.includes("-p") && !launchArgs.includes("--print") && !launchArgs.includes("--output-format"),
         "the launch carries no headless-print flag (-p/--print/--output-format)",
       );
-      assert.deepEqual(ptys[0].writes, [`${command}\n`], "the command lands in exactly one pty.write, as a whole newline-terminated line — never the spawn argv");
+      assert.deepEqual(ptys[0].writes, [`${command}\r`], "the command lands in exactly one pty.write, as a whole carriage-return-terminated line (Enter = \\r, F27b) — never the spawn argv");
     },
   },
   {
