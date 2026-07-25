@@ -6,13 +6,26 @@
 // basis-neutral (neither cwd- nor projectRoot-relative) and both faces emit it
 // unchanged. Path display for list is therefore a no-op on either face.
 import { listStream } from "../work.mjs";
+// VERIFICATION (board mesh-execution overlay, 2026-07-25) — the board asked "what is the
+// state of this item?" and got the CONTROL node's own local frontmatter, which reads
+// `not-started` for work a WORKER on another machine is executing on its own branch. The
+// overlay answers the operator's three steps (is it executing / show that / else local).
+import { readExecutionOverlay, applyExecutionOverlay } from "../board-mesh-execution.mjs";
 
 export const listCommand = {
   id: "work:list",
-  input: { type: "object", properties: {}, additionalProperties: false },
+  // `mesh` is an OPT-IN (the board face passes it; the CLI never does), so `aof work list`
+  // stays a pure local read with no store open — the overlay is a board affordance, not a
+  // new cost on every list.
+  input: { type: "object", properties: { mesh: { type: "boolean" } }, additionalProperties: false },
 
-  async run(_input, ctx) {
-    return await listStream(ctx.workspace.workDir);
+  async run(input, ctx) {
+    const rows = await listStream(ctx.workspace.workDir);
+    if (input?.mesh !== true) return rows;
+    const overlay = await readExecutionOverlay(ctx.workspace, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
+    return applyExecutionOverlay(rows, overlay);
   },
 
   cli: {

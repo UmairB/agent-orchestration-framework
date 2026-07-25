@@ -44,7 +44,13 @@ export async function handleWorkApi(request, response, options = {}) {
     if (request.method === "GET" && pathname === "/api/work/list") {
       // The list rows pass straight through — `dir` is already forward-slashed
       // by listStream, so no path projection is needed (ADR-002).
-      const rows = await invoke("work:list", {}, ctx);
+      // `mesh: true` — VERIFICATION (2026-07-25): the BOARD asks for the mesh-execution
+      // overlay (is this item being executed by a worker, and where does that work live),
+      // so a milestone a remote worker is building no longer reads `not-started` from this
+      // node's own local frontmatter. Opt-in per call: the CLI's own `work:list` is
+      // untouched. The overlay degrades to the local rows on any fault, so this cannot
+      // fail the board.
+      const rows = await invoke("work:list", { mesh: true }, ctx);
       sendJson(response, 200, rows);
       return true;
     }
