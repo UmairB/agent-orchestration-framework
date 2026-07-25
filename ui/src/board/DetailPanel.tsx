@@ -153,6 +153,27 @@ export function DetailPanel({
           </span>
         </div>
         <h2 className="mt-2 text-[16px] font-bold leading-snug">{item.title ?? humanizeSlug(item.slug)}</h2>
+        {/* The MESH-EXECUTION line (VERIFICATION 2026-07-25). This board reads the LOCAL
+            checkout's frontmatter, which says `not-started` for work a WORKER ran on
+            another machine on its own branch — so without this the panel silently
+            contradicts reality. Rendered ONLY when the mesh has actually dispatched this
+            item; a local-only item shows nothing new. A LIVE run is stated as running on
+            its node; a FINISHED one names the branch the work actually landed on, which is
+            the fact the local view cannot know. */}
+        {item.execution ? (
+          <div className="mono mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={item.execution.active ? "font-semibold text-primary" : "font-semibold"}>
+                {item.execution.active ? `running on ${item.execution.nodeId}` : `last run ${item.execution.state} on ${item.execution.nodeId}`}
+              </span>
+              {item.execution.branch ? (
+                <span className="truncate" title={`The mesh work for this item lives on branch ${item.execution.branch}`}>
+                  · branch {item.execution.branch}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
           {/* The slug meta line is redundant when there is no title (the H2 already
               shows the humanized slug), so suppress it with an em-dash to avoid

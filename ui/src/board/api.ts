@@ -14,6 +14,21 @@ export type WorkItem = {
   title: string | null;
   parent: string | null;
   dir: string;
+  // The MESH-EXECUTION overlay (VERIFICATION 2026-07-25, src/board-mesh-execution.mjs).
+  // Present ONLY for an item the mesh has dispatched to a worker node; absent for every
+  // local-only item (and for every non-mesh workspace), which is what keeps the board's
+  // default the plain local view. `active` distinguishes a LIVE run from a finished one —
+  // a finished run still reports, because its work lives on `branch`, which this node's
+  // checkout does not have, and that is precisely what the local `not-started` hides.
+  execution?: {
+    assignmentId: string;
+    active: boolean;
+    state: string;
+    nodeId: string;
+    sessionId: string | null;
+    updatedAt: string | null;
+    branch: string | null;
+  };
 };
 
 export type WorkStatus = "not-started" | "in-progress" | "in-review" | "blocked" | "done";
