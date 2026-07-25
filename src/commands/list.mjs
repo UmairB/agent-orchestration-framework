@@ -11,6 +11,9 @@ import { listStream } from "../work.mjs";
 // `not-started` for work a WORKER on another machine is executing on its own branch. The
 // overlay answers the operator's three steps (is it executing / show that / else local).
 import { readExecutionOverlay, applyExecutionOverlay } from "../board-mesh-execution.mjs";
+// …and, for an item whose mesh work lives on a BRANCH this checkout does not carry, the
+// stream AS IT EXISTS THERE — otherwise a fully-broken-down milestone reads "0 stories".
+import { readBranchItems, mergeBranchItems } from "../board-branch-stream.mjs";
 
 export const listCommand = {
   id: "work:list",
@@ -25,7 +28,27 @@ export const listCommand = {
     const overlay = await readExecutionOverlay(ctx.workspace, {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
     });
-    return applyExecutionOverlay(rows, overlay);
+    let merged = applyExecutionOverlay(rows, overlay);
+    // For every item whose mesh work landed on a branch, splice in that branch's OWN
+    // subtree (the milestone plus the stories a refine authored there). Without this the
+    // board lists only what THIS checkout has — a scaffolded milestone with "0 stories"
+    // over one that has been fully broken down on the branch. Per-item and best-effort:
+    // an unresolvable ref, or a git fault, simply leaves that item's local rows in place.
+    const workDirRel = relativeWorkDir(ctx.workspace);
+    for (const [itemRef, execution] of overlay) {
+      if (execution?.branch == null) continue;
+      try {
+        const branchRows = await readBranchItems(ctx.workspace.projectRoot, execution.branch, { workDirRel, itemRef });
+        if (branchRows != null) {
+          // The branch rows describe the same item the overlay just annotated, so carry
+          // the execution facts onto the milestone row they replace.
+          merged = mergeBranchItems(merged, branchRows.map((row) => (row.ref === itemRef ? { ...row, execution } : row)));
+        }
+      } catch {
+        // best-effort: this item keeps whatever the local stream gave it.
+      }
+    }
+    return merged;
   },
 
   cli: {
@@ -55,6 +78,19 @@ export const listCommand = {
     json: (rows) => rows,
   },
 };
+
+// relativeWorkDir(workspace) — the workspace's work dir as a REPO-RELATIVE, forward-slashed
+// path (`wiki/work`), which is how it appears inside a git tree listing. Falls back to the
+// documented default when the two paths do not relate (a workspace configured oddly).
+function relativeWorkDir(workspace) {
+  const root = String(workspace?.projectRoot ?? "");
+  const workDir = String(workspace?.workDir ?? "");
+  if (!root || !workDir) return "wiki/work";
+  const normalizedRoot = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalized = workDir.replaceAll("\\", "/");
+  if (!normalized.startsWith(`${normalizedRoot}/`)) return "wiki/work";
+  return normalized.slice(normalizedRoot.length + 1);
+}
 
 // The human-view scope filter (mirrors validateWork's `inScope`): an item is in
 // scope if its own number equals the scope, its parent equals the scope, or — for
