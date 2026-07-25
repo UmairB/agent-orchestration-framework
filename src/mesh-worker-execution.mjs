@@ -1179,7 +1179,12 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     if (command != null && command.length > 0) {
       commandWriteTimer = setTimeout(() => {
         try {
-          term.write(`${command}\n`);
+          // F27b (live soak 2026-07-25) — SUBMIT with carriage-return `\r`, the byte a
+          // real Enter keypress sends in a terminal, NOT line-feed `\n`. Measured at the
+          // soak (PTY capture): claude's TUI enters the command text fine but a trailing
+          // `\n` never submits it — the command sat unsubmitted in the input box and the
+          // run went idle. `\r` is the Enter key; `\n` (Ctrl+J) is not.
+          term.write(`${command}\r`);
         } catch {
           // an already-exited PTY write races nothing observable here — onExit above
           // still resolves the outcome for a process that died before the write landed.

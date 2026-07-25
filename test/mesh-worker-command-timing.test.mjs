@@ -26,7 +26,7 @@ export const meshWorkerCommandTimingTests = [
       await new Promise((r) => setTimeout(r, 15));
       assert.equal(written.length, 0, "the command is NOT typed before commandDelayMs elapses");
       const result = await p; // resolves after the delayed write -> emitExit(0) -> done
-      assert.deepEqual(written, ["/aof:refine 38/05 --autonomous\n"], "exactly the one newline-terminated command is typed, after the delay");
+      assert.deepEqual(written, ["/aof:refine 38/05 --autonomous\r"], "exactly the one carriage-return-terminated command is typed (Enter = \\r, not \\n), after the delay");
       assert.equal(result.outcome, "done");
     },
   },

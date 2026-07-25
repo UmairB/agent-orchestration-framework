@@ -25,7 +25,7 @@ export const meshWorkerDriverDirectiveCommandTests = [
           { ptySpawn: spawn, which },
         );
         assert.equal(spawnCalls.length, 1, `[${command}] interactive claude is spawned ONCE for the assignment (not re-spawned to deliver the command)`);
-        assert.deepEqual(ptys[0].writes, [`${command}\n`], `[${command}] the command is written into that session's PTY stdin as a SINGLE whole newline-terminated pty.write`);
+        assert.deepEqual(ptys[0].writes, [`${command}\r`], `[${command}] the command is written into that session's PTY stdin as a SINGLE whole carriage-return-terminated pty.write (Enter = \\r, not \\n)`);
         assert.ok(!spawnCalls[0].args.join(" ").includes(command), `[${command}] the command is NOT baked into the spawn argv as a -p prompt`);
       }
     },
@@ -85,7 +85,7 @@ export const meshWorkerDriverDirectiveCommandTests = [
         at: "2026-07-18T09:00:00.000Z",
         command: "/aof:verify 38/05",
       });
-      assert.deepEqual(ptys[0].writes, ["/aof:verify 38/05\n"], "the REAL directive object's own .command field is what lands in the PTY stdin write");
+      assert.deepEqual(ptys[0].writes, ["/aof:verify 38/05\r"], "the REAL directive object's own .command field is what lands in the PTY stdin write (Enter = \\r, not \\n)");
     }),
   },
 ];
