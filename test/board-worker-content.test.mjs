@@ -146,6 +146,55 @@ export const boardWorkerContentTests = [
     },
   },
   {
+    // The m42 RETHINK (operator-forced after the third read shipped the same
+    // disease): for a streamed item the local filesystem is not the truth for ANY
+    // read. An item the worker streams EXISTS — absent data answers EMPTY, never
+    // ref-not-found; runs honour the execution scope (a story's run context is
+    // its milestone's).
+    name: "board-worker-content/rethink a STREAMED item never 404s on any read — tasks answer empty, docs answer absent, runs answer at SCOPE",
+    async run() {
+      await withFixture(async ({ ctx, env }) => {
+        // The item row itself streams (the board lists it) — no docs, no runs yet.
+        const { upsertWorkItemContent, openGlobalWorkProjectionStore } = await import("../src/global-work-store.mjs");
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          store.db.prepare(
+            "INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path) VALUES (?, '18/04', 'story', 'fetch-cache', 'in-progress', 'Fetch cache', '18', '/w/18/04/STORY.md')"
+          ).run(WORKSPACE_ID);
+          // Runs recorded at SCOPE (the milestone), as the worker actually writes them.
+          upsertWorkItemContent(store, WORKSPACE_ID, {
+            runs: [{ ref: "18", runId: "run-14", record: { runId: "run-14", itemRef: "18", state: "running" } }],
+            nodeId: "umairs-mac-mini",
+          }, { now: NOW });
+        } finally {
+          store.close();
+        }
+
+        const tasks = await invoke("work:tasks", { ref: "18/04" }, ctx);
+        assert.deepEqual(tasks, { ref: "18/04", tasks: [], fromWorker: true }, "tasks: EMPTY for a streamed item, never ref-not-found");
+
+        const doc = await invoke("work:doc", { ref: "18/04", doc: "VERIFICATION" }, ctx);
+        assert.equal(doc.present, false, "doc: absent-not-error for a streamed item with no streamed copy");
+        assert.equal(doc.fromWorker, true);
+
+        const runs = await invoke("work:run-status", { ref: "18/04" }, ctx);
+        assert.equal(runs.runs.length, 1, "runs: a story answers its SCOPE's streamed run (runs are recorded at the milestone)");
+        assert.equal(runs.runs[0].runId, "run-14");
+        assert.equal(runs.fromWorker, true);
+      });
+    },
+  },
+  {
+    name: "board-worker-content/rethink checkoutRootForWorktree inverts the worktree layout",
+    async run() {
+      const { checkoutRootForWorktree } = await import("../src/mesh-worker-execution.mjs");
+      const path = (await import("node:path")).default;
+      const checkout = path.resolve("/home/u/.aof/mesh/checkouts/1f164bd03ea535da");
+      const worktree = path.join(checkout, ".aof", "mesh", "worktrees", "asg-1");
+      assert.equal(checkoutRootForWorktree(worktree), checkout, "the checkout root the run bracket writes under");
+    },
+  },
+  {
     name: "board-worker-content/v5 nothing streamed → work:run-status behaviour is unchanged (404 / empty history)",
     async run() {
       await withFixture(async ({ ctx }) => {

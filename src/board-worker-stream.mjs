@@ -50,6 +50,22 @@ async function withProjectionStore(workspace, options, read) {
   }
 }
 
+// readStreamedItemRow(workspace, ref, options) — THE streamed-existence rule (the
+// m42 rethink, operator-forced after the third read command shipped with the same
+// disease): for a streamed item the LOCAL filesystem is not the truth for ANY
+// read. An item EXISTS when the worker's stream says so; every read command that
+// misses locally asks THIS before 404ing, and answers absent data as EMPTY for an
+// item the board is actively showing — "Could not load X" for a listed item is a
+// lie about existence, not a missing file.
+export async function readStreamedItemRow(workspace, ref, options = {}) {
+  return withProjectionStore(workspace, options, (store, workspaceId) => {
+    const row = store.db.prepare(
+      "SELECT ref, type, slug, status, title, parent FROM work_items WHERE workspace_id = ? AND ref = ?"
+    ).get(workspaceId, ref);
+    return row ?? null;
+  });
+}
+
 // readWorkerDoc(workspace, ref, doc, options) — the drill-down sibling of
 // readWorkerItems (schema v5, TECH_DEBT item 6): a record-doc BODY as the worker
 // streamed it, for a ref the local checkout cannot resolve (the streamed story) or a

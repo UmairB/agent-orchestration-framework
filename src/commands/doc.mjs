@@ -19,7 +19,7 @@ import { readFile } from "node:fs/promises";
 import { resolveItem } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { WORK_ITEM_DOC_FILES } from "../global-work-store.mjs";
-import { readWorkerDoc } from "../board-worker-stream.mjs";
+import { readWorkerDoc, readStreamedItemRow } from "../board-worker-stream.mjs";
 
 // The docs the detail panel may request, mapped to their on-disk filename — the ONE
 // home shared with the worker's content stream (global-work-store.mjs), so the
@@ -55,6 +55,10 @@ export const docCommand = {
       if (streamed != null) {
         return { ref, doc: docName, present: true, body: streamed.body, fromWorker: true, reportedBy: streamed.reportedBy };
       }
+      // The streamed-existence rule (m42): a listed streamed item with no
+      // streamed copy of THIS doc is absent-not-error — never ref-not-found.
+      const row = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
+      if (row != null) return { ref, doc: docName, present: false, body: "", fromWorker: true };
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
     }
 

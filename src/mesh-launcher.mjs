@@ -41,7 +41,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1179,6 +1179,18 @@ export async function startLauncher(ws, options = {}) {
           // REPORTED (the no-silent-failure rule), never dropped, and never blocks
           // the rows already sent.
           const content = await readWorkspaceContentRecords(worktreeWs, { itemRef: active.itemRef });
+          // m42 (operator-forced rethink): the run-lifecycle bracket writes its run
+          // records against the CHECKOUT's work dir, not the worktree's — a live
+          // run streamed 0 run rows for 20+ minutes because this read looked only
+          // in the worktree. Read the checkout's runs for the same subtree and
+          // merge (checkout wins on a duplicate id — it is where the bracket
+          // actually writes).
+          const checkoutWs = await loadWorkspace(checkoutRootForWorktree(active.worktreePath), undefined, { env: options?.globalWorkStoreOptions?.env });
+          const checkoutContent = await readWorkspaceContentRecords(checkoutWs, { itemRef: active.itemRef });
+          const runsById = new Map(content.runs.map((run) => [`${run.ref}::${run.runId}`, run]));
+          for (const run of checkoutContent.runs) runsById.set(`${run.ref}::${run.runId}`, run);
+          content.runs = [...runsById.values()];
+          content.errors.push(...checkoutContent.errors);
           for (const readError of content.errors) {
             emitWarning(launcherWarnings, {
               code: "worker-worktree-content-read-failed",

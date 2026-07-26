@@ -12,6 +12,10 @@ import { readFile, readdir } from "node:fs/promises";
 import { parseFeature } from "../feature-parse.mjs";
 import { resolveItem } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
+// The streamed-existence rule (m42): an item the worker streams EXISTS — a local
+// resolve miss answers EMPTY tasks for it (the features live in the worker's
+// worktree and are not streamed yet), never ref-not-found for a listed item.
+import { readStreamedItemRow } from "../board-worker-stream.mjs";
 
 export const tasksCommand = {
   id: "work:tasks",
@@ -26,6 +30,10 @@ export const tasksCommand = {
     const ref = typeof input.ref === "string" ? input.ref.trim() : "";
     const item = await resolveItem(ctx.workspace.workDir, ref);
     if (!item) {
+      const streamed = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
+      if (streamed != null) {
+        return { ref, tasks: [], fromWorker: true };
+      }
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
     }
 

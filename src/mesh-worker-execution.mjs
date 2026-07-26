@@ -176,6 +176,16 @@ export function listActiveWorktrees() {
   return [...activeWorktrees.values()];
 }
 
+// checkoutRootForWorktree(worktreePath) — the deterministic inverse of the worktree
+// layout (<checkout>/.aof/mesh/worktrees/<assignmentId>): the CHECKOUT root a
+// worktree belongs to. The run-lifecycle bracket writes its run records against the
+// CHECKOUT's work dir (findWork(ws.workDir) at run-start), NOT the worktree's — so
+// the content stream must read runs THERE (measured live: a run 20 minutes in had
+// streamed 0 run rows because the reader only looked in the worktree).
+export function checkoutRootForWorktree(worktreePath) {
+  return path.resolve(worktreePath, "..", "..", "..", "..");
+}
+
 // listStrandedWorktreeAssignments(options) — m42 wave (b) / TECH_DEBT item 7 leg 2:
 // the DURABLE startup view the in-memory registry above cannot give. Worktree
 // DIRECTORIES persist across a daemon restart at

@@ -13,7 +13,8 @@ import { readRuns } from "../run-store.mjs";
 // another machine's worktree answers from the worker-streamed projection — the RUNS
 // tab used to read the LOCAL runs/ dir and say "No runs yet" for an item that was
 // running remotely at that moment.
-import { readWorkerRuns } from "../board-worker-stream.mjs";
+import { readWorkerRuns, readStreamedItemRow } from "../board-worker-stream.mjs";
+import { executionScopeRef } from "../board-mesh-execution.mjs";
 
 export const runStatusCommand = {
   id: "work:run-status",
@@ -30,13 +31,23 @@ export const runStatusCommand = {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
     });
 
+    // Streamed lookup honours the EXECUTION SCOPE (runs are recorded at the
+    // top-level item — a story's run context IS its milestone's): the ref's own
+    // streamed runs, else the scope's.
+    const streamedScoped = async (lookupRef) =>
+      (await streamedRuns(lookupRef)) ?? (executionScopeRef(lookupRef) !== lookupRef ? await streamedRuns(executionScopeRef(lookupRef)) : null);
+
     // The READ tolerates the slug-fallback resolver (like work:doc / work:tasks).
     const item = await resolveItem(ctx.workspace.workDir, ref);
     if (!item) {
-      // The local checkout has never seen this ref (a worker-streamed story) — the
-      // projection is the only run history this machine holds for it.
-      const streamed = await streamedRuns(ref);
+      // The streamed-existence rule (m42): an item the worker streams EXISTS.
+      // Its runs come from the projection (own ref, else scope); no streamed
+      // runs is an EMPTY history — "Could not load runs" for a listed item was
+      // a lie about existence.
+      const streamed = await streamedScoped(ref);
       if (streamed != null) return { ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
+      const row = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
+      if (row != null) return { ref, runs: [], fromWorker: true };
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
     }
 
@@ -45,7 +56,7 @@ export const runStatusCommand = {
     // NOW) are the truthful answer, not an empty local dir.
     const runs = await readRuns(item);
     if (runs.length === 0) {
-      const streamed = await streamedRuns(item.ref);
+      const streamed = await streamedScoped(item.ref);
       if (streamed != null) return { ref: item.ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
     }
     return { ref: item.ref, runs };
