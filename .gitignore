@@ -3,8 +3,6 @@ coverage/
 ui/dist/
 graphify-out/
 .tmp-npm-cache/
-.claude/
-.codex/
 .aof-test/
 .aof/aof.memory.index.json
 *.sqlite
