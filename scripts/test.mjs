@@ -1281,6 +1281,8 @@ import { meshCandidacyEveryReturnTests } from "../test/mesh-candidacy-every-retu
 // per-project config override wins + validation; task 03: solo-mode inert map)
 import { bundleModelMapTests } from "../test/bundle-model-map.test.mjs";
 import { agentModelOverrideTests } from "../test/agent-model-override.test.mjs";
+import { workOrchestratorTests } from "../test/work-orchestrator.test.mjs";
+import { workDelegationTests } from "../test/work-delegation.test.mjs";
 import { agentModelSoloInertTests } from "../test/agent-model-solo-inert.test.mjs";
 import { archTests as acdAgentModelSourceMapTests } from "../test/arch/acd-agent-model-source-map.test.mjs";
 import { archTests as acdAgentModelRoleDerivationTests } from "../test/arch/acd-agent-model-role-derivation.test.mjs";
@@ -1746,6 +1748,8 @@ export const tests = [
   // story 30 — per-agent model selection
   ...bundleModelMapTests,
   ...agentModelOverrideTests,
+  ...workOrchestratorTests,
+  ...workDelegationTests,
   ...agentModelSoloInertTests,
   ...acdAgentModelSourceMapTests,
   ...acdAgentModelRoleDerivationTests,

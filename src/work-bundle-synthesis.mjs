@@ -16,6 +16,7 @@ import { createRenderPlan } from "./render-plan.mjs";
 import { partitionByCapability } from "./work-bundle-runtime.mjs";
 import { renderBundleTemplateOutputs } from "./work-bundle.mjs";
 import { packageVersion } from "./work-bundle-manifest.mjs";
+import { readConfig, readDelegation, readDelegationModel, applyDelegationToResources, applyDelegationModelToResources } from "./work-delegation.mjs";
 
 export function bundleVersion() {
   // The aof package version (ADR-002). Read package.json directly via the shared
@@ -49,7 +50,18 @@ export async function planDesiredOutputs(bundle, installableResources, runtimes,
 export { partitionByCapability } from "./work-bundle-runtime.mjs";
 
 export async function synthesizeBundleConfig(bundle, { runtimes, targetDir }) {
-  const { installable, notInstallable } = partitionByCapability(bundle.resources, runtimes);
+  // Config-aware projection (the ONLY project-config read on the render path): the
+  // `work.agents.delegation` toggle drops disable-model-invocation off the codex-*
+  // skills when ON, so init/update render them auto-invocable. Absent config ⇒ OFF
+  // ⇒ no change (the bundle default). No runtime branch — a generic per-resource map.
+  const { config } = await readConfig(targetDir);
+  // Two config-aware projections, both pure per-resource maps: the delegation
+  // TOGGLE drops disable-model-invocation off the codex-* skills when ON, and the
+  // delegation MODEL bakes the configured id into every `{{delegationModel}}` token
+  // (skills + agents) regardless of the toggle. Absent config ⇒ OFF + default model.
+  const toggled = applyDelegationToResources(bundle.resources, readDelegation(config));
+  const resources = applyDelegationModelToResources(toggled, readDelegationModel(config));
+  const { installable, notInstallable } = partitionByCapability(resources, runtimes);
   const desiredOutputs = await planDesiredOutputs(bundle, installable, runtimes, targetDir);
   return { desiredOutputs, notInstallable };
 }

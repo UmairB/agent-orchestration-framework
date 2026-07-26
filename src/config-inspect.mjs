@@ -1203,6 +1203,31 @@ function validateWorkAgents(agents, diagnostics) {
     return;
   }
 
+  // work.agents.delegation — the Codex delegation toggle (default "off"). When
+  // provided it must be exactly "off" or "on"; anything else is an error.
+  if (agents.delegation !== undefined && agents.delegation !== "off" && agents.delegation !== "on") {
+    diagnostics.push(diagnostic(
+      "error",
+      "work.agents.delegation",
+      'work.agents.delegation must be "off" or "on" when provided.',
+      "delegation-bad-value"
+    ));
+  }
+
+  // work.agents.delegationModel — the Codex delegation model id (default
+  // "gpt-5.6-sol" when absent). When provided it must be a non-empty,
+  // non-whitespace string; any such id is accepted so future Codex models work
+  // without a code change.
+  if (agents.delegationModel !== undefined
+    && (typeof agents.delegationModel !== "string" || agents.delegationModel.trim() === "")) {
+    diagnostics.push(diagnostic(
+      "error",
+      "work.agents.delegationModel",
+      "work.agents.delegationModel must be a non-empty string when provided.",
+      "delegation-model-bad-value"
+    ));
+  }
+
   const rawMap = agents.models;
   if (rawMap === undefined) return;
   if (!rawMap || typeof rawMap !== "object" || Array.isArray(rawMap)) {

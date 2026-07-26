@@ -367,6 +367,16 @@
               "enum": ["inline", "agent"],
               "description": "inline = the main session authors SPEC/story/acceptance; agent = delegate authoring to the aof-product-owner sub-agent."
             },
+            "delegation": {
+              "enum": ["off", "on"],
+              "description": "The Codex delegation toggle (default \"off\" when absent). off = Claude does everything itself and the codex-* skills render with disable-model-invocation:true (Claude Code won't auto-trigger them); on = the codex-* skills render auto-invocable so the ACD agents may hand bulk/mechanical work to the configured delegation model (work.agents.delegationModel, default gpt-5.6-sol) via the Codex CLI when it is available. The init/update render honours this flag (applyDelegationToResources); flipping it re-renders the skills. Set with `aof work delegation on|off`."
+            },
+            "delegationModel": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "The Codex delegation model id the codex-* skills and ACD agents target (default \"gpt-5.6-sol\" when absent). A moving variable — set it to a future Codex model (e.g. \"gpt-5.7-codex-max\") without editing any bundle asset. The init/update render bakes this value into the rendered codex-* skills and agents ({{delegationModel}} substitution), independent of the on/off toggle. Any non-empty, non-whitespace string is accepted so new models work without a schema change. Set with `aof work delegation-model <id>` or `aof work delegation on --gpt-model <id>`."
+            },
             "models": {
               "type": "object",
               "description": "Per-role model override map: an ACD role id (one of the 8 frozen roles, e.g. aof-architect) -> a model string (a moving family alias like \"opus\"/\"sonnet\", or a pinned id). Wins over the bundle's shipped default in the rendered agent file under orchestrated mode; inert (surfaced, not enforced) under mode \"solo\". Authoritative validation is `aof project validate` (no Ajv runs at validate time, so this schema is advisory): keys are checked against the live 8-role set derived from the bundle descriptor, and values must be non-empty and non-whitespace.",
