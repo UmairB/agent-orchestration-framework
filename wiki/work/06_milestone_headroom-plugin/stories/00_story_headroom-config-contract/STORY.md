@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-20
 updated: 2026-06-20
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · Headroom config contract — `work.headroom` schema + the honest-degrade resolver
 

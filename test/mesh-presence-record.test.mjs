@@ -21,7 +21,11 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { meshDir, presenceRecordPath } from "../src/mesh-store.mjs";
 
-const FROZEN_KEYS = ["nodeId", "heartbeatAt", "activeRuns", "aofVersion"];
+// milestone 38 / story 00 (ADR-001) — the presence record grows ADDITIVELY to FIVE
+// keys (`sessions` inserted before the trailing `aofVersion`); mesh:heartbeat does
+// not yet read session records, so it always emits `sessions: []` (absent-is-benign)
+// — the m23 four keys keep their relative order and their VALUES stay byte-identical.
+const FROZEN_KEYS = ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"];
 const NODE_ID = "test-node-a";
 
 // A fixture repo whose config PINS mesh.nodeId (so the resolved id is stable + known)
@@ -90,8 +94,19 @@ export const meshPresenceRecordTests = [
         // heartbeatAt is an ISO-8601 UTC-Z instant.
         assert.match(record.heartbeatAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "heartbeatAt is ISO-8601 UTC-Z");
         assert.deepEqual(record.activeRuns, [], "activeRuns is an empty list");
+        assert.deepEqual(record.sessions, [], "sessions is the empty array (mesh:heartbeat reads no session records) — present, not omitted");
         assert.equal(typeof record.aofVersion, "string", "aofVersion is a string");
         assert.ok(record.aofVersion.length > 0, "aofVersion is non-empty");
+        // 1c — the m23 FOUR-KEY projection (nodeId, heartbeatAt, activeRuns,
+        // aofVersion) is byte-identical to a HAND-BUILT m23 record for the same
+        // values, asserted directly here (not merely inherited from the separate
+        // acd-session-presence-additive arch-test) — the ADR-001 freeze.
+        const m23HandBuilt = { nodeId: record.nodeId, heartbeatAt: record.heartbeatAt, activeRuns: record.activeRuns, aofVersion: record.aofVersion };
+        assert.equal(
+          JSON.stringify(m23HandBuilt),
+          JSON.stringify({ nodeId: NODE_ID, heartbeatAt: record.heartbeatAt, activeRuns: [], aofVersion: record.aofVersion }),
+          "the four m23 keys are byte-identical to a hand-built m23 record",
+        );
         // The persisted record is byte-equivalent to the returned record.
         assert.equal(onDisk, JSON.stringify(record, null, 2), "persisted record byte-equivalent to returned");
       } finally {

@@ -38,6 +38,8 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "ajv": "^8.20.0"
+    "ajv": "^8.20.0",
+    "esbuild": "0.28.1",
+    "postject": "1.0.0-alpha.6"
   }
 }

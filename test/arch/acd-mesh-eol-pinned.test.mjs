@@ -15,14 +15,15 @@ import { readFile } from "node:fs/promises";
 
 const GITATTRIBUTES = new URL("../../.gitattributes", import.meta.url);
 
-// A rule that pins the .mesh records to LF: `**/.mesh/** text eol=lf` (the form this
-// milestone adds — the `**/` prefix anchors at ANY depth, since a node's .mesh/ lives
-// under its work stream, e.g. wiki/work/.mesh/) OR a root-anchored `.mesh/** ...` OR a
-// record-`*.json`-scoped variant under .mesh, OR the `-text` binary-treatment
-// alternative — any of which forces byte-stable checkout. The match is tolerant of the
-// optional `**/` prefix + the record-glob, but REQUIRES the eol=lf / -text treatment so
-// a bare `.mesh/** text` (which still leaves CRLF under autocrlf) does not satisfy it.
-const MESH_EOL_PIN = /^\s*(?:\*\*\/)?\.mesh\/\*\*(?:\/\*\.json)?\s+(?:text\s+eol=lf|-text|eol=lf)\b/m;
+// A rule that pins the mesh records to LF: `.aof/mesh/** text eol=lf` (the mesh
+// substrate anchors on the .aof config home as of 28/verify — no longer under the work
+// stream) OR a record-`*.json`-scoped variant under .aof/mesh, OR the `-text`
+// binary-treatment alternative — any of which forces byte-stable checkout. The match is
+// tolerant of the record-glob, but REQUIRES the eol=lf / -text treatment so a bare
+// `.aof/mesh/** text` (which still leaves CRLF under autocrlf) does not satisfy it.
+// (line-1's `.aof/**/*.json text eol=lf` also covers the JSON records; this dedicated
+// pin is the discoverable, mesh-scoped one this fitness function locks.)
+const MESH_EOL_PIN = /^\s*\.aof\/mesh\/\*\*(?:\/\*\.json)?\s+(?:text\s+eol=lf|-text|eol=lf)\b/m;
 
 export const archTests = [
   {
@@ -44,15 +45,17 @@ export const archTests = [
   {
     name: "arch/mesh-eol-pinned: the .mesh pin matcher is non-vacuous (a bare, un-pinned .mesh line does not satisfy it)",
     async run() {
-      // Self-check: an un-pinned `.mesh/** text` (no eol=lf) must NOT match — otherwise
-      // the gate would falsely pass while CRLF could still leak under autocrlf.
-      assert.ok(!MESH_EOL_PIN.test(".mesh/** text\n"), "a bare `.mesh/** text` (no eol=lf) does not satisfy the pin");
-      assert.ok(!MESH_EOL_PIN.test("# .mesh/** text eol=lf\n"), "a commented `.mesh` pin does not satisfy the gate");
-      // …and the canonical forms DO match (the positive control).
-      assert.ok(MESH_EOL_PIN.test("**/.mesh/** text eol=lf\n"), "the depth-anchored `**/.mesh/** text eol=lf` form matches");
-      assert.ok(MESH_EOL_PIN.test(".mesh/** text eol=lf\n"), "the root-anchored `.mesh/** text eol=lf` form matches");
-      assert.ok(MESH_EOL_PIN.test(".mesh/**/*.json text eol=lf\n"), "the record-json-scoped form matches");
-      assert.ok(MESH_EOL_PIN.test("**/.mesh/** -text\n"), "the `-text` binary-treatment form matches");
+      // Self-check: an un-pinned `.aof/mesh/** text` (no eol=lf) must NOT match —
+      // otherwise the gate would falsely pass while CRLF could still leak under autocrlf.
+      assert.ok(!MESH_EOL_PIN.test(".aof/mesh/** text\n"), "a bare `.aof/mesh/** text` (no eol=lf) does not satisfy the pin");
+      assert.ok(!MESH_EOL_PIN.test("# .aof/mesh/** text eol=lf\n"), "a commented `.aof/mesh` pin does not satisfy the gate");
+      // The OLD work-stream-anchored `.mesh/**` form must NO LONGER satisfy the pin
+      // (the location moved to .aof/mesh at 28/verify — a stale pin is a real regression).
+      assert.ok(!MESH_EOL_PIN.test("**/.mesh/** text eol=lf\n"), "the superseded `**/.mesh/**` (work-stream) form does NOT satisfy the .aof/mesh pin");
+      // …and the canonical .aof/mesh forms DO match (the positive control).
+      assert.ok(MESH_EOL_PIN.test(".aof/mesh/** text eol=lf\n"), "the `.aof/mesh/** text eol=lf` form matches");
+      assert.ok(MESH_EOL_PIN.test(".aof/mesh/**/*.json text eol=lf\n"), "the record-json-scoped form matches");
+      assert.ok(MESH_EOL_PIN.test(".aof/mesh/** -text\n"), "the `-text` binary-treatment form matches");
     },
   },
 ];

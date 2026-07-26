@@ -3,12 +3,14 @@ type: milestone
 number: 11
 slug: graphify-codebase-intelligence
 title: "Graphify Codebase Intelligence — grounding for the ACD agents"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-06-21
-updated: 2026-06-23
+updated: 2026-07-03
 depends: [09]
 origin: wiki/planning/PRD-graphify-integration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
@@ -80,18 +82,18 @@ authored `2026-06-22` (Three Amigos: PO scenarios + QA examples/tagging + develo
 00/01/02; 03's contract is the ADR-006 fitness table itself (four arch-tests, no `.feature` pass — mirrors
 05/03, 09/03, 10/03).
 
-- [ ] **00 · [grounding-convention-and-discipline](stories/00_story_grounding-convention-and-discipline/STORY.md)** —
+- [x] **00 · [grounding-convention-and-discipline](stories/00_story_grounding-convention-and-discipline/STORY.md)** —
   the shared grounding convention (build-fresh → run the registered command → read the legible output → cite
   it) + the freshness/derivation discipline (git-ignore `graphify-out/`, closing the open gap) + the
   advisory-only boundary + the no-op-when-absent gate (ADR-002/003/004). The spine. 2 tasks.
-- [ ] **01 · [architect-refine-coupling-grounding](stories/01_story_architect-refine-coupling-grounding/STORY.md)** —
+- [x] **01 · [architect-refine-coupling-grounding](stories/01_story_architect-refine-coupling-grounding/STORY.md)** —
   the two coupling seams: the `aof-architect` agent prompt (structural review + story boundaries, inherited by
   `continue` + `code-review`) and `refine.md` step 2 read `graph:query` coupling (ADR-001/002). Consumes 00's
   convention. 2 tasks.
-- [ ] **02 · [code-review-pr-impact-triage](stories/02_story_code-review-pr-impact-triage/STORY.md)** — the
+- [x] **02 · [code-review-pr-impact-triage](stories/02_story_code-review-pr-impact-triage/STORY.md)** — the
   PR-impact seam: `code-review.md` step 3 surfaces `graph:triage`'s ranked queue as advisory review context
   (ADR-001/004). Consumes 00's convention. 1 task.
-- [ ] **03 · [codebase-intelligence-fitness](stories/03_story_codebase-intelligence-fitness/STORY.md)** — the
+- [x] **03 · [codebase-intelligence-fitness](stories/03_story_codebase-intelligence-fitness/STORY.md)** — the
   four enforcing arch-tests (ADR-006 — the load-bearing deliverable): no-parse, via-commands (no new
   spawn/module), advisory-only, derived/git-ignored. Asserts against 00/01/02; no `.feature` pass. 4 arch-tests.
 

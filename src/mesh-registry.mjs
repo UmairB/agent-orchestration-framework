@@ -1,19 +1,15 @@
 // src/mesh-registry.mjs — the group registry: the group-level, control-node-owned
-// SINGLE-WRITER second git-of-record (milestone 24, ADR-001) — the roster of admitted
+// SINGLE-WRITER global registry (milestone 24, ADR-001) — the roster of admitted
 // nodes + the set of registered boards + the pending-invite records + the revocation
-// list, held as ONE aggregate file under meshDir/registry/ so it rides the m22
-// payload-agnostic git-sync engine unchanged (the engine stages meshDir and moves
-// files as bytes — a new record type under the mesh tree needs zero engine change).
+// list, held as ONE aggregate file under meshDir/registry/ in the global mesh home.
 //
 // THE SINGLE-WRITER INVARIANT (ADR-001 decision 1): 22/ADR-002 forbids an aggregate
-// file two nodes co-write — a multi-writer roster forces a three-way content merge git
-// cannot do add-only. The registry is a legitimately DIFFERENT artifact because exactly
-// ONE writer mutates it: the nominated control node (config.mesh.relay.controlNode ===
-// config.mesh.nodeId — the same predicate relayMode gates on). writeRegistry is the ONE
-// write seam; a non-control invocation is a structured no-op — it writes nothing and
-// throws nothing, leaving an existing file byte-unchanged. Single-writer ⇒ no
-// multi-writer merge ⇒ the m22 hazard does not apply.
-//
+// file two nodes co-write. The registry is a legitimately DIFFERENT artifact because
+// exactly ONE writer mutates it: the nominated control node (config.mesh.relay.controlNode
+// === config.mesh.nodeId — the same predicate relayMode gates on). writeRegistry is the
+// ONE write seam; a non-control invocation is a structured no-op — it writes nothing
+// and throws nothing, leaving an existing file byte-unchanged. Single-writer ⇒ no
+// multi-writer conflict ⇒ the m22 hazard does not apply.
 // Like the mesh-store spine it sits beside, this module references zero record-doc
 // filename (record-doc resolution lives in work.mjs, never a store), every fs write
 // joins the registryDir/registryPath partition seam, and every persist routes through
@@ -42,9 +38,8 @@ import { createHash, timingSafeEqual } from "node:crypto";
 // 19/R2 — every registry persist routes through the atomic temp+rename seam (the
 // Windows renameWithRetry is load-bearing on this platform). Never a bare writeFile.
 import { writeText } from "./fs.mjs";
-// The registry builds FROM the m22 partition-root seam — the SAME .mesh/ root the
-// per-node records live under, so the registry rides the same git bus + the same
-// self-host ignore/EOL pins (22/R4 + 22/R5, ADR-001 decision 4).
+// The registry builds FROM the mesh partition-root seam — the SAME global mesh root the
+// per-node records live under.
 import { meshDir } from "./mesh-store.mjs";
 
 // --------------------------------------------------------- the path seam ----
@@ -101,7 +96,7 @@ export async function writeRegistry(workspace, registry, config) {
 // registry file yet (ENOENT) reads as the EMPTY registry — a peer not yet synced is
 // not an error (the mesh-store ENOENT→absent discipline). ONLY absence is tolerated:
 // a corrupt/torn registry THROWS rather than reading as empty, because the registry
-// is the authoritative git-of-record — a control-node read→mutate→write over a
+// is the authoritative registry record — a control-node read→mutate→write over a
 // silently-emptied registry would persist the wipe (roster/pending/revocations lost).
 // A read mutates nothing.
 export async function readRegistry(workspace) {
@@ -134,7 +129,7 @@ export async function readRegistry(workspace) {
 //
 // milestone 24 / story 01 (ADR-003 move 1; 22/R6): the entry may ADDITIVELY carry
 // relayAuthHash — the VERIFIABLE half of the credential issued at admission (a HASH of
-// the relay-auth token, NEVER the token itself: the registry is git-synced fleet-wide
+// the relay-auth token, NEVER the token itself: the registry is shared across the mesh
 // and a plaintext credential at rest is SECURITY T3/T5's exact hazard). Story 02's
 // relay auth-gate verifies a presented token by hashing it and comparing against this
 // field. Absent ⇒ the original three-key entry, byte-identical to the story-00 shape.
@@ -170,8 +165,8 @@ export function appendRevocation(registry, { nodeId, revokedAt, reason = null })
 // { codeHash, issuedAt, expiresAt, consumedAt: null }. The record carries a codeHash —
 // an OPAQUE string here; the hashing happens BEFORE this seam (story 01's mint path,
 // security-owned fitness) — and NO plaintext device-code field is ever part of the
-// durable shape (the registry is git-synced to every peer; a plaintext secret on it
-// would live in git history forever — SECURITY T3).
+// durable shape (the registry is shared across the mesh; a plaintext secret on it
+// would persist in global mesh state — SECURITY T3).
 export function appendPendingInvite(registry, { codeHash, issuedAt, expiresAt }) {
   const entry = { codeHash, issuedAt, expiresAt, consumedAt: null };
   return { ...registry, pending: [...(registry.pending ?? []), entry] };

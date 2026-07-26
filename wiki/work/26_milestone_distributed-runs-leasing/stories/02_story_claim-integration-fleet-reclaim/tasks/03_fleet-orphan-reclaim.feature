@@ -74,6 +74,7 @@ Feature: a crashed peer's orphaned run is reclaimed at the claim path under the 
       | stale (age > the 90s presence threshold)       | fresh (heartbeat within threshold)   | left byte-unchanged (wait — conservative)                 | untouched                   |
       | fresh (age within the presence threshold)      | fresh (heartbeat within threshold)   | left byte-unchanged                                       | untouched                   |
       | exactly AT the presence threshold (age == 90s) | stale (age > the 15m run threshold)  | left byte-unchanged (AT the threshold is still LIVE)      | untouched                   |
+      | no presence record (never beat)                | stale (age > the 15m run threshold)  | left byte-unchanged (unknown liveness — hands off)        | untouched                   |
 
   # THE RECLAIM, IN FULL (the stale+stale row expanded): the force-fail is the ONE sanctioned
   # foreign-path write (ADR-006.4 — through the legal running→failed transition only), the failure

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Window controls for the frameless custom titlebar (milestone 36, DESIGN §Surface 1 region 1): the data-tauri-drag-region needs core:window:start_dragging, and double-click-to-maximize needs the maximize/unmaximize core commands. The bespoke minimize/maximize/hide-to-tray buttons route through the app's OWN #[tauri::command] handlers (Rust does the window op), so they need no core-window grant; only the Tauri-injected drag handler does.",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-minimize"
+  ]
+}

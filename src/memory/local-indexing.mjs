@@ -9,6 +9,8 @@
 //
 // Source set (ADR-007): RETROSPECTIVE `R<n>` entries -> `lesson` records;
 // ARCHITECTURE `ADR-NNN` blocks -> `adr` records, across every milestone folder.
+// 39/ADR-001/ADR-002 adds OUTCOME.md: `## Delivered` `### ` headings -> `capability`
+// records, `## Gaps` `### ` headings -> `gap` records (Assumptions fold into text).
 // Each record is the frozen `MemoryRecord` (ADR-005): fields absent for a given
 // recordType are present as "" (never omitted) so retrieval filters uniformly.
 import path from "node:path";
@@ -37,7 +39,16 @@ export function memoryIndexPath(projectRoot) {
 
 // Split a markdown body into heading-delimited sections, recording the 1-based
 // line of each heading so a record's `source` resolves back to live text.
-function splitSections(text, headerRe) {
+//
+// `boundaryRe` (review fix, defaults to `headerRe` — every EXISTING caller is
+// unaffected) additionally ENDS the current section's body on a heading that
+// does not itself match `headerRe` — so an unrecognized heading at the same
+// boundary level (e.g. a foreign "## Notes" after parseOutcome's recognized
+// "## Delivered|Assumptions|Gaps") is never silently folded into the LAST
+// recognized section's body (where it would otherwise run to EOF and mint
+// spurious nested records). The unrecognized heading itself starts NO section
+// (recorded nowhere) — it and everything under it are simply excluded.
+function splitSections(text, headerRe, boundaryRe = headerRe) {
   const lines = text.split(/\r?\n/);
   const sections = [];
   let current = null;
@@ -45,6 +56,11 @@ function splitSections(text, headerRe) {
     if (headerRe.test(line)) {
       if (current) sections.push(current);
       current = { header: line, line: idx + 1, body: [] };
+    } else if (boundaryRe.test(line)) {
+      // An unrecognized-but-boundary-level heading: close the current section
+      // (if any) without starting a new tracked one.
+      if (current) sections.push(current);
+      current = null;
     } else if (current) {
       current.body.push(line);
     }
@@ -214,6 +230,199 @@ export function parseAof(text, { item, itemSlug, workRelPath }) {
 // A heading → a stable kebab id ("Key decision" → "key-decision"). Empty → "section".
 function slugifyHeading(title) {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+
+// --------------------------------------------------------- OUTCOME parser ----
+
+// Two `capability`/`gap` MemoryRecords per OUTCOME.md `### ` heading (39/ADR-001,
+// ADR-002), reading the PINNED grammar (39 SPEC "## Stories"):
+//   `## Delivered`   -> "### " heading = capability
+//   `## Assumptions` -> bullets fold into the nearest-preceding (LAST) capability
+//   `## Gaps`        -> "### " heading = gap, "- **Status:**" / "- **Discharge
+//                        condition:**" fields + a free-form gap statement
+// `area` is ALWAYS "delivery" (ADR-001); the lesson-only fields (stage/kind/owner)
+// are present-as-"" (ADR-005); a capability's `status` is "" (a standing fact, no
+// lifecycle token); a gap's `status` is the REUSED `status` field, defaulting to
+// "open" when no Status line is present. `source` resolves to the ABSOLUTE line of
+// the "### " heading — a two-level parse over the single-level `splitSections`:
+// the OUTER split finds the "## Delivered"/"## Assumptions"/"## Gaps" section (and
+// its own start line), the INNER split finds each "### " heading WITHIN that
+// section's body, offsetting by the section's start line so the source line stays
+// absolute (39/story-02 notes: a small compose `splitSections` does not itself do).
+
+const OUTCOME_SECTION_RE = /^##\s+(Delivered|Assumptions|Gaps)\b/i;
+const SUBHEADING_RE = /^###\s+\S/;
+
+// Split an array of already-sliced body lines — `baseLine` is the 1-based line of
+// the heading directly BEFORE `bodyLines[0]` — into "### " heading subsections,
+// each carrying an ABSOLUTE 1-based `line`. Mirrors `splitSections`'s algorithm
+// one level down, so a delivery record's `source` resolves to live text exactly
+// like every other parser's (the derived-index invariant, ADR-005).
+function splitSubsections(bodyLines, baseLine) {
+  const subs = [];
+  let current = null;
+  bodyLines.forEach((line, idx) => {
+    if (SUBHEADING_RE.test(line)) {
+      if (current) subs.push(current);
+      current = { header: line, line: baseLine + idx + 1, body: [] };
+    } else if (current) {
+      current.body.push(line);
+    }
+  });
+  if (current) subs.push(current);
+  return subs;
+}
+
+// The prose statement under a "### " heading: every non-blank body line, joined
+// (a soft-wrapped continuation flattens into one searchable line).
+function proseStatement(bodyLines) {
+  return bodyLines
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+// A "- **Label:** value" field line — but ONLY the grammar's TWO recognized
+// field labels, Status and Discharge condition (review fix). A blanket
+// `[^*]+` label match swallowed ANY dash-bulleted bold-label line (e.g. a
+// gap-statement line shaped "- **Owner:** platform team") into `fieldLines`,
+// where it matched neither Status nor Discharge and simply vanished — present
+// in NEITHER the extracted fields NOR the prose statement. Narrowing the
+// label alternation to the two fields the grammar actually declares routes
+// every OTHER "- **…:**" line into the free-form gap statement instead (the
+// `else if` branch below), where it belongs.
+const FIELD_LINE_RE = /^\s*-\s*\*\*(?:Status|Discharge condition)[:.]\*\*/i;
+
+// Split a gap "### " heading's body into its Status / Discharge condition fields
+// plus the free-form gap statement (every OTHER non-blank line). The grammar does
+// NOT blank-line-separate the statement from the Discharge condition field, so the
+// generic `inlineField` scan (which swallows to the next blank line or field) would
+// engulf the statement into the field's value; this classifies by the dash-field
+// marker the grammar's field lines carry (and the statement does not) instead.
+function extractGapParts(bodyLines) {
+  const fieldLines = [];
+  const proseLines = [];
+  for (const line of bodyLines) {
+    if (FIELD_LINE_RE.test(line)) fieldLines.push(line);
+    else if (line.trim().length > 0) proseLines.push(line);
+  }
+  const statusLine = fieldLines.find((l) => /\*\*Status[:.]\*\*/i.test(l)) ?? "";
+  const statusMatch = statusLine.replace(/<!--[\s\S]*?-->/g, "").match(/\*\*Status[:.]\*\*\s*(.+)/i);
+  const status = (statusMatch ? statusMatch[1].trim() : "") || "open"; // default open (ADR-001)
+  const dischargeLine = fieldLines.find((l) => /\*\*Discharge condition[:.]\*\*/i.test(l)) ?? "";
+  const dischargeMatch = dischargeLine.match(/\*\*Discharge condition[:.]\*\*\s*(.+)/i);
+  const discharge = dischargeMatch ? dischargeMatch[1].trim() : "";
+  const statement = proseLines.map((l) => l.trim()).join(" ");
+  return { status, discharge, statement };
+}
+
+// Fold "## Assumptions" bullets into one searchable string — each "- " bullet is
+// one assumption (a continuation line with no leading dash appends to the current
+// bullet); markdown emphasis is stripped so the folded text reads as plain prose.
+function foldAssumptions(bodyLines) {
+  const bullets = [];
+  let current = null;
+  for (const raw of bodyLines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^-\s+/.test(line)) {
+      if (current) bullets.push(current);
+      current = line.replace(/^-\s+/, "");
+    } else if (current) {
+      current += ` ${line}`;
+    }
+  }
+  if (current) bullets.push(current);
+  return bullets
+    .map((b) => b.replace(/\*\*/g, "").trim())
+    .filter(Boolean)
+    .join(" \n ");
+}
+
+// A bare angle-bracket placeholder heading (review fix) — the SHIPPED template's
+// own unauthored "### <Capability name>" / "### <declared-but-unfilled surface,
+// e.g. …>" headings. `cleanTitle` (backtick-stripping only) does not touch angle
+// brackets, so these survive as titles and would be indexed as real delivery
+// records if a reindex runs before aof:verify finishes authoring OUTCOME.md.
+const PLACEHOLDER_TITLE_RE = /^<.+>$/;
+
+// parseOutcome(text, meta) — composed into `buildRecords` exactly as `parseAof`
+// was (14/ADR-001, 39/ADR-002), so `capability`/`gap` records reach BOTH backends
+// with this one edit (the graph-verified 2-importer seam).
+export function parseOutcome(text, { item, itemSlug, workRelPath }) {
+  // A foreign "## X" heading (review fix) — not Delivered/Assumptions/Gaps —
+  // BOUNDS the current top-level section's body too (`/^##\s+\S/`), so its own
+  // "### " subheadings are never folded into the LAST recognized section
+  // (Gaps, which otherwise runs to EOF) and mint spurious gap/capability
+  // records.
+  const topSections = splitSections(text, OUTCOME_SECTION_RE, /^##\s+\S/);
+  const deliveredSection = topSections.find((s) => /^##\s+Delivered\b/i.test(s.header));
+  const assumptionsSection = topSections.find((s) => /^##\s+Assumptions\b/i.test(s.header));
+  const gapsSection = topSections.find((s) => /^##\s+Gaps\b/i.test(s.header));
+
+  const capabilitySubs = deliveredSection ? splitSubsections(deliveredSection.body, deliveredSection.line) : [];
+  const capabilityRecords = capabilitySubs
+    .map((sub) => {
+      const title = cleanTitle(sub.header.replace(/^###\s+/, ""));
+      const statement = proseStatement(sub.body);
+      return {
+        recordType: "capability",
+        id: slugifyHeading(title),
+        item,
+        itemSlug,
+        title,
+        area: "delivery", // ADR-001: always "delivery" for a delivery record
+        stage: "", // lesson-only; present-as-"" on a delivery record (ADR-005)
+        kind: "",
+        owner: "",
+        status: "", // a capability is a standing fact — no lifecycle token
+        summary: statement, // the one-line delivered statement — the display gist
+        text: [title, statement].filter(Boolean).join(" \n "), // searchable blob
+        source: `${workRelPath}:${sub.line}`,
+      };
+    })
+    // Never a record for an empty heading, nor for the shipped template's own
+    // unauthored "<Capability name>" placeholder (review fix).
+    .filter((record) => record.title.length > 0 && !PLACEHOLDER_TITLE_RE.test(record.title));
+
+  // 39/ADR-002: an Assumptions bullet folds into the NEAREST-PRECEDING capability in
+  // document order — given the grammar's single Assumptions section after Delivered,
+  // that is the LAST delivered capability. Not an independent record (never its own
+  // "assumption" recordType).
+  if (assumptionsSection && capabilityRecords.length > 0) {
+    const folded = foldAssumptions(assumptionsSection.body);
+    if (folded) {
+      const last = capabilityRecords[capabilityRecords.length - 1];
+      last.text = [last.text, folded].filter(Boolean).join(" \n ");
+    }
+  }
+
+  const gapSubs = gapsSection ? splitSubsections(gapsSection.body, gapsSection.line) : [];
+  const gapRecords = gapSubs
+    .map((sub) => {
+      const title = cleanTitle(sub.header.replace(/^###\s+/, ""));
+      const { status, discharge, statement } = extractGapParts(sub.body);
+      return {
+        recordType: "gap",
+        id: slugifyHeading(title),
+        item,
+        itemSlug,
+        title,
+        area: "delivery", // ADR-001: always "delivery" for a delivery record
+        stage: "",
+        kind: "",
+        owner: "",
+        status, // the REUSED status field (ADR-001): open|discharged, default open
+        summary: [statement, discharge].filter(Boolean).join(" — "), // gap statement + discharge gist
+        text: [title, statement, discharge].filter(Boolean).join(" \n "), // searchable blob
+        source: `${workRelPath}:${sub.line}`,
+      };
+    })
+    // Never a record for an empty heading, nor for the shipped template's own
+    // unauthored "<declared-but-unfilled surface, …>" placeholder (review fix).
+    .filter((record) => record.title.length > 0 && !PLACEHOLDER_TITLE_RE.test(record.title));
+
+  return [...capabilityRecords, ...gapRecords];
 }
 
 // ------------------------------------------------------------- index build ----
@@ -412,6 +621,15 @@ export async function buildRecords(only, ctx) {
       indexedAof.add(path.resolve(aofPath));
       const text = await readFile(aofPath, "utf8");
       records.push(...parseAof(text, { ...meta, workRelPath: toWorkRel(workDir, aofPath) }));
+    }
+    // OUTCOME.md → capability/gap records (39/ADR-001/ADR-002 localised additive
+    // source), authored at Accept. A milestone without one indexes exactly as
+    // before — the scan is conditional, and this is a work-stream-only discovery
+    // (imports never carry an OUTCOME.md — story-01's Accept-time artifact).
+    const outcomePath = path.join(item.dir, "OUTCOME.md");
+    if (existsSync(outcomePath)) {
+      const text = await readFile(outcomePath, "utf8");
+      records.push(...parseOutcome(text, { ...meta, workRelPath: toWorkRel(workDir, outcomePath) }));
     }
   }
 

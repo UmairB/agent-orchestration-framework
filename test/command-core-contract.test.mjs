@@ -33,7 +33,38 @@ const SIX_IDS = ["work:list", "work:doc", "work:tasks", "work:validate", "work:n
 // Milestone 20 (ADR-003) registers a 4th run verb — work:run-retry, the resume-vs-fresh
 // command — into the SAME core; another sanctioned in-namespace extension (its CLI face
 // is wired; the board face is milestone 21, the BOARD_DEFERRED carve-out).
-const WORK_IDS = [...SIX_IDS, "work:doctor", "work:run-start", "work:run-complete", "work:run-status", "work:run-retry"];
+// Milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) registers two more —
+// work:insert-milestone / work:insert-uat, the top-level placement pair over story 01's
+// re-index engine — another sanctioned in-namespace extension (CLI-only by design, per
+// ARCHITECTURE ADR-002; the board face is deferred — see BOARD_DEFERRED in
+// acd-work-command-route-coverage.test.mjs). Story 03 registers a third —
+// work:insert-story, the nested-axis sibling — same carve-out, same design.
+// Milestone 39 / story 03 (gap-to-chore, ADR-001) registers two more —
+// work:insert-chore (the SAME insert-top-level family, over the chore type) and
+// work:promote-gap (the promotion verb over the same engine) — same CLI-only
+// carve-out (BOARD_DEFERRED), same design.
+// Milestone 40 / story 02 (migration registry & `aof upgrade`, ADR-005)
+// registers one more — work:upgrade, the thin face over the NEW
+// src/work-upgrade.mjs registry engine — another sanctioned in-namespace
+// extension, CLI-only by design (same BOARD_DEFERRED carve-out).
+const WORK_IDS = [
+  ...SIX_IDS,
+  "work:doctor",
+  "work:run-start",
+  "work:run-complete",
+  "work:run-status",
+  "work:run-retry",
+  "work:insert-milestone",
+  "work:insert-uat",
+  "work:insert-story",
+  "work:insert-chore",
+  "work:promote-gap",
+  "work:upgrade",
+  // work:continue (TECH_DEBT item 0 "one door per act") — the SINGLE continue door
+  // (CLI, board POST, fleet all route through it; the where-to-run decision lives
+  // inside the command) — another sanctioned in-namespace extension.
+  "work:continue",
+];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------
 
@@ -68,6 +99,7 @@ async function milestone(workDir, { number, slug, status, title, depends }) {
       title: `"${title}"`,
       created: "2026-06-19",
       updated: "2026-06-19",
+      schema: 1,
       ...(depends ? { depends: `[${depends}]` } : {}),
     }) + `# ${number} · ${title}\n`,
     "utf8"
@@ -89,6 +121,7 @@ async function story(workDir, milestoneFolder, { number, slug, status, title, pa
       parent,
       created: "2026-06-19",
       updated: "2026-06-19",
+      schema: 1,
     }) + `# ${number} · ${title}\n`,
     "utf8"
   );

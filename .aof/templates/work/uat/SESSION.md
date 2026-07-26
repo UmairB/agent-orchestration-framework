@@ -10,6 +10,8 @@ owner: qa
 depends: [<milestone numbers this session accepts>]
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
+schema: <schema-version>
+aofVersion: <aof-version>
 ---
 <!--
   UAT SESSION.md — the record doc for an acceptance session. Answers ONE question:

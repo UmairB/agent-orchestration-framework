@@ -55,6 +55,7 @@ async function milestone(workDir, { number, slug, status, title, depends }) {
       title: `"${title}"`,
       created: "2026-06-19",
       updated: "2026-06-19",
+      schema: 1,
       ...(depends ? { depends: `[${depends}]` } : {}),
     }) + `# ${number} · ${title}\n`,
     "utf8"
@@ -76,6 +77,7 @@ async function story(workDir, milestoneFolder, { number, slug, status, title, pa
       parent,
       created: "2026-06-19",
       updated: "2026-06-19",
+      schema: 1,
     }) + `# ${number} · ${title}\n`,
     "utf8"
   );

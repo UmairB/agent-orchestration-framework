@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-17
 updated: 2026-06-17
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · Resolve items from the folder index
 

@@ -71,7 +71,7 @@ async function makeRepo(seedSlots = []) {
     await mkdir(dir, { recursive: true });
     await writeFile(
       path.join(dir, "SPEC.md"),
-      `---\ntype: milestone\nnumber: ${ref}\nslug: seed-${ref}\nstatus: in-progress\ntitle: "Seed ${ref}"\nowner: product-owner\ncreated: 2026-06-19\nupdated: 2026-06-19\n---\n# ${ref} · Seed ${ref}\n`,
+      `---\ntype: milestone\nnumber: ${ref}\nslug: seed-${ref}\nstatus: in-progress\ntitle: "Seed ${ref}"\nowner: product-owner\ncreated: 2026-06-19\nupdated: 2026-06-19\nschema: 1\n---\n# ${ref} · Seed ${ref}\n`,
       "utf8"
     );
   }

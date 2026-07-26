@@ -7,6 +7,8 @@ status: done
 owner: product-owner
 created: 2026-06-16
 updated: 2026-06-19
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Planning Init (the bought seam)
 

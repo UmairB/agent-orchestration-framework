@@ -8,6 +8,8 @@ owner: product-owner
 created: 2026-06-16
 updated: 2026-06-17
 depends: [00]
+schema: 1
+aofVersion: 0.1.0
 ---
 # 01 · ACD Asset Bundle + work init/update
 

@@ -167,3 +167,53 @@ demonstrable deliverable. **It does NOT yet close everything** — see F11-6.
 **Status: milestone stays `in-progress`.** A real, tested consumer now exists (value delivered), but
 re-accept requires closing F11-6 (dogfood so aof's own agents benefit) and an unprompted live-agent proof,
 and ideally F11-4 (the m10 re-rank). No premature "done" this time.
+
+## Re-verification — 2026-07-03 (`aof:verify 11 --reverify`) — re-open CLEARED, ACCEPTED
+
+The re-open's two hard bars — **F11-6 (dogfood)** and the **unprompted live-agent value proof** — are now
+met on the tree; F11-4 is re-triaged (m10-scope, the "ideally"). This is NOT a repeat of the retracted
+2026-06-23 accept: that one certified word-presence + a hand-instructed demo; this one has a **genuine,
+unprompted value demonstration** + a real dogfood, each verified below.
+
+### F11-6 (dogfood) — CLOSED
+aof now eats its own grounding. `.claude/agents/aof-architect.md` is **bundle-rendered** from
+`src/bundle/agents/aof-architect.md` (differs only in generated frontmatter; the `<codebase-graph-grounding>`
+body is byte-identical) and carries the `aof graph impact` step; `.claude/commands/aof/refine.md` +
+`code-review.md` carry it too. `aof work update --dry-run` → **0 drift, 35 in-sync "keep"** — aof's OWN
+running agents/commands now carry the `impact` grounding, not just downstream projects.
+_verifies → the dogfood claim in `## AC re-assessment` + F11-6._
+
+### F11-5 (unprompted live-agent value proof) — CLOSED
+A live `aof-architect` was spawned on a plain structural-review task (two m27 modules) with **zero mention
+of graph / impact / grounding**. Unprompted, it ran `aof graph build src` (fresh: 1295 nodes / 3522 edges)
+then `aof graph impact` on the modules, and **grounded its entire verdict on exact graph-derived coupling
+edges** — proving `src/work.mjs` carries zero mesh edges, distinguishing comment-citations from real
+imports, ruling out cycles, and catching a real bijection-coverage gap via the negative-coupling fact a
+fuzzy query cannot prove. The grounding demonstrably CHANGED the analysis (structural facts no eyeball read
+supplies). This is the demonstrable value the re-open demanded. _verifies → the "running agents benefit"
+value claim; `@manual` unprompted-agent-observed._
+
+### F11-4 — re-triaged to deferred non-blocker (→ m10)
+Still present: the graphify memory backend (`src/memory/graphify-backend.mjs`, work-stream corpus) and the
+codebase build (`aof graph build src`) both resolve `<projectRoot>/graphify-out/graph.json`, so whichever
+built last wins and a cross-use recall re-ranks against the wrong corpus. This is an **m10 memory-backend
+path concern**, not m11's codebase-grounding value (which is proven independently). The re-accept bar lists
+it as "ideally" — **deferred, routed to m10** (fix: give the memory backend a distinct graph output path,
+e.g. `graphify-out/memory/graph.json`, so the two corpora never collide).
+
+### `@executable` gate — GREEN (2221 ok / 0 fail)
+Confirmed in isolation on the current tree. The four `acd-codebase-grounding-*` arch-tests +
+`test/graph-impact.test.mjs` (the non-vacuous ADR-007 value test) are green.
+
+### Finding logged (non-blocker → m28)
+
+| id | observed | type | severity | triage | routed-to | status |
+|----|----------|------|----------|--------|-----------|--------|
+| **F11-7** | Under CONCURRENT test runs, a mesh test writes THIS machine's real node record to the real `.aof/mesh/nodes/<nodeId>.json` (m28's in-progress `meshDir` relocation `.mesh/` → `.aof/mesh/`, `mesh-store.mjs:50-66`), so parallel `node scripts/test.mjs` invocations collide and 10-28 mesh-substrate tests (issuance-record/00, issuance-add-only-merge/02, mesh-store, mesh-ui) flake. Green in ISOLATION (2221/0); the failures were an artifact of running multiple suites at once during this verify. | test-isolation (hermeticity under concurrency) | non-blocker (green in isolation) | **defer → m28** (the relocation's own verify): make the mesh tests hermetic — no test may resolve `aofHome`/`meshDir` to the real repo `.aof`; a fixture must always inject `projectRoot`/`aofDir`. | milestone 28 (`meshDir` relocation verify) | open (deferred) |
+
+## Accept decision — RE-ACCEPTED (2026-07-03)
+
+The 2026-06-23 retraction is **cleared**. m11's value is now genuinely demonstrated (F11-5 unprompted proof
++ F11-6 dogfood + the ADR-007 `graph:impact` value test), the `@executable` gate is green in isolation,
+`aof work validate` PASS, and **no blocker finding is open** (F11-4 → m10, F11-7 → m28, both non-blocking
+and out of m11's scope). All four stories → `done`; milestone → `done`.

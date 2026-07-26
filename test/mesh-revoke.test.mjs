@@ -1,23 +1,20 @@
 // Traceability wiring for milestone 24 / story 02 — task 01 (tasks/01_mesh-revoke
 // .feature). aof mesh revoke <node> (control-node-guarded) removes the node from the
 // registry roster, appends an explicit-deny revocation { nodeId, revokedAt, reason } via
-// story 00's writeRegistry (ONE atomic write), and de-provisions its git-remote via the
-// shell-less spawnSync("git", ["remote","remove",name]) argv idiom — after it, the relay
+// story 00's writeRegistry (ONE atomic write); after it, the relay
 // auth-gate (task 00) rejects that node's credential on its next connect.
 //
 // Covers EVERY @executable scenario, white-box over mesh:revoke + the registry seam:
 // invoke the registered command with an INJECTED config.mesh.relay.controlNode /
 // config.mesh.nodeId pair (matching → the control node admits the revoke; mismatched →
 // the non-authority refusal) over a workspace fixture, with an INJECTED revokedAt (a
-// value, never wall-clock — the 22/R2 discipline). The git de-provision runs against a
-// LOCAL fixture clone (a real `git remote remove` on a local repo, no network). The
-// "auth-gate now rejects" observable REUSES task 00's in-process serveRelay. The --json
+// value, never wall-clock — the 22/R2 discipline). The "auth-gate now rejects" observable
+// REUSES task 00's in-process serveRelay. The --json
 // face is exercised via the real CLI (spawnCliSync — mesh:revoke touches only the local
 // registry/clone, no in-process server, so the synchronous spawn is safe). One test object
 // per scenario.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +23,7 @@ import { loadWorkspace } from "../src/work.mjs";
 import { invoke } from "../src/command-core.mjs";
 import { serveRelay, sha256Hex } from "../src/mesh-relay.mjs";
 import { writeRegistry, readRegistry } from "../src/mesh-registry.mjs";
+import { meshDir } from "../src/mesh-store.mjs";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,10 +33,9 @@ const CONTROL_ID = "control-node-a";
 const CLOCK = "2026-07-01T10:00:00.000Z";
 const REVOKED_AT = "2026-07-02T12:00:00.000Z";
 
-// A control-node project fixture: a real repo (git init) with the .aof config seeded so
-// the workspace loads config.mesh (control node) + the roster is writable. Returns
-// { root, configPath, workspace }.
-async function makeControlProject({ roster = [], revocations = [], gitInit = true, controlNode = CONTROL_ID, nodeId = CONTROL_ID } = {}) {
+// A control-node project fixture with the .aof config seeded so the workspace loads
+// config.mesh (control node) + the roster is writable. Returns { root, configPath, workspace }.
+async function makeControlProject({ roster = [], revocations = [], controlNode = CONTROL_ID, nodeId = CONTROL_ID } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-revoke-ctl-"));
   await mkdir(path.join(root, ".aof"), { recursive: true });
   await mkdir(path.join(root, "wiki", "work"), { recursive: true });
@@ -49,10 +46,6 @@ async function makeControlProject({ roster = [], revocations = [], gitInit = tru
   };
   const configPath = path.join(root, ".aof", "aof.config.json");
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-  if (gitInit) {
-    const init = spawnSync("git", ["init"], { cwd: root, encoding: "utf8" });
-    assert.equal(init.status, 0, `git init the control fixture (stderr: ${init.stderr})`);
-  }
   const workspace = await loadWorkspace(root);
   await writeRegistry(workspace, { roster, boards: [], pending: [], revocations }, config);
   return { root, configPath, workspace };
@@ -68,17 +61,17 @@ function admittedNode(nodeId, { admittedAt = CLOCK } = {}) {
   };
 }
 
-function gitRemotes(cwd) {
-  const result = spawnSync("git", ["remote"], { cwd, encoding: "utf8" });
-  return result.status === 0 ? result.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
+async function seedGitConfig(root, text) {
+  await mkdir(path.join(root, ".git"), { recursive: true });
+  await writeFile(path.join(root, ".git", "config"), text, "utf8");
 }
 
-// Configure a named remote on a fixture clone (a real `git remote add`, no network).
-function addRemote(cwd, name, url) {
-  const result = spawnSync("git", ["remote", "add", name, url], { cwd, encoding: "utf8" });
-  assert.equal(result.status, 0, `git remote add ${name} (stderr: ${result.stderr})`);
+async function readGitConfig(root) {
+  return readFile(path.join(root, ".git", "config"), "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  });
 }
-
 // The task-00 in-process relay auth-gate harness (isGroupConnection forced to group so an
 // in-process 127.0.0.1 client is treated as a group connection — the injectable seam).
 async function standRelay(workspace, config) {
@@ -135,29 +128,20 @@ export const meshRevokeTests = [
     },
   },
 
-  // ══ Scenario: mesh:revoke de-provisions the git-remote via the shell-less argv form ═
+  // ══ Scenario: mesh:revoke leaves git remotes untouched; mesh sync is WebSocket-only ═
   {
-    name: "mesh-revoke/01 mesh:revoke de-provisions the revoked node's git-remote via git remote remove (the argv form) on the control node's own clone, leaving the unrelated origin remote configured",
+    name: "mesh-revoke/01 mesh:revoke does not de-provision or otherwise touch git remotes",
     async run() {
       const x = admittedNode("node-x");
       const ctl = await makeControlProject({ roster: [x.entry] });
       try {
-        // A local fixture clone with the revoked node's remote configured (the <nodeId>-remote
-        // convention) plus an unrelated origin. A url carrying a SPACE proves the argv form
-        // does not word-split it (the 13/ADR-002 Windows hazard).
-        addRemote(ctl.root, "node-x-remote", "https://git.example.test/group remotes/node-x.git");
-        addRemote(ctl.root, "origin", "https://git.example.test/origin.git");
-        assert.deepEqual(gitRemotes(ctl.root).sort(), ["node-x-remote", "origin"], "both remotes are configured before the revoke");
+        const before = `[remote "node-x-remote"]\n\turl = https://git.example.test/group remotes/node-x.git\n[remote "origin"]\n\turl = https://git.example.test/origin.git\n`;
+        await seedGitConfig(ctl.root, before);
 
-        const ctx = { workspace: ctl.workspace };
-        const result = await invoke("mesh:revoke", { node: "node-x", revokedAt: REVOKED_AT }, ctx);
-        assert.equal(result.gitRemote.deprovisioned, true, "the revoke de-provisioned the node's git-remote");
-        assert.equal(result.gitRemote.name, "node-x-remote", "the de-provision targeted the <nodeId>-remote");
-
-        // The node-x-remote is gone; the unrelated origin is still configured.
-        const remotes = gitRemotes(ctl.root);
-        assert.ok(!remotes.includes("node-x-remote"), "the node-x-remote is no longer configured on the clone");
-        assert.ok(remotes.includes("origin"), "the unrelated origin remote is still configured (the de-provision targets only the revoked node's remote)");
+        const result = await invoke("mesh:revoke", { node: "node-x", revokedAt: REVOKED_AT }, { workspace: ctl.workspace });
+        assert.equal(result.revoked, true, "the revoke still succeeds");
+        assert.equal("gitRemote" in result, false, "the revoke result exposes no git de-provisioning result");
+        assert.equal(await readGitConfig(ctl.root), before, "repository metadata is byte-unchanged; revocation is registry-only");
       } finally {
         await rm(ctl.root, { recursive: true, force: true });
       }
@@ -214,7 +198,7 @@ export const meshRevokeTests = [
         const nonControlWorkspace = { ...ctl.workspace, config: nonControlConfig };
 
         // Record the registry bytes on disk before the refused invocation.
-        const registryPath = path.join(ctl.workspace.workDir, ".mesh", "registry", "group.json");
+        const registryPath = path.join(meshDir(ctl.workspace), "registry", "group.json");
         const before = await readFile(registryPath, "utf8");
 
         let refused = null;
@@ -241,7 +225,7 @@ export const meshRevokeTests = [
       const x = admittedNode("node-x");
       const ctl = await makeControlProject({ roster: [x.entry] });
       try {
-        // mesh:revoke touches only the local registry/clone — no in-process server is
+        // mesh:revoke touches only the local registry — no in-process server is
         // stood here, so the synchronous spawn is safe (no deadlock risk).
         const result = spawnCliSync(process.execPath, [cliPath, "mesh", "revoke", "node-x", "--json"], {
           cwd: ctl.root,
@@ -300,46 +284,22 @@ export const meshRevokeTests = [
     },
   },
 
-  // ══ Scenario: the git de-provision is TOLERANT — an absent remote / no git repo is a
-  //    structured degraded outcome, never a throw; the roster removal + revocation
-  //    STILL persist (the durable authority act does not hinge on the git clone state).
-  //    (aof-qa coverage finding — both tolerance branches were correct but unguarded.) ══
+  // ══ Scenario: revocation does not require a git repository ═══════════════════════
   {
-    name: "mesh-revoke/01 the git de-provision is tolerant — an absent <nodeId>-remote and a no-git-repo control project each yield a structured degraded gitRemote outcome (no throw), and the roster removal + revocation still persist",
+    name: "mesh-revoke/01 mesh:revoke succeeds without a git repository because revocation is registry-only",
     async run() {
-      // Variant A: a git repo whose <nodeId>-remote was never configured.
-      {
-        const x = admittedNode("node-x");
-        const ctl = await makeControlProject({ roster: [x.entry], gitInit: true });
-        try {
-          const result = await invoke("mesh:revoke", { node: "node-x", revokedAt: REVOKED_AT }, { workspace: ctl.workspace });
-          assert.equal(result.revoked, true, "[absent remote] the revoke still succeeds");
-          assert.equal(result.gitRemote.deprovisioned, false, "[absent remote] the git de-provision reports it did not de-provision");
-          assert.equal(result.gitRemote.reason, "no-such-remote", "[absent remote] the tolerated reason is no-such-remote (never a throw)");
-          // The durable authority act still landed.
-          const after = await readRegistry(ctl.workspace);
-          assert.ok(!after.roster.some((e) => e.nodeId === "node-x"), "[absent remote] node-x is still removed from the roster");
-          assert.ok(after.revocations.some((r) => r.nodeId === "node-x"), "[absent remote] the node-x revocation is still appended");
-        } finally {
-          await rm(ctl.root, { recursive: true, force: true });
-        }
-      }
-
-      // Variant B: a control project with NO git repo at all.
-      {
-        const x = admittedNode("node-x");
-        const ctl = await makeControlProject({ roster: [x.entry], gitInit: false });
-        try {
-          const result = await invoke("mesh:revoke", { node: "node-x", revokedAt: REVOKED_AT }, { workspace: ctl.workspace });
-          assert.equal(result.revoked, true, "[no git repo] the revoke still succeeds");
-          assert.equal(result.gitRemote.deprovisioned, false, "[no git repo] the git de-provision reports it did not de-provision");
-          assert.equal(result.gitRemote.reason, "no-git-repo", "[no git repo] the tolerated reason is no-git-repo (never a throw)");
-          const after = await readRegistry(ctl.workspace);
-          assert.ok(!after.roster.some((e) => e.nodeId === "node-x"), "[no git repo] node-x is still removed from the roster");
-          assert.ok(after.revocations.some((r) => r.nodeId === "node-x"), "[no git repo] the node-x revocation is still appended");
-        } finally {
-          await rm(ctl.root, { recursive: true, force: true });
-        }
+      const x = admittedNode("node-x");
+      const ctl = await makeControlProject({ roster: [x.entry] });
+      try {
+        assert.equal(await readGitConfig(ctl.root), null, "precondition: the fixture has no repository metadata");
+        const result = await invoke("mesh:revoke", { node: "node-x", revokedAt: REVOKED_AT }, { workspace: ctl.workspace });
+        assert.equal(result.revoked, true, "the revoke still succeeds without a git repo");
+        assert.equal("gitRemote" in result, false, "the result has no git de-provisioning branch");
+        const after = await readRegistry(ctl.workspace);
+        assert.ok(!after.roster.some((e) => e.nodeId === "node-x"), "node-x is removed from the roster");
+        assert.ok(after.revocations.some((r) => r.nodeId === "node-x"), "the node-x revocation is appended");
+      } finally {
+        await rm(ctl.root, { recursive: true, force: true });
       }
     },
   },

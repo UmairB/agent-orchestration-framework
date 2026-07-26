@@ -16,6 +16,24 @@ export function primaryAction(item, ctx) {
     return { kind: "view", label: "View terminal" };
   }
 
+  // …and so does a run in flight on a WORKER (2026-07-26). `liveForRef` only knows
+  // about a LOCAL dock session, so an item a worker was actively executing still
+  // offered "Continue" — clicking it dispatched a second run, which the assign core
+  // then refused ("already has an active assignment held by <node>"). The row already
+  // carries the answer (`execution.active` + the node), so read it here rather than
+  // letting the operator discover it by being refused. Running work is watched, not
+  // restarted.
+  // Its own kind, NOT "view": the board's terminal dock is a LOCAL pty, so reusing
+  // "view" here would open an empty dock and look like it did something. Disabled and
+  // labelled with the node — the honest answer is "this is running over there".
+  if (item.execution?.active === true) {
+    return {
+      kind: "running",
+      label: item.execution.nodeId ? `Running on ${item.execution.nodeId}` : "Running",
+      disabled: true,
+    };
+  }
+
   switch (item.status) {
     case "blocked":
       return { kind: "blocked", label: "Blocked", disabled: true };

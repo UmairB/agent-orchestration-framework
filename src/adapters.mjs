@@ -9,6 +9,7 @@ import {
   claudeSettingsJson,
   codexConfigToml,
   projectDocContent,
+  codexHooksJson,
   projectDocOutputPath,
   targetForProjectDocRuntime
 } from "./runtime-config.mjs";
@@ -108,14 +109,25 @@ function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, option
     ));
   }
 
-  if (codexMcpServers.length > 0 || codexHooks.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
+  if (codexMcpServers.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
     outputs.push(renderedRuntimeConfig(
       targetDir,
       path.join(".codex", "config.toml"),
       "codex",
       "settings",
       "codex-config",
-      codexConfigToml({ mcpServers: codexMcpServers, hooks: codexHooks, settings: config.settings })
+      codexConfigToml({ mcpServers: codexMcpServers, settings: config.settings })
+    ));
+  }
+
+  if (codexHooks.length > 0) {
+    outputs.push(renderedRuntimeConfig(
+      targetDir,
+      path.join(".codex", "hooks.json"),
+      "codex",
+      "hooks",
+      "codex-hooks",
+      codexHooksJson(codexHooks)
     ));
   }
 
@@ -373,6 +385,13 @@ function resourcePath(runtime, resource) {
 
 function renderResource(runtime, adapter, resource, workflowIndex = new Map(), assetReferenceIndex = createAssetReferenceIndex()) {
   if (resource.kind === "skill") {
+    if (runtime === "codex") {
+      return renderCodexMarkdownResource([
+        `name: ${resource.name ?? resource.id}`,
+        `description: ${resource.description ?? ""}`
+      ], contentFor(resource, runtime, workflowIndex, assetReferenceIndex));
+    }
+
     // `disable-model-invocation: true` makes Claude Code NOT auto-trigger the
     // skill — it runs only when the user invokes `/<name>` explicitly. Emitted
     // when the resource carries the flag. For the codex-* delegation skills this is
@@ -418,6 +437,13 @@ function renderResource(runtime, adapter, resource, workflowIndex = new Map(), a
     return renderRule(runtime, resource, workflowIndex, assetReferenceIndex);
   }
 
+  if (runtime === "codex") {
+    return renderCodexMarkdownResource([
+      `name: ${resource.name ?? resource.id}`,
+      `description: ${resource.description ?? ""}`
+    ], contentFor(resource, runtime, workflowIndex, assetReferenceIndex));
+  }
+
   return [
     "---",
     "aof-generated: true",
@@ -431,6 +457,19 @@ function renderResource(runtime, adapter, resource, workflowIndex = new Map(), a
     contentFor(resource, runtime, workflowIndex, assetReferenceIndex).trim(),
     ""
   ].filter(Boolean).join("\n");
+}
+
+function renderCodexMarkdownResource(frontmatterLines, body) {
+  return [
+    "---",
+    ...frontmatterLines,
+    "---",
+    "",
+    "<!-- aof-generated: true; aof-runtime: codex -->",
+    "",
+    body.trim(),
+    ""
+  ].join("\n");
 }
 
 function renderWorkflow(runtime, workflow, assetReferenceIndex = createAssetReferenceIndex()) {

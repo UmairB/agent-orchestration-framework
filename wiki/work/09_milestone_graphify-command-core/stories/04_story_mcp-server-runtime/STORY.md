@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-21
 updated: 2026-06-22
+schema: 1
+aofVersion: 0.1.0
 ---
 # 04 · The aof MCP server runtime — the server the rendered MCP entry launches
 

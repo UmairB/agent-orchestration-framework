@@ -3,12 +3,14 @@ type: milestone
 number: 27
 slug: work-issuance-routing
 title: "Cross-Machine Issuance & Routing — issue from the control node, claim anywhere"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-03
 depends: [25, 26]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
@@ -61,7 +63,31 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-_To be broken down — `aof:refine 27`._
+Broken down `2026-07-03` by `aof:refine 27 --autonomous`. The partition follows the codebase-graph
+coupling ([ARCHITECTURE.md §Recommended story partition](ARCHITECTURE.md); graph freshly built — 1261
+nodes / 3400 edges) and the milestone family's proven grain (**substrate/dependency-root → CLI end-to-end →
+UI/integration**, the 3-story shape m22/m23/m26 all landed). Routing is a thin **composition of the four
+DONE seams** (m22 identity, m24 registry/control-node, m25 fleet UI, m26 leasing) with one substrate
+contract flowing through all three stories, so — unlike m25 (01∥02) or m26 (a git-pure sibling parallel to
+the substrate) — the honest cut is a **three-link chain 00 → 01 → 02**, each sequenced on a real data
+dependency, file-disjoint per story (no file owned by two). The **security-lens** work (SECURITY.md + its
+fitness — the first cross-machine inbound write surface) was authored at Decide and converges into story 02.
+Contracts (task `.feature` files) are authored per story via Three Amigos.
+
+- [x] **00 · [the issuance directive substrate + the eligibility matcher](stories/00_story_issuance-directive-substrate/STORY.md)** —
+  the git-pure dependency root: `src/mesh-issuance.mjs` (the frozen six-key `.mesh/issuance/<issuer>/<item-ref>.json`
+  directive + `readIssuanceDirectives` + the pure `nodeSatisfiesTarget` matcher) + the RESERVED
+  `issuanceDirectivePath` builder on `mesh-store.mjs` (ADR-001/ADR-003; fitness #2, #3). No command, no
+  relay, no UI — provable over plain git fixtures. **The dependency root.**
+- [x] **01 · [mesh:issue + mesh-aware-next routing pickup](stories/01_story_mesh-issue-routing-pickup/STORY.md)** —
+  the CLI end-to-end over git: `aof mesh issue <ref> [--to <node|cap>]` (a registered `mesh:*` verb) + the
+  directive WRITES + the UNIFIED candidacy view in `work:next` (routing filter + the m26 lease) + the
+  **m26/ADR-007 every-ready-return fold-in** in `work.mjs` + the `mesh:status` issued render (ADR-002/ADR-004/
+  ADR-005/ADR-001.3; fitness #1, #4, #5, #6). **Sequenced after 00.**
+- [x] **02 · [the fleet-UI issue/assign affordance](stories/02_story_fleet-ui-issue-affordance/STORY.md)** —
+  the UI/integration join + the security-lens story: `POST /api/mesh/issue` on the fleet face → `invoke("mesh:issue")`
+  (the FIRST write route) + the `[assign ▸]` affordance + the deliberate flip of `acd-mesh-ui-write-isolation`
+  to bounded-write (ADR-006; DESIGN.md; SECURITY.md; fitness #7 + the security fitness). **Depends on 01.**
 
 ## Dependencies
 

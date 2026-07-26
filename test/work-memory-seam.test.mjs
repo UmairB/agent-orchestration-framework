@@ -169,6 +169,29 @@ export const workMemorySeamTests = [
       }
     }
   },
+  {
+    // Regression: `ingest`/`reindex` route STRAIGHT into the rebuild (which writes the
+    // index and spawns the graph build) — so before the --help guard, `memory ingest
+    // --help` did real work and hung. --help must print usage and reach NO backend.
+    name: "memory-seam/dispatch: `ingest --help` prints usage and exits 0, reaching no backend (never starts the rebuild)",
+    run: async () => {
+      const r = await runWithStub(["ingest", "--help"]);
+      assert.equal(r.exitCode, 0, "help exits 0");
+      assert.equal(r.calls.length, 0, "no backend method was invoked (the rebuild never starts)");
+      for (const verb of MEMORY_VERBS) {
+        assert.ok(r.output.includes(verb), `help output lists ${verb}`);
+      }
+    }
+  },
+  {
+    name: "memory-seam/dispatch: `reindex --help` prints usage and exits 0, reaching no backend",
+    run: async () => {
+      const r = await runWithStub(["reindex", "--help"]);
+      assert.equal(r.exitCode, 0, "help exits 0");
+      assert.equal(r.calls.length, 0, "no backend method was invoked");
+      assert.ok(r.output.includes("reindex"), "help output names reindex");
+    }
+  },
   // Scenario Outline: each verb routes to its frozen interface method.
   // | verb | args | method | composed |
   ...[

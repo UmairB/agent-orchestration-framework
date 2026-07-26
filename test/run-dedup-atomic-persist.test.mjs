@@ -20,7 +20,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
 const RUNID_RE = /^(\d{8}T\d{9}Z)-(\d{4})$/;
 
 // --- fixture builders --------------------------------------------------------
@@ -83,6 +83,11 @@ async function writeRecord(item, overrides) {
     heartbeatAt: null,
     retryOf: null,
     reclaimedAt: null,
+    // The m26 fourteenth key (26/ADR-001): the retry-lineage persist row asserts the
+    // ON-DISK keys of this directly-written fixture against the fourteen-key freeze,
+    // so the fixture carries the additive node key too (a 13-key fixture would still
+    // READ forward benignly — that read-forward property has its own coverage).
+    node: null,
   };
   const record = { ...base, ...overrides };
   await writeFile(path.join(runsDir, `${record.runId}.json`), JSON.stringify(record, null, 2), "utf8");
@@ -258,10 +263,10 @@ export const runDedupAtomicPersistTests = [
         const runs = await fresh.readRuns(item);
         assert.equal(runs.length, 1, "the record reloads as one run");
         const [reloaded] = runs;
-        // it parses as complete JSON carrying all thirteen frozen keys
+        // it parses as complete JSON carrying all fourteen frozen keys
         const onDisk = JSON.parse(await readFileBytes(item, record.runId));
-        assert.deepEqual(Object.keys(onDisk), FROZEN_KEYS, "the on-disk record carries all thirteen frozen keys");
-        assert.deepEqual(Object.keys(reloaded), FROZEN_KEYS, "the reloaded record carries all thirteen frozen keys");
+        assert.deepEqual(Object.keys(onDisk), FROZEN_KEYS, "the on-disk record carries all fourteen frozen keys");
+        assert.deepEqual(Object.keys(reloaded), FROZEN_KEYS, "the reloaded record carries all fourteen frozen keys");
         // no partial or temp (.tmp-) artifact remains in the item's runs/ directory
         assert.deepEqual(await tmpArtifacts(item), [], "no .tmp- artifact remains in the item's runs/ directory");
       } finally {

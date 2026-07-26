@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-19
 updated: 2026-06-19
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · Memory seam — `aof work memory` verbs + backend selection
 

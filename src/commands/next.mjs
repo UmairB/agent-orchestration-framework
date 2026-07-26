@@ -1,9 +1,9 @@
 // work:next — the next actionable item, respecting `depends` (ADR-002).
 //
 // `run` returns the core `nextWork` result with its `path` left a RAW ABSOLUTE in
-// its on-disk OS form — NO projection inside run (the ADR-002 keystone). Path
-// display is a FACE adapter: the board projects to projectRoot + forward-slash,
-// the CLI to cwd (path.relative). A `done` result carries no `path`.
+// its on-disk OS form. Mesh git-bus lease/issuance overlays are retired; global
+// visibility is handled by the mesh projection/WebSocket path, not by filtering
+// next-work candidacy from repo-local mesh files.
 import path from "node:path";
 import { nextWork } from "../work.mjs";
 
@@ -11,17 +11,19 @@ export const nextCommand = {
   id: "work:next",
   input: {
     type: "object",
-    properties: { scope: { type: "string" } },
+    // `now` remains accepted as a white-box no-op for older callers.
+    properties: { scope: { type: "string" }, now: { type: "string" } },
     additionalProperties: false,
   },
 
   async run(input, ctx) {
     const scope = scopeOf(input);
+    const ws = ctx.workspace;
+
     // The raw nextWork result — its `path` (when present) is the OS-native
     // absolute item directory; the command does not relativise or slash it.
-    return await nextWork(ctx.workspace.workDir, scope);
+    return await nextWork(ws.workDir, scope);
   },
-
   cli: {
     // `aof work next [scope]` — an optional positional maps onto the input.
     argv: (positionals) => (positionals[0] ? { scope: positionals[0] } : {}),

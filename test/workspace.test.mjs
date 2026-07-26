@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "../src/workspace.mjs";
+import { findProjectConfig, globalMeshPaths, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "../src/workspace.mjs";
 
 export const workspaceTests = [
   {
@@ -25,6 +25,18 @@ export const workspaceTests = [
       assert.equal(paths.configPath, path.join(root, "aof.config.json"));
       assert.equal(paths.lockPath, path.join(root, "aof.lock.json"));
       assert.equal(paths.assetsDir, path.join(root, "assets"));
+    }
+  },
+  {
+    name: "global mesh paths sit under the global workspace home",
+    run() {
+      const paths = globalMeshPaths({ env: { AOF_GLOBAL_HOME: "/tmp/aof-global" } });
+      const root = path.resolve("/tmp/aof-global");
+      assert.equal(paths.meshRoot, path.join(root, "mesh"));
+      assert.equal(paths.workRoot, path.join(root, "mesh", "work"));
+      assert.equal(paths.nodesRoot, path.join(root, "mesh", "nodes"));
+      assert.equal(paths.workspacesRoot, path.join(root, "mesh", "workspaces"));
+      assert.equal(paths.databasePath, path.join(root, "mesh", "work", "projection.sqlite"));
     }
   },
   {

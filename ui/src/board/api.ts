@@ -5,12 +5,37 @@
 // element exactly these seven fields; `parent` is the only tree edge.
 export type WorkItem = {
   ref: string;
-  type: "milestone" | "story" | "task" | "uat";
+  // milestone 37/ADR-003: `spike`/`chore` are additive top-level driver types
+  // (ADR-001, uat-shaped). The board's minimal default is a type badge + the
+  // existing driver placement — no new lane/column, no per-type doc tabs.
+  type: "milestone" | "story" | "task" | "uat" | "spike" | "chore";
   slug: string;
   status: WorkStatus | null;
   title: string | null;
   parent: string | null;
   dir: string;
+  // The MESH-EXECUTION overlay (VERIFICATION 2026-07-25, src/board-mesh-execution.mjs).
+  // Present ONLY for an item the mesh has dispatched to a worker node; absent for every
+  // local-only item (and for every non-mesh workspace), which is what keeps the board's
+  // default the plain local view. `active` distinguishes a LIVE run from a finished one —
+  // a finished run still reports, because its work lives on `branch`, which this node's
+  // checkout does not have, and that is precisely what the local `not-started` hides.
+  execution?: {
+    assignmentId: string;
+    active: boolean;
+    state: string;
+    nodeId: string;
+    sessionId: string | null;
+    updatedAt: string | null;
+    branch: string | null;
+  };
+  // Set by the server's worker-row merge (src/board-worker-stream.mjs): this row came
+  // from a WORKER's own view of the item, streamed over the fabric — so this machine's
+  // checkout may not have the item at all. The drill-downs (doc bodies, run records)
+  // are NOT bridged, so a row carrying these needs a "lives on <node>" answer rather
+  // than a local resolution error (TECH_DEBT item 6).
+  fromWorker?: boolean;
+  reportedBy?: string | null;
 };
 
 export type WorkStatus = "not-started" | "in-progress" | "in-review" | "blocked" | "done";
@@ -33,6 +58,26 @@ export type NextResponse = {
 };
 
 export type FeedbackResponse = { ok: true; bullet: string };
+
+// The /api/work/continue envelope. `where` is the server's answer to the only question
+// this endpoint exists to settle: does this continue run HERE, on a worker node — or is
+// it ALREADY running ("running": the ref or its milestone scope has an active
+// assignment; nothing was spawned or minted, the caller watches it instead)?
+// `command` is the slash command a LOCAL continue types into its own session.
+// `scopeRef` is the top-level item the execution actually rides on (a story's continue
+// routes at its milestone — one branch, one worktree per top-level item).
+export type ContinueResponse = {
+  ok: true;
+  ref: string;
+  where: "local" | "remote" | "running";
+  node: string | null;
+  resolvedBy: "requested" | "last-node" | "no-prior-run" | "active-run" | null;
+  scopeRef?: string;
+  state?: string | null;
+  sessionId?: string | null;
+  command?: string;
+  assignmentId?: string;
+};
 
 // A story's tasks are its `<dir>/tasks/*.feature` files, parsed server-side
 // (the browser can't read disk). Mirrors the /api/work/tasks wire shape.
@@ -116,6 +161,19 @@ export const workApi = {
   next(scope?: string): Promise<NextResponse> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
     return getJson<NextResponse>(`/api/work/next${query}`);
+  },
+  // THE single continue door (2026-07-26). The SERVER decides where a continue runs —
+  // the node that last worked on the item, or here when nothing ever has. The button
+  // must not make that decision itself: that is how clicking Continue on a milestone a
+  // worker owns used to start a rival local run on the control node.
+  async continueWork(input: { ref: string; node?: string }): Promise<ContinueResponse> {
+    const response = await fetch("/api/work/continue", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) throw new Error(await safeError(response));
+    return (await response.json()) as ContinueResponse;
   },
   async feedback(input: { ref: string; note: string; actor: string; refs?: string }): Promise<FeedbackResponse> {
     const response = await fetch("/api/work/feedback", {

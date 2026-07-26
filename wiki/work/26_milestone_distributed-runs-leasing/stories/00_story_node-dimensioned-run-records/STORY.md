@@ -4,10 +4,12 @@ number: 00
 slug: node-dimensioned-run-records
 title: "Node-dimensioned run records — the runs/<node>/ partition made real in run-store + the sync root-set, the git substrate (no lease, no relay)"
 parent: 26
-status: not-started
+status: done
 owner: product-owner
 created: 2026-07-02
-updated: 2026-07-02
+updated: 2026-07-03
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?
@@ -33,15 +35,15 @@ so that two nodes' concurrent run records merge **add-only** over git — never 
      task is one `.feature` under tasks/; done when its feature is green. The fitness functions are
      arch-tests (structural invariants → never a behaviour feature) tracked as buildable units below. -->
 
-- [ ] `tasks/00_node-dimensioned-records.feature` — the fourteen-key record + the record-driven persist + the union readers (ADR-001): a run minted **with** a `node` persists at `runs/<node>/<run-id>.json` (exactly the m22-frozen `runNodeRecordPath` shape) and carries `node` as the fourteenth key; minted **without** ⇒ the flat legacy path with `node: null`, byte-identical to today (the store reads no config — the node id arrives as data); a legacy thirteen-key record on disk reads forward with `node: null` (absence is benign); `readRuns` returns the UNION of flat entries + one level of node subdirs (same normalization, same torn-file tolerance); the dedup guard refuses a duplicate non-terminal run **across nodes**; `completeRun`'s no-runId resolution sees every node's running runs; runId uniqueness spans the union — two nodes minting at the same instant get distinct ids.
-- [ ] `tasks/01_sync-root-set.feature` — the sync-scope generalisation (ADR-002): `syncMesh(workspace, { roots })` defaults to `[meshDir]` and preserves today's behaviour **byte-for-byte** for every existing call site; a mesh-aware root set adds the runs pathspec so run-record writes commit/push on the tick; an operator's unrelated working-tree edit is NEVER swept into a mesh commit; the engine stays content-agnostic (moves bytes, parses nothing); the honest failure envelopes (`push-failed`/`pull-failed`) are unchanged.
-- [ ] `tasks/02_add-only-run-merge.feature` — the outsider-verifiable add-only property (ADR-001 + ADR-002): two clones over a shared bare remote each mint a run for the SAME item under their own node dirs; both sync; the merge is add-only (no content conflict, no wedged MERGING state); each clone then reads the union with BOTH nodes' records intact byte-for-byte. `@executable` over real git fixtures (the m22 transport-task precedent).
-- [ ] **Structural deliverable — `leaseClaimPath` RESERVED** (ADR-003.1, the m22→m23 seam-reservation idiom): the pure builder `leaseClaimPath(workspace, itemRef, nodeId)` = `join(meshDir, "leases", flatLeaf(itemRef), flatLeaf(nodeId) + ".json")` lands in `mesh-store.mjs` beside `presenceRecordPath`, routed through the SAME `flatLeaf` boundary — named, not built: it writes nothing (story 01 builds the writes).
-- [ ] **Fitness `acd-run-node-path-single-builder`** (arch-test, ADR-001 / fitness #1) — `runNodeRecordPath` defined ONCE in `run-store.mjs` (built FROM `runsDir`, the frozen shape byte-identical); `mesh-store.mjs` RE-EXPORTS it; no second `join(runsDir…, node…)` in `src/`; the persist path routes through the builder.
-- [ ] **Fitness `acd-run-record-node-additive`** (arch-test, ADR-001 / fitness #2) — the fourteen-key freeze: `20/ADR-001`'s thirteen unchanged in name/order + `node` appended defaulting `null`; a thirteen-key record normalizes forward.
-- [ ] **Fitness `acd-runs-eol-pinned`** (arch-test, ADR-001 / fitness #3, the 23/R3 carry-forward) — `.gitattributes` rules MATCH the real sample paths `wiki/work/<item>/runs/<node>/<run-id>.json` + the flat shape (git-semantics matching, never a literal grep); asserts `.mesh/leases/**` is already covered by `**/.mesh/**`.
-- [ ] **Fitness `acd-run-store-mesh-free`** (arch-test, ADR-001 / fitness #4) — `run-store.mjs` imports NO mesh module and reads no config; the mint's `node` is parameter-sourced.
-- [ ] **Fitness `acd-sync-root-set`** (arch-test, ADR-002 / fitness #5) — the root-set default `[meshDir]`, the pathspec iteration, the runs-pathspec resolver's single home; the existing `acd-mesh-sync-record-neutral` re-arms green over the modified engine.
+- [x] `tasks/00_node-dimensioned-records.feature` — the fourteen-key record + the record-driven persist + the union readers (ADR-001): a run minted **with** a `node` persists at `runs/<node>/<run-id>.json` (exactly the m22-frozen `runNodeRecordPath` shape) and carries `node` as the fourteenth key; minted **without** ⇒ the flat legacy path with `node: null`, byte-identical to today (the store reads no config — the node id arrives as data); a legacy thirteen-key record on disk reads forward with `node: null` (absence is benign); `readRuns` returns the UNION of flat entries + one level of node subdirs (same normalization, same torn-file tolerance); the dedup guard refuses a duplicate non-terminal run **across nodes**; `completeRun`'s no-runId resolution sees every node's running runs; runId uniqueness spans the union — two nodes minting at the same instant get distinct ids.
+- [x] `tasks/01_sync-root-set.feature` — the sync-scope generalisation (ADR-002): `syncMesh(workspace, { roots })` defaults to `[meshDir]` and preserves today's behaviour **byte-for-byte** for every existing call site; a mesh-aware root set adds the runs pathspec so run-record writes commit/push on the tick; an operator's unrelated working-tree edit is NEVER swept into a mesh commit; the engine stays content-agnostic (moves bytes, parses nothing); the honest failure envelopes (`push-failed`/`pull-failed`) are unchanged.
+- [x] `tasks/02_add-only-run-merge.feature` — the outsider-verifiable add-only property (ADR-001 + ADR-002): two clones over a shared bare remote each mint a run for the SAME item under their own node dirs; both sync; the merge is add-only (no content conflict, no wedged MERGING state); each clone then reads the union with BOTH nodes' records intact byte-for-byte. `@executable` over real git fixtures (the m22 transport-task precedent).
+- [x] **Structural deliverable — `leaseClaimPath` RESERVED** (ADR-003.1, the m22→m23 seam-reservation idiom): the pure builder `leaseClaimPath(workspace, itemRef, nodeId)` = `join(meshDir, "leases", flatLeaf(itemRef), flatLeaf(nodeId) + ".json")` lands in `mesh-store.mjs` beside `presenceRecordPath`, routed through the SAME `flatLeaf` boundary — named, not built: it writes nothing (story 01 builds the writes).
+- [x] **Fitness `acd-run-node-path-single-builder`** (arch-test, ADR-001 / fitness #1) — `runNodeRecordPath` defined ONCE in `run-store.mjs` (built FROM `runsDir`, the frozen shape byte-identical); `mesh-store.mjs` RE-EXPORTS it; no second `join(runsDir…, node…)` in `src/`; the persist path routes through the builder.
+- [x] **Fitness `acd-run-record-node-additive`** (arch-test, ADR-001 / fitness #2) — the fourteen-key freeze: `20/ADR-001`'s thirteen unchanged in name/order + `node` appended defaulting `null`; a thirteen-key record normalizes forward.
+- [x] **Fitness `acd-runs-eol-pinned`** (arch-test, ADR-001 / fitness #3, the 23/R3 carry-forward) — `.gitattributes` rules MATCH the real sample paths `wiki/work/<item>/runs/<node>/<run-id>.json` + the flat shape (git-semantics matching, never a literal grep); asserts `.mesh/leases/**` is already covered by `**/.mesh/**`.
+- [x] **Fitness `acd-run-store-mesh-free`** (arch-test, ADR-001 / fitness #4) — `run-store.mjs` imports NO mesh module and reads no config; the mint's `node` is parameter-sourced.
+- [x] **Fitness `acd-sync-root-set`** (arch-test, ADR-002 / fitness #5) — the root-set default `[meshDir]`, the pathspec iteration, the runs-pathspec resolver's single home; the existing `acd-mesh-sync-record-neutral` re-arms green over the modified engine.
 
 ## Notes
 

@@ -6,13 +6,47 @@
 // basis-neutral (neither cwd- nor projectRoot-relative) and both faces emit it
 // unchanged. Path display for list is therefore a no-op on either face.
 import { listStream } from "../work.mjs";
+// VERIFICATION (board mesh-execution overlay, 2026-07-25) — the board asked "what is the
+// state of this item?" and got the CONTROL node's own local frontmatter, which reads
+// `not-started` for work a WORKER on another machine is executing on its own branch. The
+// overlay answers the operator's three steps (is it executing / show that / else local).
+import { readExecutionOverlay, applyExecutionOverlay } from "../board-mesh-execution.mjs";
+// …and the WORKER's own live view of those items (streamed from its worktree into the
+// projection), which is what a mesh item's rows come from — otherwise a fully-broken-down
+// milestone reads "0 stories" because this checkout has only the pre-run scaffold.
+import { readWorkerItems, mergeWorkerItems } from "../board-worker-stream.mjs";
 
 export const listCommand = {
   id: "work:list",
-  input: { type: "object", properties: {}, additionalProperties: false },
+  // `mesh` is an OPT-IN (the board face passes it; the CLI never does), so `aof work list`
+  // stays a pure local read with no store open — the overlay is a board affordance, not a
+  // new cost on every list.
+  input: { type: "object", properties: { mesh: { type: "boolean" } }, additionalProperties: false },
 
-  async run(_input, ctx) {
-    return await listStream(ctx.workspace.workDir);
+  async run(input, ctx) {
+    const rows = await listStream(ctx.workspace.workDir);
+    if (input?.mesh !== true) return rows;
+    const overlay = await readExecutionOverlay(ctx.workspace, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
+    // The WORKER's own view of each mesh item, streamed up the fabric from the worktree it
+    // is actually working in and merged into the global projection. This is the source for
+    // a mesh item — NOT the git branch: a branch only exists after a run commits and
+    // pushes, so branch-reading can never show work in flight and makes committing a
+    // precondition for seeing anything. Absent (no worker has reported) leaves the row
+    // exactly as the local checkout has it.
+    const worker = await readWorkerItems(ctx.workspace, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+      refs: [...overlay.keys()],
+    });
+    // Overlay LAST (2026-07-26, operator-found): a mesh milestone's stories often exist
+    // ONLY as worker-streamed rows (the local checkout holds the pre-run scaffold), and
+    // the earlier merge-after-overlay order meant those inserted rows never passed the
+    // overlay — so a story of a RUNNING milestone still offered Continue instead of
+    // "Running on <node>". applyExecutionOverlay skips its status override for
+    // fromWorker rows (their streamed status IS the live truth), so the order swap
+    // changes affordance data only, never a worker-reported status.
+    return applyExecutionOverlay(mergeWorkerItems(rows, worker, overlay), overlay);
   },
 
   cli: {

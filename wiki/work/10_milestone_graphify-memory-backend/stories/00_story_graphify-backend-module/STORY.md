@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-22
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · The graphify memory backend module — the frozen interface + the graph-build integration (the spine)
 

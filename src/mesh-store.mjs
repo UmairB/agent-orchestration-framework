@@ -6,17 +6,14 @@
 //
 // THE PARTITION INVARIANT (ADR-002, frozen): every mesh record file is owned and
 // addressed by EXACTLY ONE node id, built from a SINGLE seam (meshDir/nodeRecordPath),
-// so two nodes never write the same path. Git merges of disjoint per-node files are
-// add-only — never a three-way content merge — which is the precondition that keeps
-// git viable as the mesh's bus (story 02's sync engine rests on it). There is NO
-// shared or aggregate file two nodes co-write (no nodes.json roster).
+// so two nodes never write the same path. The active mesh root is machine-global, not
+// repository-local; WebSocket streams and global projections are the sync surface, not
+// a per-workspace git bus. There is NO shared or aggregate file two nodes co-write
+// (no nodes.json roster).
 //
-// The partition root is the git-TRACKED .mesh/ dir inside the work stream (the
-// conscious 17/ADR-001 departure, ADR-003): git IS the bus, so a peer reads this
-// node's record straight from the synced tree — NOT a git-ignored .aof/ sidecar.
-// The records stay derived/rebuildable (the sidecar's OTHER property is honoured);
-// only their location departs (tracked, not ignored).
-//
+// Mesh is AOF runtime state — a cross-cutting, extensible concept (planning too, not
+// only the work stream) — so the active mesh store anchors in the global AOF home
+// (`AOF_GLOBAL_HOME` or `~/.aof`), outside project `.aof` output/config.
 // Like run-store, this module references ZERO record-doc filename (SPEC.md/STORY.md/
 // STATE.md/SESSION.md): record-doc resolution lives in work.mjs, never here (the
 // write-scope guard, fitness #2). Every write joins meshDir/nodeRecordPath and routes
@@ -32,19 +29,42 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import { writeText } from "./fs.mjs";
 // The run dimension adopts milestone 19's frozen run-record seam as the reference
 // (ADR-002 "compose-with-19"): runNodeRecordPath composes 22's <node>/ convention
-// with 19's runsDir — it does NOT redefine the run seam.
-import { runsDir, runRecordPath } from "./run-store.mjs";
+// with 19's runsDir — it does NOT redefine the run seam. As of milestone 26
+// (26/ADR-001.1) the builder's AUTHORITY lives in run-store.mjs (the import
+// direction — this module imports run-store — forbids the reverse), and this module
+// RE-EXPORTS it: every existing import site is unchanged, and there is still
+// exactly ONE builder.
+import { runsDir, runRecordPath, runNodeRecordPath } from "./run-store.mjs";
+// 34/story 00 — mesh state is machine-wide GLOBAL (the operator directive): the roster/
+// presence/coordination live in the global AOF home, not per-project `.aof/mesh/`.
+import { globalMeshPaths } from "./workspace.mjs";
 
 // --------------------------------------------------------- the path seam ----
 
-// THE single partition-root seam (ADR-002). The git-TRACKED .mesh/ dir lives inside
-// the work stream (workspace.workDir), sibling to the work items, so git carries it
-// as the bus. This is the ONLY partition-root join site; nodeRecordPath /
-// presenceRecordPath build FROM it. The literal ".mesh" leaf is the seam's own
-// choice (the contract pins only node-id-keyed, under workDir, git-tracked, not
-// .aof/) — renameable without a contract change.
+// The .aof config-home a workspace's mesh anchors under. `loadWorkspace` supplies
+// `aofDir` (the real .aof dir); a synthetic `{ workDir }` workspace (tests) derives it
+// from `projectRoot`, else from the conventional <root>/wiki/work workDir. ONE resolver
+// so the anchor lives in a single place.
+export function aofHome(workspace) {
+  if (workspace.aofDir) return workspace.aofDir;
+  if (workspace.projectRoot) return path.join(workspace.projectRoot, ".aof");
+  return path.join(path.dirname(path.dirname(workspace.workDir)), ".aof");
+}
+
+// THE single partition-root seam. MACHINE-WIDE GLOBAL as of 34/story 00 (operator
+// directive): mesh is a machine fact, NOT per-project — the node roster, presence, and
+// coordination state live in the GLOBAL AOF home (globalMeshPaths().meshRoot, honoring
+// AOF_GLOBAL_HOME), initialized once per machine, propagated between machines over the
+// WebSocket stream (ADR-007) — NOT the git bus (the git-bus mesh transport is retired;
+// see ADR-007). No `workspace` anchor anymore — every workspace on the machine sees the
+// SAME mesh home. `loadWorkspace` injects the resolved globalMeshRoot so tests and
+// subprocess callers that set AOF_GLOBAL_HOME stay hermetic; synthetic workspaces fall
+// back to the process default global home.
 export function meshDir(workspace) {
-  return path.join(workspace.workDir, ".mesh");
+  if (typeof workspace?.globalMeshRoot === "string" && workspace.globalMeshRoot.length > 0) {
+    return workspace.globalMeshRoot;
+  }
+  return globalMeshPaths().meshRoot;
 }
 
 // The node id is coerced to ONE FLAT leaf segment before it becomes a path: any
@@ -74,25 +94,17 @@ export function presenceRecordPath(workspace, id) {
   return path.join(meshDir(workspace), "presence", flatLeaf(id) + ".json");
 }
 
-// The run-dimension CONVENTION (ADR-002, "compose-with-19"): the path the convention
-// prescribes for a (node, run) record is EXACTLY milestone 19's runRecordPath(item,
-// runId) with one <node>/ segment inserted before the run-id leaf —
-// join(runsDir(item), node, runId + ".json"). It ADOPTS 19's frozen runsDir seam as
-// the reference (imported, never redefined) so convention (22) and store (19)
-// provably compose at milestone 26. This is a PURE path builder — it WRITES NOTHING
-// (milestone 26 builds the writes). `runRecordPath` is imported alongside `runsDir`
-// so a test can assert the composition (run-id leaf byte-identical to 19's).
-export function runNodeRecordPath(item, node, runId) {
-  return path.join(runsDir(item), node, runId + ".json");
-}
-
-// Re-export 19's frozen run seam so the composition can be asserted against the same
-// reference the convention adopts (no divergent run-path builder lives here).
-export { runsDir, runRecordPath };
+// Re-export 19's frozen run seam — and 26's node-partitioned builder (the ADR-002
+// "compose-with-19" convention: runRecordPath with one <node>/ segment before the
+// run-id leaf), whose authority now lives beside it in run-store.mjs — so the
+// composition can be asserted against the same reference the convention adopts (no
+// divergent run-path builder lives here; 26/ADR-001.1 — a home change, not a
+// contract change).
+export { runsDir, runRecordPath, runNodeRecordPath };
 
 // ------------------------------------------------- opaque per-node persist ----
 
-// Publish a node's record as exactly ONE git-tracked nodes/<id>.json, written
+// Publish a node's record as exactly ONE global nodes/<id>.json, written
 // atomically (writeText temp+rename, 19/R2). The record is persisted OPAQUE / AS-IS
 // — pretty JSON, no normalization, no schema reshaping: unknown additive keys and
 // nested mixed-type values survive byte-equivalent + key-order-preserved (ADR-003 is

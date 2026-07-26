@@ -128,7 +128,7 @@ export const terminalWsTests = [
   ...["claude", "codex", "gemini"].map((provider) => ({
     name: `terminal-ws/01 the selected provider "${provider}" is the CLI that gets run`,
     async run() {
-      const { repo, storyDir } = await makeRepo();
+      const { repo } = await makeRepo();
       const calls = [];
       try {
         await withServer(
@@ -143,8 +143,10 @@ export const terminalWsTests = [
         // Then the CLI that is run is the "<provider>" CLI, and no other.
         assert.equal(calls.length, 1, "exactly one CLI was spawned");
         assert.equal(calls[0].bin, `/fake/bin/${provider}`, `the spawned binary is the ${provider} CLI`);
-        // And it ran bound to the item's directory (cwd = item dir).
-        assert.equal(calls[0].options.cwd, storyDir, "the CLI runs with the item's directory as cwd");
+        // And it ran at the PROJECT ROOT (2026-07-26) — never the item's own wiki/work
+        // folder: an agent building an item works on the repo, and a per-item cwd also
+        // makes claude's folder-trust dialog unavoidable (a new untrusted path per item).
+        assert.equal(calls[0].options.cwd, repo, "the CLI runs with the project root as cwd");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

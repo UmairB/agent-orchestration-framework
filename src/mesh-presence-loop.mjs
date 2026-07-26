@@ -2,7 +2,7 @@
 // ADR-003). A thin background TIMER over the one-shot presence publish (the two-publish
 // path in mesh-heartbeat.mjs) — it invokes the one-shot publish ONCE per tick and holds
 // NO publish logic of its own (no git write, no relay push directly — task 01 asserts
-// both). The m22 startSyncLoop / intervalTicker / resolveCadenceSeconds / cadenceFromConfig
+// both). The intervalTicker / resolveCadenceSeconds / cadenceFromConfig
 // split, applied to presence (the 22/ADR-004 runner shape — copied so the two loops share
 // one shape).
 //
@@ -83,7 +83,7 @@ export function startPresenceLoop({ publishOnce, cadenceSeconds, ticker } = {}) 
 }
 
 // A real setInterval-backed ticker (production). Tests inject a manual ticker instead, so
-// the loop never wall-clock-waits in CI. (Identical to mesh-sync.mjs's intervalTicker —
+// the loop never wall-clock-waits in CI. (Identical to the launcher intervalTicker shape —
 // the two loops share the clock shape.)
 export function intervalTicker() {
   return {

@@ -107,7 +107,8 @@ function resourceWarnings(resources, requestedRuntimes, options) {
   const warnings = [];
   for (const [index, resource] of resources.entries()) {
     for (const runtime of selectedPrimitiveRuntimes(resource, requestedRuntimes)) {
-      if (resource.kind === "agent" && runtime === "codex" && resource.model) {
+      if (resource.kind !== "agent" || runtime !== "codex") continue;
+      if (resource.model) {
         warnings.push(adapterWarning({
           code: ADAPTER_WARNING_CODES.lossyRuntimeMapping,
           path: `resources[${index}].model`,
@@ -115,8 +116,20 @@ function resourceWarnings(resources, requestedRuntimes, options) {
           id: resource.id,
           runtime,
           generatedPath: generatedResourcePath(resource, runtime, options),
-          reason: "Codex agent model preference is emitted as frontmatter metadata because AOF has no more precise Codex-native model mapping.",
-          remediation: "Confirm the generated Codex agent metadata is acceptable, or move the model preference into a Codex-specific override."
+          reason: "Codex agent model preference is omitted because AOF has no safe Codex-native model mapping for agent files.",
+          remediation: "Move the model preference to a Codex-native settings field if one is available, or remove it from Codex-targeted agent resources."
+        }));
+      }
+      if (Array.isArray(resource.tools) && resource.tools.length > 0) {
+        warnings.push(adapterWarning({
+          code: ADAPTER_WARNING_CODES.lossyRuntimeMapping,
+          path: `resources[${index}].tools`,
+          kind: "agent",
+          id: resource.id,
+          runtime,
+          generatedPath: generatedResourcePath(resource, runtime, options),
+          reason: "Claude tool allow-list is omitted because Codex agent files do not use Claude Code tools frontmatter.",
+          remediation: "Move tool restrictions to a Codex-native configuration surface if one is available, or remove them from Codex-targeted agent resources."
         }));
       }
     }
@@ -156,12 +169,14 @@ function normalizeRequestedRuntimes(runtimes) {
 
 function runtimeHookPath(runtime) {
   if (runtime === "claude") return portablePath(".claude", "settings.json");
-  if (runtime === "codex") return portablePath(".codex", "config.toml");
+  if (runtime === "codex") return portablePath(".codex", "hooks.json");
   return null;
 }
 
 function runtimeSettingsPath(runtime) {
-  return runtimeHookPath(runtime);
+  if (runtime === "claude") return portablePath(".claude", "settings.json");
+  if (runtime === "codex") return portablePath(".codex", "config.toml");
+  return null;
 }
 
 function generatedResourcePath(resource, runtime, options = {}) {

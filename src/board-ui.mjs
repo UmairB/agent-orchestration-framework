@@ -44,7 +44,13 @@ export async function handleWorkApi(request, response, options = {}) {
     if (request.method === "GET" && pathname === "/api/work/list") {
       // The list rows pass straight through — `dir` is already forward-slashed
       // by listStream, so no path projection is needed (ADR-002).
-      const rows = await invoke("work:list", {}, ctx);
+      // `mesh: true` — VERIFICATION (2026-07-25): the BOARD asks for the mesh-execution
+      // overlay (is this item being executed by a worker, and where does that work live),
+      // so a milestone a remote worker is building no longer reads `not-started` from this
+      // node's own local frontmatter. Opt-in per call: the CLI's own `work:list` is
+      // untouched. The overlay degrades to the local rows on any fault, so this cannot
+      // fail the board.
+      const rows = await invoke("work:list", { mesh: true }, ctx);
       sendJson(response, 200, rows);
       return true;
     }
@@ -120,6 +126,28 @@ export async function handleWorkApi(request, response, options = {}) {
         payload.path = displayPath(workspace.projectRoot, payload.path);
       }
       sendJson(response, 200, payload);
+      return true;
+    }
+
+    if (request.method === "POST" && pathname === "/api/work/continue") {
+      // THE single continue door (2026-07-26): "continue this task, optionally naming
+      // where". It may mint an assignment, so it carries the same same-origin admission
+      // guard the fleet's own assign route uses — a same-origin browser fetch always
+      // matches this server's own http://<host>; anything else is refused before the
+      // body is read.
+      const expectedOrigin = `http://${request.headers.host}`;
+      if (request.headers.origin !== expectedOrigin) {
+        sendApiError(response, 403, "Cross-origin write refused.", "cross-origin-refused");
+        return true;
+      }
+      const body = await readJsonBody(request);
+      // Only ref/node are lifted off the body — the command decides everything else.
+      const result = await invoke(
+        "work:continue",
+        { ref: body.ref, ...(body.node ? { node: body.node } : {}) },
+        ctx
+      );
+      sendJson(response, 200, result);
       return true;
     }
 

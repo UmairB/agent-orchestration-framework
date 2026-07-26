@@ -8,6 +8,8 @@ owner: product-owner
 created: 2026-06-20
 updated: 2026-06-20
 depends: [00, 03]
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

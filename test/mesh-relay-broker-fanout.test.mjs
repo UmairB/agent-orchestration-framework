@@ -171,8 +171,8 @@ export const meshRelayBrokerFanoutTests = [
     async run() {
       // A workspace dir the relay COULD (but must not) write under.
       const workspace = await mkdtemp(path.join(os.tmpdir(), "aof-relay-fs-"));
-      await mkdir(path.join(workspace, "wiki", "work", ".mesh", "presence"), { recursive: true });
-      await writeFile(path.join(workspace, "wiki", "work", ".mesh", "presence", "seed.json"), '{"seed":true}\n', "utf8");
+      await mkdir(path.join(workspace, ".aof", "mesh", "presence"), { recursive: true });
+      await writeFile(path.join(workspace, ".aof", "mesh", "presence", "seed.json"), '{"seed":true}\n', "utf8");
       const relay = await serveRelay({ port: 0, config: { mesh: { nodeId: "A" } } });
       let a, b;
       try {
@@ -189,7 +189,7 @@ export const meshRelayBrokerFanoutTests = [
         const after = await snapshotTree(workspace);
         assert.ok(snapshotsEqual(before, after), "the filesystem under the workspace is byte-unchanged from before the publish (no file created/modified/deleted)");
         // Belt-and-braces: only the seed record exists — no relay log appeared.
-        const presence = await readdir(path.join(workspace, "wiki", "work", ".mesh", "presence"));
+        const presence = await readdir(path.join(workspace, ".aof", "mesh", "presence"));
         assert.deepEqual(presence, ["seed.json"], "no presence record or relay log was written (the in-flight signal stays in memory only)");
       } finally {
         await closeAll(a, b);

@@ -1,4 +1,11 @@
 .aof/**/*.json text eol=lf
+# milestone 41 review fast-follow: pin the insert-scaffolded work-item templates
+# to LF too — a `core.autocrlf=true` Windows checkout would otherwise hand
+# insert-shared.mjs's `stripBundleMarker` CRLF bytes around the leading
+# `<!-- aof-generated: bundle -->` marker, and (pre-fix) that defeated the
+# strip, scaffolding a validate-broken doc whose first line stayed the
+# comment. Kept as a belt-and-braces pin alongside the CRLF-tolerant regex fix.
+.aof/templates/**/*.md text eol=lf
 .planning/**/*.md text eol=lf
 test/fixtures/** text eol=lf
 test/integration/**/*.feature text eol=lf
@@ -10,13 +17,33 @@ test/integration/**/*.feature text eol=lf
 src/bundle/** text eol=lf
 
 # The git-tracked mesh records (milestone 22 / story 00 partition; milestone 23 /
-# story 00 presence, ADR-002 / fitness #6, the 22/R5 carry-forward): pin LF so a
-# mixed-OS / autocrlf=true fleet sees BYTE-STABLE record files. A node writes its
-# presence/<id>.json (and nodes/<id>.json) with LF, and a peer checks it out with
-# LF regardless of core.autocrlf — so the "byte-for-byte as the writer wrote it"
-# poll-for-durability assertions hold across the git seam (acd-mesh-eol-pinned).
-# The `**/` prefix anchors the rule at ANY depth: a node's .mesh/ lives under its
-# work stream (e.g. wiki/work/.mesh/), so the pin must match a NESTED .mesh/, not
-# only one at the repo root (the m03 whole-surface-scope lesson).
-**/.mesh/** text eol=lf
+# story 00 presence, ADR-002 / fitness #6, the 22/R5 carry-forward; location moved to
+# .aof/mesh/ at 28/verify): pin LF so a mixed-OS / autocrlf=true fleet sees BYTE-STABLE
+# record files. A node writes its presence/<id>.json (and nodes/<id>.json) with LF, and
+# a peer checks it out with LF regardless of core.autocrlf — so the "byte-for-byte as
+# the writer wrote it" poll-for-durability assertions hold across the git seam
+# (acd-mesh-eol-pinned). The mesh substrate anchors on the .aof config home, so this
+# pins .aof/mesh/** explicitly (a dedicated, discoverable pin, even though line-1's
+# .aof/**/*.json rule already covers the JSON records).
+.aof/mesh/** text eol=lf
+
+# The git-tracked RUN records (milestone 26 / story 00, ADR-001 / fitness #3 — the
+# 23/R3 carry-forward: the EOL pin must match the REAL nested record path). Run
+# records become a git-as-bus record class in milestone 26 (the sync root-set
+# carries wiki/work/<item>/runs/…), so they get the same LF pin as the .mesh/**
+# records. The `/**/` between runs/ and the leaf matches ZERO or more directories,
+# so this ONE rule covers BOTH the flat legacy wiki/work/<item>/runs/<run-id>.json
+# AND the node-partitioned .../runs/<node>/<run-id>.json; the *.json scope avoids
+# marking a future binary run artifact as text. (.aof/mesh/leases/** needs NO new rule —
+# the .aof/mesh/** pin above already covers it.)
+**/runs/**/*.json text eol=lf
+
+# The committed upgrade changelog (milestone 40 / story 04, ADR-006): a pure,
+# DETERMINISTIC projection of WORK_ITEM_MIGRATIONS (src/work-upgrade.mjs
+# renderChangelog) — the drift guard is regenerate == committed BYTE-FOR-BYTE
+# (acd-changelog-generated), and renderChangelog always emits LF. Pin LF here
+# too so a core.autocrlf=true Windows checkout never hands the committed file
+# CRLF bytes the generator's LF output could never match (the 22/R5, 01/R2
+# carry-forward: a byte-identity guard must pin line endings).
+UPGRADE-CHANGELOG.md text eol=lf
 

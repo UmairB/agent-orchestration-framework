@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aof mesh — fleet</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<!--
+  Milestone 36 · Mesh Desktop App — the node/work view (DESIGN.md §Surface 1).
+  This is the WebView-hosted UI (ADR-001, Tauri v2). It is STRICTLY READ-ONLY over the fleet:
+  the only controls are the two LOCAL process toggles + window/tray actions. It renders the
+  corrected `aof mesh status --json` shape via app.js's mapStatusToView() (story 02 view-model).
+  Demo/screenshot: ?state=populated|empty|loading|error  &  ?theme=light|dark  (default populated/light).
+-->
+<body>
+  <main class="window" role="application" aria-label="AOF Mesh — fleet">
+    <!-- TITLE BAR (frameless-window custom chrome). data-tauri-drag-region makes the
+         bar (and its non-interactive logo/title children) a window-move handle; the
+         wincontrols <button>s are auto-excluded from the drag region by Tauri and wired
+         to the minimize/maximize/hide IPC in app.js. -->
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="logo" data-tauri-drag-region aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span class="title" data-tauri-drag-region>aof mesh</span>
+      <span class="title-sub" data-tauri-drag-region>— fleet</span>
+      <div class="wincontrols">
+        <button type="button" class="wc" id="wc-min" title="Minimize" aria-label="Minimize">&#8211;</button>
+        <button type="button" class="wc" id="wc-max" title="Maximize" aria-label="Maximize">&#9723;</button>
+        <button type="button" class="wc wc-close" id="wc-close" title="Close (hides to tray)" aria-label="Close">&#10005;</button>
+      </div>
+    </header>
+
+    <!-- CONTROL BAR (LOCAL process health + this-machine identity — filled by app.js) -->
+    <div class="controlbar" id="controlbar"></div>
+
+    <!-- BODY (fleet presence — one of empty/loading/error/populated — filled by app.js) -->
+    <div class="body" id="body"></div>
+
+    <!-- FOOTER (poll freshness) -->
+    <footer class="footer"><span class="foot-glyph" aria-hidden="true">&#8635;</span><span id="footer-text"></span></footer>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

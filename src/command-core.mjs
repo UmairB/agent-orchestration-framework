@@ -26,6 +26,7 @@
 // achievable on Windows separators (ADR-002).
 import { loadWorkspace } from "./work.mjs";
 import { listCommand } from "./commands/list.mjs";
+import { continueCommand } from "./commands/continue.mjs";
 import { docCommand } from "./commands/doc.mjs";
 import { tasksCommand } from "./commands/tasks.mjs";
 import { validateCommand } from "./commands/validate.mjs";
@@ -95,20 +96,11 @@ import { runRetryCommand } from "./commands/run-retry.mjs";
 // register into the SAME core; ADR-001/003). Thin over story 00's src/mesh-store.mjs
 // (the partition seam + opaque per-node persist/read) and story 01's
 // src/node-identity.mjs (id derivation + descriptor assembly): mesh:identity publishes/
-// reads THIS node's record, mesh:status lists the synced roster. Additive — exactly the
+// reads THIS node's record, mesh:status lists the machine-wide roster. Additive — exactly the
 // 08 move (one import + one COMMANDS entry each). They take the `mesh:` prefix, so they
 // are EXCLUDED from the `work:`-filtered bijection but inherit the NEW registry-derived
 // acd-mesh-command-cli-bijection gate (story 00, fitness #3).
 import { meshIdentityCommand, meshStatusCommand } from "./commands/mesh-identity.mjs";
-// milestone 22 — mesh-foundation (story 02: git-sync engine — mesh:sync registers into
-// the SAME core; ADR-004). Thin over story 02's src/mesh-sync.mjs syncMesh (the
-// PAYLOAD-AGNOSTIC git transport): it stages + commits this node's records under the
-// partition root, pulls peers', pushes — moving FILES, never parsing record content.
-// The one-shot testable transport unit; the background loop is a thin timer over it.
-// Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is
-// EXCLUDED from the `work:`-filtered bijection but inherits the acd-mesh-command-cli-
-// bijection gate (now covering identity+status+sync).
-import { meshSyncCommand } from "./commands/mesh-sync.mjs";
 // milestone 23 — control-node-relay (story 00: presence-heartbeat — mesh:heartbeat
 // registers into the SAME core; ADR-002). Thin over story 00's src/mesh-presence.mjs
 // (the presence-record assembly + the activeRuns read of the run records + the atomic
@@ -134,26 +126,70 @@ import { meshRelayCommand } from "./commands/mesh-relay.mjs";
 // control-node-guarded MINT (a 6-digit code, recorded HASHED as a pending invite
 // through story 00's writeRegistry seam, the plaintext returned ONCE in the result);
 // mesh:join PRESENTS a code to the control node's device-flow HTTP endpoint (the
-// POST /enroll route on serveRelay's ONE http server), stores the issued credential at
-// config.mesh.credential (read-merge-write of the free-form mesh subtree — the
-// resolveInstallSalt precedent), and provisions the granted git remote via the
-// shell-less spawnSync("git", [ … ]) argv idiom (13/ADR-002). Additive — one import +
-// one COMMANDS entry each. They take the `mesh:` prefix, so they are EXCLUDED from the
-// `work:`-filtered bijection but RIDE the existing acd-mesh-command-cli-bijection gate
-// (now covering identity+status+sync+heartbeat+relay+invite+join).
+// POST /enroll route on the control service), stores the issued websocket credential
+// in the machine-global mesh config, and configures no repository remotes. Additive —
+// one import + one COMMANDS entry each. They take the `mesh:` prefix, so they are
+// EXCLUDED from the `work:`-filtered bijection but RIDE the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+
+// relay+invite+join).
 import { meshInviteCommand } from "./commands/mesh-invite.mjs";
 import { meshJoinCommand } from "./commands/mesh-join.mjs";
 // milestone 24 — group-enrollment (story 02: the enforceable trust boundary — ADR-004).
 // mesh:revoke is the control-node-guarded REVOKE: it removes the node from the registry
 // roster + appends an explicit-deny revocation { nodeId, revokedAt, reason } through
-// story 00's writeRegistry seam (ONE atomic write), and de-provisions git-remote on the
-// control node's OWN clone via the shell-less spawnSync("git", ["remote","remove",…])
-// argv idiom (13/ADR-002). After it the relay auth-gate (in mesh-relay.mjs's upgrade
-// handler) rejects the revoked node's credential on its next connect (T6). Additive —
-// one import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from
-// the `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection
-// gate (now covering identity+status+sync+heartbeat+relay+invite+join+revoke).
+// story 00's writeRegistry seam (ONE atomic write). After it the relay auth-gate (in
+// mesh-relay.mjs's upgrade handler) rejects the revoked node's credential on its next
+// connect (T6). Additive — one import + one COMMANDS entry. It takes the `mesh:` prefix,
+// so it is EXCLUDED from the `work:`-filtered bijection but RIDES the existing
+// acd-mesh-command-cli-bijection gate (now covering identity+status+sync+heartbeat+
+// relay+invite+join+revoke).
 import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
+// milestone 33 — mesh relay/transport redesign (story 01: fabric-native transport +
+// coordination launcher — mesh:serve registers into the SAME core; ADR-003). Thin over
+// story 01's src/mesh-launcher.mjs: `aof mesh serve` is the per-node presence+sync
+// daemon serve verb, but the registered run is the NON-BLOCKING probe (fabric state +
+// self-address + peer count + control-node status) — the actual long-lived daemon is the
+// `--serve` CLI face's job (startLauncher), never the registered run. Additive — one
+// import + one COMMANDS entry. It takes the `mesh:` prefix, so it is EXCLUDED from the
+// `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
+// (now covering identity+status+sync+heartbeat+relay+invite+join+revoke+issue+serve).
+import { meshServeCommand } from "./commands/mesh-serve.mjs";
+// milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
+// milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
+// (src/commands/insert-shared.mjs) over story 01's re-index engine
+// (src/work-reindex.mjs): open the slot at the caller's target position P in the
+// TOP-LEVEL number space, count-gate the confirmation, then scaffold the new
+// item's skeleton from `.aof/templates/work/<type>/` — the SAME templates add-*
+// uses. Additive — the registry-derived acd-work-command-cli-bijection guard
+// covers the new verbs for free (08/ADR-004).
+import { insertMilestoneCommand } from "./commands/insert-milestone.mjs";
+import { insertUatCommand } from "./commands/insert-uat.mjs";
+// milestone 41 / story 03 (insert-story, ADR-002/004/005/006) — work:insert-
+// story, the NESTED-axis sibling: places a new story at local position SS
+// under a milestone NN, reusing the SAME insert-shared.mjs mechanics
+// (count-gate, template-scaffold-strip) via `runInsertStory`. Independent of
+// story 02's top-level pair above — disjoint number space, own command file.
+import { insertStoryCommand } from "./commands/insert-story.mjs";
+// milestone 39 / story 03 (gap-to-chore, ADR-001, feasibility flag 4) —
+// work:insert-chore joins the SAME top-level pair above (a THIN wrapper over
+// insert-shared.mjs's runInsertTopLevel, reusing the mechanics, not a bespoke
+// writer). work:promote-gap is the promotion verb: given a declared gap
+// (title + discharge condition), it calls the SAME runInsertTopLevel engine to
+// scaffold a chore, then seeds its Definition of Done + back-reference — the
+// mechanical bridge from "a gap is a note" to "a gap is schedulable debt".
+import { insertChoreCommand } from "./commands/insert-chore.mjs";
+import { promoteGapToChoreCommand } from "./commands/promote-gap-to-chore.mjs";
+// milestone 40 / story 02 (migration registry & `aof upgrade`, ADR-005) —
+// work:upgrade registers into the SAME core. A thin wrapper over the NEW
+// src/work-upgrade.mjs engine (WORK_ITEM_MIGRATIONS + planUpgrade/runUpgrade),
+// which imports work.mjs's readers + the ADR-004 writer but is never imported
+// BY work.mjs (acd-upgrade-engine-blast-radius — the god-node's blast radius
+// does not grow). Reachable as the top-level `aof upgrade` verb (mirroring
+// `aof migrate` -> migrate:folder) AND as `aof work upgrade` (cli.mjs's
+// workCommand dispatch) — both routes reach this ONE registered command.
+// CLI-only by design (no board affordance requested — the same BOARD_DEFERRED
+// carve-out `insert-milestone`/`insert-chore`/etc already use).
+import { upgradeCommand } from "./commands/upgrade.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -187,12 +223,22 @@ const COMMANDS = [
   runRetryCommand,
   meshIdentityCommand,
   meshStatusCommand,
-  meshSyncCommand,
   meshHeartbeatCommand,
   meshRelayCommand,
   meshInviteCommand,
   meshJoinCommand,
   meshRevokeCommand,
+  meshServeCommand,
+  insertMilestoneCommand,
+  insertUatCommand,
+  insertStoryCommand,
+  insertChoreCommand,
+  promoteGapToChoreCommand,
+  upgradeCommand,
+  // work:continue (2026-07-26) — THE single "continue this task [--node <id>]" door.
+  // Every face (board button, CLI, fleet) resolves WHERE a continue happens here, so a
+  // board click can no longer start a local run against work that lives on a worker.
+  continueCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

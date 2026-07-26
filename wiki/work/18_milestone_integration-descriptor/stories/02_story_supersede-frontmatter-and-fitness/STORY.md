@@ -7,6 +7,8 @@ status: done
 owner: product-owner
 created: 2026-06-26
 updated: 2026-06-27
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Supersede the frontmatter mechanism + author the fitness invariants
 

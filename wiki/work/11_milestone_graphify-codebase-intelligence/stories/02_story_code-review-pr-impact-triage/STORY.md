@@ -4,10 +4,12 @@ number: 02
 slug: code-review-pr-impact-triage
 title: "Code-review PR-impact triage — surface graph:triage's ranked queue as review context"
 parent: 11
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Code-review PR-impact triage — the ranked queue as advisory review context
 

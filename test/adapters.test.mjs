@@ -52,7 +52,7 @@ async function rendersPortableResources() {
       resources: [
         { kind: "skill", id: "context", description: "Context", body: "Use project context." },
         { kind: "command", id: "prime", description: "Prime", prompt: "Map the repository.", runtimes: ["claude"] },
-        { kind: "agent", id: "reviewer", description: "Review", instructions: "Review the diff." }
+        { kind: "agent", id: "reviewer", description: "Review", model: "opus", tools: ["Read", "Grep"], instructions: "Review the diff." }
       ]
     });
 
@@ -61,10 +61,21 @@ async function rendersPortableResources() {
 
     const claudeCommand = await readFile(path.join(targetDir, ".claude", "commands", "prime.md"), "utf8");
     const codexGitignore = await readFile(path.join(targetDir, ".codex", ".gitignore"), "utf8");
+    const claudeAgent = await readFile(path.join(targetDir, ".claude", "agents", "reviewer.md"), "utf8");
+    const codexAgent = await readFile(path.join(targetDir, ".codex", "agents", "reviewer.md"), "utf8");
 
     assert.match(claudeCommand, /aof-generated: true/);
     assert.match(claudeCommand, /aof-invocation: \/prime/);
     assert.match(codexGitignore, /!\.gitignore/);
+    assert.match(claudeAgent, /^model: opus$/m);
+    assert.match(claudeAgent, /^tools: Read, Grep$/m);
+    assert.match(codexAgent, /^name: reviewer$/m);
+    assert.match(codexAgent, /^description: Review$/m);
+    assert.doesNotMatch(codexAgent, /^model:/m);
+    assert.doesNotMatch(codexAgent, /^tools:/m);
+    assert.doesNotMatch(codexAgent, /^aof-generated:/m);
+    assert.doesNotMatch(codexAgent, /^aof-runtime:/m);
+    assert.match(codexAgent, /<!-- aof-generated: true; aof-runtime: codex -->/);
   } finally {
     await rm(targetDir, { recursive: true, force: true });
   }
@@ -220,12 +231,13 @@ async function rendersExpandedDslRuntimeOutputs() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 7);
+    assert.equal(writes.length, 8);
 
     const claudeMcp = await readFile(path.join(targetDir, ".mcp.json"), "utf8");
     const claudeSettings = await readFile(path.join(targetDir, ".claude", "settings.json"), "utf8");
     const codexConfig = await readFile(path.join(targetDir, ".codex", "config.toml"), "utf8");
     const agents = await readFile(path.join(targetDir, "AGENTS.md"), "utf8");
+    const codexHooks = JSON.parse(await readFile(path.join(targetDir, ".codex", "hooks.json"), "utf8"));
     const claudeDoc = await readFile(path.join(targetDir, "CLAUDE.md"), "utf8");
 
     assert.match(claudeMcp, /"docs"/);
@@ -233,7 +245,11 @@ async function rendersExpandedDslRuntimeOutputs() {
     assert.match(claudeSettings, /"hooks"/);
     assert.match(claudeSettings, /"PostToolUse"/);
     assert.match(codexConfig, /\[mcp_servers\.docs\]/);
-    assert.match(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
+    assert.doesNotMatch(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
+    assert.equal(codexHooks.hooks.PostToolUse[0].matcher, "Write");
+    assert.deepEqual(codexHooks.hooks.PostToolUse[0].hooks, [
+      { type: "command", command: "npm test" }
+    ]);
     assert.match(codexConfig, /approval_policy = "on-request"/);
     assert.match(agents, /Use generated guidance/);
     assert.match(claudeDoc, /Use generated guidance/);

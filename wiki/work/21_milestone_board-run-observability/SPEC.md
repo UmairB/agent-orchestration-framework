@@ -9,6 +9,8 @@ created: 2026-06-27
 updated: 2026-06-30
 depends: [03, 19]
 origin: wiki/planning/PRD-work-run-orchestration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

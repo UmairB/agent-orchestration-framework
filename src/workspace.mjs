@@ -12,6 +12,24 @@ export function globalWorkspacePaths(options = {}) {
   return workspacePathsForRoot(defaultGlobalWorkspaceDir(options.env, options.platform, options.homedir), { projectDir: null });
 }
 
+export function globalMeshPaths(options = {}) {
+  const { workspaceDir } = globalWorkspacePaths(options);
+  const meshRoot = path.join(workspaceDir, "mesh");
+  const workRoot = path.join(meshRoot, "work");
+  return {
+    meshRoot,
+    workRoot,
+    nodesRoot: path.join(meshRoot, "nodes"),
+    workspacesRoot: path.join(meshRoot, "workspaces"),
+    databasePath: path.join(workRoot, "projection.sqlite"),
+    // The MACHINE-WIDE per-install identity (nodeId + salt), initialized once and
+    // shared by every workspace on this machine (34/story 00). Lives in the global AOF
+    // home (honoring AOF_GLOBAL_HOME), so a git clone never carries it — strictly more
+    // clone-safe than the per-workspace sidecar 33/ADR-004 used.
+    identityPath: path.join(meshRoot, "identity.json"),
+  };
+}
+
 export function workspacePathsForRoot(workspaceDir, options = {}) {
   const resolvedWorkspaceDir = path.resolve(workspaceDir);
   return {

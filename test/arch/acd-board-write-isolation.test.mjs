@@ -157,8 +157,24 @@ export const archTests = [
           `board-ui.mjs serves NO /api/work/${op} route (the rerun is a terminal launch, not a board write)`
         );
       }
+      // The POST surface is an EXPLICIT allowlist, not a count (changed 2026-07-26 when
+      // `/api/work/continue` landed). The rule this file enforces is "the board face
+      // writes nothing and shells out to nothing" — every assertion above still holds
+      // for `continue`: it touches no fs verb, imports no child_process, and serves none
+      // of the run-* routes. Naming the permitted routes is STRICTER than counting them:
+      // a count of 2 would admit any second POST, whereas this fails on an unlisted one.
+      const postRoutes = [...board.matchAll(/pathname\s*===\s*["']\/api\/work\/([a-z-]+)["']/g)]
+        .map((match) => match[1])
+        .filter((route) => new RegExp(`method\\s*===\\s*["']POST["'][\\s\\S]{0,200}?/api/work/${route}`).test(board));
+      const allowedPosts = new Set([
+        "feedback",   // the pre-existing feedback write
+        "continue",   // THE single continue door — decides WHERE a continue runs (local vs a worker node)
+      ]);
+      for (const route of postRoutes) {
+        assert.ok(allowedPosts.has(route), `board-ui.mjs POSTs an unlisted route /api/work/${route} — the board face stays read-mostly`);
+      }
       const posts = [...board.matchAll(/method\s*===\s*["']POST["']/g)];
-      assert.ok(posts.length <= 1, "the board face has at most ONE POST route (the feedback write) — the rerun adds none");
+      assert.ok(posts.length <= allowedPosts.size, `the board face has at most ${allowedPosts.size} POST routes (${[...allowedPosts].join(", ")})`);
 
       // (d) The rerun UI surface (the pure verb module + the DetailPanel affordance)
       // reaches the launch via the runAgent → TerminalDock path and adds NO new

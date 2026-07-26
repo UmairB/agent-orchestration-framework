@@ -20,9 +20,11 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 
-// The THIRTEEN frozen schema keys, IN ORDER (20/ADR-001 SUPERSEDES 19/ADR-003's
-// nine-key freeze): the original nine, then the four additive resilience keys.
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
+// The FOURTEEN frozen schema keys, IN ORDER (26/ADR-001 SUPERSEDES 20/ADR-001's
+// thirteen-key freeze): the original nine, then the four additive resilience keys,
+// then the one additive partition-provenance key (node). RESILIENCE_KEYS below is
+// untouched — the four m20 keys are still the resilience quartet.
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
 // The original nine milestone-19 keys — a legacy record carries only these.
 const LEGACY_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt"];
 const RESILIENCE_KEYS = ["failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
@@ -105,12 +107,12 @@ export const runResilienceRecordKeysTests = [
         const item = await milestoneItem(workDir);
 
         const record = await startRun(item);
-        // each of the thirteen enumerated keys is present (the outline rows)
+        // each of the fourteen enumerated keys is present (the outline rows)
         for (const key of FROZEN_KEYS) {
           assert.ok(key in record, `the run record has a "${key}" key`);
         }
-        // and NOTHING else — exactly the thirteen, in order (the no-others scenario)
-        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the record carries exactly the thirteen frozen keys, in order, and no field outside them");
+        // and NOTHING else — exactly the fourteen, in order (the no-others scenario)
+        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the record carries exactly the fourteen frozen keys, in order, and no field outside them");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -152,10 +154,10 @@ export const runResilienceRecordKeysTests = [
         for (const key of RESILIENCE_KEYS) {
           assert.equal(record[key], null, `the missing resilience key "${key}" reads as null`);
         }
-        // the original nine survive verbatim, and the read normalises to all thirteen keys
+        // the original nine survive verbatim, and the read normalises to all fourteen keys
         assert.equal(record.sessionId, "sess-legacy", "the original sessionId survives the read");
         assert.deepEqual(record.brief, { note: "from m19" }, "the original brief survives the read");
-        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the normalised record carries all thirteen frozen keys");
+        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the normalised record carries all fourteen frozen keys");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -199,7 +201,7 @@ export const runResilienceRecordKeysTests = [
         assert.equal(record.retryOf, priorRunId, "the reloaded retryOf equals the prior runId, byte-equivalent");
         assert.equal(record.heartbeatAt, heartbeatAt, "the reloaded heartbeatAt equals the persisted instant");
         assert.equal(record.reclaimedAt, reclaimedAt, "the reloaded reclaimedAt equals the persisted instant");
-        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the reloaded record carries all thirteen frozen keys");
+        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the reloaded record carries all fourteen frozen keys");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

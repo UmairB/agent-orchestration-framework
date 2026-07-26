@@ -1,0 +1,325 @@
+# milestone 28 / story 01 (ADR-001/ADR-002/ADR-005/ADR-006) — the release
+# workflow: a per-OS/arch runner matrix instantiating Story 00's SEA build
+# recipe (scripts/build-sea.mjs, untouched by this story), signing each
+# artifact on its own OS, and emitting the SHA256SUMS(+.asc) checksum manifest
+# Story 02's installer verifies against.
+#
+# SEA CANNOT CROSS-COMPILE (ADR-001, RESEARCH §1/§6) — it copies the RUNNER'S
+# OWN node binary — so every leg below builds ON its own target OS/arch. The
+# arm64 legs run on NATIVE (non-container) runners: a Linux-arm64 DOCKER
+# container corrupts the ELF hash table so process.dlopen() (node-pty) breaks
+# (RESEARCH §6) — ubuntu-24.04-arm is GitHub's hosted NATIVE arm64 runner
+# (never a container image on an x64 host).
+#
+# LOAD-BEARING ORDERING (ADR-005): on macOS, postject injection (build-sea.mjs,
+# Story 00) runs BEFORE codesign — injecting the SEA blob breaks any existing
+# signature. The step order below makes this structurally explicit: "Build
+# self-contained binary (Story 00 recipe, includes postject injection)" is
+# followed by, never preceded by, "Sign (codesign, macOS only)".
+#
+# Windows arm64: GitHub Actions offers no hosted Windows-arm64 runner as of
+# this workflow's authoring (2026-07-03) — windows-latest is x64-only. The
+# windows-arm64 asset name is PINNED in the soft contract with Story 02
+# (aof-windows-arm64.exe) but this workflow does NOT emit it yet; flagged
+# explicitly here and in this story's developer report / STATE.md Feedback
+# rather than silently faking a leg. Re-add the leg the day a hosted
+# windows-11-arm (or equivalent) runner exists.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to build (e.g. v1.2.3) — required for workflow_dispatch"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # One job per OS/arch leg. Each: checkout -> Node 22 -> npm ci -> build ui ->
+  # Story 00's build-sea.mjs (esbuild -> blob -> POSTJECT INJECT) -> stage the
+  # PINNED asset/sidecar names -> sign (per-OS) -> upload the leg's artifacts.
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: build (macos-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14 # native Apple Silicon runner
+          - arch: x64
+            runner: macos-13 # native Intel runner (no cross-compile, ADR-001)
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # craft-review F13(a): a workflow_dispatch run checks out the
+          # REQUESTED version tag (the input was previously declared
+          # `required: true` but never consumed anywhere); the push:tags
+          # trigger falls through to the natural github.ref (the pushed tag)
+          # since github.event.inputs.version is empty on that trigger.
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: npm ci
+        run: npm ci
+
+      - name: build ui
+        run: npm run ui:build
+
+      - name: Build self-contained binary (Story 00 recipe — includes postject injection)
+        run: node scripts/build-sea.mjs --out dist-sea
+
+      - name: Stage pinned asset + sidecar names
+        run: node scripts/release/stage-release-assets.mjs --sea-out dist-sea --stage-dir stage --os macos --arch ${{ matrix.arch }}
+
+      # --- Sign runs AFTER the build step above (postject already ran) ---
+      - name: Sign (codesign --options runtime --timestamp -> notarytool submit --wait -> stapler staple)
+        env:
+          AOF_MACOS_DEVELOPER_ID_IDENTITY: ${{ secrets.AOF_MACOS_DEVELOPER_ID_IDENTITY }}
+          AOF_MACOS_NOTARY_KEY_ID: ${{ secrets.AOF_MACOS_NOTARY_KEY_ID }}
+          AOF_MACOS_NOTARY_ISSUER_ID: ${{ secrets.AOF_MACOS_NOTARY_ISSUER_ID }}
+          AOF_MACOS_NOTARY_KEY_PATH: ${{ runner.temp }}/notary-key.p8
+          # craft-review F13(b): the secret is passed via `env:` (GitHub
+          # Actions' secret-masking machinery covers env-sourced values) and
+          # written with `printf '%s' "$VAR" > file`, NEVER interpolated
+          # directly into the shell script SOURCE (a `${{ secrets.X }}`
+          # inline in `run:` is textually substituted into the script before
+          # it runs — a secret containing shell-special characters could
+          # otherwise corrupt the command or, if the runner ever echoed the
+          # script, leak the raw secret in log/diagnostic output).
+          AOF_MACOS_NOTARY_KEY_P8: ${{ secrets.AOF_MACOS_NOTARY_KEY_P8 }}
+        run: |
+          printf '%s' "$AOF_MACOS_NOTARY_KEY_P8" > "$AOF_MACOS_NOTARY_KEY_PATH"
+          node scripts/release/sign-macos.mjs --file stage/aof-macos-${{ matrix.arch }}
+          rm -f "$AOF_MACOS_NOTARY_KEY_PATH"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: stage/*
+          retention-days: 7
+
+  build-windows:
+    name: build (windows-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+    # NOTE: no hosted windows-arm64 GitHub Actions runner exists as of
+    # authoring — the aof-windows-arm64.exe leg is a documented gap (see the
+    # file header + this story's developer report), not silently dropped.
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # craft-review F13(a): a workflow_dispatch run checks out the
+          # REQUESTED version tag (the input was previously declared
+          # `required: true` but never consumed anywhere); the push:tags
+          # trigger falls through to the natural github.ref (the pushed tag)
+          # since github.event.inputs.version is empty on that trigger.
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: npm ci
+        run: npm ci
+
+      - name: build ui
+        run: npm run ui:build
+
+      - name: Build self-contained binary (Story 00 recipe)
+        run: node scripts/build-sea.mjs --out dist-sea
+
+      - name: Stage pinned asset + sidecar names
+        run: node scripts/release/stage-release-assets.mjs --sea-out dist-sea --stage-dir stage --os windows --arch ${{ matrix.arch }}
+
+      - name: Sign (AzureSignTool — HSM/cloud OV/EV cert, CA/B June-2023 rule; no file .pfx)
+        env:
+          AOF_AZURE_SIGN_KEY_VAULT_URL: ${{ secrets.AOF_AZURE_SIGN_KEY_VAULT_URL }}
+          AOF_AZURE_SIGN_CERT_NAME: ${{ secrets.AOF_AZURE_SIGN_CERT_NAME }}
+          AOF_AZURE_SIGN_TENANT_ID: ${{ secrets.AOF_AZURE_SIGN_TENANT_ID }}
+          AOF_AZURE_SIGN_CLIENT_ID: ${{ secrets.AOF_AZURE_SIGN_CLIENT_ID }}
+          AOF_AZURE_SIGN_CLIENT_SECRET: ${{ secrets.AOF_AZURE_SIGN_CLIENT_SECRET }}
+        run: node scripts/release/sign-windows.mjs --file stage/aof-windows-${{ matrix.arch }}.exe --timestamp-url http://timestamp.digicert.com
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: stage/*
+          retention-days: 7
+
+  build-linux:
+    name: build (linux-${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            # NATIVE arm64 runner (never a Docker/QEMU container leg) — a
+            # Linux-arm64 Docker container corrupts the ELF hash table so
+            # process.dlopen() (node-pty) breaks, RESEARCH §6.
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # craft-review F13(a): a workflow_dispatch run checks out the
+          # REQUESTED version tag (the input was previously declared
+          # `required: true` but never consumed anywhere); the push:tags
+          # trigger falls through to the natural github.ref (the pushed tag)
+          # since github.event.inputs.version is empty on that trigger.
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # No linux-* node-pty prebuild is shipped (RESEARCH §2) — a plain
+      # `npm ci` falls through node-pty's own install script to `node-gyp
+      # rebuild`, compiling the .node from source on THIS runner. A C++
+      # toolchain (build-essential/python3) ships on ubuntu-latest /
+      # ubuntu-24.04-arm images by default; make it explicit rather than
+      # relying on an unstated image default.
+      - name: Ensure a C++ toolchain is present (node-gyp needs it to compile node-pty)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3
+
+      - name: npm ci (compiles node-pty from source — no linux-* prebuild is shipped)
+        run: npm ci
+
+      - name: build ui
+        run: npm run ui:build
+
+      # Stage the freshly-compiled .node into the prebuilds/linux-<arch>/
+      # shape Story 00's build-sea.mjs expects (it does not itself compile —
+      # RESEARCH §2 / ADR-002), and confirm it process.dlopen()s on THIS
+      # runner. See the file header of stage-linux-node-pty-prebuild.mjs for
+      # why this bridging step exists instead of editing build-sea.mjs.
+      #
+      # GLIBC/TOOLCHAIN TARGETING (QA feasibility flag, 00_ci-build-matrix.feature):
+      # ubuntu-latest / ubuntu-24.04-arm ship a RECENT glibc. A .node compiled
+      # here dlopen()s on THIS runner (asserted below) but a symbol-versioned
+      # glibc dependency means it may NOT dlopen on an OLDER-glibc user
+      # machine (e.g. a still-supported older LTS distro). This workflow does
+      # NOT currently pin an older-glibc build image (e.g. a manylinux-style
+      # container or an older Ubuntu LTS runner) — flagged explicitly here and
+      # in this story's developer report as an OPEN documented choice for the
+      # PO/architect: either (a) pin an older-glibc build runner/container for
+      # the Linux legs, or (b) accept "compiled on the newest supported
+      # ubuntu-latest" as the documented minimum-glibc floor for end users.
+      - name: Stage the compiled linux node-pty .node (+ verify it dlopens here)
+        run: node scripts/release/stage-linux-node-pty-prebuild.mjs
+
+      - name: Build self-contained binary (Story 00 recipe)
+        run: node scripts/build-sea.mjs --out dist-sea
+
+      - name: Stage pinned asset + sidecar names
+        run: node scripts/release/stage-release-assets.mjs --sea-out dist-sea --stage-dir stage --os linux --arch ${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: stage/*
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Collects every leg's staged artifacts, emits the SHA256SUMS manifest
+  # (@executable — scripts/release/generate-sha256sums.mjs) covering EVERY
+  # binary + sidecar, and GPG-signs it (Linux convention, RESEARCH §4 — no OS
+  # code-signing standard for the manifest itself).
+  # ---------------------------------------------------------------------------
+  checksum-and-sign-manifest:
+    name: checksum manifest + GPG signature
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # craft-review F13(a): a workflow_dispatch run checks out the
+          # REQUESTED version tag (the input was previously declared
+          # `required: true` but never consumed anywhere); the push:tags
+          # trigger falls through to the natural github.ref (the pushed tag)
+          # since github.event.inputs.version is empty on that trigger.
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS (LF line endings, lowercase 64-hex, two-space separator — the Story 02 soft contract)
+        run: node scripts/release/generate-sha256sums.mjs --dir release-assets --out release-assets/SHA256SUMS
+
+      - name: Import the release GPG private key (CI-held secret; never committed)
+        env:
+          AOF_RELEASE_GPG_PRIVATE_KEY: ${{ secrets.AOF_RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gpg-home"
+          chmod 700 "$RUNNER_TEMP/gpg-home"
+          echo "$AOF_RELEASE_GPG_PRIVATE_KEY" | gpg --homedir "$RUNNER_TEMP/gpg-home" --batch --import
+
+      # Craft-review F3 (HIGH): nothing previously tied install.sh's pinned
+      # GPG fingerprint to the key just imported above — a one-byte drift
+      # would make every Linux install refuse the release forever (install.sh
+      # Build note F2's untrusted/unpinned-key refusal). Fails the RELEASE
+      # (before publishing, below) on any mismatch — see
+      # scripts/release/assert-fingerprint-pin.mjs for the pin-form-agnostic
+      # extraction logic (it reads whatever pin shape install.sh currently
+      # carries, never a value duplicated here).
+      - name: Assert install.sh's pinned GPG fingerprint matches the CI signing key (craft F3)
+        run: node scripts/release/assert-fingerprint-pin.mjs --homedir "$RUNNER_TEMP/gpg-home"
+
+      - name: GPG-sign the manifest (SHA256SUMS.asc, detached, armored)
+        run: node scripts/release/gpg-sign-manifest.mjs --manifest release-assets/SHA256SUMS --homedir "$RUNNER_TEMP/gpg-home"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: |
+            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.asc
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Publishes every staged + signed artifact + the manifest to the GitHub
+  # Release for the pushed tag.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish release
+    needs: [checksum-and-sign-manifest]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true

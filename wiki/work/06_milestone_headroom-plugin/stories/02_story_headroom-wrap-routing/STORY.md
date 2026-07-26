@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-20
 updated: 2026-06-20
+schema: 1
+aofVersion: 0.1.0
 ---
 # 02 · Headroom wrap routing — wire the resolver into the terminal launch
 

@@ -1,0 +1,16 @@
+{
+  "runId": "20260712T213809392Z-0000",
+  "itemRef": "38",
+  "state": "cancelled",
+  "attempt": 1,
+  "outcome": "cancelled",
+  "sessionId": null,
+  "brief": {},
+  "createdAt": "2026-07-12T21:38:09.392Z",
+  "updatedAt": "2026-07-12T21:41:02.073Z",
+  "failureReason": null,
+  "heartbeatAt": null,
+  "retryOf": null,
+  "reclaimedAt": null,
+  "node": "umairs-msi"
+}

@@ -20,19 +20,64 @@ import { invoke, getCommand } from "./command-core.mjs";
 import { serveStdio } from "./graph-mcp-server.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
+import { observeMilestone, observabilityEnabled } from "./work-observe.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
 import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
 import { serveBoard } from "./board-serve.mjs";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
+// milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
+// F-38.06, option (a)): the fleet CONSUMER seam — a real relay subscription,
+// wired as a LITERAL `startTerminalRelaySubscriber` key at the production
+// `serveMeshUi({...})` call site below (meshUiCommand).
+import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
+import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
+import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
+import { recoverPush } from "./commands/mesh-recover-push.mjs";
+// milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
+// nested-verb sub-group (the mesh-repo.mjs/mesh-assign.mjs `← 1 cli.mjs` shape).
+// Deliberately outside the mesh:* registry (see the meshCommand dispatch note below).
+import { meshDesktopCommand } from "./commands/mesh-desktop.mjs";
+// milestone 38 / story 00 (ADR-002) — `aof session start|ping|end`, the
+// assistant-agnostic session-presence CLI seam. A CLI-only TOP-LEVEL command (the
+// mesh-desktop.mjs nested-verb shape, but at the top level rather than under
+// `mesh`) — NOT a registered mesh:* command (its stdin-JSON/env identity resolution
+// doesn't fit meshVerbCli's single-positional shape).
+import { meshSessionCommand } from "./commands/mesh-session.mjs";
+// milestone 33 / story 01 (ADR-003) — the coordination-launcher serve seam:
+// `aof mesh serve --serve` is a foreground per-node presence+sync daemon over
+// src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
+// does NOT run it (command-core.mjs: the registered run is the non-blocking probe).
+import { startLauncher } from "./mesh-launcher.mjs";
+import { acquireMeshLauncherLock } from "./mesh-launcher-lock.mjs";
 import { initPlanning } from "./planning-init.mjs";
+// milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
+// (the dev-only vite re-exec route) + the version string for `aof --version`
+// (ADR-004's "node mode = everything else" — an argv branch of the SAME run()
+// dispatch, never a fork ahead of it, mirroring the existing `help` branch).
+import { assetBase, packageVersionString } from "./asset-base.mjs";
+// TECH_DEBT item 1 — which code is this process actually running (source /
+// payload / embedded + the install's build stamp)? Surfaced on --version and on
+// every daemon startup line, so a stale build is VISIBLE rather than inferred.
+import { readBuildInfo, buildInfoString } from "./build-info.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
     console.log(helpText());
+    return;
+  }
+
+  // milestone 28 / story 00 (ADR-004): node mode = "everything but mesh relay" —
+  // --version is an argv branch of the SAME run() dispatch, exactly like help
+  // above; NOT a registered command-core command and NOT a fork ahead of run().
+  if (command === "--version" || command === "-v") {
+    // "0.1.0 (source)" / "0.1.0 (payload b3319d6.20260726T134012)" — the semver
+    // stays the line's prefix (the existing contract); the runtime-mode + build
+    // stamp ride behind it (TECH_DEBT item 1's "the build is honest about itself").
+    console.log(`${packageVersionString()} (${buildInfoString(readBuildInfo())})`.trim());
     return;
   }
 
@@ -71,6 +116,15 @@ export async function run(argv) {
     return;
   }
 
+  // milestone 38 / story 00 (ADR-002) — the additive `aof session start|ping|end`
+  // top-level dispatch (the mesh-desktop.mjs CLI-only nested-verb precedent, but a
+  // top-level sibling of `work`/`graph`/`mesh` since a session verb is fired from an
+  // editor hook, not nested under a mesh sub-group).
+  if (command === "session") {
+    await meshSessionCommand(rest);
+    return;
+  }
+
   if (command === "planning") {
     await planningCommand(rest);
     return;
@@ -86,6 +140,17 @@ export async function run(argv) {
   // "migrate:folder") → render/--json face, mirroring importMilestoneCommandCli.
   if (command === "migrate") {
     await migrateCommand(rest);
+    return;
+  }
+
+  // milestone 40 / story 02 — reclaim the top-level `upgrade` verb: run the
+  // migration registry engine over the CURRENT work stream (the contrast with
+  // `migrate`: migrate converts a FOREIGN folder in; upgrade advances the
+  // stream's OWN items to this build's schema). A thin argv -> invoke(
+  // "work:upgrade") -> render/--json face, mirroring migrateCommand exactly.
+  // Also reachable as `aof work upgrade` (workCommand, below) — the SAME face.
+  if (command === "upgrade") {
+    await upgradeCommand(rest);
     return;
   }
 
@@ -279,6 +344,64 @@ async function workCommand(args) {
     return;
   }
 
+  // `aof work observe <ref>` — a CLI-only diagnostic face (the mesh-desktop /
+  // mesh-session idiom: deliberately OUTSIDE the work:* command registry, since it
+  // reads Claude Code session transcripts rather than the work store). Mines
+  // per-agent time/token spend + stall gaps for a milestone and (with --write)
+  // drops an `observability/` folder into it. Not registry-registered => the
+  // acd-work-command-cli-bijection guard (registry -> CLI) does not require it.
+  if (subcommand === "observe") {
+    await workObserveCommand(rest);
+    return;
+  }
+
+  // milestone 41 / story 02 — the two additive insert-top-level dispatch
+  // branches, ABOVE the unknown-subcommand fallthrough (the m19/m22 additive-verb
+  // idiom). The EXACT `subcommand === "<sub>"` form the
+  // acd-work-command-cli-bijection grep requires; both reuse the shared
+  // workInsertCli face.
+  if (subcommand === "insert-milestone") {
+    await workInsertCli("work:insert-milestone", rest);
+    return;
+  }
+
+  if (subcommand === "insert-uat") {
+    await workInsertCli("work:insert-uat", rest);
+    return;
+  }
+
+  // milestone 41 / story 03 — the nested-axis dispatch branch, same shape as
+  // the two above (`--under NN` maps onto the engine's REQUIRED `parent`
+  // selector at the shared workInsertCli face's argv adapter, ADR-006).
+  if (subcommand === "insert-story") {
+    await workInsertCli("work:insert-story", rest);
+    return;
+  }
+
+  // milestone 39 / story 03 (gap-to-chore, ADR-001, feasibility flag 4) —
+  // work:insert-chore joins the SAME insert-top-level dispatch family (the
+  // shared workInsertCli face); work:promote-gap is its own thin verb but rides
+  // the SAME face (same --json single-envelope discipline).
+  if (subcommand === "insert-chore") {
+    await workInsertCli("work:insert-chore", rest);
+    return;
+  }
+
+  if (subcommand === "promote-gap") {
+    await workInsertCli("work:promote-gap", rest);
+    return;
+  }
+
+  // milestone 40 / story 02 — `aof work upgrade` is the SAME face as the
+  // top-level `aof upgrade` verb above (both reach work:upgrade); nested here
+  // so the registry-derived acd-work-command-cli-bijection guard (every
+  // work:* command has a reachable `aof work <sub>` dispatch branch) stays
+  // satisfied for work:upgrade's `work:` id.
+  if (subcommand === "upgrade") {
+    await upgradeCommand(rest);
+    return;
+  }
+
   if (subcommand === "doctor") {
     await workDoctorCommand(rest);
     return;
@@ -286,6 +409,13 @@ async function workCommand(args) {
 
   if (subcommand === "next") {
     await workNextCommand(rest);
+    return;
+  }
+
+  // `aof work continue <ref> [--node <id>]` — THE single continue door (2026-07-26).
+  // Same shape as every other registry-backed verb; the command decides WHERE.
+  if (subcommand === "continue") {
+    await runVerbCli("work:continue", rest);
     return;
   }
 
@@ -374,7 +504,7 @@ async function workCommand(args) {
     return;
   }
 
-  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work orchestrator [fable|opus] [--show]\n  aof work delegation [on|off] [--model fable|opus] [--gpt-model <id>] [--no-model] [--show]\n  aof work delegation-model [<id>] [--show]\n  aof work use-headroom\n  aof work unuse-headroom`);
+  throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work orchestrator [fable|opus] [--show]\n  aof work delegation [on|off] [--model fable|opus] [--gpt-model <id>] [--no-model] [--show]\n  aof work delegation-model [<id>] [--show]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]\n  aof work upgrade [--dry-run] [--json]`);
 }
 
 // `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
@@ -501,14 +631,6 @@ async function meshCommand(args) {
     await meshVerbCli("mesh:status", rest, { positionalAllowed: false });
     return;
   }
-  // milestone 22 / story 02 — the additive git-sync dispatch branch, ABOVE the
-  // unknown-sub fallthrough. The EXACT `subcommand === "sync"` form the
-  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
-  // mesh:sync takes no positional (it syncs THIS node's records, not a named ref).
-  if (subcommand === "sync") {
-    await meshVerbCli("mesh:sync", rest, { positionalAllowed: false });
-    return;
-  }
   // milestone 23 / story 00 — the additive presence-publish dispatch branch, ABOVE the
   // unknown-sub fallthrough. The EXACT `subcommand === "heartbeat"` form the
   // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
@@ -538,14 +660,13 @@ async function meshCommand(args) {
     return;
   }
   if (subcommand === "join") {
-    await meshVerbCli("mesh:join", rest, { positionalAllowed: true });
+    await meshVerbCli("mesh:join", rest, { positionalAllowed: true, extraFlags: ["control", "url"] });
     return;
   }
   // milestone 24 / story 02 — the additive revoke dispatch branch, ABOVE the unknown-sub
   // fallthrough. The EXACT `subcommand === "revoke"` form the acd-mesh-command-cli-bijection
   // grep requires; reuses the shared meshVerbCli face. mesh:revoke takes ONE positional —
-  // the nodeId to revoke (the control node removes it from the roster + records a revocation
-  // + de-provisions its git-remote).
+  // the nodeId to revoke (the control node removes it from the roster + records a revocation).
   if (subcommand === "revoke") {
     await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
     return;
@@ -558,6 +679,60 @@ async function meshCommand(args) {
   // (src/mesh-ui-serve.mjs), reaching fleet data only through invoke("mesh:status").
   if (subcommand === "ui") {
     await meshUiCommand(rest);
+    return;
+  }
+  // milestone 34 / story 06 (ADR-010) — the additive `aof mesh repo <verb>` sub-group,
+  // ABOVE the unknown-sub fallthrough. Like `ui` and the `serve --serve` daemon it is a
+  // CLI-ONLY nested verb, NOT a registered mesh:* command — so it is (correctly)
+  // OUTSIDE the flat acd-mesh-command-cli-bijection (which maps registry mesh:* ids to
+  // `subcommand === "<sub>"` branches; a nested `repo publish` has no flat registry id).
+  if (subcommand === "repo") {
+    await meshRepoCommand(rest);
+    return;
+  }
+  // milestone 35 / story 00 (ADR-001/003/007) — the additive `aof mesh assign <ref>
+  // --to <nodeId>` / `--withdraw` dispatch verb, ABOVE the unknown-sub fallthrough.
+  // Like `repo`/`ui` it is a CLI-ONLY nested verb, NOT a registered mesh:* command
+  // (the --to/--withdraw flags don't fit the single-positional meshVerbCli face) — so
+  // it is (correctly) OUTSIDE the flat acd-mesh-command-cli-bijection.
+  if (subcommand === "assign") {
+    await meshAssignCommand(rest);
+    return;
+  }
+  // VERIFICATION (live soak 2026-07-25) — the additive `aof mesh recover-push
+  // <assignmentId>` control-driven recovery verb. A CLI-ONLY nested verb like
+  // `assign`/`repo`/`ui` (its single-positional assignmentId + long poll don't fit the
+  // meshVerbCli face), so it too is OUTSIDE the flat acd-mesh-command-cli-bijection.
+  if (subcommand === "recover-push") {
+    await meshRecoverPushCommand(rest);
+    return;
+  }
+  // milestone 36 / story 03 (ADR-003) — the additive `aof mesh desktop <install|run>`
+  // sub-group, ABOVE the unknown-sub fallthrough. Like `repo`/`ui`/`assign` it is a
+  // CLI-ONLY nested verb, NOT a registered mesh:* command (the nested inner-verb face
+  // doesn't fit the single-positional meshVerbCli shape) — so it is (correctly)
+  // OUTSIDE the flat acd-mesh-command-cli-bijection (fitness acd-desktop-verbs-
+  // outside-bijection). Routes the WHOLE `desktop` sub to the one new command
+  // module (commands/mesh-desktop.mjs), which then dispatches on its own inner verb.
+  if (subcommand === "desktop") {
+    await meshDesktopCommand(rest);
+    return;
+  }
+  // milestone 33 / story 01 (ADR-003) — the additive coordination-launcher dispatch
+  // branch, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "serve"` form
+  // the acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
+  // face for the bare (non-blocking probe) call. `aof mesh serve --serve` is the
+  // FOREGROUND presence+sync daemon (the long-lived face over the one-shot core, NEVER
+  // the bijection-probed run) — it preflights the fabric via probeFabric and
+  // refuses-with-guidance if degraded, publishes this node's presence, runs global work propagation, and periodically
+  // re-reads resolvePeers; it binds NO listening
+  // broker socket. `aof mesh serve` (no --serve) stays the non-blocking probe.
+  if (subcommand === "serve") {
+    if (parseOptions(rest).serve) {
+      await meshServeDaemonCommand(rest);
+      return;
+    }
+    await meshVerbCli("mesh:serve", rest, { positionalAllowed: false });
     return;
   }
 
@@ -596,8 +771,8 @@ async function meshCommand(args) {
 //                     absent null the mesh:identity run returns).
 // opts.positionalAllowed: whether the sub accepts ONE id positional (identity yes,
 // status no). The recognised flags on the mesh face are --json and --config; any other
-// --flag is invalid-input.
-async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
+// --flag is invalid-input, UNLESS named in opts.extraFlags.
+async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [] } = {}) {
   const command = getCommand(id);
 
   // Detect --json + an unknown flag from the RAW args, NOT from parseOptions's keys:
@@ -609,7 +784,7 @@ async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
     .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
     .map((arg) => arg.slice(2).split("=", 2)[0]);
   const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config");
+  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config" && !extraFlags.includes(flag));
 
   const options = parseOptions(args);
   // Force the resolved --json onto the parsed options so an unknown flag that
@@ -648,14 +823,6 @@ async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
         emitMeshError(true, `No node record for "${options._[0]}".`, "node-not-found");
         return;
       }
-      // FACE sync-failure split (ADR-004): a sync that could not honestly move records
-      // (a failed git pull/push) returns { synced:false, reason } — NOT a success
-      // envelope. The face surfaces it as ONE { ok:false, error, code } + a non-zero
-      // exit; a failed sync is a real error, surfaced as one.
-      if (isSyncFailure(result)) {
-        emitMeshError(true, meshSyncFailureMessage(result), result.reason);
-        return;
-      }
       console.log(JSON.stringify(command.cli.json(result), null, 2));
     } catch (error) {
       emitMeshError(true, error.message, error.code ?? "error");
@@ -670,30 +837,9 @@ async function meshVerbCli(id, args, { positionalAllowed = false } = {}) {
     emitMeshError(false, `No node record for "${options._[0]}".`, "node-not-found");
     return;
   }
-  // A failed sync (synced:false) is surfaced as a face error (stderr + non-zero exit),
-  // never rendered as if records moved.
-  if (isSyncFailure(result)) {
-    emitMeshError(false, meshSyncFailureMessage(result), result.reason);
-    return;
-  }
   console.log(command.cli.render(result));
 }
 
-// A sync-result envelope that the transport marked as a FAILURE (a non-zero git
-// pull/push): the engine did not honestly move records, so the face must not report it
-// as a success. (`synced === false` is the failure flag the transport sets only on the
-// pull-failed/push-failed paths; the happy + no-git-repo envelopes never carry it.)
-function isSyncFailure(result) {
-  return result != null && typeof result === "object" && result.synced === false;
-}
-
-// A human-readable message for a failed sync, naming the structured reason.
-function meshSyncFailureMessage(result) {
-  const reason = result.reason ?? "error";
-  if (reason === "push-failed") return "mesh:sync failed: git push was rejected (records were NOT pushed).";
-  if (reason === "pull-failed") return "mesh:sync failed: git pull failed (peer records were NOT read back).";
-  return `mesh:sync failed (${reason}).`;
-}
 
 // Emit a mesh face error: under --json ONE { ok:false, error, code } document on stdout
 // (+ non-zero exit); otherwise the message on stderr (+ non-zero exit).
@@ -785,6 +931,37 @@ async function migrateCommand(args) {
 
   // Non-json: render the result; a command error (missing-folder / nothing-
   // recoverable / source-read) propagates to bin/aof.mjs (stderr + non-zero exit).
+  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+  console.log(command.cli.render(result));
+}
+
+// `aof upgrade [--dry-run] [--json]` — the thin face over the registered
+// work:upgrade command (milestone 40 / story 02, ADR-005). Mirrors
+// migrateCommand EXACTLY: parseOptions → getCommand → loadWorkspace → invoke →
+// cli.render/cli.json. Bare `aof upgrade` APPLIES; `--dry-run` PREVIEWS and
+// writes nothing (the aof project migrate dry-run/apply face). In --json mode
+// a command error (e.g. schema-newer-than-build) is emitted as a SINGLE
+// structured envelope { ok:false, error, code } on stdout (+ non-zero exit),
+// like the import/migrate/graph verbs. Also reachable as `aof work upgrade`
+// (workCommand, above) — the SAME function, both routes reach the one command.
+async function upgradeCommand(args) {
+  const options = parseOptions(args);
+  const command = getCommand("work:upgrade");
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  // Non-json: render the result; a command error (schema-newer-than-build)
+  // propagates to bin/aof.mjs (stderr + non-zero exit).
   const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
   console.log(command.cli.render(result));
 }
@@ -948,22 +1125,69 @@ async function workUiCommand(args) {
   });
 }
 
-// `aof mesh ui [--port 4181]` — the read-only fleet mission-control web surface
-// (milestone 25 / story 02; ADR-003). A CLI-ONLY serve verb (a sibling to
-// `aof work ui`), NOT a registered mesh:* command. It stands up its OWN thin fleet
-// serve-face (serveMeshUi) — one 127.0.0.1 server serving the ui/dist bundle with
-// ?mode=fleet + the single GET /api/mesh/status route (invoke("mesh:status")) —
-// and mirrors the board's ui-build-missing + EADDRINUSE friendly refusals (never a
-// stack trace). Default port 4181 clears assets-ui 4177/4178 + board 4180, so the
-// fleet view runs ON TOP of a board on one machine.
+// `aof mesh ui [--port 4181] [--local]` — the read-only fleet mission-control web
+// surface (milestone 25 / story 02, ADR-003; milestone 34 / story 03, ADR-006). A
+// CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
+// command. It stands up its OWN thin fleet serve-face (serveMeshUi) — one
+// 127.0.0.1 server serving the ui/dist bundle with ?mode=fleet + the single
+// GET /api/mesh/status route — and mirrors the board's ui-build-missing +
+// EADDRINUSE friendly refusals (never a stack trace). Default port 4181 clears
+// assets-ui 4177/4178 + board 4180, so the fleet view runs ON TOP of a board on
+// one machine.
+//
+// milestone 34 / story 03 (ADR-006) — `aof mesh ui` is GLOBAL by default: it
+// passes scope "global" to serveMeshUi and does NOT require the current
+// directory to be a mesh-enabled workspace to start (serveMeshUi loads no
+// workspace up front; the global read only opens the machine-wide projection
+// store). `--local` passes scope "local" + this directory as projectDir — the
+// pre-existing focused-workspace view, unchanged. The announced browser URL
+// always names the selected scope (`?mode=fleet&scope=<global|local>`) so a
+// bookmarked/shared link reproduces the same view. An unrecognized flag (e.g.
+// `--workspace`) is rejected BEFORE serveMeshUi is ever called — the CLI's own
+// input-validation guard, mirroring meshVerbCli's "Unknown option" phrasing.
+const MESH_UI_FLAGS = new Set(["port", "local", "target"]);
+
 async function meshUiCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0])
+    .map((flag) => flag.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()));
+  const unknownFlag = flagTokens.find((flag) => !MESH_UI_FLAGS.has(flag));
+  if (unknownFlag) {
+    console.error(`Unknown option "--${unknownFlag}".`);
+    process.exitCode = 1;
+    return;
+  }
+
   const options = parseOptions(args);
   const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_UI_PORT), 10);
   const projectDir = path.resolve(options.target ?? process.cwd());
+  const scope = options.local ? "local" : "global";
+
+  // milestone 38 / story 06 — ADR-014 AMENDMENT: resolve `config` best-effort —
+  // `aof mesh ui` requires NO mesh-enabled workspace to START (ADR-006's
+  // existing global-by-default posture), so a `loadWorkspace` fault (cwd is not
+  // a workspace at all, no aof.config.json, …) degrades to `config: undefined`
+  // rather than refusing the command. `createTerminalMirrorSubscriberTransport`
+  // already returns `null` for an undefined/unconfigured relay (no
+  // `config.mesh.relay.url`), so `startTerminalMirrorSubscriber` cleanly
+  // degrades to `{ connected:false }` — the mirror simply never receives a live
+  // frame; every other route on the fleet face still serves.
+  let config;
+  try {
+    ({ config } = await loadWorkspace(projectDir, options.config));
+  } catch {
+    config = undefined;
+  }
 
   let session;
   try {
-    session = await serveMeshUi({ projectDir, port });
+    session = await serveMeshUi({
+      projectDir,
+      port,
+      scope,
+      startTerminalRelaySubscriber: (mirror) => startTerminalMirrorSubscriber({ transport: createTerminalMirrorSubscriberTransport(config), mirror }),
+    });
   } catch (error) {
     if (error.code === "ui-build-missing") {
       console.error(error.message);
@@ -980,7 +1204,10 @@ async function meshUiCommand(args) {
 
   const { server, fleetUrl } = session;
   console.log("AOF mesh ui is running locally.");
-  console.log(`Open this URL in your browser: ${fleetUrl}`);
+  // TECH_DEBT item 1 — the daemon's startup line records which build it runs
+  // (a SECOND line: the announce line above is a pinned contract).
+  console.log(`Build: ${buildInfoString(readBuildInfo())}`);
+  console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the fleet view.");
 
@@ -995,6 +1222,283 @@ async function meshUiCommand(args) {
   });
 }
 
+// `aof mesh repo <verb>` — the per-repo mesh membership sub-group (milestone 34 / story
+// 06, ADR-010). Today the ONE verb is `publish`: it writes the local per-repo published
+// marker into .aof/aof.config.json AND publishes a snapshot into the machine-wide global
+// store now (src/commands/mesh-repo.mjs's publishRepoToMesh). CLI-only (see the dispatch
+// branch note). A failed snapshot is a non-fatal warning (the marker still lands);
+// only a real fault is a non-zero mesh-face error.
+const MESH_REPO_FLAGS = new Set(["json", "config"]);
+
+async function meshRepoCommand(args) {
+  const verb = typeof args[0] === "string" && !args[0].startsWith("--") ? args[0] : undefined;
+  const rest = verb === undefined ? args : args.slice(1);
+
+  const flagTokens = rest
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_REPO_FLAGS.has(flag));
+  const options = parseOptions(rest);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+  if (verb === undefined) {
+    emitMeshError(options.json, "`aof mesh repo` needs a verb.\n\nUsage:\n  aof mesh repo publish   publish this repo into the mesh", "invalid-input");
+    return;
+  }
+  if (verb !== "publish") {
+    emitMeshError(options.json, `Unknown mesh repo verb "${verb}".`, "unknown-subcommand");
+    return;
+  }
+  if (options._.length > 0) {
+    emitMeshError(options.json, `"repo publish" takes no positional argument (got "${options._[0]}").`, "invalid-input");
+    return;
+  }
+
+  let result;
+  try {
+    const workspace = await loadWorkspace(process.cwd(), options.config);
+    result = await publishRepoToMesh(workspace, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    return;
+  }
+  const lines = [
+    `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
+    `Marked as a mesh repo in ${result.configPath}.`,
+  ];
+  lines.push(
+    result.cloneUrl
+      ? `Clone URL: ${result.cloneUrl}`
+      : "Clone URL: none configured and none detected from `git remote get-url origin` — a worker clone-miss for this workspace will fail loud (assignment-repo-unavailable) until one is set.",
+  );
+  if (!result.published && result.warning) {
+    lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
+  } else {
+    lines.push("Snapshot written to the global mesh store.");
+  }
+  console.log(lines.join("\n"));
+}
+
+// `aof mesh assign <ref> --to <nodeId>` / `--withdraw` — the operator dispatch verb
+// (milestone 35 / story 00, ADR-001/003/007). CLI-only (see the dispatch branch
+// note); core kept in commands/mesh-assign.mjs so it is unit-testable without
+// spawning the CLI. One `--json` envelope: `{ ok:true, …record }` on a clean mint/
+// withdraw, `{ ok:false, error, code }` on any coded refusal — never a second shape.
+const MESH_ASSIGN_FLAGS = new Set(["json", "config", "to", "withdraw"]);
+
+async function meshAssignCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_ASSIGN_FLAGS.has(flag));
+  const options = parseOptions(args);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+
+  const ref = options._[0];
+  if (typeof ref !== "string" || ref.length === 0) {
+    emitMeshError(
+      options.json,
+      "`aof mesh assign` needs a work ref.\n\nUsage:\n  aof mesh assign <ref> --to <nodeId>   assign a work item to a node\n  aof mesh assign <ref> --withdraw      withdraw the active assignment",
+      "invalid-input",
+    );
+    return;
+  }
+  if (options._.length > 1) {
+    emitMeshError(options.json, `"mesh assign" takes exactly one positional ref (got "${options._[1]}").`, "invalid-input");
+    return;
+  }
+  if (options.withdraw && options.to) {
+    emitMeshError(options.json, `"mesh assign" takes either --to <nodeId> or --withdraw, not both.`, "invalid-input");
+    return;
+  }
+  if (!options.withdraw && (typeof options.to !== "string" || options.to.length === 0)) {
+    emitMeshError(options.json, "`aof mesh assign <ref>` needs --to <nodeId> (or --withdraw).", "invalid-input");
+    return;
+  }
+
+  let workspace;
+  try {
+    workspace = await loadWorkspace(process.cwd(), options.config);
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.withdraw) {
+    let result;
+    try {
+      result = await withdrawWork(workspace, ref, {});
+    } catch (error) {
+      emitMeshError(options.json, error.message, error.code ?? "error");
+      return;
+    }
+    if (!result.ok) {
+      emitMeshError(options.json, result.error, result.code);
+      return;
+    }
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, assignment: result.assignment }, null, 2));
+      return;
+    }
+    console.log(
+      result.assignment == null
+        ? `No assignment exists for "${ref}"; nothing to withdraw.`
+        : `Withdrew the assignment for "${ref}" (assignmentId ${result.assignment.assignmentId}).`,
+    );
+    return;
+  }
+
+  let result;
+  try {
+    result = await assignWork(workspace, ref, options.to, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+  if (!result.ok) {
+    emitMeshError(options.json, result.error, result.code);
+    return;
+  }
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    return;
+  }
+  console.log(`Assigned "${ref}" to "${result.targetNodeId}" (assignmentId ${result.assignmentId}).`);
+}
+
+// `aof mesh recover-push <assignmentId>` — the control-driven recovery verb
+// (VERIFICATION, live two-machine soak 2026-07-25). Run on the CONTROL node to push a
+// stalled/terminal assignment's stranded worktree home. CLI-only (see the dispatch
+// branch note); core kept in commands/mesh-recover-push.mjs so it is unit-testable
+// without spawning the CLI. One `--json` envelope: `{ ok, code, ... }` — the SAME
+// single-shape discipline meshAssignCommand keeps. The target worker is determined
+// ENTIRELY by the assignment record (its own target_node_id), so the operator supplies
+// only the assignmentId; the command then blocks (polling the request row) until the
+// daemon+worker settle it pushed/failed, or reports it still-pending on timeout.
+const MESH_RECOVER_PUSH_FLAGS = new Set(["json"]);
+
+async function meshRecoverPushCommand(args) {
+  const flagTokens = args
+    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
+    .map((arg) => arg.slice(2).split("=", 2)[0]);
+  const wantsJson = flagTokens.includes("json");
+  const unknownFlag = flagTokens.find((flag) => !MESH_RECOVER_PUSH_FLAGS.has(flag));
+  const options = parseOptions(args);
+  if (wantsJson) options.json = true;
+
+  if (unknownFlag) {
+    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
+    return;
+  }
+
+  const assignmentId = options._[0];
+  if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+    emitMeshError(
+      options.json,
+      "`aof mesh recover-push` needs an assignmentId.\n\nUsage:\n  aof mesh recover-push <assignmentId>   commit + push a stalled assignment's stranded worktree home",
+      "invalid-input",
+    );
+    return;
+  }
+  if (options._.length > 1) {
+    emitMeshError(options.json, `"mesh recover-push" takes exactly one positional assignmentId (got "${options._[1]}").`, "invalid-input");
+    return;
+  }
+
+  if (!options.json) {
+    console.log(`Requesting recovery push for assignment "${assignmentId}" — minting a write credential and dispatching to its worker…`);
+  }
+
+  let result;
+  try {
+    result = await recoverPush(assignmentId, {});
+  } catch (error) {
+    emitMeshError(options.json, error.message, error.code ?? "error");
+    return;
+  }
+
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  if (!result.ok) {
+    emitMeshError(options.json, result.error ?? `Recovery push ${result.code}${result.detail ? ` (${result.detail})` : ""}.`, result.code);
+    return;
+  }
+  console.log(`Pushed "${result.itemRef}" home from "${result.targetNodeId}" (assignment ${result.assignmentId}${result.detail ? `, ${result.detail}` : ""}).`);
+}
+
+// `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
+// 01, ADR-003.1/.3): the long-lived `--serve` face over the one-shot launcher core
+// (src/mesh-launcher.mjs's startLauncher). Preflights the fabric and refuses-with-
+// guidance if degraded (never starting a loop over a dead fabric); a healthy preflight
+// publishes this node's presence, starts global work propagation, and
+// periodically re-reads the fabric peer-map — binding NO listening broker socket (the
+// "bind" is the fabric self-address). Traps SIGINT/SIGTERM to stop cleanly.
+async function meshServeDaemonCommand(args) {
+  const options = parseOptions(args);
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const launcherLock = await acquireMeshLauncherLock({ env: process.env });
+  if (!launcherLock.acquired) {
+    const pid = launcherLock.pid != null ? ` (pid ${launcherLock.pid})` : "";
+    console.error(`AOF mesh launcher is already running${pid}.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let handle = null;
+  try {
+    // review fix (live soak, 2026-07-17): a connect failure, propagation fault, or
+    // dispatch-tick error used to be accumulated into handle.warnings and never read
+    // again by this foreground loop — the daemon's own log showed nothing regardless
+    // of what actually went wrong. Every warning now prints live, timestamped, as it
+    // happens.
+    handle = await startLauncher(workspace, {
+      onWarning: (warning) => {
+        console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
+      },
+    });
+    if (handle.refused) {
+      console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
+      for (const line of handle.guidance.lines) console.error(`  ${line}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
+    // TECH_DEBT item 1 — same second-line build report as mesh ui's.
+    console.log(`Build: ${buildInfoString(readBuildInfo())}`);
+    console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
+    console.log("Press Ctrl+C to stop the launcher.");
+
+    await new Promise((resolve) => {
+      const shutdown = () => {
+        handle.stop();
+        resolve();
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
+  } finally {
+    await launcherLock.release();
+  }
+}
 // `aof work orchestrator [model] [dir] [--show]` — set the model the main ACD
 // (orchestrating) session runs on. Config-only read-merge-write of
 // settings.claude.model in .aof/aof.config.json (never the lock); the render engine
@@ -1408,6 +1912,84 @@ async function workValidateCommand(args) {
   console.log(command.cli.render(result, { scope }));
   // A non-empty findings list is a non-zero exit (today's CLI behaviour).
   if (result.findings.length > 0) process.exitCode = 1;
+}
+
+// `aof work observe <ref> [--write] [--json] [--stall <min>]` — mine Claude Code
+// session transcripts for the milestone's per-agent time/token spend + stall gaps.
+// A READ by default; `--write` drops `wiki/work/<folder>/observability/{report.md,
+// agents.json}` into the milestone. The config opt-in (`work.observability.enabled`)
+// gates AUTOMATIC generation by the lifecycle — an explicit invocation here always
+// runs (an operator asked for it directly).
+async function workObserveCommand(args) {
+  const options = parseOptions(args);
+  const ref = options._[0];
+  if (!ref) {
+    throw new Error('Usage: aof work observe <milestone-ref> [--write] [--json] [--stall <minutes>] [--if-enabled]');
+  }
+  // `--if-enabled` self-gates on the opt-in config flag (work.observability.enabled)
+  // and no-ops when off. This is the form the lifecycle (aof:retrospective) calls, so
+  // the bundle instruction can invoke observe unconditionally and the CLI decides —
+  // deterministic, rather than asking the agent to branch on config. A DIRECT
+  // `aof work observe` (no --if-enabled) always runs: an operator asked for it.
+  if (options.ifEnabled) {
+    const workspace = await loadWorkspace(process.cwd(), options.config);
+    if (!observabilityEnabled(workspace.config)) {
+      if (!options.json) console.log("observability disabled (set work.observability.enabled to enable) — skipped.");
+      return;
+    }
+  }
+  const stallMs = options.stall != null ? Number(options.stall) * 60 * 1000 : undefined;
+  const result = await observeMilestone({
+    cwd: process.cwd(),
+    ref,
+    stallMs,
+    // Stamp with the caller's wall clock (Date.now is fine in the CLI process).
+    generatedAt: Date.now(),
+    write: Boolean(options.write),
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(result.json, null, 2));
+  } else {
+    console.log(result.report);
+    if (!result.found) {
+      console.log(`\n(no Claude Code transcripts found under ${result.projectsDir})`);
+    }
+    if (result.written) {
+      console.log(`\nWrote ${path.relative(process.cwd(), result.written.reportPath)} + agents.json`);
+    }
+  }
+}
+
+// The shared insert-top-level face (milestone 41 / story 02, ADR-002/004) —
+// getCommand -> loadWorkspace -> invoke -> cli.json/render, mirroring
+// projectProvisionCli's single-structured-envelope --json discipline. ADR-004's
+// never-deadlock guard: an above-threshold caller without --yes is a command
+// error (code "insert-confirm-required"), caught here and emitted as ONE
+// { ok:false, error, code, shifted } envelope (+ non-zero exit) in --json mode —
+// never a hang on an unanswered prompt. The non-json face lets the error
+// propagate to bin/aof.mjs (stderr + non-zero exit).
+async function workInsertCli(id, args) {
+  const options = parseOptions(args);
+  const command = getCommand(id);
+  const workspace = await loadWorkspace(process.cwd(), options.config);
+  const input = command.cli.argv(options._, options);
+
+  if (options.json) {
+    try {
+      const result = await invoke(command.id, input, { workspace });
+      console.log(JSON.stringify(command.cli.json(result), null, 2));
+    } catch (error) {
+      console.log(
+        JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error", shifted: error.shifted ?? null }, null, 2),
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  const result = await invoke(command.id, input, { workspace });
+  console.log(command.cli.render(result));
 }
 
 // `aof work doctor [scope] [--json] [--strict]` — the FACE over work:doctor
@@ -2223,8 +2805,15 @@ async function setupUiCommand(options) {
   });
 }
 
+// DEV-ONLY: the vite UI dev server re-exec (RESEARCH §0; ADR-003 allow-list).
+// Never on the shipped path — a SEA never runs vite. Re-homed onto the ONE
+// asset-base seam for correctness (the same repoRoot-derivation every other
+// site used), but allow-listed from the "must serve packaged assets" assertion
+// (acd-sea-safe-asset-base fitness #1) since this line never executes in a SEA.
 function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  // "version" resolves to the repo root in dev (the same base package.json/
+  // work-bundle-manifest.mjs read); it never runs under a SEA (dev-only path).
+  const repoRoot = assetBase("version");
   const uiDir = path.join(repoRoot, "ui");
   const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
   return spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
@@ -2508,7 +3097,7 @@ function parseOptions(args) {
     const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
     const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "show", "noModel"].includes(key)) {
+    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve", "yes", "changelog", "write", "ifEnabled", "show", "noModel"].includes(key)) {
       options[key] = true;
       continue;
     }
@@ -2631,6 +3220,7 @@ Work (ACD work stream):
   aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
   aof work ui [--port]                   serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
   aof migrate <folder> [--dry-run] [--json]   convert an existing folder INTO a managed milestone under work.dir (the import contrast)
+  aof upgrade [--dry-run] [--changelog] [--json]   advance the work stream's OWN items to this build's schema (bare = apply, --dry-run = preview only, --changelog emits the generated upgrade changelog)
   aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]   install the bought planner (pm-skills), record pinned-sha provenance
 
 Defaults:

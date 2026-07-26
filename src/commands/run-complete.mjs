@@ -13,6 +13,7 @@ import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { completeRun } from "../run-store.mjs";
 import { rollbackItemStatus } from "../work.mjs";
+import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
 const VALID_OUTCOMES = new Set(["done", "failed", "cancelled"]);
@@ -31,6 +32,9 @@ export const runCompleteCommand = {
       // stays with the classifier failing closed (ADR-002), NOT a command rejection —
       // so an unrecognised reason is recorded, not rejected. Ignored on done/cancelled.
       reason: { type: "string" },
+      // `now` (ISO-8601 UTC-Z) is an INJECTED clock for timestamp-deterministic
+      // assertions (the 22/R2 white-box idiom — a test input, never a CLI flag).
+      now: { type: "string" },
     },
     required: ["ref", "outcome"],
     additionalProperties: false,
@@ -55,7 +59,7 @@ export const runCompleteCommand = {
     // ambiguous-run / illegal-transition errors (each carrying .code) propagate. The
     // reason is written onto failureReason only on a → failed transition (store-side).
     const reason = typeof input.reason === "string" ? input.reason : null;
-    const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason });
+    const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason, now: input.now });
 
     // (4) Status rollback (20/ADR-005): a run completed as FAILED rolls its in-progress
     // item back to not-started so the stream is left honest — the failed path CALLS the
@@ -68,7 +72,7 @@ export const runCompleteCommand = {
         if (error.code !== "rollback-not-applicable") throw error;
       }
     }
-    return record;
+    return await withGlobalWorkPropagation(record, ctx.workspace, ctx);
   },
 
   cli: {
@@ -81,7 +85,7 @@ export const runCompleteCommand = {
     }),
 
     // Confirm the terminal state the transition reached.
-    render: (result) => `Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.`,
+    render: (result) => renderWithPropagationWarnings(`Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.`, result),
 
     // No path in the result (records carry refs) — passes through unchanged.
     json: (result) => result,

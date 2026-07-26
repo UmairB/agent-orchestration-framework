@@ -1,0 +1,5 @@
+{
+  "event": "UserPromptSubmit",
+  "type": "command",
+  "command": "aof session ping --assistant codex"
+}

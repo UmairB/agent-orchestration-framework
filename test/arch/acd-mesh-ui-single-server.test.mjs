@@ -26,7 +26,7 @@ function stripComments(source) {
 
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-single-server-"));
-  const meshDir = path.join(repo, "wiki", "work", ".mesh");
+  const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
   await mkdir(path.join(meshDir, "presence"), { recursive: true });
@@ -73,9 +73,30 @@ export const archTests = [
         /\.listen\s*\(\s*[^,]+,\s*["']127\.0\.0\.1["']/.test(clean),
         "the one server binds 127.0.0.1 (server.listen(port, \"127.0.0.1\", …))"
       );
-      // No second server is stood up (no WebSocketServer, no attachTerminalWebSocket).
-      assert.ok(!/new WebSocketServer\s*\(/.test(clean), "the fleet face stands up no WebSocketServer");
-      assert.ok(!/attachTerminalWebSocket\s*\(/.test(clean), "the fleet face does not attach a terminal WebSocket");
+      // No second SERVER/listener is stood up. SUPERSEDED-IN-PLACE (m38/story-06, ADR-014
+      // carve-out #2): the fleet face may stand up EXACTLY the read-only terminal-VIEW
+      // WebSocketServer, but ONLY in `noServer` mode — it rides the ONE http.createServer
+      // above via `server.on("upgrade")`, binding no port/server of its own (a port/server-bound
+      // WSS WOULD be the second listener ADR-003 forbids). This widens (does not weaken) the
+      // invariant exactly as story-04's assign route widened the read-only fitnesses
+      // (m27/ADR-006 SUPERSEDED-IN-PLACE precedent). The bidirectional local /ws/terminal
+      // (`attachTerminalWebSocket`) stays OFF the fleet face entirely.
+      const wssCtors = clean.match(/new WebSocketServer\s*\(([^)]*)\)/g) ?? [];
+      assert.ok(
+        wssCtors.length <= 1,
+        "at most ONE WebSocketServer on the fleet face (the ADR-014 read-only terminal-VIEW carve-out)"
+      );
+      for (const ctor of wssCtors) {
+        assert.ok(
+          /noServer\s*:\s*true/.test(ctor),
+          "any fleet-face WebSocketServer is noServer:true (rides the one http.createServer, never a second listener)"
+        );
+        assert.ok(
+          !/\bport\s*:/.test(ctor) && !/\bserver\s*:/.test(ctor),
+          "the fleet-face WebSocketServer binds no port/server of its own"
+        );
+      }
+      assert.ok(!/attachTerminalWebSocket\s*\(/.test(clean), "the fleet face does not attach a bidirectional terminal WebSocket");
     },
   },
   {
@@ -105,7 +126,10 @@ export const archTests = [
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" (milestone 34 / story 03, ADR-006) — this fitness assertion
+        // is about the single-server/disjoint-namespace INVARIANT, orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local" }));
         const address = server.address();
         assert.equal(address.address, "127.0.0.1", "the fleet server binds 127.0.0.1");
 

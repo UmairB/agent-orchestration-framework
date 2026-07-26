@@ -14,6 +14,7 @@ import path from "node:path";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
+import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 
 // The verbatim feedback heading — must match templates/uat/STATE.md and
 // src/bundle/commands/feedback.md byte-for-byte (ADR-003 / 02_add-feedback.feature).
@@ -58,7 +59,7 @@ export const feedbackCommand = {
       : `- ${note} — Raised by: ${actor}`;
 
     await appendFeedbackBullet(path.join(item.dir, "STATE.md"), bullet);
-    return { ok: true, bullet };
+    return await withGlobalWorkPropagation({ ok: true, bullet }, ctx.workspace, ctx);
   },
 
   cli: {
@@ -71,7 +72,7 @@ export const feedbackCommand = {
     }),
 
     // No historical human form; confirm the appended bullet.
-    render: (result) => `Appended: ${result.bullet}`,
+    render: (result) => renderWithPropagationWarnings(`Appended: ${result.bullet}`, result),
 
     // No path in the result — passes through to --json unchanged.
     json: (result) => result,

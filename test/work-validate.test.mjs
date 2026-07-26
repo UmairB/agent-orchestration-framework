@@ -58,6 +58,7 @@ function milestoneFields(overrides = {}) {
     status: "done",
     created: "2026-01-01",
     updated: "2026-01-02",
+    schema: 1,
     ...overrides,
   };
 }
@@ -84,6 +85,7 @@ function digestFields(overrides = {}) {
     title: "Foundation",
     status: "done",
     imported: "true",
+    schema: 1,
     ...overrides,
   };
 }
@@ -104,6 +106,7 @@ async function writeStory(milestoneDir, { folderNumber = "00", folderSlug = "alp
         created: "2026-01-01",
         updated: "2026-01-02",
         parent: "00",
+        schema: 1,
       },
     ),
   );
@@ -810,6 +813,7 @@ export const validateStreamTests = [
             updated: "2026-01-02",
             parent: "00",
             depends: ["99"],
+            schema: 1,
           },
           feature: "@executable\nFeature: Thing\n\n  Scenario: does a thing\n    When x\n    Then y\n",
         });

@@ -145,7 +145,7 @@ export const meshRelayControlNodeTests = [
       // Given durable records exist on disk (node + presence records under the partition
       // root) — written by the DURABLE side (git/story 00), NOT by the relay.
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-relay-data-"));
-      const meshRoot = path.join(repo, "wiki", "work", ".mesh");
+      const meshRoot = path.join(repo, ".aof", "mesh");
       await mkdir(path.join(meshRoot, "nodes"), { recursive: true });
       await mkdir(path.join(meshRoot, "presence"), { recursive: true });
       await writeFile(path.join(meshRoot, "nodes", "node-a.json"), '{"nodeId":"node-a","aofVersion":"1.0.0"}\n', "utf8");

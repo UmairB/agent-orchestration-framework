@@ -1,17 +1,18 @@
-// work:run-start — mint a new run for an item, ALREADY in `running` (ADR-001:
+// work:run-start — mint a new run for an item, ALREADY in `running` (19/ADR-001:
 // work:run-start creates-and-begins; the operator triggers and runs in one step).
 //
-// A thin WRITE wrapper over story 00's src/run-store.mjs (the next.mjs-over-nextWork
-// idiom). It resolves the target with `resolveItemExact` — NO slug fallback, so a
-// typo'd/partial ref returns ref-not-found rather than writing a run to the wrong
-// item (08/ADR-003 write-isolation, exactly as feedback does). The store performs
-// every filesystem write under runs/ (ADR-002); this command never touches item
-// frontmatter (status rollback is milestone 20). The result is the new running run
-// record — records carry refs, NOT absolute paths, so there is no path projection.
+// Mesh no longer takes a git-bus lease before minting. A mesh-configured run carries
+// this machine node id on the run record, then publishes the workspace snapshot into
+// the global mesh store for WebSocket/backstop propagation.
+import { readdir } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
-import { startRun, reclaimStaleRuns } from "../run-store.mjs";
-import { rollbackItemStatus } from "../work.mjs";
+import { startRun, retryRun, reclaimStaleRuns, readRuns, runsDir, shouldRetry } from "../run-store.mjs";
+import { rollbackItemStatus, listItems } from "../work.mjs";
+import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mesh-presence.mjs";
+import { aofVersion } from "./mesh-identity.mjs";
+import { meshNodeIdOf } from "./mesh-gate.mjs";
+import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 
 // The documented default staleness threshold for the restart-time reclaim scan
 // (20/ADR-004 — the "missing-after-N" semantics): a `running` run idle this long with
@@ -28,6 +29,10 @@ export const runStartCommand = {
       ref: { type: "string" },
       sessionId: { type: "string" },
       brief: { type: "object" },
+      // `now` (ISO-8601 UTC-Z) is an INJECTED clock (the mesh:heartbeat/mesh:status
+      // white-box idiom, 22/R2 — a test input, never a CLI flag): it drives the claim
+      // stamp, the reclaim scan, and the deterministic runId; absent ⇒ wall-clock.
+      now: { type: "string" },
     },
     required: ["ref"],
     additionalProperties: false,
@@ -41,13 +46,91 @@ export const runStartCommand = {
     const item = await resolveItemExact(ctx.workspace.workDir, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
 
-    // Restart-time reclaim (20/ADR-004): a run orphaned by a crash leaves a stale
-    // `running` record that would wedge this restart (dedup would refuse the new mint).
-    // Force-fail this item's stale runs FIRST (runtime_offline — retryable), then roll
-    // each reclaimed item's status back so the stream is honest (best-effort). This is
-    // "the work:run-start path picks it up"; the skill drives the wider scan (story 02).
-    const stalenessThreshold = ctx.workspace?.config?.work?.autonomous?.heartbeatStaleMs ?? DEFAULT_HEARTBEAT_STALE_MS;
-    const reclaimed = await reclaimStaleRuns([item], { stalenessThreshold });
+    const ws = ctx.workspace;
+    const config = ws.config ?? {};
+    // THE CONFIG GATE (ADR-004/ADR-006) — the ONE shared predicate (mesh-gate.mjs):
+    // the mesh branch exists only for a mesh-configured install. With no
+    // config.mesh.nodeId every mesh step below is skipped and the command is
+    // byte-identical to today's single-node run-start.
+    const meshNodeId = meshNodeIdOf(config);
+    const nowIso = typeof input.now === "string" && input.now.length > 0 ? input.now : new Date().toISOString();
+
+    // (0) Restart-time reclaim (20/ADR-004), fleet-widened under mesh (26/ADR-006): a
+    // run orphaned by a crash leaves a stale `running` record that would wedge a
+    // restart (dedup would refuse the new mint) — and on a fleet, a CRASHED PEER's
+    // orphan would wedge its item for everyone. Build the scan set, force-fail the
+    // stale runs (runtime_offline — retryable), then roll each reclaimed item's
+    // status back so the stream is honest (best-effort, 20/ADR-005 verbatim).
+    const stalenessThreshold = config.work?.autonomous?.heartbeatStaleMs ?? DEFAULT_HEARTBEAT_STALE_MS;
+    const scanSet = [];
+    if (meshNodeId) {
+      // THE DUAL-STALENESS PREFILTER (ADR-006.2/6.3 — orchestration; the store stays
+      // fleet-blind): presence has PRECEDENCE. Only a run owned by an affirmatively
+      // presence-STALE peer may reach the scan; the scan's own heartbeat gate
+      // (unchanged) is the second half of the dual guard.
+      const nowMs = Date.parse(nowIso);
+      const presenceThresholdMs = resolveStalenessSeconds(config) * 1000;
+      const presenceByNode = new Map();
+      const ownerIsStale = async (node) => {
+        if (!presenceByNode.has(node)) presenceByNode.set(node, await readPresenceRecord(ws, node));
+        const presence = presenceByNode.get(node);
+        // No presence record ⇒ UNKNOWN liveness, not staleness (the m23 lock) —
+        // hands off, the KR2-safe direction. Fresh ⇒ hands off, unconditionally.
+        if (presence == null || typeof presence.heartbeatAt !== "string") return false;
+        return isNodeStale(presence, nowMs, presenceThresholdMs);
+      };
+      // The cheap prefilter floor: FOREIGN runs live ONLY under runs/<node>/ (the
+      // record→path invariant, 26/ADR-001.3), so an item whose runs/ dir carries no
+      // foreign node subdir cannot hold a peer's run — one readdir stat, ZERO record
+      // parses, cuts the hot path from O(total runs) parses to O(items) stats.
+      const hasForeignPartition = async (candidate) => {
+        let entries = [];
+        try {
+          entries = await readdir(runsDir(candidate), { withFileTypes: true });
+        } catch {
+          return false; // no runs/ dir ⇒ no runs at all — absence is benign
+        }
+        return entries.some((entry) => entry.isDirectory() && entry.name !== meshNodeId);
+      };
+
+      // The STARTED item keeps today's local scan (own/flat runs — heartbeat rules
+      // alone; presence is never consulted for oneself) UNLESS its in-flight run is
+      // owned by a hands-off peer (fresh/unknown presence ⇒ the item leaves the scan;
+      // the dedup guard will refuse the mint — the item is being worked elsewhere).
+      let includeStarted = true;
+      if (await hasForeignPartition(item)) {
+        for (const run of await readRuns(item)) {
+          if (run.state !== "running") continue;
+          if (run.node == null || run.node === meshNodeId) continue; // own/flat — local rules
+          if (!(await ownerIsStale(run.node))) {
+            includeStarted = false;
+            break;
+          }
+        }
+      }
+      if (includeStarted) scanSet.push(item);
+
+      // The FLEET SWEEP (ADR-006.1 — reclaim happens when ANY node seeks work; no
+      // daemon, no new verb): any OTHER item whose in-flight run is owned by a
+      // presence-stale peer joins the scan. This node's own runs on other items are
+      // EXCLUDED (they stay under the local scan's existing rules).
+      for (const candidate of await listItems(ws.workDir)) {
+        if (candidate.ref === item.ref) continue;
+        if (!(await hasForeignPartition(candidate))) continue; // zero parses on the common path
+        for (const run of await readRuns(candidate)) {
+          if (run.state !== "running") continue;
+          if (run.node == null || run.node === meshNodeId) continue;
+          if (await ownerIsStale(run.node)) {
+            scanSet.push(candidate);
+            break;
+          }
+        }
+      }
+    } else {
+      // Unconfigured mesh ⇒ today's local [item] scan — the WHOLE of it (ADR-006.1).
+      scanSet.push(item);
+    }
+    const reclaimed = await reclaimStaleRuns(scanSet, { now: nowIso, stalenessThreshold });
     for (const entry of reclaimed) {
       try {
         await rollbackItemStatus(entry.item, "not-started");
@@ -56,24 +139,41 @@ export const runStartCommand = {
       }
     }
 
-    // The store mints the record (running, attempt 1, null outcome) and persists it
-    // under the item's runs/ dir, returning it AS-IS. The dedup guard refuses a second
-    // non-terminal run (the orphan is now terminal, so a genuine restart proceeds).
-    return await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {} });
-  },
+    // Mesh no longer uses the retired git-bus lease/sync path. A mesh-configured node
+    // still stamps its run record with the machine node id; visibility and convergence
+    // ride the global work projection plus the WebSocket stream/backstop.
+    if (!meshNodeId) {
+      const record = await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: input.now });
+      return await withGlobalWorkPropagation(record, ws, ctx);
+    }
+
+    const runs = await readRuns(item);
+    const latest = runs.length > 0 ? runs[runs.length - 1] : null;
+    const reclaimedPrior =
+      latest != null && latest.state === "failed" && latest.failureReason === "runtime_offline" && latest.reclaimedAt != null
+        ? latest
+        : null;
+    const maxAttempts = config.work?.autonomous?.maxAttempts ?? 3;
+    const record =
+      reclaimedPrior != null && shouldRetry(reclaimedPrior, maxAttempts)
+        ? await retryRun(item, { runId: reclaimedPrior.runId, maxAttempts, brief: input.brief, now: nowIso, node: meshNodeId, sessionId: input.sessionId ?? null })
+        : await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: nowIso, node: meshNodeId });
+
+    return await withGlobalWorkPropagation(record, ws, ctx);  },
 
   cli: {
     // `aof work run-start <ref> [--session …] [--brief '<json>']`. The brief arrives
     // as a JSON STRING on the CLI; the argv adapter parses it (undefined stays
-    // undefined — an omitted --brief defaults to {} in run).
+    // undefined — an omitted --brief defaults to {} in run). `now` is a white-box
+    // test input, never a CLI flag.
     argv: (positionals, options) => ({
       ref: positionals[0],
       sessionId: options.session,
       brief: parseBriefJson(options.brief),
     }),
 
-    // Confirm the started run: the ref, the running state, the minted runId.
-    render: (result) => `Started run ${result.runId} for ${result.itemRef} — state running.`,
+    // Confirm the started run: the ref, the running state, and the minted runId.
+    render: (result) => renderWithPropagationWarnings(`Started run ${result.runId} for ${result.itemRef} — state running.`, result),
 
     // No path in the result (records carry refs) — passes through unchanged.
     json: (result) => result,

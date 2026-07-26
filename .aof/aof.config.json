@@ -3,20 +3,49 @@
   "name": "aof",
   "work": {
     "dir": "./wiki/work",
-    "agents": { "mode": "orchestrated", "productOwner": "inline" },
-    "codeReview": { "autoComplete": false },
-    "autonomous": { "maxAttempts": 3 },
+    "agents": {
+      "mode": "orchestrated",
+      "productOwner": "inline"
+    },
+    "codeReview": {
+      "autoComplete": false
+    },
+    "autonomous": {
+      "maxAttempts": 3
+    },
     "tags": {
-      "layers": ["@cli", "@ui", "@docs"],
-      "refinements": ["@work", "@planning", "@assets", "@adapter"],
-      "domains": ["@work-stream", "@validate", "@scaffold", "@planning", "@board", "@distribution", "@round-trip", "@memory", "@design"]
+      "layers": [
+        "@cli",
+        "@ui",
+        "@docs"
+      ],
+      "refinements": [
+        "@work",
+        "@planning",
+        "@assets",
+        "@adapter"
+      ],
+      "domains": [
+        "@work-stream",
+        "@validate",
+        "@scaffold",
+        "@planning",
+        "@board",
+        "@distribution",
+        "@round-trip",
+        "@memory",
+        "@design"
+      ]
     }
   },
-  "memory": { "backend": "graphify" },
+  "memory": {
+    "backend": "graphify"
+  },
   "resources": [],
   "packages": [],
   "runtimes": [
     "claude",
     "codex"
-  ]
+  ],
+  "mesh": {}
 }

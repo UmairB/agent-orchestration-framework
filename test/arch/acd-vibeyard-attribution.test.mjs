@@ -18,6 +18,12 @@ const ADAPTED_FILES = [
   "ui/src/board/terminal/dock-state.mjs",
   "ui/src/board/terminal/provider-picker.mjs",
   "ui/src/board/terminal/resize.mjs",
+  // milestone 38 / story 06 / task 04 — the fleet's read-only terminal-VIEW reaches
+  // the SAME vibeyard-derived xterm pane wiring (new Terminal / FitAddon / open /
+  // fit / dispose) through TerminalDock.tsx, which ported it first (DESIGN §Surface
+  // 3 V3 requires that reuse). The attribution travels with the derivation — this
+  // entry WIDENS the invariant's scope to the new derived file; it weakens nothing.
+  "ui/src/fleet/terminal-view/FleetTerminalView.tsx",
 ];
 
 export const archTests = [

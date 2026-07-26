@@ -2,8 +2,8 @@
 // a ws@8 broker shipped as the same aof binary in a `relay` mode, carrying a FROZEN,
 // payload-agnostic ephemeral envelope. It brokers signals IN MEMORY ONLY and fans them
 // out — it persists NOTHING authoritative, imports NO record schema, and is NEVER a
-// system of record. Kill it and the fleet loses LIVENESS, not DATA (every signal has a
-// durable git counterpart — that durable write is story 00/02, never here).
+// system of record. Kill it and the fleet loses LIVENESS, not DATA (durable state is
+// written through the global mesh store/presence seams, never here).
 //
 // THE SERVE UNIT (the board-serve/terminal-ws precedent, 03/ADR-001): serveRelay({ port,
 // config }) returns { server, url, stop } — ONE http.createServer; a single
@@ -42,6 +42,7 @@ import { WebSocketServer } from "ws";
 // the registry is the system of record, the relay merely invokes its seam on the one
 // node that IS the enrollment authority).
 import {
+  isControlNode,
   readRegistry,
   writeRegistry,
   admitNode,
@@ -50,6 +51,7 @@ import {
   isInviteExpired,
   verifyCredential,
 } from "./mesh-registry.mjs";
+import { publishNodeRecord, readNodeRecord } from "./mesh-store.mjs";
 
 // The single relay pathname (ADR-001 — ONE path; any other upgrade pathname is
 // destroyed, the terminal-ws default branch). Loopback-bound by default (pre-auth).
@@ -133,17 +135,7 @@ function hashesEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// The git-remote GRANT the credential carries (ADR-003 move 1 — "provisioned
-// alongside"): the trusted-operator single-group default is the remote the operator
-// configured on the control node (config.mesh.enrollment.gitRemote — the free-form
-// mesh subtree). An unconfigured url is an honest null grant (the join side then has
-// nothing to provision — a degraded-but-valid credential, not a crash).
-function resolveGitRemoteGrant(config) {
-  const raw = config?.mesh?.enrollment?.gitRemote;
-  const url = typeof raw?.url === "string" && raw.url.length > 0 ? raw.url : null;
-  const name = typeof raw?.name === "string" && raw.name.length > 0 ? raw.name : "aof-mesh";
-  return { url, name };
-}
+
 
 // One structured JSON response — the never-crash HTTP discipline (03/ADR-003 mirrored
 // over HTTP): EVERY enrollment outcome, success or rejection, is a written response,
@@ -190,6 +182,28 @@ function readRequestBody(request, limitBytes) {
 // a checks-on-a-neutral-local shape (never an equality operator adjacent to a
 // code-named identifier — the constant-time fitness's grep is deliberately blunt).
 // Anything that is not exactly six decimal digits is NOT a valid presentation.
+function safeDescriptorString(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function safeDescriptorStringArray(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+
+function readJoinerNodeRecord(parsed, joiner, nowIso) {
+  const candidate = parsed?.nodeRecord;
+  if (candidate == null || typeof candidate !== "object" || candidate.nodeId !== joiner) {
+    return { nodeId: joiner, host: "", os: "", runtimes: [], aofVersion: "", publishedAt: nowIso };
+  }
+  return {
+    nodeId: joiner,
+    host: safeDescriptorString(candidate.host),
+    os: safeDescriptorString(candidate.os),
+    runtimes: safeDescriptorStringArray(candidate.runtimes),
+    aofVersion: safeDescriptorString(candidate.aofVersion),
+    publishedAt: safeDescriptorString(candidate.publishedAt) || nowIso,
+  };
+}
 function readPresentedDigits(parsed) {
   const value = parsed?.code;
   if (typeof value !== "string") return null;
@@ -283,6 +297,140 @@ function parseEnvelope(text) {
   return value;
 }
 
+export function createEnrollmentHttpHandler({ config, workspace = null, now = null } = {}) {
+  const codeTtlSeconds = resolveCodeTtlSeconds(config);
+  const maxAttempts = resolveMaxAttempts(config);
+  const attemptBuckets = new Map();
+  const resolveNowIso = () => {
+    if (typeof now === "function") return String(now());
+    if (typeof now === "string" && now.length > 0) return now;
+    return new Date().toISOString();
+  };
+
+  function attemptsExhausted(source, nowMs) {
+    const bucket = attemptBuckets.get(source);
+    if (bucket == null) return false;
+    if (Number.isFinite(nowMs) && nowMs - bucket.startMs > codeTtlSeconds * 1000) {
+      attemptBuckets.delete(source);
+      return false;
+    }
+    return bucket.failures >= maxAttempts;
+  }
+
+  function recordFailedAttempt(source, nowMs) {
+    const startMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const bucket = attemptBuckets.get(source);
+    if (bucket == null || startMs - bucket.startMs > codeTtlSeconds * 1000) {
+      attemptBuckets.set(source, { failures: 1, startMs });
+      return;
+    }
+    bucket.failures += 1;
+  }
+
+  async function handleEnroll(request, response) {
+    if (workspace == null) {
+      respondJson(response, 503, { ok: false, reason: "enrollment-unavailable", error: "this relay has no workspace wired — enrollment needs the group registry" });
+      return;
+    }
+
+    const nowIso = resolveNowIso();
+    const nowMs = Date.parse(nowIso);
+    const source = request.socket?.remoteAddress ?? "unknown";
+
+    if (attemptsExhausted(source, nowMs)) {
+      respondJson(response, 429, { ok: false, reason: "attempt-cap", error: "too many failed presentations from this source — the enrollment endpoint refuses further attempts within the TTL window" });
+      return;
+    }
+
+    const bodyText = await readRequestBody(request, 4096);
+    let parsed = null;
+    if (bodyText != null) {
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        parsed = null;
+      }
+    }
+    const presented = readPresentedDigits(parsed);
+    const joiner = typeof parsed?.nodeId === "string" && parsed.nodeId.length > 0 ? parsed.nodeId : null;
+    if (presented == null || joiner == null) {
+      recordFailedAttempt(source, nowMs);
+      respondJson(response, 400, { ok: false, reason: "malformed", error: "malformed enrollment body — expected JSON { code: <6 digits>, nodeId }" });
+      return;
+    }
+    const joinerRecord = readJoinerNodeRecord(parsed, joiner, nowIso);
+
+    const registry = await readRegistry(workspace);
+    const pendingInvites = Array.isArray(registry.pending) ? registry.pending : [];
+    const presentedHash = sha256Hex(presented);
+    const matched = pendingInvites.find((invite) => hashesEqual(presentedHash, invite?.codeHash));
+
+    if (matched == null) {
+      recordFailedAttempt(source, nowMs);
+      respondJson(response, 404, { ok: false, reason: "no-match", error: "the presented code matches no pending invite" });
+      return;
+    }
+    if (isInviteConsumed(matched)) {
+      recordFailedAttempt(source, nowMs);
+      respondJson(response, 409, { ok: false, reason: "consumed", error: "the presented code was already consumed — an invite is single-use" });
+      return;
+    }
+    if (isInviteExpired(matched, nowIso)) {
+      recordFailedAttempt(source, nowMs);
+      respondJson(response, 410, { ok: false, reason: "expired", error: "the presented code has expired" });
+      return;
+    }
+    if (!isControlNode(config)) {
+      respondJson(response, 503, { ok: false, reason: "not-control-node", error: "admission requires the nominated control node — this relay is not the enrollment authority" });
+      return;
+    }
+
+    await publishNodeRecord(workspace, joiner, joinerRecord);
+
+    const relayAuth = crypto.randomBytes(32).toString("hex");
+    const relayAuthHash = sha256Hex(relayAuth);
+    const controlNode = typeof config?.mesh?.relay?.controlNode === "string" && config.mesh.relay.controlNode.length > 0 ? config.mesh.relay.controlNode : null;
+    const consumed = consumePendingInvite(registry, matched.codeHash, nowIso);
+    const admitted = admitNode(consumed, { nodeId: joiner, admittedAt: nowIso, boards: [], relayAuthHash });
+    const persisted = await writeRegistry(workspace, admitted, config);
+    if (!persisted.written) {
+      respondJson(response, 503, { ok: false, reason: "not-control-node", error: "admission requires the nominated control node — this relay is not the enrollment authority" });
+      return;
+    }
+
+    attemptBuckets.delete(source);
+    // review fix (live soak, 2026-07-17): the joiner's record was already persisted
+    // ON THE CONTROL NODE above (publishNodeRecord(workspace, joiner, ...)), but
+    // nothing in the ORIGINAL enroll response ever gave the JOINER a copy of the
+    // CONTROL NODE'S own descriptor — only its bare nodeId string. Without that
+    // descriptor in the joiner's own local nodes/ directory, resolvePeers' roster
+    // join (mesh-fabric.mjs) has nothing to match a live tailscale peer against, so
+    // a freshly (or re-)joined worker can NEVER resolve the control node's dial
+    // address, regardless of tailscale connectivity — the join silently completed
+    // but left the worker permanently unable to stream. Read the control node's OWN
+    // already-published record (every control node publishes itself via `aof mesh
+    // identity` before it can serve) and hand it back so the joiner can persist an
+    // equivalent local copy (mesh-join.mjs). Absence-tolerant: an unpublished
+    // control-node record degrades to admission succeeding exactly as before this
+    // fix, never a failure of the join itself.
+    const controlNodeRecord = controlNode != null ? await readNodeRecord(workspace, controlNode) : null;
+    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, controlNode, controlNodeRecord } });
+  }
+
+  return async function enrollmentHttpHandler(request, response) {
+    if (request.method !== "POST" || requestPathname(request) !== "/enroll") return false;
+    try {
+      await handleEnroll(request, response);
+    } catch {
+      try {
+        respondJson(response, 500, { ok: false, reason: "enroll-failed", error: "enrollment failed unexpectedly" });
+      } catch {
+        /* response already settled */
+      }
+    }
+    return true;
+  };
+}
 // serveRelay({ port, config, workspace, now }) → { server, url, stop }. The one-shot
 // serve core (the board-serve/terminal-ws clone). Binds loopback on the requested port
 // (0 ⇒ an ephemeral port; the url carries the ACTUAL assigned port, the setup-ui
@@ -312,168 +460,29 @@ export async function serveRelay({ port = 0, config, workspace = null, now = nul
   // the remote-address default (ADR-003 move 2; the STORY.md injectable seam).
   const isGroup = typeof isGroupConnection === "function" ? isGroupConnection : defaultIsGroupConnection;
 
-  // ADR-005: the enrollment knobs, resolved ONCE at serve start (the maxFrameBytes
-  // precedent), and the per-source EPHEMERAL failed-attempt buckets — an in-memory Map
-  // beside the in-memory clients Set, NEVER persisted (the relay stays stateless: the
-  // counter is a guard, not a record; a restart merely re-opens the attempt window,
-  // and admission still requires the live control node + a non-expired code).
-  const codeTtlSeconds = resolveCodeTtlSeconds(config);
-  const maxAttempts = resolveMaxAttempts(config);
-  const attemptBuckets = new Map();
-  const resolveNowIso = () => {
-    if (typeof now === "function") return String(now());
-    if (typeof now === "string" && now.length > 0) return now;
-    return new Date().toISOString();
-  };
+  // Enrollment state lives inside createEnrollmentHttpHandler; the WebSocket relay core
+  // keeps only connection/broker state.
 
   // ONE http.createServer (ADR-001 / 03/ADR-001 — never a second server or port). The
   // m24 device-flow enrollment route (ADR-002 move 2) sits ABOVE the 426 fallback —
   // the ONLY HTTP route the relay serves; every other non-upgrade request still gets
   // the terse 426 and never hangs.
+  const enrollmentHttpHandler = createEnrollmentHttpHandler({ config, workspace, now });
   const server = http.createServer((request, response) => {
-    if (request.method === "POST" && requestPathname(request) === "/enroll") {
-      // NEVER-CRASH over HTTP (03/ADR-003 mirrored): an unexpected fault inside the
-      // handler is a structured 500 response, never a thrown error out of the server.
-      handleEnroll(request, response).catch(() => {
+    enrollmentHttpHandler(request, response)
+      .then((handled) => {
+        if (handled) return;
+        response.writeHead(426, { "Content-Type": "text/plain" });
+        response.end("Upgrade required");
+      })
+      .catch(() => {
         try {
-          respondJson(response, 500, { ok: false, reason: "enroll-failed", error: "enrollment failed unexpectedly" });
+          respondJson(response, 500, { ok: false, reason: "http-failed", error: "request failed unexpectedly" });
         } catch {
           /* response already settled */
         }
       });
-      return;
-    }
-    response.writeHead(426, { "Content-Type": "text/plain" });
-    response.end("Upgrade required");
   });
-
-  // Has this source exhausted its attempt budget within the TTL window? The window is
-  // anchored at the bucket's FIRST failure; once the window lapses the bucket resets
-  // (an operator's next legitimate code is not poisoned by stale history).
-  function attemptsExhausted(source, nowMs) {
-    const bucket = attemptBuckets.get(source);
-    if (bucket == null) return false;
-    if (Number.isFinite(nowMs) && nowMs - bucket.startMs > codeTtlSeconds * 1000) {
-      attemptBuckets.delete(source);
-      return false;
-    }
-    return bucket.failures >= maxAttempts;
-  }
-
-  // Count one FAILED presentation against the source's bucket (per-source, ADR-005 —
-  // an enumeration attack walks MANY codes from ONE source, so the source is the
-  // bucket that closes the 10^6 walk).
-  function recordFailedAttempt(source, nowMs) {
-    const startMs = Number.isFinite(nowMs) ? nowMs : Date.now();
-    const bucket = attemptBuckets.get(source);
-    if (bucket == null || startMs - bucket.startMs > codeTtlSeconds * 1000) {
-      attemptBuckets.set(source, { failures: 1, startMs });
-      return;
-    }
-    bucket.failures += 1;
-  }
-
-  // The device-flow handler (ADR-002 move 2 + ADR-005): match → consume → admit →
-  // issue, with the reject matrix (malformed / no-match / consumed / expired /
-  // cap-exceeded) each a STRUCTURED JSON rejection that admits and writes NOTHING.
-  async function handleEnroll(request, response) {
-    // Enrollment needs the registry — a relay stood up without a workspace has no
-    // group-of-record to admit into (a structured refusal, not a crash).
-    if (workspace == null) {
-      respondJson(response, 503, { ok: false, reason: "enrollment-unavailable", error: "this relay has no workspace wired — enrollment needs the group registry" });
-      return;
-    }
-
-    const nowIso = resolveNowIso();
-    const nowMs = Date.parse(nowIso);
-    const source = request.socket?.remoteAddress ?? "unknown";
-
-    // (ADR-005) THE ATTEMPT-CAP, FIRST: after maxAttempts FAILED presentations from
-    // this source within the TTL window, the endpoint refuses to be walked — a
-    // structured 429, before any body/registry work is spent on the attacker.
-    if (attemptsExhausted(source, nowMs)) {
-      respondJson(response, 429, { ok: false, reason: "attempt-cap", error: "too many failed presentations from this source — the enrollment endpoint refuses further attempts within the TTL window" });
-      return;
-    }
-
-    // A bounded body read + parse: an over-limit / unreadable / non-JSON / non-6-digit
-    // presentation is ONE malformed class (a structured 400, never a throw), and it
-    // costs the source a failed attempt (a malformed flood is still a flood — T7).
-    const bodyText = await readRequestBody(request, 4096);
-    let parsed = null;
-    if (bodyText != null) {
-      try {
-        parsed = JSON.parse(bodyText);
-      } catch {
-        parsed = null;
-      }
-    }
-    const presented = readPresentedDigits(parsed);
-    const joiner = typeof parsed?.nodeId === "string" && parsed.nodeId.length > 0 ? parsed.nodeId : null;
-    if (presented == null || joiner == null) {
-      recordFailedAttempt(source, nowMs);
-      respondJson(response, 400, { ok: false, reason: "malformed", error: "malformed enrollment body — expected JSON { code: <6 digits>, nodeId }" });
-      return;
-    }
-
-    // Match the presented code against the pending invites via hash + the
-    // CONSTANT-TIME compare (SECURITY T2/T4 — hashesEqual, never a raw === on hash
-    // material). The registry is read FRESH per presentation (the control node may
-    // have minted since the relay stood up).
-    const registry = await readRegistry(workspace);
-    const pendingInvites = Array.isArray(registry.pending) ? registry.pending : [];
-    const presentedHash = sha256Hex(presented);
-    const matched = pendingInvites.find((invite) => hashesEqual(presentedHash, invite?.codeHash));
-
-    if (matched == null) {
-      recordFailedAttempt(source, nowMs);
-      respondJson(response, 404, { ok: false, reason: "no-match", error: "the presented code matches no pending invite" });
-      return;
-    }
-    // Single-use (T4 replay): a consumed invite is burned — a second presentation of
-    // the same code fails, whatever the clock says.
-    if (isInviteConsumed(matched)) {
-      recordFailedAttempt(source, nowMs);
-      respondJson(response, 409, { ok: false, reason: "consumed", error: "the presented code was already consumed — an invite is single-use" });
-      return;
-    }
-    // TTL (the strict-> boundary, story 00's helper): now > expiresAt ⇒ expired.
-    if (isInviteExpired(matched, nowIso)) {
-      recordFailedAttempt(source, nowMs);
-      respondJson(response, 410, { ok: false, reason: "expired", error: "the presented code has expired" });
-      return;
-    }
-
-    // THE MATCH — consume-then-admit (ADR-002 move 2c), composed on the registry VALUE
-    // and persisted in ONE atomic writeRegistry (story 00's control-node-guarded seam):
-    // the invite is burned and the node admitted in the same durable write, so no
-    // window exists where the code is spent but the admission lost (or vice versa).
-    // The roster entry ADDITIVELY carries relayAuthHash — the verifiable half story
-    // 02's auth-gate checks a presented token against (the token itself is NEVER at
-    // rest — SECURITY T3/T5).
-    const relayAuth = crypto.randomBytes(32).toString("hex");
-    const relayAuthHash = sha256Hex(relayAuth);
-    const gitRemote = resolveGitRemoteGrant(config);
-    const consumed = consumePendingInvite(registry, matched.codeHash, nowIso);
-    const admitted = admitNode(consumed, { nodeId: joiner, admittedAt: nowIso, boards: [], relayAuthHash });
-    const persisted = await writeRegistry(workspace, admitted, config);
-    if (!persisted.written) {
-      // Not the nominated control node ⇒ story 00's seam refused the write — no
-      // admission was durable, so NO credential is issued (admission requires the
-      // live enrollment authority; there is no offline/peer-side admission path).
-      respondJson(response, 503, { ok: false, reason: "not-control-node", error: "admission requires the nominated control node — this relay is not the enrollment authority" });
-      return;
-    }
-
-    // A successful match retires the source's attempt bucket (ADR-005: the code is
-    // consumed; the bucket must not poison the NEXT legitimate join from this source).
-    attemptBuckets.delete(source);
-
-    // ISSUE the credential (ADR-003 move 1): relay-auth + stream identity + the
-    // git-remote grant. The plaintext relayAuth exists ONLY in this response — the
-    // registry holds its hash.
-    respondJson(response, 200, { ok: true, credential: { relayAuth, nodeId: joiner, gitRemote } });
-  }
 
   // A single WebSocketServer via noServer (ADR-001) + the maxPayload floor (the defence-
   // in-depth half; the CONTRACT path is the hand-rolled byte-length check below). The

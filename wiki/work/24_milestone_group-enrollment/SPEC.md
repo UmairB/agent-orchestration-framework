@@ -9,6 +9,8 @@ created: 2026-06-29
 updated: 2026-07-02
 depends: [23]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

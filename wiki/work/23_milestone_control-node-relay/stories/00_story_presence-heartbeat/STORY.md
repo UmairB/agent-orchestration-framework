@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-30
 updated: 2026-07-01
+schema: 1
+aofVersion: 0.1.0
 ---
 <!-- Build landed 2026-06-30 (aof:continue 23): tasks 00/01 @executable green, fitness #3/#6 green,
      bijection gate green covering mesh:heartbeat. Task 02 stays @manual (verified at aof:verify).

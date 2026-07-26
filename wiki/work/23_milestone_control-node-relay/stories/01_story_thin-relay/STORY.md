@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-30
 updated: 2026-07-01
+schema: 1
+aofVersion: 0.1.0
 ---
 <!-- Build landed 2026-06-30 (aof:continue 23): tasks 00/01/02 @executable green, fitness #1/#2 green,
      bijection gate green covering mesh:relay (non-blocking --json probe). status → in-review at the

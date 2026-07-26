@@ -18,7 +18,7 @@
 //       cleanly (a warn/error finding can gate) — accept [0,1] for both.
 import assert from "node:assert/strict";
 import { spawnCliSync } from "../support/cli-spawn.mjs";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, cp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,21 @@ async function buildFixture() {
     `${JSON.stringify({ name: "fixture", work: { dir: "./wiki/work" } }, null, 2)}\n`,
     "utf8"
   );
+  // milestone 41 / story 02 — insert-milestone/insert-uat scaffold from
+  // `.aof/templates/work/<type>/`, the SAME templates add-* uses; copy the
+  // repo's real committed templates into the fixture so the bijection probe's
+  // insert calls (below) can actually scaffold a valid record doc.
+  await cp(path.join(repoRoot, ".aof", "templates", "work", "milestone"), path.join(aofDir, "templates", "work", "milestone"), { recursive: true });
+  await cp(path.join(repoRoot, ".aof", "templates", "work", "uat"), path.join(aofDir, "templates", "work", "uat"), { recursive: true });
+  // milestone 41 / story 03 — insert-story scaffolds from
+  // `.aof/templates/work/story/`, the SAME template add-story uses; copy it in
+  // too so the bijection probe's insert-story call (below) can actually
+  // scaffold a valid record doc.
+  await cp(path.join(repoRoot, ".aof", "templates", "work", "story"), path.join(aofDir, "templates", "work", "story"), { recursive: true });
+  // milestone 39 / story 03 — insert-chore/promote-gap scaffold from
+  // `.aof/templates/work/chore/`, the SAME template add-chore uses; copy it in
+  // too so the bijection probes below can actually scaffold a valid chore.
+  await cp(path.join(repoRoot, ".aof", "templates", "work", "chore"), path.join(aofDir, "templates", "work", "chore"), { recursive: true });
   await writeFile(
     path.join(milestoneDir, "SPEC.md"),
     frontmatter({ type: "milestone", number: "03", slug: "board", status: "in-progress", title: '"Board"', created: "2026-06-19", updated: "2026-06-19" }),
@@ -140,6 +155,44 @@ function argsFor(sub) {
     // milestone 20 — run-retry resumes the seeded retryable failed run on milestone 03
     // (exit 0). The switch THROWS on an unmapped sub (19/R1), so this case is required.
     case "run-retry": return ["work", "run-retry", "03", "--json"];
+    // milestone 41 / story 02 — insert-milestone/insert-uat place a new top-level
+    // driver. --at is chosen WELL ABOVE the fixture's highest number (03) so the
+    // insert shifts ZERO existing items (no --yes needed) and never disturbs the
+    // "03"/"03/01" refs the other subcommand probes above depend on.
+    case "insert-milestone": return ["work", "insert-milestone", "bijection-milestone", "--at", "50", "--json"];
+    case "insert-uat": return ["work", "insert-uat", "bijection-uat", "--at", "51", "--json"];
+    // milestone 41 / story 03 — insert-story places a new story under the
+    // fixture's milestone "03". --at is chosen WELL ABOVE the fixture's one
+    // existing nested story (03/01) so the insert shifts ZERO siblings (no
+    // --yes needed) and never disturbs the "03/01" ref the other subcommand
+    // probes above depend on.
+    case "insert-story": return ["work", "insert-story", "bijection-story", "--at", "50", "--under", "3", "--json"];
+    // milestone 39 / story 03 — insert-chore places a new top-level chore;
+    // --at 49 stays well clear of the other insert-* probes' targets (50/51)
+    // and the fixture's own "03"/"03/01" refs, so it shifts zero items.
+    case "insert-chore": return ["work", "insert-chore", "bijection-chore", "--at", "49", "--json"];
+    // promote-gap composes over the SAME chore insert engine; --at 60 is a
+    // fourth, disjoint slot so this probe never collides with any of the
+    // above regardless of subcommand execution order.
+    case "promote-gap":
+      return [
+        "work",
+        "promote-gap",
+        "bijection gap field",
+        "--discharge",
+        "a production path writes bijection_gap_field",
+        "--at",
+        "60",
+        "--json",
+      ];
+    // milestone 40 / story 02 — work:upgrade. --dry-run so the probe never
+    // mutates the fixture's "03"/"03/01" refs the other subcommand probes
+    // above depend on (it only REPORTS what would change).
+    case "upgrade": return ["work", "upgrade", "--dry-run", "--json"];
+    // 2026-07-26 — work:continue, THE single "continue this task [--node <id>]" door.
+    // The fixture is NOT mesh-configured and "03/01" has no prior run, so WHERE resolves
+    // to `local`: exit 0, one parseable envelope, and NOTHING is dispatched or minted.
+    case "continue": return ["work", "continue", "03/01", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

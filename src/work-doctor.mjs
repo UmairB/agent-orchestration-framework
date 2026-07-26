@@ -29,21 +29,38 @@ import { listItems, parseFrontmatter } from "./work.mjs";
 import { statusCoherenceGroup, lifecycleCompletenessGroup } from "./work-doctor-coherence.mjs";
 import { freshnessGroup, structuralIntegrityGroup } from "./work-doctor-freshness.mjs";
 import { budgetGroup } from "./work-doctor-budget.mjs";
+// milestone 33 / story 00 (ADR-004.4, F-3203) — the mesh-identity-committed warn group.
+import { meshIdentityCommittedGroup } from "./work-doctor-identity.mjs";
 
 // The item-identity regex + record-doc mapping are owned by `work.mjs`; doctor is
 // a consumer. `work.mjs` does not export them, so the snapshot pass replicates the
 // tiny bodies here (the same closed vocabulary) rather than re-globbing identity.
 // Exported so the appended check-group modules (stories 01/02) consume the SAME
 // identity vocabulary as the spine — no re-parsing of the item-name grammar.
-export const ITEM_RE = /^(\d+)_(milestone|story|task|uat)_([a-z0-9-]+)$/;
+// milestone 37 / ADR-001 — spike/chore admitted here too (mirrors work.mjs's
+// ITEM_RE), so doctor does not flag a NN_spike_*/NN_chore_* folder as an unknown
+// orphan.
+export const ITEM_RE = /^(\d+)_(milestone|story|task|uat|spike|chore)_([a-z0-9-]+)$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const recordDoc = (type) =>
-  type === "milestone" ? "SPEC.md" : type === "story" ? "STORY.md" : type === "uat" ? "SESSION.md" : null;
+  type === "milestone"
+    ? "SPEC.md"
+    : type === "story"
+      ? "STORY.md"
+      : type === "uat"
+        ? "SESSION.md"
+        : type === "spike"
+          ? "SPIKE.md"
+          : type === "chore"
+            ? "CHORE.md"
+            : null;
 
 // Top-level drivers of the stream — the items that carry a number the resolver
-// keys on (milestones + uat sessions). Mirrors `work.mjs`'s `isDriver`.
-export const isDriver = (item) => item.type === "milestone" || item.type === "uat";
+// keys on (milestones + uat sessions + spike/chore — milestone 37 / ADR-001).
+// Mirrors `work.mjs`'s `isDriver`.
+export const isDriver = (item) =>
+  item.type === "milestone" || item.type === "uat" || item.type === "spike" || item.type === "chore";
 
 async function readDirSafe(dir) {
   try {
@@ -285,6 +302,8 @@ export function duplicateDriverNumberGroup(snapshot) {
 //   story 02 — freshnessGroup (injected clock + mtimes), structuralIntegrityGroup
 //   story 02 — freshnessGroup (injected clock + mtimes), structuralIntegrityGroup
 //   milestone 16 — budgetGroup (doc-bloat: per-artifact line budgets off ctx.budgets)
+//   milestone 33 (story 00) — meshIdentityCommittedGroup (per-install identity in the
+//     COMMITTED config — reads ctx.rawCommittedMesh, never ctx.config, ADR-004.4)
 export const CHECK_GROUPS = [
   orphanFolderGroup,
   duplicateDriverNumberGroup,
@@ -293,6 +312,7 @@ export const CHECK_GROUPS = [
   freshnessGroup,
   structuralIntegrityGroup,
   budgetGroup,
+  meshIdentityCommittedGroup,
 ];
 
 // ----------------------------------------------------------- the engine ----
@@ -379,14 +399,27 @@ function dedupe(findings) {
 // `staleWindow` are INJECTED (the impure edge — the CLI's Date.now() — lives at
 // the command boundary, never here). `groups` defaults to CHECK_GROUPS; the tests
 // (and the milestone-16 seam) pass their own registry to prove composition.
+//
+// milestone 33 / story 00 (ADR-004.4, F-3203) — `rawCommittedMesh` + `committedConfigPath`
+// are ALSO injected at this SAME impure edge: the mesh-identity-committed check-group
+// (work-doctor-identity.mjs) must warn off the RAW committed config on disk, never
+// `ctx.config` (which is the loadWorkspace-HYDRATED object — post-migration it still
+// carries mesh.nodeId, sourced from the sidecar, so warning off it would false-positive
+// forever on a correctly-migrated repo). `commands/doctor.mjs` reads the committed
+// file's mesh block independently and hands it in here as plain data, exactly like
+// `now`/`staleWindow` — the engine itself performs no extra disk read.
 export async function doctorWork(workDir, config, scope, options = {}) {
-  const { now, staleWindow, budgets, groups = CHECK_GROUPS } = options;
+  const { now, staleWindow, budgets, groups = CHECK_GROUPS, rawCommittedMesh, committedConfigPath, legacyIdentitySidecarPresent, legacyIdentitySidecarPath } = options;
   const snapshot = await buildSnapshot(workDir);
   const ctx = {
     now: now ?? null,
     staleWindow: staleWindow ?? staleWindowFromConfig(config),
     budgets: budgets ?? budgetsFromConfig(config),
     config: config ?? {},
+    rawCommittedMesh: rawCommittedMesh ?? {},
+    committedConfigPath: committedConfigPath ?? null,
+    legacyIdentitySidecarPresent: legacyIdentitySidecarPresent === true,
+    legacyIdentitySidecarPath: legacyIdentitySidecarPath ?? null,
   };
 
   const all = [];

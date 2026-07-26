@@ -9,6 +9,8 @@ created: 2026-06-21
 updated: 2026-06-22
 depends: [05, 09]
 origin: wiki/planning/PRD-graphify-integration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.

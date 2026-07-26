@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-19
 updated: 2026-06-19
+schema: 1
+aofVersion: 0.1.0
 ---
 <!-- Accepted at aof:verify 02 (2026-06-19): @executable + the 3 lock fitness functions green; the
      @manual "one lock holds all states" re-verified live (asset + planning + work sections preserved

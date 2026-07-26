@@ -47,6 +47,43 @@ export const boardActionTests = [
     },
   },
   {
+    // 2026-07-26 (operator, live soak): an item a WORKER was actively executing still
+    // offered "Continue", and clicking it dispatched a second run that the assign core
+    // refused — "already has an active assignment held by <node>". The row already
+    // carries the answer; running work is watched, not restarted.
+    name: "board-action/a worker is executing it → disabled, names the node, offers NO continue",
+    async run() {
+      const running = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: null, updatedAt: null, branch: null } };
+      const a = primaryAction(running, { hasBreakdown: true, liveForRef: false });
+      assert.equal(a.kind, "running");
+      assert.equal(a.label, "Running on umairs-mac-mini");
+      assert.equal(a.disabled, true);
+      assert.equal(a.command, undefined, "a running item offers no command to launch");
+    },
+  },
+  {
+    // The mirror case: a SETTLED remote run (withdrawn/done/failed) is not executing, so
+    // the item is continuable again — the guard must key on `active`, not on the mere
+    // presence of an execution record (every finished mesh run leaves one behind).
+    name: "board-action/a SETTLED remote run → Continue is offered again",
+    async run() {
+      const settled = { ...item("in-progress"), execution: { assignmentId: "a1", active: false, state: "withdrawn", nodeId: "umairs-mac-mini", sessionId: null, updatedAt: null, branch: null } };
+      const a = primaryAction(settled, { hasBreakdown: true, liveForRef: false });
+      assert.equal(a.kind, "continue");
+      assert.equal(a.command, "/aof:continue 03");
+    },
+  },
+  {
+    // A LOCAL dock session still wins over everything — unchanged.
+    name: "board-action/a live local session wins over a remote execution record",
+    async run() {
+      const running = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: null, updatedAt: null, branch: null } };
+      const a = primaryAction(running, { hasBreakdown: true, liveForRef: true });
+      assert.equal(a.kind, "view");
+      assert.equal(a.label, "View terminal");
+    },
+  },
+  {
     name: "board-action/blocked → disabled, no command",
     async run() {
       const a = primaryAction(item("blocked"), { hasBreakdown: true, liveForRef: false });

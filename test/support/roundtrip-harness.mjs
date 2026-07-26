@@ -95,6 +95,7 @@ status: not-started
 created: ${CREATED}
 updated: ${UPDATED}
 depends: []
+schema: 1
 ---
 # 00 · Sample milestone
 
@@ -114,6 +115,7 @@ parent: 0
 status: not-started
 created: ${CREATED}
 updated: ${UPDATED}
+schema: 1
 ---
 # 0${number} · ${title}
 

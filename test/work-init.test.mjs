@@ -450,17 +450,41 @@ export const workInitTests = [
     }
   },
   {
-    name: "work-init/runtime: --runtime codex renders supported members and reports unsupported commands; no command force-written",
+    name: "work-init/runtime: --runtime codex renders agents and maps ACD commands to skills",
     run: async () => {
       const repo = await tempRepo();
       try {
         const result = await initWork({ targetDir: repo, runtimes: ["codex"] });
         // agent members appear under .codex
         assert.ok(existsSync(p(repo, ".codex", "agents", "aof-architect.md")), "codex agent rendered");
-        // output reports command members as not installable on codex
-        const codexCommands = result.notInstallable.filter((n) => n.kind === "command" && n.runtime === "codex");
-        assert.ok(codexCommands.length > 0, "command members reported not installable on codex");
+        const codexArchitect = await readFile(p(repo, ".codex", "agents", "aof-architect.md"), "utf8");
+        assert.match(codexArchitect, /^name: aof-architect$/m, "codex agent keeps codex-readable name metadata");
+        assert.match(codexArchitect, /^description: /m, "codex agent keeps codex-readable description metadata");
+        assert.doesNotMatch(codexArchitect, /^model:/m, "codex agent frontmatter omits Claude model aliases");
+        assert.doesNotMatch(codexArchitect, /^tools:/m, "codex agent frontmatter omits Claude tool allow-lists");
+        assert.doesNotMatch(codexArchitect, /^aof-generated:/m, "codex agent frontmatter omits AOF-only metadata");
+        assert.doesNotMatch(codexArchitect, /^aof-runtime:/m, "codex agent frontmatter omits AOF-only metadata");
+        assert.match(codexArchitect, /<!-- aof-generated: true; aof-runtime: codex -->/, "codex agent carries AOF metadata as a markdown comment");
+        assert.deepEqual(result.notInstallable, [], "codex ACD command procedures are installable via mapped skills");
+        const refineSkill = p(repo, ".codex", "skills", "aof-refine", "SKILL.md");
+        assert.ok(existsSync(refineSkill), "refine command procedure rendered as a codex skill");
+        const content = await readFile(refineSkill, "utf8");
+        assert.match(content, /^name: aof-refine$/m, "codex skill has a stable skill name");
+        assert.match(content, /Use this skill when the user asks for `\$aof-refine <item ref - NN or slug> \[--autonomous\] \[--solo\]`/);
+        assert.match(content, /Where this procedure mentions `\$ARGUMENTS`, use the text the user supplied after the skill name\./);
+        assert.match(content, /Where it mentions Claude slash command `\/aof:refine`/);
         // no command file written under .codex (any namespace)
+        const hooks = JSON.parse(await readFile(p(repo, ".codex", "hooks.json"), "utf8"));
+        assert.equal(
+          hooks.hooks.SessionStart[0].hooks[0].command,
+          "aof session start --assistant codex",
+          "Codex starts AOF session presence"
+        );
+        assert.equal(hooks.hooks.SessionStart[0].matcher, "startup|resume|clear", "compaction does not reset presence");
+        assert.equal(hooks.hooks.UserPromptSubmit[0].hooks[0].command, "aof session ping --assistant codex");
+        assert.equal(hooks.hooks.Stop[0].hooks[0].command, "aof session ping --assistant codex");
+        assert.equal(hooks.hooks.SessionEnd, undefined, "Codex has no native SessionEnd event; TTL ends presence");
+        assert.equal(hooks.hooks.Stop[0].hooks[0].type, "command", "native nested handler schema");
         assert.ok(!existsSync(p(repo, ".codex", "commands", "aof", "refine.md")), "no namespaced codex command file");
         assert.ok(!existsSync(p(repo, ".codex", "commands", "refine.md")), "no flat codex command file");
         // not force-written under ANY runtime root
@@ -487,13 +511,13 @@ export const workInitTests = [
   },
   // Scenario Outline: a member kind on a runtime is rendered or reported unsupported.
   {
-    name: "work-init/runtime: outline — (claude,agent)=rendered (claude,command)=rendered (codex,agent)=rendered (codex,command)=reported-unsupported",
+    name: "work-init/runtime: outline — (claude,agent)=rendered (claude,command)=rendered (codex,agent)=rendered (codex,command)=mapped-skill",
     run: async () => {
       const rows = [
         { runtime: "claude", kind: "agent", id: "aof-architect", outcome: "rendered" },
         { runtime: "claude", kind: "command", id: "refine", outcome: "rendered" },
         { runtime: "codex", kind: "agent", id: "aof-architect", outcome: "rendered" },
-        { runtime: "codex", kind: "command", id: "refine", outcome: "reported-unsupported" }
+        { runtime: "codex", kind: "command", id: "refine", outcome: "mapped-skill" }
       ];
       for (const row of rows) {
         const repo = await tempRepo();
@@ -506,8 +530,12 @@ export const workInitTests = [
               : p(repo, root, "commands", "aof", `${row.id}.md`);
             assert.ok(existsSync(where), `(${row.runtime},${row.kind}) rendered at ${where}`);
           } else {
-            const reported = result.notInstallable.some((n) => n.kind === row.kind && n.runtime === row.runtime);
-            assert.ok(reported, `(${row.runtime},${row.kind}) reported unsupported`);
+            const skill = p(repo, root, "skills", `aof-${row.id}`, "SKILL.md");
+            assert.ok(existsSync(skill), `(${row.runtime},${row.kind}) rendered as mapped skill`);
+            assert.ok(
+              !result.notInstallable.some((n) => n.kind === row.kind && n.runtime === row.runtime),
+              `(${row.runtime},${row.kind}) not reported unsupported`
+            );
             const flat = p(repo, root, "commands", `${row.id}.md`);
             const nested = p(repo, root, "commands", "aof", `${row.id}.md`);
             assert.ok(!existsSync(flat) && !existsSync(nested), `(${row.runtime},${row.kind}) not written`);

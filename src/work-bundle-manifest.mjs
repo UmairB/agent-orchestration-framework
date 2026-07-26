@@ -8,22 +8,22 @@
 //
 // Determinism (the byte-for-byte stable-regeneration scenario): entries are
 // sorted by (path, runtime) and the manifest embeds NO timestamps.
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadBundle, renderBundleOutputs, bundleRoot } from "./work-bundle.mjs";
+// milestone 28 / story 00 (ADR-003): the version + shipped-manifest reads route
+// through the ONE SEA-safe asset-base seam instead of joining a path off a bare
+// import.meta.url — dev behaviour is byte-for-byte unchanged.
+import { packageVersionString, readAssetText } from "./asset-base.mjs";
 
-// The runtimes the shipped manifest is generated for. Claude is ACD's native
-// home where every member (agents, commands, templates) is supported (ADR-006).
-export const MANIFEST_RUNTIMES = ["claude"];
+// The runtimes the shipped manifest is generated for. Claude keeps native slash
+// commands; Codex receives the ACD command procedures as mapped skills.
+export const MANIFEST_RUNTIMES = ["claude", "codex"];
 
-// The aof package version (ADR-002 bundle version). Read straight from
-// package.json — exported so init/update can stamp the install manifest's
+// The aof package version (ADR-002 bundle version). Read through the asset-base
+// seam — exported so init/update can stamp the install manifest's
 // `bundle.version` WITHOUT re-rendering the bundle just to read a string.
 export function packageVersion() {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
-  return pkg.version;
+  return packageVersionString();
 }
 
 function manifestEntry(output) {
@@ -63,5 +63,5 @@ export function manifestPath() {
 }
 
 export function readShippedManifest() {
-  return JSON.parse(readFileSync(manifestPath(), "utf8"));
+  return JSON.parse(readAssetText("bundle", "manifest.json"));
 }

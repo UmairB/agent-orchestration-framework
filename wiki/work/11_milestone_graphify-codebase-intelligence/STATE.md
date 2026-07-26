@@ -65,6 +65,16 @@ doc: state
 - **Remaining (milestone STAYS `in-progress`):** F11-6 — aof doesn't dogfood its own `.claude/` (stale,
   untracked, NOT bundle-rendered), so aof's OWN agents don't yet carry the `impact` step (downstream
   projects get it via `aof work update`); F11-4 — the m10 re-rank collision. No premature re-accept.
+- **RE-ACCEPTED 2026-07-03** (`aof:verify 11 --reverify`) → **`done`**. The re-open's two hard bars closed:
+  **F11-6 (dogfood)** — aof's own `.claude/` agents + `refine`/`code-review` commands are now bundle-rendered
+  and carry the `graph impact` step (`aof work update --dry-run` = 0 drift); **F11-5 (unprompted value proof)**
+  — a live `aof-architect`, on a plain structural-review task with NO mention of grounding, autonomously ran
+  `graph build`+`graph impact` and grounded its whole verdict on graph-derived coupling edges (the genuine
+  value the retracted 2026-06-23 accept lacked). `@executable` suite GREEN (2221/0, in isolation);
+  `aof work validate` PASS. F11-4 re-triaged → deferred non-blocker (m10 memory-backend path). New non-blocker
+  **F11-7** logged → m28 (the in-progress `meshDir` relocation makes mesh tests non-hermetic under concurrent
+  runs — green in isolation, flaky in parallel). No blocker open. All four stories → `done`; milestone → `done`.
+  See [VERIFICATION.md](VERIFICATION.md) ## Re-verification.
 
 ## Default decisions taken at refine — graduated to ADRs at accept
 

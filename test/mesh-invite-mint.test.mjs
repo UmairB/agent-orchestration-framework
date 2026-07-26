@@ -45,7 +45,18 @@ const controlMesh = (extra = {}) => ({ nodeId: CONTROL_ID, relay: { controlNode:
 const nonControlMesh = () => ({ nodeId: PEER_ID, relay: { controlNode: CONTROL_ID } });
 const controlConfig = () => ({ mesh: controlMesh() });
 
-const ctxFor = async (repo) => ({ workspace: await loadWorkspace(repo) });
+// review fix (live soak, 2026-07-17): defaults to an ISOLATED AOF_GLOBAL_HOME
+// (under the fixture's own tmpdir) when a caller doesn't supply one — every
+// pre-existing call site here read the REAL machine's global aof.config.json,
+// so mesh:invite's control-node predicate (config.mesh.relay.controlNode ===
+// config.mesh.nodeId) was silently comparing the fixture's local mesh.nodeId
+// against whatever THIS machine's real global config happened to carry.
+// Passed but invisible for as long as this whole file was never actually wired
+// into scripts/test.mjs; surfaced the moment it was.
+const ctxFor = async (repo, options = {}) => {
+  const env = options.env ?? { ...process.env, AOF_GLOBAL_HOME: path.join(repo, ".global-aof") };
+  return { workspace: await loadWorkspace(repo, undefined, { ...options, env }), env };
+};
 
 // A seeded registry with real roster/boards/revocations content, so the "unaffected
 // lists byte-unchanged" (R4) assertions bite on something.
@@ -95,6 +106,28 @@ export const meshInviteMintTests = [
     },
   },
 
+  // ══ Scenario: mesh:invite returns an operator-safe join command using control name ═
+  {
+    name: "mesh-invite-mint/00 on the control node mesh:invite returns a copy-paste join command using the control node name, not a raw websocket URL",
+    async run() {
+      const relayUrl = "ws://control-node-a:4182/ws/relay";
+      const repo = await makeRepo(controlMesh({ relay: { controlNode: CONTROL_ID, url: relayUrl } }));
+      try {
+        const ctx = await ctxFor(repo);
+        const result = await invoke("mesh:invite", { issuedAt: INJECTED_ISSUED_AT }, ctx);
+
+        assert.equal(result.control, CONTROL_ID, "the invite result carries the control node identity");
+        assert.equal(result.relayUrl, relayUrl, "the invite result carries the relay URL as machine-readable context");
+        assert.equal(
+          result.joinCommand,
+          `aof mesh join ${result.code} --control ${CONTROL_ID}`,
+          "the human-facing join command uses --control with the Tailscale/control name"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
   // ══ Scenario: the durable pending record carries codeHash, not the plaintext code ═
   {
     name: "mesh-invite-mint/00 the durable pending record carries codeHash and NO plaintext code field — the plaintext exists only in the returned result",
@@ -192,7 +225,8 @@ export const meshInviteMintTests = [
         // And on a FRESH workspace a refused mint creates no registry file at all.
         const fresh = await makeRepo(nonControlMesh());
         try {
-          const freshCtx = await ctxFor(fresh);
+          const freshEnv = { ...process.env, AOF_GLOBAL_HOME: path.join(fresh, ".fresh-global-aof") };
+          const freshCtx = await ctxFor(fresh, { env: freshEnv });
           await assert.rejects(() => invoke("mesh:invite", { issuedAt: INJECTED_ISSUED_AT }, freshCtx));
           await assert.rejects(() => access(registryPath(freshCtx.workspace)), "no registry file was created by the refused mint");
         } finally {
@@ -235,7 +269,7 @@ export const meshInviteMintTests = [
         const result = spawnCliSync(process.execPath, [cliPath, "mesh", "invite", "--json"], {
           cwd: repo,
           encoding: "utf8",
-          env: { ...process.env, NODE_NO_WARNINGS: "1" },
+          env: { ...process.env, NODE_NO_WARNINGS: "1", AOF_GLOBAL_HOME: path.join(repo, ".global-aof") },
         });
         assert.equal(result.status, 0, `aof mesh invite --json exits cleanly (stderr: ${result.stderr})`);
         let parsed;

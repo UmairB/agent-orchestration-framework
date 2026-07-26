@@ -32,6 +32,7 @@ async function buildFixture(options = {}) {
       status: m0Status,
       created: "2026-01-01",
       updated: "2026-01-02",
+      schema: 1,
       ...(cycle ? { depends: ["01"] } : {}),
     }),
   );
@@ -45,6 +46,7 @@ async function buildFixture(options = {}) {
       created: "2026-01-01",
       updated: "2026-01-02",
       parent: "00",
+      schema: 1,
     }),
   );
 
@@ -66,6 +68,7 @@ async function buildFixture(options = {}) {
       status: m1Status,
       created: "2026-01-01",
       updated: "2026-01-02",
+      schema: 1,
       depends: danglingDepends ? ["99"] : ["00"],
     }),
   );
@@ -83,6 +86,7 @@ async function buildFixture(options = {}) {
         owner: "qa",
         created: "2026-01-01",
         updated: "2026-01-02",
+        schema: 1,
         depends: uatDangling ? ["99"] : ["00", "01"],
       }),
     );

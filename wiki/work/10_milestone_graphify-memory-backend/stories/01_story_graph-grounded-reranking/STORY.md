@@ -8,6 +8,8 @@ status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-22
+schema: 1
+aofVersion: 0.1.0
 ---
 # 01 · Graph-grounded re-ranking — what makes recall graph-grounded
 

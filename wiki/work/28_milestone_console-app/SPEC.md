@@ -3,12 +3,14 @@ type: milestone
 number: 28
 slug: console-app
 title: "Cross-Platform Console App — signed, install-anywhere node + relay binary"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-07-03
 depends: [23]
 origin: wiki/planning/PRD-decentralized-agent-orchestration.md
+schema: 1
+aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
@@ -53,7 +55,34 @@ Out of scope:
      Populated at the Break-down stage (refine); "to be broken down" until then. The milestone is
      accepted when all its stories are. -->
 
-_To be broken down — `aof:refine 28`._
+Broken down `2026-07-03` by `aof:refine 28 --autonomous`. The partition is a **linear artifact pipeline**
+(build → sign → install) following the codebase-graph coupling
+([ARCHITECTURE.md §Story break-down rationale](ARCHITECTURE.md), `aof graph build src` → 1261 nodes / 3400
+edges, builtAt 2026-07-03): the graph confines **every** runtime `src/` change to story 00 — ONE
+`src/asset-base.mjs` seam threaded through 7 low-fan-out `import.meta.url` sites (ADR-003) + ONE node-pty
+dynamic-import re-home on the `terminal-ws.mjs` leaf (ADR-002, which the graph shows has **no static edge to
+node-pty at all**) + the greenfield SEA recipe (ADR-001) + the single-entry two-mode confirmation (ADR-004,
+`run()` has 0 src-dependents — the one door). Stories 01 and 02 are **file-disjoint greenfield** (CI/signing
+scripts + installer scripts, **not in the src graph**) — they add zero `src/` code and couple to 00 only at the
+**artifact boundary** (01 signs 00's built binary; 02 downloads+verifies 01's signed artifacts). That
+artifact-boundary coupling is what lets the three contracts be authored **in parallel**. Edges: **00 → 01 → 02**
+(02's checksum-verify a soft contract on 01's `SHA256SUMS` format).
+
+- [x] **00 · [the self-contained binary](stories/00_story_self-contained-binary/STORY.md)** — the SEA +
+  esbuild→CJS build recipe + asset-manifest generator (ADR-001), the ONE `src/asset-base.mjs` SEA-safe seam
+  re-homing all 7 sites (ADR-003), the node-pty on-disk sidecar + `createRequire` re-home + load-bearing degrade
+  (ADR-002), and the single-entry two-mode confirmation (ADR-004) + fitness #1/#2/#3 + the build-recipe
+  completeness unit #4. Produces an **unsigned working binary** (KR4 minus signing). The **only** story touching
+  `src/`; the code-coupled root of the chain.
+- [x] **01 · [cross-OS signing & notarization](stories/01_story_signing-notarization/STORY.md)** — the per-OS CI
+  runner matrix (win/mac/linux + arch legs) + the **Linux node-pty source-compile** (ADR-002) + Windows
+  Authenticode / macOS codesign+notarize+staple / Linux GPG `SHA256SUMS` (ADR-005) + the checksum manifest.
+  **File-disjoint greenfield**; consumes 00's build recipe. KR4's "signed" half; mostly `@manual`/`@uat`.
+- [x] **02 · [the one-line installer](stories/02_story_one-line-installer/STORY.md)** — `install.sh` (curl|sh) +
+  `install.ps1` (irm|iex): detect OS/arch → download the signed asset **+ its sidecar** → **verify checksum/
+  signature before** placing on PATH → per-user `$HOME/.aof/bin` (ADR-006) + the README one-liner.
+  **File-disjoint greenfield**; consumes 01's signed artifacts (soft `SHA256SUMS` contract). KR4 end-to-end
+  (`@uat`).
 
 ## Dependencies
 

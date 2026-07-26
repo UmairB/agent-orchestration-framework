@@ -4,10 +4,12 @@ number: 00
 slug: grounding-convention-and-discipline
 title: "The grounding convention + the freshness/derivation/advisory/no-op discipline (the spine)"
 parent: 11
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23
+schema: 1
+aofVersion: 0.1.0
 ---
 # 00 · The grounding convention + the freshness/derivation discipline — the spine
 

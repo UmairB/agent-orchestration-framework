@@ -58,6 +58,7 @@ export function DetailPanel({
   action,
   actor,
   onRunAgent,
+  onContinue,
   onViewTerminal,
   onRevealRef,
 }: {
@@ -67,6 +68,9 @@ export function DetailPanel({
   action: PrimaryAction | null;
   actor: string;
   onRunAgent: (ref: string, command?: string) => void;
+  // CONTINUE is routed separately (2026-07-26): the server decides whether it runs
+  // here or on the worker node that last worked on the item.
+  onContinue: (ref: string) => void;
   onViewTerminal: () => void;
   onRevealRef: (ref: string) => void;
 }) {
@@ -153,6 +157,43 @@ export function DetailPanel({
           </span>
         </div>
         <h2 className="mt-2 text-[16px] font-bold leading-snug">{item.title ?? humanizeSlug(item.slug)}</h2>
+        {/* The MESH-EXECUTION line (VERIFICATION 2026-07-25). This board reads the LOCAL
+            checkout's frontmatter, which says `not-started` for work a WORKER ran on
+            another machine on its own branch — so without this the panel silently
+            contradicts reality. Rendered ONLY when the mesh has actually dispatched this
+            item; a local-only item shows nothing new. A LIVE run is stated as running on
+            its node; a FINISHED one names the branch the work actually landed on, which is
+            the fact the local view cannot know. */}
+        {item.execution ? (
+          <div className="mono mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={item.execution.active ? "font-semibold text-primary" : "font-semibold"}>
+                {item.execution.active ? `running on ${item.execution.nodeId}` : `last run ${item.execution.state} on ${item.execution.nodeId}`}
+              </span>
+              {item.execution.branch ? (
+                <span className="truncate" title={`The mesh work for this item lives on branch ${item.execution.branch}`}>
+                  · branch {item.execution.branch}
+                </span>
+              ) : null}
+              {/* "It's running — where do I watch it?" (operator, 2026-07-26). The board's
+                  own terminal dock is a LOCAL pty, so a live worker session is only
+                  visible in the fleet's read-only mirror. Until the board embeds that
+                  mirror, say where it is rather than stating "running" with no way to
+                  look. */}
+              {item.execution.active ? (
+                <a
+                  href="http://127.0.0.1:4181/?mode=fleet&scope=global"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  title={`Watch ${item.execution.nodeId}'s live session in the fleet`}
+                >
+                  · watch on the fleet →
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
           {/* The slug meta line is redundant when there is no title (the H2 already
               shows the humanized slug), so suppress it with an em-dash to avoid
@@ -162,6 +203,7 @@ export function DetailPanel({
             item={item}
             action={action ?? { kind: "adhoc", label: "Run agent" }}
             onRunAgent={onRunAgent}
+            onContinue={onContinue}
             onViewTerminal={onViewTerminal}
           />
         </div>
@@ -209,17 +251,23 @@ function PrimaryActionButton({
   item,
   action,
   onRunAgent,
+  onContinue,
   onViewTerminal,
 }: {
   item: WorkItem;
   action: PrimaryAction;
   onRunAgent: (ref: string, command?: string) => void;
+  onContinue: (ref: string) => void;
   onViewTerminal: () => void;
 }) {
-  const showCaret = action.kind !== "blocked" && action.kind !== "view";
+  const showCaret = action.kind !== "blocked" && action.kind !== "view" && action.kind !== "running";
   const handleClick = () => {
     if (action.kind === "view") return onViewTerminal();
     if (action.kind === "blocked") return; // no-op while blocked
+    if (action.kind === "running") return; // a worker holds it — nothing to launch here
+    // CONTINUE goes through the one continue door, which decides WHERE it runs
+    // (2026-07-26) — every other action still launches a local session directly.
+    if (action.kind === "continue") return onContinue(item.ref);
     onRunAgent(item.ref, action.command);
   };
   return (
@@ -227,7 +275,13 @@ function PrimaryActionButton({
       type="button"
       onClick={handleClick}
       disabled={action.disabled}
-      title={action.kind === "blocked" ? "Blocked — waiting on its dependencies" : undefined}
+      title={
+        action.kind === "blocked"
+          ? "Blocked — waiting on its dependencies"
+          : action.kind === "running"
+            ? "A worker node is executing this item — it cannot be continued until that run settles"
+            : undefined
+      }
       className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
     >
       {showCaret ? <span aria-hidden="true">▸</span> : null}
@@ -320,6 +374,18 @@ function MilestoneRecords({ records }: { records: Record<string, boolean> }) {
 function DocMarkdown({ tab, doc, item }: { tab: Tab; doc: DocState; item: WorkItem }) {
   const docLabel = tab === "SPEC" && item.type !== "milestone" ? "document" : tab;
   if (doc.kind === "loading") return <p className="mono text-sm text-muted-foreground">Loading {docLabel}...</p>;
+  // A WORKER-REPORTED row has no document on THIS machine (2026-07-26): the stream
+  // bridges the item list, not doc bodies, so `work:doc` resolves the ref against a
+  // local work dir that does not contain it. Rendering the raw resolver error made the
+  // board assert a story exists and then deny it. Say where the document actually is.
+  if (doc.kind === "error" && item.fromWorker) {
+    return (
+      <RemoteContentNotice
+        node={item.reportedBy ?? item.execution?.nodeId ?? null}
+        what={`This ${docLabel} document`}
+      />
+    );
+  }
   if (doc.kind === "error") return <p className="text-sm text-accent">Could not load {docLabel}: {doc.message}</p>;
   if (doc.kind === "absent") {
     // For a story this is its STORY.md; for a milestone, the chosen record doc.
@@ -497,7 +563,9 @@ function RunsTab({
   if (state.kind === "error") return <p className="text-sm text-accent">Could not load runs: {state.message}</p>;
 
   const runs = state.runs;
-  if (runs.length === 0) return <RunsEmpty />;
+  // The item is passed so an empty LOCAL run list on a worker-run item reports where the
+  // records actually are, instead of the false "this item hasn't been run".
+  if (runs.length === 0) return <RunsEmpty item={item} />;
 
   const nowIso = new Date(now).toISOString();
   const current = selectCurrentRun(runs);
@@ -664,12 +732,40 @@ function RunHistory({ runs, nowIso }: { runs: RunRecord[]; nowIso: string }) {
 
 // The empty state (DESIGN documented-default 5): a dashed-border card, the m03
 // doc-absent convention — an item with no runs is ABSENT, not an error.
-function RunsEmpty() {
+function RunsEmpty({ item }: { item?: WorkItem }) {
+  // "No runs yet" is a LIE for an item a worker has run (2026-07-26): run records live
+  // in the worker's own checkout and are not bridged, so this tab reads an empty local
+  // runs/ directory. Absence of a local record is not absence of a run.
+  const node = item?.execution?.nodeId ?? item?.reportedBy ?? null;
+  if (node) return <RemoteContentNotice node={node} what="This item's run history" />;
   return (
     <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border p-6 text-center">
       <span className="inline-block h-6 w-6 rounded-full border-2 border-dashed border-muted-foreground/45" aria-hidden="true" />
       <p className="text-sm font-medium text-muted-foreground">No runs yet</p>
       <p className="text-xs text-muted-foreground">This item hasn't been run.</p>
+    </div>
+  );
+}
+
+// The one notice for "this content lives on another node". The board bridges a worker's
+// item ROWS but not its documents, run records or terminal (TECH_DEBT item 6) — until it
+// does, say so plainly and point at the surface that CAN show it, rather than rendering a
+// resolution error or a false "nothing here".
+function RemoteContentNotice({ node, what }: { node: string | null; what: string }) {
+  return (
+    <div className="flex flex-col items-start gap-2 rounded-md border border-dashed border-border p-4">
+      <p className="text-sm text-muted-foreground">
+        {what} lives on <span className="mono text-foreground">{node ?? "another node"}</span>, not on this
+        machine — this board bridges the item list, not its documents or runs.
+      </p>
+      <a
+        href="http://127.0.0.1:4181/?mode=fleet&scope=global"
+        target="_blank"
+        rel="noreferrer"
+        className="text-sm underline underline-offset-2"
+      >
+        Open the fleet to watch {node ?? "that node"} →
+      </a>
     </div>
   );
 }

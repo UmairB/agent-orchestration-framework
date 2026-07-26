@@ -138,6 +138,11 @@ function bucket(derived: Derived, focus: "all" | string): Record<StatusKind, Lan
       }
     }
     for (const u of derived.uat) place(u, "uat");
+    // milestone 37/ADR-003: spike/chore are additive top-level drivers
+    // (ADR-001, uat-shaped) — placed via the SAME existing driver mechanism as
+    // uat above (no new lane/column); the tag doubles as the type badge whose
+    // text is the item's type.
+    for (const d of derived.otherDrivers) place(d, d.type);
   } else {
     const m = derived.milestones.find((x) => x.num === focus);
     if (m) for (const s of m.stories) place(s, `in ${m.num}`);

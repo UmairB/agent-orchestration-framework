@@ -12,22 +12,70 @@
 //   - control    : client→server JSON { type:'resize', cols, rows } → pty.resize;
 //                  server→client JSON { type:'exit', exitCode }     (clean/failed exit)
 //                  server→client JSON { type:'error', message }     (spawn failure).
+import { createRequire } from "node:module";
 import { WebSocketServer } from "ws";
-import { loadWorkspace, findWork } from "./work.mjs";
+import { loadWorkspace } from "./work.mjs";
+// The SAME folder-trust pre-write the mesh worker's spawn uses (a leaf module, so this
+// never reaches back into mesh-worker-execution.mjs — which imports THIS file).
+import { ensureWorktreeTrusted } from "./claude-trust.mjs";
 import { resolveProvider, PROVIDER_IDS } from "./terminal-providers.mjs";
 import { registerSession, unregisterSession } from "./terminal-sessions.mjs";
 import { resolveHeadroomLaunch } from "./headroom.mjs";
+// milestone 28 / story 00 (ADR-002): the SEA sentinel this module's node-pty
+// re-home branches on — the SAME sentinel src/asset-base.mjs's assetBase()
+// keys on, so a test flips ONE seam and both the asset base AND the node-pty
+// loader branch move in lock-step.
+import { isPackaged } from "./asset-base.mjs";
 
 // The single terminal pathname (ADR-001). Any other upgrade pathname is destroyed.
 const TERMINAL_PATH = "/ws/terminal";
 
-// The default PTY spawner: dynamically imports node-pty INSIDE the call so that
-// importing this module never requires the native addon at load time (CI tests
-// inject a stub spawn; only a real session touches node-pty). Returns the
-// node-pty process handle.
+// The node-pty LOADER — separated from defaultSpawn so an @executable test can
+// inject a stub loader (resolves / throws) and assert WHICH branch ran, with no
+// built binary and no real node-pty (the Build-notes developer-seat guidance).
+// Real behaviour, exactly as before the split:
+//   - SEA (isPackaged() true): createRequire(process.execPath)("node-pty") —
+//     a filesystem require resolved against the on-disk sidecar the build
+//     recipe ships beside the binary (a raw `await import("node-pty")` THROWS
+//     for an FS module inside a SEA main — RESEARCH §1/§2).
+//   - dev (isPackaged() false): the EXISTING `await import("node-pty")`,
+//     byte-for-byte unchanged.
+// Exported (F12 craft-review) so an @executable test can drive the REAL
+// branch-selection logic directly — flipping isPackaged() via
+// setSeaSentinelForTest and observing WHICH mechanism was actually attempted
+// (its distinct failure/success signature in a dev environment), rather than
+// only asserting on the source text. This does not change production
+// behaviour: defaultSpawn (below) still calls this exact function.
+export function loadNodePty() {
+  return isPackaged() ? createRequire(process.execPath)("node-pty") : import("node-pty");
+}
+
+// The default PTY spawner: loads node-pty INSIDE the call (via the injectable
+// ptyLoader) so that importing this module never requires the native addon at
+// load time (CI tests inject a stub spawn; only a real session touches
+// node-pty). Returns the node-pty process handle.
+//
+// The load stays INSIDE this function, never hoisted to a top-level import
+// (fitness #3 — a missing/unloadable sidecar must never crash startup;
+// importing terminal-ws.mjs must never need the addon).
 async function defaultSpawn(bin, args, options) {
-  const pty = await import("node-pty");
+  const pty = await loadNodePty();
   return pty.spawn(bin, args, options);
+}
+
+// A defaultSpawn FACTORY, parameterised on the ptyLoader — the injectable seam
+// an @executable test uses to model "sidecar resolves" / "ENOENT" / "throws on
+// require" / "wrong-arch dlopen failure" / "missing Windows companion" without
+// a built binary and without a real node-pty (mirrors the isPackaged/
+// setSeaSentinelForTest injection shape in src/asset-base.mjs). The real
+// defaultSpawn above is EXACTLY createTerminalSpawn(loadNodePty)'s behaviour —
+// this factory does not change the production default, it only exposes the
+// same shape for a test-supplied loader.
+export function createTerminalSpawn(ptyLoader) {
+  return async function spawnWithLoader(bin, args, options) {
+    const pty = await ptyLoader();
+    return pty.spawn(bin, args, options);
+  };
 }
 
 // Attach the terminal WebSocket to an existing http.Server (ADR-001: the SAME
@@ -51,6 +99,14 @@ export function attachTerminalWebSocket(server, options = {}) {
   // test suite's serveSetupUi servers never touch .aof (no temp-dir teardown
   // race); the real `aof work ui` (serveBoard) turns it ON.
   const recordSessions = options.recordSessions ?? false;
+  // trustCwd(cwd) — the claude folder-trust pre-write. DEFAULT NO-OP on purpose: the
+  // real writer touches the operator's own ~/.claude.json, and a test that stands up
+  // this server and opens a terminal would write real entries for its temp fixture
+  // dirs. So the real one is wired ONLY at the production call site (board-serve.mjs's
+  // serveBoard — the same "literal key at the production call site" discipline the mesh
+  // launcher uses for its own trustWorktree seam). No test run can touch that file by
+  // construction, rather than by every fixture remembering to stub it.
+  const trustCwd = options.trustCwd ?? (() => {});
 
   const wss = new WebSocketServer({ noServer: true });
 
@@ -73,7 +129,7 @@ export function attachTerminalWebSocket(server, options = {}) {
   });
 
   wss.on("connection", (ws, request) => {
-    handleConnection(ws, request, { projectDir, spawn, baseEnv, which, recordSessions }).catch((error) => {
+    handleConnection(ws, request, { projectDir, spawn, baseEnv, which, recordSessions, trustCwd }).catch((error) => {
       // A defensive backstop: even an unexpected error in connection setup must
       // surface as the dock error state, never an unguarded throw (ADR-003).
       sendControl(ws, { type: "error", message: error?.message ?? "terminal session failed" });
@@ -87,7 +143,7 @@ export function attachTerminalWebSocket(server, options = {}) {
 // Read the thin launch contract (ref + provider) off the upgrade URL, resolve the
 // item dir + provider, and either spawn the session or emit the error
 // control-frame. Never throws in a way that crashes the process.
-async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which, recordSessions }) {
+async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which, recordSessions, trustCwd }) {
   const params = parseQuery(request.url);
   const ref = (params.get("ref") ?? "").trim();
   const providerId = (params.get("provider") ?? "").trim();
@@ -105,21 +161,41 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
     return;
   }
 
-  // Resolve the item's directory from the ref, in-process, to use as PTY cwd.
-  // A missing/unresolvable ref falls back to projectDir rather than crashing.
-  // The workspace config is retained for the headroom resolver (ADR-003): it is
-  // hoisted out of the try and left undefined on the catch path, so a config
-  // resolution failure is treated as plugin-off and never breaks the terminal.
-  let cwd = projectDir;
+  // The PTY cwd is the PROJECT ROOT — never the item's own wiki/work folder
+  // (2026-07-26). An agent asked to build an item works on the REPO: source, tests,
+  // config all live above the work folder, and a session rooted inside
+  // `wiki/work/<NN>_<type>_<slug>/` starts every run outside the code it is there to
+  // change. It also made claude's one-time folder-TRUST dialog unavoidable — trust is
+  // keyed on the exact absolute cwd, so a per-item cwd is a NEW untrusted folder for
+  // every item, forever (the mesh worker path has never had this problem: it spawns at
+  // the worktree ROOT). The ref still reaches the agent as the typed slash-command.
+  //
+  // The workspace config is still resolved here for the headroom resolver (ADR-003):
+  // it is left undefined on the catch path, so a config resolution failure is treated
+  // as plugin-off and never breaks the terminal.
+  const cwd = projectDir;
   let headroomConfig = undefined;
   try {
     const workspace = await loadWorkspace(projectDir);
     headroomConfig = workspace.config;
-    const rows = await findWork(workspace.workDir, ref);
-    const item = rows.find((row) => row.ref === ref) ?? rows[0] ?? null;
-    if (item?.dir) cwd = item.dir;
-  } catch {
-    // Resolution failure is non-fatal: spawn against projectDir, plugin off.
+  } catch (error) {
+    // Non-fatal (the session still spawns, headroom off) but NOT silent — a config
+    // that won't load silently changes how the agent is launched.
+    console.error(`terminal: workspace config did not load for ${projectDir}, headroom disabled: ${error?.message ?? error}`);
+  }
+  // Pre-clear claude's one-time folder-trust dialog for THIS cwd — the SAME seam the
+  // mesh worker's spawn already uses, never a second trust-writing rule. INJECTED
+  // (`trustCwd`) for the same reason the launcher injects it: the real one writes the
+  // operator's actual ~/.claude.json, which no test run may ever touch — the test
+  // fixture passes a no-op. Best-effort: a fault here must never block the spawn.
+  try {
+    await trustCwd(cwd);
+  } catch (error) {
+    // NOT SILENT. Best-effort means "does not take the terminal down", never "fails
+    // invisibly": if this throws, the very next thing the operator sees is claude's
+    // blocking trust dialog with no explanation of why it came back. Reported on the
+    // board server's stdout, beside the spawn line below.
+    console.error(`terminal: folder-trust pre-write failed for cwd=${cwd}: ${error?.message ?? error}`);
   }
 
   // Resolve the binary path ONCE and reuse it for both the honest-degrade gate

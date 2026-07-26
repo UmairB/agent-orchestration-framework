@@ -192,6 +192,43 @@ export function Board() {
     [select]
   );
 
+  // CONTINUE — the one action that must NOT decide for itself where it runs
+  // (2026-07-26). It asks the server: the node that last worked on this item, or here
+  // when nothing ever has. `local` opens the dock exactly as before; `remote` opens NO
+  // local session — it dispatched to a worker, so the board just refreshes and the row
+  // reports "running on <node>". Clicking Continue on a milestone a worker owns can no
+  // longer start a rival run against this machine's checkout.
+  const [dispatch, setDispatch] = useState<{ ref: string; message: string; error: boolean } | null>(null);
+  const continueWork = useCallback(
+    async (ref: string) => {
+      select(ref);
+      setDispatch(null);
+      try {
+        const result = await workApi.continueWork({ ref });
+        if (result.where === "local") {
+          runAgent(ref, result.command ?? `/aof:continue ${ref}`);
+          return;
+        }
+        // "running": the ref (or its milestone scope) already has an active run —
+        // nothing was spawned or minted; say where it is instead of racing it.
+        setDispatch({
+          ref,
+          message: result.where === "running"
+            ? `Already running on ${result.node ?? "a worker"}`
+            : `Continuing on ${result.node}`,
+          error: false,
+        });
+        await load({ silent: true });
+      } catch (error) {
+        // Surfaced, never swallowed: a refused continue (already running, node
+        // unreachable, repo unavailable) must say so — silence here reads as "nothing
+        // happened" when something was actively refused.
+        setDispatch({ ref, message: error instanceof Error ? error.message : String(error), error: true });
+      }
+    },
+    [load, runAgent, select]
+  );
+
   // Re-reveal the existing session's dock (no re-launch) — the "View terminal"
   // action when a live session is already bound to the selected item.
   const viewTerminal = useCallback(() => {
@@ -316,6 +353,7 @@ export function Board() {
                 action={selectedAction}
                 actor="you"
                 onRunAgent={runAgent}
+                onContinue={continueWork}
                 onViewTerminal={viewTerminal}
                 onRevealRef={select}
               />
@@ -328,6 +366,24 @@ export function Board() {
           (a stream sync, a view switch, the loading state, a re-render) can unmount
           it and tear down the running session. It only appears once Run agent has
           opened a session (dockOpen), and binds to its own dockRef. */}
+      {/* Where a continue went. A REMOTE continue opens no terminal here, so without
+          this the click would look like nothing happened — and a REFUSED one (already
+          running, node unreachable) must say so out loud rather than vanish. */}
+      {dispatch ? (
+        <div
+          role="status"
+          className={`fixed bottom-4 right-4 z-50 max-w-md rounded-md border px-3 py-2 text-sm shadow-lg ${
+            dispatch.error ? "border-accent bg-background text-accent" : "border-border bg-background text-foreground"
+          }`}
+        >
+          <span className="mono text-xs text-muted-foreground">{dispatch.ref}</span>{" "}
+          {dispatch.message}
+          <button type="button" onClick={() => setDispatch(null)} className="ml-3 text-xs underline">
+            dismiss
+          </button>
+        </div>
+      ) : null}
+
       {dockOpen ? (
         <TerminalDock targetRef={dockRef} command={dockCommand} onClose={() => setDockOpen(false)} />
       ) : null}

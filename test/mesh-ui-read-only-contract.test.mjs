@@ -15,7 +15,7 @@
 //        upgrade is refused, no session opened).
 //
 // Exercises the REAL server (serveMeshUi) against temp fixtures — a fixture ui/dist,
-// planted .mesh records, a real fetch, a real ws client, and an on-disk snapshot.
+// an isolated global projection store, a real fetch, a real ws client, and an on-disk snapshot.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
@@ -23,40 +23,51 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { serveMeshUi, meshUiDist } from "../src/mesh-ui-serve.mjs";
-
+import { loadWorkspace } from "../src/work.mjs";
+import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
+import { publishGlobalRegistryDescriptorsToStore } from "../src/global-node-registry.mjs";
+import { publishNodeRecord } from "../src/mesh-store.mjs";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-"));
   const workDir = path.join(repo, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const globalHome = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-home-"));
+  const milestoneDir = path.join(workDir, "34_milestone_global-mesh");
+  await mkdir(milestoneDir, { recursive: true });
+  await writeFile(
+    path.join(milestoneDir, "SPEC.md"),
+    "---\ntype: milestone\nnumber: 34\nslug: global-mesh\nstatus: in-progress\ntitle: Global Mesh\n---\n",
+    "utf8"
+  );
   await mkdir(path.join(repo, ".aof"), { recursive: true });
-  await mkdir(path.join(meshDir, "nodes"), { recursive: true });
-  await mkdir(path.join(meshDir, "presence"), { recursive: true });
-  await mkdir(path.join(meshDir, "registry"), { recursive: true });
   await writeFile(
     path.join(repo, ".aof", "aof.config.json"),
-    JSON.stringify({ name: "fixture", work: { dir: "./wiki/work" } }, null, 2),
+    JSON.stringify({ name: "fixture", work: { dir: "./wiki/work" }, mesh: { enabled: true, relay: { controlNode: "n1" } } }, null, 2),
     "utf8"
   );
-  await writeFile(
-    path.join(meshDir, "nodes", "n1.json"),
-    JSON.stringify({ nodeId: "n1", host: "n1", os: "linux", runtimes: [], skills: [], aofVersion: "0.1.0", publishedAt: "2026-06-29T00:00:00.000Z" }, null, 2),
-    "utf8"
-  );
-  await writeFile(
-    path.join(meshDir, "presence", "n1.json"),
-    JSON.stringify({ nodeId: "n1", heartbeatAt: new Date().toISOString(), activeRuns: [], aofVersion: "0.1.0" }, null, 2),
-    "utf8"
-  );
-  await writeFile(
-    path.join(meshDir, "registry", "group.json"),
-    JSON.stringify({ roster: [{ nodeId: "n1", admittedAt: "2026-07-01T00:00:00.000Z", boards: ["let-shield"] }], boards: ["let-shield"], pending: [], revocations: [] }, null, 2),
-    "utf8"
-  );
-  return { repo, workDir };
-}
 
+  const globalStoreOptions = { env: { AOF_GLOBAL_HOME: globalHome } };
+  const workspace = await loadWorkspace(repo, undefined, globalStoreOptions);
+  await publishNodeRecord(workspace, "n1", {
+    nodeId: "n1",
+    host: "n1",
+    os: "linux",
+    runtimes: [],
+    skills: [],
+    aofVersion: "0.1.0",
+    publishedAt: "2026-06-29T00:00:00.000Z",
+  });
+  const store = await openGlobalWorkProjectionStore(globalStoreOptions);
+  try {
+    await store.publishWorkspaceSnapshot(workspace, { now: "2026-07-04T10:05:00.000Z" });
+    await publishGlobalRegistryDescriptorsToStore(store, workspace, { now: "2026-07-04T10:05:00.000Z" });
+  } finally {
+    store.close();
+  }
+
+  return { repo, workDir, globalHome, globalStoreOptions };
+}
 async function writeDist(dir) {
   await mkdir(path.join(dir, "assets"), { recursive: true });
   await writeFile(
@@ -73,20 +84,26 @@ async function writeDist(dir) {
 // server's 'request' emit is not directly observable, so instead we assert via the
 // request paths a client issues + the server responses (a /api/work request → 404).
 async function withFleet(body) {
-  const { repo, workDir } = await makeRepo();
+  const { repo, workDir, globalHome, globalStoreOptions } = await makeRepo();
   const root = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-ro-root-"));
   await writeDist(meshUiDist(root));
-  const { server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root });
+  // scope:"local" (milestone 34 / story 03, ADR-006) — these scenarios assert the
+  // global projection read-only contract (drill-in isolation, no
+  // event stream, write-isolation), which is the LOCAL scope's job now that the
+  // default is global; the global-default read is covered separately in
+  // mesh-ui-global-scope.test.mjs.
+  const { server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions });
   // Record the pathnames the server actually receives (the wire-observable proof
   // that no /api/work request reaches the fleet face on a drill-in).
   const seen = [];
   server.on("request", (request) => seen.push(request.url ?? "/"));
   try {
-    return await body({ url, server, seen, workDir });
+    return await body({ url, server, seen, workDir, repo });
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(repo, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
+    await rm(globalHome, { recursive: true, force: true });
   }
 }
 
@@ -138,19 +155,19 @@ function diffSnapshots(before, after) {
 export const meshUiReadOnlyContractTests = [
   // ═══ 03_board-drill-in.feature @executable ═════════════════════════════════
   // The fleet face issues no /api/work request for a drill-in: loading the page +
-  // reading the aggregate (the board facts) reaches /api/mesh/status only — the
+  // reading the aggregate reaches /api/mesh/status only — the
   // server receives NO /api/work request. (Following a drill-in navigates OUT to the
   // board's own aof work ui; the fleet server is never asked for /api/work.)
   {
     name: "mesh-ui-read-only/03 the fleet face issues no /api/work request — every board fact came from the one /api/mesh/status read",
     async run() {
       await withFleet(async ({ url, seen }) => {
-        // load the page + read the board facts (the aggregate)
+        // load the page + read the work facts (the aggregate)
         await fetch(new URL("/", url));
         const status = await fetch(new URL("/api/mesh/status", url));
         assert.equal(status.status, 200, "the one aggregate read answers");
         const body = await status.json();
-        assert.ok(body.boards.some((b) => b.ref === "let-shield"), "the board fact came from the aggregate");
+        assert.ok(body.items.some((item) => item.ref === "34" && item.slug === "global-mesh"), "the work item fact came from the global projection aggregate");
         // the server saw NO /api/work request (the fleet face proxies no board)
         const apiReqs = seen.filter((u) => u.startsWith("/api/"));
         assert.ok(apiReqs.length > 0, "the client made at least the one aggregate read");
@@ -195,7 +212,13 @@ export const meshUiReadOnlyContractTests = [
   // ═══ 05_fleet-view-is-read-only.feature @executable ════════════════════════
   // Scenario Outline: a write-method request to the fleet face is rejected without a
   // state change — a clean method-rejection, not a crash. (POST/PUT/PATCH/DELETE is
-  // the mutating set; the would-be m27 /api/mesh/issue|/assign must not exist early.)
+  // the mutating set on the READ route; milestone 27 / story 02 landed POST
+  // /api/mesh/issue as an accepted write route — SINCE RETIRED, `aof graph impact`
+  // confirms it is gone from the live tree. Milestone 38 / story 04 (ADR-012) then
+  // landed POST /api/mesh/assign as the fleet face's FIRST live write route — SO an
+  // UNAUTHENTICATED bare POST to it (no Origin header, this suite's fetch never sets
+  // one) is REFUSED by its own admission guard before ever reaching the mutation;
+  // this row asserts that refusal, never that the route doesn't exist.)
   {
     name: "mesh-ui-read-only/05 a write-method request to the fleet face is a clean method-rejection, never a state change",
     async run() {
@@ -204,21 +227,17 @@ export const meshUiReadOnlyContractTests = [
         { method: "PUT", route: "/api/mesh/status" },
         { method: "PATCH", route: "/api/mesh/status" },
         { method: "DELETE", route: "/api/mesh/status" },
-        { method: "POST", route: "/api/mesh/issue" },
         { method: "POST", route: "/api/mesh/assign" },
       ];
-      await withFleet(async ({ url, workDir }) => {
-        const before = await snapshotDir(workDir);
+      await withFleet(async ({ url, repo }) => {
+        const before = await snapshotDir(repo);
         for (const { method, route } of rows) {
           const res = await fetch(new URL(route, url), { method });
           // A clean rejection: NOT a 2xx success, and the server did not crash
-          // (a follow-up read still answers). The one route rejects the method
-          // (405); a would-be m27 write route simply does not exist (404).
-          assert.ok(
-            res.status === 405 || res.status === 404,
-            `${method} ${route} is rejected (405 method-not-allowed or 404 not-found) — got ${res.status}`
-          );
-          assert.ok(res.status < 500, `${method} ${route} is a clean rejection, not a crash`);
+          // (a follow-up read still answers). The read routes reject the method
+          // (405); an unauthenticated POST to the m38/ADR-012 assign exception is
+          // refused by its own admission guard (a coded 4xx, never a crash).
+          assert.ok(res.status >= 400 && res.status < 500, `${method} ${route} is rejected (4xx) — got ${res.status}`);
           const body = await res.json().catch(() => ({}));
           assert.notEqual(body.ok, true, `${method} ${route} did not succeed`);
         }
@@ -226,7 +245,7 @@ export const meshUiReadOnlyContractTests = [
         const survive = await fetch(new URL("/api/mesh/status", url));
         assert.equal(survive.status, 200, "the server survived every rejected write");
         // NO state change on disk from any write attempt
-        const after = await snapshotDir(workDir);
+        const after = await snapshotDir(repo);
         assert.deepEqual(diffSnapshots(before, after), [], "no write-method request changed any file");
       });
     },
@@ -237,11 +256,11 @@ export const meshUiReadOnlyContractTests = [
   {
     name: "mesh-ui-read-only/05 serving + reading the fleet view end-to-end changes no files",
     async run() {
-      await withFleet(async ({ url, workDir }) => {
-        const before = await snapshotDir(workDir);
+      await withFleet(async ({ url, repo }) => {
+        const before = await snapshotDir(repo);
         await fetch(new URL("/", url));
         for (let i = 0; i < 5; i += 1) await fetch(new URL("/api/mesh/status", url));
-        const after = await snapshotDir(workDir);
+        const after = await snapshotDir(repo);
         assert.deepEqual(diffSnapshots(before, after), [], "the workspace on-disk state is byte-unchanged");
       });
     },

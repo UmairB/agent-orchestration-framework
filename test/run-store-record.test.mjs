@@ -16,10 +16,12 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// The THIRTEEN frozen schema keys, IN ORDER (20/ADR-001 SUPERSEDES 19/ADR-003's
-// nine-key freeze): the original nine, unchanged in name/order/meaning, then the
-// four additive resilience keys (failureReason, heartbeatAt, retryOf, reclaimedAt).
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
+// The FOURTEEN frozen schema keys, IN ORDER (26/ADR-001 SUPERSEDES 20/ADR-001's
+// thirteen-key freeze, which superseded 19/ADR-003's nine): the original nine,
+// unchanged in name/order/meaning, then the four additive resilience keys
+// (failureReason, heartbeatAt, retryOf, reclaimedAt), then the one additive
+// partition-provenance key (node, defaulting null).
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RUNID_RE = /^(\d{8}T\d{9}Z)-(\d{4})$/;
@@ -99,8 +101,8 @@ export const runStoreRecordTests = [
         assert.match(record.createdAt, ISO_RE, "createdAt is an ISO-8601 instant");
         assert.match(record.updatedAt, ISO_RE, "updatedAt is an ISO-8601 instant");
         assert.equal(record.createdAt, record.updatedAt, "createdAt and updatedAt are equal at start");
-        // carries no field outside the frozen schema — exactly the thirteen keys, in order
-        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "carries exactly the thirteen frozen schema keys in order");
+        // carries no field outside the frozen schema — exactly the fourteen keys, in order
+        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "carries exactly the fourteen frozen schema keys in order");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -288,7 +290,7 @@ export const runStoreRecordTests = [
         const [record] = runs;
         assert.equal(record.sessionId, "sess-load", "the record's sessionId survives the round-trip");
         assert.deepEqual(record.brief, brief, "the record's brief equals the persisted object byte-equivalent");
-        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the record carries all thirteen frozen schema fields");
+        assert.deepEqual(Object.keys(record), FROZEN_KEYS, "the record carries all fourteen frozen schema fields");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

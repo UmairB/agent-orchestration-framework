@@ -4,10 +4,12 @@ number: 03
 slug: codebase-intelligence-fitness
 title: "The codebase-intelligence fitness functions — no-parse, via-commands, advisory-only, derived/git-ignored — as arch-tests"
 parent: 11
-status: in-review
+status: done
 owner: product-owner
 created: 2026-06-22
 updated: 2026-06-23
+schema: 1
+aofVersion: 0.1.0
 ---
 # 03 · The codebase-intelligence fitness functions — the load-bearing structural guarantee
 

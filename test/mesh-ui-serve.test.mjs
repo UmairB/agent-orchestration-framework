@@ -3,18 +3,17 @@
 //
 // Covers EVERY @executable scenario / Scenario-Outline row: the `aof mesh ui`
 // serve-face stands up ONE 127.0.0.1 server on its documented default port (4181),
-// serving the built ui/dist bundle + the single GET /api/mesh/status route which
-// answers the mesh:status aggregate (deep-equal to `aof mesh status --json` for the
-// same fixture — one command, two faces); the /api/mesh namespace is DISJOINT from
+// serving the built ui/dist bundle, the GET /api/mesh/status route which
+// answers the global mesh projection (with --local narrowing work items to the
+// current workspace), and GET /api/mesh/board-url for real board drill-ins; the /api/mesh namespace is DISJOINT from
 // the board's frozen /api/work (a board request is a 404, never a proxied board); an
 // unknown route is a clean { ok:false, error, code:"not-found" } envelope and a miss
 // never crashes the server; a missing bundle + an occupied port are friendly refusals
 // (the board's ui-build-missing / EADDRINUSE posture, mirrored), never a stack trace.
 //
 // Exercises the REAL server (serveMeshUi) against temp fixtures — a fixture ui/dist
-// standing in for the built bundle, planted .mesh node/presence/registry records so
-// the aggregate is non-empty, a real fetch, and the real CLI (spawn) for the parity
-// oracle. node:assert/strict.
+// standing in for the built bundle, an isolated global projection store, and real
+// fetches against the server. node:assert/strict.
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -22,48 +21,55 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveMeshUi, DEFAULT_MESH_UI_PORT, meshUiDist } from "../src/mesh-ui-serve.mjs";
-import { spawnCliSync } from "./support/cli-spawn.mjs";
-
+import { loadWorkspace } from "../src/work.mjs";
+import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
+import { publishGlobalRegistryDescriptorsToStore } from "../src/global-node-registry.mjs";
+import { publishNodeRecord } from "../src/mesh-store.mjs";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 
 // --- fixtures ----------------------------------------------------------------
 
-// A repo whose .aof/aof.config.json points work.dir at wiki/work, with planted
-// .mesh node/presence/registry records so the mesh:status aggregate is non-empty.
+// A repo whose config points work.dir at wiki/work, with one work item and one
+// node record published into an isolated global mesh projection store.
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-serve-"));
   const workDir = path.join(repo, "wiki", "work");
-  const meshDir = path.join(workDir, ".mesh");
+  const globalHome = path.join(repo, "global-home");
+  const milestoneDir = path.join(workDir, "34_milestone_global-mesh");
+  await mkdir(milestoneDir, { recursive: true });
+  await writeFile(
+    path.join(milestoneDir, "SPEC.md"),
+    "---\ntype: milestone\nnumber: 34\nslug: global-mesh\nstatus: in-progress\ntitle: Global Mesh\n---\n",
+    "utf8"
+  );
   await mkdir(path.join(repo, ".aof"), { recursive: true });
-  await mkdir(path.join(meshDir, "nodes"), { recursive: true });
-  await mkdir(path.join(meshDir, "presence"), { recursive: true });
-  await mkdir(path.join(meshDir, "registry"), { recursive: true });
   await writeFile(
     path.join(repo, ".aof", "aof.config.json"),
-    JSON.stringify({ name: "fixture", runtimes: ["claude"], work: { dir: "./wiki/work" } }, null, 2),
+    JSON.stringify({ name: "fixture", runtimes: ["claude"], work: { dir: "./wiki/work" }, mesh: { enabled: true, relay: { controlNode: "mac-studio" } } }, null, 2),
     "utf8"
   );
-  // one live node
-  await writeFile(
-    path.join(meshDir, "nodes", "mac-studio.json"),
-    JSON.stringify({ nodeId: "mac-studio", host: "mac-studio", os: "darwin", runtimes: ["claude"], skills: ["a", "b"], aofVersion: "0.1.0", publishedAt: "2026-06-29T00:00:00.000Z" }, null, 2),
-    "utf8"
-  );
-  await writeFile(
-    path.join(meshDir, "presence", "mac-studio.json"),
-    JSON.stringify({ nodeId: "mac-studio", heartbeatAt: new Date().toISOString(), activeRuns: [], aofVersion: "0.1.0" }, null, 2),
-    "utf8"
-  );
-  // a registered board
-  await writeFile(
-    path.join(meshDir, "registry", "group.json"),
-    JSON.stringify({ roster: [{ nodeId: "mac-studio", admittedAt: "2026-07-01T00:00:00.000Z", boards: ["let-shield"] }], boards: ["let-shield"], pending: [], revocations: [] }, null, 2),
-    "utf8"
-  );
-  return { repo, workDir };
-}
 
+  const globalStoreOptions = { env: { AOF_GLOBAL_HOME: globalHome } };
+  const workspace = await loadWorkspace(repo, undefined, globalStoreOptions);
+  await publishNodeRecord(workspace, "mac-studio", {
+    nodeId: "mac-studio",
+    host: "mac-studio",
+    os: "darwin",
+    runtimes: ["claude"],
+    skills: ["a", "b"],
+    aofVersion: "0.1.0",
+    publishedAt: "2026-06-29T00:00:00.000Z",
+  });
+  const store = await openGlobalWorkProjectionStore(globalStoreOptions);
+  try {
+    await store.publishWorkspaceSnapshot(workspace, { now: "2026-07-04T10:05:00.000Z" });
+    await publishGlobalRegistryDescriptorsToStore(store, workspace, { now: "2026-07-04T10:05:00.000Z" });
+  } finally {
+    store.close();
+  }
+
+  return { repo, workDir, globalStoreOptions };
+}
 // Write a directory that stands in for the BUILT bundle (ui/dist): an index.html
 // referencing a hashed asset, plus the asset — the same shape board-serve.test uses.
 async function writeDist(dir) {
@@ -99,31 +105,21 @@ async function closeServer(server) {
   await new Promise((resolve) => server.close(resolve));
 }
 
-// The CLI --json parity oracle: run `aof mesh status --json` against the SAME
-// fixture repo (a separate process reading the fixture disk — it never talks to the
-// fleet server, so spawnSync is safe here) and parse its stdout.
-function cliStatusJson(repo) {
-  const result = spawnCliSync(process.execPath, [cliPath, "mesh", "status", "--json"], {
-    cwd: repo,
-    encoding: "utf8",
-    env: { ...process.env, NODE_NO_WARNINGS: "1" },
-  });
-  assert.equal(result.status, 0, `aof mesh status --json exits 0 (stderr: ${result.stderr})`);
-  return JSON.parse(result.stdout);
-}
-
 export const meshUiServeTests = [
   // ═══ Scenario: aof mesh ui starts the fleet server on 127.0.0.1 ═══════════
   {
     name: "mesh-ui-serve/00 the fleet server starts, binds 127.0.0.1, and the page + its API answer on one same-origin port",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       const root = await makeRepoRootWithDist();
       let server;
       try {
         let url;
         let fleetUrl;
-        ({ server, url, fleetUrl } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — this scenario is about serve MECHANICS (one origin, the
+        // static bundle + the API), not the global-vs-local data source, so it stays
+        // isolated from whatever global store (if any) exists on the host machine.
+        ({ server, url, fleetUrl } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions }));
         const address = server.address();
         assert.equal(address.address, "127.0.0.1", "the server binds 127.0.0.1");
         // the announce carries the ?mode=fleet selector (the single bundle, fleet mode)
@@ -163,14 +159,14 @@ export const meshUiServeTests = [
   {
     name: "mesh-ui-serve/00 a missing ui/dist build is a friendly ui-build-missing refusal, not a crash",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       // a repoRoot WITHOUT ui/dist
       const root = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-nobuild-"));
       let rejected;
       let server;
       try {
         try {
-          ({ server } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+          ({ server } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, globalStoreOptions }));
         } catch (error) {
           rejected = error;
         }
@@ -196,7 +192,7 @@ export const meshUiServeTests = [
   {
     name: "mesh-ui-serve/00 an occupied port rejects with EADDRINUSE (the friendly port-in-use refusal), not a crash",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       const root = await makeRepoRootWithDist();
       // occupy a port with a throwaway server
       const blocker = http.createServer(() => {});
@@ -206,7 +202,7 @@ export const meshUiServeTests = [
       let server;
       try {
         try {
-          ({ server } = await serveMeshUi({ projectDir: repo, port: occupied, repoRoot: root }));
+          ({ server } = await serveMeshUi({ projectDir: repo, port: occupied, repoRoot: root, globalStoreOptions }));
         } catch (error) {
           rejected = error;
         }
@@ -221,30 +217,32 @@ export const meshUiServeTests = [
     },
   },
 
-  // ═══ Scenario: GET /api/mesh/status answers the mesh:status aggregate ═══════
-  // The load-bearing PARITY assertion (one command, two faces): the web payload
-  // deep-equals what `aof mesh status --json` prints for the SAME fixture.
+  // ═══ Scenario: GET /api/mesh/status answers the local-filtered global projection ═══
+  // milestone 34 / story 03 (ADR-006): local mode is the same machine-wide
+  // projection with work items narrowed to the current workspace id; nodes remain
+  // machine-wide.
   {
-    name: "mesh-ui-serve/00 GET /api/mesh/status carries the nodes-and-boards aggregate and deep-equals `aof mesh status --json`",
+    name: "mesh-ui-serve/00 GET /api/mesh/status carries the local-filtered global projection (scope: local)",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       const root = await makeRepoRootWithDist();
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions }));
         const response = await fetch(new URL("/api/mesh/status", url));
         assert.equal(response.status, 200);
         const payload = await response.json();
-        // it carries the nodes-and-boards aggregate mesh:status returns
-        assert.ok(Array.isArray(payload.nodes), "the payload carries a nodes array");
-        assert.ok(Array.isArray(payload.boards), "the payload carries a boards array");
+        assert.ok(Array.isArray(payload.nodes), "the payload carries a machine-wide nodes array");
+        assert.ok(Array.isArray(payload.workspaces), "the payload carries a workspaces array");
+        assert.ok(Array.isArray(payload.items), "the payload carries a work items array");
+        assert.equal(payload.scope, "local");
+        assert.equal(payload.currentWorkspace, path.resolve(repo));
         assert.ok(payload.nodes.some((n) => n.nodeId === "mac-studio"), "the planted node surfaces");
-        assert.ok(payload.boards.some((b) => b.ref === "let-shield"), "the registered board surfaces");
-
-        // deep-equals the CLI --json for the same fixture (the parity oracle)
-        const cli = cliStatusJson(repo);
-        assert.deepEqual(payload, cli, "the /api/mesh/status payload deep-equals `aof mesh status --json` for the same fixture");
+        assert.ok(payload.workspaces.some((w) => w.projectRoot === path.resolve(repo)), "the current workspace surfaces");
+        assert.ok(payload.items.some((item) => item.ref === "34" && item.slug === "global-mesh"), "the planted work item surfaces");
+        assert.ok(payload.items.every((item) => item.workspaceId === payload.workspaceId), "local scope filters work items to the current workspace id");
+        assert.ok(payload.nodes.some((n) => n.workspaceIds?.includes(payload.workspaceId)), "the machine-wide node roster retains workspace membership");
       } finally {
         if (server) await closeServer(server);
         await rm(repo, { recursive: true, force: true });
@@ -257,12 +255,14 @@ export const meshUiServeTests = [
   {
     name: "mesh-ui-serve/00 the /api/mesh namespace is disjoint from /api/work — a board request is a 404, never a proxied board",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       const root = await makeRepoRootWithDist();
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — the /api/work disjoint-namespace concern is orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions }));
         for (const route of ["/api/work/list", "/api/work/doc?ref=03&doc=SPEC", "/api/work/run-status?ref=03"]) {
           const response = await fetch(new URL(route, url));
           assert.equal(response.status, 404, `${route} is a 404 on the fleet face (no /api/work)`);
@@ -278,17 +278,60 @@ export const meshUiServeTests = [
     },
   },
 
+
+  // ═══ Scenario: a milestone drill-in opens a real workspace board URL ═══════
+  {
+    name: "mesh-ui-serve/00 board-url drill-in starts and reuses the selected workspace's real board server",
+    async run() {
+      const { repo, globalStoreOptions } = await makeRepo();
+      const root = await makeRepoRootWithDist();
+      let server;
+      try {
+        let url;
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "global", globalStoreOptions }));
+        const statusResponse = await fetch(new URL("/api/mesh/status", url));
+        assert.equal(statusResponse.status, 200, "the global mesh status answers");
+        const status = await statusResponse.json();
+        const workspaceId = status.workspaces[0]?.workspaceId;
+        assert.ok(workspaceId, "the fixture publishes a workspace id");
+
+        const firstResponse = await fetch(new URL(`/api/mesh/board-url?workspaceId=${encodeURIComponent(workspaceId)}&ref=34`, url));
+        assert.equal(firstResponse.status, 200, "the board-url route answers");
+        const first = await firstResponse.json();
+        assert.equal(first.workspaceId, workspaceId, "the response is for the selected workspace");
+        assert.equal(first.ref, "34", "the response carries the requested milestone ref");
+        assert.ok(first.url.includes("mode=board"), "the drill-in URL selects board mode");
+        assert.ok(first.url.endsWith("#34"), "the drill-in URL selects the requested milestone hash");
+
+        const boardList = await fetch(new URL("/api/work/list", first.url));
+        assert.equal(boardList.status, 200, "the returned board origin serves /api/work/list");
+        const items = await boardList.json();
+        assert.ok(items.some((item) => item.ref === "34" && item.title === "Global Mesh"), "the board serves the selected workspace's work stream");
+
+        const secondResponse = await fetch(new URL(`/api/mesh/board-url?workspaceId=${encodeURIComponent(workspaceId)}&ref=34`, url));
+        assert.equal(secondResponse.status, 200, "a second drill-in answers");
+        const second = await secondResponse.json();
+        assert.equal(second.url, first.url, "the workspace board server is reused, not relaunched per click");
+      } finally {
+        if (server) await closeServer(server);
+        await rm(repo, { recursive: true, force: true });
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  },
   // ═══ Scenario Outline: an unknown /api/mesh route answers a clean not-found and the server survives ═══
   {
     name: "mesh-ui-serve/00 an unknown /api/mesh route answers a clean not-found envelope and a follow-up read proves the miss did not crash the server",
     async run() {
       const routes = ["/api/mesh/does-not-exist", "/api/mesh/status/extra", "/api/mesh/"];
-      const { repo } = await makeRepo();
+      const { repo, globalStoreOptions } = await makeRepo();
       const root = await makeRepoRootWithDist();
       let server;
       try {
         let url;
-        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root }));
+        // scope:"local" — the unknown-route survival concern is orthogonal to
+        // global-vs-local; isolated from the ambient global store.
+        ({ server, url } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions }));
         for (const route of routes) {
           const response = await fetch(new URL(route, url));
           assert.equal(response.status, 404, `${route} is a 404`);

@@ -22,11 +22,12 @@ export function defaultGlobalWorkspaceDir(env = process.env, platform = process.
 
 // --------------------------------------------------------- tool store (12) ---
 // PURE path geometry for the managed-tool store (milestone 12, ADR-001). The
-// store lives UNDER the existing global workspace home (defaultGlobalWorkspaceDir
-// = ~/.aof, AOF_GLOBAL_HOME-overridable) — so the root is NEVER a hardcoded
-// os.homedir()/".aof" literal here: it derives from defaultGlobalWorkspaceDir(env),
-// which makes AOF_GLOBAL_HOME relocate the WHOLE store for free (ADR-005 inv. 2,
-// the relocation guard). These are raw-absolute, basis-neutral (08/ADR-002).
+// store lives UNDER the global workspace home (defaultGlobalWorkspaceDir,
+// AOF_GLOBAL_HOME-overridable; otherwise ~/.aof on every platform) — so the root
+// is NEVER a hardcoded home literal here: it derives from
+// defaultGlobalWorkspaceDir(env), which makes AOF_GLOBAL_HOME relocate the WHOLE
+// store for free (ADR-005 inv. 2, the relocation guard). These are raw-absolute,
+// basis-neutral (08/ADR-002).
 
 // toolStoreRoot(env) → <defaultGlobalWorkspaceDir(env)>/tools — the one root all
 // managed tools share across the operator's projects.

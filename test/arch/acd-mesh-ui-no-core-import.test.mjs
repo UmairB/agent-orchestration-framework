@@ -12,7 +12,7 @@
 // local import is `./command-core.mjs`; the deny-list
 // mesh-store|mesh-presence|mesh-registry|mesh-sync + `./commands/` is empty; and no
 // fs-write call form (writeFile/appendFile) remains — the face is a pure read-only
-// transport over invoke("mesh:status").
+// transport over queryGlobalMeshStatus.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -37,37 +37,70 @@ function imports(source) {
 
 export const archTests = [
   {
-    name: "arch/25 ADR-003: the command registry (./command-core.mjs) is the ONLY operation-bearing import in mesh-ui-serve.mjs",
+    name: "arch/34 ADR-006 + 38/ADR-012: global-mesh-query.mjs is the ONLY fleet-data READ import, and ./commands/mesh-assign.mjs the ONE sanctioned WRITE-verb import, in mesh-ui-serve.mjs",
     run: async () => {
       const source = stripComments(await readFile(MESH_UI_SERVE, "utf8"));
       const specifiers = imports(source).map((i) => i.specifier);
       // The door IS imported — the positive assertion a deny-list lint cannot make.
       assert.ok(
-        specifiers.includes("./command-core.mjs"),
-        "mesh-ui-serve.mjs imports the command registry from ./command-core.mjs (the only door to the fleet data)"
+        specifiers.includes("./global-mesh-query.mjs"),
+        "mesh-ui-serve.mjs imports the global query surface from ./global-mesh-query.mjs (the only door to fleet data)"
+      );
+      // milestone 38 / story 04 (ADR-012) — the read-only posture gained EXACTLY
+      // one documented write exception: the fleet face now ALSO imports the
+      // `assignWork` verb, verbatim, from `./commands/mesh-assign.mjs` — the ONE
+      // sanctioned carve-out of the "no ./commands/*" deny-list below (ADR-012's
+      // own codebase-graph grounding: "the UI route becomes an 8th CALLER of that
+      // SAME core, never a re-implementation"). No OTHER commands/* module, and
+      // no mesh-core module, is imported.
+      assert.ok(
+        specifiers.includes("./commands/mesh-assign.mjs"),
+        "mesh-ui-serve.mjs imports the assignWork verb from ./commands/mesh-assign.mjs — the ONE sanctioned write-verb door (38/ADR-012)"
       );
       // No OTHER local ./<module> import brings in fleet-core/operation logic. The
-      // deny-list is the mesh-core modules + any direct command-body import.
+      // deny-list is the mesh-core modules + any direct command-body import EXCEPT
+      // the one carved-out ./commands/mesh-assign.mjs.
       const operationBearing = imports(source).filter((i) => {
         const spec = i.specifier;
         if (!spec.startsWith(".")) return false; // node:* / package deps are not fleet-core
-        if (spec === "./command-core.mjs") return false; // the door
-        return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || spec.startsWith("./commands/");
+        if (spec === "./global-mesh-query.mjs") return false; // the read door
+        if (spec === "./commands/mesh-assign.mjs") return false; // the ONE sanctioned write door (38/ADR-012)
+        return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || /\.\/global-(work-store|node-registry)\.mjs$/.test(spec) || spec.startsWith("./commands/");
       });
       assert.deepEqual(
         operationBearing.map((i) => i.specifier),
         [],
-        "mesh-ui-serve.mjs imports no mesh-store/mesh-presence/mesh-registry/mesh-sync/commands/* — only ./command-core.mjs"
+        "mesh-ui-serve.mjs imports no mesh-store/mesh-presence/mesh-registry/mesh-sync/global-work-store/global-node-registry, and no commands/* OTHER than ./commands/mesh-assign.mjs"
+      );
+
+      // --- self-check: the detector FIRES on a planted bypass (a SECOND commands/*
+      // import, e.g. a direct mesh-issuance-shaped import) alongside the sanctioned one.
+      const plantedBypass = stripComments(`
+        import { queryGlobalMeshStatus } from "./global-mesh-query.mjs";
+        import { assignWork } from "./commands/mesh-assign.mjs";
+        import { issueDirective } from "./commands/mesh-issue.mjs";
+      `);
+      const plantedOperationBearing = imports(plantedBypass).filter((i) => {
+        const spec = i.specifier;
+        if (!spec.startsWith(".")) return false;
+        if (spec === "./global-mesh-query.mjs") return false;
+        if (spec === "./commands/mesh-assign.mjs") return false;
+        return /\.\/mesh-(store|presence|registry|sync)\.mjs$/.test(spec) || /\.\/global-(work-store|node-registry)\.mjs$/.test(spec) || spec.startsWith("./commands/");
+      });
+      assert.notDeepEqual(
+        plantedOperationBearing.map((i) => i.specifier),
+        [],
+        "self-check: the detector FIRES on a planted second commands/* import beside the sanctioned mesh-assign door"
       );
     },
   },
   {
-    name: "arch/25 ADR-003: mesh-ui-serve.mjs reaches the fleet aggregate ONLY via invoke(mesh:status) — no direct mesh-core read",
+    name: "arch/34 ADR-006: mesh-ui-serve.mjs reaches the fleet aggregate ONLY via queryGlobalMeshStatus — no direct mesh-core read",
     run: async () => {
       const source = stripComments(await readFile(MESH_UI_SERVE, "utf8"));
       // Positive: it invokes the ONE registered fleet-data command (ADR-002).
       assert.ok(
-        /invoke\s*\(\s*["']mesh:status["']/.test(source),
+        /queryGlobalMeshStatus\s*\(/.test(source),
         "mesh-ui-serve.mjs reaches the fleet aggregate via invoke(\"mesh:status\", …) — the single data command"
       );
       // It never names a mesh-core read directly (readRegistry / readNodeRecords /
@@ -75,7 +108,7 @@ export const archTests = [
       for (const reader of ["readRegistry", "readNodeRecords", "readPresenceRecord", "readNodeRecord", "publishNodeRecord"]) {
         assert.ok(
           !new RegExp(`\\b${reader}\\s*\\(`).test(source),
-          `mesh-ui-serve.mjs makes no ${reader}( call — the fleet read flows through invoke("mesh:status"), not a direct mesh-core read`
+          `mesh-ui-serve.mjs makes no ${reader}( call — the fleet read flows through queryGlobalMeshStatus, not a direct mesh-core read`
         );
       }
     },

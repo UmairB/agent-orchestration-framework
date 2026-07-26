@@ -20,7 +20,7 @@ import path from "node:path";
 import { loadWorkspace, findWork } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
 
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
 
 // --- fixture builders --------------------------------------------------------
 
@@ -171,8 +171,8 @@ export const runRetryCommandTests = [
         assert.equal(result.sessionId, "sess-3", "the result run record sessionId is sess-3 (carried)");
         assert.equal(result.attempt, 2, "the result run record attempt is 2");
         assert.equal(result.retryOf, prior.runId, "the result run record retryOf is the prior run's runId");
-        // the record carries exactly the frozen thirteen keys
-        assert.deepEqual(Object.keys(result), FROZEN_KEYS, "the result is a frozen 13-key run record");
+        // the record carries exactly the frozen fourteen keys
+        assert.deepEqual(Object.keys(result), FROZEN_KEYS, "the result is a frozen 14-key run record");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

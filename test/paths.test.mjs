@@ -22,13 +22,15 @@ export const pathTests = [
     }
   },
   {
-    name: "uses ~/.aof for global source workspace",
+    name: "uses ~/.aof for global source workspace when AOF_GLOBAL_HOME is unset",
     run() {
       assert.equal(defaultGlobalWorkspaceDir({}, "linux", "/home/test"), path.join("/home/test", ".aof"));
+      assert.equal(defaultGlobalWorkspaceDir({}, "darwin", "/Users/test"), path.join("/Users/test", ".aof"));
+      assert.equal(defaultGlobalWorkspaceDir({}, "win32", "C:\\Users\\Test"), path.join("C:\\Users\\Test", ".aof"));
     }
   },
   {
-    name: "global source workspace is separate from app data",
+    name: "global source workspace ignores app data when AOF_GLOBAL_HOME is unset",
     run() {
       const env = { XDG_DATA_HOME: "/tmp/data" };
       assert.equal(defaultDataDir(env, "linux", "/home/test"), path.join("/tmp/data", "aof"));

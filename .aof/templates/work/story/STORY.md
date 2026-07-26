@@ -10,6 +10,8 @@ status: not-started
 owner: product-owner
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
+schema: <schema-version>
+aofVersion: <aof-version>
 ---
 <!--
   STORY.md — the story record. Answers ONE question: why this story (the user-facing outcome)?

@@ -20,12 +20,12 @@ export const archTests = [
       const source = await readFile(MESH_STORE, "utf8");
       const code = stripComments(source);
 
-      // meshDir is the SINGLE partition-root seam — defined exactly once, the only
-      // place workspace.workDir is joined to the partition root.
+      // meshDir is the SINGLE partition-root seam: injected globalMeshRoot first,
+      // then the process-global mesh root from globalMeshPaths().meshRoot.
       const meshDirDefs = [...code.matchAll(/function\s+meshDir\s*\(/g)];
       assert.equal(meshDirDefs.length, 1, "meshDir is defined exactly once (the single partition-root seam)");
-      assert.ok(/function\s+meshDir[\s\S]*?path\.join\s*\(\s*workspace\.workDir\s*,/.test(code), "meshDir joins workspace.workDir (the git-tracked partition root, not a .aof/ sidecar)");
-      assert.ok(!/\.aof/.test(code), "the partition root is NOT a .aof/ sidecar (it is git-tracked in the work stream)");
+      assert.ok(/function\s+meshDir[\s\S]*?globalMeshPaths\s*\(\s*\)\.meshRoot/.test(code), "meshDir falls back to globalMeshPaths().meshRoot (the machine-global partition root)");
+      assert.ok(/workspace\?\.globalMeshRoot/.test(code), "meshDir honors an injected workspace.globalMeshRoot for hermetic tests and loaded workspaces");
 
       // nodeRecordPath is the ONE node-record path builder, built FROM meshDir.
       const recordPathDefs = [...code.matchAll(/function\s+nodeRecordPath\s*\(/g)];
@@ -55,7 +55,7 @@ export const archTests = [
       const { publishNodeRecord, meshDir } = await import("../../src/mesh-store.mjs");
       const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-partition-arch-"));
       try {
-        const workspace = { workDir: path.join(repo, "wiki", "work") };
+        const workspace = { workDir: path.join(repo, "wiki", "work"), globalMeshRoot: path.join(repo, "global", "mesh") };
         await mkdir(workspace.workDir, { recursive: true });
 
         const ids = ["umair-desktop", "umair-mbp", "build-server", "laptop-a1b2", "ci-runner"];

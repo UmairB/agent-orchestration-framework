@@ -21,7 +21,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWorkspace } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
-import { normalizeGraph, graphifyBuildArgs } from "../src/graphify.mjs";
+import {
+  normalizeGraph,
+  graphifyBuildArgs,
+  graphifySpawnOptions,
+  GRAPHIFY_TIMEOUT_ENV,
+  DEFAULT_GRAPHIFY_TIMEOUT_MS,
+} from "../src/graphify.mjs";
 import { classifyEgress, isNetworkBackend } from "../src/commands/graph-build.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -289,6 +295,49 @@ export const graphCommandCoreTests = [
         backendArgs[backendOutIndex + 1],
         projectRoot,
         "--out still pins the projectRoot when a backend is set"
+      );
+    },
+  },
+
+  // Every graphify spawn (build/query/triage) is SYNCHRONOUS; with the network
+  // claude-cli extraction backend it can block for minutes or wait on an interactive
+  // prompt, so an UNBOUNDED spawn hangs the whole aof process — this was the
+  // `aof work memory ingest`/`reindex` hang (the records index wrote, then the graph
+  // spawn never returned). graphifySpawnOptions is the guard: a positive finite
+  // wall-clock timeout (force-kill on overrun) + an IGNORED stdin (a prompt gets EOF,
+  // not a hang). Asserted on the PURE helper so the guard is CI-runnable with NO live
+  // binary (the @manual build/query/triage lanes cannot guard this).
+  {
+    name: "graph-core/spawn the graphify spawn is BOUNDED (finite timeout + ignored stdin) so a hung extraction can't block aof",
+    async run() {
+      const projectRoot = "/some/project/root";
+
+      const opts = graphifySpawnOptions({ projectRoot });
+      assert.equal(opts.cwd, projectRoot, "the spawn runs with cwd = projectRoot (#756)");
+      assert.ok(
+        Number.isFinite(opts.timeout) && opts.timeout > 0,
+        "a positive, finite timeout is always set (never unbounded)"
+      );
+      assert.equal(opts.timeout, DEFAULT_GRAPHIFY_TIMEOUT_MS, "the default timeout is the pinned default");
+      assert.ok(opts.killSignal, "a kill signal is set so a hung child is force-killed on overrun");
+      assert.equal(
+        Array.isArray(opts.stdio) && opts.stdio[0],
+        "ignore",
+        "the child's stdin is ignored (an interactive read gets EOF, never a hang)"
+      );
+
+      // AOF_GRAPHIFY_TIMEOUT_MS raises the budget for a large repo — injected via the env
+      // seam so the global process env is never mutated.
+      const tuned = graphifySpawnOptions({ projectRoot, env: { [GRAPHIFY_TIMEOUT_ENV]: "5000" } });
+      assert.equal(tuned.timeout, 5000, "AOF_GRAPHIFY_TIMEOUT_MS overrides the default timeout");
+
+      // A non-positive / garbage override falls back to the default — never "no timeout"
+      // (which would reintroduce the hang).
+      const garbage = graphifySpawnOptions({ projectRoot, env: { [GRAPHIFY_TIMEOUT_ENV]: "-1" } });
+      assert.equal(
+        garbage.timeout,
+        DEFAULT_GRAPHIFY_TIMEOUT_MS,
+        "a non-positive override falls back to the default (never unbounded)"
       );
     },
   },

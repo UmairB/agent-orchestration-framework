@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "aof session start" }] }
+    ],
+    "UserPromptSubmit": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "aof session ping" }] }
+    ],
+    "SessionEnd": [
+      { "matcher": "", "hooks": [{ "type": "command", "command": "aof session end" }] }
+    ],
+    "PostToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          { "type": "command", "command": "node \".claude/hooks/aof/guard-test-isolation.mjs\"" }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "pm-execution@pm-skills": true,
+    "pm-product-discovery@pm-skills": true,
+    "pm-product-strategy@pm-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "pm-skills": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/phuryn/pm-skills.git",
+        "ref": "v2.0.0"
+      }
+    }
+  },
+  "permissions": {
+    "deny": [
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyRead": [
+        "**/*.pem",
+        "**/*.key"
+      ]
+    }
+  }
+}
