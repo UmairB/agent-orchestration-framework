@@ -90,17 +90,18 @@ export const meshAssignmentDirectiveTests = [
       assert.equal(assignmentDirectiveCommand("refine", "18"), "/aof:refine 18 --autonomous");
       assert.equal(assignmentDirectiveCommand("continue", "18"), "/aof:continue 18");
       assert.equal(assignmentDirectiveCommand("verify", "18"), "/aof:verify 18");
+      assert.equal(assignmentDirectiveCommand("autonomous", "18"), "/aof:autonomous 18");
       // An unknown/garbage phase never becomes arbitrary PTY text — it maps to the refine default.
       assert.equal(assignmentDirectiveCommand("rm -rf", "18"), "/aof:refine 18 --autonomous");
       assert.equal(assignmentDirectiveCommand(undefined, "18"), "/aof:refine 18 --autonomous");
-      assert.deepEqual([...ASSIGNMENT_PHASES], ["refine", "continue", "verify"]);
+      assert.deepEqual([...ASSIGNMENT_PHASES], ["refine", "continue", "verify", "autonomous"]);
       assert.equal(DEFAULT_ASSIGNMENT_PHASE, "refine");
     },
   },
   {
     name: "assignment-directive: isAssignmentPhase accepts only the closed set",
     run: async () => {
-      for (const p of ["refine", "continue", "verify"]) assert.equal(isAssignmentPhase(p), true, p);
+      for (const p of ["refine", "continue", "verify", "autonomous"]) assert.equal(isAssignmentPhase(p), true, p);
       for (const p of ["", "Refine", "build", "continue ", null, undefined, 3]) assert.equal(isAssignmentPhase(p), false, String(p));
     },
   },

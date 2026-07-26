@@ -26,7 +26,9 @@
 // mints the assignment and the worker's daemon picks it up. One decision, one place.
 import { commandError } from "./errors.mjs";
 import { assignWork } from "./mesh-assign.mjs";
+import { resolveItem } from "./resolve.mjs";
 import { readExecutionOverlay, resolveScopedExecution, executionScopeRef } from "../board-mesh-execution.mjs";
+import { readStreamedItemRow } from "../board-worker-stream.mjs";
 
 // resolveContinueDecision(overlay, ref, { requestedNode, localNodeId }) — the PURE
 // where-does-this-continue-happen decision, extracted so it is unit-testable without a
@@ -97,6 +99,34 @@ export function resolveContinueDecision(overlay, ref, { requestedNode = "", loca
 const PHASE_VERBS = { continue: "Continuing", refine: "Refining", verify: "Verifying" };
 const PHASE_IMPERATIVES = { continue: "Continue", refine: "Refine", verify: "Verify" };
 
+// resolveDirectivePhase(workspace, phase, dispatchRef, storeOptions) — WHAT continuing
+// this item means (operator, 2026-07-26: "continue xy should be a continuation of the
+// entire milestone. All stories. Why is it not CONTINUING UNTIL COMPLETION"). A
+// CONTINUE whose dispatch target is a MILESTONE resolves to the `autonomous` cascade —
+// the worker drives refine → build → verify across every story until the milestone is
+// done, stopping only at a genuine human gate — because a milestone continue that runs
+// one slice and parks is exactly the truncation the operator kept measuring. Every
+// other case (a story/task continue, every refine/verify) keeps its single-phase
+// directive. The item's type comes from the local index first, else the
+// worker-streamed row (the SAME local-then-streamed order every read command uses);
+// an unresolvable type degrades to the single phase — the act must never be blocked
+// by a type lookup.
+export async function resolveDirectivePhase(workspace, phase, dispatchRef, storeOptions) {
+  if (phase !== "continue") return phase;
+  let type = null;
+  try {
+    const local = await resolveItem(workspace.workDir, dispatchRef);
+    type = local?.type ?? null;
+    if (type == null) {
+      const streamed = await readStreamedItemRow(workspace, dispatchRef, { globalWorkStoreOptions: storeOptions });
+      type = streamed?.type ?? null;
+    }
+  } catch {
+    type = null;
+  }
+  return type === "milestone" ? "autonomous" : phase;
+}
+
 export function createPhaseDoorCommand(phase) {
   return {
     id: `work:${phase}`,
@@ -142,22 +172,27 @@ export function createPhaseDoorCommand(phase) {
       // this node. The caller runs it in its own session; nothing is minted, so a
       // local act can never leave an assignment row behind for a run that only ever
       // existed in a terminal. Local acts keep the EXACT ref (a session can refine/
-      // continue/verify one story directly).
+      // continue/verify one story directly). A local MILESTONE continue carries the
+      // same cascade its remote form dispatches (resolveDirectivePhase) — the act
+      // means the same thing on every machine.
       if (decision.where === "local") {
+        const localPhase = await resolveDirectivePhase(ctx.workspace, phase, ref, storeOptions);
         return {
           ok: true,
           ref,
           where: "local",
           node: decision.node,
           resolvedBy: decision.resolvedBy,
-          command: `/aof:${phase} ${ref}`,
+          command: `/aof:${localPhase} ${ref}`,
         };
       }
 
       // Remote — dispatched at the SCOPE ref (the unit of mesh execution: one
       // branch, one worktree per top-level item; assigning a child ref would mint a
-      // divergent second line beside the milestone's own).
-      const result = await assignWork(ctx.workspace, decision.dispatchRef, decision.node, { phase, globalWorkStoreOptions: storeOptions });
+      // divergent second line beside the milestone's own). A milestone continue
+      // dispatches the `autonomous` cascade (resolveDirectivePhase above).
+      const directivePhase = await resolveDirectivePhase(ctx.workspace, phase, decision.dispatchRef, storeOptions);
+      const result = await assignWork(ctx.workspace, decision.dispatchRef, decision.node, { phase: directivePhase, globalWorkStoreOptions: storeOptions });
       if (result?.ok !== true) {
         // assignWork returns expected refusals structurally (already-active, unknown
         // node, repo unavailable) — surfaced as a coded error, never a silent fall
@@ -172,7 +207,7 @@ export function createPhaseDoorCommand(phase) {
         scopeRef: decision.scopeRef,
         resolvedBy: decision.resolvedBy,
         assignmentId: result.assignmentId,
-        command: `/aof:${phase} ${decision.dispatchRef}`,
+        command: `/aof:${directivePhase} ${decision.dispatchRef}`,
       };
     },
 

@@ -20,9 +20,12 @@
 // row is absent (a CLI `aof mesh assign` with no phase is byte-identical to before).
 
 // The closed set of dispatchable phases (the ACD lifecycle verbs a worker can be told
-// to run). Mirrors ui/src/board/action.mjs's own primaryAction kinds (refine → continue
-// → verify) — the SAME three lifecycle verbs, here on the control/dispatch side.
-export const ASSIGNMENT_PHASES = ["refine", "continue", "verify"];
+// to run). The three lifecycle verbs mirror ui/src/board/action.mjs's own primaryAction
+// kinds (refine → continue → verify); `autonomous` is the CASCADE directive (operator,
+// 2026-07-26: "continue xy should be a continuation of the entire milestone. All
+// stories") — the continue door resolves a MILESTONE continue to it, so the worker
+// drives refine → build → verify across the whole item instead of one slice.
+export const ASSIGNMENT_PHASES = ["refine", "continue", "verify", "autonomous"];
 export const DEFAULT_ASSIGNMENT_PHASE = "refine";
 
 export function isAssignmentPhase(value) {
@@ -33,14 +36,19 @@ export function isAssignmentPhase(value) {
 // the worker types into its interactive `claude` PTY. `refine` carries `--autonomous`
 // (the headless-worker cascade — a worker has no human to stop at each sub-step, exactly
 // the pre-existing default); `continue`/`verify` do NOT (neither command's argument-hint
-// accepts `--autonomous` — src/bundle/commands/{continue,verify}.md). An unknown phase
-// degrades to the refine default (never a blank/garbage command typed into a live PTY).
+// accepts `--autonomous` — src/bundle/commands/{continue,verify}.md). `autonomous` is
+// the whole-item cascade (`/aof:autonomous <ref>` — src/bundle/commands/autonomous.md
+// takes a single NN range): drive the item refine → build → verify until done, stopping
+// only for a genuine human gate. An unknown phase degrades to the refine default (never
+// a blank/garbage command typed into a live PTY).
 export function assignmentDirectiveCommand(phase, itemRef) {
   switch (phase) {
     case "continue":
       return `/aof:continue ${itemRef}`;
     case "verify":
       return `/aof:verify ${itemRef}`;
+    case "autonomous":
+      return `/aof:autonomous ${itemRef}`;
     case "refine":
     default:
       return `/aof:refine ${itemRef} --autonomous`;

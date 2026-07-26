@@ -300,7 +300,7 @@
         "id": "continue",
         "kind": "command"
       },
-      "hash": "sha256:195a6f74af8ee0100d04af0a70c16010942fe92587a9306b61c35bf0bc46b216"
+      "hash": "sha256:95fd5bc29a9e60a58b02ba1df48ca5b53b35d39eec672863d9296d42cc79d904"
     },
     {
       "path": ".claude/commands/aof/delegate.md",
@@ -615,7 +615,7 @@
         "id": "aof-continue",
         "kind": "skill"
       },
-      "hash": "sha256:dc968df2adf6cf829a2958939744ff7e9541dbc61756392581edc32b05bcca8a"
+      "hash": "sha256:9aea41cd1c7e3ce1de14be31994bf6eca2d349dca4d116dc9dd5e3c6275eed50"
     },
     {
       "path": ".codex/skills/aof-delegate/SKILL.md",
