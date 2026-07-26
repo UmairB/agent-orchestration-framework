@@ -839,6 +839,11 @@ import { archTests as acdStatusRollbackBoundedTests } from "../test/arch/acd-sta
 // above; milestone 21 adds NO new arch-test file (21/ADR-003).
 import { boardRunStatusRouteTests } from "../test/board-run-status-route.test.mjs";
 import { boardRunsPureTests } from "../test/board-runs-pure.test.mjs";
+// schema v5 (TECH_DEBT item 6 — finish the board bridge): the board's drill-downs
+// (work:doc / work:run-status) fall back to the worker-streamed projection content
+// (doc bodies + run records) when the local checkout cannot answer — closing the
+// "board lists seven streamed stories, then dead-ends every click" gap.
+import { boardWorkerContentTests } from "../test/board-worker-content.test.mjs";
 // milestone 22 — mesh-foundation (story 00: mesh-store spine + face skeleton — the
 // SPINE src/mesh-store.mjs: the partition path seam meshDir/nodeRecordPath (ADR-002),
 // the frozen node-record schema's OPAQUE per-node persist/read (ADR-003) through the
@@ -1669,6 +1674,7 @@ export const tests = [
   // milestone 21 — board-run-observability (story 00: run-observability route +
   // pure helpers; story 01: rerun verb + in-flight predicate)
   ...boardRunStatusRouteTests,
+  ...boardWorkerContentTests,
   ...boardRunsPureTests,
   // milestone 26 (story 00, mesh-blindness half only) — acd-run-store-mesh-free:
   // registered here at milestone 35 / story 02 build time (fitness #12

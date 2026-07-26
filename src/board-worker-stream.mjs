@@ -15,31 +15,78 @@
 // visibility — the board would still be blind for the entire duration of a run, which is
 // exactly the window an operator is watching. The worker is the authority on its own work;
 // the projection is how that authority reaches this node.
-import { openGlobalWorkProjectionStore, workspaceIdFor, readWorkspaceItems } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore, workspaceIdFor, readWorkspaceItems, readWorkItemDoc, readWorkItemRuns } from "./global-work-store.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
+
+// resolveStreamWorkspaceId(workspace, options) — the ONE id derivation all three
+// readers in this module share (the same precedence readWorkerItems always used):
+// an explicit option, else the workspace's pinned mesh id, else the path-derived id.
+function resolveStreamWorkspaceId(workspace, options = {}) {
+  return options.workspaceId
+    ?? workspace?.config?.mesh?.workspaceId
+    ?? workspaceIdFor(workspace?.projectRoot ?? workspace?.workDir);
+}
+
+// withProjectionStore(workspace, options, read) — open the projection, hand
+// (store, workspaceId) to `read`, always close. Any fault → null: the board's
+// worker-view reads DEGRADE to "no worker view" (the local-first default), exactly
+// like readWorkerItems' empty-map contract below.
+async function withProjectionStore(workspace, options, read) {
+  const storeOptions = options.globalWorkStoreOptions ?? {};
+  const openStore = options.openStore ?? openGlobalWorkProjectionStore;
+  let store = null;
+  try {
+    const workspaceId = resolveStreamWorkspaceId(workspace, options);
+    if (workspaceId == null) return null;
+    store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+    return await read(store, workspaceId);
+  } catch {
+    return null;
+  } finally {
+    try { store?.close?.(); } catch { /* already closed */ }
+  }
+}
+
+// readWorkerDoc(workspace, ref, doc, options) — the drill-down sibling of
+// readWorkerItems (schema v5, TECH_DEBT item 6): a record-doc BODY as the worker
+// streamed it, for a ref the local checkout cannot resolve (the streamed story) or a
+// doc it does not hold. Null when nothing was streamed — the caller keeps its local
+// behaviour.
+export async function readWorkerDoc(workspace, ref, doc, options = {}) {
+  return withProjectionStore(workspace, options, (store, workspaceId) => {
+    const row = readWorkItemDoc(store, workspaceId, ref, doc);
+    return row == null ? null : { ref, doc: row.doc, body: row.body, reportedBy: row.nodeId ?? null, updatedAt: row.updatedAt ?? null };
+  });
+}
+
+// readWorkerRuns(workspace, ref, options) — the RUNS-tab sibling: the run records
+// the worker streamed for a ref whose local runs/ dir is absent or empty. Null when
+// nothing was streamed.
+export async function readWorkerRuns(workspace, ref, options = {}) {
+  return withProjectionStore(workspace, options, (store, workspaceId) => {
+    const rows = readWorkItemRuns(store, workspaceId, ref);
+    if (rows.length === 0) return null;
+    return {
+      ref,
+      runs: rows.map((row) => row.record),
+      reportedBy: rows.find((row) => row.nodeId != null)?.nodeId ?? null,
+    };
+  });
+}
 
 // readWorkerItems(workspace, options) → Map<ref, row> — the worker-reported rows for this
 // workspace, narrowed to the mesh items the caller cares about (`refs` — the items with an
 // execution record) and their children. Returns an EMPTY map on any fault, which the merge
 // below treats as "no worker view", leaving the local rows untouched.
 export async function readWorkerItems(workspace, options = {}) {
-  const out = new Map();
-  const storeOptions = options.globalWorkStoreOptions ?? {};
-  const openStore = options.openStore ?? openGlobalWorkProjectionStore;
   const refs = Array.isArray(options.refs) ? options.refs.filter((r) => typeof r === "string" && r.length > 0) : [];
-  if (refs.length === 0) return out;
+  if (refs.length === 0) return new Map();
 
-  let store = null;
-  try {
-    const workspaceId = options.workspaceId
-      ?? workspace?.config?.mesh?.workspaceId
-      ?? workspaceIdFor(workspace?.projectRoot ?? workspace?.workDir);
-    if (workspaceId == null) return out;
-    store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
-
+  const result = await withProjectionStore(workspace, options, (store, workspaceId) => {
     // The milestone numbers the caller asked about — a worker's rows for an item include
     // that item AND the stories beneath it (the breakdown is the thing the local checkout
     // is missing), so children are matched by parent.
+    const out = new Map();
     const wanted = new Set(refs);
     const milestones = new Set(refs.map((ref) => String(ref).split("/")[0]));
     for (const row of readWorkspaceItems(store, workspaceId)) {
@@ -47,12 +94,9 @@ export async function readWorkerItems(workspace, options = {}) {
         out.set(row.ref, row);
       }
     }
-  } catch {
-    return new Map();
-  } finally {
-    try { store?.close?.(); } catch { /* already closed */ }
-  }
-  return out;
+    return out;
+  });
+  return result ?? new Map();
 }
 
 // mergeWorkerItems(rows, workerRows, overlay) → rows — replaces a local row with the

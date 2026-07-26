@@ -26,7 +26,7 @@ import {
   streamLivenessLabel,
   startControlStreamServer,
 } from "../src/control-stream-server.mjs";
-import { openGlobalWorkProjectionStore, queryGlobalWorkProjection } from "../src/global-work-store.mjs";
+import { openGlobalWorkProjectionStore, queryGlobalWorkProjection, readWorkItemDoc, readWorkItemRuns } from "../src/global-work-store.mjs";
 import { readPresenceRecord } from "../src/mesh-presence.mjs";
 
 const NOW = "2026-07-05T10:00:00.000Z";
@@ -420,6 +420,51 @@ export const controlStreamServerTests = [
           const publishedMs = Date.parse(metadata.value);
           assert.ok(Number.isFinite(publishedMs), "the fallback value parses as a real instant");
           assert.ok(publishedMs >= before - 1000 && publishedMs <= after + 1000, "the fallback is the server clock (close to now), not garbage");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    // schema v5 (TECH_DEBT item 6 — finish the board bridge): the worktree-content
+    // frame lands doc bodies + run records behind the SAME descriptor gate as
+    // snapshot/delta, attributed to the CONNECTION-bound nodeId (T6).
+    name: "control-stream-server/06 a worktree-content frame applies behind the descriptor gate and an unknown workspace is refused",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const record = { runId: "run-1", itemRef: "18/03", state: "running", attempt: 1, createdAt: NOW, updatedAt: NOW };
+          const frame = {
+            kind: "worktree-content",
+            nodeId: "self-declared-node",
+            workspaceId: "ws-worker-a",
+            itemRef: "18",
+            docs: [{ ref: "18/03", doc: "STORY", body: "# the streamed story\n" }],
+            runs: [{ ref: "18", runId: "run-1", record }],
+            at: NOW,
+          };
+
+          // UNREGISTERED workspace: refused, and the refusal is a reportable skip —
+          // the accept loop's onFrameSkipped contract, never a silent drop.
+          const refused = await applyStreamFrame(store, frame, { now: NOW, nodeId: "worker-a" });
+          assert.equal(refused.skipped, true, "an unknown workspace is refused");
+          assert.equal(refused.code, "unknown-workspace");
+          assert.equal(readWorkItemDoc(store, "ws-worker-a", "18/03", "STORY"), null, "a refused frame writes nothing");
+
+          registerWorkspaceDescriptor(store, "ws-worker-a");
+          const applied = await applyStreamFrame(store, frame, { now: NOW, nodeId: "worker-a" });
+          assert.equal(applied.published, true);
+          assert.equal(applied.docCount, 1);
+          assert.equal(applied.runCount, 1);
+
+          const doc = readWorkItemDoc(store, "ws-worker-a", "18/03", "STORY");
+          assert.equal(doc.body, "# the streamed story\n", "the streamed body is readable for a ref the control checkout has never seen");
+          assert.equal(doc.nodeId, "worker-a", "attribution is the CONNECTION-bound nodeId, never the frame's self-declared one (T6)");
+          const runs = readWorkItemRuns(store, "ws-worker-a", "18");
+          assert.equal(runs.length, 1);
+          assert.deepEqual(runs[0].record, record, "the run record round-trips");
         } finally {
           store.close();
         }

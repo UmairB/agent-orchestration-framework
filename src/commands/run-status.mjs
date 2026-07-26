@@ -9,6 +9,11 @@
 import { resolveItem } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
 import { readRuns } from "../run-store.mjs";
+// schema v5 (TECH_DEBT item 6 — finish the board bridge): a ref whose runs live on
+// another machine's worktree answers from the worker-streamed projection — the RUNS
+// tab used to read the LOCAL runs/ dir and say "No runs yet" for an item that was
+// running remotely at that moment.
+import { readWorkerRuns } from "../board-worker-stream.mjs";
 
 export const runStatusCommand = {
   id: "work:run-status",
@@ -21,13 +26,29 @@ export const runStatusCommand = {
 
   async run(input, ctx) {
     const ref = typeof input.ref === "string" ? input.ref.trim() : "";
+    const streamedRuns = (lookupRef) => readWorkerRuns(ctx.workspace, lookupRef, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
 
     // The READ tolerates the slug-fallback resolver (like work:doc / work:tasks).
     const item = await resolveItem(ctx.workspace.workDir, ref);
-    if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    if (!item) {
+      // The local checkout has never seen this ref (a worker-streamed story) — the
+      // projection is the only run history this machine holds for it.
+      const streamed = await streamedRuns(ref);
+      if (streamed != null) return { ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
+      throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    }
 
-    // readRuns is absence-tolerant: an item with no runs/ dir → an empty array.
-    return { ref: item.ref, runs: await readRuns(item) };
+    // readRuns is absence-tolerant: an item with no runs/ dir → an empty array —
+    // in which case the worker's streamed records (an item running remotely RIGHT
+    // NOW) are the truthful answer, not an empty local dir.
+    const runs = await readRuns(item);
+    if (runs.length === 0) {
+      const streamed = await streamedRuns(item.ref);
+      if (streamed != null) return { ref: item.ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
+    }
+    return { ref: item.ref, runs };
   },
 
   cli: {

@@ -5,6 +5,7 @@ import {
   recordWorkspaceProjectionError,
   workspaceIdFor,
   readWorkspaceProjectionItems,
+  readWorkspaceContentRecords,
 } from "./global-work-store.mjs";
 import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.mjs";
 
@@ -16,7 +17,10 @@ import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.
 // exporting a pure/read helper here does not weaken that invariant — the WRITE
 // path (publishWorkspaceSnapshot/openGlobalWorkProjectionStore) still only runs
 // inside this module's own publishGlobalWorkSnapshot.
-export { workspaceIdFor, readWorkspaceProjectionItems };
+// readWorkspaceContentRecords rides the same re-export rationale: a WORKER-side
+// pure read (doc bodies + run records for the worktree-content frame, schema v5) —
+// the launcher reaches it through this seam, never the store module directly.
+export { workspaceIdFor, readWorkspaceProjectionItems, readWorkspaceContentRecords };
 
 export const MESH_GLOBAL_DISABLED_CODE = "mesh-global-disabled";
 

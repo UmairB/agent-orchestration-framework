@@ -63,6 +63,30 @@ export function buildDeltaFrame(nodeId, workspaceId, items, now) {
   return { kind: "delta", nodeId, workspaceId, items: Array.isArray(items) ? [...items] : [], at: now };
 }
 
+// The worktree-CONTENT frame kind (schema v5, TECH_DEBT item 6 — finish the board
+// bridge). The worktree delta above bridges an assignment's item ROWS; this sibling
+// kind carries what the board's drill-downs need and could not resolve locally: the
+// subtree's record-doc BODIES and RUN RECORDS. One home for the literal — the
+// control-stream server imports it, never a re-spelled string.
+export const WORKTREE_CONTENT_FRAME_KIND = "worktree-content";
+
+// buildWorktreeContentFrame(nodeId, workspaceId, { itemRef, docs, runs }, now) — a
+// pure projection, same shape family as the other frame builders. `docs` is
+// [{ ref, doc, body }], `runs` is [{ ref, runId, record }] (the shapes
+// global-work-store.mjs's readWorkspaceContentRecords produces and
+// upsertWorkItemContent consumes — the two ends of this frame).
+export function buildWorktreeContentFrame(nodeId, workspaceId, { itemRef, docs, runs } = {}, now) {
+  return {
+    kind: WORKTREE_CONTENT_FRAME_KIND,
+    nodeId,
+    workspaceId,
+    itemRef: typeof itemRef === "string" ? itemRef : null,
+    docs: Array.isArray(docs) ? [...docs] : [],
+    runs: Array.isArray(runs) ? [...runs] : [],
+    at: now,
+  };
+}
+
 export function buildPresenceFrame(nodeId, presence, now) {
   return { kind: "presence", nodeId, presence: presence && typeof presence === "object" ? { ...presence } : {}, at: now };
 }
@@ -423,6 +447,19 @@ export function createWorkerStreamClient({
     return sendFrame(buildPresenceFrame(nodeId, presence, resolveNow()));
   }
 
+  // sendWorktreeContent(content, { workspaceId }) — the worktree-content sibling of
+  // sendDelta: the SAME per-frame workspaceId override (an assignment's content
+  // speaks for the ASSIGNMENT's workspace, never this daemon's launch workspace —
+  // the exact id mismatch that silently zeroed the row stream, 2026-07-26). While
+  // the session needs a snapshot the frame is SKIPPED, not promoted (the frame
+  // contract's "first frame on any (re)connection is a snapshot" belongs to the
+  // row stream; content is re-streamed every tick, so the next tick re-carries it).
+  async function sendWorktreeContent(content, { workspaceId: frameWorkspaceId } = {}) {
+    if (needsSnapshot) return { sent: false, skipped: true, code: "needs-snapshot" };
+    const target = typeof frameWorkspaceId === "string" && frameWorkspaceId.length > 0 ? frameWorkspaceId : workspaceId;
+    return sendFrame(buildWorktreeContentFrame(nodeId, target, content, resolveNow()));
+  }
+
   // sendAssignmentStatus(assignmentId, state, { runId, sessionId, code }) — milestone
   // 35 / ADR-002, story 01 task 02: the up-frame emitter Story 02 calls to stream
   // accepted -> running -> done|failed back up the SAME persistent socket. Reuses
@@ -723,6 +760,7 @@ export function createWorkerStreamClient({
     ensureConnected,
     sendSnapshot,
     sendDelta,
+    sendWorktreeContent,
     sendPresence,
     sendAssignmentStatus,
     sendTerminalFrame,

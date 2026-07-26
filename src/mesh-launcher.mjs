@@ -32,7 +32,7 @@ import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
 import { aofVersion } from "./commands/mesh-identity.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
 import { listItems, loadWorkspace } from "./work.mjs";
-import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems } from "./global-work-publisher.mjs";
+import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
@@ -1164,6 +1164,26 @@ export async function startLauncher(ws, options = {}) {
           const milestone = String(active.itemRef ?? "").split("/")[0];
           const rows = (result?.rows ?? []).filter((row) => row.ref === active.itemRef || row.ref === milestone || row.parent === milestone);
           if (rows.length > 0) await streamClient.sendDelta(rows, { fullItems, workspaceId: frameWorkspaceId });
+          // schema v5 (TECH_DEBT item 6 — finish the bridge): the rows above tell the
+          // board WHAT exists; this frame carries what its drill-downs then ask for —
+          // the subtree's record-doc bodies + run records — over the SAME connection,
+          // stamped with the SAME assignment workspaceId. A per-file read fault is
+          // REPORTED (the no-silent-failure rule), never dropped, and never blocks
+          // the rows already sent.
+          const content = await readWorkspaceContentRecords(worktreeWs, { itemRef: active.itemRef });
+          for (const readError of content.errors) {
+            emitWarning(launcherWarnings, {
+              code: "worker-worktree-content-read-failed",
+              message: `reading worktree content for assignment ${active?.assignmentId} failed: ${readError.message}`,
+              path: readError.sourcePath ?? null,
+            }, options);
+          }
+          if ((content.docs.length > 0 || content.runs.length > 0) && typeof streamClient.sendWorktreeContent === "function") {
+            await streamClient.sendWorktreeContent(
+              { itemRef: active.itemRef, docs: content.docs, runs: content.runs },
+              { workspaceId: frameWorkspaceId },
+            );
+          }
         } catch (error) {
           emitWarning(launcherWarnings, {
             code: "worker-worktree-stream-failed",

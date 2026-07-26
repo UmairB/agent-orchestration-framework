@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import {
   createWorkerStreamClient,
   backoffDelaySeconds,
+  WORKTREE_CONTENT_FRAME_KIND,
 } from "../src/worker-stream-client.mjs";
 
 // A scriptable fake transport: connect()/send() resolve unless scripted to throw;
@@ -305,6 +306,41 @@ export const workerStreamClientTests = [
       assert.equal(next.sent, true, "the next work-state send succeeds over the still-live connection");
       assert.equal(transport.connectCalls, 1, "no reconnect — the same live connection was reused");
       assert.equal(transport.frames.at(-1).kind, "delta", "the next frame is a DELTA (needsSnapshot was not reset) — the terminal send fault never entered the drop path");
+    },
+  },
+  {
+    // schema v5 (TECH_DEBT item 6 — finish the board bridge): the worktree-content
+    // frame carries an assignment subtree's doc bodies + run records, stamped with
+    // the ASSIGNMENT's workspaceId (the sendDelta per-frame override, same rationale),
+    // and is SKIPPED — never promoted to a snapshot — while the session owes one.
+    name: "worker-stream-client/v5 sendWorktreeContent stamps the per-frame workspaceId and is skipped while a snapshot is owed",
+    async run() {
+      const transport = fakeTransport();
+      const client = createWorkerStreamClient({ transport, nodeId: "worker-a", workspaceId: "ws-launch", now: () => NOW });
+
+      // A fresh session owes a snapshot: content is skipped, nothing is sent, and
+      // the snapshot debt is untouched.
+      const skipped = await client.sendWorktreeContent({ itemRef: "18", docs: [{ ref: "18/03", doc: "STORY", body: "#\n" }], runs: [] }, { workspaceId: "ws-assignment" });
+      assert.equal(skipped.sent, false, "content is skipped while the session owes a snapshot");
+      assert.equal(skipped.code, "needs-snapshot");
+      assert.equal(transport.frames.length, 0, "nothing was sent — the frame contract's snapshot-first rule holds");
+      assert.equal(client.needsSnapshot, true);
+
+      await client.sendSnapshot([{ ref: "18", status: "in-progress" }]);
+      const sent = await client.sendWorktreeContent({ itemRef: "18", docs: [{ ref: "18/03", doc: "STORY", body: "# body\n" }], runs: [{ ref: "18", runId: "run-1", record: { runId: "run-1", state: "running" } }] }, { workspaceId: "ws-assignment" });
+      assert.equal(sent.sent, true);
+      const frame = transport.frames.at(-1);
+      assert.equal(frame.kind, WORKTREE_CONTENT_FRAME_KIND);
+      assert.equal(frame.workspaceId, "ws-assignment", "the frame speaks for the ASSIGNMENT's workspace, never the launch workspace");
+      assert.equal(frame.nodeId, "worker-a");
+      assert.equal(frame.itemRef, "18");
+      assert.deepEqual(frame.docs, [{ ref: "18/03", doc: "STORY", body: "# body\n" }]);
+      assert.deepEqual(frame.runs, [{ ref: "18", runId: "run-1", record: { runId: "run-1", state: "running" } }]);
+      assert.equal(frame.at, NOW);
+
+      // No override → the client's own (launch) workspaceId, like sendDelta.
+      await client.sendWorktreeContent({ itemRef: "18", docs: [{ ref: "18", doc: "SPEC", body: "#\n" }], runs: [] });
+      assert.equal(transport.frames.at(-1).workspaceId, "ws-launch");
     },
   },
 ];

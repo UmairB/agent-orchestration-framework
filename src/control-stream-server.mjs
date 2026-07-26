@@ -23,7 +23,13 @@ import {
   openGlobalWorkProjectionStore,
   publishWorkspaceSnapshot,
   readWorkspaceItems,
+  upsertWorkItemContent,
 } from "./global-work-store.mjs";
+// schema v5 (TECH_DEBT item 6 — finish the board bridge): the worktree-CONTENT frame
+// kind (doc bodies + run records for an assignment's subtree). The literal lives in
+// ONE home (the builder module) — imported here, never re-spelled, the same
+// discipline as RECOVERY_PUSH_RESULT_KIND / TERMINAL_FRAME_KIND above.
+import { WORKTREE_CONTENT_FRAME_KIND } from "./worker-stream-client.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
 import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
@@ -180,6 +186,28 @@ export async function applyDeltaFrame(store, frame, { now } = {}) {
     // a verbatim non-ISO string written into last_published_at.
     now: now ?? validFrameAt(frame.at) ?? new Date().toISOString(),
   });
+}
+
+// applyWorktreeContentFrame(store, frame, options) — schema v5 (TECH_DEBT item 6):
+// writes a worker's streamed record-doc bodies + run records into the projection's
+// content tables, behind the SAME descriptor gate as applySnapshotFrame /
+// applyDeltaFrame (a frame for a workspaceId with no registered descriptor is
+// REFUSED — the refusal reaches onFrameSkipped via the accept loop, never silence).
+// The stored node_id is the CONNECTION-bound identity (options.nodeId, the T6
+// discipline every apply* keeps), so the board can say WHOSE view a body is.
+export async function applyWorktreeContentFrame(store, frame, options = {}) {
+  const known = resolveKnownWorkspaceRoot(store, frame.workspaceId);
+  if (known == null) {
+    return { published: false, skipped: true, code: "unknown-workspace", workspaceId: frame.workspaceId };
+  }
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const nowValue = typeof options.now === "function" ? options.now() : options.now;
+  return upsertWorkItemContent(store, frame.workspaceId, {
+    docs: frame.docs,
+    runs: frame.runs,
+    nodeId: ownerNode ?? frameNode,
+  }, { now: validFrameAt(nowValue) ?? validFrameAt(frame.at) ?? new Date().toISOString() });
 }
 
 function safeStringArray(value) {
@@ -622,6 +650,7 @@ export async function applyWriteCredentialRequestFrame(store, frame, options = {
 export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "snapshot") return applySnapshotFrame(store, frame, options);
   if (frame?.kind === "delta") return applyDeltaFrame(store, frame, options);
+  if (frame?.kind === WORKTREE_CONTENT_FRAME_KIND) return applyWorktreeContentFrame(store, frame, options);
   if (frame?.kind === "presence") return applyPresenceFrame(store, frame, options);
   if (frame?.kind === "assignment-status") return applyAssignmentStatusFrame(store, frame, options);
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
