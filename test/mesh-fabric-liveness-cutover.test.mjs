@@ -52,6 +52,43 @@ async function seedPeer(workspace, id) {
 }
 
 export const meshFabricLivenessCutoverTests = [
+  {
+    // m42 wave (b) / m38-F23 — THE MEASURED DEFECT, flipped green: fabricLivenessFor
+    // rebuilt a four-key pseudo record with heartbeatAt=now, which always won the
+    // merge, so `sessions` was DESTROYED for every fabric-ONLINE node on every tick —
+    // the desktop fleet read `idle` during live work, and the feature only worked
+    // while the fabric believed the node was OFFLINE. Liveness must SHARPEN the
+    // heartbeat, never rebuild the record.
+    name: "mesh-fabric-liveness-cutover/m42-F23 an ONLINE node's sessions survive the fabric-liveness merge — liveness sharpens the heartbeat, never rebuilds the record",
+    async run() {
+      const { repo } = await makeRepo();
+      try {
+        const ws = await loadWorkspace(repo);
+        await seedPeer(ws, "peer-live");
+        // The disk record is OLDER than `now` (the destructive path: the fabric
+        // pseudo-record wins the merge) and carries a live session.
+        const older = new Date(Date.parse(NOW) - 30_000).toISOString();
+        await publishPresenceRecord(ws, "peer-live", assemblePresenceRecord({
+          nodeId: "peer-live",
+          heartbeatAt: older,
+          activeRuns: ["42"],
+          sessions: [{ workspaceId: "ws-1", repo: "let-shield-portal", assistant: "claude", lastPingAt: older }],
+          aofVersion: "0.1.0",
+        }));
+
+        const fabricPeers = [{ nodeId: "peer-live", dialAddress: "100.90.11.5", online: true, host: "peer-live" }];
+        const result = await invoke("mesh:status", { now: NOW }, { workspace: ws, fabricPeers });
+        const peer = nodeOf(result, "peer-live");
+        assert.ok(peer?.presence, "the online node carries a presence projection");
+        assert.equal(peer.presence.sessions.length, 1, "sessions SURVIVE the liveness merge for an ONLINE node (F23: they were destroyed on every tick)");
+        assert.equal(peer.presence.sessions[0].repo, "let-shield-portal", "the surviving session is the disk record's own, verbatim");
+        assert.deepEqual(peer.presence.activeRuns, ["42"], "activeRuns still ride through (the pre-fix carve-out keeps working)");
+        assert.equal(peer.presence.heartbeatAt, NOW, "…while liveness still sharpened the heartbeat to now (the fabric's one legitimate contribution)");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
   // ══ Scenario Outline: mergePresence reconciles the git-disk record against the
   //    fabric peer-map liveness, git authority preserved on a tie ══
   {

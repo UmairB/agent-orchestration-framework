@@ -295,4 +295,37 @@ export const globalNodeRegistryTests = [
       }
     }),
   },
+  {
+    // m42 wave (b) / m38-F24 — a node card's `workspaces` comes from the MEMBERSHIP
+    // table, never the descriptor file's publisher stamp. Measured live: every card
+    // advertised the LAST publisher's single workspace (at its worst,
+    // C:\WINDOWS\system32) while the membership table correctly held four per node.
+    name: "global-node-registry/m42-F24 a node's workspaces are projected from the membership TABLE — the last publisher's descriptor-file stamp never reaches a consumer",
+    run: async () => withTemp(async (root) => {
+      const alpha = await makeWorkspace(path.join(root, "alpha-repo"), { name: "alpha" });
+      const beta = await makeWorkspace(path.join(root, "beta-repo"), { name: "beta" });
+      await seedNode(alpha, "worker-x");
+      await seedNode(beta, "worker-x");
+      const store = await openStore(path.join(root, "home"));
+      try {
+        // Two workspaces publish the SAME node; the second publish's descriptor
+        // FILE stamps only beta (last-writer-wins on the file — the F24 mechanism).
+        await publishGlobalRegistryDescriptorsToStore(store, alpha, { now: NOW });
+        await publishGlobalRegistryDescriptorsToStore(store, beta, { now: "2026-07-04T10:03:00.000Z" });
+
+        const result = await queryGlobalRegistry(store, { now: "2026-07-04T10:04:00.000Z" });
+        const node = result.nodes.find((n) => n.nodeId === "worker-x");
+        assert.ok(node, "the shared node surfaces");
+        assert.equal(node.workspaces.length, 2, "the card lists BOTH member workspaces (the table), not the last publisher's single stamp");
+        assert.deepEqual(
+          node.workspaces.map((w) => w.name).sort(),
+          ["alpha", "beta"],
+          "each membership resolves through the workspace descriptors (names intact)",
+        );
+        assert.deepEqual([...node.workspaceIds].sort(), node.workspaces.map((w) => w.workspaceId).sort(), "workspaces and workspaceIds agree — one truth");
+      } finally {
+        store.close();
+      }
+    }),
+  },
 ];

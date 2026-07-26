@@ -170,6 +170,18 @@ export async function queryGlobalRegistry(store, options = {}) {
   let nodeRows = db.prepare("SELECT * FROM global_nodes WHERE COALESCE(record_source, 'node-record') != 'fabric' ORDER BY node_id").all();
   if (roleFilter) nodeRows = nodeRows.filter((row) => row.role === roleFilter);
 
+  // m42 wave (b) / m38-F24 — the descriptor FILE's `workspaces[]` is the last
+  // PUBLISHER's own single workspace stamped onto every roster node (measured
+  // live: both node cards advertised C:\WINDOWS\system32 while the membership
+  // table correctly held four per node — and after the cwd-phantom gate, the
+  // stale stamp could never even be refreshed). The membership TABLE is the ONE
+  // truth; each card's `workspaces` is projected from it below, resolved through
+  // the workspace-descriptor rows. The file's stamp never reaches a consumer again.
+  const workspaceById = new Map(
+    db.prepare("SELECT workspace_id, project_root, name FROM global_workspace_descriptors").all()
+      .map((entry) => [entry.workspace_id, { workspaceId: entry.workspace_id, name: entry.name ?? null, projectRoot: entry.project_root ?? null }]),
+  );
+
   const errors = [];
   const nodes = [];
   for (const row of nodeRows) {
@@ -182,6 +194,7 @@ export async function queryGlobalRegistry(store, options = {}) {
       ...descriptor,
       freshness: freshnessFor(row.last_seen_at, now, thresholdMs),
       workspaceIds: memberships, // nodes are machine-wide; never narrowed by a workspace filter (34/story 02)
+      workspaces: memberships.map((id) => workspaceById.get(id) ?? { workspaceId: id, name: null, projectRoot: null }),
     };
     // finding F6 — ADDITIVE: carry the node's presence record ALONGSIDE the
     // pre-existing `freshness` ramp (unchanged), so no existing consumer breaks.

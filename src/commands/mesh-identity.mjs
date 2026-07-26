@@ -212,7 +212,17 @@ export const meshStatusCommand = {
     const fabricLivenessFor = (id, diskPresence) => {
       const peer = fabricById.get(id);
       if (peer == null || peer.online !== true) return null;
+      // m42 wave (b) / m38-F23 — fabric liveness SHARPENS the heartbeat; it never
+      // REBUILDS the record. The original four-key rebuild was a whitelist, and a
+      // whitelist silently drops what it was never told about: with heartbeatAt=now
+      // this pseudo-record always wins the merge, so m38's additive `sessions` key
+      // was DESTROYED for every fabric-Online node, on every tick — the desktop
+      // fleet read `idle` during live work, and the feature only worked while the
+      // fabric believed the node was OFFLINE. The disk record now rides through
+      // whole (sessions and any future additive key included); the fabric
+      // contributes exactly one fact: this peer is alive NOW.
       return {
+        ...(diskPresence != null && typeof diskPresence === "object" ? diskPresence : {}),
         nodeId: id,
         heartbeatAt: nowIso,
         activeRuns: Array.isArray(diskPresence?.activeRuns) ? diskPresence.activeRuns : [],
