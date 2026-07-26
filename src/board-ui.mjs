@@ -129,12 +129,14 @@ export async function handleWorkApi(request, response, options = {}) {
       return true;
     }
 
-    if (request.method === "POST" && pathname === "/api/work/continue") {
-      // THE single continue door (2026-07-26): "continue this task, optionally naming
-      // where". It may mint an assignment, so it carries the same same-origin admission
-      // guard the fleet's own assign route uses — a same-origin browser fetch always
-      // matches this server's own http://<host>; anything else is refused before the
-      // body is read.
+    // THE phase doors (continue 2026-07-26; refine/verify m42 wave (b) — the
+    // one-door completion): "do this act, optionally naming where". Each may mint
+    // an assignment, so each carries the same same-origin admission guard the
+    // fleet's own assign route uses — a same-origin browser fetch always matches
+    // this server's own http://<host>; anything else is refused before the body is
+    // read. ONE implementation (handlePhaseDoor below); the routes are spelled
+    // explicitly so the registry-derived route-coverage gate can see each literal.
+    const handlePhaseDoor = async (phase) => {
       const expectedOrigin = `http://${request.headers.host}`;
       if (request.headers.origin !== expectedOrigin) {
         sendApiError(response, 403, "Cross-origin write refused.", "cross-origin-refused");
@@ -143,12 +145,21 @@ export async function handleWorkApi(request, response, options = {}) {
       const body = await readJsonBody(request);
       // Only ref/node are lifted off the body — the command decides everything else.
       const result = await invoke(
-        "work:continue",
+        `work:${phase}`,
         { ref: body.ref, ...(body.node ? { node: body.node } : {}) },
         ctx
       );
       sendJson(response, 200, result);
       return true;
+    };
+    if (request.method === "POST" && pathname === "/api/work/continue") {
+      return handlePhaseDoor("continue");
+    }
+    if (request.method === "POST" && pathname === "/api/work/refine") {
+      return handlePhaseDoor("refine");
+    }
+    if (request.method === "POST" && pathname === "/api/work/verify") {
+      return handlePhaseDoor("verify");
     }
 
     if (request.method === "POST" && pathname === "/api/work/feedback") {

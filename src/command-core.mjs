@@ -26,7 +26,7 @@
 // achievable on Windows separators (ADR-002).
 import { loadWorkspace } from "./work.mjs";
 import { listCommand } from "./commands/list.mjs";
-import { continueCommand } from "./commands/continue.mjs";
+import { continueCommand, refineDoorCommand, verifyDoorCommand } from "./commands/continue.mjs";
 import { docCommand } from "./commands/doc.mjs";
 import { tasksCommand } from "./commands/tasks.mjs";
 import { validateCommand } from "./commands/validate.mjs";
@@ -244,6 +244,10 @@ const COMMANDS = [
   // Every face (board button, CLI, fleet) resolves WHERE a continue happens here, so a
   // board click can no longer start a local run against work that lives on a worker.
   continueCommand,
+  // m42 wave (b) — the one-door-per-act COMPLETION: refine and verify are the SAME
+  // door (one factory, one decision, one scope rule) with their own lifecycle phase.
+  refineDoorCommand,
+  verifyDoorCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

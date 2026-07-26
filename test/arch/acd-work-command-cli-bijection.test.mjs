@@ -193,6 +193,9 @@ function argsFor(sub) {
     // The fixture is NOT mesh-configured and "03/01" has no prior run, so WHERE resolves
     // to `local`: exit 0, one parseable envelope, and NOTHING is dispatched or minted.
     case "continue": return ["work", "continue", "03/01", "--json"];
+    // m42 wave (b) — refine/verify are the SAME door (one factory, one decision).
+    case "refine": return ["work", "refine", "03/01", "--json"];
+    case "verify": return ["work", "verify", "03/01", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

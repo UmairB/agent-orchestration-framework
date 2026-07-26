@@ -422,6 +422,18 @@ async function workCommand(args) {
     return;
   }
 
+  // m42 wave (b) — the one-door completion: `aof work refine <ref> [--node <id>]`
+  // and `aof work verify <ref> [--node <id>]` are the SAME door (one factory, one
+  // decision) with their own lifecycle phase.
+  if (subcommand === "refine") {
+    await runVerbCli("work:refine", rest);
+    return;
+  }
+  if (subcommand === "verify") {
+    await runVerbCli("work:verify", rest);
+    return;
+  }
+
   if (subcommand === "doc") {
     await workDocCommand(rest);
     return;

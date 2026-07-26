@@ -133,8 +133,11 @@ async function hitRoute(url, op) {
   // [--node]" door. It carries a same-origin guard, so the probe sends the server's own
   // origin; the fixture item has no prior run, so it resolves `where: "local"` and mints
   // nothing (this probe never dispatches anything to a real node).
-  if (op === "continue") {
-    return fetch(new URL("/api/work/continue", url), {
+  // The three PHASE DOORS (continue 2026-07-26; refine/verify m42 wave (b)) share
+  // one probe shape: same-origin POST, fixture item with no prior run resolves
+  // `where: "local"` and mints nothing.
+  if (op === "continue" || op === "refine" || op === "verify") {
+    return fetch(new URL(`/api/work/${op}`, url), {
       method: "POST",
       headers: { "content-type": "application/json", origin: new URL(url).origin },
       body: JSON.stringify({ ref: "03/01" }),

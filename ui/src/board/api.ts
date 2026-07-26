@@ -167,7 +167,13 @@ export const workApi = {
   // must not make that decision itself: that is how clicking Continue on a milestone a
   // worker owns used to start a rival local run on the control node.
   async continueWork(input: { ref: string; node?: string }): Promise<ContinueResponse> {
-    const response = await fetch("/api/work/continue", {
+    return this.dispatchPhase("continue", input);
+  },
+  // m42 wave (b) — one door per act: refine and verify are the SAME envelope with
+  // their own phase. The server decides WHERE (running/local/remote); the button
+  // never chooses a machine.
+  async dispatchPhase(phase: "continue" | "refine" | "verify", input: { ref: string; node?: string }): Promise<ContinueResponse> {
+    const response = await fetch(`/api/work/${phase}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),

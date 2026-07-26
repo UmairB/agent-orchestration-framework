@@ -169,6 +169,10 @@ export const archTests = [
       const allowedPosts = new Set([
         "feedback",   // the pre-existing feedback write
         "continue",   // THE single continue door — decides WHERE a continue runs (local vs a worker node)
+        // m42 wave (b) — the one-door-per-act completion: refine and verify are the
+        // SAME door (one factory, one decision, one scope rule) with their own phase.
+        "refine",
+        "verify",
       ]);
       for (const route of postRoutes) {
         assert.ok(allowedPosts.has(route), `board-ui.mjs POSTs an unlisted route /api/work/${route} — the board face stays read-mostly`);

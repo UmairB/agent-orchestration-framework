@@ -70,7 +70,7 @@ export function DetailPanel({
   onRunAgent: (ref: string, command?: string) => void;
   // CONTINUE is routed separately (2026-07-26): the server decides whether it runs
   // here or on the worker node that last worked on the item.
-  onContinue: (ref: string) => void;
+  onContinue: (ref: string, phase?: "continue" | "refine" | "verify") => void;
   onViewTerminal: () => void;
   onRevealRef: (ref: string) => void;
 }) {
@@ -257,7 +257,7 @@ function PrimaryActionButton({
   item: WorkItem;
   action: PrimaryAction;
   onRunAgent: (ref: string, command?: string) => void;
-  onContinue: (ref: string) => void;
+  onContinue: (ref: string, phase?: "continue" | "refine" | "verify") => void;
   onViewTerminal: () => void;
 }) {
   const showCaret = action.kind !== "blocked" && action.kind !== "view" && action.kind !== "running";
@@ -267,7 +267,12 @@ function PrimaryActionButton({
     if (action.kind === "running") return; // a worker holds it — nothing to launch here
     // CONTINUE goes through the one continue door, which decides WHERE it runs
     // (2026-07-26) — every other action still launches a local session directly.
-    if (action.kind === "continue") return onContinue(item.ref);
+    // m42 wave (b) — refine and verify route through the SAME door as continue:
+    // the server decides WHERE (running/local/remote); the button never spawns a
+    // local session on its own authority.
+    if (action.kind === "continue" || action.kind === "refine" || action.kind === "verify") {
+      return onContinue(item.ref, action.kind);
+    }
     onRunAgent(item.ref, action.command);
   };
   return (

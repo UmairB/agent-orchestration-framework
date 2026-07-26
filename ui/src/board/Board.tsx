@@ -200,13 +200,14 @@ export function Board() {
   // longer start a rival run against this machine's checkout.
   const [dispatch, setDispatch] = useState<{ ref: string; message: string; error: boolean } | null>(null);
   const continueWork = useCallback(
-    async (ref: string) => {
+    async (ref: string, phase: "continue" | "refine" | "verify" = "continue") => {
       select(ref);
       setDispatch(null);
       try {
-        const result = await workApi.continueWork({ ref });
+        // m42 wave (b) — one door per act: refine/verify ride the same envelope.
+        const result = await workApi.dispatchPhase(phase, { ref });
         if (result.where === "local") {
-          runAgent(ref, result.command ?? `/aof:continue ${ref}`);
+          runAgent(ref, result.command ?? `/aof:${phase} ${ref}`);
           return;
         }
         // "running": the ref (or its milestone scope) already has an active run —
@@ -215,7 +216,7 @@ export function Board() {
           ref,
           message: result.where === "running"
             ? `Already running on ${result.node ?? "a worker"}`
-            : `Continuing on ${result.node}`,
+            : `${phase === "continue" ? "Continuing" : phase === "refine" ? "Refining" : "Verifying"} on ${result.node}`,
           error: false,
         });
         await load({ silent: true });

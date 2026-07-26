@@ -64,6 +64,10 @@ const WORK_IDS = [
   // (CLI, board POST, fleet all route through it; the where-to-run decision lives
   // inside the command) — another sanctioned in-namespace extension.
   "work:continue",
+  // m42 wave (b) — the one-door-per-act COMPLETION: refine and verify are the SAME
+  // door (one factory, one decision, one scope rule) with their own phase.
+  "work:refine",
+  "work:verify",
 ];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------
