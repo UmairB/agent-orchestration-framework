@@ -1,3 +1,5 @@
+import path from "node:path";
+import { existsSync } from "node:fs";
 import { globalMeshPaths } from "./workspace.mjs";
 import {
   openGlobalWorkProjectionStore,
@@ -23,6 +25,7 @@ import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.
 export { workspaceIdFor, readWorkspaceProjectionItems, readWorkspaceContentRecords };
 
 export const MESH_GLOBAL_DISABLED_CODE = "mesh-global-disabled";
+export const MESH_WORKSPACE_UNCONFIGURED_CODE = "mesh-workspace-unconfigured";
 
 export function meshGlobalPropagationDecision(workspaceOrConfig) {
   const config = workspaceOrConfig?.config ?? workspaceOrConfig ?? {};
@@ -35,7 +38,29 @@ export function meshGlobalPropagationDecision(workspaceOrConfig) {
   // on a control node that never "joined". The single-predicate invariant
   // (acd-global-propagation-single-predicate) holds: this ONE function is still the sole
   // decision, and it still literally requires mesh?.enabled === true as one arm.
-  if (mesh?.enabled === true || mesh?.repo?.published === true) return { enabled: true };
+  if (mesh?.enabled === true || mesh?.repo?.published === true) {
+    // …but a DIRECTORY is not a workspace just because a daemon was launched from it
+    // (measured 2026-07-26: Task Scheduler's default cwd published C:\WINDOWS\system32
+    // — and an installer-dir launch published ~/.aof/bin — as fleet "workspaces": the
+    // machine-wide mesh.enabled merges into ANY cwd, so the enable arm alone cannot
+    // gate). When the caller supplies a real workspace (it has a projectRoot),
+    // propagation additionally requires the workspace's OWN config on disk — the
+    // committed .aof/aof.config.json (or the legacy root aof.config.json). A pure
+    // config-shaped argument (no projectRoot to check) keeps the enable-arm behaviour.
+    const projectRoot = typeof workspaceOrConfig?.projectRoot === "string" ? workspaceOrConfig.projectRoot : null;
+    if (projectRoot != null && projectRoot.length > 0) {
+      const hasOwnConfig = existsSync(path.join(projectRoot, ".aof", "aof.config.json"))
+        || existsSync(path.join(projectRoot, "aof.config.json"));
+      if (!hasOwnConfig) {
+        return {
+          enabled: false,
+          code: MESH_WORKSPACE_UNCONFIGURED_CODE,
+          guidance: `Not publishing ${projectRoot}: it has no aof config — a launch directory is not a workspace.`,
+        };
+      }
+    }
+    return { enabled: true };
+  }
 
   const hasMeshHints = mesh != null && Object.keys(mesh).some((key) => key !== "enabled");
   return {

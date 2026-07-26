@@ -92,6 +92,34 @@ export const globalWorkPropagationTests = [
     },
   },
   {
+    // 2026-07-26 (operator-found): the machine-wide mesh.enabled merges into ANY cwd,
+    // so a daemon launched from a non-workspace directory (Task Scheduler's default
+    // C:\WINDOWS\system32; an installer-dir launch) published that directory as a fleet
+    // "workspace". The enable arm alone cannot gate — a real workspace must carry its
+    // OWN config on disk.
+    name: "global-work-propagation/00 an enabled-but-unconfigured DIRECTORY is refused — a launch cwd is not a workspace",
+    async run() {
+      const bareDir = await mkdtemp(path.join(os.tmpdir(), "aof-not-a-workspace-"));
+      try {
+        const ws = { config: { mesh: { enabled: true } }, projectRoot: bareDir, workDir: path.join(bareDir, "wiki", "work") };
+        const decision = meshGlobalPropagationDecision(ws);
+        assert.equal(decision.enabled, false, "no .aof/aof.config.json on disk -> refused despite the global enable");
+        assert.equal(decision.code, "mesh-workspace-unconfigured");
+
+        let calls = 0;
+        const result = await publishGlobalWorkSnapshot(ws, { globalPublisher: async () => { calls += 1; } });
+        assert.equal(result.code, "mesh-workspace-unconfigured");
+        assert.equal(calls, 0, "an unconfigured directory never reaches the publisher");
+
+        // A config-shaped argument (no projectRoot to check) keeps the enable-arm
+        // behaviour — the pure-config callers are unaffected.
+        assert.equal(meshGlobalPropagationDecision({ mesh: { enabled: true } }).enabled, true);
+      } finally {
+        await rm(bareDir, { recursive: true, force: true });
+      }
+    },
+  },
+  {
     name: "global-work-propagation/00 enabled workspaces call the injected publisher once",
     async run() {
       const repo = await makeWorkRepo({ mesh: { enabled: true } });

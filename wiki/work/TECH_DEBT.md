@@ -197,6 +197,12 @@ but the mesh clone path writes `mesh.repo.workspaceId` — which nothing reads a
 - Every CLI mesh verb resolves the workspace from **cwd**: `aof mesh assign 18 --withdraw` run from
   the wrong directory reports "No assignment exists" while the row sits in the store (bit the
   operator-recovery path live, 2026-07-26) — the same one-fact-many-derivations class.
+- A daemon launched from a non-workspace directory **published its launch cwd as a fleet
+  workspace** (measured 2026-07-26: `C:\WINDOWS\system32` via Task Scheduler's default cwd,
+  `~/.aof/bin` via an installer-dir launch) — the machine-wide `mesh.enabled` merges into ANY cwd.
+  **Gated 2026-07-26**: `meshGlobalPropagationDecision` now also requires the workspace's own
+  config on disk (`mesh-workspace-unconfigured` refusal); `scripts/prune-projection.mjs` is the
+  recovery tool for rows that already landed. The underlying cwd-derived identity remains open.
 
 **The fix.** Make the mesh workspace id the checkout's *own* local identity: write `mesh.workspaceId`
 into the scoped checkout's `.aof/aof.config.json` at clone time, so publish, descriptor and frames all
