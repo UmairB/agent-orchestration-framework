@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createMeshLogSink, readMeshLog, meshLogPath } from "../src/mesh-log.mjs";
+import { invoke } from "../src/command-core.mjs";
 
 async function withHome(fn) {
   const home = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-log-"));
@@ -66,6 +67,34 @@ export const meshLogTests = [
         const { entries } = readMeshLog("mesh-ui", { env });
         assert.equal(entries.length, 2);
         assert.deepEqual(entries[1], { raw: "{ torn" }, "a torn line is surfaced, never silently dropped");
+      });
+    },
+  },
+  {
+    name: "mesh-log/item-2 the mesh:logs command reads the sink (proc default, tail knob, invalid-proc refusal)",
+    async run() {
+      await withHome(async ({ env }) => {
+        const sink = createMeshLogSink("mesh-serve", { env });
+        sink.write({ level: "warn", code: "frame-skipped", message: "unknown-workspace" });
+        const ctx = { workspace: { projectRoot: "/x", workDir: "/x", config: {} }, globalWorkStoreOptions: { env } };
+
+        const result = await invoke("mesh:logs", {}, ctx);
+        assert.equal(result.ok, true);
+        assert.equal(result.proc, "mesh-serve", "proc defaults to mesh-serve");
+        assert.equal(result.count, 1);
+        assert.equal(result.entries[0].code, "frame-skipped");
+
+        const tailed = await invoke("mesh:logs", { proc: "mesh-serve", tail: 1 }, ctx);
+        assert.equal(tailed.entries.length, 1);
+
+        const empty = await invoke("mesh:logs", { proc: "mesh-ui" }, ctx);
+        assert.deepEqual(empty.entries, [], "an absent log is absent-not-error");
+
+        await assert.rejects(
+          invoke("mesh:logs", { proc: "not-a-daemon" }, ctx),
+          (error) => error.code === "invalid-proc" && error.status === 400,
+          "an unknown proc is an input-contract refusal naming the valid set",
+        );
       });
     },
   },

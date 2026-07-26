@@ -739,6 +739,14 @@ async function meshCommand(args) {
     return;
   }
 
+  // `aof mesh logs [proc] [--tail N]` — the durable-log reader (m42 wave (a),
+  // TECH_DEBT item 2): read what a daemon logged without redirecting stdout by
+  // hand. The optional positional is the proc (mesh-serve default).
+  if (subcommand === "logs") {
+    await meshVerbCli("mesh:logs", rest, { positionalAllowed: true, extraFlags: ["tail"] });
+    return;
+  }
+
   // No sub: render the usage and exit 0 (recognised, not an error).
   if (sub === undefined) {
     if (options.json) {

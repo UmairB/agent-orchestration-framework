@@ -134,7 +134,11 @@ actually costs time.
 
 ## 2. Daemons have nowhere to log
 
-**Status:** open (raised 2026-07-26). **Severity:** high — it is why item-level bugs stay undiagnosed
+**Status:** largely addressed (2026-07-26, milestone 42 wave (a)): every daemon event lands as JSONL
+in `~/.aof/mesh/logs/<proc>.log` (size-rotated, one kept generation) — mesh-serve tees all launcher
+warnings + a build-stamped `daemon-started`; mesh-ui records its startup; `aof mesh logs [proc]
+[--tail N]` reads it (absent-not-error, torn lines surfaced as `raw`). Remaining: the REMOTE-node
+read (`--node <id>`, over the fabric) and `--follow`. **Severity:** high — it is why item-level bugs stay undiagnosed
 for days.
 
 **What's wrong.** The long-running processes (`aof mesh serve --serve`, `aof mesh ui`) write

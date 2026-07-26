@@ -142,6 +142,9 @@ function argsFor(sub) {
     // `--serve` face is a SEPARATE CLI-only path (meshServeDaemonCommand), never routed
     // through the registered bijection-probed run.
     case "serve": return ["mesh", "serve", "--json"];
+    // m42 wave (a) — mesh:logs, the durable-log reader: an absent log is
+    // absent-not-error, so the bare fixture run exits 0 with { entries: [] }.
+    case "logs": return ["mesh", "logs", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

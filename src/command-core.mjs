@@ -154,6 +154,10 @@ import { meshRevokeCommand } from "./commands/mesh-revoke.mjs";
 // `work:`-filtered bijection but RIDES the existing acd-mesh-command-cli-bijection gate
 // (now covering identity+status+sync+heartbeat+relay+invite+join+revoke+issue+serve).
 import { meshServeCommand } from "./commands/mesh-serve.mjs";
+// m42 wave (a) — mesh:logs, the durable-log READER over mesh-log.mjs's sink
+// (TECH_DEBT item 2). Additive — one import + one COMMANDS entry; takes the
+// `mesh:` prefix so the mesh bijection gate covers it with no edit.
+import { meshLogsCommand } from "./commands/mesh-logs.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -229,6 +233,7 @@ const COMMANDS = [
   meshJoinCommand,
   meshRevokeCommand,
   meshServeCommand,
+  meshLogsCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

@@ -22,8 +22,13 @@ doc: state
   lease-release test inside `acd-fleet-reclaim-guarded` retired for the same reason (its three live
   siblings kept). `acd-command-namespace`'s member counts are now DERIVED (declared vs rendered),
   never hard-coded — the count treadmill (21 → red → 23 → red) is gone.
-- Next in wave (a): item 2 (daemon log sink + logs reader), then item 3 (no-empty-catch fitness +
-  sweep, needs the sink) + F26 temp-leak; then wave (b) starting at item 7 (liveness loop).
+- **Wave (a) / item 2 largely DONE (2026-07-26):** `src/mesh-log.mjs` (JSONL sink, size-rotated,
+  tolerant reader) wired into mesh-serve (warning tee + build-stamped daemon-started) and mesh-ui;
+  `mesh:logs` registered + `aof mesh logs [proc] [--tail N]` — the derived bijection gate covered
+  the new verb with no edit (item 5's payoff, first use). Deferred within item 2: remote-node read
+  + --follow. Daemons pick the sink up at the next operator restart.
+- Next in wave (a): item 3 (no-empty-catch fitness + sweep — the sink now exists to emit into) +
+  F26 temp-leak; then wave (b) starting at item 7 (liveness loop).
 
 ## Notes & decisions in flight
 
