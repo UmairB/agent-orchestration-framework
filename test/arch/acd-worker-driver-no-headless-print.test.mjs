@@ -118,6 +118,13 @@ function surfacesSessionIdOnStatusFrames(strippedCode) {
 }
 
 // ---------------------------------------------------------------- invariant 6 ----
+// REVISED 2026-07-26 (declared-completion): the launch arg is now the COMPOSED
+// WORKER_SESSION_INSTRUCTION — NEEDS_INPUT_INSTRUCTION plus the
+// DIRECTIVE_COMPLETE_INSTRUCTION producer (the declared-completion sentinel that
+// replaced silence-guessing) — appended as ONE --append-system-prompt (two flags
+// would override each other in claude's CLI). The invariant is BOTH producers
+// exist AND the composition reaches the launch; dropping either instruction from
+// the composition, or the composition from the launch, trips the detector.
 // The NEEDS_INPUT producer EXISTS (ADR-013 amendment, option C): a NEEDS_INPUT_INSTRUCTION
 // template embedding the sentinel via `${NEEDS_INPUT_SENTINEL}` (so producer + detector
 // share one literal), appended to the interactive launch as a `--append-system-prompt`
@@ -125,8 +132,10 @@ function surfacesSessionIdOnStatusFrames(strippedCode) {
 function hasNeedsInputProducer(strippedCode) {
   const definesInstruction = /const\s+NEEDS_INPUT_INSTRUCTION\s*=/.test(strippedCode);
   const instructionEmbedsSentinel = /NEEDS_INPUT_INSTRUCTION\s*=\s*`[\s\S]*?\$\{\s*NEEDS_INPUT_SENTINEL\s*\}/.test(strippedCode);
-  const appendedToLaunch = /["']--append-system-prompt["'][\s\S]{0,40}NEEDS_INPUT_INSTRUCTION/.test(strippedCode);
-  return definesInstruction && instructionEmbedsSentinel && appendedToLaunch;
+  const completeEmbedsSentinel = /DIRECTIVE_COMPLETE_INSTRUCTION\s*=\s*`[\s\S]*?\$\{\s*DIRECTIVE_COMPLETE_SENTINEL\s*\}/.test(strippedCode);
+  const composed = /WORKER_SESSION_INSTRUCTION\s*=\s*`\$\{\s*NEEDS_INPUT_INSTRUCTION\s*\}[\s\S]*?\$\{\s*DIRECTIVE_COMPLETE_INSTRUCTION\s*\}/.test(strippedCode);
+  const appendedToLaunch = /["']--append-system-prompt["'][\s\S]{0,40}WORKER_SESSION_INSTRUCTION/.test(strippedCode);
+  return definesInstruction && instructionEmbedsSentinel && completeEmbedsSentinel && composed && appendedToLaunch;
 }
 
 // ---------------------------------------------------------------- invariant 5 ----
@@ -289,7 +298,7 @@ export const archTests = [
     },
   },
   {
-    name: "arch/38 ADR-013 amendment (acd-worker-driver-no-headless-print): invariant 6 — the NEEDS_INPUT producer EXISTS (NEEDS_INPUT_INSTRUCTION embeds the sentinel and rides a worker-scoped --append-system-prompt launch arg)",
+    name: "arch/38 ADR-013 amendment (acd-worker-driver-no-headless-print): invariant 6 — BOTH sentinel producers EXIST (NEEDS_INPUT + DIRECTIVE_COMPLETE, composed into WORKER_SESSION_INSTRUCTION riding ONE worker-scoped --append-system-prompt launch arg)",
     run: async () => {
       const raw = await readFile(DRIVER_SOURCE, "utf8");
       const stripped = stripComments(raw);
@@ -299,13 +308,18 @@ export const archTests = [
       assert.equal(
         hasNeedsInputProducer(stripped),
         true,
-        "the real source defines NEEDS_INPUT_INSTRUCTION embedding ${NEEDS_INPUT_SENTINEL} and appends it to the interactive launch via --append-system-prompt (ADR-013 amendment, option C)",
+        "the real source defines BOTH producers (NEEDS_INPUT + DIRECTIVE_COMPLETE, each embedding its sentinel), composes them into WORKER_SESSION_INSTRUCTION, and appends that composition to the interactive launch via --append-system-prompt",
       );
 
-      // Self-check: remove the launch append → the producer no longer reaches the spawn.
-      const plantedNoAppend = stripped.replace(/["']--append-system-prompt["'],\s*NEEDS_INPUT_INSTRUCTION/, "/* NEEDS_INPUT producer removed */");
+      // Self-check: remove the launch append → the producers no longer reach the spawn.
+      const plantedNoAppend = stripped.replace(/["']--append-system-prompt["'],\s*WORKER_SESSION_INSTRUCTION/, "/* session-instruction producers removed */");
       assert.notEqual(plantedNoAppend, stripped, "the plant actually changed the source text");
-      assert.equal(hasNeedsInputProducer(plantedNoAppend), false, "a launch that no longer appends the NEEDS_INPUT system-prompt instruction trips the detector");
+      assert.equal(hasNeedsInputProducer(plantedNoAppend), false, "a launch that no longer appends the composed session instruction trips the detector");
+
+      // Self-check: drop DIRECTIVE_COMPLETE_INSTRUCTION from the composition → trips.
+      const plantedNoComplete = stripped.replace(/\$\{\s*DIRECTIVE_COMPLETE_INSTRUCTION\s*\}/, "");
+      assert.notEqual(plantedNoComplete, stripped, "the composition plant actually changed the source text");
+      assert.equal(hasNeedsInputProducer(plantedNoComplete), false, "a composition that dropped the DIRECTIVE_COMPLETE producer trips the detector");
     },
   },
   {

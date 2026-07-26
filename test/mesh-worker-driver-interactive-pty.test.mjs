@@ -11,7 +11,7 @@
 // the session_id transcript watch injected — never a hand-built stub of "what the
 // provider ought to emit" (the milestone's producer-fed lesson).
 import assert from "node:assert/strict";
-import { driveInteractiveClaudeSession, createMeshWorkerExecutionHandler, NEEDS_INPUT_SENTINEL } from "../src/mesh-worker-execution.mjs";
+import { driveInteractiveClaudeSession, createMeshWorkerExecutionHandler, NEEDS_INPUT_SENTINEL, DIRECTIVE_COMPLETE_SENTINEL } from "../src/mesh-worker-execution.mjs";
 import { loadWorkspace } from "../src/work.mjs";
 import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedPushExec } from "./support/mesh-worker-exec-fixture.mjs";
 import { createFakeWhich, createFakePtySpawn } from "./support/mesh-worker-terminal-fixture.mjs";
@@ -40,6 +40,7 @@ export const meshWorkerDriverInteractivePtyTests = [
       assert.equal(spawnCalls[0].args[2], "--append-system-prompt", "the --append-system-prompt token follows the permission-mode pair");
       assert.equal(typeof spawnCalls[0].args[3], "string", "the appended system-prompt instruction is a string arg");
       assert.ok(spawnCalls[0].args[3].includes(NEEDS_INPUT_SENTINEL), "the appended system-prompt instruction embeds the NEEDS_INPUT sentinel");
+      assert.ok(spawnCalls[0].args[3].includes(DIRECTIVE_COMPLETE_SENTINEL), "the appended system-prompt instruction embeds the DIRECTIVE_COMPLETE sentinel (the declared-completion producer)");
       assert.equal(result.outcome, "done", "a clean exit resolves done");
     },
   },

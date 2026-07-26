@@ -939,6 +939,34 @@ line ${NEEDS_INPUT_SENTINEL} on its own line, with nothing else on that line, th
 stop. Only use this for a real, blocking judgment call; keep working through every
 task you can complete confidently without it.`;
 
+// DIRECTIVE_COMPLETE — the DECLARED-completion sentinel pair (m42 follow-up,
+// operator-verified truncation 2026-07-26). "end_turn + transcript silence" is a
+// GUESS about completion, and every guess so far has truncated a live run (the ~3s
+// window killed `/aof:continue 18` at 14.7 min mid-build; the 5-minute window killed
+// the SAME milestone's next run the following day — background developer agents are
+// routinely quiet for longer than any fixed window). The honest signal is the model
+// DECLARING completion, exactly like NEEDS_INPUT already declares a blocking
+// question: a producer instruction on the worker launch, a detector on the
+// transcript's final turn. A declared outcome settles fast; an UNDECLARED end_turn
+// is only a fallback, and has to out-wait the long idle window below. Same
+// no-`comment-sequence` constraint as NEEDS_INPUT_INSTRUCTION (the
+// acd-worker-driver-no-headless-print comment-stripper).
+export const DIRECTIVE_COMPLETE_SENTINEL = "AOF_DIRECTIVE_COMPLETE";
+
+export const DIRECTIVE_COMPLETE_INSTRUCTION = `When the directive you were given is FULLY complete — every agent you spawned has
+finished and reported back, statuses are updated and the work is recorded — end your
+final message with the exact line ${DIRECTIVE_COMPLETE_SENTINEL} on its own line,
+with nothing else on that line. Print it only when nothing remains in flight: never
+while a spawned agent is still working, and never as a progress update. If you stop
+for a blocking question instead, use ${NEEDS_INPUT_SENTINEL} as instructed and do
+not print ${DIRECTIVE_COMPLETE_SENTINEL}.`;
+
+// The ONE worker-session system-prompt payload: both producers, appended as a single
+// `--append-system-prompt` (two flags would override each other in claude's CLI).
+export const WORKER_SESSION_INSTRUCTION = `${NEEDS_INPUT_INSTRUCTION}
+
+${DIRECTIVE_COMPLETE_INSTRUCTION}`;
+
 // defaultWatchTranscriptSessionId({ cwd, env, signal, maxWaitMs }) => Promise<string|null>
 // — the REAL production transcript-dir watch (ADR-013 amendment). Registers its
 // `signal`-abort listener SYNCHRONOUSLY, before any async fs call ever runs, so a
@@ -1051,31 +1079,43 @@ function containsNeedsInputSentinel(buffer) {
 // omits it or injects a double and no test run reads a real transcript.
 const COMPLETION_POLL_MS = 1500;
 
-// COMPLETION_IDLE_MS — VERIFICATION (premature-done, live soak 2026-07-25). `end_turn`
-// means "the MODEL finished speaking", NOT "the WORK is finished". This watch originally
-// settled after the outcome was seen on two consecutive stable-mtime ticks — ~3 SECONDS of
-// transcript silence — which is far below the quiet period a real autonomous run produces.
-// MEASURED: a `/aof:continue 18` whose agent had just said "Waiting for 3 background agents
-// to finish" ended its turn, went quiet while those agents worked, and was declared `done`
-// at 14.7 min — the PTY killed and a PARTIAL diff committed and pushed mid-flight.
+// COMPLETION_IDLE_MS — VERIFICATION (premature-done, live soak 2026-07-25; REVISED
+// 2026-07-26 after the SAME truncation recurred at 5 minutes). `end_turn` means "the
+// MODEL finished speaking", NOT "the WORK is finished". The ~3s window truncated
+// `/aof:continue 18` at 14.7 min (measured); the 5-minute window truncated the same
+// milestone's next run a day later — a background story build is routinely quiet for
+// longer than ANY comfortable fixed window, so the window is not the fix. Two
+// structural changes replace the constant-tuning:
 //
-// A finished turn that is merely WAITING resumes the moment its background work reports
-// back, so the transcript moves again. The distinguishing signal is therefore the LENGTH of
-// the silence, and it must be far longer than a background build's quiet stretch. A settled
-// outcome must now hold with an UNCHANGED transcript mtime for this whole window before the
-// session is called finished. This trades a few minutes of latency on a genuinely-complete
-// run for never truncating a live one — the correct direction (a premature `done` destroys
-// work and reports success; a late `done` only costs time). Injectable, so a test drives it
-// on a controllable clock rather than a wall-clock wait.
-export const COMPLETION_IDLE_MS = 5 * 60 * 1000;
+//   1. The idle clock now reads the WHOLE SESSION TREE — the parent transcript AND
+//      every file under `<projectsDir>/<sessionId>/` (work-observe.mjs's own
+//      subagents layout) — so a parked parent whose background agents are still
+//      writing THEIR transcripts is never "quiet" at all.
+//   2. A DECLARED completion (the DIRECTIVE_COMPLETE sentinel above, mirrored on
+//      NEEDS_INPUT's producer/detector pair) settles after the SHORT confirmation
+//      window below — the model said it finished; waiting minutes adds nothing.
+//
+// This long window remains ONLY as the undeclared-outcome fallback (a session that
+// finished but forgot the sentinel), aligned with the system's standing 15-minute
+// staleness constant (DEFAULT_ASSIGNMENT_HEARTBEAT_STALE_MS). A late `done` costs
+// time; a premature `done` destroys work and reports success. Injectable clock, so
+// tests never wall-wait.
+export const COMPLETION_IDLE_MS = 15 * 60 * 1000;
 
-// readTranscriptTerminalOutcome(file) => { outcome } | null — the transcript's SETTLED
-// outcome, or null while the session is still working. Scans the jsonl from the end for
-// the last assistant record: `stop_reason: "end_turn"` means the turn is DONE (the
-// autonomous session has nothing left and is waiting) — `needs-input` if that turn's
-// own text carries the sentinel, else `done`. Any other stop_reason (`tool_use`, or a
-// not-yet-terminated streaming turn) is "still working" -> null. NEVER throws (an
-// absent or half-written file is simply "nothing settled yet").
+// The declared-outcome confirmation window: long enough to survive a transcript
+// flush mid-write, nowhere near a wait a human would notice.
+export const DECLARED_COMPLETION_IDLE_MS = 10 * 1000;
+
+// readTranscriptTerminalOutcome(file) => { outcome, declared } | null — the
+// transcript's SETTLED outcome, or null while the session is still working. Scans the
+// jsonl from the end for the last assistant record: `stop_reason: "end_turn"` means
+// the turn is DONE (the autonomous session has nothing left and is waiting) —
+// `needs-input` if that turn's own text carries the sentinel, else `done`. `declared`
+// is true when the finished turn EXPLICITLY declared its outcome (either sentinel) —
+// the watch settles a declared outcome fast, and makes an undeclared one out-wait the
+// long idle window. Any other stop_reason (`tool_use`, or a not-yet-terminated
+// streaming turn) is "still working" -> null. NEVER throws (an absent or half-written
+// file is simply "nothing settled yet").
 async function readTranscriptTerminalOutcome(file) {
   let text;
   try {
@@ -1107,29 +1147,75 @@ async function readTranscriptTerminalOutcome(file) {
       } else if (typeof content === "string") {
         body = content;
       }
-      const needsInput = body.split("\n").some((l) => l.trim() === NEEDS_INPUT_SENTINEL);
-      return { outcome: needsInput ? "needs-input" : "done" };
+      const lines2 = body.split("\n").map((l) => l.trim());
+      const needsInput = lines2.some((l) => l === NEEDS_INPUT_SENTINEL);
+      if (needsInput) return { outcome: "needs-input", declared: true };
+      const declaredComplete = lines2.some((l) => l === DIRECTIVE_COMPLETE_SENTINEL);
+      return { outcome: "done", declared: declaredComplete };
     }
   }
   return null;
 }
 
-// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs, idleMs, now }) =>
-// Promise<{ outcome }|null> — polls the session's transcript for the settled outcome
-// above and fires ONLY once that outcome has held with an UNCHANGED transcript mtime for
-// the WHOLE `idleMs` window (COMPLETION_IDLE_MS — see its note: a turn that merely ended
-// while waiting on background work resumes and moves the file again, so the length of the
-// silence is the signal; the pre-fix ~3s confirmation truncated a live run mid-flight).
-// Resolves null on abort (the driver's finish() aborts it via the SAME watchController the
-// session-id watch uses, the moment any outcome is known first) — never throws.
+// latestSessionActivityMtimeMs(projectsDir, sessionId) — the newest mtime across the
+// session's WHOLE transcript tree: the parent `<sessionId>.jsonl` plus every file
+// under `<projectsDir>/<sessionId>/` (recursively — work-observe.mjs reads subagent
+// transcripts from `<sessionId>/subagents/*.jsonl`, and this must never re-guess
+// that layout narrowly: any file claude writes under the session's own directory is
+// session activity). Returns -1 when nothing exists. NEVER throws — an absent file
+// or directory is simply "no activity there".
+async function latestSessionActivityMtimeMs(projectsDir, sessionId) {
+  const mtimeOf = async (p) => {
+    try {
+      return (await stat(p)).mtimeMs;
+    } catch {
+      return -1;
+    }
+  };
+  let latest = await mtimeOf(path.join(projectsDir, `${sessionId}.jsonl`));
+  const walk = async (dir) => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // absent dir — a session with no subagents yet
+    }
+    for (const entry of entries) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(p);
+      } else {
+        const m = await mtimeOf(p);
+        if (m > latest) latest = m;
+      }
+    }
+  };
+  await walk(path.join(projectsDir, sessionId));
+  return latest;
+}
+
+// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs, idleMs,
+// declaredIdleMs, now }) => Promise<{ outcome, declared }|null> — polls the session's
+// transcript for the settled outcome above and fires only once that outcome has held
+// across a quiet stretch of the WHOLE SESSION TREE (latestSessionActivityMtimeMs —
+// parent transcript + subagent transcripts; a parked parent over live background
+// agents is NOT quiet). The stretch a settled outcome must hold for depends on how it
+// settled: a DECLARED outcome (either sentinel in the finished turn) confirms after
+// the short `declaredIdleMs`; an undeclared `end_turn` is a guess and must out-wait
+// the long `idleMs` fallback window (see COMPLETION_IDLE_MS's note for the two live
+// truncations that shaped this). Resolves null on abort (the driver's finish() aborts
+// it via the SAME watchController the session-id watch uses, the moment any outcome
+// is known first) — never throws.
 export async function defaultWatchTranscriptCompletion({
   cwd, env, sessionId, signal,
   pollMs = COMPLETION_POLL_MS,
   idleMs = COMPLETION_IDLE_MS,
+  declaredIdleMs = DECLARED_COMPLETION_IDLE_MS,
   now = () => Date.now(),
 } = {}) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return null;
-  const file = path.join(claudeProjectsDir({ cwd, env }), `${sessionId}.jsonl`);
+  const projectsDir = claudeProjectsDir({ cwd, env });
+  const file = path.join(projectsDir, `${sessionId}.jsonl`);
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
@@ -1155,23 +1241,23 @@ export async function defaultWatchTranscriptCompletion({
 
     const tick = async () => {
       if (settled) return;
-      let mtimeMs = -1;
-      try {
-        mtimeMs = (await stat(file)).mtimeMs;
-      } catch {
-        mtimeMs = -1;
-      }
+      // The quiet-stretch clock reads the WHOLE session tree, never just the parent
+      // file — a parked parent whose background agents are still writing THEIR
+      // transcripts is a session mid-work, not a quiet one (the exact truncation
+      // measured live on `/aof:continue 18`, twice).
+      const mtimeMs = await latestSessionActivityMtimeMs(projectsDir, sessionId);
       const outcome = await readTranscriptTerminalOutcome(file);
-      // ANY movement in the transcript restarts the quiet stretch — the session is alive
-      // (a background agent reported back, a new turn began, a tool ran).
+      // ANY movement anywhere in the tree restarts the quiet stretch — the session is
+      // alive (a background agent wrote, a new turn began, a tool ran).
       if (mtimeMs !== lastMtimeMs) {
         lastMtimeMs = mtimeMs;
         stableSince = now();
       }
-      // Fire only once a settled outcome has held across a FULLY QUIET `idleMs` window —
-      // proof the session is finished, not merely between turns or waiting on background
-      // work (the premature-done defect this window exists to close).
-      if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= idleMs) {
+      // A DECLARED outcome (the model printed its sentinel) confirms after the short
+      // window; an undeclared `end_turn` is a guess and must out-wait the long
+      // fallback window (the premature-done defect both windows exist to close).
+      const requiredIdleMs = outcome?.declared === true ? declaredIdleMs : idleMs;
+      if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= requiredIdleMs) {
         settleWatch(outcome);
         return;
       }
@@ -1227,7 +1313,7 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
   // from the one-time folder-TRUST dialog (cleared pre-spawn by ensureWorktreeTrusted
   // below) — trust fires BEFORE the system prompt is read, so no in-session mode can
   // catch it.
-  const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];
+  const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", WORKER_SESSION_INSTRUCTION];
   const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
   return { bin, args, env: sessionEnv, providerId };
 }
