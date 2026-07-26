@@ -32,7 +32,8 @@ import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
 import { aofVersion } from "./commands/mesh-identity.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
 import { listItems, loadWorkspace } from "./work.mjs";
-import { publishGlobalWorkSnapshot, workspaceIdFor, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
+import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
@@ -130,7 +131,7 @@ function resolveNow(options = {}) {
 //     never guesses, never throws itself (FAILURE-ISOLATED, the same discipline every
 //     other launcher collaborator keeps).
 export function createResolveWorkspaceCloneUrl(ws, options = {}) {
-  const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+  const ownWorkspaceId = resolveWorkspaceId(ws);
   return async function resolveWorkspaceCloneUrl(workspaceId) {
     if (workspaceId === ownWorkspaceId) {
       return resolveCloneUrl(ws);
@@ -261,7 +262,7 @@ function identityFromConfig(config, options) {
 // NEVER reads a SIBLING (neither-own-nor-launch) workspace's identity — the
 // structural "no cross-org borrow" ADR-011 invariant #2 / SECURITY T12 pins.
 export function createResolveWorkspaceAppIdentity(ws, options = {}) {
-  const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+  const ownWorkspaceId = resolveWorkspaceId(ws);
   return async function resolveWorkspaceAppIdentity(workspaceId) {
     if (workspaceId === ownWorkspaceId) {
       return identityFromConfig(ws.config ?? {}, { ...options, allowEnvOverride: true });
@@ -327,7 +328,7 @@ function resolveAggregationWorkspaces(ws, registryResult) {
     seen.add(key);
     workspaces.push({ workDir, workspaceId });
   };
-  addWorkspace(ws.workDir, ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir));
+  addWorkspace(ws.workDir, resolveWorkspaceId(ws));
   if (registryResult.ok) {
     for (const entry of registryResult.workspaces) addWorkspace(entry.workDir, entry.workspaceId);
   }
@@ -641,7 +642,7 @@ export async function startLauncher(ws, options = {}) {
   // explicit config.mesh.workspaceId) — never a bare `?? null`, which would land the
   // worker's streamed rows under a phantom "null" workspace distinct from every other
   // write path for this same workspace.
-  const workspaceId = config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+  const workspaceId = resolveWorkspaceId(ws);
   let streamServer = null;
   let streamClient = null;
   // VERIFICATION (live soak 2026-07-25) — the control-side write mint, hoisted to this

@@ -123,7 +123,8 @@ import { claudeProjectsDir } from "./work-observe.mjs";
 import { startRun, completeRun } from "./run-store.mjs";
 import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
-import { openGlobalWorkProjectionStore, workspaceIdFor } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
 import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./mesh-presence.mjs";
 // milestone 38 / story 05 (ADR-013) — the interactive-`claude`-PTY driver reuses the
@@ -1913,7 +1914,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // the cloned-this-run case AND a checkout already present from a prior run
     // (workerHasRepo can pass without cloning). The launcher's own-workspace assignment
     // is untouched: its projectRoot already IS its repo and it has no scoped clone.
-    const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+    const ownWorkspaceId = resolveWorkspaceId(ws);
     if (workspaceId !== ownWorkspaceId) {
       const checkoutPath = meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {});
       try {
@@ -2193,7 +2194,7 @@ export function createMeshRecoveryPushHandler(options = {}) {
       // Repoint to the assignment's OWN checkout (own workspace vs scoped foreign clone),
       // the SAME resolution the driver performs before it ever touches a worktree.
       let ws = await loadWs();
-      const ownWorkspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot ?? ws.workDir);
+      const ownWorkspaceId = resolveWorkspaceId(ws);
       if (workspaceId != null && workspaceId !== ownWorkspaceId) {
         const checkoutPath = meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {});
         ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });

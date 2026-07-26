@@ -1356,6 +1356,9 @@ import { archTests as acdNoNewSilentCatchTests } from "../test/arch/acd-no-new-s
 // m42 wave (b) / TECH_DEBT item 7 — the PTY liveness probe: a child that dies
 // without an exit event settles failed/agent_died instead of running forever.
 import { meshWorkerLivenessTests } from "../test/mesh-worker-liveness.test.mjs";
+// m42 wave (b) / TECH_DEBT item 4 — workspace identity has ONE home
+// (workspace-identity.mjs); no hand-spelled `?? workspaceIdFor(...)` fallback.
+import { archTests as acdWorkspaceIdentitySingleHomeTests } from "../test/arch/acd-workspace-identity-single-home.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -2017,6 +2020,7 @@ export const tests = [
   ...fsTempHygieneTests,
   ...acdNoNewSilentCatchTests,
   ...meshWorkerLivenessTests,
+  ...acdWorkspaceIdentitySingleHomeTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,

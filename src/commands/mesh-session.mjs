@@ -21,7 +21,7 @@ import { loadWorkspace } from "../work.mjs";
 import { resolveInstallSalt } from "./mesh-identity.mjs";
 import { deriveNodeId, sidecarPathFor } from "../node-identity.mjs";
 import { startSession, pingSession, endSession } from "../mesh-session.mjs";
-import { workspaceIdFor } from "../global-work-store.mjs";
+import { resolveWorkspaceId } from "../workspace-identity.mjs";
 
 // A calm coded refusal — the ONLY error shape this module throws for an expected
 // input problem (never a stack trace).
@@ -229,7 +229,7 @@ export async function meshSessionCommand(args, ctx = {}) {
       // global-work-store.mjs) — LOAD-BEARING, not cosmetic: a record keyed on a
       // non-canonical id would be invisible to ADR-003 presence aggregation and
       // would break ADR-004 run↔session subsumption.
-      if (workspaceId == null) workspaceId = cfg?.mesh?.workspaceId ?? workspaceIdFor(ws.projectRoot);
+      if (workspaceId == null) workspaceId = resolveWorkspaceId({ config: cfg, projectRoot: ws.projectRoot });
       // `repo` mirrors the SAME `name` field the workspace registry/descriptor
       // stores (global-work-store.mjs publishWorkspaceSnapshot, global-node-
       // registry.mjs assembleGlobalRegistrySnapshot: both read `config.name`).

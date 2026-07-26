@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
-import { workspaceIdFor } from "./global-work-store.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 // milestone 38 / story 00 / task 08 (finding F6) — `readPresenceRecord` +
 // `assemblePresenceRecord` are the SAME seam mesh:status's diskPresence read
@@ -44,7 +44,7 @@ export async function assembleGlobalRegistrySnapshot(workspace, options = {}) {
   const paths = options.paths ?? globalMeshPaths(options);
   const now = options.now ?? new Date().toISOString();
   const config = workspace.config ?? {};
-  const workspaceId = config?.mesh?.workspaceId ?? workspaceIdFor(workspace.projectRoot);
+  const workspaceId = resolveWorkspaceId(workspace);
   const nodeRecords = await readNodeRecords(workspace);
   const presenceRecords = await readPresenceRecords(workspace);
   const fabricPeers = Array.isArray(options.fabricPeers)

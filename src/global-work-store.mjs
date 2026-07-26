@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
@@ -30,10 +29,12 @@ export function globalStoreError(message, code, status = 500, extra = {}) {
   return error;
 }
 
-export function workspaceIdFor(projectRoot) {
-  const resolved = path.resolve(projectRoot ?? "");
-  return createHash("sha256").update(resolved.toLowerCase()).digest("hex").slice(0, 16);
-}
+// m42 wave (b) / item 4 — the derivation moved to its ONE home
+// (workspace-identity.mjs); re-exported here so every existing import keeps
+// working byte-identically. New callers use resolveWorkspaceId (the one
+// precedence), never a hand-spelled `?? workspaceIdFor(...)` fallback.
+import { workspaceIdFromPath, resolveWorkspaceId } from "./workspace-identity.mjs";
+export const workspaceIdFor = workspaceIdFromPath;
 
 export async function openGlobalWorkProjectionStore(options = {}) {
   const paths = options.paths ?? globalMeshPaths(options);
@@ -285,7 +286,7 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
   const now = options.now ?? new Date().toISOString();
   const projectRoot = path.resolve(workspace.projectRoot);
   const workDir = path.resolve(workspace.workDir);
-  const workspaceId = options.workspaceId ?? workspace.config?.mesh?.workspaceId ?? workspaceIdFor(projectRoot);
+  const workspaceId = resolveWorkspaceId(workspace, { override: options.workspaceId });
   // review fix P2.10: readWorkspaceProjectionItems(workspace) takes ONE argument
   // (its own doc-comment: "signature UNCHANGED") — the dead `{ now }` 2nd arg was
   // never read by the function and is dropped here to match.
@@ -354,7 +355,7 @@ export function recordWorkspaceProjectionError(store, workspace, error, options 
   const now = options.now ?? new Date().toISOString();
   const projectRoot = path.resolve(workspace.projectRoot);
   const workDir = path.resolve(workspace.workDir);
-  const workspaceId = options.workspaceId ?? workspace.config?.mesh?.workspaceId ?? workspaceIdFor(projectRoot);
+  const workspaceId = resolveWorkspaceId(workspace, { override: options.workspaceId });
   const sourcePath = normalizeSourcePath(options.sourcePath ?? workDir);
 
   store.db.prepare(`

@@ -12,7 +12,8 @@
 // Arbitration is a plain store query — no lease/issuance/sync module, no git read
 // (ADR-003 / acd-assignment-arbitration-store-not-git). Every miss is a CODED, loud
 // refusal (34/ADR-008) that mints nothing; nothing here silently returns.
-import { openGlobalWorkProjectionStore, workspaceIdFor } from "../global-work-store.mjs";
+import { openGlobalWorkProjectionStore } from "../global-work-store.mjs";
+import { resolveWorkspaceId } from "../workspace-identity.mjs";
 import { globalMeshPaths } from "../workspace.mjs";
 import { findWork } from "../work.mjs";
 import {
@@ -92,7 +93,7 @@ function resolveTarget(store, workspaceId, nodeId) {
 // workspaceId together. Exact resolution only (findWork's ref-based match, work.mjs);
 // an unresolvable/typo'd ref refuses coded `ref-not-found`, minting nothing.
 async function resolveItem(workspace) {
-  const workspaceId = workspace.config?.mesh?.workspaceId ?? workspaceIdFor(workspace.projectRoot);
+  const workspaceId = resolveWorkspaceId(workspace);
   return { workspaceId };
 }
 

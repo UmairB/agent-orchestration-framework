@@ -31,7 +31,8 @@
 // still fails loud and coded (`assignment-repo-unavailable`), per ADR-005.
 import { execFile } from "node:child_process";
 import { readJson, writeText } from "../fs.mjs";
-import { publishGlobalWorkSnapshot, workspaceIdFor } from "../global-work-publisher.mjs";
+import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
+import { resolveWorkspaceId } from "../workspace-identity.mjs";
 import { isWellFormedCloneUrl } from "../mesh-worker-execution.mjs";
 
 function isPlainObject(value) {
@@ -166,7 +167,7 @@ function withRepoMarker(ws, { workspaceId, now, cloneUrl }) {
 export async function publishRepoToMesh(ws, ctx = {}) {
   const now = ctx.now ?? new Date().toISOString();
   const projectRoot = ws.projectRoot;
-  const workspaceId = ws.config?.mesh?.workspaceId ?? workspaceIdFor(projectRoot);
+  const workspaceId = resolveWorkspaceId(ws);
   const configPath = ws.configPath;
 
   const { cloneUrl } = await writeRepoPublishedMarker({

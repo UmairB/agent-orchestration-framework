@@ -15,16 +15,16 @@
 // visibility — the board would still be blind for the entire duration of a run, which is
 // exactly the window an operator is watching. The worker is the authority on its own work;
 // the projection is how that authority reaches this node.
-import { openGlobalWorkProjectionStore, workspaceIdFor, readWorkspaceItems, readWorkItemDoc, readWorkItemRuns } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore, readWorkspaceItems, readWorkItemDoc, readWorkItemRuns } from "./global-work-store.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 
 // resolveStreamWorkspaceId(workspace, options) — the ONE id derivation all three
 // readers in this module share (the same precedence readWorkerItems always used):
 // an explicit option, else the workspace's pinned mesh id, else the path-derived id.
 function resolveStreamWorkspaceId(workspace, options = {}) {
-  return options.workspaceId
-    ?? workspace?.config?.mesh?.workspaceId
-    ?? workspaceIdFor(workspace?.projectRoot ?? workspace?.workDir);
+  // m42 item 4: the ONE precedence (workspace-identity.mjs) — no local fallback.
+  return resolveWorkspaceId(workspace, { override: options.workspaceId });
 }
 
 // withProjectionStore(workspace, options, read) — open the projection, hand

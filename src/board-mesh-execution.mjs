@@ -22,7 +22,8 @@
 // It is a READ-ONLY overlay over rows the board already produces: it never writes, never
 // mutates a record doc, and any fault (no store, an unreadable projection, a workspace
 // that was never published) degrades to step 3 rather than failing the board.
-import { openGlobalWorkProjectionStore, workspaceIdFor } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { isActiveAssignmentState } from "./assignment-record.mjs";
 import { readItemBranch } from "./mesh-assignment-directive.mjs";
@@ -42,9 +43,7 @@ export async function readExecutionOverlay(workspace, options = {}) {
   const openStore = options.openStore ?? openGlobalWorkProjectionStore;
   let store = null;
   try {
-    const workspaceId = options.workspaceId
-      ?? workspace?.config?.mesh?.workspaceId
-      ?? workspaceIdFor(workspace?.projectRoot ?? workspace?.workDir);
+    const workspaceId = resolveWorkspaceId(workspace, { override: options.workspaceId });
     if (workspaceId == null) return overlay;
     store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
 
