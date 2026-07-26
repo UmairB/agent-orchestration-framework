@@ -34,6 +34,8 @@ export function globalStoreError(message, code, status = 500, extra = {}) {
 // working byte-identically. New callers use resolveWorkspaceId (the one
 // precedence), never a hand-spelled `?? workspaceIdFor(...)` fallback.
 import { workspaceIdFromPath, resolveWorkspaceId } from "./workspace-identity.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 export const workspaceIdFor = workspaceIdFromPath;
 
 export async function openGlobalWorkProjectionStore(options = {}) {
@@ -65,9 +67,9 @@ export async function openGlobalWorkProjectionStore(options = {}) {
   } catch (error) {
     try {
       db.close();
-    } catch {
+    } catch (error) {
       // Closing a failed open is best-effort; the original error is the contract.
-    }
+      reportDegrade("global-work-store", error); }
     throw error;
   }
 }
@@ -562,10 +564,10 @@ export function readWorkItemRuns(store, workspaceId, ref) {
   for (const row of rows) {
     try {
       out.push({ record: JSON.parse(row.record_json), nodeId: row.node_id, updatedAt: row.updated_at });
-    } catch {
+    } catch (error) {
       // Torn/garbage record_json: skip the one bad row, keep the rest — the same
       // tolerance run-store's readRuns applies to a torn file on disk.
-    }
+      reportDegrade("global-work-store", error); }
   }
   return out;
 }

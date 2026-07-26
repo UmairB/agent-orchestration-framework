@@ -22,6 +22,8 @@ import { resolveInstallSalt } from "./mesh-identity.mjs";
 import { deriveNodeId, sidecarPathFor } from "../node-identity.mjs";
 import { startSession, pingSession, endSession } from "../mesh-session.mjs";
 import { resolveWorkspaceId } from "../workspace-identity.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "../degrade.mjs";
 
 // A calm coded refusal — the ONLY error shape this module throws for an expected
 // input problem (never a stack trace).
@@ -57,9 +59,9 @@ export function resolveSessionIdentity({ stdinText, env } = {}) {
       if (payload && typeof payload === "object") {
         return { source: "stdin", sessionId: payload.session_id ?? null, payload };
       }
-    } catch {
+    } catch (error) {
       // malformed JSON — fall through to the env channel.
-    }
+      reportDegrade("commands-mesh-session", error); }
   }
   const envSessionId = env?.CLAUDE_SESSION_ID;
   if (typeof envSessionId === "string" && envSessionId.length > 0) {

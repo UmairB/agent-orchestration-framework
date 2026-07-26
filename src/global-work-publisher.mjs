@@ -10,6 +10,8 @@ import {
   readWorkspaceContentRecords,
 } from "./global-work-store.mjs";
 import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // Re-exported so mesh-launcher.mjs (review fix P0.1/P1.7) can derive a workspace's
 // canonical id and read its CURRENT item-row set WITHOUT importing global-work-
@@ -100,9 +102,9 @@ export async function publishGlobalWorkSnapshot(workspace, ctx = {}) {
     } catch (error) {
       try {
         recordWorkspaceProjectionError(store, workspace, error, { now: ctx.now });
-      } catch {
+      } catch (error) {
         // Recording the projection failure is best-effort; the caller gets the warning.
-      }
+      reportDegrade("global-work-publisher", error); }
       return { published: false, warning: propagationWarning(error, paths) };
     } finally {
       store.close?.();

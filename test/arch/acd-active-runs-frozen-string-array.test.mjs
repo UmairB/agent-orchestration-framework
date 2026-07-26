@@ -260,8 +260,8 @@ export const archTests = [
       try {
         assert.deepEqual(
           Object.keys(record),
-          ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"],
-          "the producer emits the frozen five keys in ADR-001 order",
+          ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion", "buildId"],
+          "the producer emits the frozen keys in ADR-001 order (buildId is the m42/item-1 sixth additive key)",
         );
         assert.ok(record.activeRuns.length > 0, "the producer genuinely emitted a run (an empty array would make the element check vacuous)");
         for (const run of record.activeRuns) {

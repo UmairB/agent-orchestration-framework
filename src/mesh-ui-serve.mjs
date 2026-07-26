@@ -89,6 +89,8 @@ import { isAssignmentPhase } from "./mesh-assignment-directive.mjs";
 // genuinely stands up a mirror even before any relay subscriber is wired to it.
 import { WebSocketServer } from "ws";
 import { createTerminalMirror } from "./mesh-terminal-mirror.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The default fleet port (task 00, DEV flag): 4181 — the next free port directly
 // above the board (4180), distinct from all of assets-ui 4177/4178 + board 4180
@@ -504,9 +506,9 @@ export async function serveMeshUi({
     if (pathname !== "/ws/terminal-view") {
       try {
         socket.destroy();
-      } catch {
+      } catch (error) {
         /* the socket may already be closed — refusing an upgrade never crashes */
-      }
+      reportDegrade("mesh-ui-serve", error); }
       return;
     }
     const nodeId = searchParams.get("nodeId");
@@ -518,9 +520,9 @@ export async function serveMeshUi({
     if (!nodeId || !sessionId) {
       try {
         socket.destroy();
-      } catch {
+      } catch (error) {
         /* already closed */
-      }
+      reportDegrade("mesh-ui-serve", error); }
       return;
     }
     terminalViewWss.handleUpgrade(request, socket, head, (ws) => {
@@ -546,16 +548,16 @@ export async function serveMeshUi({
         if (meta?.end === true) {
           try {
             ws.close();
-          } catch {
+          } catch (error) {
             /* the socket may already be closing */
-          }
+      reportDegrade("mesh-ui-serve", error); }
           return;
         }
         try {
           ws.send(bytes);
-        } catch {
+        } catch (error) {
           /* the socket may already be closing */
-        }
+      reportDegrade("mesh-ui-serve", error); }
       });
       ws.on("close", unsubscribe);
       ws.on("error", unsubscribe);

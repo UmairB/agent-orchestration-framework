@@ -34,6 +34,8 @@ import { existsSync } from "node:fs";
 // (closing 19/R2a). run-store finally couples to fs.mjs like its 15 peers; the lone
 // non-consumer the graph flagged.
 import { writeText } from "./fs.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // ----------------------------------------------------------- error helper ----
 
@@ -164,9 +166,9 @@ async function countRunFiles(item) {
       try {
         const nested = await readdir(path.join(runsDir(item), entry.name));
         count += nested.filter((name) => name.endsWith(".json")).length;
-      } catch {
+      } catch (error) {
         // An unreadable node subdir counts as empty (absence is benign).
-      }
+      reportDegrade("run-store", error); }
       continue;
     }
     if (entry.name.endsWith(".json")) count += 1;
@@ -317,9 +319,9 @@ export async function readRuns(item) {
   const readInto = async (filePath) => {
     try {
       records.push(normalizeRecord(JSON.parse(await readFile(filePath, "utf8"))));
-    } catch {
+    } catch (error) {
       // Torn-file tolerance: skip the one bad entry, keep the rest of the union.
-    }
+      reportDegrade("run-store", error); }
   };
   for (const entry of entries) {
     if (entry.isDirectory()) {

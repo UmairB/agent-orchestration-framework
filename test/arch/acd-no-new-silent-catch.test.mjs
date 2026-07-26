@@ -24,38 +24,15 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const srcRoot = path.join(repoRoot, "src");
 
-// The 2026-07-26 baseline: 94 sites across 29 files. SHRINK-ONLY — lower a count
-// (or remove a line) when its file is swept; never raise one, never add a line.
+// THE SWEEP IS DONE (2026-07-26, same day the ratchet armed): the 2026-07-26
+// baseline of 94 sites across 29 files was swept to coded degrade events
+// (degrade.mjs's reportDegrade — throttled, never-throwing, into the mesh-log
+// sink family). What remains is the SANCTIONED FLOOR — the reporter and the sink
+// themselves, whose faults have nowhere lower to report. This gate is now an
+// outright ban everywhere else: any new silent catch in src/ fails the build.
 const BASELINE = {
-  "asset-references.mjs": 3,
-  "board-mesh-execution.mjs": 1,
-  "board-worker-stream.mjs": 1,
-  "build-info.mjs": 1,
-  "claude-trust.mjs": 1,
-  "commands/mesh-join.mjs": 1,
-  "commands/mesh-session.mjs": 1,
-  "config-inspect.mjs": 6,
-  "control-stream-server.mjs": 5,
-  "fs.mjs": 1,
-  "global-node-registry.mjs": 1,
-  "global-work-publisher.mjs": 1,
-  "global-work-store.mjs": 2,
-  "integrations/routing.mjs": 1,
-  "mesh-launcher.mjs": 5,
+  "degrade.mjs": 1,
   "mesh-log.mjs": 1,
-  "mesh-relay-client.mjs": 5,
-  "mesh-relay.mjs": 6,
-  "mesh-terminal-mirror.mjs": 10,
-  "mesh-terminal-relay-bridge.mjs": 6,
-  "mesh-ui-serve.mjs": 3,
-  "mesh-worker-execution.mjs": 14,
-  "notion/cli.mjs": 1,
-  "run-store.mjs": 2,
-  "terminal-providers.mjs": 1,
-  "terminal-sessions.mjs": 1,
-  "terminal-ws.mjs": 9,
-  "tool-store.mjs": 1,
-  "worker-stream-client.mjs": 3,
 };
 
 function walk(dir, out = []) {

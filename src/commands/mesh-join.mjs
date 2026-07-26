@@ -24,6 +24,8 @@ import { resolvePeers } from "../mesh-fabric.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
 import { publishNodeRecord } from "../mesh-store.mjs";
 import { aofVersion } from "./mesh-identity.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "../degrade.mjs";
 
 // A structured command error the mesh face renders as ONE { ok:false, error, code }
 // envelope (the property is assigned, not an object-literal field).
@@ -230,9 +232,9 @@ export const meshJoinCommand = {
     if (controlNode != null && controlNodeRecord != null) {
       try {
         await publishNodeRecord(ws, controlNode, controlNodeRecord);
-      } catch {
+      } catch (error) {
         // never let a local-cache write block the join itself.
-      }
+      reportDegrade("commands-mesh-join", error); }
     }
 
     const configPath = await writeGlobalMeshConfig({

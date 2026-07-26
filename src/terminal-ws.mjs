@@ -26,6 +26,8 @@ import { resolveHeadroomLaunch } from "./headroom.mjs";
 // keys on, so a test flips ONE seam and both the asset base AND the node-pty
 // loader branch move in lock-step.
 import { isPackaged } from "./asset-base.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The single terminal pathname (ADR-001). Any other upgrade pathname is destroyed.
 const TERMINAL_PATH = "/ws/terminal";
@@ -255,9 +257,9 @@ async function handleConnection(ws, request, { projectDir, spawn, baseEnv, which
   // be migrated into a native terminal, so the pid is the handle to it.
   try {
     console.log(`terminal: ${provider.id} started · pid=${term?.pid ?? "?"} · ref=${ref || "-"} · cwd=${cwd}`);
-  } catch {
+  } catch (error) {
     /* logging must never break the session */
-  }
+      reportDegrade("terminal-ws", error); }
 
   // Persist the running session to .aof/terminal-sessions.json (best-effort, when
   // enabled) so the live PTY is traceable from the host; dropped again when it ends.
@@ -279,18 +281,18 @@ function wireSession(ws, term, onEnd = () => {}) {
     ended = true;
     try {
       onEnd();
-    } catch {
+    } catch (error) {
       /* the end hook must never throw into the session */
-    }
+      reportDegrade("terminal-ws", error); }
   };
 
   // PTY → client: raw frames.
   const dataSub = term.onData((data) => {
     try {
       ws.send(data);
-    } catch {
+    } catch (error) {
       // socket already closing
-    }
+      reportDegrade("terminal-ws", error); }
   });
 
   // PTY exit → client: the {type:'exit', exitCode} control-frame.
@@ -307,30 +309,30 @@ function wireSession(ws, term, onEnd = () => {}) {
     if (control && control.type === "resize") {
       try {
         term.resize(toCols(control.cols), toRows(control.rows));
-      } catch {
+      } catch (error) {
         // already-exited guard (win32)
-      }
+      reportDegrade("terminal-ws", error); }
       return;
     }
     try {
       term.write(isBinary ? data : data.toString());
-    } catch {
+    } catch (error) {
       // already-exited guard (win32)
-    }
+      reportDegrade("terminal-ws", error); }
   });
 
   ws.on("close", () => {
     try {
       dataSub?.dispose?.();
       exitSub?.dispose?.();
-    } catch {
+    } catch (error) {
       /* no-op */
-    }
+      reportDegrade("terminal-ws", error); }
     try {
       term.kill();
-    } catch {
+    } catch (error) {
       // already-exited guard (win32)
-    }
+      reportDegrade("terminal-ws", error); }
     end();
   });
 }
@@ -359,17 +361,17 @@ function parseControl(data) {
 function sendControl(ws, payload) {
   try {
     ws.send(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
     // socket closed/closing — nothing to send
-  }
+      reportDegrade("terminal-ws", error); }
 }
 
 function safeClose(ws) {
   try {
     ws.close();
-  } catch {
+  } catch (error) {
     /* already closed */
-  }
+      reportDegrade("terminal-ws", error); }
 }
 
 function toCols(value) {

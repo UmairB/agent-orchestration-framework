@@ -40,6 +40,8 @@ import { resolveManagedBinary, toolDescriptors } from "./tool-store.mjs";
 import { delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 const VALID_KINDS = new Set(supportedResourceKinds());
 const VALID_GLOBAL_REF_KINDS = new Set(supportedGlobalRefKinds());
@@ -570,18 +572,18 @@ function defaultUvWhich(binary, platform = process.platform, pathValue = process
       const first = probe.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
       if (first) return first;
     }
-  } catch {
+  } catch (error) {
     // locator absent — fall through to the manual PATH scan.
-  }
+      reportDegrade("config-inspect", error); }
   const exeNames = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`, `${binary}.bat`, binary] : [binary];
   for (const dir of (pathValue ?? "").split(delimiter).filter(Boolean)) {
     for (const exe of exeNames) {
       const candidate = path.join(dir, exe);
       try {
         if (statSync(candidate).isFile()) return candidate;
-      } catch {
+      } catch (error) {
         // missing candidate — keep scanning.
-      }
+      reportDegrade("config-inspect", error); }
     }
   }
   return null;
@@ -948,9 +950,9 @@ function workflowIndexFor(localWorkflows, referencedWorkflows) {
         id: normalizeId(workflow.id),
         runtimes: Array.isArray(workflow.runtimes) && workflow.runtimes.length > 0 ? workflow.runtimes : supportedRuntimes()
       });
-    } catch {
+    } catch (error) {
       // Invalid ids are reported by validateWorkflow.
-    }
+      reportDegrade("config-inspect", error); }
   }
   return result;
 }
@@ -961,9 +963,9 @@ function workflowArgumentNames(workflow) {
     if (typeof arg?.name !== "string") continue;
     try {
       result.add(normalizeId(arg.name));
-    } catch {
+    } catch (error) {
       // Invalid argument names are reported by validateArguments.
-    }
+      reportDegrade("config-inspect", error); }
   }
   return result;
 }
@@ -1551,9 +1553,9 @@ async function resourceReferenceTexts(resource, baseDir, location) {
   if (resource.path) {
     try {
       result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, resource.path), "utf8"), runtimes: resourceRuntimes });
-    } catch {
+    } catch (error) {
       // Missing/unreadable primary files are reported by requireFile.
-    }
+      reportDegrade("config-inspect", error); }
   }
 
   for (const [runtime, override] of Object.entries(resource.overrides ?? {})) {
@@ -1584,9 +1586,9 @@ async function workflowReferenceTexts(workflow, baseDir, location) {
   if (workflow.path) {
     try {
       result.push({ pathName: `${location}.path`, text: await readFile(path.resolve(baseDir, workflow.path), "utf8"), runtimes });
-    } catch {
+    } catch (error) {
       // Missing/unreadable workflow files are reported by requireFile.
-    }
+      reportDegrade("config-inspect", error); }
   }
   return result;
 }

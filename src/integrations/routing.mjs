@@ -25,6 +25,8 @@
 import path from "node:path";
 import { readFileSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { recordDoc } from "../work.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "../degrade.mjs";
 
 // The descriptor file name (folder-rooted — a sibling of the record doc).
 export const INTEGRATIONS_FILE = ".integrations.json";
@@ -220,9 +222,9 @@ export function writeRouting(item, next) {
     // Clearing the whole descriptor removes the file (round-trips to "no routing").
     try {
       rmSync(filePath, { force: true });
-    } catch {
+    } catch (error) {
       // A best-effort remove of an absent file is a no-op.
-    }
+      reportDegrade("integrations-routing", error); }
     return {};
   }
   writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, "utf8");

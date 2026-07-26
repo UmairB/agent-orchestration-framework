@@ -23,6 +23,8 @@ import path from "node:path";
 import os from "node:os";
 import { existsSync, readdirSync } from "node:fs";
 import { descriptorFor } from "../tool-store.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "../degrade.mjs";
 
 // The default env-var NAME the token is read from when the config omits `tokenEnv`
 // (RESEARCH §A2 — Notion's own NOTION_API_TOKEN convention). The config's
@@ -106,9 +108,9 @@ export function resolveNtnLauncher(env = process.env) {
     for (const hash of readdirSync(npxRoot)) {
       candidates.push(path.join(npxRoot, hash, "node_modules", "ntn", "bin", "ntn"));
     }
-  } catch {
+  } catch (error) {
     // No npx cache — fine, the PATH lane may still resolve.
-  }
+      reportDegrade("notion-cli", error); }
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }

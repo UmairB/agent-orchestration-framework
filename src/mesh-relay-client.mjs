@@ -25,6 +25,8 @@
 //     real-socket behaviour is exercised by the @manual fleet spike (task 02), NOT
 //     @executable CI — so it stays a thin, injectable seam.
 import { WebSocket } from "ws";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The FROZEN presence signal kind (story 01's first envelope `kind`; m26 leasing is the
 // second). A single source so the publish path and the tests agree on the literal.
@@ -83,10 +85,12 @@ export async function pushPresenceSignal(relayClient, envelope) {
     // Each close is independently guarded so a half-built or already-closing handle can
     // never mask the push outcome.
     if (handle && typeof handle.close === "function") {
-      try { handle.close(); } catch { /* handle already closing — nothing to dispose */ }
+      try { handle.close(); } catch (error) { /* handle already closing — nothing to dispose */
+      reportDegrade("mesh-relay-client", error); }
     }
     if (typeof relayClient.close === "function") {
-      try { relayClient.close(); } catch { /* client already closing — nothing to dispose */ }
+      try { relayClient.close(); } catch (error) { /* client already closing — nothing to dispose */
+      reportDegrade("mesh-relay-client", error); }
     }
   }
   return { pushed: true, skipped: false };
@@ -147,13 +151,15 @@ export function createRelayClient(config, { timeoutMs = 3000 } = {}) {
         const timer = setTimeout(() => {
           if (!settled) {
             settled = true;
-            try { ws.close(); } catch { /* noop */ }
+            try { ws.close(); } catch (error) { /* noop */
+      reportDegrade("mesh-relay-client", error); }
             reject(new Error("relay connect: join-ack timeout"));
           }
         }, timeoutMs);
         ws.on("message", (data) => {
           let parsed = null;
-          try { parsed = JSON.parse(data.toString()); } catch { /* raw frame */ }
+          try { parsed = JSON.parse(data.toString()); } catch (error) { /* raw frame */
+      reportDegrade("mesh-relay-client", error); }
           if (parsed && parsed.type === "joined" && !settled) {
             settled = true;
             clearTimeout(timer);
@@ -207,7 +213,8 @@ export function createRelayClient(config, { timeoutMs = 3000 } = {}) {
 
     // Dispose the one-shot socket.
     close() {
-      try { socket?.close(); } catch { /* already closing */ }
+      try { socket?.close(); } catch (error) { /* already closing */
+      reportDegrade("mesh-relay-client", error); }
       socket = null;
     },
   };

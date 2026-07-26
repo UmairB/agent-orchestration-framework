@@ -19,6 +19,8 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import { isPackaged, sidecarAnchor } from "./asset-base.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 export const BUILD_ID_FILENAME = "BUILD_ID.json";
 
@@ -43,10 +45,10 @@ export function readBuildInfo({ env = process.env } = {}) {
       const raw = JSON.parse(readFileSync(path.join(sidecarAnchor(), BUILD_ID_FILENAME), "utf8"));
       if (typeof raw?.buildId === "string" && raw.buildId.length > 0) buildId = raw.buildId;
       if (typeof raw?.installedAt === "string" && raw.installedAt.length > 0) installedAt = raw.installedAt;
-    } catch {
+    } catch (error) {
       // Absent/corrupt stamp (an install that predates BUILD_ID.json): the
       // honest answer is "no build stamp", reported as such by buildInfoString.
-    }
+      reportDegrade("build-info", error); }
   }
   return { mode, buildId, installedAt };
 }

@@ -138,6 +138,8 @@ import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./m
 // spawn path or a re-implemented provider table.
 import { resolveProvider } from "./terminal-providers.mjs";
 import { createTerminalSpawn, loadNodePty } from "./terminal-ws.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -958,7 +960,8 @@ export async function defaultWatchTranscriptSessionId({ cwd, env, signal, maxWai
       if (settled) return;
       settled = true;
       if (timer != null) clearTimeout(timer);
-      try { signal?.removeEventListener?.("abort", onAbort); } catch { /* non-EventTarget signal double */ }
+      try { signal?.removeEventListener?.("abort", onAbort); } catch (error) { /* non-EventTarget signal double */
+      reportDegrade("mesh-worker-execution", error); }
       resolve(value);
     }
 
@@ -969,7 +972,8 @@ export async function defaultWatchTranscriptSessionId({ cwd, env, signal, maxWai
       finish(null);
       return;
     }
-    try { signal?.addEventListener?.("abort", onAbort); } catch { /* non-EventTarget signal */ }
+    try { signal?.addEventListener?.("abort", onAbort); } catch (error) { /* non-EventTarget signal */
+      reportDegrade("mesh-worker-execution", error); }
 
     const deadline = Date.now() + maxWaitMs;
 
@@ -1130,12 +1134,14 @@ export async function defaultWatchTranscriptCompletion({
       if (settled) return;
       settled = true;
       if (timer != null) clearTimeout(timer);
-      try { signal?.removeEventListener?.("abort", onAbort); } catch { /* no signal */ }
+      try { signal?.removeEventListener?.("abort", onAbort); } catch (error) { /* no signal */
+      reportDegrade("mesh-worker-execution", error); }
       resolve(value);
     };
     const onAbort = () => settleWatch(null);
     if (signal?.aborted) { resolve(null); return; }
-    try { signal?.addEventListener?.("abort", onAbort, { once: true }); } catch { /* no signal */ }
+    try { signal?.addEventListener?.("abort", onAbort, { once: true }); } catch (error) { /* no signal */
+      reportDegrade("mesh-worker-execution", error); }
 
     const tick = async () => {
       if (settled) return;
@@ -1257,9 +1263,9 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
   if (typeof options.trustWorktree === "function") {
     try {
       await options.trustWorktree(brief.worktreeCwd);
-    } catch {
+    } catch (error) {
       // leave claude's own (blocking) dialog in place — the pre-fix behavior.
-    }
+      reportDegrade("mesh-worker-execution", error); }
   }
 
   let term;
@@ -1320,9 +1326,9 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
         // up-channel must never crash or stall the driven session itself.
         try {
           await options.onSessionIdCaptured?.(resolved);
-        } catch {
+        } catch (error) {
           /* a report fault is never the run's problem */
-        }
+      reportDegrade("mesh-worker-execution", error); }
       }
       return resolved ?? null;
     })
@@ -1339,8 +1345,10 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     let livenessTimer = null;
 
     const cleanupSubs = () => {
-      try { dataSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
-      try { exitSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
+      try { dataSub?.dispose?.(); } catch (error) { /* already-exited guard (win32) */
+      reportDegrade("mesh-worker-execution", error); }
+      try { exitSub?.dispose?.(); } catch (error) { /* already-exited guard (win32) */
+      reportDegrade("mesh-worker-execution", error); }
       // never let a queued command write land in an already-exited/settled PTY.
       if (commandWriteTimer != null) { clearTimeout(commandWriteTimer); commandWriteTimer = null; }
       if (livenessTimer != null) { clearInterval(livenessTimer); livenessTimer = null; }
@@ -1391,13 +1399,13 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
         try {
           const ended = options.onSessionEnd?.(endedSessionId);
           if (ended && typeof ended.catch === "function") {
-            ended.catch(() => {
+            ended.catch((error) => {
               // a lost end frame is a stale live view, never a correctness fault.
-            });
+      reportDegrade("mesh-worker-execution", error); });
           }
-        } catch {
+        } catch (error) {
           // a synchronous end-report fault is never the run's problem either.
-        }
+      reportDegrade("mesh-worker-execution", error); }
         resolve({ ...result, sessionId: endedSessionId });
       })();
     };
@@ -1415,9 +1423,9 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       // Absent by default (every pre-story-06 caller stays byte-identical).
       try {
         options.onOutputChunk?.(chunk, capturedSessionId);
-      } catch {
+      } catch (error) {
         // a bridge fault must never crash/backpressure the driven session itself.
-      }
+      reportDegrade("mesh-worker-execution", error); }
       // task 02 — the NEEDS_INPUT sentinel yields the THIRD outcome BEFORE any exit
       // is ever observed: a "turn end" is not a process exit, so this driver must
       // detect it from the OUTPUT stream, never wait on onExit for it. Once detected,
@@ -1426,7 +1434,8 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       // attaches a NEW process to the SAME persisted conversation, never reattaches
       // to a still-running one) and resolve `needs-input`, never `done`.
       if (containsNeedsInputSentinel(buffer)) {
-        try { term.kill(); } catch { /* already-exited guard (win32) */ }
+        try { term.kill(); } catch (error) { /* already-exited guard (win32) */
+      reportDegrade("mesh-worker-execution", error); }
         finish({ outcome: "needs-input" });
       }
     }) ?? null;
@@ -1479,13 +1488,14 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
           watchTranscriptCompletion({ cwd: brief.worktreeCwd, env: launch.env ?? process.env, sessionId: sid, signal: watchController.signal }),
         ).then((result) => {
           if (settled || result == null) return;
-          try { term.kill(); } catch { /* already-exited guard (win32) */ }
+          try { term.kill(); } catch (error) { /* already-exited guard (win32) */
+      reportDegrade("mesh-worker-execution", error); }
           finish({ outcome: result.outcome });
         });
       })
-      .catch(() => {
+      .catch((error) => {
         // a completion-watch fault never settles the run — onExit / the sentinel still can.
-      });
+      reportDegrade("mesh-worker-execution", error); });
 
     // task 01 / F27 — the directive's WHOLE command string, typed as ONE newline-
     // terminated pty.write into THIS ONE session (never a `-p` prompt argv), but only
@@ -1508,10 +1518,10 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
           // `\n` never submits it — the command sat unsubmitted in the input box and the
           // run went idle. `\r` is the Enter key; `\n` (Ctrl+J) is not.
           term.write(`${command}\r`);
-        } catch {
+        } catch (error) {
           // an already-exited PTY write races nothing observable here — onExit above
           // still resolves the outcome for a process that died before the write landed.
-        }
+      reportDegrade("mesh-worker-execution", error); }
       }, options.commandDelayMs ?? 0);
     }
   });

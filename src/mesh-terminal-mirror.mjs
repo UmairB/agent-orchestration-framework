@@ -43,6 +43,8 @@ import { TERMINAL_FRAME_KIND, loopbackRelayUrl } from "./mesh-terminal-relay-bri
 // backoff ladder the worker's own stream client reconnects on (1s, 2s, 4s … 30s),
 // IMPORTED rather than re-derived so the two never drift.
 import { backoffDelaySeconds } from "./worker-stream-client.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 export { resolveMaxFrameBytes };
 
@@ -157,11 +159,11 @@ export function createTerminalMirror() {
       for (const listener of listeners) {
         try {
           listener(signal.bytes, meta);
-        } catch {
+        } catch (error) {
           // a listener fault must never break delivery to the OTHER listeners, nor
           // crash the mirror's own apply() — the never-crash discipline every
           // other mesh consumer in this codebase keeps.
-        }
+      reportDegrade("mesh-terminal-mirror", error); }
       }
       return true;
     },
@@ -193,16 +195,16 @@ export function createTerminalMirror() {
         for (const chunk of tail.chunks) {
           try {
             listener(chunk, { end: false });
-          } catch {
+          } catch (error) {
             /* a replay fault must not break the subscribe */
-          }
+      reportDegrade("mesh-terminal-mirror", error); }
         }
         if (tail.ended) {
           try {
             listener(undefined, { end: true });
-          } catch {
+          } catch (error) {
             /* the end marker is best-effort too */
-          }
+      reportDegrade("mesh-terminal-mirror", error); }
         }
       }
       return () => {
@@ -302,9 +304,9 @@ export async function startTerminalMirrorSubscriber({
     try {
       const frame = parseInboundTerminalFrame(data, maxFrameBytes);
       mirror?.apply(frame);
-    } catch {
+    } catch (error) {
       // never-crash: ignore a bad frame, keep the persistent connection.
-    }
+      reportDegrade("mesh-terminal-mirror", error); }
   });
 
   let connected = false;
@@ -328,7 +330,8 @@ export async function startTerminalMirrorSubscriber({
     if (stopped || connected) return;
     try {
       await transport.connect();
-      if (stopped) { try { transport.close?.(); } catch { /* noop */ } return; }
+      if (stopped) { try { transport.close?.(); } catch (error) { /* noop */
+      reportDegrade("mesh-terminal-mirror", error); } return; }
       connected = true;
       attempts = 0; // a healthy connection resets the ladder
     } catch {
@@ -355,9 +358,9 @@ export async function startTerminalMirrorSubscriber({
       if (retryTimer != null) { clearTimeoutFn(retryTimer); retryTimer = null; }
       try {
         transport.close?.();
-      } catch {
+      } catch (error) {
         // already closing — nothing to dispose.
-      }
+      reportDegrade("mesh-terminal-mirror", error); }
     },
   };
 }
@@ -397,13 +400,15 @@ export function createTerminalMirrorSubscriberTransport(config, { timeoutMs = 30
         const timer = setTimeout(() => {
           if (!settled) {
             settled = true;
-            try { ws.close(); } catch { /* noop */ }
+            try { ws.close(); } catch (error) { /* noop */
+      reportDegrade("mesh-terminal-mirror", error); }
             reject(new Error("terminal mirror subscribe: join-ack timeout"));
           }
         }, timeoutMs);
         ws.on("message", (data) => {
           let parsed = null;
-          try { parsed = JSON.parse(data.toString()); } catch { /* raw/opaque frame */ }
+          try { parsed = JSON.parse(data.toString()); } catch (error) { /* raw/opaque frame */
+      reportDegrade("mesh-terminal-mirror", error); }
           if (parsed && parsed.type === "joined" && !settled) {
             settled = true;
             clearTimeout(timer);
@@ -413,7 +418,8 @@ export function createTerminalMirrorSubscriberTransport(config, { timeoutMs = 30
           }
           if (parsed && parsed.type === "joined") return;
           if (handler) {
-            try { handler(data); } catch { /* the handler never-crashes on its own */ }
+            try { handler(data); } catch (error) { /* the handler never-crashes on its own */
+      reportDegrade("mesh-terminal-mirror", error); }
           }
         });
         ws.on("error", (error) => {
@@ -441,7 +447,8 @@ export function createTerminalMirrorSubscriberTransport(config, { timeoutMs = 30
       dropHandler = typeof fn === "function" ? fn : null;
     },
     close() {
-      try { socket?.close(); } catch { /* already closing */ }
+      try { socket?.close(); } catch (error) { /* already closing */
+      reportDegrade("mesh-terminal-mirror", error); }
       socket = null;
     },
   };

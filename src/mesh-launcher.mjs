@@ -82,6 +82,8 @@ import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
 // is the ONE seam this launcher reaches for a workspaceId -> project_root lookup,
 // keeping fitness `acd-global-publisher-single-seam` intact.
 import { resolveCloneCredentialProvider, resolveWriteCredentialProvider } from "./mesh-clone-credential-provider.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -374,9 +376,9 @@ async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) 
           workspacesWithRuns.add(workspace.workspaceId);
         }
       }
-    } catch {
+    } catch (error) {
       // absence-is-benign — this workspace's runs are skipped, not fatal.
-    }
+      reportDegrade("mesh-launcher", error); }
   }
   return { activeRuns, workspacesWithRuns };
 }
@@ -392,7 +394,8 @@ async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) 
 function emitWarning(sink, warning, options) {
   sink.push(warning);
   if (typeof options?.onWarning === "function") {
-    try { options.onWarning(warning); } catch { /* a warning consumer must never crash the daemon */ }
+    try { options.onWarning(warning); } catch (error) { /* a warning consumer must never crash the daemon */
+      reportDegrade("mesh-launcher", error); }
   }
 }
 
@@ -432,9 +435,9 @@ async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsS
   let sessions = [];
   try {
     sessions = (await readLiveSessions(ws, nodeId, options)).filter((session) => !workspacesWithRuns.has(session.workspaceId));
-  } catch {
+  } catch (error) {
     // absence-is-benign — sessions are skipped this tick, not fatal.
-  }
+      reportDegrade("mesh-launcher", error); }
 
   // m42 wave (c) / item 1 — the build stamp rides the presence record (the sixth
   // additive key), so `aof mesh status` answers WHICH build a remote node runs.
@@ -1008,10 +1011,10 @@ export async function startLauncher(ws, options = {}) {
     if (typeof options?.onPeers === "function") options.onPeers(peers);
   };
   const peerPollHandle = peerPollTicker.start(peerPollSeconds, () => {
-    pollPeers().catch(() => {
+    pollPeers().catch((error) => {
       // a transient fabric-read fault mid-serve must never crash the daemon — the next
       // tick simply re-attempts (the same never-crash discipline probeFabric itself keeps).
-    });
+      reportDegrade("mesh-launcher", error); });
   });
 
   const propagationTicker = typeof options?.propagationTicker === "object" && options.propagationTicker != null ? options.propagationTicker : intervalTicker();
@@ -1198,7 +1201,7 @@ export async function startLauncher(ws, options = {}) {
         }
       }
     };
-    streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch(() => {}));
+    streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch((error) => { reportDegrade("mesh-launcher", error); }));
 
     // m42 wave (b) / TECH_DEBT item 7 leg 2 — STARTUP RECLAIM. Every worktree
     // directory found on disk at startup belongs to a run whose PTY child cannot be

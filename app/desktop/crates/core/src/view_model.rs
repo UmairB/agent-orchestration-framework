@@ -508,7 +508,8 @@ mod tests {
         "heartbeatAt": "2026-07-04T10:00:00.000Z",
         "activeRuns": [],
         "sessions": [],
-        "aofVersion": "0.1.0"
+        "aofVersion": "0.1.0",
+        "buildId": "source"
       },
       "stale": true
     },
@@ -584,7 +585,8 @@ mod tests {
             "lastPingAt": "2026-07-12T20:55:20.329Z"
           }
         ],
-        "aofVersion": "0.1.0"
+        "aofVersion": "0.1.0",
+        "buildId": "source"
       },
       "stale": false,
       "local": true
@@ -629,7 +631,8 @@ mod tests {
         "heartbeatAt": "2026-07-04T10:00:00.000Z",
         "activeRuns": [],
         "sessions": [],
-        "aofVersion": "0.1.0"
+        "aofVersion": "0.1.0",
+        "buildId": "source"
       },
       "stale": true
     },
@@ -711,7 +714,8 @@ mod tests {
             "lastPingAt": "2026-07-12T20:54:50.302Z"
           }
         ],
-        "aofVersion": "0.1.0"
+        "aofVersion": "0.1.0",
+        "buildId": "source"
       },
       "stale": false,
       "local": true
@@ -767,7 +771,8 @@ mod tests {
             "lastPingAt": "2026-07-12T21:10:00.000Z"
           }
         ],
-        "aofVersion": "0.1.0"
+        "aofVersion": "0.1.0",
+        "buildId": "source"
       }
     }
   ],
@@ -895,7 +900,8 @@ mod tests {
                                 "lastPingAt": "2026-07-12T20:55:20.329Z"
                             }
                         ],
-                        "aofVersion": "0.1.0"
+                        "aofVersion": "0.1.0",
+                        "buildId": "source"
                     }
                 }
             ],

@@ -11,6 +11,8 @@ import { readPresenceRecords, readPresenceRecord, assemblePresenceRecord } from 
 import { resolvePeers } from "./mesh-fabric.mjs";
 import { writeText } from "./fs.mjs";
 import { resolveCloneUrl } from "./mesh-worker-execution.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 const SECRET_KEY_PATTERN = /(token|secret|credential|auth|invite|hash)/i;
 
@@ -353,9 +355,9 @@ async function removeStaleFabricDescriptors(filePaths, nodesRoot, currentDescrip
     if (!(await isFabricOnlyDescriptor(resolved))) continue;
     try {
       await rm(resolved, { force: true });
-    } catch {
+    } catch (error) {
       // Stale descriptors are best-effort cleanup; database rows are already pruned.
-    }
+      reportDegrade("global-node-registry", error); }
   }
 }
 

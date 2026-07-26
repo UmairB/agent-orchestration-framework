@@ -44,6 +44,8 @@ import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-ter
 // the control-side owner); imported here so both sides share the contract, never a
 // re-spelled literal at this call site.
 import { RECOVERY_PUSH_KIND, buildRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
@@ -375,7 +377,8 @@ export function createWorkerStreamClient({
     connected = false;
     needsSnapshot = true;
     if (handle != null) {
-      try { transport.close(handle); } catch { /* already gone */ }
+      try { transport.close(handle); } catch (error) { /* already gone */
+      reportDegrade("worker-stream-client", error); }
     }
     handle = null;
   }
@@ -760,7 +763,7 @@ export function createWorkerStreamClient({
       // transport already up. A fault here is caught by ensureConnected/markDropped
       // and simply re-schedules on the NEXT explicit notifyDrop() (production calls
       // notifyDrop again from the transport's error/close handler).
-      ensureConnected().catch(() => {});
+      ensureConnected().catch((error) => { reportDegrade("worker-stream-client", error); });
     });
     return { scheduledDelaySeconds: delaySeconds };
   }
@@ -864,7 +867,8 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
     },
     close(ws) {
       if (currentSocket === ws) currentSocket = null;
-      try { ws.close(); } catch { /* already closing */ }
+      try { ws.close(); } catch (error) { /* already closing */
+      reportDegrade("worker-stream-client", error); }
     },
     onDrop(handler) {
       dropHandler = typeof handler === "function" ? handler : null;

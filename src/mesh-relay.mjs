@@ -52,6 +52,8 @@ import {
   verifyCredential,
 } from "./mesh-registry.mjs";
 import { publishNodeRecord, readNodeRecord } from "./mesh-store.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The single relay pathname (ADR-001 — ONE path; any other upgrade pathname is
 // destroyed, the terminal-ws default branch). Loopback-bound by default (pre-auth).
@@ -166,9 +168,9 @@ function readRequestBody(request, limitBytes) {
         settle(null);
         try {
           request.destroy();
-        } catch {
+        } catch (error) {
           /* stream already closing */
-        }
+      reportDegrade("mesh-relay", error); }
         return;
       }
       chunks.push(chunk);
@@ -271,9 +273,9 @@ function frameByteLength(data) {
 function sendControl(ws, payload) {
   try {
     ws.send(JSON.stringify(payload));
-  } catch {
+  } catch (error) {
     // socket closed/closing — nothing to send
-  }
+      reportDegrade("mesh-relay", error); }
 }
 
 // Parse JUST enough of an inbound frame to read { kind, nodeId } for ROUTING — it NEVER
@@ -424,9 +426,9 @@ export function createEnrollmentHttpHandler({ config, workspace = null, now = nu
     } catch {
       try {
         respondJson(response, 500, { ok: false, reason: "enroll-failed", error: "enrollment failed unexpectedly" });
-      } catch {
+      } catch (error) {
         /* response already settled */
-      }
+      reportDegrade("mesh-relay", error); }
     }
     return true;
   };
@@ -478,9 +480,9 @@ export async function serveRelay({ port = 0, config, workspace = null, now = nul
       .catch(() => {
         try {
           respondJson(response, 500, { ok: false, reason: "http-failed", error: "request failed unexpectedly" });
-        } catch {
+        } catch (error) {
           /* response already settled */
-        }
+      reportDegrade("mesh-relay", error); }
       });
   });
 
@@ -596,9 +598,9 @@ export async function serveRelay({ port = 0, config, workspace = null, now = nul
         if (peer === ws) continue;
         try {
           peer.send(text);
-        } catch {
+        } catch (error) {
           // a peer socket closing mid-broadcast must never break the fan-out
-        }
+      reportDegrade("mesh-relay", error); }
       }
     });
 
@@ -634,9 +636,9 @@ export async function serveRelay({ port = 0, config, workspace = null, now = nul
       for (const ws of clients) {
         try {
           ws.close();
-        } catch {
+        } catch (error) {
           /* already closed */
-        }
+      reportDegrade("mesh-relay", error); }
       }
       clients.clear();
       wss.close(() => {

@@ -19,6 +19,8 @@
 // env, no askpass file, no mint reply) — so the streamed signal is sourced
 // EXCLUSIVELY from the PTY's own printed output, exactly as SECURITY T14 requires.
 import { WebSocket } from "ws";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The NEW opaque relay `kind` this bridge introduces (ADR-014 decision 1). A single
 // source so the bridge and its tests agree on the literal.
@@ -134,22 +136,22 @@ export function wireTerminalBridge(term, { nodeId, sessionId, push } = {}) {
     try {
       const result = push?.(envelope);
       if (result && typeof result.catch === "function") {
-        result.catch(() => {
+        result.catch((error) => {
           // a relay push fault must never stall/crash the PTY session — the frame is
           // simply lost from the live mirror (no durable floor for a terminal mirror).
-        });
+      reportDegrade("mesh-terminal-relay-bridge", error); });
       }
-    } catch {
+    } catch (error) {
       // a synchronous push fault is swallowed for the exact same reason.
-    }
+      reportDegrade("mesh-terminal-relay-bridge", error); }
   });
   return {
     dispose() {
       try {
         sub?.dispose?.();
-      } catch {
+      } catch (error) {
         // already disposed — nothing to do.
-      }
+      reportDegrade("mesh-terminal-relay-bridge", error); }
     },
   };
 }
@@ -191,13 +193,15 @@ export function createTerminalRelayPushTransport(config, { timeoutMs = 3000 } = 
       const timer = setTimeout(() => {
         if (!settled) {
           settled = true;
-          try { ws.close(); } catch { /* noop */ }
+          try { ws.close(); } catch (error) { /* noop */
+      reportDegrade("mesh-terminal-relay-bridge", error); }
           reject(new Error("terminal relay connect: join-ack timeout"));
         }
       }, timeoutMs);
       ws.on("message", (data) => {
         let parsed = null;
-        try { parsed = JSON.parse(data.toString()); } catch { /* raw frame */ }
+        try { parsed = JSON.parse(data.toString()); } catch (error) { /* raw frame */
+      reportDegrade("mesh-terminal-relay-bridge", error); }
         if (parsed && parsed.type === "joined" && !settled) {
           settled = true;
           clearTimeout(timer);
@@ -232,7 +236,8 @@ export function createTerminalRelayPushTransport(config, { timeoutMs = 3000 } = 
       });
     },
     close() {
-      try { socket?.close(); } catch { /* already closing */ }
+      try { socket?.close(); } catch (error) { /* already closing */
+      reportDegrade("mesh-terminal-relay-bridge", error); }
       socket = null;
     },
   };

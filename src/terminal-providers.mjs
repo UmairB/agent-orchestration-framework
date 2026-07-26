@@ -12,6 +12,8 @@
 // runs" and "a stubbed-absent binary → error" with no real PATH lookup and no PTY.
 import { delimiter, join } from "node:path";
 import { existsSync } from "node:fs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The exclusive provider vocabulary (DESIGN §4 picker; ADR-003).
 export const PROVIDER_IDS = ["claude", "codex", "gemini"];
@@ -40,9 +42,9 @@ function defaultWhich(bin, env = process.env) {
       const candidate = join(dir, ext ? `${bin}${ext}` : bin);
       try {
         if (existsSync(candidate)) return candidate;
-      } catch {
+      } catch (error) {
         // ignore unreadable PATH entries
-      }
+      reportDegrade("terminal-providers", error); }
     }
   }
   return null;

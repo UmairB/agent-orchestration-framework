@@ -18,6 +18,8 @@
 import { openGlobalWorkProjectionStore, readWorkspaceItems, readWorkItemDoc, readWorkItemRuns } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // resolveStreamWorkspaceId(workspace, options) — the ONE id derivation all three
 // readers in this module share (the same precedence readWorkerItems always used):
@@ -43,7 +45,8 @@ async function withProjectionStore(workspace, options, read) {
   } catch {
     return null;
   } finally {
-    try { store?.close?.(); } catch { /* already closed */ }
+    try { store?.close?.(); } catch (error) { /* already closed */
+      reportDegrade("board-worker-stream", error); }
   }
 }
 

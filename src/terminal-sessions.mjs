@@ -11,6 +11,8 @@
 // is guarded: a registry failure must never break a terminal session.
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 function registryPath(projectDir) {
   return path.join(projectDir, ".aof", "terminal-sessions.json");
@@ -47,9 +49,9 @@ async function persist(projectDir, sessions) {
       `${JSON.stringify({ updatedAt: new Date().toISOString(), sessions }, null, 2)}\n`,
       "utf8"
     );
-  } catch {
+  } catch (error) {
     /* best-effort — never break a session over a registry write */
-  }
+      reportDegrade("terminal-sessions", error); }
 }
 
 // Record a freshly-spawned session (pruning any dead/duplicate entries first).

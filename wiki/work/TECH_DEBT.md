@@ -159,13 +159,12 @@ nobody needs to redirect stdout by hand to see what a remote node is doing.
 
 ## 3. Silent `catch {}` is load-bearing
 
-**Status:** ratchet armed (2026-07-26, milestone 42 wave (a)): `acd-no-new-silent-catch` enumerates
-the true baseline — **94 sites across 29 files** (the original 43 counted only statement-empty
-bodies; comment-only bodies are still runtime silence, so they count) — as a per-file, shrink-only
-allowlist. A NEW silent catch anywhere in `src/` fails the build immediately (the recurrence class:
-two were written the same day the first two were fixed). The SWEEP — each site emitting a coded
-event into the item-2 sink instead — proceeds file-by-file, shrinking the baseline to zero, at which
-point the gate becomes an outright ban. **Severity:** high.
+**Status:** ADDRESSED (2026-07-26, milestone 42 wave (a) — ratchet armed and swept the same day):
+all 97 silent-catch sites across 28 files (the honest count: comment-only bodies are runtime
+silence) now report coded degrade events via `degrade.mjs` (throttled, never-throwing, into the
+item-2 sink family as `degrade.log`). `acd-no-new-silent-catch`'s baseline is the sanctioned floor —
+the reporter and the sink themselves — so the gate is an outright ban everywhere else: best-effort
+now means "does not crash", and it always says something. **Severity:** high.
 
 **What's wrong.** "Best-effort, never crash the daemon" is implemented throughout as an empty catch,
 which in practice means "fails invisibly". Cases found in one day:

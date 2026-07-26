@@ -274,7 +274,7 @@ export const archTests = [
     name: "arch/38 ADR-008 (acd-captured-producer-fixture): every captured fixture is still PRODUCER-SHAPED — compared against a record assembled by the REAL producer in this test (frozen five keys / string[] activeRuns / the producer's session keys), so a producer shape-change with a stale fixture fails CI",
     run: async () => {
       const producer = await produceProducerShape();
-      assert.deepEqual(producer.presenceKeys, ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"], "the producer's frozen five-key record (the yardstick)");
+      assert.deepEqual(producer.presenceKeys, ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion", "buildId"], "the producer's frozen record (the yardstick; buildId is the m42/item-1 sixth additive key)");
       assert.deepEqual(producer.sessionKeys, ["workspaceId", "repo", "assistant", "lastPingAt"], "the producer's session projection (the yardstick)");
 
       const rust = await readRustSurface();
@@ -307,14 +307,14 @@ export const archTests = [
     name: "arch/38 ADR-008 (acd-captured-producer-fixture): self-check — an un-captured fixture, a producer-drifted fixture (object-shaped activeRuns / 4-key presence / invented session key) and a drifted Rust render literal are each FLAGGED by the same detectors the real tree passes (non-vacuous)",
     run: async () => {
       const producer = {
-        presenceKeys: ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion"],
+        presenceKeys: ["nodeId", "heartbeatAt", "activeRuns", "sessions", "aofVersion", "buildId"],
         sessionKeys: ["workspaceId", "repo", "assistant", "lastPingAt"],
       };
 
       // ── planted: a HAND-AUTHORED fixture (no capture provenance) ─────────────
       const plantedHandAuthored = `
     // A handy fixture for the desktop tests.
-    const REAL_CAPTURED_MADE_UP: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[],"sessions":[],"aofVersion":"0.1.0"}}],"boards":[],"isControlNode":true}"#;
+    const REAL_CAPTURED_MADE_UP: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[],"sessions":[],"aofVersion":"0.1.0","buildId":"source"}}],"boards":[],"isControlNode":true}"#;
 `;
       const handAuthored = capturedFixtures(plantedHandAuthored);
       assert.equal(handAuthored.length, 1, "the planted fixture is seen by the extractor");
@@ -327,7 +327,7 @@ export const archTests = [
       // ── planted: PRODUCER DRIFT — the F8/F1 object-shaped run element ────────
       const driftedRuns = capturedFixtures(`
     // REAL — captured live via \`aof mesh status --json\`.
-    const REAL_CAPTURED_DRIFTED_RUNS: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[{"ref":"35/02","title":"UI"}],"sessions":[],"aofVersion":"0.1.0"}}],"boards":[],"isControlNode":true}"#;
+    const REAL_CAPTURED_DRIFTED_RUNS: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[{"ref":"35/02","title":"UI"}],"sessions":[],"aofVersion":"0.1.0","buildId":"source"}}],"boards":[],"isControlNode":true}"#;
 `);
       const runsViolations = producerShapeViolations(driftedRuns, producer);
       assert.equal(runsViolations.length, 1, `an object-shaped activeRuns element is flagged (got ${JSON.stringify(runsViolations)})`);
@@ -343,7 +343,7 @@ export const archTests = [
       // ── planted: PRODUCER DRIFT — an invented session field ──────────────────
       const driftedSession = capturedFixtures(`
     // REAL — captured live via \`aof mesh status --json\`.
-    const REAL_CAPTURED_DRIFTED_SESSION: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[],"sessions":[{"workspaceId":"ws-A","repo":"aof","assistant":"claude-code","lastPingAt":"${NOW}","ref":"38/00"}],"aofVersion":"0.1.0"}}],"boards":[],"isControlNode":true}"#;
+    const REAL_CAPTURED_DRIFTED_SESSION: &str = r#"{"nodes":[{"nodeId":"n1","local":true,"presence":{"nodeId":"n1","heartbeatAt":"${NOW}","activeRuns":[],"sessions":[{"workspaceId":"ws-A","repo":"aof","assistant":"claude-code","lastPingAt":"${NOW}","ref":"38/00"}],"aofVersion":"0.1.0","buildId":"source"}}],"boards":[],"isControlNode":true}"#;
 `);
       assert.equal(producerShapeViolations(driftedSession, producer).length, 1, "a session entry carrying a key the producer never emits is flagged");
 

@@ -27,6 +27,8 @@ import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { isActiveAssignmentState } from "./assignment-record.mjs";
 import { readItemBranch } from "./mesh-assignment-directive.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The ONE status the overlay ever asserts, and only while a worker is genuinely RUNNING
 // the item. A queued (`assigned`) or just-accepted assignment does NOT claim progress the
@@ -79,7 +81,8 @@ export async function readExecutionOverlay(workspace, options = {}) {
     // cannot read) degrades to the LOCAL view — never a broken board.
     return new Map();
   } finally {
-    try { store?.close?.(); } catch { /* already closed */ }
+    try { store?.close?.(); } catch (error) { /* already closed */
+      reportDegrade("board-mesh-execution", error); }
   }
   return overlay;
 }

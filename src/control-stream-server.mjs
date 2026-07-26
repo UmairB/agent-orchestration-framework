@@ -50,6 +50,8 @@ import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-
 // carrying the branch it pushed, record it as the item's active mesh branch so the next
 // continue/verify dispatch reuses it (the work accumulates on ONE branch per item).
 import { setItemBranch } from "./mesh-assignment-directive.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // isRevokedLocal(registry, nodeId) — milestone 35 / ADR-002, story 01 task 01
 // (SECURITY T2). A deliberate LOCAL re-implementation of mesh-registry.mjs's
@@ -158,7 +160,7 @@ function isCompleteItemRow(row) {
 // don't supply the schema's NOT NULL columns (type/slug/sourcePath) would otherwise
 // merge into an INCOMPLETE row — publishWorkspaceSnapshot's INSERT then throws,
 // which rolls back the ENTIRE BEGIN IMMEDIATE txn and (via the caller's
-// .catch(()=>{})) silently drops every OTHER item in the same frame. Skip exactly
+// .catch((error) => { reportDegrade("control-stream-server", error); })) silently drops every OTHER item in the same frame. Skip exactly
 // that incomplete merged row here, before the re-publish, so the rest of the
 // frame's items (and the rest of the workspace's already-published rows) are never
 // collaterally rolled back by one partial/unseen-ref delta.
@@ -942,7 +944,7 @@ export async function startControlStreamServer({
   // onFrameSkipped({ code, nodeId, workspaceId, kind }) — VERIFICATION (live worktree
   // streaming, 2026-07-26). applySnapshotFrame/applyDeltaFrame REFUSE a frame whose
   // workspaceId has no registered descriptor, and that refusal used to be returned into
-  // a `.catch(() => {})` that nobody read: a worker could stream every 5s for days while
+  // a `.catch((error) => { reportDegrade("control-stream-server", error); })` that nobody read: a worker could stream every 5s for days while
   // this node discarded 100% of it and said nothing (it did — that is how the worktree
   // stream stayed at zero rows without a single diagnostic). A refusal is now REPORTED.
   // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs wires
@@ -969,9 +971,9 @@ export async function startControlStreamServer({
           try {
             response.writeHead(500, { "Content-Type": "application/json" });
             response.end(JSON.stringify({ ok: false, error: "request failed unexpectedly" }));
-          } catch {
+          } catch (error) {
             /* response already settled */
-          }
+      reportDegrade("control-stream-server", error); }
         });
       return;
     }
@@ -1027,9 +1029,9 @@ export async function startControlStreamServer({
       if (frame?.kind === TERMINAL_FRAME_KIND) {
         try {
           onTerminalFrame(frame, { nodeId });
-        } catch {
+        } catch (error) {
           // never-crash: a terminal-bridge sink fault is swallowed, the connection lives on.
-        }
+      reportDegrade("control-stream-server", error); }
         return;
       }
       const receivedAt = now();
@@ -1052,13 +1054,13 @@ export async function startControlStreamServer({
         if (result?.skipped !== true) return;
         try {
           onFrameSkipped({ code: result.code ?? "frame-skipped", nodeId, workspaceId: result.workspaceId ?? null, kind: frame?.kind ?? null });
-        } catch {
+        } catch (error) {
           // a diagnostic sink fault is never fatal.
-        }
-      }).catch(() => {
+      reportDegrade("control-stream-server", error); }
+      }).catch((error) => {
         // A store-apply fault must never crash the accept loop — the next frame
         // simply tries again (mirrors probeFabric's never-crash discipline).
-      });
+      reportDegrade("control-stream-server", error); });
     });
 
     ws.on("close", () => {
@@ -1122,7 +1124,8 @@ export async function startControlStreamServer({
     },
     stop() {
       for (const client of wss.clients) {
-        try { client.terminate(); } catch { /* already gone */ }
+        try { client.terminate(); } catch (error) { /* already gone */
+      reportDegrade("control-stream-server", error); }
       }
       wss.close();
       server.close();

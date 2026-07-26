@@ -1,5 +1,7 @@
 import { normalizeId } from "./fs.mjs";
 import { RUNTIMES, supportedRuntimes } from "./model.mjs";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 const VALID_NAMESPACES = new Set(["skills", "workflows"]);
 const UNSUPPORTED_NAMESPACES = new Set(["skill", "workflow", "command", "commands"]);
@@ -11,18 +13,18 @@ export function createAssetReferenceIndex(resources = [], workflows = []) {
     try {
       const id = normalizeId(resource.id);
       index.skill.set(id, { kind: "skill", id, runtimes: effectiveRuntimes(resource) });
-    } catch {
+    } catch (error) {
       // Invalid ids are reported by schema validation.
-    }
+      reportDegrade("asset-references", error); }
   }
   for (const workflow of workflows ?? []) {
     if (typeof workflow?.id !== "string") continue;
     try {
       const id = normalizeId(workflow.id);
       index.workflow.set(id, { kind: "workflow", id, runtimes: effectiveRuntimes(workflow) });
-    } catch {
+    } catch (error) {
       // Invalid ids are reported by workflow validation.
-    }
+      reportDegrade("asset-references", error); }
   }
   return index;
 }
@@ -36,9 +38,9 @@ export function extractAssetReferencePlaceholders(text) {
     if (!VALID_NAMESPACES.has(namespace)) continue;
     try {
       references.push(referenceFromParts(namespace, rawId, match[0]));
-    } catch {
+    } catch (error) {
       // Invalid placeholders are reported by extractInvalidAssetReferencePlaceholders().
-    }
+      reportDegrade("asset-references", error); }
   }
   return references;
 }

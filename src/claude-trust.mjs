@@ -10,6 +10,8 @@ import os from "node:os";
 import path from "node:path";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // ensureWorktreeTrusted(cwd, options) — milestone 38 / story 05 fix (live two-machine
 // soak 2026-07-25, VERIFICATION F24). claude shows a one-time "Do you trust the files
@@ -39,7 +41,7 @@ export async function ensureWorktreeTrusted(worktreeCwd, options = {}) {
     const tmp = `${cfgPath}.aof-trust-${randomUUID()}`;
     await writeFile(tmp, JSON.stringify(cfg, null, 2));
     await rename(tmp, cfgPath);
-  } catch {
+  } catch (error) {
     // best-effort — leave claude's own dialog in place (the pre-fix behavior).
-  }
+      reportDegrade("claude-trust", error); }
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 export async function readJson(filePath) {
   const text = await readFile(filePath, "utf8");
@@ -53,10 +55,10 @@ export async function sweepStaleTempFiles(dir, { olderThanMs = 60 * 60 * 1000, n
       if (now - info.mtimeMs < olderThanMs) continue;
       await unlink(filePath);
       removed.push(name);
-    } catch {
+    } catch (error) {
       // A vanished/locked entry is skipped — the next sweep retries; the sweep
       // itself must never throw out of a daemon's startup.
-    }
+      reportDegrade("fs", error); }
   }
   return { removed };
 }
