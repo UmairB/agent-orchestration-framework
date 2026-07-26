@@ -1197,7 +1197,10 @@ import { archTests as acdRunNodePathSingleBuilderTests } from "../test/arch/acd-
 import { archTests as acdRunRecordNodeAdditiveTests } from "../test/arch/acd-run-record-node-additive.test.mjs";
 import { archTests as acdRunsEolPinnedTests } from "../test/arch/acd-runs-eol-pinned.test.mjs";
 import { archTests as acdRunStoreMeshFreeTests } from "../test/arch/acd-run-store-mesh-free.test.mjs";
-import { archTests as acdSyncRootSetTests } from "../test/arch/acd-sync-root-set.test.mjs";
+// milestone 42 (item 5 — the gate must gate): acd-sync-root-set is RETIRED — its
+// subject (src/mesh-sync.mjs, the m22/m23 git-bus sync engine) was eliminated by
+// 33/ADR-002's relay-transport redesign, and the test failed on ENOENT ever since
+// (a permanently-red gate gates nothing).
 // milestone 26 — distributed-runs-leasing (story 01: the lease-of-record + mesh-aware
 // next — GIT-ONLY; ADR-003 + ADR-005, no relay). src/mesh-lease.mjs (NEW) carries the
 // frozen six-key claim record { itemRef, nodeId, state, claimedAt, runId, aofVersion },
@@ -1251,7 +1254,9 @@ import { archTests as acdSyncRootSetTests } from "../test/arch/acd-sync-root-set
 // are confirmed DEAD code (no live caller) once the broker is eliminated, so this guard
 // now protects a broker that no longer brokers — superseded by 33/ADR-002 — the broker
 // is eliminated.
-import { archTests as acdClaimRelayIndependentTests } from "../test/arch/acd-claim-relay-independent.test.mjs";
+// milestone 42 (item 5): acd-claim-relay-independent is RETIRED — the lease/claim
+// path it guarded (acquireLease/pushLeaseSignal in run-start.mjs) was superseded by
+// m35's assignment record; no lease call site remains in the run commands.
 import { archTests as acdFleetReclaimGuardedTests } from "../test/arch/acd-fleet-reclaim-guarded.test.mjs";
 // milestone 27 (story 00) — work-issuance-routing: the issuance directive
 // substrate + the eligibility matcher. src/mesh-issuance.mjs (NEW): the frozen

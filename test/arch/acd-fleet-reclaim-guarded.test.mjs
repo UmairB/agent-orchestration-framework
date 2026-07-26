@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RUN_START = path.join(repoRoot, "src", "commands", "run-start.mjs");
-const RUN_COMPLETE = path.join(repoRoot, "src", "commands", "run-complete.mjs");
 const RUN_STORE = path.join(repoRoot, "src", "run-store.mjs");
 const MESH_GATE = path.join(repoRoot, "src", "commands", "mesh-gate.mjs");
 const TEST_SUITE = path.join(repoRoot, "scripts", "test.mjs");
@@ -164,34 +163,11 @@ export const archTests = [
       );
     },
   },
-  {
-    name: "arch/fleet-reclaim-guarded: the run-complete lease release sits inside the config.mesh-gated branch (the boundary half folded in at Contract — no lease touch on the unconfigured floor)",
-    async run() {
-      const code = stripComments(await readFile(RUN_COMPLETE, "utf8"));
-      // The gate variable derives from config.mesh through the ONE shared predicate,
-      // and EVERY releaseLease call sits inside a POSITIVE block gated on it.
-      assert.ok(/meshNodeId\s*=\s*meshNodeIdOf\s*\(/.test(code), "run-complete derives its gate (meshNodeId) via the shared meshNodeIdOf helper");
-      const gates = gatedBlocks(code, "meshNodeId");
-      const releaseOffsets = offsetsOf(code, /\breleaseLease\s*\(/g);
-      assert.ok(releaseOffsets.length >= 1, "run-complete releases the lease (the release exists)");
-      for (const offset of releaseOffsets) {
-        assert.ok(inside(gates, offset), "every releaseLease( call sits inside the meshNodeId-gated branch");
-      }
-      // Self-check (non-vacuous): an UNgated release is flagged by the inside-check.
-      const violation = "await releaseLease(ws, item.ref, id);";
-      assert.ok(
-        offsetsOf(violation, /\breleaseLease\s*\(/g).every((o) => !inside(gatedBlocks(violation, "meshNodeId"), o)),
-        "the detector flags an ungated lease release"
-      );
-      // Self-check (the POLARITY rule): a release inside `if (!meshNodeId)` — the
-      // unconfigured floor — must fail the gate too (negation is not a gate).
-      const negated = "if (!meshNodeId) { await releaseLease(ws, item.ref, id); }";
-      assert.ok(
-        offsetsOf(negated, /\breleaseLease\s*\(/g).every((o) => !inside(gatedBlocks(negated, "meshNodeId"), o)),
-        "the detector flags a lease release inside the negated (unconfigured-floor) branch"
-      );
-    },
-  },
+  // milestone 42 (item 5): the run-complete LEASE-release test is RETIRED — the lease
+  // era (releaseLease/meshNodeIdOf in run-complete.mjs) was superseded by m35's
+  // assignment record; no release call site remains, so the guard's subject is gone.
+  // If run-complete ever regrows a mesh-gated boundary, it needs a NEW guard against
+  // the design of that day, not this one resurrected.
   {
     name: "arch/fleet-reclaim-guarded: the existing acd-run-reclaim-stale-only + acd-status-rollback-bounded gates re-arm over the unchanged store/rollback (enumerated — their suite registration is asserted)",
     async run() {

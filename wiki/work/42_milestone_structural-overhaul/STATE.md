@@ -12,7 +12,18 @@ doc: state
 ## Progress
 
 - Framed 2026-07-26 from TECH_DEBT.md items 0–7 (operator direction: rewrite-to-a-designed-shape
-  over further adhoc fixes). Stories not yet broken down — next: `aof:refine 42`.
+  over further adhoc fixes). Operator direction (2026-07-26 pm): implement INLINE, outside the aof
+  agent ceremony — this STATE is the running record.
+- **Wave (a) / item 5 DONE (2026-07-26): the arch gate runs at ZERO standing failures** — 694 pass /
+  0 fail across all 219 arch files (was 8 standing failures in 3 files). Retired with their dead
+  subjects: `acd-sync-root-set` (src/mesh-sync.mjs eliminated by 33/ADR-002) and
+  `acd-claim-relay-independent` (lease/claim path superseded by m35 assignments) — both were also
+  imported-but-never-registered in scripts/test.mjs, a red gate nobody ran; the run-complete
+  lease-release test inside `acd-fleet-reclaim-guarded` retired for the same reason (its three live
+  siblings kept). `acd-command-namespace`'s member counts are now DERIVED (declared vs rendered),
+  never hard-coded — the count treadmill (21 → red → 23 → red) is gone.
+- Next in wave (a): item 2 (daemon log sink + logs reader), then item 3 (no-empty-catch fitness +
+  sweep, needs the sink) + F26 temp-leak; then wave (b) starting at item 7 (liveness loop).
 
 ## Notes & decisions in flight
 

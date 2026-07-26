@@ -25,9 +25,15 @@ export const archTests = [
       const bundle = loadBundle();
       const outputs = renderBundleOutputs(bundle, { runtimes: ["claude"] });
       const commandIds = bundle.resources.filter((r) => r.kind === "command").map((r) => r.id);
-      assert.equal(commandIds.length, 23, "23 command members (incl. the 4 insert-* placement twins (m41 R5), assimilate-code, and delegate)");
+      // milestone 42 (item 5): the member count is DERIVED, never hard-coded — a
+      // hard-coded count turned this gate red on every legitimate bundle addition
+      // (measured live at 21, bumped to 23, red again in between), and a gate that
+      // is red between every addition gates nothing. Membership drift is the
+      // bundle-manifest suites' job; THIS gate owns the namespace-rendering rule.
+      assert.ok(commandIds.length > 0, "the bundle declares at least one command member (non-vacuous)");
 
       const byId = new Map(outputs.filter((o) => o.resource.kind === "command").map((o) => [o.resource.id, o]));
+      assert.equal(byId.size, commandIds.length, "every declared command member renders exactly once (derived, not hard-coded)");
       for (const id of commandIds) {
         const output = byId.get(id);
         assert.ok(output, `rendered output for command ${id}`);
@@ -42,9 +48,11 @@ export const archTests = [
       const bundle = loadBundle();
       const outputs = renderBundleOutputs(bundle, { runtimes: ["claude"] });
       const agentIds = bundle.resources.filter((r) => r.kind === "agent").map((r) => r.id);
-      assert.equal(agentIds.length, 8, "8 agent members");
+      // Derived, not hard-coded — same item-5 rationale as the command count above.
+      assert.ok(agentIds.length > 0, "the bundle declares at least one agent member (non-vacuous)");
 
       const byId = new Map(outputs.filter((o) => o.resource.kind === "agent").map((o) => [o.resource.id, o]));
+      assert.equal(byId.size, agentIds.length, "every declared agent member renders exactly once (derived, not hard-coded)");
       for (const id of agentIds) {
         const output = byId.get(id);
         assert.ok(output, `rendered output for agent ${id}`);

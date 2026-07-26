@@ -213,7 +213,12 @@ projections.
 
 ## 5. Part of the fitness gate is dead
 
-**Status:** open (raised 2026-07-26). **Severity:** medium — the gate reads green-ish while not
+**Status:** ADDRESSED (2026-07-26, milestone 42 wave (a)): the arch suite runs at zero standing
+failures (694/0 across 219 files). Dead tests retired with their eliminated subjects
+(`acd-sync-root-set`, `acd-claim-relay-independent`, the lease test in `acd-fleet-reclaim-guarded`);
+the bundle-member counts in `acd-command-namespace` are derived, not hard-coded. Remaining caveat:
+the FULL suite still cannot run on the control node while daemons hold :4182 (the focused-run
+discipline stands). **Severity:** medium — the gate reads green-ish while not
 running.
 
 **What's wrong.** Measured 2026-07-26: **10 of 700 arch tests fail before any change is made.**
