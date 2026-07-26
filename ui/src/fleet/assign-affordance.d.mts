@@ -93,14 +93,18 @@ export declare function assignAffordanceView(ctx: {
   selected?: string;
 }): AssignAffordanceView;
 
+// The lifecycle command the worker runs (VERIFICATION 2026-07-25) — OPTIONAL, defaults
+// to refine on the route when absent.
+export type AssignLifecyclePhase = "refine" | "continue" | "verify";
+
 export declare function runAssign(
   deps: {
-    assign: (ref: string, nodeId: string, workspaceId: string) => Promise<WorkAssignment>;
+    assign: (ref: string, nodeId: string, workspaceId: string, phase?: string) => Promise<WorkAssignment>;
     onAssigned?: (() => void) | null;
     onState?: ((next: AssignAffordanceState) => void) | null;
     timeoutMs?: number;
   },
-  request: { ref: string; nodeId: string; workspaceId: string }
+  request: { ref: string; nodeId: string; workspaceId: string; phase?: AssignLifecyclePhase }
 ): Promise<
   | { ok: true; record: WorkAssignment }
   | { ok: false; error: unknown; timedOut?: undefined }

@@ -393,13 +393,16 @@ const ASSIGN_DEADLINE = Symbol("assign-deadline");
 
 export async function runAssign(
   { assign, onAssigned, onState, timeoutMs = ASSIGN_TIMEOUT_MS } = {},
-  { ref, nodeId, workspaceId } = {},
+  { ref, nodeId, workspaceId, phase } = {},
 ) {
   onState?.(assignBegin());
 
   // Normalised to a promise so a synchronously-throwing client takes the same
-  // path as a rejecting one.
-  const call = Promise.resolve().then(() => assign(ref, nodeId, workspaceId));
+  // path as a rejecting one. `phase` (VERIFICATION 2026-07-25) is the OPTIONAL
+  // lifecycle command the worker runs (refine/continue/verify); absent ⇒ the route
+  // defaults to refine, so a caller that passes only {ref,nodeId,workspaceId} is
+  // byte-identical to before.
+  const call = Promise.resolve().then(() => assign(ref, nodeId, workspaceId, phase));
   let abandoned = false;
 
   // Clause 5, wired before the race so it cannot be missed: the ONLY thing a

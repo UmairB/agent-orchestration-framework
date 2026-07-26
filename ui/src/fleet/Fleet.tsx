@@ -709,6 +709,14 @@ function AssignAffordance({ ref, workspaceId, nodes, onAssigned }: { ref: string
   const options = assignableNodeOptions(nodes);
   const [selected, setSelected] = useState(options[0] ?? "");
   const [ack, setAck] = useState<AssignAffordanceState>(assignAtRest);
+  // VERIFICATION (UI phase selection, 2026-07-25) — the lifecycle command the worker
+  // runs (refine → continue → verify), a NET-NEW control that lives OUTSIDE the assign
+  // row's fitness-locked `picker · action · message` geometry (DG-13): the node picker's
+  // parent row must stay exactly `select · button`, so the phase select is its own row
+  // above the divider. Defaults to `refine` (the pre-existing dispatch default), so an
+  // operator who ignores it gets byte-identical behaviour; `continue`/`verify` are the
+  // opt-in phases for an already-refined item.
+  const [lifecyclePhase, setLifecyclePhase] = useState<"refine" | "continue" | "verify">("refine");
   // REVIEW FIX QA-a (2026-07-24) — F21's defect class, relocated to the NODE
   // axis: the row must never NAME one target and POST another. This face is a
   // long-lived monitor that re-polls every POLL_MS, so the roster under the
@@ -749,18 +757,40 @@ function AssignAffordance({ ref, workspaceId, nodes, onAssigned }: { ref: string
         // implementation, not of the seam.
         { assign: fleetApi.assign.bind(fleetApi), onAssigned, onState: setAck },
         // QA-a — the SAME derived value the row renders. The name the operator
-        // reads and the id the route receives are one datum.
-        { ref, nodeId: target, workspaceId }
+        // reads and the id the route receives are one datum. `phase` is the
+        // operator-chosen lifecycle command (VERIFICATION 2026-07-25).
+        { ref, nodeId: target, workspaceId, phase: lifecyclePhase }
       );
     },
-    [ref, workspaceId, target, onAssigned]
+    [ref, workspaceId, target, onAssigned, lifecyclePhase]
   );
 
   return (
-    <div
-      className="mt-3 flex min-w-0 items-center gap-2 border-t border-border pt-3 text-xs"
-      onClick={(event) => event.stopPropagation()}
-    >
+    <div className="min-w-0" onClick={(event) => event.stopPropagation()}>
+      {/* VERIFICATION (UI phase selection, 2026-07-25) — the "what to run" control,
+          its OWN row ABOVE the assign divider so the fitness-locked assign row below
+          stays exactly `select · button (· message)` (DG-13; the geometry test asserts
+          rowChildTypes). Its aria-label deliberately does NOT start with "Assign " so
+          the fleet harness never mistakes it for a node picker. Disabled while a
+          dispatch is in flight, mirroring the node picker. */}
+      <div className="mt-3 flex items-center gap-2 text-xs">
+        <span className="shrink-0 text-muted-foreground">Run</span>
+        <select
+          aria-label={`Lifecycle phase to run on ${ref}`}
+          value={lifecyclePhase}
+          disabled={view.pickerDisabled}
+          onChange={(event) => setLifecyclePhase(event.target.value as "refine" | "continue" | "verify")}
+          className="mono rounded-md border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground disabled:opacity-50"
+        >
+          <option value="refine">Refine — break down / author contracts</option>
+          <option value="continue">Continue — build tasks to green + review</option>
+          <option value="verify">Verify — checks + accept</option>
+        </select>
+      </div>
+      {/* The assign row — GEOMETRY-LOCKED (DG-13). Its class list and its exact
+          `select · button (· message)` membership are asserted by
+          test/fleet-assign-row-geometry.test.mjs; do not add elements here. */}
+      <div className="mt-3 flex min-w-0 items-center gap-2 border-t border-border pt-3 text-xs">
       {/* DG-13 clause 2 (DESIGN §Surface 2 Amendment 2026-07-24 (b)) — the
           picker has a FLOOR and never yields to the message. The real-assign
           render caught `min-w-0` letting it collapse to a BARE CHEVRON (~26px,
@@ -818,6 +848,7 @@ function AssignAffordance({ ref, workspaceId, nodes, onAssigned }: { ref: string
           assigned → <holder>`, not the sentence that spends its width on the ref
           region 1 already shows. */}
       {view.message ? <span className="mono min-w-0 shrink truncate text-[10.5px] text-destructive" title={view.messageTitle ?? view.message}>{view.message}</span> : null}
+      </div>
     </div>
   );
 }

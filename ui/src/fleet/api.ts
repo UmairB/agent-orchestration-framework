@@ -291,11 +291,18 @@ export const fleetApi = {
   // mis-assigned — and where the ref collided it dispatched entirely different
   // work off a `200 ok`. There is no fallback: a blank/absent workspaceId is a
   // coded 400 `invalid-workspace`, so a stale client fails VISIBLY.
-  async assign(ref: string, nodeId: string, workspaceId: string): Promise<WorkAssignment> {
+  // `phase` (OPTIONAL, VERIFICATION 2026-07-25) is the lifecycle command the worker
+  // runs — "refine" | "continue" | "verify". Absent ⇒ the route + dispatch default to
+  // refine (byte-identical to before), so an older caller is unaffected. The route
+  // validates it against the closed set, so a bad value can never become arbitrary text
+  // typed into a worker PTY.
+  async assign(ref: string, nodeId: string, workspaceId: string, phase?: string): Promise<WorkAssignment> {
+    const body: { ref: string; nodeId: string; workspaceId: string; phase?: string } = { ref, nodeId, workspaceId };
+    if (typeof phase === "string" && phase.length > 0) body.phase = phase;
     const response = await fetch("/api/mesh/assign", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ref, nodeId, workspaceId }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) throw await safeError(response);
     return (await response.json()) as WorkAssignment;

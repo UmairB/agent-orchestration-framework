@@ -76,6 +76,9 @@ import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-
 // global-work-store/global-node-registry module is imported (ADR-012 inv.2/4).
 import { loadWorkspace } from "./work.mjs";
 import { assignWork } from "./commands/mesh-assign.mjs";
+// VERIFICATION (UI phase selection, 2026-07-25) — the closed-set validator for the
+// optional `phase` on POST /api/mesh/assign (refine/continue/verify).
+import { isAssignmentPhase } from "./mesh-assignment-directive.mjs";
 // milestone 38 / story 06 (ADR-014) — the fleet face's SECOND carve-out: a
 // READ-ONLY terminal-VIEW upgrade route, `GET /ws/terminal-view?nodeId=&sessionId=`.
 // `WebSocketServer` (noServer) mirrors terminal-ws.mjs's / mesh-relay.mjs's own
@@ -281,6 +284,15 @@ export async function serveMeshUi({
         sendApiError(response, 400, "Both \"ref\" and \"nodeId\" are required.", "invalid-body");
         return;
       }
+      // VERIFICATION (UI phase selection, 2026-07-25) — an OPTIONAL 4th field: the
+      // lifecycle phase the worker runs (refine/continue/verify). Validated against the
+      // closed set; anything else (or absent) is REFUSED to `refine` (the pre-existing
+      // default), never trusted verbatim — the phase then maps to a whole slash-command
+      // string on the control's dispatch side, so an unvalidated value would become
+      // arbitrary text typed into a live worker PTY. It is threaded into the verb, which
+      // persists it in the additive side-table; it never touches the frozen record.
+      const requestedPhase = typeof body?.phase === "string" ? body.phase.trim() : "";
+      const phase = isAssignmentPhase(requestedPhase) ? requestedPhase : "refine";
       // ADR-012 AMENDMENT ruling 1 — workspaceId is REQUIRED, and a blank/absent
       // one is a CODED refusal minting nothing. There is deliberately NO default
       // and NO fallback anywhere on this path: the "intuitive" fallback (absent
@@ -372,7 +384,7 @@ export async function serveMeshUi({
           );
           return;
         }
-        const result = await assignWork(assignWorkspace, ref, nodeId, { globalWorkStoreOptions: globalStoreOptions ?? {}, issuer });
+        const result = await assignWork(assignWorkspace, ref, nodeId, { globalWorkStoreOptions: globalStoreOptions ?? {}, issuer, phase });
         if (!result.ok) {
           // The verb's OWN { ok:false, code } surfaces as a coded non-200 —
           // never a 200, never swallowed (ADR-012 inv.3). The HTTP NUMBER is
