@@ -25,6 +25,7 @@ import {
 import { StatusRing, StatusChip } from "./status";
 import { ActionsStrip } from "./ActionsStrip";
 import { Markdown } from "./Markdown";
+import { WorkerMirror } from "./WorkerMirror";
 
 type Tab = DocName | "FINDINGS" | "TASKS" | "RUNS";
 
@@ -180,7 +181,7 @@ export function DetailPanel({
                   visible in the fleet's read-only mirror. Until the board embeds that
                   mirror, say where it is rather than stating "running" with no way to
                   look. */}
-              {item.execution.active ? (
+              {item.execution.active && !item.execution.sessionId ? (
                 <a
                   href="http://127.0.0.1:4181/?mode=fleet&scope=global"
                   target="_blank"
@@ -192,6 +193,14 @@ export function DetailPanel({
                 </a>
               ) : null}
             </div>
+            {/* m42 item 6's console leg — the board EMBEDS the worker's read-only
+                mirror (the fleet's /ws/terminal-view route on the fixed :4181)
+                instead of linking out. Rendered only with the FULL (nodeId,
+                sessionId) tuple (ADR-014 invariant 4); a pre-session run keeps
+                the fleet link above. */}
+            {item.execution.active && item.execution.sessionId && item.execution.nodeId ? (
+              <WorkerMirror nodeId={item.execution.nodeId} sessionId={item.execution.sessionId} />
+            ) : null}
           </div>
         ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
