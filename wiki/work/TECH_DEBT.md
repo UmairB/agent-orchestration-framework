@@ -194,6 +194,9 @@ but the mesh clone path writes `mesh.repo.workspaceId` — which nothing reads a
   has no descriptor for, so they are refused (`unknown-workspace`). This is what stopped the worktree
   stream from ever landing a row; fixed for worktree deltas in `f623a6a` by stamping the assignment's
   id, but the underlying identity mismatch is untouched.
+- Every CLI mesh verb resolves the workspace from **cwd**: `aof mesh assign 18 --withdraw` run from
+  the wrong directory reports "No assignment exists" while the row sits in the store (bit the
+  operator-recovery path live, 2026-07-26) — the same one-fact-many-derivations class.
 
 **The fix.** Make the mesh workspace id the checkout's *own* local identity: write `mesh.workspaceId`
 into the scoped checkout's `.aof/aof.config.json` at clone time, so publish, descriptor and frames all
@@ -259,7 +262,14 @@ at least *say* the content lives on \<node\> rather than rendering a resolution 
 
 ## 7. A restarted worker does not reclaim its own runs
 
-**Status:** open (carried from the 2026-07-25 handover; hit again 2026-07-26). **Severity:** medium.
+**Status:** open (carried from the 2026-07-25 handover; hit again 2026-07-26 — **twice**: the
+morning stall, and run `39ec5149` in the afternoon, whose agent died ~11 minutes in — subagents
+"stopped by user" in the transcript, cause undiagnosable without item 2's log sink — while the
+assignment sat `running` and the fleet mirror showed "waiting for output" for a process that no
+longer existed; recovered by manual withdraw). The scope is wider than restarts: **any dead run is
+indistinguishable from a live one** — no heartbeat-driven liveness on the assignment, no watchdog,
+no startup reclaim. This is the single biggest source of perceived flakiness and the top of
+milestone 42's wave (a)/(b) work with items 2 and 3. **Severity:** high (upgraded 2026-07-26).
 
 **What's wrong.** Killing a worker daemon mid-run strands `runs/<node>/<runId>.json` in `running` and
 its control-side assignment in `running`. Nothing clears them: the item is blocked until heartbeat
