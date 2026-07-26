@@ -227,6 +227,34 @@ export const boardMeshExecutionTests = [
     },
   },
   {
+    name: "exec-scope: WORKER-ONLY story rows of a running milestone carry the inherited execution — overlay applies AFTER the worker merge (the reported defect: local checkout has no stories/, so the inserted rows skipped the overlay and still offered Continue)",
+    run: async () => withStore(async ({ store, env }) => {
+      seed(store, { assignmentId: "a1", itemRef: "18", state: "running" });
+      const overlay = await readExecutionOverlay({ projectRoot: "/x", config: { mesh: { workspaceId: WS } } }, { globalWorkStoreOptions: { env } });
+      // The control checkout holds ONLY the milestone scaffold; every story row comes
+      // from the worker stream (the item-18 shape measured live 2026-07-26).
+      const local = [{ ref: "18", type: "milestone", slug: "homedata", status: "not-started", title: "Homedata", parent: null, dir: "/x/18" }];
+      const worker = new Map([
+        ["18", { ref: "18", type: "milestone", slug: "homedata", status: "in-progress", title: "Homedata", parent: null, sourcePath: "/w/18/SPEC.md" }],
+        ["18/02", { ref: "18/02", type: "story", slug: "uprn", status: "not-started", title: "UPRN", parent: "18", sourcePath: "/w/18/stories/02/STORY.md" }],
+      ]);
+
+      // The EXACT list.mjs composition: merge first, overlay last.
+      const rows = applyExecutionOverlay(mergeWorkerItems(local, worker, overlay), overlay);
+
+      const story = rows.find((r) => r.ref === "18/02");
+      assert.ok(story, "the worker-only story row is present");
+      assert.equal(story.fromWorker, true);
+      assert.equal(story.execution?.active, true, "the inserted story carries the milestone's live execution — the affordance can now say Running-on-node");
+      assert.equal(story.execution?.scopeRef, "18");
+      assert.equal(story.status, "not-started", "its own streamed status is untouched");
+
+      const milestone = rows.find((r) => r.ref === "18");
+      assert.equal(milestone.execution?.active, true);
+      assert.equal(milestone.status, "in-progress", "the fromWorker milestone keeps the WORKER's streamed status (the live truth), not a blanket override");
+    }),
+  },
+  {
     name: "continue-decision: a story whose milestone is RUNNING answers 'running' — never local, never a second dispatch (the reported defect)",
     run: () => {
       const overlay = new Map([["18", { nodeId: "umairs-mac-mini", active: true, state: "running", assignmentId: "a1" }]]);

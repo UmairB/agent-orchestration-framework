@@ -39,7 +39,14 @@ export const listCommand = {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
       refs: [...overlay.keys()],
     });
-    return mergeWorkerItems(applyExecutionOverlay(rows, overlay), worker, overlay);
+    // Overlay LAST (2026-07-26, operator-found): a mesh milestone's stories often exist
+    // ONLY as worker-streamed rows (the local checkout holds the pre-run scaffold), and
+    // the earlier merge-after-overlay order meant those inserted rows never passed the
+    // overlay — so a story of a RUNNING milestone still offered Continue instead of
+    // "Running on <node>". applyExecutionOverlay skips its status override for
+    // fromWorker rows (their streamed status IS the live truth), so the order swap
+    // changes affordance data only, never a worker-reported status.
+    return applyExecutionOverlay(mergeWorkerItems(rows, worker, overlay), overlay);
   },
 
   cli: {

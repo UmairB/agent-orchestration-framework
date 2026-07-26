@@ -139,7 +139,10 @@ export function applyExecutionOverlay(rows, overlay) {
   return rows.map((row) => {
     const own = overlay.get(row.ref);
     if (own != null) {
-      const status = own.state === "running" ? RUNNING_STATUS : row.status;
+      // The running-status override corrects a stale LOCAL row; a fromWorker row's
+      // status is the worker's own live view (streamed from the worktree) — fresher
+      // and more specific than the overlay's blanket `in-progress`, so it stands.
+      const status = own.state === "running" && row.fromWorker !== true ? RUNNING_STATUS : row.status;
       return { ...row, status, execution: { ...own, scopeRef: row.ref } };
     }
     // Scope inheritance (2026-07-26): a child row carries its top-level item's
