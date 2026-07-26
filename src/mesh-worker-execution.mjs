@@ -817,7 +817,7 @@ export async function cloneRepoForWorkspace(ws, { workspaceId, nodeId, assignmen
 // the pin is the fact that matters). Atomic via writeText; a fault propagates (a
 // checkout whose identity could not be pinned would silently regress to the
 // per-machine derivation — the exact bug this exists to end).
-async function pinWorkspaceIdInCheckout(checkoutPath, workspaceId) {
+export async function pinWorkspaceIdInCheckout(checkoutPath, workspaceId) {
   const configPath = path.join(checkoutPath, ".aof", "aof.config.json");
   let config = {};
   try {
