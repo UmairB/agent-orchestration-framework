@@ -11,6 +11,13 @@ doc: state
 
 ## Progress
 
+- **2026-07-26 (evening): ALL ROADMAP ITEMS DONE** — see [ROADMAP.md](ROADMAP.md) for the per-item
+  ledger with commits and measurements. Waves (a), (b) and (c) landed in one inline day at the
+  operator's direction; two scope decisions recorded (--follow + self-restart → deferred backlog;
+  comment-mass reduction → enforced convention). Remaining: LIVE verification (operator restarts on
+  both machines + a real dead-run drill) — caveats, not open work. `status:` stays `in-progress`
+  until the live drill passes; acceptance is `aof:verify 42`'s call.
+
 - Framed 2026-07-26 from TECH_DEBT.md items 0–7 (operator direction: rewrite-to-a-designed-shape
   over further adhoc fixes). Operator direction (2026-07-26 pm): implement INLINE, outside the aof
   agent ceremony — this STATE is the running record.
