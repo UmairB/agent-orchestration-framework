@@ -1350,6 +1350,9 @@ import { meshLogTests } from "../test/mesh-log.test.mjs";
 // m42 wave (a) / m38-F26 — atomic-write temp hygiene (failed rename reclaims its
 // temp; the startup sweep reclaims aged orphans only).
 import { fsTempHygieneTests } from "../test/fs-temp-hygiene.test.mjs";
+// m42 wave (a) / TECH_DEBT item 3 — the silent-catch RATCHET: per-file shrink-only
+// baseline; a NEW statement-empty catch (or .catch(() => {})) fails the build.
+import { archTests as acdNoNewSilentCatchTests } from "../test/arch/acd-no-new-silent-catch.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -2009,6 +2012,7 @@ export const tests = [
   ...buildInfoTests,
   ...meshLogTests,
   ...fsTempHygieneTests,
+  ...acdNoNewSilentCatchTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,

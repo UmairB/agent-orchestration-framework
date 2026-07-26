@@ -32,8 +32,12 @@ doc: state
   fresh temp) runs at mesh-serve startup over presence/ + nodes/, logging reclaims to the sink.
   Measured + reclaimed live on the control node: 42 orphans in presence/, 6 in nodes/ (the earlier
   0-counts were plain `ls` hiding dotfiles — measurement lesson recorded). Mac clean.
-- Next in wave (a): item 3 (no-empty-catch fitness + sweep — the sink now exists to emit into);
-  then wave (b) starting at item 7 (liveness loop).
+- **Wave (a) / item 3 ratchet ARMED (2026-07-26):** `acd-no-new-silent-catch` — the true baseline is
+  94 sites / 29 files (comment-only catch bodies count: a comment is documentation, not a runtime
+  signal), pinned as a per-file shrink-only allowlist; any NEW silent catch fails the build. The
+  sweep (emit into the item-2 sink) shrinks it file-by-file — remaining within item 3.
+- Next: wave (b) starting at item 7 (liveness loop: worker startup reclaim + dead-PTY report +
+  control heartbeat staleness); then F23/F24 presence home; then item 4 identity home.
 
 ## Notes & decisions in flight
 
