@@ -61,6 +61,9 @@ import { assetBase, packageVersionString } from "./asset-base.mjs";
 // payload / embedded + the install's build stamp)? Surfaced on --version and on
 // every daemon startup line, so a stale build is VISIBLE rather than inferred.
 import { readBuildInfo, buildInfoString } from "./build-info.mjs";
+// m42 wave (a) / TECH_DEBT item 2 — the daemons' durable JSONL log sink (warnings
+// tee beside the live stderr; startup records the build id).
+import { createMeshLogSink } from "./mesh-log.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -1207,6 +1210,10 @@ async function meshUiCommand(args) {
   // TECH_DEBT item 1 — the daemon's startup line records which build it runs
   // (a SECOND line: the announce line above is a pinned contract).
   console.log(`Build: ${buildInfoString(readBuildInfo())}`);
+  // m42 wave (a) / item 2 — the ui daemon's durable startup record (same sink family
+  // as mesh-serve's; the fleet server's own faults land via its error paths below).
+  const uiLogSink = createMeshLogSink("mesh-ui", { env: process.env });
+  uiLogSink.write({ level: "info", code: "daemon-started", message: `mesh ui running (build ${buildInfoString(readBuildInfo())})` });
   console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the fleet view.");
@@ -1463,6 +1470,11 @@ async function meshServeDaemonCommand(args) {
   }
 
   let handle = null;
+  // m42 wave (a) / TECH_DEBT item 2 — the durable sink. Warnings TEE here beside the
+  // live stderr line (a supervised daemon's stderr goes nowhere; this file is the
+  // record). Startup/shutdown are logged too, with the build id, so "which build ran
+  // when" is answerable from the file alone.
+  const logSink = createMeshLogSink("mesh-serve", { env: process.env });
   try {
     // review fix (live soak, 2026-07-17): a connect failure, propagation fault, or
     // dispatch-tick error used to be accumulated into handle.warnings and never read
@@ -1472,6 +1484,7 @@ async function meshServeDaemonCommand(args) {
     handle = await startLauncher(workspace, {
       onWarning: (warning) => {
         console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
+        logSink.write({ level: "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null });
       },
     });
     if (handle.refused) {
@@ -1485,7 +1498,9 @@ async function meshServeDaemonCommand(args) {
     // TECH_DEBT item 1 — same second-line build report as mesh ui's.
     console.log(`Build: ${buildInfoString(readBuildInfo())}`);
     console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
+    console.log(`Log: ${logSink.path}`);
     console.log("Press Ctrl+C to stop the launcher.");
+    logSink.write({ level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, node: handle.record.nodeId });
 
     await new Promise((resolve) => {
       const shutdown = () => {
