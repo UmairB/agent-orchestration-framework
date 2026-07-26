@@ -27,8 +27,13 @@ doc: state
   `mesh:logs` registered + `aof mesh logs [proc] [--tail N]` — the derived bijection gate covered
   the new verb with no edit (item 5's payoff, first use). Deferred within item 2: remote-node read
   + --follow. Daemons pick the sink up at the next operator restart.
-- Next in wave (a): item 3 (no-empty-catch fitness + sweep — the sink now exists to emit into) +
-  F26 temp-leak; then wave (b) starting at item 7 (liveness loop).
+- **Wave (a) / m38-F26 DONE (2026-07-26):** `writeText`'s failure path now reclaims its own temp
+  (error still propagates), and `sweepStaleTempFiles` (age-gated, never touches a live writer's
+  fresh temp) runs at mesh-serve startup over presence/ + nodes/, logging reclaims to the sink.
+  Measured + reclaimed live on the control node: 42 orphans in presence/, 6 in nodes/ (the earlier
+  0-counts were plain `ls` hiding dotfiles — measurement lesson recorded). Mac clean.
+- Next in wave (a): item 3 (no-empty-catch fitness + sweep — the sink now exists to emit into);
+  then wave (b) starting at item 7 (liveness loop).
 
 ## Notes & decisions in flight
 

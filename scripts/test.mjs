@@ -1347,6 +1347,9 @@ import { assetBaseSeamTests } from "../test/asset-base-seam.test.mjs";
 import { buildInfoTests } from "../test/build-info.test.mjs";
 // m42 wave (a) / TECH_DEBT item 2 — the daemons' durable JSONL log sink + reader.
 import { meshLogTests } from "../test/mesh-log.test.mjs";
+// m42 wave (a) / m38-F26 — atomic-write temp hygiene (failed rename reclaims its
+// temp; the startup sweep reclaims aged orphans only).
+import { fsTempHygieneTests } from "../test/fs-temp-hygiene.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -2005,6 +2008,7 @@ export const tests = [
   ...assetBaseSeamTests,
   ...buildInfoTests,
   ...meshLogTests,
+  ...fsTempHygieneTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,

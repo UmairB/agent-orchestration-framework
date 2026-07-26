@@ -7,11 +7,11 @@ import { applyConfig, supportedRuntimes } from "./adapters.mjs";
 import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
 import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
 import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
-import { readJson, writeText } from "./fs.mjs";
+import { readJson, writeText, sweepStaleTempFiles } from "./fs.mjs";
 import { normalizePackage } from "./packages.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { promptResourceInput, selectRuntimes } from "./prompt.mjs";
-import { findProjectConfig, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { findProjectConfig, globalMeshPaths, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { collectAdapterWarnings } from "./adapter-warnings.mjs";
 import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
 import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
@@ -1509,6 +1509,14 @@ async function meshServeDaemonCommand(args) {
     console.log(`Log: ${logSink.path}`);
     console.log("Press Ctrl+C to stop the launcher.");
     logSink.write({ level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, node: handle.record.nodeId });
+    // m38-F26 (m42 wave (a)) — reclaim .tmp-* orphans a crashed publisher left in
+    // the presence/nodes stores (age-gated; a live writer's temp is never touched).
+    for (const dir of [path.join(globalMeshPaths({ env: process.env }).meshRoot, "presence"), globalMeshPaths({ env: process.env }).nodesRoot]) {
+      const swept = await sweepStaleTempFiles(dir);
+      if (swept.removed.length > 0) {
+        logSink.write({ level: "info", code: "temp-orphans-swept", message: `reclaimed ${swept.removed.length} stale .tmp-* file(s) in ${dir}` });
+      }
+    }
 
     await new Promise((resolve) => {
       const shutdown = () => {
