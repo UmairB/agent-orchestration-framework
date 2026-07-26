@@ -1,5 +1,6 @@
 import path from "node:path";
 import { access, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, loadProjectConfig } from "./dsl.mjs";
@@ -807,7 +808,9 @@ async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [
     .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
     .map((arg) => arg.slice(2).split("=", 2)[0]);
   const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config" && !extraFlags.includes(flag));
+  // --workspace joins --json/--config as a face-wide flag (m42 item 4 — the
+  // cwd-independent target selector every mesh verb accepts).
+  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config" && flag !== "workspace" && !extraFlags.includes(flag));
 
   const options = parseOptions(args);
   // Force the resolved --json onto the parsed options so an unknown flag that
@@ -834,7 +837,43 @@ async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [
     return;
   }
 
-  const workspace = await loadWorkspace(process.cwd(), options.config);
+  // m42 wave (b) / item 4 — CWD-INDEPENDENT workspace resolution. Every mesh verb
+  // used to resolve its workspace from process.cwd() alone, so a recovery command
+  // run from the wrong directory silently operated on the WRONG workspace
+  // (measured live: `aof mesh assign 18 --withdraw` reported "No assignment
+  // exists" while the row sat in the store under another workspace's id).
+  // `--workspace <path|id>` names the target explicitly: a path loads that
+  // workspace; a bare id resolves its registered projectRoot through the global
+  // descriptor store (the fleet's own registry) and refuses loudly when unknown —
+  // never a silent fall-through to the cwd.
+  let workspaceRoot = process.cwd();
+  const requestedWorkspace = typeof options.workspace === "string" ? options.workspace.trim() : "";
+  if (requestedWorkspace !== "") {
+    if (existsSync(requestedWorkspace)) {
+      workspaceRoot = requestedWorkspace;
+    } else {
+      const { openGlobalWorkProjectionStore } = await import("./global-work-store.mjs");
+      let resolvedRoot = null;
+      try {
+        const store = await openGlobalWorkProjectionStore({});
+        try {
+          const row = store.db.prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?").get(requestedWorkspace);
+          resolvedRoot = row?.project_root ?? null;
+        } finally {
+          store.close?.();
+        }
+      } catch (error) {
+        emitMeshError(options.json, `Could not resolve --workspace "${requestedWorkspace}": ${error.message}`, "workspace-unresolvable");
+        return;
+      }
+      if (resolvedRoot == null) {
+        emitMeshError(options.json, `Unknown workspace "${requestedWorkspace}" — not a path, and no registered workspace descriptor carries that id.`, "workspace-unknown");
+        return;
+      }
+      workspaceRoot = resolvedRoot;
+    }
+  }
+  const workspace = await loadWorkspace(workspaceRoot, options.config);
   const input = command.cli.argv(options._, options);
 
   if (options.json) {
