@@ -3,12 +3,8 @@ type: milestone
 number: 42
 slug: structural-overhaul
 title: "Structural overhaul — one home, one door, no silence"
-status: not-started
-owner: product-owner
 created: 2026-07-26
 updated: 2026-07-26
-schema: 1
-aofVersion: 0.1.0
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
