@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { serveSetupUi } from "./setup-ui.mjs";
+import { ensureWorktreeTrusted } from "./claude-trust.mjs";
 import { assetPath } from "./asset-base.mjs";
 
 export function boardUiDist(repoRoot) {
@@ -35,7 +36,11 @@ export async function serveBoard({ projectDir = process.cwd(), port = 4178, repo
     throw error;
   }
 
-  const { server, url } = await serveSetupUi(null, { projectDir, port, uiRoot: dist, spawn, which, recordSessions });
+  // `trustCwd: ensureWorktreeTrusted` — a LITERAL key at THE production call site. The
+  // terminal layer defaults it to a no-op precisely so no test can write the operator's
+  // real ~/.claude.json; this is the one place the real writer is wired, so the board's
+  // spawned agent never hits claude's blocking folder-trust dialog.
+  const { server, url } = await serveSetupUi(null, { projectDir, port, uiRoot: dist, spawn, which, recordSessions, trustCwd: ensureWorktreeTrusted });
   // `url` already ends with "/", so this yields e.g. http://127.0.0.1:PORT/?mode=board.
   const boardUrl = `${url}?mode=board`;
   return { server, url, boardUrl };

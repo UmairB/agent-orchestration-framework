@@ -403,6 +403,13 @@ async function workCommand(args) {
     return;
   }
 
+  // `aof work continue <ref> [--node <id>]` — THE single continue door (2026-07-26).
+  // Same shape as every other registry-backed verb; the command decides WHERE.
+  if (subcommand === "continue") {
+    await runVerbCli("work:continue", rest);
+    return;
+  }
+
   if (subcommand === "doc") {
     await workDocCommand(rest);
     return;

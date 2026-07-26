@@ -129,6 +129,17 @@ async function buildFixture() {
 // with a valid body (so it answers 200, not 400 missing-note) — the point is that
 // the ROUTE is served via the registry, whatever the status.
 async function hitRoute(url, op) {
+  // `continue` is the second POST (2026-07-26) — THE single "continue this task
+  // [--node]" door. It carries a same-origin guard, so the probe sends the server's own
+  // origin; the fixture item has no prior run, so it resolves `where: "local"` and mints
+  // nothing (this probe never dispatches anything to a real node).
+  if (op === "continue") {
+    return fetch(new URL("/api/work/continue", url), {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: new URL(url).origin },
+      body: JSON.stringify({ ref: "03/01" }),
+    });
+  }
   if (op === "feedback") {
     return fetch(new URL("/api/work/feedback", url), {
       method: "POST",

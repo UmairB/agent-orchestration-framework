@@ -129,6 +129,28 @@ export async function handleWorkApi(request, response, options = {}) {
       return true;
     }
 
+    if (request.method === "POST" && pathname === "/api/work/continue") {
+      // THE single continue door (2026-07-26): "continue this task, optionally naming
+      // where". It may mint an assignment, so it carries the same same-origin admission
+      // guard the fleet's own assign route uses — a same-origin browser fetch always
+      // matches this server's own http://<host>; anything else is refused before the
+      // body is read.
+      const expectedOrigin = `http://${request.headers.host}`;
+      if (request.headers.origin !== expectedOrigin) {
+        sendApiError(response, 403, "Cross-origin write refused.", "cross-origin-refused");
+        return true;
+      }
+      const body = await readJsonBody(request);
+      // Only ref/node are lifted off the body — the command decides everything else.
+      const result = await invoke(
+        "work:continue",
+        { ref: body.ref, ...(body.node ? { node: body.node } : {}) },
+        ctx
+      );
+      sendJson(response, 200, result);
+      return true;
+    }
+
     if (request.method === "POST" && pathname === "/api/work/feedback") {
       // readJsonBody is the HTTP-body transport reader (its payload-too-large /
       // empty-json / malformed-json errors are HTTP-body concerns, not operation

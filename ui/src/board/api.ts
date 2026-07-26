@@ -29,6 +29,13 @@ export type WorkItem = {
     updatedAt: string | null;
     branch: string | null;
   };
+  // Set by the server's worker-row merge (src/board-worker-stream.mjs): this row came
+  // from a WORKER's own view of the item, streamed over the fabric — so this machine's
+  // checkout may not have the item at all. The drill-downs (doc bodies, run records)
+  // are NOT bridged, so a row carrying these needs a "lives on <node>" answer rather
+  // than a local resolution error (TECH_DEBT item 6).
+  fromWorker?: boolean;
+  reportedBy?: string | null;
 };
 
 export type WorkStatus = "not-started" | "in-progress" | "in-review" | "blocked" | "done";
@@ -51,6 +58,19 @@ export type NextResponse = {
 };
 
 export type FeedbackResponse = { ok: true; bullet: string };
+
+// The /api/work/continue envelope. `where` is the server's answer to the only question
+// this endpoint exists to settle: does this continue run HERE, or on a worker node?
+// `command` is the slash command a LOCAL continue types into its own session.
+export type ContinueResponse = {
+  ok: true;
+  ref: string;
+  where: "local" | "remote";
+  node: string | null;
+  resolvedBy: "requested" | "last-node" | "no-prior-run" | null;
+  command: string;
+  assignmentId?: string;
+};
 
 // A story's tasks are its `<dir>/tasks/*.feature` files, parsed server-side
 // (the browser can't read disk). Mirrors the /api/work/tasks wire shape.
@@ -134,6 +154,19 @@ export const workApi = {
   next(scope?: string): Promise<NextResponse> {
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
     return getJson<NextResponse>(`/api/work/next${query}`);
+  },
+  // THE single continue door (2026-07-26). The SERVER decides where a continue runs —
+  // the node that last worked on the item, or here when nothing ever has. The button
+  // must not make that decision itself: that is how clicking Continue on a milestone a
+  // worker owns used to start a rival local run on the control node.
+  async continueWork(input: { ref: string; node?: string }): Promise<ContinueResponse> {
+    const response = await fetch("/api/work/continue", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) throw new Error(await safeError(response));
+    return (await response.json()) as ContinueResponse;
   },
   async feedback(input: { ref: string; note: string; actor: string; refs?: string }): Promise<FeedbackResponse> {
     const response = await fetch("/api/work/feedback", {

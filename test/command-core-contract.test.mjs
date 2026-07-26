@@ -60,6 +60,10 @@ const WORK_IDS = [
   "work:insert-chore",
   "work:promote-gap",
   "work:upgrade",
+  // work:continue (TECH_DEBT item 0 "one door per act") — the SINGLE continue door
+  // (CLI, board POST, fleet all route through it; the where-to-run decision lives
+  // inside the command) — another sanctioned in-namespace extension.
+  "work:continue",
 ];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------

@@ -142,7 +142,10 @@ export async function serveSetupUi(catalog, options = {}) {
 
   // Story 02: the terminal WebSocket (/ws/terminal) on the SAME server (ADR-001).
   // `spawn`/`which` are optional injection seams for tests (no real PTY/PATH).
-  attachTerminalWebSocket(server, { projectDir, spawn: options.spawn, which: options.which, recordSessions: options.recordSessions });
+  // `trustCwd` — the claude folder-trust pre-write seam (default: the real writer,
+  // wired inside attachTerminalWebSocket). Threaded through so the test fixture can
+  // stub it; production passes nothing and gets the real one.
+  attachTerminalWebSocket(server, { projectDir, spawn: options.spawn, which: options.which, recordSessions: options.recordSessions, trustCwd: options.trustCwd });
 
   // Reject (don't hang) when the port can't be bound — e.g. EADDRINUSE — so a
   // caller (the board launcher) can degrade honestly instead of an unhandled

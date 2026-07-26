@@ -189,6 +189,10 @@ function argsFor(sub) {
     // mutates the fixture's "03"/"03/01" refs the other subcommand probes
     // above depend on (it only REPORTS what would change).
     case "upgrade": return ["work", "upgrade", "--dry-run", "--json"];
+    // 2026-07-26 — work:continue, THE single "continue this task [--node <id>]" door.
+    // The fixture is NOT mesh-configured and "03/01" has no prior run, so WHERE resolves
+    // to `local`: exit 0, one parseable envelope, and NOTHING is dispatched or minted.
+    case "continue": return ["work", "continue", "03/01", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }
