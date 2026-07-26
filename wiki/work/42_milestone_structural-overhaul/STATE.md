@@ -16,6 +16,11 @@ doc: state
 
 ## Notes & decisions in flight
 
+- 2026-07-26 (pre-refine): debt item 1's core was paid down — `aof.exe` is now a payload-first
+  launcher (sea-entry bootstrap; verified `import()` of external ESM works inside this SEA recipe),
+  install-local defaults to a payload file-copy deploy (`--sea` only for launcher/release builds),
+  BUILD_ID stamped + surfaced (`--version`, daemon startup lines), `.bak` pruning. Remaining for
+  wave (c): remote build-id in `aof mesh status`. Refine should fold this in, not re-plan it.
 - 2026-07-26 (pre-refine): debt item 6's doc/run legs were paid down ahead of the milestone —
   projection schema v5 (`work_item_docs`/`work_item_runs`), the worker's `worktree-content` frame,
   and the `work:doc`/`work:run-status` projection fallback. Unit-verified only; live two-machine

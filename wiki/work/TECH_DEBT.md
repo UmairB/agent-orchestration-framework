@@ -79,7 +79,15 @@ then (c) the build (item 1). Each step should leave the soak running.
 
 ## 1. The binary is the whole program, not a wrapper around the CLI
 
-**Status:** open (raised 2026-07-26, live two-machine soak). **Severity:** high — it taxes every
+**Status:** largely addressed (2026-07-26). `aof.exe` is now a payload-first LAUNCHER: when
+`<exeDir>/src/cli.mjs` exists (the install ships the real `src/` + prod `node_modules` beside the
+exe) the CLI loads from disk — a source change deploys as `node scripts/install-local.mjs` (file
+copy, no SEA build) + restart. The embedded bundle remains only as the release/single-file fallback
+(`AOF_SEA_EMBEDDED=1`); a broken payload fails loudly, never a silent embedded fallback. The build
+is stamped (`BUILD_ID.json`; `aof --version` and both daemons' startup lines report
+source/payload/embedded + build id) and `.bak` binaries are pruned to the newest 3 on install.
+Remaining: `aof mesh status` does not yet surface a REMOTE node's build id, and the deploy is still
+per-machine (the Mac's npm-symlink path was already restart-based). **Severity:** high — it taxes every
 single change.
 
 **What's wrong.** `aof.exe` is supposed to be a thin wrapper around the CLI. It isn't. It is a Node
