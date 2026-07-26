@@ -170,6 +170,44 @@ export function listActiveWorktrees() {
   return [...activeWorktrees.values()];
 }
 
+// listStrandedWorktreeAssignments(options) — m42 wave (b) / TECH_DEBT item 7 leg 2:
+// the DURABLE startup view the in-memory registry above cannot give. Worktree
+// DIRECTORIES persist across a daemon restart at
+// <checkoutsRoot>/<workspaceId>/.aof/mesh/worktrees/<assignmentId>/ — and at startup
+// every one of them belongs to a run whose PTY child no longer exists (this process
+// just started). The launcher reports each as failed/daemon-restarted; the control's
+// terminal-guard (a terminal row never regresses) makes the broadcast safe for
+// retained-after-failure and already-withdrawn worktrees. Absent roots scan to [].
+export async function listStrandedWorktreeAssignments(options = {}) {
+  const out = [];
+  const root = meshCheckoutsRoot(options.globalWorkStoreOptions ?? {});
+  let workspaces = [];
+  try {
+    workspaces = await readdir(root, { withFileTypes: true });
+  } catch {
+    return out; // no checkouts yet — a fresh worker has nothing stranded
+  }
+  for (const workspace of workspaces) {
+    if (!workspace.isDirectory()) continue;
+    const worktreesDir = path.join(root, workspace.name, ".aof", "mesh", "worktrees");
+    let entries = [];
+    try {
+      entries = await readdir(worktreesDir, { withFileTypes: true });
+    } catch {
+      continue; // this checkout has no worktrees dir — nothing stranded here
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      out.push({
+        assignmentId: entry.name,
+        workspaceId: workspace.name,
+        worktreePath: path.join(worktreesDir, entry.name),
+      });
+    }
+  }
+  return out;
+}
+
 // resolveWorkspaceWorkDir(projectRoot, workDir, worktreePath) — the SAME work.mjs
 // resolution the primary checkout uses, re-rooted at the worktree: workDir is always
 // `projectRoot` joined with the configured (default "./wiki/work") relative segment,

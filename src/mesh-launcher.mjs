@@ -38,7 +38,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1194,6 +1194,29 @@ export async function startLauncher(ws, options = {}) {
       }
     };
     streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch(() => {}));
+
+    // m42 wave (b) / TECH_DEBT item 7 leg 2 — STARTUP RECLAIM. Every worktree
+    // directory found on disk at startup belongs to a run whose PTY child cannot be
+    // alive (this daemon just started), so each is reported failed/daemon-restarted
+    // BEFORE new work arrives — the board flips instead of showing `running` over a
+    // process that died with the previous daemon. The control's terminal-guard
+    // refuses the report for assignments already settled (done/failed/withdrawn —
+    // e.g. a retained-after-failure worktree), so this broadcast can never regress a
+    // terminal row. Fire-and-forget with LOUD failure: a reclaim fault is a warning,
+    // never a daemon-startup crash.
+    (async () => {
+      const stranded = await listStrandedWorktreeAssignments({ globalWorkStoreOptions: options?.globalWorkStoreOptions });
+      for (const entry of stranded) {
+        emitWarning(launcherWarnings, {
+          code: "startup-reclaim",
+          message: `reporting stranded worktree assignment ${entry.assignmentId} as failed (daemon restarted — its run cannot be alive)`,
+          path: entry.worktreePath,
+        }, options);
+        await streamClient.sendAssignmentStatus(entry.assignmentId, "failed", { code: "daemon-restarted" });
+      }
+    })().catch((error) => {
+      emitWarning(launcherWarnings, { code: "startup-reclaim-failed", message: error?.message ?? String(error), path: null }, options);
+    });
   }
 
   // stop() — the clean daemon shutdown (ADR-003.3, the serve-unit discipline): stop

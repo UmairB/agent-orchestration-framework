@@ -27,7 +27,7 @@ import { updateAssignmentState, isActiveAssignmentState, listAllAssignments } fr
 // global-work-store.mjs / openGlobalWorkProjectionStore directly (fitness
 // acd-global-publisher-single-seam — the launcher reaches the global store only
 // through a sanctioned seam, never the SQLite store module itself).
-import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore, readWorkItemRuns } from "./global-work-store.mjs";
 // VERIFICATION (UI phase selection, 2026-07-25) — the per-assignment phase directive
 // (which lifecycle command the worker runs). The dispatch call site below reads the
 // operator-chosen phase from the additive side-table and maps it to the command string;
@@ -117,15 +117,32 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
   const presenceCache = new Map();
 
   for (const row of rows) {
-    if (row.runId == null) continue; // no run minted yet (still `assigned`) — nothing to check a heartbeat against
+    if (row.runId == null) continue; // no run minted yet (still `assigned`) — the dispatch retry loop owns that state
 
     const matches = await findWork(workspace.workDir, row.itemRef);
     const item = matches.find((m) => m.ref === row.itemRef) ?? matches[0] ?? null;
-    if (item == null) continue; // the item no longer resolves — nothing to reclaim a run against
 
-    const runs = await readRuns(item);
-    const run = runs.find((r) => r.runId === row.runId) ?? null;
-    if (run == null || run.state !== "running") continue; // already terminal, or no matching run record
+    // m42 wave (b) / item 7 leg 3 — THE RUN RECORD, WHEREVER IT ACTUALLY IS. The
+    // original read was local-only (`readRuns(item)` against THIS checkout), and a
+    // cross-machine run's record lives on the WORKER — the control checkout has no
+    // runs/ by construction — so `run == null` skipped EVERY mesh assignment and the
+    // dual-staleness reclaim was structurally dead for exactly the case it exists
+    // for (measured live: a dead run sat `running` 25+ minutes, recovered by hand).
+    // Order of truth: the LOCAL record (single-machine runs, unchanged behaviour),
+    // else the STREAMED record (schema v5's work_item_runs — the worker's own run
+    // records ride the projection while it works), else NO record at all — in which
+    // case the ASSIGNMENT's own updatedAt is the staleness clock (it froze when the
+    // worker last reported; a worker that died before ever streaming must not be
+    // un-reclaimable forever).
+    const localRuns = item != null ? await readRuns(item) : [];
+    const localRun = localRuns.find((r) => r.runId === row.runId) ?? null;
+    const streamedRun = localRun == null
+      ? readWorkItemRuns(store, row.workspaceId ?? workspaceId, row.itemRef)
+          .map((entry) => entry.record)
+          .find((record) => record?.runId === row.runId) ?? null
+      : null;
+    const run = localRun ?? streamedRun;
+    if (run != null && run.state !== "running") continue; // already terminal — never a reclaim candidate
 
     if (!presenceCache.has(row.targetNodeId)) {
       presenceCache.set(row.targetNodeId, await readPresenceRecord(workspace, row.targetNodeId));
@@ -133,7 +150,7 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
     const presence = presenceCache.get(row.targetNodeId);
 
     const shouldReclaim = dualStalenessDecision(
-      { presence, heartbeatAt: run.heartbeatAt ?? run.updatedAt },
+      { presence, heartbeatAt: run?.heartbeatAt ?? run?.updatedAt ?? row.updatedAt },
       nowMs,
       { presenceThresholdMs, heartbeatThresholdMs },
     );
@@ -141,12 +158,17 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
 
     // Force-fail the run runtime_offline, retryable (reusing the EXACT applyTransition
     // edge reclaimStaleRuns itself uses — the single source of "how a run is
-    // reclaimed", never a second write path).
-    await applyTransition(item, run.runId, "failed", {
-      now,
-      failureReason: "runtime_offline",
-      reclaimedAt: now,
-    });
+    // reclaimed", never a second write path). LOCAL records only: a streamed record
+    // is the worker's own disk state mirrored here — the control cannot transition a
+    // file on another machine, and the assignment write below IS the control-side
+    // fact the fleet/board read.
+    if (localRun != null && item != null) {
+      await applyTransition(item, localRun.runId, "failed", {
+        now,
+        failureReason: "runtime_offline",
+        reclaimedAt: now,
+      });
+    }
 
     const updated = updateAssignmentState(store, row.assignmentId, "reclaimed", { now, reclaimedAt: now });
     if (updated) reclaimed.push(updated);

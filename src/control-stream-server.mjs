@@ -285,6 +285,18 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
     return { applied: false, skipped: true, code: "assignment-status-not-holder" };
   }
 
+  // m42 wave (b) / item 7 leg 2 — A TERMINAL ROW NEVER REGRESSES. A late/stale
+  // worker frame (a startup reclaim broadcast covering a retained worktree, a
+  // duplicate `failed` after a manual withdraw, a done echo arriving after a
+  // reclaim) must never flip a settled assignment back to another state:
+  // updateAssignmentState itself is guard-free by design (its callers own the
+  // transition rules), so THIS apply seam — the only door worker frames come
+  // through — is where the invariant lives. Refused, and reportable (the skip
+  // reaches onFrameSkipped like every other refusal).
+  if (!isActiveAssignmentState(existing.state)) {
+    return { applied: false, skipped: true, code: "assignment-status-already-terminal", workspaceId: existing.workspace_id };
+  }
+
   const now = options.now ?? new Date().toISOString();
   const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : undefined;
   // milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 invariant 3 +

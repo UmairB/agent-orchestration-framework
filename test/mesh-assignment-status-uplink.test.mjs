@@ -164,4 +164,26 @@ export const meshAssignmentStatusUplinkTests = [
       });
     },
   },
+  {
+    // m42 wave (b) / item 7 leg 2 — A TERMINAL ROW NEVER REGRESSES: a late/stale
+    // worker frame (a startup-reclaim broadcast covering a retained worktree, a
+    // duplicate failed after a manual withdraw, a done echo after a reclaim) is
+    // REFUSED at the one apply seam, reportably — never written through.
+    name: "assignment-status-uplink/m42-7.2 a frame against a TERMINAL assignment is refused (already-terminal) — Scenario Outline (done, failed, withdrawn, reclaimed × an incoming failed)",
+    async run() {
+      for (const terminal of ["done", "failed", "withdrawn", "reclaimed"]) {
+        await withMeshAssignFixture(async ({ workspaceId, home }) => {
+          await seedAssignment({ home }, { assignmentId: "asg-t", itemRef: "35/01", workspaceId, targetNodeId: "worker-a", issuer: "control-a", state: terminal, assignedAt: NOW });
+          await withStore({ home }, async (store) => {
+            const frame = { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-t", state: "failed", code: "daemon-restarted", at: NOW };
+            const result = await applyStreamFrame(store, frame, { now: NOW, nodeId: "worker-a" });
+            assert.equal(result.applied, false, `${terminal} -> failed is refused`);
+            assert.equal(result.skipped, true);
+            assert.equal(result.code, "assignment-status-already-terminal");
+            assert.equal(readAssignment(store, "asg-t").state, terminal, `the ${terminal} row is untouched`);
+          });
+        });
+      }
+    },
+  },
 ];

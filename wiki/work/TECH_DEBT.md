@@ -292,6 +292,14 @@ indistinguishable from a live one** — no heartbeat-driven liveness on the assi
 no startup reclaim. This is the single biggest source of perceived flakiness and the top of
 milestone 42's wave (a)/(b) work with items 2 and 3. **Severity:** high (upgraded 2026-07-26).
 
+**ADDRESSED in code (2026-07-26, milestone 42 wave (b) — live-drill verification pending):**
+(1) the PTY liveness probe — a child that dies without an exit event settles `failed/agent_died`
+within ~15s; (2) worker startup reclaim — persisted worktree dirs are reported
+`failed/daemon-restarted` before new work, made safe by the new apply-seam invariant *a terminal
+assignment never regresses*; (3) the control dual-staleness reclaim read run records LOCAL-ONLY, so
+every cross-machine assignment was skipped forever — it now falls back to the streamed v5
+`work_item_runs` record, then to the assignment's own frozen `updatedAt`.
+
 **What's wrong.** Killing a worker daemon mid-run strands `runs/<node>/<runId>.json` in `running` and
 its control-side assignment in `running`. Nothing clears them: the item is blocked until heartbeat
 staleness (~15 min) or a manual `aof work run-complete <ref> --run-id <id> --outcome cancelled` plus

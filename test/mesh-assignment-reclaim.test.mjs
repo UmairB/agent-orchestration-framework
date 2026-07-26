@@ -184,4 +184,82 @@ export const meshAssignmentReclaimTests = [
       assert.equal(dualStalenessDecision({ presence: null, heartbeatAt: HEARTBEAT_STALE }, nowMs, thresholds), false);
     },
   },
+  // --- m42 wave (b) / item 7 leg 3 — the run record, wherever it actually is. The
+  // local-only read skipped EVERY cross-machine assignment (the control checkout has
+  // no runs/ for a worker's run), so the reclaim was structurally dead for exactly
+  // the case it exists for. ---
+  {
+    name: "assignment-reclaim/m42-7.3 a CROSS-MACHINE run (no local record) reclaims from the STREAMED work_item_runs record — and never touches local run files",
+    run: async () => {
+      const { upsertWorkItemContent } = await import("../src/global-work-store.mjs");
+      await withMeshWorkerExecFixture(async (fx) => {
+        const store = await openGlobalWorkProjectionStore({ env: fx.env });
+        try {
+          // The assignment references a run that exists ONLY as a streamed record
+          // (the item-18 shape: worker ran it, control checkout has no runs/).
+          const record = assembleAssignmentRecord({
+            itemRef: fx.itemRef, workspaceId: fx.workspaceId, targetNodeId: TARGET_NODE,
+            issuer: "control-a", state: "running", runId: "run-remote-1", now: secondsBefore(NOW, 600),
+          });
+          insertAssignment(store, record);
+          upsertWorkItemContent(store, fx.workspaceId, {
+            runs: [{ ref: fx.itemRef, runId: "run-remote-1", record: { runId: "run-remote-1", itemRef: fx.itemRef, state: "running", heartbeatAt: HEARTBEAT_STALE, updatedAt: HEARTBEAT_STALE } }],
+            nodeId: TARGET_NODE,
+          }, { now: NOW });
+          await seedPresence(fx, PRESENCE_STALE);
+
+          const reclaimed = await reclaimStaleAssignments(store, fx.workspace, fx.workspaceId, { now: NOW });
+          assert.equal(reclaimed.length, 1, "the streamed record is a first-class heartbeat source — the mesh run reclaims");
+          assert.equal(readAssignment(store, record.assignmentId).state, "reclaimed");
+
+          // …and a FRESH streamed heartbeat is hands-off (the streamed record is
+          // read with the same decision table, not a shortcut).
+          const fresh = assembleAssignmentRecord({
+            itemRef: fx.itemRef, workspaceId: fx.workspaceId, targetNodeId: TARGET_NODE,
+            issuer: "control-a", state: "running", runId: "run-remote-2", now: secondsBefore(NOW, 300),
+          });
+          insertAssignment(store, fresh);
+          upsertWorkItemContent(store, fx.workspaceId, {
+            runs: [{ ref: fx.itemRef, runId: "run-remote-2", record: { runId: "run-remote-2", itemRef: fx.itemRef, state: "running", heartbeatAt: HEARTBEAT_FRESH, updatedAt: HEARTBEAT_FRESH } }],
+            nodeId: TARGET_NODE,
+          }, { now: NOW });
+          const second = await reclaimStaleAssignments(store, fx.workspace, fx.workspaceId, { now: NOW });
+          assert.equal(second.length, 0, "a fresh streamed heartbeat is hands-off");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
+  {
+    name: "assignment-reclaim/m42-7.3 NO run record anywhere ⇒ the ASSIGNMENT's own updatedAt is the staleness clock — a worker dead before ever streaming is not un-reclaimable forever",
+    run: async () => {
+      await withMeshWorkerExecFixture(async (fx) => {
+        const store = await openGlobalWorkProjectionStore({ env: fx.env });
+        try {
+          // Stale assignment (updatedAt 20 min ago), stale presence, no run record
+          // local OR streamed.
+          const record = assembleAssignmentRecord({
+            itemRef: fx.itemRef, workspaceId: fx.workspaceId, targetNodeId: TARGET_NODE,
+            issuer: "control-a", state: "running", runId: "run-vanished", now: msBefore(NOW, DEFAULT_ASSIGNMENT_HEARTBEAT_STALE_MS + 5 * 60_000),
+          });
+          insertAssignment(store, record);
+          await seedPresence(fx, PRESENCE_STALE);
+          const reclaimed = await reclaimStaleAssignments(store, fx.workspace, fx.workspaceId, { now: NOW });
+          assert.equal(reclaimed.length, 1, "the assignment's frozen updatedAt is the surrogate heartbeat");
+
+          // A RECENT assignment with no record is hands-off (it may just be booting).
+          const young = assembleAssignmentRecord({
+            itemRef: fx.itemRef, workspaceId: fx.workspaceId, targetNodeId: TARGET_NODE,
+            issuer: "control-a", state: "running", runId: "run-booting", now: secondsBefore(NOW, 120),
+          });
+          insertAssignment(store, young);
+          const second = await reclaimStaleAssignments(store, fx.workspace, fx.workspaceId, { now: NOW });
+          assert.equal(second.length, 0, "a young no-record assignment is left alone");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
 ];
