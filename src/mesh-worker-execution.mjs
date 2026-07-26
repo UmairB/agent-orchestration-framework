@@ -126,6 +126,9 @@ import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
+// m42 wave (b) / item 4 — the clone-time identity pin writes through the ONE atomic
+// write seam (temp+rename, failure reclaims its temp).
+import { writeText } from "./fs.mjs";
 import { resolveWorkspaceCloneUrl as defaultResolveWorkspaceCloneUrl } from "./mesh-presence.mjs";
 // milestone 38 / story 05 (ADR-013) — the interactive-`claude`-PTY driver reuses the
 // EXISTING terminal infrastructure verbatim: `resolveProvider` is the SAME seam
@@ -797,8 +800,34 @@ export async function cloneRepoForWorkspace(ws, { workspaceId, nodeId, assignmen
   // failure" invariant task 02 pins.
   await writeRepoPublishedMarker({ configPath: ws.configPath, workspaceId, now });
   await writeNodeWorkspaceMembership(nodeId, workspaceId, options);
+  // m42 wave (b) / item 4 — CLONE-TIME IDENTITY PIN. The checkout's identity used
+  // to be re-derived from ITS OWN path on this machine (a different id per machine
+  // for the same repo — the class that refused the worker's launch-workspace frames
+  // and spammed workspace-workdir-unresolvable every 5s, forever). The id the
+  // assignment arrived under IS the fleet's canonical id for this repo; pin it into
+  // the checkout's own config so resolveWorkspaceId answers it on every machine.
+  await pinWorkspaceIdInCheckout(checkoutPath, workspaceId);
 
   return checkoutPath;
+}
+
+// pinWorkspaceIdInCheckout(checkoutPath, workspaceId) — m42 wave (b) / item 4: write
+// `mesh.workspaceId` into the scoped checkout's `.aof/aof.config.json`, merging with
+// whatever the repo committed (an absent/torn config pins into a fresh `{ mesh }` —
+// the pin is the fact that matters). Atomic via writeText; a fault propagates (a
+// checkout whose identity could not be pinned would silently regress to the
+// per-machine derivation — the exact bug this exists to end).
+async function pinWorkspaceIdInCheckout(checkoutPath, workspaceId) {
+  const configPath = path.join(checkoutPath, ".aof", "aof.config.json");
+  let config = {};
+  try {
+    config = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    config = {}; // absent or unparseable committed config — pin into a fresh one
+  }
+  const mesh = config?.mesh != null && typeof config.mesh === "object" && !Array.isArray(config.mesh) ? config.mesh : {};
+  const next = { ...config, mesh: { ...mesh, workspaceId } };
+  await writeText(configPath, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 // ------------------------------------------------------- the headless driver ----

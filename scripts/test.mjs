@@ -1359,6 +1359,9 @@ import { meshWorkerLivenessTests } from "../test/mesh-worker-liveness.test.mjs";
 // m42 wave (b) / TECH_DEBT item 4 — workspace identity has ONE home
 // (workspace-identity.mjs); no hand-spelled `?? workspaceIdFor(...)` fallback.
 import { archTests as acdWorkspaceIdentitySingleHomeTests } from "../test/arch/acd-workspace-identity-single-home.test.mjs";
+// m42 wave (b) / item 4 — the clone-time identity pin: a fresh checkout answers the
+// fleet's canonical id on every machine.
+import { meshCloneIdentityPinTests } from "../test/mesh-clone-identity-pin.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -2021,6 +2024,7 @@ export const tests = [
   ...acdNoNewSilentCatchTests,
   ...meshWorkerLivenessTests,
   ...acdWorkspaceIdentitySingleHomeTests,
+  ...meshCloneIdentityPinTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,
