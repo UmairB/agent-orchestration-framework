@@ -25,6 +25,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { globalMeshPaths } from "./workspace.mjs";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
@@ -41,7 +42,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -399,16 +400,66 @@ function emitWarning(sink, warning, options) {
   }
 }
 
+// recoverSkippedViaMeshCheckout(skipped, options) — the WORKER-side descriptor
+// fallback (m42 follow-up; measured 2026-07-26: the Mac's remote log ring was 259/260
+// copies of `workspace-workdir-unresolvable` for `no-descriptor`, drowning every
+// other line — the workspace descriptor lives in the CONTROL's store, so a worker's
+// membership row for an assignment-cloned repo can NEVER resolve through its own
+// descriptor table). On a worker, the workspace IS its mesh checkout: a
+// `no-descriptor` skip whose `meshCheckoutPath(workspaceId)` exists resolves to that
+// checkout's own configured work dir (loadWorkspace — the launcher's existing
+// config-precedence seam, never a re-parse) and joins the aggregation like any
+// registered workspace. Only a skip with NO checkout (or one whose work dir is
+// genuinely absent) stays a loud warning — the diagnostic survives; the every-5s
+// false alarm dies.
+async function recoverSkippedViaMeshCheckout(skipped, options) {
+  const recovered = [];
+  const remaining = [];
+  for (const skip of skipped) {
+    if (skip.reason !== "no-descriptor") {
+      remaining.push(skip);
+      continue;
+    }
+    try {
+      const checkoutPath = meshCheckoutPath(skip.workspaceId, options?.globalWorkStoreOptions ?? {});
+      if (!(await stat(checkoutPath)).isDirectory()) {
+        remaining.push(skip);
+        continue;
+      }
+      const checkoutWs = await loadWorkspace(checkoutPath, undefined, { env: options?.globalWorkStoreOptions?.env });
+      const workDir = typeof checkoutWs?.workDir === "string" && checkoutWs.workDir.length > 0 ? checkoutWs.workDir : null;
+      if (workDir == null || !(await stat(workDir)).isDirectory()) {
+        remaining.push(skip);
+        continue;
+      }
+      recovered.push({ workspaceId: skip.workspaceId, workDir, projectRoot: checkoutPath });
+    } catch (error) {
+      // No checkout on this machine is the EXPECTED miss (ENOENT) — the skip stands
+      // and the warning below reports it; a second degrade event would just re-flood
+      // the sink this fallback exists to quiet. Any OTHER fault is a real event.
+      if (error?.code !== "ENOENT") reportDegrade("mesh-launcher", error);
+      remaining.push(skip);
+    }
+  }
+  return { recovered, remaining };
+}
+
 // `warningsSink` (default a scratch array — production always passes the real
 // `launcherWarnings` accumulator) is where FINDING F11's LOUD-skip diagnostics land:
 // a workspace resolveNodeWorkspaces skipped (its resolved absolute work dir
 // genuinely doesn't exist) is surfaced HERE as a coded warning — never a silent
 // `continue` that lets a zero/short aggregation masquerade as healthy. The frozen
 // presence record itself (ADR-001's five keys) carries NONE of this — warnings are
-// a launcher-facing diagnostic, never a wire-shape change.
+// a launcher-facing diagnostic, never a wire-shape change. A `no-descriptor` skip is
+// first offered the mesh-checkout fallback above; only the genuinely unresolvable
+// remainder warns.
 async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsSink = []) {
   const registryResult = await resolveNodeWorkspaces(nodeId, options);
-  for (const skip of registryResult.skipped ?? []) {
+  const { recovered, remaining } = await recoverSkippedViaMeshCheckout(registryResult.skipped ?? [], options);
+  if (registryResult.ok && recovered.length > 0) {
+    registryResult.workspaces.push(...recovered);
+  }
+  for (const skip of remaining) {
     emitWarning(warningsSink, {
       code: "workspace-workdir-unresolvable",
       message: `Workspace ${skip.workspaceId} work dir could not be resolved (${skip.reason})${skip.workDir ? `: ${skip.workDir}` : ""}.`,
