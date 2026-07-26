@@ -60,17 +60,33 @@ const DOCK_DEFAULT_HEIGHT = 280;
 // still supports all three, so re-enabling is just widening this list.
 const VISIBLE_PROVIDERS: ProviderId[] = ["claude"];
 
+// The dock's ONE session descriptor (m42 item 6, reworked at the operator's
+// insistence): the board has exactly ONE terminal surface — this dock — and a
+// session is either LOCAL (a pty this server spawns, read-write) or REMOTE (the
+// fleet's read-only mirror of a worker's live session). A remote session is a
+// SOURCE of the same surface, never a second widget.
+export type DockSession =
+  | { kind: "local"; ref: string; command: string | null }
+  | { kind: "remote"; ref: string; nodeId: string; sessionId: string };
+
+// The worker's fixed mirror geometry + the fleet's fixed port (the documented
+// contracts — the mirror socket lives on the FLEET server, the board runs on an
+// ephemeral port).
+const MIRROR_COLS = 80;
+const MIRROR_ROWS = 24;
+const FLEET_PORT = 4181;
+
 export function TerminalDock({
-  targetRef,
-  command,
+  session,
   onClose,
 }: {
-  // The ref the SESSION is bound to (independent of the live board selection) and
-  // the state-aware aof slash-command to type on connect (null → ad-hoc agent).
-  targetRef: string | null;
-  command: string | null;
+  // The session bound to the dock (independent of the live board selection).
+  session: DockSession | null;
   onClose?: () => void;
 }) {
+  const targetRef = session?.ref ?? null;
+  const command = session?.kind === "local" ? session.command : null;
+  const remote = session?.kind === "remote" ? session : null;
   const [picker, setPicker] = useState<PickerState>(() => initialPicker());
   const [dock, setDock] = useState<DockState>(() => initialDockState());
   const [collapsed, setCollapsed] = useState(false);
@@ -130,7 +146,10 @@ export function TerminalDock({
 
     const term = new Terminal({
       convertEol: true,
-      cursorBlink: true,
+      // REMOTE = the fleet mirror: read-only IN FACT (stdin disabled — no
+      // keystroke can become input), no blinking cursor inviting one.
+      cursorBlink: remote == null,
+      disableStdin: remote != null,
       fontSize: 13,
       fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
       theme: { background: "#0b0f14", foreground: "#d7dde3" },
@@ -140,13 +159,19 @@ export function TerminalDock({
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
     term.open(container);
-    try {
-      fitAddon.fit();
-    } catch {
-      /* container not yet measured */
+    if (remote != null) {
+      // The FleetTerminalView lesson: the worker's TUI is absolutely addressed at
+      // 80×24 — fitting the pane garbles it. Fixed geometry for the mirror.
+      term.resize(MIRROR_COLS, MIRROR_ROWS);
+    } else {
+      try {
+        fitAddon.fit();
+      } catch {
+        /* container not yet measured */
+      }
     }
 
-    const wsUrl = terminalWsUrl(targetRef, providerId);
+    const wsUrl = remote != null ? mirrorWsUrl(remote) : terminalWsUrl(targetRef, providerId);
     const socket = new WebSocket(wsUrl);
     socket.binaryType = "arraybuffer";
     let lastFit: ResizeMessage | null = null;
@@ -170,6 +195,8 @@ export function TerminalDock({
     };
 
     const sendResize = () => {
+      // The mirror is server→browser ONLY: no resize frames, no fit (fixed 80×24).
+      if (remote != null) return;
       if (socket.readyState !== WebSocket.OPEN) return;
       try {
         fitAddon.fit();
@@ -221,10 +248,13 @@ export function TerminalDock({
       );
     };
 
-    // term → WS: raw input frames.
-    const dataSub = term.onData((input) => {
-      if (socket.readyState === WebSocket.OPEN) socket.send(input);
-    });
+    // term → WS: raw input frames — LOCAL sessions only. Nothing this browser
+    // originates ever travels up a mirror socket (the read-only contract).
+    const dataSub = remote == null
+      ? term.onData((input) => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(input);
+        })
+      : { dispose() {} };
 
     // Reflow on container resize → a single resize per fit.
     const resizeObserver = new ResizeObserver(() => sendResize());
@@ -242,7 +272,7 @@ export function TerminalDock({
       term.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRef, command, providerId, runToken]);
+  }, [targetRef, command, providerId, runToken, remote?.nodeId, remote?.sessionId]);
 
   const stateLabel = useMemo(() => describeState(dock), [dock]);
 
@@ -272,16 +302,25 @@ export function TerminalDock({
           <span aria-hidden="true">▣</span> TERMINAL
         </span>
 
-        {/* Provider picker — radio-semantics, exactly one selected (DESIGN §4). The
-            selected provider carries a teal dot. Changing the provider re-runs the
-            session effect (providerId is a dep), which tears down a live WS/PTY —
-            so the segments are DISABLED while a session is RUNNING (the cheap
-            data-loss guard; exactly-one-selected is preserved). */}
-        <span className="text-xs text-zinc-500">provider:</span>
+        {/* REMOTE session: the read-only badge replaces the provider picker (there
+            is nothing to pick — the session already exists, on another machine). */}
+        {remote != null ? (
+          <span className="mono rounded bg-[#1e2a44] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
+            read-only · {remote.nodeId}
+          </span>
+        ) : null}
+
+        {/* Provider picker — LOCAL sessions only: radio-semantics, exactly one
+            selected (DESIGN §4). The selected provider carries a teal dot. Changing
+            the provider re-runs the session effect (providerId is a dep), which
+            tears down a live WS/PTY — so the segments are DISABLED while a session
+            is RUNNING (the cheap data-loss guard; exactly-one-selected is
+            preserved). */}
+        {remote == null ? <span className="text-xs text-zinc-500">provider:</span> : null}
         <div
           role="radiogroup"
           aria-label="Agent provider"
-          className="grid grid-flow-col gap-1 rounded-md border border-[#1e2a44] bg-[#0b1120] p-1"
+          className={cn("grid grid-flow-col gap-1 rounded-md border border-[#1e2a44] bg-[#0b1120] p-1", remote != null && "hidden")}
         >
           {VISIBLE_PROVIDERS.map((id) => {
             const active = isSelected(picker, id);
@@ -387,6 +426,15 @@ function terminalWsUrl(ref: string, provider: ProviderId): string {
   const host = typeof window !== "undefined" ? window.location.host : "127.0.0.1:4177";
   const params = new URLSearchParams({ ref, provider });
   return `${scheme}://${host}/ws/terminal?${params.toString()}`;
+}
+
+// Build the fleet-mirror URL: the read-only /ws/terminal-view route on the FIXED
+// fleet port (the board itself runs on an ephemeral port).
+function mirrorWsUrl(remote: { nodeId: string; sessionId: string }): string {
+  const scheme = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
+  const hostname = typeof window !== "undefined" ? window.location.hostname : "127.0.0.1";
+  const params = new URLSearchParams({ nodeId: remote.nodeId, sessionId: remote.sessionId });
+  return `${scheme}://${hostname}:${FLEET_PORT}/ws/terminal-view?${params.toString()}`;
 }
 
 // Map the dock state onto the DESIGN §4 ramp (dot colour + label text). The dark

@@ -7,6 +7,7 @@ import { Overview } from "./Overview";
 import { BoardLanes } from "./BoardLanes";
 import { DetailPanel } from "./DetailPanel";
 import { TerminalDock } from "./TerminalDock";
+import type { DockSession } from "./TerminalDock";
 import { StatusRing, statusMeta, LANE_ORDER } from "./status";
 
 // The two-level work board (DESIGN — two views in one screen). A slim top bar
@@ -34,8 +35,9 @@ export function Board() {
   // from the live board selection: the dock stays on the session you launched
   // even as you click around the board (DESIGN — the dock is session-bound).
   const [dockOpen, setDockOpen] = useState(false);
-  const [dockRef, setDockRef] = useState<string | null>(null);
-  const [dockCommand, setDockCommand] = useState<string | null>(null);
+  // ONE session descriptor (m42 item 6): local pty OR the fleet mirror — the
+  // dock is the board's single terminal surface for both.
+  const [dockSession, setDockSession] = useState<DockSession | null>(null);
   // Per-gate "waiting on" labels (DESIGN VIEW 1, preferred-if-cheap from /next).
   const [gateWaiting, setGateWaiting] = useState<Record<string, string[]>>({});
   // Refs with a live `running` run — drives the lane-card in-flight pulse dot
@@ -170,9 +172,9 @@ export function Board() {
       selectedItem.type === "milestone"
         ? (derived.milestones.find((m) => m.num === selectedItem.ref)?.stories.length ?? 0) > 0
         : true;
-    const liveForRef = dockOpen && dockRef === selectedItem.ref;
+    const liveForRef = dockOpen && dockSession?.ref === selectedItem.ref;
     return primaryAction(selectedItem, { hasBreakdown, liveForRef });
-  }, [selectedItem, derived, dockOpen, dockRef]);
+  }, [selectedItem, derived, dockOpen, dockSession]);
 
   const select = useCallback((ref: string) => {
     setSelectedRef(ref);
@@ -184,8 +186,7 @@ export function Board() {
   // item. A null command spawns the interactive agent (ad-hoc).
   const runAgent = useCallback(
     (ref: string, command?: string) => {
-      setDockRef(ref);
-      setDockCommand(command ?? null);
+      setDockSession({ kind: "local", ref, command: command ?? null });
       setDockOpen(true);
       select(ref);
     },
@@ -235,6 +236,17 @@ export function Board() {
   const viewTerminal = useCallback(() => {
     setDockOpen(true);
   }, []);
+
+  // Open the dock as the READ-ONLY MIRROR of a worker's live session (m42 item 6:
+  // one terminal surface — a remote session is a SOURCE of the dock).
+  const openMirror = useCallback(
+    (ref: string, nodeId: string, sessionId: string) => {
+      setDockSession({ kind: "remote", ref, nodeId, sessionId });
+      setDockOpen(true);
+      select(ref);
+    },
+    [select]
+  );
 
   const openMilestone = useCallback(
     (ref: string) => {
@@ -355,6 +367,7 @@ export function Board() {
                 actor="you"
                 onRunAgent={runAgent}
                 onContinue={continueWork}
+                onMirror={openMirror}
                 onViewTerminal={viewTerminal}
                 onRevealRef={select}
               />
@@ -386,7 +399,7 @@ export function Board() {
       ) : null}
 
       {dockOpen ? (
-        <TerminalDock targetRef={dockRef} command={dockCommand} onClose={() => setDockOpen(false)} />
+        <TerminalDock session={dockSession} onClose={() => setDockOpen(false)} />
       ) : null}
     </main>
   );

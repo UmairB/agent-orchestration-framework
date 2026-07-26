@@ -25,7 +25,6 @@ import {
 import { StatusRing, StatusChip } from "./status";
 import { ActionsStrip } from "./ActionsStrip";
 import { Markdown } from "./Markdown";
-import { WorkerMirror } from "./WorkerMirror";
 
 type Tab = DocName | "FINDINGS" | "TASKS" | "RUNS";
 
@@ -60,6 +59,7 @@ export function DetailPanel({
   actor,
   onRunAgent,
   onContinue,
+  onMirror,
   onViewTerminal,
   onRevealRef,
 }: {
@@ -72,6 +72,7 @@ export function DetailPanel({
   // CONTINUE is routed separately (2026-07-26): the server decides whether it runs
   // here or on the worker node that last worked on the item.
   onContinue: (ref: string, phase?: "continue" | "refine" | "verify") => void;
+  onMirror: (ref: string, nodeId: string, sessionId: string) => void;
   onViewTerminal: () => void;
   onRevealRef: (ref: string) => void;
 }) {
@@ -193,14 +194,6 @@ export function DetailPanel({
                 </a>
               ) : null}
             </div>
-            {/* m42 item 6's console leg — the board EMBEDS the worker's read-only
-                mirror (the fleet's /ws/terminal-view route on the fixed :4181)
-                instead of linking out. Rendered only with the FULL (nodeId,
-                sessionId) tuple (ADR-014 invariant 4); a pre-session run keeps
-                the fleet link above. */}
-            {item.execution.active && item.execution.sessionId && item.execution.nodeId ? (
-              <WorkerMirror nodeId={item.execution.nodeId} sessionId={item.execution.sessionId} />
-            ) : null}
           </div>
         ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
@@ -213,6 +206,7 @@ export function DetailPanel({
             action={action ?? { kind: "adhoc", label: "Run agent" }}
             onRunAgent={onRunAgent}
             onContinue={onContinue}
+            onMirror={onMirror}
             onViewTerminal={onViewTerminal}
           />
         </div>
@@ -261,19 +255,22 @@ function PrimaryActionButton({
   action,
   onRunAgent,
   onContinue,
+  onMirror,
   onViewTerminal,
 }: {
   item: WorkItem;
   action: PrimaryAction;
   onRunAgent: (ref: string, command?: string) => void;
   onContinue: (ref: string, phase?: "continue" | "refine" | "verify") => void;
+  onMirror: (ref: string, nodeId: string, sessionId: string) => void;
   onViewTerminal: () => void;
 }) {
   const showCaret = action.kind !== "blocked" && action.kind !== "view" && action.kind !== "running";
   const handleClick = () => {
     if (action.kind === "view") return onViewTerminal();
     if (action.kind === "blocked") return; // no-op while blocked
-    if (action.kind === "running") return; // a worker holds it — nothing to launch here
+    if (action.kind === "running") return; // a worker holds it, session not yet captured
+    if (action.kind === "mirror") return onMirror(item.ref, action.nodeId!, action.sessionId!);
     // CONTINUE goes through the one continue door, which decides WHERE it runs
     // (2026-07-26) — every other action still launches a local session directly.
     // m42 wave (b) — refine and verify route through the SAME door as continue:

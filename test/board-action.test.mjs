@@ -51,7 +51,7 @@ export const boardActionTests = [
     // offered "Continue", and clicking it dispatched a second run that the assign core
     // refused — "already has an active assignment held by <node>". The row already
     // carries the answer; running work is watched, not restarted.
-    name: "board-action/a worker is executing it → disabled, names the node, offers NO continue",
+    name: "board-action/a worker is executing it (session not yet captured) → disabled, names the node, offers NO continue",
     async run() {
       const running = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: null, updatedAt: null, branch: null } };
       const a = primaryAction(running, { hasBreakdown: true, liveForRef: false });
@@ -59,6 +59,22 @@ export const boardActionTests = [
       assert.equal(a.label, "Running on umairs-mac-mini");
       assert.equal(a.disabled, true);
       assert.equal(a.command, undefined, "a running item offers no command to launch");
+    },
+  },
+  {
+    // m42 item 6 (reworked at the operator's insistence): the board has ONE terminal
+    // surface — the dock — and a running item WITH a captured session opens it as the
+    // fleet's read-only mirror. A remote session is a SOURCE of the dock, never a
+    // second widget.
+    name: "board-action/a worker is executing it WITH a captured session → View terminal opens the dock as the read-only mirror",
+    async run() {
+      const running = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: "3ffa37de-ce0c", updatedAt: null, branch: null } };
+      const a = primaryAction(running, { hasBreakdown: true, liveForRef: false });
+      assert.equal(a.kind, "mirror");
+      assert.equal(a.label, "View terminal — umairs-mac-mini");
+      assert.equal(a.nodeId, "umairs-mac-mini");
+      assert.equal(a.sessionId, "3ffa37de-ce0c", "the full (nodeId, sessionId) tuple rides the action — the dock needs both");
+      assert.equal(a.disabled, undefined, "watchable running work is not a dead end");
     },
   },
   {

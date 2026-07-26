@@ -27,6 +27,18 @@ export function primaryAction(item, ctx) {
   // "view" here would open an empty dock and look like it did something. Disabled and
   // labelled with the node — the honest answer is "this is running over there".
   if (item.execution?.active === true) {
+    // With a captured session, running work is WATCHABLE — the dock opens the
+    // fleet's read-only mirror of the worker's live session (m42 item 6: one
+    // terminal surface; a remote session is a SOURCE of the dock, never a second
+    // widget). Without one (the pre-session window), the honest disabled state.
+    if (item.execution.sessionId && item.execution.nodeId) {
+      return {
+        kind: "mirror",
+        label: `View terminal — ${item.execution.nodeId}`,
+        nodeId: item.execution.nodeId,
+        sessionId: item.execution.sessionId,
+      };
+    }
     return {
       kind: "running",
       label: item.execution.nodeId ? `Running on ${item.execution.nodeId}` : "Running",
