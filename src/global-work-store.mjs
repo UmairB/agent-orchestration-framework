@@ -8,7 +8,7 @@ import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 // run-store.mjs imports no store/mesh module — no cycle.
 import { readRuns } from "./run-store.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 5;
+export const GLOBAL_WORK_SCHEMA_VERSION = 6;
 
 // The record docs a board/CLI face may request by NAME (work:doc's input contract)
 // and therefore exactly the doc bodies a worker streams for its active worktree —
@@ -230,6 +230,22 @@ function migrateSchema(db, existingVersion) {
         PRIMARY KEY (workspace_id, ref, run_id)
       );
       CREATE INDEX IF NOT EXISTS idx_work_item_runs_ref ON work_item_runs(workspace_id, ref);
+      -- schema v6 (m42 wave (a) follow-up, TECH_DEBT item 2's REMOTE read): a
+      -- worker's log events stream up its existing connection and land here, so
+      -- \`aof mesh logs --node <id>\` answers from the control's own store — no SSH,
+      -- no request/reply round-trip. Ring-bounded by the applier (newest
+      -- NODE_LOG_KEEP rows per node); stream-written, never touched by the row
+      -- publisher (the global_assignments discipline).
+      CREATE TABLE IF NOT EXISTS node_logs (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_id TEXT NOT NULL,
+        at TEXT,
+        level TEXT,
+        code TEXT,
+        message TEXT,
+        path TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_node_logs_node ON node_logs(node_id, seq);
     `);
 
     // schema v4 (milestone 38 / ADR-010 Gap A, extended) — CREATE TABLE IF NOT
@@ -552,6 +568,50 @@ export function readWorkItemRuns(store, workspaceId, ref) {
     }
   }
   return out;
+}
+
+// The node_logs ring bound — newest rows kept per node (m42 / item 2 remote read).
+export const NODE_LOG_KEEP = 500;
+
+// appendNodeLogEntries(store, nodeId, entries, { keep }) — the ONE writer for the
+// v6 node_logs table (the control's applyLogEntriesFrame call site). Appends, then
+// ring-prunes to the newest `keep` rows for that node — bounded store, no reclaim
+// job. Malformed entries are screened (the applyDeltaFrame completeness discipline).
+export function appendNodeLogEntries(store, nodeId, entries, { keep = NODE_LOG_KEEP } = {}) {
+  const rows = (Array.isArray(entries) ? entries : []).filter((entry) => entry != null && typeof entry === "object");
+  const db = store.db;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const insert = db.prepare("INSERT INTO node_logs (node_id, at, level, code, message, path) VALUES (?, ?, ?, ?, ?, ?)");
+    for (const entry of rows) {
+      insert.run(
+        nodeId,
+        typeof entry.at === "string" ? entry.at : null,
+        typeof entry.level === "string" ? entry.level : null,
+        typeof entry.code === "string" ? entry.code : null,
+        typeof entry.message === "string" ? entry.message : null,
+        typeof entry.path === "string" ? entry.path : null,
+      );
+    }
+    db.prepare(`
+      DELETE FROM node_logs WHERE node_id = ? AND seq NOT IN (
+        SELECT seq FROM node_logs WHERE node_id = ? ORDER BY seq DESC LIMIT ?
+      )
+    `).run(nodeId, nodeId, keep);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { appended: rows.length };
+}
+
+// readNodeLogEntries(store, nodeId, { tail }) — the reader half for
+// `aof mesh logs --node <id>`: the newest `tail` entries, oldest-first.
+export function readNodeLogEntries(store, nodeId, { tail = 200 } = {}) {
+  return store.db.prepare(
+    "SELECT at, level, code, message, path FROM node_logs WHERE node_id = ? ORDER BY seq DESC LIMIT ?"
+  ).all(nodeId, tail).reverse();
 }
 
 export function queryGlobalWorkProjection(store, options = {}) {

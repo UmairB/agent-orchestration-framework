@@ -98,4 +98,42 @@ export const meshLogTests = [
       });
     },
   },
+  {
+    // m42 / item 2's REMOTE read — a worker's log events ride its stream into the
+    // control's node_logs ring; `mesh:logs --node` answers from the store, T6
+    // holder-attributed, ring-bounded.
+    name: "mesh-log/item-2 REMOTE: log-entries frames land in the node_logs ring (T6-attributed, ring-bounded) and mesh:logs --node reads them",
+    async run() {
+      await withHome(async ({ env }) => {
+        const { openGlobalWorkProjectionStore, readNodeLogEntries } = await import("../src/global-work-store.mjs");
+        const { applyStreamFrame } = await import("../src/control-stream-server.mjs");
+        const { buildLogEntriesFrame } = await import("../src/worker-stream-client.mjs");
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const frame = buildLogEntriesFrame("spoofed-node", [
+            { at: "2026-07-26T15:00:00.000Z", level: "warn", code: "frame-skipped", message: "unknown-workspace", path: null },
+          ], "2026-07-26T15:00:00.000Z");
+          const applied = await applyStreamFrame(store, frame, { now: "2026-07-26T15:00:00.000Z", nodeId: "umairs-mac-mini" });
+          assert.equal(applied.appended, 1);
+          assert.equal(applied.nodeId, "umairs-mac-mini", "attribution is the CONNECTION-bound nodeId, never the frame's self-declared one (T6)");
+
+          const ctx = { workspace: { projectRoot: "/x", workDir: "/x", config: {} }, globalWorkStoreOptions: { env } };
+          const result = await invoke("mesh:logs", { node: "umairs-mac-mini", tail: 10 }, ctx);
+          assert.equal(result.node, "umairs-mac-mini");
+          assert.equal(result.entries[0].code, "frame-skipped", "the remote node's streamed event reads back");
+
+          // Ring bound: appending beyond keep retains only the newest rows.
+          const { appendNodeLogEntries } = await import("../src/global-work-store.mjs");
+          appendNodeLogEntries(store, "umairs-mac-mini", Array.from({ length: 6 }, (_, i) => ({ code: `e${i}` })), { keep: 3 });
+          const entries = readNodeLogEntries(store, "umairs-mac-mini", { tail: 10 });
+          assert.deepEqual(entries.map((e) => e.code), ["e3", "e4", "e5"], "the ring keeps exactly the newest N, oldest-first on read");
+
+          const empty = await invoke("mesh:logs", { node: "never-streamed" }, ctx);
+          assert.deepEqual(empty.entries, [], "a node that never streamed reads empty, not an error");
+        } finally {
+          store.close();
+        }
+      });
+    },
+  },
 ];

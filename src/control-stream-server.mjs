@@ -24,12 +24,13 @@ import {
   publishWorkspaceSnapshot,
   readWorkspaceItems,
   upsertWorkItemContent,
+  appendNodeLogEntries,
 } from "./global-work-store.mjs";
 // schema v5 (TECH_DEBT item 6 — finish the board bridge): the worktree-CONTENT frame
 // kind (doc bodies + run records for an assignment's subtree). The literal lives in
 // ONE home (the builder module) — imported here, never re-spelled, the same
 // discipline as RECOVERY_PUSH_RESULT_KIND / TERMINAL_FRAME_KIND above.
-import { WORKTREE_CONTENT_FRAME_KIND } from "./worker-stream-client.mjs";
+import { WORKTREE_CONTENT_FRAME_KIND, LOG_ENTRIES_FRAME_KIND } from "./worker-stream-client.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
 import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
@@ -208,6 +209,19 @@ export async function applyWorktreeContentFrame(store, frame, options = {}) {
     runs: frame.runs,
     nodeId: ownerNode ?? frameNode,
   }, { now: validFrameAt(nowValue) ?? validFrameAt(frame.at) ?? new Date().toISOString() });
+}
+
+// applyLogEntriesFrame(store, frame, options) — m42 / item 2's remote read: a
+// worker's log events land in the node_logs ring, attributed to the
+// CONNECTION-bound nodeId (T6 — a frame on worker-a's socket can never write
+// worker-b's log), ring-bounded by the one writer (appendNodeLogEntries).
+export async function applyLogEntriesFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const nodeId = ownerNode ?? frameNode;
+  if (nodeId == null) return { published: false, skipped: true, code: "missing-node-id" };
+  const result = appendNodeLogEntries(store, nodeId, frame?.entries ?? []);
+  return { published: true, nodeId, appended: result.appended };
 }
 
 function safeStringArray(value) {
@@ -667,6 +681,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "snapshot") return applySnapshotFrame(store, frame, options);
   if (frame?.kind === "delta") return applyDeltaFrame(store, frame, options);
   if (frame?.kind === WORKTREE_CONTENT_FRAME_KIND) return applyWorktreeContentFrame(store, frame, options);
+  if (frame?.kind === LOG_ENTRIES_FRAME_KIND) return applyLogEntriesFrame(store, frame, options);
   if (frame?.kind === "presence") return applyPresenceFrame(store, frame, options);
   if (frame?.kind === "assignment-status") return applyAssignmentStatusFrame(store, frame, options);
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);

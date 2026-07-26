@@ -91,7 +91,7 @@ export const globalWorkStoreTests = [
         // v4 -> v5 (TECH_DEBT item 6 — finish the board bridge): the additive
         // work_item_docs + work_item_runs content tables (their own fixtures live
         // in the /05 tests below); again the pinned-version/table-presence re-arm.
-        assert.equal(store.schemaVersion, 5);
+        assert.equal(store.schemaVersion, 6);
         const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("aof_schema"));
         assert.ok(tables.includes("workspaces"));
@@ -104,6 +104,7 @@ export const globalWorkStoreTests = [
         assert.ok(tables.includes("global_assignments"));
         assert.ok(tables.includes("work_item_docs"));
         assert.ok(tables.includes("work_item_runs"));
+        assert.ok(tables.includes("node_logs"));
       } finally {
         store.close();
       }
@@ -112,7 +113,7 @@ export const globalWorkStoreTests = [
       try {
         const versions = reopened.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").all();
         assert.equal(versions.length, 1);
-        assert.equal(versions[0].value, 5);
+        assert.equal(versions[0].value, 6);
       } finally {
         reopened.close();
       }

@@ -132,10 +132,10 @@ export const meshAssignmentRecordTests = [
         // catching any FUTURE unintentional version drift, not this one.
         // v5 (TECH_DEBT item 6): the additive work_item_docs/work_item_runs content
         // tables — the pin bumps again, same rationale.
-        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 5);
-        assert.equal(v3.schemaVersion, 5);
+        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 6);
+        assert.equal(v3.schemaVersion, 6);
         const version = v3.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").get();
-        assert.equal(version.value, 5);
+        assert.equal(version.value, 6);
 
         const tables = v3.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("global_assignments"), "global_assignments table exists");

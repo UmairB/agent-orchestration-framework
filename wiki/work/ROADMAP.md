@@ -68,6 +68,14 @@ registry + the `.aof` records); decide them together. Until then, consider the c
 
 ## Other deferred items (backlog)
 
+- **`aof mesh logs --follow`** — a live tail mode on the log reader (m42 descoped it by decision:
+  polling `--tail` covers the operator need; follow is a CLI nicety, not debt). (Milestone 42.)
+
+- **Daemons self-restart on a new build stamp** — the m42 item-1 optional leg: daemons poll the
+  installed `BUILD_ID.json` and exit cleanly on change so the desktop supervisor respawns them —
+  `install-local` becomes the whole deploy, no manual restart. Deferred: the supervisor's respawn
+  semantics need verifying first. (Milestone 42.)
+
 - **Re-enable codex / gemini providers.** The dock picker is claude-only for now (operator request);
   the provider seam (`terminal-providers.mjs` / `provider-picker.mjs` / server) still supports all three
   — re-enabling is widening `VISIBLE_PROVIDERS` in `TerminalDock.tsx`. (Milestone 03.)

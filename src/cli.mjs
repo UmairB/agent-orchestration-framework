@@ -756,7 +756,7 @@ async function meshCommand(args) {
   // TECH_DEBT item 2): read what a daemon logged without redirecting stdout by
   // hand. The optional positional is the proc (mesh-serve default).
   if (subcommand === "logs") {
-    await meshVerbCli("mesh:logs", rest, { positionalAllowed: true, extraFlags: ["tail"] });
+    await meshVerbCli("mesh:logs", rest, { positionalAllowed: true, extraFlags: ["tail", "node"] });
     return;
   }
 
@@ -1534,6 +1534,11 @@ async function meshServeDaemonCommand(args) {
   // record). Startup/shutdown are logged too, with the build id, so "which build ran
   // when" is answerable from the file alone.
   const logSink = createMeshLogSink("mesh-serve", { env: process.env });
+  // m42 / item 2's REMOTE read — a worker forwards each log event UP its stream so
+  // the control's `aof mesh logs --node <id>` answers from its own store. Wired
+  // after startLauncher returns (the client exists then); a forward fault is
+  // already failure-isolated inside sendLogEntries.
+  let forwardLogEntry = null;
   try {
     // review fix (live soak, 2026-07-17): a connect failure, propagation fault, or
     // dispatch-tick error used to be accumulated into handle.warnings and never read
@@ -1543,7 +1548,9 @@ async function meshServeDaemonCommand(args) {
     handle = await startLauncher(workspace, {
       onWarning: (warning) => {
         console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
-        logSink.write({ level: "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null });
+        const entry = { at: new Date().toISOString(), level: "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null };
+        logSink.write(entry);
+        forwardLogEntry?.(entry);
       },
     });
     if (handle.refused) {
@@ -1560,6 +1567,13 @@ async function meshServeDaemonCommand(args) {
     console.log(`Log: ${logSink.path}`);
     console.log("Press Ctrl+C to stop the launcher.");
     logSink.write({ level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, node: handle.record.nodeId });
+    if (handle.streamClient != null && typeof handle.streamClient.sendLogEntries === "function") {
+      const client = handle.streamClient;
+      forwardLogEntry = (entry) => {
+        void client.sendLogEntries([entry]);
+      };
+      forwardLogEntry({ at: new Date().toISOString(), level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, path: null });
+    }
     // m38-F26 (m42 wave (a)) — reclaim .tmp-* orphans a crashed publisher left in
     // the presence/nodes stores (age-gated; a live writer's temp is never touched).
     for (const dir of [path.join(globalMeshPaths({ env: process.env }).meshRoot, "presence"), globalMeshPaths({ env: process.env }).nodesRoot]) {

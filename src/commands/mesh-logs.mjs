@@ -9,6 +9,10 @@
 // The remote-node read (`--node <id>`, over the fabric) is the deferred second leg.
 import { commandError } from "./errors.mjs";
 import { readMeshLog, meshLogPath } from "../mesh-log.mjs";
+// m42 / item 2's REMOTE read — `--node <id>` answers from the control's node_logs
+// ring (streamed up by each worker's daemon), no SSH archaeology.
+import { openGlobalWorkProjectionStore, readNodeLogEntries } from "../global-work-store.mjs";
+import { globalMeshPaths } from "../workspace.mjs";
 
 const KNOWN_PROCS = ["mesh-serve", "mesh-ui"];
 
@@ -16,17 +20,30 @@ export const meshLogsCommand = {
   id: "mesh:logs",
   input: {
     type: "object",
-    properties: { proc: { type: "string" }, tail: { type: "number" } },
+    properties: { proc: { type: "string" }, tail: { type: "number" }, node: { type: "string" } },
     additionalProperties: false,
   },
 
   async run(input, ctx) {
+    const tail = Number.isFinite(input.tail) && input.tail > 0 ? Math.floor(input.tail) : 200;
+    const storeOptions = ctx?.globalWorkStoreOptions ?? {};
+
+    // REMOTE: a node id names whose streamed log to read (this node's store copy).
+    const node = typeof input.node === "string" ? input.node.trim() : "";
+    if (node !== "") {
+      const store = await openGlobalWorkProjectionStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+      try {
+        const entries = readNodeLogEntries(store, node, { tail });
+        return { ok: true, node, count: entries.length, entries };
+      } finally {
+        store.close?.();
+      }
+    }
+
     const proc = typeof input.proc === "string" && input.proc.length > 0 ? input.proc : "mesh-serve";
     if (!KNOWN_PROCS.includes(proc)) {
       throw commandError(`Unknown log proc "${proc}" — one of: ${KNOWN_PROCS.join(", ")}.`, "invalid-proc", 400);
     }
-    const tail = Number.isFinite(input.tail) && input.tail > 0 ? Math.floor(input.tail) : 200;
-    const storeOptions = ctx?.globalWorkStoreOptions ?? {};
     const { path: logPath, entries } = readMeshLog(proc, { tail, ...storeOptions });
     return { ok: true, proc, path: logPath, count: entries.length, entries };
   },
@@ -36,10 +53,15 @@ export const meshLogsCommand = {
     argv: (positionals, options = {}) => ({
       ...(typeof positionals[0] === "string" && positionals[0].length > 0 ? { proc: positionals[0] } : {}),
       ...(options.tail != null ? { tail: Number(options.tail) } : {}),
+      ...(typeof options.node === "string" && options.node.length > 0 ? { node: options.node } : {}),
     }),
 
     render(result) {
-      if (result.entries.length === 0) return `${result.proc} — no log entries yet (${result.path}).`;
+      if (result.entries.length === 0) {
+        return result.node != null
+          ? `${result.node} — no streamed log entries yet (the node's daemon streams them while connected).`
+          : `${result.proc} — no log entries yet (${result.path}).`;
+      }
       return result.entries
         .map((e) => (e.raw != null ? e.raw : `${e.at ?? "-"} ${e.level ?? "-"} ${e.code ?? "-"}: ${e.message ?? ""}`))
         .join("\n");

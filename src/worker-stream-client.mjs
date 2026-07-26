@@ -70,6 +70,16 @@ export function buildDeltaFrame(nodeId, workspaceId, items, now) {
 // control-stream server imports it, never a re-spelled string.
 export const WORKTREE_CONTENT_FRAME_KIND = "worktree-content";
 
+// The log-entries frame kind (m42 / item 2's REMOTE read): a worker's daemon log
+// events ride UP the same connection, land in the control's node_logs ring, and
+// `aof mesh logs --node <id>` answers from the store — no SSH archaeology. One
+// home for the literal, like every other kind.
+export const LOG_ENTRIES_FRAME_KIND = "log-entries";
+
+export function buildLogEntriesFrame(nodeId, entries, now) {
+  return { kind: LOG_ENTRIES_FRAME_KIND, nodeId, entries: Array.isArray(entries) ? [...entries] : [], at: now };
+}
+
 // buildWorktreeContentFrame(nodeId, workspaceId, { itemRef, docs, runs }, now) — a
 // pure projection, same shape family as the other frame builders. `docs` is
 // [{ ref, doc, body }], `runs` is [{ ref, runId, record }] (the shapes
@@ -447,6 +457,14 @@ export function createWorkerStreamClient({
     return sendFrame(buildPresenceFrame(nodeId, presence, resolveNow()));
   }
 
+  // sendLogEntries(entries) — node-scoped (no workspaceId), same failure-isolated
+  // sendFrame seam as presence/assignment-status; a log frame lost to a drop is a
+  // gap in the remote mirror, never a correctness fault (the durable file sink on
+  // the worker itself still has every line).
+  async function sendLogEntries(entries) {
+    return sendFrame(buildLogEntriesFrame(nodeId, entries, resolveNow()));
+  }
+
   // sendWorktreeContent(content, { workspaceId }) — the worktree-content sibling of
   // sendDelta: the SAME per-frame workspaceId override (an assignment's content
   // speaks for the ASSIGNMENT's workspace, never this daemon's launch workspace —
@@ -762,6 +780,7 @@ export function createWorkerStreamClient({
     sendDelta,
     sendWorktreeContent,
     sendPresence,
+    sendLogEntries,
     sendAssignmentStatus,
     sendTerminalFrame,
     sendTerminalEnd,
