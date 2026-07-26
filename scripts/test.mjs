@@ -1335,6 +1335,9 @@ import { installerPlaceTests } from "../test/installer-place.test.mjs";
 // through assetBase(); the import.meta.url resolution assert re-points at
 // src/asset-base.mjs; the cwd-independence asserts stay green).
 import { assetBaseSeamTests } from "../test/asset-base-seam.test.mjs";
+// TECH_DEBT item 1 — the launcher decouple: build-info (source/payload/embedded
+// + the BUILD_ID.json stamp behind --version and the daemons' "Build:" line).
+import { buildInfoTests } from "../test/build-info.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -1989,6 +1992,7 @@ export const tests = [
   ...installerPlaceTests,
   // milestone 28 — console-app (story 00: self-contained-binary)
   ...assetBaseSeamTests,
+  ...buildInfoTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,

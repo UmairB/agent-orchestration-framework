@@ -68,16 +68,51 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-004: the SEA-main source (scripts/sea-entry.mjs, esbuild-bundled into the CJS SEA main) is byte-equivalent in shape to bin/aof.mjs — run(...) only, no relay fast-path",
+    name: "arch/ADR-004: the SEA-main source (scripts/sea-entry.mjs, esbuild-bundled into the CJS SEA main) routes through the one run() — no relay fast-path",
     run: async () => {
       const raw = await readFile(seaEntryPath, "utf8");
       const code = stripComments(raw);
-      assert.ok(/import\s*\{\s*run\s*\}\s*from\s*["']\.\.\/src\/cli\.mjs["']/.test(code), "scripts/sea-entry.mjs imports { run } from ../src/cli.mjs");
+      assert.ok(/import\s*\{\s*run\s*\}\s*from\s*["']\.\.\/src\/cli\.mjs["']/.test(code), "scripts/sea-entry.mjs imports { run } from ../src/cli.mjs (the embedded fallback)");
       assert.ok(callsRunWithFullArgv(code), "the SEA main source calls run(process.argv.slice(2))");
       assert.ok(!hasPerModeFork(code), "the SEA main source has no argv[0]/mode === \"relay\" fork ahead of run()");
       // The SEA main must not stand up its own relay serve/listener ahead of
       // run() — the ONLY door into relay mode is run()'s existing argv dispatch.
       assert.ok(!/serveRelay\s*\(/.test(code), "the SEA main source does not call serveRelay() directly (no relay fast-path)");
+    },
+  },
+  {
+    // TECH_DEBT item 1 — the LAUNCHER discipline. The SEA main prefers the
+    // installed on-disk payload (<exeDir>/src/cli.mjs) over its embedded bundle,
+    // so a source change is picked up by RESTART, never a rebuild. The invariants:
+    // the selection consults ONLY payload presence + the AOF_SEA_EMBEDDED
+    // override (never argv — that would be a per-mode fork ahead of run()), and
+    // a present-but-broken payload fails LOUDLY (never a silent fallback to the
+    // embedded build — stale-code-running-invisibly is the defect this exists
+    // to end).
+    name: "arch/item-1: the SEA main is a payload-first launcher — presence/env-selected, loud on a broken payload, embedded only as the explicit fallback",
+    run: async () => {
+      const raw = await readFile(seaEntryPath, "utf8");
+      const code = stripComments(raw);
+      assert.ok(
+        /path\.join\(\s*path\.dirname\(\s*process\.execPath\s*\)\s*,\s*["']src["']\s*,\s*["']cli\.mjs["']\s*\)/.test(code),
+        "the payload CLI is anchored at <exeDir>/src/cli.mjs — the same process.execPath anchor every sidecar uses",
+      );
+      assert.ok(
+        /payloadPresent\s*=\s*process\.env\.AOF_SEA_EMBEDDED\s*!==\s*["']1["']\s*&&\s*existsSync\(\s*payloadCliPath\s*\)/.test(code),
+        "payload selection is presence + AOF_SEA_EMBEDDED only — argv can never choose the code location",
+      );
+      assert.ok(
+        code.includes("failed to load the installed CLI payload"),
+        "a present-but-broken payload fails loudly, naming the payload path (never a silent embedded fallback)",
+      );
+      assert.ok(
+        /:\s*Promise\.resolve\(run\)/.test(code),
+        "the embedded run is reachable ONLY on the no-payload branch of the selection ternary",
+      );
+      assert.ok(
+        /AOF_RUNTIME_MODE/.test(code),
+        "the chosen mode is stamped (AOF_RUNTIME_MODE) so build-info/--version can report which code is running",
+      );
     },
   },
   {

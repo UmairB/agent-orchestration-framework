@@ -55,6 +55,10 @@ import { initPlanning } from "./planning-init.mjs";
 // (ADR-004's "node mode = everything else" — an argv branch of the SAME run()
 // dispatch, never a fork ahead of it, mirroring the existing `help` branch).
 import { assetBase, packageVersionString } from "./asset-base.mjs";
+// TECH_DEBT item 1 — which code is this process actually running (source /
+// payload / embedded + the install's build stamp)? Surfaced on --version and on
+// every daemon startup line, so a stale build is VISIBLE rather than inferred.
+import { readBuildInfo, buildInfoString } from "./build-info.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -68,7 +72,10 @@ export async function run(argv) {
   // --version is an argv branch of the SAME run() dispatch, exactly like help
   // above; NOT a registered command-core command and NOT a fork ahead of run().
   if (command === "--version" || command === "-v") {
-    console.log(packageVersionString());
+    // "0.1.0 (source)" / "0.1.0 (payload b3319d6.20260726T134012)" — the semver
+    // stays the line's prefix (the existing contract); the runtime-mode + build
+    // stamp ride behind it (TECH_DEBT item 1's "the build is honest about itself").
+    console.log(`${packageVersionString()} (${buildInfoString(readBuildInfo())})`.trim());
     return;
   }
 
@@ -1180,6 +1187,9 @@ async function meshUiCommand(args) {
 
   const { server, fleetUrl } = session;
   console.log("AOF mesh ui is running locally.");
+  // TECH_DEBT item 1 — the daemon's startup line records which build it runs
+  // (a SECOND line: the announce line above is a pinned contract).
+  console.log(`Build: ${buildInfoString(readBuildInfo())}`);
   console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the fleet view.");
@@ -1455,6 +1465,8 @@ async function meshServeDaemonCommand(args) {
     }
 
     console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
+    // TECH_DEBT item 1 — same second-line build report as mesh ui's.
+    console.log(`Build: ${buildInfoString(readBuildInfo())}`);
     console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
     console.log("Press Ctrl+C to stop the launcher.");
 
