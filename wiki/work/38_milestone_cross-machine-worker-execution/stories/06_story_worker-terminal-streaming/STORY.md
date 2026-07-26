@@ -4,10 +4,10 @@ number: 06
 slug: worker-terminal-streaming
 title: "Stream a worker's live terminal into the control node's fleet view"
 parent: 38
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-23
+updated: 2026-07-26
 schema: 1
 aofVersion: 0.1.0
 ---

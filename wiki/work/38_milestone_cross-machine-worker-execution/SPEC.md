@@ -3,10 +3,10 @@ type: milestone
 number: 38
 slug: cross-machine-worker-execution
 title: "Cross-machine worker execution & session presence — workers that can take on work, and a mesh that reflects live activity"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-07-10
-updated: 2026-07-19
+updated: 2026-07-26
 depends: [34, 35, 36]
 schema: 1
 aofVersion: 0.1.0
@@ -86,7 +86,7 @@ Out of scope:
   aggregates across ALL the node's `global_node_workspaces` (ADR-003 — the single-launch-cwd fix), and the
   fleet renders it with run↔session reconciliation (ADR-004). **Fixes the "always idle" + single-workspace
   presence-scope bug.** No blocking research/security dependency.
-- [ ] [`01_story_worker-repo-checkout`](stories/01_story_worker-repo-checkout/STORY.md) — a worker assigned
+- [x] [`01_story_worker-repo-checkout`](stories/01_story_worker-repo-checkout/STORY.md) — a worker assigned
   work it lacks the repo for clones it from `config.mesh.repo.cloneUrl` into the scoped
   `meshCheckoutPath(workspaceId)`, registers the workspace, then FALLS THROUGH to the unchanged m35
   worktree+run flow (ADR-005/006). **Carries the open auth-transmission question** → `RESEARCH.md` (measured:
@@ -103,7 +103,7 @@ Out of scope:
   API + JWT signing), SECURITY (App-key-at-rest threat + least-privilege App scope), an ADR (the provider
   abstraction).**
 
-- [ ] [`03_story_per-org-credential-scoping`](stories/03_story_per-org-credential-scoping/STORY.md) — each
+- [x] [`03_story_per-org-credential-scoping`](stories/03_story_per-org-credential-scoping/STORY.md) — each
   org's clone credential is minted by that org's OWN GitHub App (its own key, its own installation),
   resolved per-workspace exactly like `config.mesh.repo.cloneUrl` already is (ADR-010 Gap A) — instead of
   today's ONE App/token resolved globally on the control node for the whole mesh. Added `2026-07-16` at
@@ -125,15 +125,15 @@ independently-verifiable stories (research + decisions: `RESEARCH.md § 4`), in 
   `terminal-ws`/`terminal-providers`/`terminal-sessions` subsystem, on the worker's subscription), driven
   by whole commands the control node writes into it (`/aof:refine <ref> --autonomous`, `/aof:continue`) —
   **replacing `claude -p` entirely**. Asks-a-human and subscription-billing both fall out of this. Dep: 04.
-- [ ] [`06_story_worker-terminal-streaming`](stories/06_story_worker-terminal-streaming/STORY.md) — relay
+- [x] [`06_story_worker-terminal-streaming`](stories/06_story_worker-terminal-streaming/STORY.md) — relay
   the worker's live `/ws/terminal` PTY stream over the mesh into the control node's fleet view (read-only
   mirror first), routed by (nodeId, sessionId) — the fleet-face no-terminal refusal becomes a carve-out.
   Dep: 05.
-- [ ] [`07_story_durable-worker-pushback`](stories/07_story_durable-worker-pushback/STORY.md) — the
+- [x] [`07_story_durable-worker-pushback`](stories/07_story_durable-worker-pushback/STORY.md) — the
   worker's work commits to a **real branch and is pushed/PR'd** (reusing the `GIT_ASKPASS` shim) so output
   survives the `done`-worktree force-remove; needs the credential widened to `contents:write` (re-opens
   SECURITY T9). Independent of 05/06.
-- [ ] [`08_story_worker-verified-memory-syncback`](stories/08_story_worker-verified-memory-syncback/STORY.md)
+- [x] [`08_story_worker-verified-memory-syncback`](stories/08_story_worker-verified-memory-syncback/STORY.md)
   — a milestone/story **verified on a worker updates the control node's memory** (`git pull` +
   `aof work memory ingest` of the now-shared markdown; the graphify index is a local cache, nothing crosses
   the mesh). Dep: 07. **Milestone now accepts only when all NINE stories (00–08) are done.**

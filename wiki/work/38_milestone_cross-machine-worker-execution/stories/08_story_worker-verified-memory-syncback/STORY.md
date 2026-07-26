@@ -4,10 +4,10 @@ number: 08
 slug: worker-verified-memory-syncback
 title: "A milestone/story verified on a worker updates the control node's memory"
 parent: 38
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-19
+updated: 2026-07-26
 schema: 1
 aofVersion: 0.1.0
 ---

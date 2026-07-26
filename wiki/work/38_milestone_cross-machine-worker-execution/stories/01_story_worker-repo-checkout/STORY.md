@@ -4,10 +4,10 @@ number: 01
 slug: worker-repo-checkout
 title: "Worker repo checkout — a worker assigned work it lacks the repo for clones it from a configured location into a scoped checkout, registers the workspace, and falls through to the existing worktree+run flow; no credential left at rest"
 parent: 38
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-26
 schema: 1
 aofVersion: 0.1.0
 ---

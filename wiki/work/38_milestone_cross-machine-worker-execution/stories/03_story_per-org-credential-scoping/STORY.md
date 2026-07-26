@@ -4,10 +4,10 @@ number: 03
 slug: per-org-credential-scoping
 title: "Per-org credential-provider scoping — a separate GitHub App per org, not one shared App resolved globally on the control node"
 parent: 38
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-16
-updated: 2026-07-18
+updated: 2026-07-26
 schema: 1
 aofVersion: 0.1.0
 ---

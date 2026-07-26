@@ -16,6 +16,39 @@ doc: state
 
 ## Notes & decisions in flight
 
+- **2026-07-26 (pre-refine) — INHERITED BLOCKER from m38's close: F23, the presence record is rebuilt
+  field-by-field at THREE seams and only two know its current shape.** Found and measured at
+  `aof:verify 38` (see [38's VERIFICATION.md](../38_milestone_cross-machine-worker-execution/VERIFICATION.md)
+  finding **F23**); routed here at the operator's direction so m38 could close, because the defect is
+  exactly wave (b)'s thesis — **one home for one derivation** — not another m38 point fix.
+  - **The defect.** [`fabricLivenessFor`](../../../src/commands/mesh-identity.mjs#L212-L221) (m33/ADR-002.1)
+    synthesises a pseudo presence record for every fabric-**Online** peer carrying only the original m23
+    four keys (`nodeId, heartbeatAt, activeRuns, aofVersion`). Its `heartbeatAt` is `now`, so it **always**
+    wins `mergePresence` — anything it omits is not merged around, it is destroyed. m38/ADR-001's additive
+    fifth key `sessions` is therefore dropped for every remote node, on every tick.
+  - **Consequence.** The Rust desktop's only fleet-data command is `aof mesh status --json`
+    ([poll.rs](../../../app/desktop/crates/core/src/poll.rs#L20-L22)) and its `current_work()` reads
+    `presence.sessions` — so a worker being actively worked on reads **`idle`** on the desktop fleet. The web
+    fleet (`/api/mesh/status`, presence read straight off disk) is unaffected.
+  - **Measured** (isolated `AOF_GLOBAL_HOME`, real publishers, real `mesh:status` invoke, `ctx.fabricPeers`
+    injected): `online:true` → `sessions` **ABSENT** → renders `idle`; `online:false` → `sessions` present →
+    renders `working · aof (session)`. **The feature works only while the fabric believes the node is offline.**
+  - **What wave (b) owes it.** One home for the presence record's shape, so `assemblePresenceRecord`,
+    `applyPresenceFrame` (taught the fifth key by m38's F18) and `fabricLivenessFor` cannot disagree — plus the
+    fitness function that pins *every additive presence key survives the fabric-liveness merge* (RED without the
+    fix). Field-by-field rebuilds are whitelists, and a whitelist silently drops what it was never told about:
+    this same key was destroyed at two different seams, eight days apart, by two separate blockers.
+  - **Also inherited (non-blocking, same class):** m38's **F24** — a node descriptor's `workspaces[]` is the
+    *publisher's* single workspace stamped onto every node in the roster
+    ([global-node-registry.mjs](../../../src/global-node-registry.mjs#L74-L104)), so both live node cards
+    advertise `C:\WINDOWS\system32` (the macOS worker included) while the SQLite membership table correctly
+    holds four per node — and after `ac361f8`'s cwd-phantom gate an install-dir-launched daemon can no longer
+    refresh its node record to correct it. This is debt item 4's (workspace identity) live bite.
+  - **And m38's F26** — the atomic presence/node publish leaks its temp file: 39 orphaned `.tmp-*` files in
+    `~/.aof/mesh/presence/` + 6 in `nodes/`, newest from the running daemon (two `aof` processes publish
+    concurrently; a lost rename race leaves the temp behind and nothing sweeps it). Wave (a)'s "no silence"
+    territory.
+
 - 2026-07-26 (pre-refine): the one-door rule gained its EXECUTION-SCOPE leg (operator-found
   defect: a story's Continue ran locally while its milestone ran on a worker — the door looked up
   execution by exact ref, but runs/branches/worktrees are recorded at the TOP-LEVEL item). One rule

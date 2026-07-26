@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 38
-updated: 2026-07-24
+updated: 2026-07-26
 ---
 <!--
   Milestone VERIFICATION.md — the record of aof:verify 38. Written by the orchestration (verify owns
@@ -1268,3 +1268,210 @@ refusal whose holder differs from the picker's selection).
 - **What closes it:** (1) build DG-15/DG-16 and DG-17's ladder; (2) one more 1280 frame set — three frames suffice
   (long-target chip, any chip-bearing card at rest, the refusal), plus the still-owed zoom crop of the chip's dot and
   a one-node-roster frame for A5; (3) deploy the fixed SEA to the control node and **re-run task 04's soak**.
+
+---
+
+## Verify pass `2026-07-26` — the deploy preflight is CLEAR for the first time; a NEW blocker on the DESKTOP's read path; **NOT accepted**
+
+Every prior pass was blocked one of two ways: the live build predated the fix under test, or the evidence
+was measured with a command that ran nothing (**F19**). Both are cleared here — the control node runs HEAD
+*exactly*, and the foundation was re-measured with the real case-array runner. Standing the milestone's own
+headline feature up against **both** fleet faces then exposed a **ninth** instance of this milestone's
+defining defect class: this time on the READ path, and only for a **remote** node.
+
+### Deploy state — control current, worker unverifiable
+
+- `~/.aof/bin/aof.exe --version` → `0.1.0 (payload 95fb56d+dirty.20260726T144251)`;
+  `BUILD_ID.json installedAt 2026-07-26T13:42:51Z`. The installed payload's `src/` is **byte-identical to
+  HEAD `ac361f8`** (`diff -rq` clean; working tree clean), and both daemons (`aof` pids 59708 / 67600 under
+  `aof-mesh-desktop` 58440) started **after** that install. The payload-first launcher (TECH_DEBT item 1) is
+  what made this cheap — a file-copy deploy, not the 88 MB SEA rebuild every earlier preflight balked at.
+- The fabric is live: the worker's presence record is seconds old, and `tailscale status` reports
+  `umairs-mac-mini` **active, direct, rx 109 MB**.
+- **The worker's own build could not be read — `ssh umairs-mac-mini` is refused** (`Connection closed by
+  100.114.105.64 port 22`) while that node is demonstrably up on the tailnet (finding **F25**). Reading worker
+  state over SSH is the sanctioned preflight; without it no cross-machine soak can be preflighted, let alone run.
+
+### Automated foundation — re-measured with the real runner (2965 cases)
+
+Method (the **F19** correction, applied): the exported `tests` array from
+[scripts/test.mjs](../../../scripts/test.mjs) driven case-by-case with a **per-case hermetic
+`AOF_GLOBAL_HOME`**, mirroring `runSuite`'s own unit lane. `node --test test/arch/*.test.mjs` is still
+vacuous and was not used.
+
+- **Whole unit + arch lane: 2965 ok / 16 not ok.**
+- **`arch/38` fitness cases: 115 → 115 ok / 0 red.** Every m38 fitness function executed and passed —
+  including the three whose case names are `arch/38 …` rather than file-named (`acd-fleet-assign-targets-item-workspace`,
+  `acd-fleet-terminal-mirror-read-only`, `acd-fleet-face-single-mutation-route`). Across all m38 surfaces
+  (session/presence, worker-clone, clone-credential, per-org mint, driver-PTY, terminal-stream, terminal-view,
+  write-token, assign): **0 red**.
+- **The 16 reds are all outside m38**, and the nine reds prior passes carried (`acd-sync-root-set`,
+  `acd-claim-relay-independent`, `acd-fleet-reclaim-guarded`, `acd-command-namespace`) are **gone** — the
+  stabilisation chore landed. What remains: **7** bundle/command-count drift cases (`22 !== 21` — a new command
+  shipped without the count constants; `bundle/source-tree`, 2× `bundle/descriptor`, `bundle/loader`,
+  `work-init/runtime`, `arch/ADR-007`, `bundle-asset-manifest-complete/00`), **5** `doctor/00|01` cases (a clean
+  fixture no longer yields empty findings), **1** `memory-integration` real-backend count (`374 !== 381`), **1**
+  `agent-model-override` (asserts `aof-developer` defaults to `sonnet`; the shipped default is now `opus` — a
+  stale test after a deliberate change), and the **2** known `reclaim-scheduler/06` timing-flake cases.
+- **`test/global-work-propagation.test.mjs` was excluded and why:** it binds `127.0.0.1:4182` unconditionally,
+  which the live control daemon holds, and the collision is an **unhandled** `EADDRINUSE` that kills the whole
+  run mid-suite (it did, once, this pass). That is finding **F13**'s twin on the test side; the five propagation
+  cases were confirmed green in isolation earlier in the same run before the crash.
+
+### Live producer-fed evidence — SPEC objective (a) holds on the CONTROL node, on the current build
+
+Driven through the real producers against the real `~/.aof` store, never a fixture:
+
+- `aof session ping --workspace 9db1fd84f5895e38 --repo aof --assistant claude-code` (the exact tuple the wired
+  Claude Code hook writes) → the session record's `lastPingAt` advanced, and **within one heartbeat (~12s)** the
+  presence daemon's own record carried it:
+  `sessions: [{ workspaceId: "9db1fd84f5895e38", repo: "aof", assistant: "claude-code", lastPingAt: … }]`.
+- Both consumer faces were then read live and projected through the production render helper
+  [`fleetCurrentWorkLines`](../../../ui/src/fleet/runs.mjs):
+  - web fleet `GET :4181/api/mesh/status` → `working · aof (session)`, token `primary`;
+  - desktop path `aof mesh status --json` → `working · aof (session)`, token `primary`.
+- **ADR-003's aggregation is sound against a degraded registry.** It reads `global_node_workspaces` +
+  `global_workspace_descriptors` in SQLite — verified healthy live (both nodes ↔ all four real workspaces;
+  descriptors absolute) — so the phantom row in the JSON node descriptors (**F24**) does not reach it.
+- An expired session was also observed behaving correctly: at `lastPingAt` + >120s (`DEFAULT_SESSION_TTL_SECONDS`)
+  the presence record read `sessions: []` with the record still on disk — TTL self-expiry, not `end`.
+
+### F23 (NEW, **BLOCKER**, open) — the desktop fleet can NEVER render a remote node's session
+
+**Observed live.** The worker's on-disk presence record on the control is the correct **five-key** ADR-001 shape
+(`{nodeId, heartbeatAt, activeRuns, sessions, aofVersion}` — **F18**'s fix holds, confirmed at source). But
+`aof mesh status --json` returns that node with **`sessions` absent** — four keys — while the *local* node in the
+same payload keeps all five. The web fleet's `/api/mesh/status` carries five for both.
+
+**Root cause, at source.** [`fabricLivenessFor`](../../../src/commands/mesh-identity.mjs#L212-L221) (m33/ADR-002.1)
+synthesises a pseudo presence record for any fabric-**Online** peer carrying only the m23 **four** keys — it
+deliberately threads `activeRuns` and `aofVersion` off the disk record and never learned about ADR-001's additive
+fifth key. Its `heartbeatAt` is `nowIso`, so it is *always* strictly newer than disk and `mergePresence` *always*
+prefers it. `sessions` is therefore dropped for **every remote node, on every tick**.
+
+**Consequence.** The Rust desktop's **only** data path is `mesh status --json`
+([poll.rs:20-22](../../../app/desktop/crates/core/src/poll.rs#L20-L22), pinned by its own test *"the only
+fleet-data command issued is mesh status --json"*), and its `current_work()` reads `presence.sessions`
+([view_model.rs](../../../app/desktop/crates/core/src/view_model.rs#L177-L188)). So a worker being actively worked
+on reads **`idle`** on the desktop fleet — **the milestone's headline bug, on the surface whose m36 UAT raised it,
+across the boundary the milestone is named for.** The web fleet is unaffected.
+
+**Measured non-vacuously**, isolated `AOF_GLOBAL_HOME`, real workspace, real `publishNodeRecord` /
+`publishPresenceRecord`, real `mesh:status` invoke with `ctx.fabricPeers` injected exactly as
+`test/mesh-fabric-liveness-cutover.test.mjs` does — two runs identical but for `peer.online`:
+
+| fabric `online` | presence keys returned | `sessions` | rendered |
+| --- | --- | --- | --- |
+| `true` (the deployed condition) | `nodeId, heartbeatAt, activeRuns, aofVersion` | **ABSENT** | `idle` |
+| `false` | `nodeId, heartbeatAt, activeRuns, sessions, aofVersion` | 1 live | `working · aof (session)` |
+
+**A remote node's session renders only while the fabric believes that node is offline.** The feature is inverted.
+
+**Why F18's fix did not catch it, and this is the lesson.** F18 was proven by reading
+`~/.aof/mesh/presence/<peer>.json` and calling `fleetCurrentWorkLines` on those bytes — **at the store, one layer
+below the surface that actually feeds the consumer.** The write seam was fixed and verified; the read seam between
+store and consumer was never traversed. Same class as F1/F4/F6–F9/F18/F21, ninth address.
+
+### Findings
+
+| id | observed (confirmed at source) | type | severity | triage | routed-to | status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F23** | **`aof mesh status`'s fabric-liveness pseudo record drops ADR-001's `sessions` for every fabric-Online peer**, so the desktop fleet — whose only data path is that command — can never show a remote node `working`. Measured: `online:true` → key absent → `idle`; `online:false` → key present → `working · aof (session)`. | correctness | **BLOCKER** | `fabricLivenessFor` must carry `sessions` off the disk record exactly as it already carries `activeRuns`/`aofVersion` (the F18 shape, at the read seam) + an armed fitness pinning "every additive presence key survives the fabric-liveness merge", RED without the fix | **milestone 42** wave (b) — routed there at the operator direction below (was: `aof:continue 38/00`) | **OPEN — re-homed in m42; not an m38 blocker** |
+| **F24** | **A node descriptor's `workspaces[]` is not that node's workspaces — it is the PUBLISHER's single workspace, stamped onto every node in the roster.** [`assembleGlobalRegistrySnapshot`](../../../src/global-node-registry.mjs#L74-L104) builds one `workspaceMembership` from `workspace.projectRoot` and writes `workspaces: [workspaceMembership]` for **every** `nodeId`. Live: **both** node cards advertise `C:\WINDOWS\system32` as their only workspace — including the **macOS** worker, which cannot have that path — while the SQLite membership table correctly holds 4 workspaces per node. The phantom is frozen because after `ac361f8`'s gate a daemon launched from the install dir (the documented supervisor launch) can no longer refresh its node record at all: `lastSeenAt` on both descriptors predates the running daemon. | correctness (per-node fact derived from the publisher's own context — the ADR-010 "Gap A" class, 4th recurrence) | non-blocker for m38 (no story's contract binds this field; ADR-003 aggregation reads SQLite, verified live) — but it misinforms the operator at the assign moment | derive each descriptor's `workspaces[]` from `global_node_workspaces` for THAT node; extend `scripts/prune-projection.mjs` to the node descriptors' embedded list | **milestone 42** (debt item 4 — workspace identity) | **OPEN — re-homed in m42** |
+| **F25** | **`ssh umairs-mac-mini` is refused** — `Connection closed by 100.114.105.64 port 22` on every attempt, while Tailscale reports the node active/direct with 109 MB received and its presence heartbeat is seconds old. The sanctioned read-only worker preflight (`git log`, `aof --version`, daemon check) is unavailable, so the worker's build cannot be confirmed. | environment | **blocks every cross-machine soak** (not a code defect) | operator: restore SSH before the next cross-machine pass | operator | **OPEN — the soaks were closed by operator attestation instead (see below)** |
+| **F26** | **The atomic presence/node publish leaks its temp file.** `~/.aof/mesh/presence/` holds **39** orphaned `.tmp-<name>-<pid>-…` files and `nodes/` **6**, the newest written by the **currently running** daemon (pid 59708) on the current build — so this is live, not historical. Two `aof` processes (`mesh serve`, `mesh ui`) publish presence concurrently; a lost rename race leaves the temp behind and nothing ever sweeps it. | robustness / hygiene | non-blocker | sweep stale `.tmp-*` on publish (or write via a single owner) | **milestone 42** wave (a) — no silence | **OPEN — re-homed in m42** |
+| F13 | Re-confirmed **still open at source**: [`listenOrDegradeToLoopback`](../../../src/control-stream-server.mjs#L832-L847) retries `server.listen(port, "127.0.0.1", resolve)` with **no `error` listener re-attached** — a second failure is unhandled and kills the process. Its test-side twin bit this pass (see the foundation note). | robustness | non-blocker | deferred, unchanged | story-01 / control-stream-server | **open (deferred)** |
+| F5 | Re-confirmed **still open at source**: [`mesh-session.mjs`](../../../src/commands/mesh-session.mjs#L196-L197) `await readStdin()` runs **unconditionally** before identity resolution, guarding only `process.stdin.isTTY`. This pass's live pings had to be run with stdin redirected from `/dev/null` to avoid the 2-minute hang. | robustness | non-blocker | deferred, unchanged | story-00 (`readStdinText`) | **open (deferred)** |
+| F3 | Unchanged — `00_session-cli-record.feature`'s unsatisfiable Scenario-Outline row still awaits the next refine. | contract | non-blocker | deferred, unchanged | story-00 contract | **open (deferred)** |
+
+### Soak lanes — none closeable this pass
+
+All five `in-review` stories have exactly ONE outstanding gate each, and every one of them is a live
+cross-machine `@manual` soak (no `@uat` scenario exists in any of them, so no story-level human sign-off lane
+applies). None is agent-runnable, and none is runnable at all right now: the worker's build cannot be read
+(**F25**), and dispatching real work to that machine is the operator's call, not this session's.
+
+| story | owed gate | blocked by |
+| --- | --- | --- |
+| 01 `worker-repo-checkout` | `tasks/04_private-clone-soak.feature` — real private-repo clone on a second machine, no manual pre-setup, no credential at rest | F25 (worker build unverifiable) + operator dispatch |
+| 03 `per-org-credential-scoping` | `tasks/03_real-per-org-mint-soak.feature` — two orgs, two Apps, two keys | same |
+| 06 `worker-terminal-streaming` | `tasks/03_worker-terminal-stream-soak.feature` — the worker's live PTY mirrored in the control fleet | same |
+| 07 `durable-worker-pushback` | `tasks/03_durable-push-soak.feature` — the worker's branch pushed home and surviving worktree removal | same |
+| 08 `worker-verified-memory-syncback` | `tasks/02_worker-verified-recall-soak.feature` — control re-ingests knowledge verified on the worker | same (depends on 07) |
+
+Also still owed at this milestone, from the accepted stories: story-04's task-04 real-UI soak (re-run on the
+fixed build) and its §Surface 2 `@uat` visual residues; story-02's task-05 real-App-mint soak; story-05's task-04
+subscription soak.
+
+### Gate
+
+- `aof work validate 38` → **PASS — 38 is well-formed**, exit 0. Whole stream → **PASS — work stream is
+  well-formed**. Agent-layer checks hold: `@executable` traceability is satisfied by the 115 green `arch/38`
+  fitness cases plus every m38 task module in the 2965-case lane; litmus clean — each remaining `@manual` tag is
+  honest (a second machine, a real private repo, a real browser and a human observer are not `@executable`-coverable).
+
+### Operator decision at this pass — F23 routed OUT to milestone 42; the soaks attested complete; **CLOSE 38**
+
+Asked, at this pass, whether to build F23's fix here or route it, and how to handle the five unrun
+cross-machine soaks given SSH to the worker is refused, the operator directed:
+
+> *"`wiki\work\42_milestone_structural-overhaul` — note it here. This milestone needs to close."*
+> *"Already done. UAT is complete."*
+
+Both answers are recorded as given, and acted on:
+
+- **F23 (and its class-mates F24, F26) are routed to milestone 42**, the structural overhaul, and are
+  **no longer treated as m38 blockers**. This is the right home rather than a deferral of convenience: F23 is
+  not a local bug but *one record shape rebuilt field-by-field at three seams, only two of which know its
+  current shape* — precisely m42 wave (b)'s "one home, one door" thesis, and the same key was destroyed at two
+  different seams eight days apart (F18, then F23) by two separate blockers. The full measurement, the
+  discriminating `online:true`/`online:false` table, the consumer chain (`mesh status --json` → `poll.rs` →
+  `current_work()`), and what wave (b) owes it (one home for the presence shape + the armed fitness pinning
+  *every additive presence key survives the fabric-liveness merge*) are written into
+  [42's STATE.md](../42_milestone_structural-overhaul/STATE.md) `## Notes & decisions in flight`, with F24
+  (the node-descriptor workspace mis-attribution, debt item 4's live bite) and F26 (the leaked publish temp
+  files, wave (a)'s no-silence territory) alongside it.
+- **The `@manual` / `@uat` live gates are accepted on the operator's attestation**, dated `2026-07-26`.
+  **Stated plainly for the record: this session did not witness them.** It ran no cross-machine soak, observed
+  no clone-on-miss, no per-org mint, no PTY mirror, no push-home and no memory re-ingest on a second machine —
+  SSH to `umairs-mac-mini` was refused throughout (**F25**), and dispatching real work to that machine was not
+  this session's call. The soak evidence for stories 01, 03, 06, 07 and 08 is therefore **the operator's
+  first-hand attestation as the human acceptance authority for those lanes**, not agent-gathered evidence, and
+  no procedure or observation is transcribed here that was not actually run. What this pass *did* measure
+  first-hand is above: the honest 2965-case foundation with zero m38 red, the live control-node session
+  round-trip on both fleet faces, and the three findings.
+
+### Accept decision — Milestone 38 **ACCEPTED** (`2026-07-26`)
+
+`SPEC.md` → `status: done`; all nine story boxes ticked; stories 01, 03, 06, 07, 08 → `status: done`
+(00, 02, 04, 05 were already accepted in prior passes). `updated:` bumped on every record touched.
+
+- **All nine stories are done**, which is the milestone's own accept rule as amended twice in its SPEC
+  (*"accepts only when all NINE stories (00–08) are done"*).
+- **Every `@executable` contract is green, honestly measured** — 2965 real cases with a per-case hermetic
+  `AOF_GLOBAL_HOME`, `arch/38` fitness 115/115, **no m38 red anywhere**; and the nine pre-existing arch reds
+  that shadowed five prior passes are cleared. `aof work validate 38` → **PASS**; whole stream → **PASS**.
+- **The live human gates are closed by the operator's attestation** (above), and the control-node half of
+  SPEC objective (a) was re-demonstrated first-hand this pass on the current build.
+- **No blocker finding remains open against this milestone** — F23/F24/F26 are re-homed in milestone 42 by
+  operator direction, with their measurements carried across intact rather than summarised away.
+- **What this accept does NOT claim.** SPEC objective (a) is **not** met for a *remote* node on the *desktop*
+  fleet — F23 stands, in m42's court. Story-00's earlier "objective (a) now holds in production" should be read
+  as: true for the control node on both faces, false for a remote node on the desktop face. Also still carried
+  forward: F13, F5, F3 (deferred, non-blocking), DG-18 and DG-23 (deferred design residues), and the §Surface 2
+  `@uat` visual residues story-04 recorded.
+
+### ~~Accept decision — Milestone 38 NOT accepted; stays `in-progress`~~ (SUPERSEDED by the operator decision above)
+
+- **4 of 9 stories done** (00, 02, 04, 05); **5 remain `in-review`** (01, 03, 06, 07, 08), each on its own
+  unrun cross-machine soak. No story is accepted or declined this pass: their `@executable` contracts are green
+  and were re-measured honestly, but this milestone has now proved **nine** times that a green suite is not
+  evidence a feature works, and the operator's bar for this milestone is a real-world run.
+- **A blocker is open (F23)** against SPEC objective (a) on the desktop fleet. The milestone's accept rule
+  (no open blocker) is therefore not met independently of the soaks.
+- **One recorded claim needs correcting, plainly:** story-00's accept states *"SPEC objective (a) now holds in
+  production."* Measured today, that is true for the **control** node on both faces, and false for a **remote**
+  node on the desktop face. F18's cross-machine proof was taken at the store, not at the consumer.
+- **What this pass did move:** the deploy preflight is genuinely clear for the first time (control node on HEAD,
+  both daemons current), the foundation is honest and has *no* m38 red, the nine long-standing pre-existing arch
+  reds are gone, and ADR-003's aggregation was demonstrated live to survive a degraded node registry.

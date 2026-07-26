@@ -4,10 +4,10 @@ number: 07
 slug: durable-worker-pushback
 title: "A worker's output survives — committed to a real branch and pushed for review"
 parent: 38
-status: in-review
+status: done
 owner: product-owner
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-26
 schema: 1
 aofVersion: 0.1.0
 ---
