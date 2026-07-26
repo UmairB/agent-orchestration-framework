@@ -296,11 +296,14 @@ export const controlStreamServerTests = [
           // INCLUDING a live session (ADR-001). The prior 4-key fixture here is what
           // let the cross-node `sessions`-drop ship — it had no sessions key to lose.
           const sessions = [{ workspaceId: "ws-9db1", repo: "aof", assistant: "claude-code", lastPingAt: NOW }];
-          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], sessions, aofVersion: "1.2.3" };
+          // Producer-shaped: the SIX-key record (m42/item 1 adds buildId — the
+          // remote node's build stamp — as the sixth additive key; the wire gate
+          // must carry it like aofVersion, never drop it on ingest).
+          const presence = { nodeId: "worker-a", heartbeatAt: NOW, activeRuns: ["run-1"], sessions, aofVersion: "1.2.3", buildId: "payload abc1234.20260726T120000" };
           await applyStreamFrame(store, { kind: "presence", nodeId: "worker-a", presence, at: NOW }, { now: NOW });
 
           const saved = await readPresenceRecord({ globalMeshRoot: store.paths.meshRoot }, "worker-a");
-          assert.deepEqual(saved, presence, "the control node stores the worker's durable presence — INCLUDING the ADR-001 sessions key — in the same seam the UI reads");
+          assert.deepEqual(saved, presence, "the control node stores the worker's durable presence — INCLUDING sessions AND the buildId stamp — in the same seam the UI reads");
         } finally {
           store.close();
         }

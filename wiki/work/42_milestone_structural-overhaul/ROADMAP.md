@@ -30,7 +30,7 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 
 | Leg | Status | Commits | What's left |
 |---|---|---|---|
-| **Item 1 — launcher decouple** | ✅ DONE (core) | `ad72943` | `aof.exe` is a payload-first launcher; deploy = file copy + restart; SEA only for bootstrap/release; BUILD_ID stamped + surfaced (`--version`, daemon startup, log sink); `.bak` pruning. **Left:** a REMOTE node's build id in `aof mesh status`; (optional) daemons self-restart when the installed stamp changes — install becomes the whole deploy. |
+| **Item 1 — launcher decouple** | ✅ DONE (core) | `ad72943` | `aof.exe` is a payload-first launcher; deploy = file copy + restart; SEA only for bootstrap/release; BUILD_ID stamped + surfaced (`--version`, daemon startup, log sink); `.bak` pruning. **Remote build-id DONE:** the presence record carries `buildId` as its sixth additive key (publisher → wire gate → store → `aof mesh status` node lines show `· build payload <stamp>`) — surviving the liveness merge by construction, F23's fix proving itself on the first new key. **Left (optional):** daemons self-restart when the installed stamp changes — install becomes the whole deploy. |
 | **Item 0 — the deletion pass** | ❌ NOT STARTED | — | Retire scar comments / dead fallbacks / duplicate derivations made obsolete by the waves above, measured against the baseline (1,670 scar markers, 31% comment ratio, 147 files / 41k lines). Runs LAST — deletions are only safe once their causes are gone. |
 
 ---

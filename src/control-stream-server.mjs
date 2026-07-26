@@ -247,6 +247,10 @@ export async function applyPresenceFrame(store, frame, options = {}) {
     // ADR-001 key order: sessions BEFORE the trailing aofVersion provenance string.
     sessions: safeSessionArray(presence.sessions),
     aofVersion: typeof presence.aofVersion === "string" ? presence.aofVersion : "",
+    // m42 wave (c) / item 1 — the sixth additive key: the worker's build stamp,
+    // carried through the wire gate the same way aofVersion is (this whitelist is
+    // the DELIBERATE one — a new presence key is taught here, at the one wire seam).
+    ...(typeof presence.buildId === "string" && presence.buildId.length > 0 ? { buildId: presence.buildId } : {}),
   };
   const workspace = options.presenceWorkspace ?? { globalMeshRoot: store?.paths?.meshRoot };
   await publishPresenceRecord(workspace, nodeId, record);

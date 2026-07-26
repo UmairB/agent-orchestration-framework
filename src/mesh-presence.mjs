@@ -269,13 +269,20 @@ export async function resolveWorkspaceCloneUrl(workspaceId, options = {}) {
 // activeRuns reads-but-never-mutates run state); aofVersion is the provenance string.
 // A PURE projection of its inputs — the same inputs yield a content-equivalent record
 // (rebuildability), so it is never a second authority.
-export function assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, sessions, aofVersion }) {
+export function assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, sessions, aofVersion, buildId }) {
   return {
     nodeId,
     heartbeatAt,
     activeRuns,
     sessions: sessions ?? [],
     aofVersion,
+    // m42 wave (c) / TECH_DEBT item 1 — the SIXTH additive key: which BUILD this
+    // node is running (build-info.mjs's stamp), so a stale remote build is visible
+    // in mesh:status/the fleet instead of inferred by SSH. Additive-only, absent
+    // omitted as null-tolerant "": a pre-stamp node reads "" like aofVersion's own
+    // absent discipline. Survives the fabric-liveness merge by construction (F23's
+    // fix: liveness spreads the record; it no longer whitelists keys).
+    ...(typeof buildId === "string" && buildId.length > 0 ? { buildId } : {}),
   };
 }
 

@@ -34,6 +34,8 @@ import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresen
 import { listItems, loadWorkspace } from "./work.mjs";
 import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
+// m42 wave (c) / item 1 — the build stamp published on this node's presence record.
+import { readBuildInfo, buildInfoString } from "./build-info.mjs";
 import { meshRole, resolveWorkerStreamTarget } from "./mesh-role.mjs";
 import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stream-client.mjs";
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
@@ -434,7 +436,9 @@ async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsS
     // absence-is-benign — sessions are skipped this tick, not fatal.
   }
 
-  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: aofVersion() });
+  // m42 wave (c) / item 1 — the build stamp rides the presence record (the sixth
+  // additive key), so `aof mesh status` answers WHICH build a remote node runs.
+  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: aofVersion(), buildId: buildInfoString(readBuildInfo()) });
 }
 
 function configuredRelayUrl(config) {

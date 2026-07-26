@@ -308,7 +308,14 @@ export const meshStatusCommand = {
       const nodesHalf = result.nodes.length === 0
         ? "No nodes in the mesh roster."
         : result.nodes
-            .map((node) => `${node.nodeId} — ${node.presence ? (node.stale ? "stale" : "live") : "no presence"}`)
+            // m42 wave (c) / item 1 — each node line names the BUILD it reports
+            // (the presence record's sixth additive key), so a stale remote build
+            // is read off `aof mesh status` instead of inferred by SSH. A
+            // pre-stamp node simply omits the suffix.
+            .map((node) => {
+              const build = typeof node.presence?.buildId === "string" && node.presence.buildId.length > 0 ? ` · build ${node.presence.buildId}` : "";
+              return `${node.nodeId} — ${node.presence ? (node.stale ? "stale" : "live") : "no presence"}${build}`;
+            })
             .join("\n");
 
       const sections = [nodesHalf];
