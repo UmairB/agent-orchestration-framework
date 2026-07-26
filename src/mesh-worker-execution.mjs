@@ -1267,12 +1267,15 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     let exitSub = null;
     // F27 — the timer for the READINESS-DELAYED directive-command write (below).
     let commandWriteTimer = null;
+    // m42 wave (b) / TECH_DEBT item 7 — the PTY LIVENESS PROBE (below).
+    let livenessTimer = null;
 
     const cleanupSubs = () => {
       try { dataSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
       try { exitSub?.dispose?.(); } catch { /* already-exited guard (win32) */ }
       // never let a queued command write land in an already-exited/settled PTY.
       if (commandWriteTimer != null) { clearTimeout(commandWriteTimer); commandWriteTimer = null; }
+      if (livenessTimer != null) { clearInterval(livenessTimer); livenessTimer = null; }
     };
 
     // finish(result) — settles this invocation EXACTLY once. Aborts the transcript
@@ -1363,6 +1366,31 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     exitSub = term.onExit?.(({ exitCode }) => {
       finish(exitCode === 0 ? { outcome: "done" } : { outcome: "failed", failureReason: "agent_error" });
     }) ?? null;
+
+    // m42 wave (b) / TECH_DEBT item 7 — THE PTY LIVENESS PROBE. Measured live
+    // (run 39ec5149, 2026-07-26): the agent process VANISHED ~11 minutes into a run
+    // with no onExit ever delivered, so the run — and its assignment — sat `running`
+    // for 25+ minutes while the fleet mirrored the silence of a dead process. onExit
+    // is an event from the PTY layer; a child that is killed out-of-band (or whose
+    // exit event is lost) delivers nothing. The probe asks the OS directly: every
+    // intervalMs, signal-0 the child pid; a dead pid settles the run as
+    // `failed/agent_died` through the SAME idempotent finish() every other outcome
+    // uses (if onExit fires first, finish's settled-guard makes the probe a no-op).
+    // Guarded on a real numeric pid so every injected test fake without one keeps
+    // byte-identical behaviour; interval injectable for tests.
+    const livenessIntervalMs = options.livenessIntervalMs ?? 15_000;
+    if (typeof term.pid === "number" && Number.isFinite(term.pid) && livenessIntervalMs > 0) {
+      livenessTimer = setInterval(() => {
+        try {
+          process.kill(term.pid, 0);
+        } catch {
+          finish({ outcome: "failed", failureReason: "agent_died" });
+        }
+      }, livenessIntervalMs);
+      // NOT unref'd: an unref'd probe lets the process exit before its first tick
+      // when nothing else holds the loop; cleanupSubs clears it on every settle,
+      // so a settled run never leaks the interval.
+    }
 
     // milestone 38 (VERIFICATION F-38.06h, live soak 2026-07-25) — COMPLETION FROM THE
     // TRANSCRIPT. An interactive `claude` never exits when a directive finishes, so

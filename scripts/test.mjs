@@ -1353,6 +1353,9 @@ import { fsTempHygieneTests } from "../test/fs-temp-hygiene.test.mjs";
 // m42 wave (a) / TECH_DEBT item 3 — the silent-catch RATCHET: per-file shrink-only
 // baseline; a NEW statement-empty catch (or .catch(() => {})) fails the build.
 import { archTests as acdNoNewSilentCatchTests } from "../test/arch/acd-no-new-silent-catch.test.mjs";
+// m42 wave (b) / TECH_DEBT item 7 — the PTY liveness probe: a child that dies
+// without an exit event settles failed/agent_died instead of running forever.
+import { meshWorkerLivenessTests } from "../test/mesh-worker-liveness.test.mjs";
 import { nativeAddonSidecarTests } from "../test/native-addon-sidecar.test.mjs";
 import { singleEntryTwoModeTests } from "../test/single-entry-two-mode.test.mjs";
 import { bundleAssetManifestCompleteTests } from "../test/bundle-asset-manifest-complete.test.mjs";
@@ -2013,6 +2016,7 @@ export const tests = [
   ...meshLogTests,
   ...fsTempHygieneTests,
   ...acdNoNewSilentCatchTests,
+  ...meshWorkerLivenessTests,
   ...nativeAddonSidecarTests,
   ...singleEntryTwoModeTests,
   ...bundleAssetManifestCompleteTests,

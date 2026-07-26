@@ -36,8 +36,15 @@ doc: state
   94 sites / 29 files (comment-only catch bodies count: a comment is documentation, not a runtime
   signal), pinned as a per-file shrink-only allowlist; any NEW silent catch fails the build. The
   sweep (emit into the item-2 sink) shrinks it file-by-file — remaining within item 3.
-- Next: wave (b) starting at item 7 (liveness loop: worker startup reclaim + dead-PTY report +
-  control heartbeat staleness); then F23/F24 presence home; then item 4 identity home.
+- **Wave (b) / item 7 leg 1 DONE (2026-07-26): the PTY liveness probe.** The observed killer (run
+  39ec5149: agent vanished ~11 min in, no onExit delivered, assignment `running` 25+ min) is closed
+  at the source — the driver signal-0s the child pid every 15s and settles `failed/agent_died`
+  through the same idempotent finish() as every outcome; the existing caller path then reports
+  run-complete + assignment-status failed upstream. Pid-guarded (fakes without pid unchanged),
+  interval injectable. Remaining item-7 legs: worker STARTUP reclaim of own `running` records, and
+  the control-side question of why dual-staleness reclaim never fired during those 25 minutes.
+- Next: item 7 legs 2–3; then F23/F24 presence home; then item 4 identity home; item 3's sweep
+  (94 → 0) interleaves as files get touched.
 
 ## Notes & decisions in flight
 
