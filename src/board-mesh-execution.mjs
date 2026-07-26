@@ -93,6 +93,41 @@ function safeBranch(store, workspaceId, itemRef) {
   }
 }
 
+// --- EXECUTION SCOPE (operator, 2026-07-26 — the story-continue defect) -------------
+//
+// Runs, assignments, branches and worktrees are all recorded against the TOP-LEVEL item
+// (the milestone): a mesh run of "18" builds its stories inside ONE worktree on ONE
+// branch. A child ref therefore has no execution row of its own — and every consumer
+// that looked up the overlay by exact ref got "never ran" for "18/02" while its
+// milestone was running on another machine. The continue door then fell through to
+// "here" and started a rival local run: the exact one-door defect, one level down.
+//
+// This is the ONE home for the scope rule. Both consumers use it: the continue
+// decision (src/commands/continue.mjs) and the row overlay (applyExecutionOverlay,
+// below) — so "what the board shows on the story" and "where the story's continue
+// goes" can never disagree.
+
+// executionScopeRef(ref) — the top-level item ref a child's execution is recorded
+// under ("18/02" → "18"; "18" → "18").
+export function executionScopeRef(ref) {
+  return String(ref ?? "").split("/")[0];
+}
+
+// resolveScopedExecution(overlay, ref) → { execution, scopeRef } | null — the item's
+// own execution when it has one, else its top-level scope's. Null when neither exists
+// (a genuinely never-run item — the local default).
+export function resolveScopedExecution(overlay, ref) {
+  if (!(overlay instanceof Map)) return null;
+  const own = overlay.get(ref);
+  if (own != null) return { execution: own, scopeRef: ref };
+  const scope = executionScopeRef(ref);
+  if (scope !== ref) {
+    const inherited = overlay.get(scope);
+    if (inherited != null) return { execution: inherited, scopeRef: scope };
+  }
+  return null;
+}
+
 // applyExecutionOverlay(rows, overlay) → rows — attaches `execution` to each row an
 // active assignment covers, and overrides `status` to `in-progress` ONLY while a worker is
 // genuinely RUNNING it (a board that reads `not-started` over a live run is the defect;
@@ -102,9 +137,20 @@ function safeBranch(store, workspaceId, itemRef) {
 export function applyExecutionOverlay(rows, overlay) {
   if (!(overlay instanceof Map) || overlay.size === 0) return rows;
   return rows.map((row) => {
-    const execution = overlay.get(row.ref);
-    if (execution == null) return row;
-    const status = execution.state === "running" ? RUNNING_STATUS : row.status;
-    return { ...row, status, execution };
+    const own = overlay.get(row.ref);
+    if (own != null) {
+      const status = own.state === "running" ? RUNNING_STATUS : row.status;
+      return { ...row, status, execution: { ...own, scopeRef: row.ref } };
+    }
+    // Scope inheritance (2026-07-26): a child row carries its top-level item's
+    // execution, so the affordance layer says "Running on <node>" on the STORY too
+    // instead of offering a Continue that would race the milestone's own run. The
+    // status is deliberately NOT overridden here — the milestone is running; this
+    // particular story may be untouched, and its own frontmatter stays the truth.
+    const scoped = resolveScopedExecution(overlay, row.ref);
+    if (scoped != null) {
+      return { ...row, execution: { ...scoped.execution, scopeRef: scoped.scopeRef } };
+    }
+    return row;
   });
 }

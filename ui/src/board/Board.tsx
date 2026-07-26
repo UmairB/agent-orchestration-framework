@@ -206,10 +206,18 @@ export function Board() {
       try {
         const result = await workApi.continueWork({ ref });
         if (result.where === "local") {
-          runAgent(ref, result.command);
+          runAgent(ref, result.command ?? `/aof:continue ${ref}`);
           return;
         }
-        setDispatch({ ref, message: `Continuing on ${result.node}`, error: false });
+        // "running": the ref (or its milestone scope) already has an active run —
+        // nothing was spawned or minted; say where it is instead of racing it.
+        setDispatch({
+          ref,
+          message: result.where === "running"
+            ? `Already running on ${result.node ?? "a worker"}`
+            : `Continuing on ${result.node}`,
+          error: false,
+        });
         await load({ silent: true });
       } catch (error) {
         // Surfaced, never swallowed: a refused continue (already running, node

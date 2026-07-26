@@ -14,7 +14,8 @@ import path from "node:path";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } from "../src/assignment-record.mjs";
 import { setItemBranch } from "../src/mesh-assignment-directive.mjs";
-import { readExecutionOverlay, applyExecutionOverlay } from "../src/board-mesh-execution.mjs";
+import { readExecutionOverlay, applyExecutionOverlay, resolveScopedExecution } from "../src/board-mesh-execution.mjs";
+import { resolveContinueDecision } from "../src/commands/continue.mjs";
 import { mergeWorkerItems } from "../src/board-worker-stream.mjs";
 import { listCommand } from "../src/commands/list.mjs";
 
@@ -184,6 +185,87 @@ export const boardMeshExecutionTests = [
       const merged = mergeWorkerItems(local, worker, new Map());
       assert.equal(merged.filter((r) => r.ref === "18/00").length, 1, "no duplicate row");
       assert.equal(merged.find((r) => r.ref === "18/00").status, "in-review", "the worker's row wins");
+    },
+  },
+  // --- EXECUTION SCOPE (operator, 2026-07-26 — the story-continue defect): runs are
+  // recorded at the TOP-LEVEL item, so a child ref inherits its scope's execution.
+  // ONE rule, two consumers: the row overlay (below) and the continue decision. ---
+  {
+    name: "exec-scope: a STORY row inherits its milestone's execution (so the affordance says Running-on-node), WITHOUT a status override",
+    run: async () => withStore(async ({ store, env }) => {
+      seed(store, { assignmentId: "a1", itemRef: "18", state: "running" });
+      const overlay = await readExecutionOverlay({ projectRoot: "/x", config: { mesh: { workspaceId: WS } } }, { globalWorkStoreOptions: { env } });
+      const rows = applyExecutionOverlay([
+        ...localRows(),
+        { ref: "18/02", type: "story", slug: "uprn", status: "not-started", title: "UPRN", parent: "18", dir: "/x/18/02" },
+      ], overlay);
+
+      const story = rows.find((r) => r.ref === "18/02");
+      assert.equal(story.execution?.active, true, "the story carries its milestone's live execution");
+      assert.equal(story.execution?.nodeId, "umairs-mac-mini");
+      assert.equal(story.execution?.scopeRef, "18", "…marked as inherited from the SCOPE, not its own");
+      assert.equal(story.status, "not-started", "the story's OWN status is never overridden — the milestone runs, this story may be untouched");
+
+      const milestone = rows.find((r) => r.ref === "18");
+      assert.equal(milestone.execution?.scopeRef, "18", "an own-execution row carries scopeRef = itself");
+      assert.equal(milestone.status, "in-progress", "the running milestone itself still reports progress");
+    }),
+  },
+  {
+    name: "exec-scope: resolveScopedExecution — own execution wins over the scope's; no execution anywhere → null",
+    run: async () => {
+      const overlay = new Map([
+        ["18", { nodeId: "mac", active: true }],
+        ["18/03", { nodeId: "other-node", active: false }],
+      ]);
+      assert.equal(resolveScopedExecution(overlay, "18/03").execution.nodeId, "other-node", "an own row wins");
+      assert.equal(resolveScopedExecution(overlay, "18/03").scopeRef, "18/03");
+      assert.equal(resolveScopedExecution(overlay, "18/02").execution.nodeId, "mac", "a story without its own row inherits the milestone's");
+      assert.equal(resolveScopedExecution(overlay, "18/02").scopeRef, "18");
+      assert.equal(resolveScopedExecution(overlay, "20"), null, "never-run → null (the local default)");
+      assert.equal(resolveScopedExecution(new Map(), "18/02"), null);
+    },
+  },
+  {
+    name: "continue-decision: a story whose milestone is RUNNING answers 'running' — never local, never a second dispatch (the reported defect)",
+    run: () => {
+      const overlay = new Map([["18", { nodeId: "umairs-mac-mini", active: true, state: "running", assignmentId: "a1" }]]);
+      const d = resolveContinueDecision(overlay, "18/02", { localNodeId: "control-node" });
+      assert.equal(d.where, "running", "clicking Continue on a story of a live milestone spawns NOTHING");
+      assert.equal(d.node, "umairs-mac-mini");
+      assert.equal(d.scopeRef, "18");
+      assert.equal(d.resolvedBy, "active-run");
+      // …and the milestone itself answers the same.
+      assert.equal(resolveContinueDecision(overlay, "18", { localNodeId: "control-node" }).where, "running");
+    },
+  },
+  {
+    name: "continue-decision: a story whose milestone LAST RAN remotely routes remote AT THE SCOPE ref (one branch/worktree per top-level item)",
+    run: () => {
+      const overlay = new Map([["18", { nodeId: "umairs-mac-mini", active: false, state: "done" }]]);
+      const d = resolveContinueDecision(overlay, "18/02", { localNodeId: "control-node" });
+      assert.equal(d.where, "remote");
+      assert.equal(d.node, "umairs-mac-mini", "the node that last worked the scope");
+      assert.equal(d.dispatchRef, "18", "dispatched at the SCOPE — assigning the child ref would mint a divergent second branch");
+      assert.equal(d.resolvedBy, "last-node");
+    },
+  },
+  {
+    name: "continue-decision: never-ran stays local at the EXACT ref; last-ran-here stays local; an explicit node wins and dispatches at scope",
+    run: () => {
+      const empty = new Map();
+      const local = resolveContinueDecision(empty, "18/02", { localNodeId: "control-node" });
+      assert.equal(local.where, "local");
+      assert.equal(local.dispatchRef, "18/02", "a local continue keeps the exact ref — a session can continue one story directly");
+      assert.equal(local.resolvedBy, "no-prior-run");
+
+      const ranHere = new Map([["18", { nodeId: "control-node", active: false, state: "done" }]]);
+      assert.equal(resolveContinueDecision(ranHere, "18/02", { localNodeId: "control-node" }).where, "local", "last node IS this node → local");
+
+      const explicit = resolveContinueDecision(empty, "18/02", { requestedNode: "umairs-mac-mini", localNodeId: "control-node" });
+      assert.equal(explicit.where, "remote");
+      assert.equal(explicit.dispatchRef, "18", "an explicit remote target still dispatches at the scope ref");
+      assert.equal(explicit.resolvedBy, "requested");
     },
   },
 ];

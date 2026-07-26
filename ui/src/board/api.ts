@@ -60,15 +60,22 @@ export type NextResponse = {
 export type FeedbackResponse = { ok: true; bullet: string };
 
 // The /api/work/continue envelope. `where` is the server's answer to the only question
-// this endpoint exists to settle: does this continue run HERE, or on a worker node?
+// this endpoint exists to settle: does this continue run HERE, on a worker node — or is
+// it ALREADY running ("running": the ref or its milestone scope has an active
+// assignment; nothing was spawned or minted, the caller watches it instead)?
 // `command` is the slash command a LOCAL continue types into its own session.
+// `scopeRef` is the top-level item the execution actually rides on (a story's continue
+// routes at its milestone — one branch, one worktree per top-level item).
 export type ContinueResponse = {
   ok: true;
   ref: string;
-  where: "local" | "remote";
+  where: "local" | "remote" | "running";
   node: string | null;
-  resolvedBy: "requested" | "last-node" | "no-prior-run" | null;
-  command: string;
+  resolvedBy: "requested" | "last-node" | "no-prior-run" | "active-run" | null;
+  scopeRef?: string;
+  state?: string | null;
+  sessionId?: string | null;
+  command?: string;
   assignmentId?: string;
 };
 

@@ -16,6 +16,14 @@ doc: state
 
 ## Notes & decisions in flight
 
+- 2026-07-26 (pre-refine): the one-door rule gained its EXECUTION-SCOPE leg (operator-found
+  defect: a story's Continue ran locally while its milestone ran on a worker — the door looked up
+  execution by exact ref, but runs/branches/worktrees are recorded at the TOP-LEVEL item). One rule
+  in one home (`executionScopeRef`/`resolveScopedExecution`, board-mesh-execution.mjs) consumed by
+  BOTH the continue decision (now pure + unit-tested; third answer `running` = watch, don't
+  restart; remote dispatch always at scope ref) and the row overlay (story rows inherit execution →
+  the affordance disables Continue with "Running on <node>"). Wave (b) must generalise this scope
+  rule to refine/verify when they get their doors.
 - 2026-07-26 (pre-refine): debt item 1's core was paid down — `aof.exe` is now a payload-first
   launcher (sea-entry bootstrap; verified `import()` of external ESM works inside this SEA recipe),
   install-local defaults to a payload file-copy deploy (`--sea` only for launcher/release builds),
