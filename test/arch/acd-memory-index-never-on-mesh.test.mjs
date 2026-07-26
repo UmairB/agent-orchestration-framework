@@ -131,7 +131,7 @@ const FRAME_BUILDER_SITES = [
   { file: "src/worker-stream-client.mjs", fn: "buildCloneUrlRequestFrame" },
   { file: "src/worker-stream-client.mjs", fn: "buildWriteCredentialRequestFrame" }, // story 07
   { file: "src/mesh-relay-client.mjs", fn: "relayEnvelope" },
-  { file: "src/mesh-relay-client.mjs", fn: "leaseRelayEnvelope" },
+  // leaseRelayEnvelope DELETED (m42 item 0 — the lease era's dead wire kind).
   { file: "src/mesh-terminal-relay-bridge.mjs", fn: "buildTerminalFrameEnvelope" }, // story 06
   { file: "src/mesh-relay.mjs", fn: "sendControl" },
 ];

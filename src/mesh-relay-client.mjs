@@ -33,25 +33,17 @@ import { reportDegrade } from "./degrade.mjs";
 export const PRESENCE_SIGNAL_KIND = "presence";
 
 // The FROZEN lease signal kind (milestone 26 / ADR-004.1 — the envelope's SECOND kind,
-// cashing 23/ADR-001's "m26 leasing is the second kind" promise with ZERO change to
-// src/mesh-relay.mjs: the broker parses only { kind, nodeId } for routing and forwards
-// unknown kinds byte-for-byte, so this literal lives HERE and only here — the relay
-// stays kind-blind, fitness #10 / acd-relay-lease-blind).
-export const LEASE_SIGNAL_KIND = "lease";
-
 // Build story 01's FROZEN { kind, nodeId, signal } envelope — kind "presence", THIS
 // node's id, and the presence record as the OPAQUE `signal` blob (the relay forwards it
 // byte-for-byte without parsing — fitness #2). A pure projection of its inputs.
+//
+// m42 item 0 (the deletion pass): the LEASE second-kind surface that used to live
+// beside this (LEASE_SIGNAL_KIND / leaseRelayEnvelope / pushLeaseSignal) is DELETED —
+// the m26 lease era was superseded by m35's assignment record, its last caller
+// retired with acd-claim-relay-independent, and dead wire kinds are exactly the
+// "history kept in the code" class the overhaul exists to end.
 export function relayEnvelope(nodeId, signal) {
   return { kind: PRESENCE_SIGNAL_KIND, nodeId, signal };
-}
-
-// Build the lease-intent envelope (m26 / ADR-004.1) — the SAME frozen { kind, nodeId,
-// signal } form with kind "lease": THIS node's id and the claim record VERBATIM as the
-// OPAQUE `signal` blob (the wire never parses it; the broker forwards it byte-for-byte).
-// A pure projection of its inputs — relayEnvelope's sibling for the second kind.
-export function leaseRelayEnvelope(nodeId, claim) {
-  return { kind: LEASE_SIGNAL_KIND, nodeId, signal: claim };
 }
 
 // pushPresenceSignal(relayClient, envelope) — the ONE-SHOT best-effort push the
@@ -94,18 +86,6 @@ export async function pushPresenceSignal(relayClient, envelope) {
     }
   }
   return { pushed: true, skipped: false };
-}
-
-// pushLeaseSignal(relayClient, envelope) — the lease-intent push (m26 / ADR-004.1): the
-// SAME one-shot connect → push-one-frame → dispose seam, reused verbatim (the push logic
-// is envelope-agnostic — it never reads envelope.kind, so the second kind rides the
-// first kind's seam unchanged). Like its sibling it NEVER swallows the throw: a
-// connect/push failure PROPAGATES to the caller's try/catch — the best-effort catch
-// lives on the CLAIM path (src/commands/run-start.mjs), where fitness #9
-// (acd-claim-relay-independent) reads it. A null/absent relayClient is the UNCONFIGURED
-// case: skipped, never attempted.
-export async function pushLeaseSignal(relayClient, envelope) {
-  return pushPresenceSignal(relayClient, envelope);
 }
 
 // createRelayClient(config) → { connect, push, close } | null — the PRODUCTION node-side

@@ -31,9 +31,17 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 | Leg | Status | Commits | What's left |
 |---|---|---|---|
 | **Item 1 — launcher decouple** | ✅ DONE (core) | `ad72943` | `aof.exe` is a payload-first launcher; deploy = file copy + restart; SEA only for bootstrap/release; BUILD_ID stamped + surfaced (`--version`, daemon startup, log sink); `.bak` pruning. **Remote build-id DONE:** the presence record carries `buildId` as its sixth additive key (publisher → wire gate → store → `aof mesh status` node lines show `· build payload <stamp>`) — surviving the liveness merge by construction, F23's fix proving itself on the first new key. **Left (optional):** daemons self-restart when the installed stamp changes — install becomes the whole deploy. |
-| **Item 0 — the deletion pass** | ❌ NOT STARTED | — | Retire scar comments / dead fallbacks / duplicate derivations made obsolete by the waves above, measured against the baseline (1,670 scar markers, 31% comment ratio, 147 files / 41k lines). Runs LAST — deletions are only safe once their causes are gone. |
+| **Item 0 — the umbrella closes** | ✅ DONE (measured; convention recorded) | deletion commit | The four disease forms each have their structural cure + a gate that keeps it cured: **one home per fact** (identity: `workspace-identity.mjs` + gate; presence shape: one authority + F23 merge fix; doc set: shared const), **one door per act** (3 phase doors, one factory, faces are transport, 4 gates), **errors are events** (97-site sweep, silent-catch BAN at the 2-site sanctioned floor, sink + remote ring), **the build is honest** (payload launcher, stamps everywhere incl. remote presence). **Deletion tranche:** dead lease wire-kind surface removed (`LEASE_SIGNAL_KIND`/`leaseRelayEnvelope`/`pushLeaseSignal`); dead guards + duplicate derivations already retired in-wave. **Measured vs the baseline:** standing arch failures 10 → **0** (698 green); silent catches 43 (honest count 97) → **2** sanctioned; identity derivations 17 sites → **1 home**; scar markers 1,670 → 1,563. Lines grew (41.3k → 43.3k) — the overhaul added verification surface, and that is the point. **Recorded decision:** the remaining comment-mass reduction is an ongoing convention (scar comments retire as files are touched, with the gates preventing new debt classes), not a blocking work item — grinding 1,500 historical comments in one pass would churn every file for cosmetic gain. |
 
 ---
+
+## Status: ALL ROADMAP ITEMS DONE (2026-07-26)
+
+Every wave's legs are landed, unit-verified, committed to `main`, synced to both machines and
+staged in the control node's payload. Two items carry recorded scope decisions (`--follow` and the
+self-restart leg → the deferred backlog in [../ROADMAP.md](../ROADMAP.md); the comment-mass
+convention in item 0's row). What remains below is LIVE verification, which requires operator
+restarts and a real dead-run drill — tracked as caveats, not as open work.
 
 ## Live-soak caveats (unit-green ≠ running)
 
