@@ -157,6 +157,22 @@ export function Board() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, focus, items]);
 
+  // While ANY item is executing (a mesh assignment is active, or a local run is
+  // live), the list itself re-fetches silently on the same observability cadence.
+  // The execution overlay — node, state, and the SESSION ID the "View terminal"
+  // mirror needs — rides /api/work/list, so a sync-gated list froze the primary
+  // action at page-load state: a session captured seconds after dispatch never
+  // reached an open board, and the operator had to hard-refresh to be OFFERED the
+  // terminal (measured live, 2026-07-27). A quiet board stays sync-gated — this
+  // poll arms only while work is genuinely in flight, and load({silent}) updates
+  // in place (never the loading branch, so the dock is never torn down).
+  useEffect(() => {
+    const executing = items.some((item) => item.execution?.active === true) || runningRefs.size > 0;
+    if (!executing) return;
+    const poll = setInterval(() => void load({ silent: true }), RUNNING_PROBE_MS);
+    return () => clearInterval(poll);
+  }, [items, runningRefs, load]);
+
   const selectedItem = useMemo(
     () => items.find((item) => item.ref === selectedRef) ?? null,
     [items, selectedRef]
