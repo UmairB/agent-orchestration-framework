@@ -11,6 +11,20 @@ doc: state
 
 ## Progress
 
+- **2026-07-27: SCOPE EXTENDED — wave (d), command spine & effects ledger.** The operator's
+  command-layer review ("side effects not happening is the biggest problem with this codebase") +
+  two full codebase maps found item 0's disease one level deeper than waves (a)–(c) reached: write
+  seams have one home now, but **cascade seams have none** — `completeRun` has 8 call sites and
+  exactly 1 does the status rollback; global publish is a per-command import decision
+  (`work:feedback` publishes, `work:insert-milestone` doesn't); reindex renumbers refs that key six
+  stores and tells none of them; the coupling rules live only in comments. The design was argued to
+  rest in-session (command/event model; locus-per-effect routing over node-role; facts-over-the-
+  bridge with directives + read-only queries as the only RPC; durable per-node journal with
+  idempotent, event-id-deduped reactors; CLI sync-drain / daemon tick-drain) and is recorded as
+  [PRD-command-spine-effects-ledger.md](../../planning/PRD-command-spine-effects-ledger.md).
+  Execution home is THIS milestone — ROADMAP wave (d), legs d1–d5, all 🔴 NOT BUILT. SPEC gains the
+  matching acceptance bullet ("one ledger per consequence") and scope wave.
+
 - **2026-07-26 (evening): ALL ROADMAP ITEMS DONE** — see [ROADMAP.md](ROADMAP.md) for the per-item
   ledger with commits and measurements. Waves (a), (b) and (c) landed in one inline day at the
   operator's direction; two scope decisions recorded (--follow + self-restart → deferred backlog;
@@ -203,6 +217,33 @@ to main without explicit signoff).**
   type resolution + baseBranch-for-every-non-refine-phase + withdraw-notify tick once-guard
   (mesh-assignment-directive, board-mesh-execution), checkout descriptor fallback
   (mesh-workspace-workdir-absolute), source git stamp (build-info).
+
+### OPEN FINDING (2026-07-27 evening) — worker-terminal INPUT: bytes reach the pty, claude does not react
+
+**Status: UNRESOLVED after ~15 restart cycles — frozen by operator-invoked stop; do NOT resume
+cycle-debugging. The next step requires claude-side visibility (its own debug logging / an
+instrumented build on the worker), not another aof deploy.**
+
+What is PROVEN (each with its instrument, all on the branch):
+- The full input path delivers: dock keystroke → tuple-bound `/ws/terminal-view` → relay →
+  serve router → stream DOWN-frame → worker handler → registry write → **the correct pty**
+  (pid-stamped delivery breadcrumbs matched the live claude's pid exactly; a bogus-session
+  probe logs a miss, the real session never does).
+- The pty layer works inside the daemon (in-daemon `cat` self-test: input + echo OK).
+- The claude term's OUTPUT flows (boot renders reach the mirror through the whole
+  fabric→loopback→mirror chain).
+- The claude term ignores typed bytes AND SIGWINCH resize jiggles — no repaint, ever.
+- One success exists: run 0021 (~90s old) visibly cycled prompt history from dock keystrokes
+  before its stream died — so the whole loop CAN work; what distinguishes 0021 is unknown.
+- Falsified along the way: restart races (real, fixed), dead reconnect loops (real, fixed —
+  keepalive both ends), fire-and-forget CLI lying (real, fixed — confirm-at-source), the
+  stale-sentinel park (real, fixed — post-resume baseline), daemon-wide pty death (cat test),
+  node-pty/node-25 (fresh-process test), IDE-attachment as the input killer (env scrubbed —
+  a REAL hygiene/security fix, `4974c82`, but input stayed dead), load-window timing (probes
+  at +3/+5 min pending as of this entry).
+
+Debug scaffolding still in the tree (remove once resolved): per-write delivery breadcrumbs
+with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
 
 ### Residual defects / deferred work (known, not yet built)
 - **THE structural debt (operator: "insanely brittle"; scoped, ~half-day):** work lives on
