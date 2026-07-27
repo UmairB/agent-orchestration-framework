@@ -2787,9 +2787,22 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
         return;
       }
 
-      // The RUN, minted like any run — the store now tells the truth ("this item
-      // is being worked on"), and the duplicate-run guard walls a parallel start.
-      runRecord = await startRun(item, { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } });
+      // The RUN. A resume that previously parked needs-input left ITS record
+      // `running` — the run PAUSED, it never ended — so a resume of the SAME
+      // assignment CONTINUES that run (same runId; completion settles the same
+      // record) instead of minting a second one straight into the duplicate-run
+      // wall. A running record held by a DIFFERENT assignment is genuine
+      // concurrent work and refuses the resume. Otherwise: minted like any run —
+      // the store tells the truth, and the guard walls a parallel start.
+      const priorRunning = (await readRuns(item)).find((record) => record.state === "running") ?? null;
+      if (priorRunning != null && priorRunning.brief?.assignmentId !== assignmentId) {
+        log("warn", `session ${sessionId}: item ${itemRef} already has a running record (${priorRunning.runId}) held by assignment ${priorRunning.brief?.assignmentId ?? "?"} — resume refused`);
+        return;
+      }
+      runRecord = priorRunning ?? await startRun(item, { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } });
+      if (priorRunning != null) {
+        log("info", `session ${sessionId}: continuing PAUSED run ${priorRunning.runId} (a needs-input park is the same run resuming, never a second record)`);
+      }
       // The row revives: worker-reported running with the resume code (the one
       // transition the apply seam sanctions out of `failed`). The board flips to
       // "running on <node>" and the Open-terminal affordance re-arms from here.

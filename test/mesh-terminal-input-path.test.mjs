@@ -489,6 +489,58 @@ export const meshTerminalInputPathTests = [
     }),
   },
   {
+    name: "terminal-resume/worker: a resume that PARKED needs-input resumes AGAIN as the SAME run — the paused record continues (same runId), never a second record into the duplicate-run wall",
+    run: async () => withMeshWorkerExecFixture(async (fx) => {
+      const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
+      const assignmentId = "asg-repark-1";
+      const worktreePath = meshWorktreePath(fx.root, assignmentId);
+      await mkdir(worktreePath, { recursive: true });
+
+      const { spawn, spawnCalls } = createFakePtySpawn({});
+      const recorder = createStatusRecorder();
+      const logs = [];
+      let completionResolve = null;
+      const resumeHandler = createMeshWorkerTerminalResumeHandler({
+        loadWs: () => Promise.resolve(ws),
+        globalWorkStoreOptions: { env: fx.env },
+        nodeId: NODE_ID,
+        now: () => NOW,
+        onLog: (entry) => logs.push(entry),
+        onOutputChunk: () => {},
+        onSessionEnd: () => {},
+        sendAssignmentStatus: recorder.sendAssignmentStatus,
+        ptySpawn: spawn,
+        which: createFakeWhich(["claude"]),
+        commandDelayMs: 0,
+        livenessIntervalMs: 0,
+        watchTranscriptSessionId: async () => "sess-fork-a",
+        watchTranscriptCompletion: () => new Promise((resolve) => { completionResolve = resolve; }),
+      });
+
+      // First resume → parks needs-input: the record stays RUNNING (the run paused).
+      const first = resumeHandler({ sessionId: "sess-old-a", assignmentId, workspaceId: fx.workspaceId, itemRef: fx.itemRef });
+      await waitFor(() => completionResolve != null && recorder.frames.length >= 1);
+      const mintedRunId = recorder.frames[0].runId;
+      completionResolve({ outcome: "needs-input" });
+      await first;
+      assert.ok(recorder.frames.some((f) => f.state === "running" && f.code === "needs-input"), "the park reported needs-input");
+      const item = await findWork(fx.workDir, fx.itemRef).then((m) => m.find((r) => r.ref === fx.itemRef));
+      assert.equal((await readRuns(item)).find((r) => r.runId === mintedRunId)?.state, "running", "the parked run record stays running — the run paused, it did not end");
+
+      // Second resume → CONTINUES the same run: same runId, no duplicate-run wall.
+      completionResolve = null;
+      const second = resumeHandler({ sessionId: "sess-old-a", assignmentId, workspaceId: fx.workspaceId, itemRef: fx.itemRef });
+      await waitFor(() => spawnCalls.length === 2 && completionResolve != null);
+      assert.ok(logs.some((l) => /continuing PAUSED run/.test(l.message)), "the continuation is logged as the same run resuming");
+      const revival = recorder.frames.filter((f) => f.code === "resumed").at(-1);
+      assert.equal(revival.runId, mintedRunId, "the revival frame carries the SAME runId — one run, paused and resumed");
+      completionResolve({ outcome: "done" });
+      await second;
+      assert.equal((await readRuns(item)).find((r) => r.runId === mintedRunId)?.state, "done", "completion settles the ONE record");
+      assert.equal((await readRuns(item)).filter((r) => r.brief?.assignmentId === assignmentId).length, 1, "one assignment, one run record — never a duplicate");
+    }),
+  },
+  {
     name: "terminal-resume/apply-seam: `running` + code `resumed` from the HOLDER revives a FAILED row — and ONLY that (no code stays refused; withdrawn stays terminal)",
     async run() {
       const home = await mkdtemp(path.join(os.tmpdir(), "aof-resume-revival-"));
