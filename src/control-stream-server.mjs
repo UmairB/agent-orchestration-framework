@@ -1027,6 +1027,26 @@ export async function startControlStreamServer({
     // connection.
     directiveTargets.set(nodeId, ws);
 
+    // HALF-OPEN DETECTION, server side (2026-07-27 — the same measured zombie
+    // class as the worker transport's keepalive): a worker whose peer vanished
+    // silently stays in directiveTargets, and every dispatch to it "succeeds"
+    // into the void with no refusal and no trace. Ping every 30s; a missed pong
+    // terminates the socket, which fires the close handler below — the target is
+    // cleared and future dispatches refuse LOUDLY (assignment-target-not-connected)
+    // until the worker's own reconnect re-admits it.
+    let pongSeen = true;
+    ws.on("pong", () => { pongSeen = true; });
+    const keepaliveTimer = setInterval(() => {
+      if (ws.readyState !== ws.OPEN) return;
+      if (!pongSeen) {
+        try { ws.terminate(); } catch (error) { reportDegrade("control-stream-server", error); }
+        return;
+      }
+      pongSeen = false;
+      try { ws.ping(); } catch (error) { reportDegrade("control-stream-server", error); }
+    }, 30_000);
+    keepaliveTimer.unref?.();
+
     ws.on("message", (data) => {
       let frame = null;
       try {
@@ -1099,10 +1119,12 @@ export async function startControlStreamServer({
     });
 
     ws.on("close", () => {
+      clearInterval(keepaliveTimer);
       registry.markDisconnected(nodeId);
       directiveTargets.deleteIfCurrent(nodeId, ws);
     });
     ws.on("error", () => {
+      clearInterval(keepaliveTimer);
       registry.markDisconnected(nodeId);
       directiveTargets.deleteIfCurrent(nodeId, ws);
     });

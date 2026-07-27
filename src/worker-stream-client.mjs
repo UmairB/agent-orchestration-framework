@@ -823,10 +823,18 @@ export function createWorkerStreamClient({
       ticker.stop(reconnectHandle);
       reconnectHandle = null;
       // The reconnect attempt itself: connect now, so a subsequent send finds the
-      // transport already up. A fault here is caught by ensureConnected/markDropped
-      // and simply re-schedules on the NEXT explicit notifyDrop() (production calls
-      // notifyDrop again from the transport's error/close handler).
-      ensureConnected().catch((error) => { reportDegrade("worker-stream-client", error); });
+      // transport already up. A FAILED attempt RE-ARMS the loop itself (2026-07-27,
+      // measured three times in one day: ensureConnected returns false — it never
+      // throws — and a failed CONNECT opens no socket, so the transport's onDrop
+      // can never fire again; the old "re-schedules on the NEXT notifyDrop" was a
+      // dead loop, and a worker that lost the race with a control restart stayed
+      // stream-dead FOREVER while fabric liveness said the machine was fine).
+      ensureConnected().then((ok) => {
+        if (!ok) notifyDrop();
+      }).catch((error) => {
+        reportDegrade("worker-stream-client", error);
+        notifyDrop();
+      });
     });
     return { scheduledDelaySeconds: delaySeconds };
   }
@@ -892,10 +900,34 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
       return new Promise((resolve, reject) => {
         const ws = new WebSocket(url);
         let settled = false;
+        // HALF-OPEN DETECTION (2026-07-27, measured three stream deaths in one
+        // day): a TCP connection that silently loses its peer keeps ACCEPTING
+        // writes locally — the worker believed it was connected while the control
+        // heard nothing for 30+ minutes, input/status frames vanished into the
+        // void, and NOTHING ever fired close/error to trigger a reconnect. A
+        // ws-level ping every 15s with a 45s pong deadline turns a zombie into a
+        // hard close (terminate()), which the close handler below bridges to
+        // onDrop -> the client's backoff reconnect.
+        let lastPong = 0;
+        let keepaliveTimer = null;
+        const armKeepalive = () => {
+          lastPong = Date.now();
+          keepaliveTimer = setInterval(() => {
+            if (ws.readyState !== ws.OPEN) return;
+            if (Date.now() - lastPong > 45_000) {
+              try { ws.terminate(); } catch (error) { reportDegrade("worker-stream-client", error); }
+              return;
+            }
+            try { ws.ping(); } catch (error) { reportDegrade("worker-stream-client", error); }
+          }, 15_000);
+          keepaliveTimer.unref?.();
+        };
+        ws.on("pong", () => { lastPong = Date.now(); });
         ws.on("open", () => {
           if (!settled) {
             settled = true;
             currentSocket = ws;
+            armKeepalive();
             resolve(ws);
           }
         });
@@ -918,6 +950,7 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
           }
         });
         ws.on("close", () => {
+          if (keepaliveTimer != null) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
           if (!settled) return; // a pre-open close is surfaced via the error branch above
           if (currentSocket === ws) {
             currentSocket = null;
