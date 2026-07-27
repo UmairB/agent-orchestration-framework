@@ -950,6 +950,12 @@ export async function startControlStreamServer({
   // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs wires
   // the daemon's own warning channel.
   onFrameSkipped = () => {},
+  // onAssignmentFailure(frame, { nodeId }) — 2026-07-27 (the wrong-base retries):
+  // the non-destructive peek at a worker's FAILED status frame, so its code
+  // reaches the control's durable log instead of dying on the worker's stderr.
+  // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs
+  // wires the daemon's warning channel.
+  onAssignmentFailure = () => {},
 } = {}) {
   const registry = createStreamRegistry();
   const directiveTargets = createDirectiveTargetRegistry();
@@ -1033,6 +1039,18 @@ export async function startControlStreamServer({
           // never-crash: a terminal-bridge sink fault is swallowed, the connection lives on.
       reportDegrade("control-stream-server", error); }
         return;
+      }
+      // 2026-07-27 (the wrong-base retries) — a worker's FAILED status frame
+      // carries its code, and the control used to apply the state and throw the
+      // code away: a deterministic 2-second failure took an SSH inspection to
+      // name. A non-destructive PEEK to the injected sink (the frame still
+      // store-applies below, unchanged); a sink fault never crashes the loop.
+      if (frame?.kind === "assignment-status" && frame?.state === "failed") {
+        try {
+          onAssignmentFailure(frame, { nodeId });
+        } catch (error) {
+          reportDegrade("control-stream-server", error);
+        }
       }
       const receivedAt = now();
       registry.markHeartbeat(nodeId, receivedAt);

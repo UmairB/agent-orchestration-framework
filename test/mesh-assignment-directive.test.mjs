@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
-import { assembleAssignmentRecord, insertAssignment } from "../src/assignment-record.mjs";
+import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } from "../src/assignment-record.mjs";
 import { runControlDispatchReclaimTick } from "../src/mesh-assignment-reclaim.mjs";
 import { buildDirectiveFrame, applyAssignmentStatusFrame } from "../src/control-stream-server.mjs";
 import { applyRecoveryPushResultFrame, buildRecoveryPushResultFrame } from "../src/mesh-recovery-push.mjs";
@@ -217,6 +217,47 @@ export const meshAssignmentDirectiveTests = [
       assert.equal(byId.get("asg-cont")?.command, "/aof:continue 18");
       assert.equal(byId.get("asg-refine")?.baseBranch, undefined, "a refine branches fresh — no baseBranch");
       assert.equal(byId.get("asg-cont-nobranch")?.baseBranch, undefined, "a continue with no recorded branch carries none (first-ever run falls back to fresh)");
+    }),
+  },
+  {
+    // 2026-07-27 (the duplicate-run wall): a withdrawal was a control-side row flip
+    // the holder never learned about — its run record stayed `running` and the
+    // duplicate-run guard refused every future run for the item. The tick now
+    // notifies the target node once per launcher lifetime; feature-gated on the
+    // caller passing the Set (an absent Set = byte-identical legacy behaviour).
+    name: "dispatch: a WITHDRAWN row is notified to its holder exactly once (kind:withdraw, carrying runId); no Set passed → no withdraw frames at all",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-w1", itemRef: "18", targetNodeId: "worker-a" });
+      updateAssignmentState(store, "asg-w1", "running", { now: "2026-07-27T10:00:00.000Z" });
+      updateAssignmentState(store, "asg-w1", "withdrawn", { now: "2026-07-27T10:01:00.000Z" });
+
+      const notified = new Set();
+      const tickOptions = {
+        workspaceId: "ws-1", now: "2026-07-27T10:02:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+        withdrawNotifiedIds: notified,
+      };
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, tickOptions);
+
+      const withdraws = streamServer.dispatched.filter((f) => f.kind === "withdraw");
+      assert.equal(withdraws.length, 1, "the withdrawn row's holder is notified");
+      assert.equal(withdraws[0].assignmentId, "asg-w1");
+      assert.equal(withdraws[0].to, "worker-a");
+      assert.equal(withdraws[0].itemRef, "18");
+      assert.ok(notified.has("asg-w1"), "the once-guard records the notify");
+
+      // Second tick: the once-guard holds — no re-send.
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, tickOptions);
+      assert.equal(streamServer.dispatched.filter((f) => f.kind === "withdraw").length, 1, "notified exactly once per launcher lifetime");
+
+      // No Set passed (a legacy caller / every pre-existing test): zero withdraw frames.
+      const legacyServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, legacyServer, {
+        workspaceId: "ws-1", now: "2026-07-27T10:03:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+      });
+      assert.equal(legacyServer.dispatched.filter((f) => f.kind === "withdraw").length, 0, "feature-gated: an absent Set sends nothing");
     }),
   },
   {

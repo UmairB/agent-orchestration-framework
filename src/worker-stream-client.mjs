@@ -78,6 +78,13 @@ export const WORKTREE_CONTENT_FRAME_KIND = "worktree-content";
 // home for the literal, like every other kind.
 export const LOG_ENTRIES_FRAME_KIND = "log-entries";
 
+// The withdraw DOWN-frame kind (2026-07-27, the duplicate-run wall): the control's
+// dispatch tick notifies an assignment's holder that the operator withdrew it, so
+// the worker can kill the live session and settle its run record — a withdrawal
+// used to be a control-side row flip the worker never learned about. One home for
+// the literal; the frame carries { assignmentId, itemRef, workspaceId, runId }.
+export const WITHDRAW_KIND = "withdraw";
+
 export function buildLogEntriesFrame(nodeId, entries, now) {
   return { kind: LOG_ENTRIES_FRAME_KIND, nodeId, entries: Array.isArray(entries) ? [...entries] : [], at: now };
 }
@@ -242,6 +249,8 @@ export function createWorkerStreamClient({
   // handler, a clean additive sibling to directiveHandler above. Registered via
   // onRecoveryPush(handler); invoked with the PARSED recovery-push DOWN-frame (below).
   let recoveryPushHandler = null;
+  // 2026-07-27 (the duplicate-run wall) — the withdraw DOWN-frame's one handler.
+  let withdrawHandler = null;
   // milestone 38 / ADR-009 — pending clone-credential-request correlation, keyed by
   // assignmentId (per-clone, per-assignment: at most ONE clone-miss is ever in flight
   // for a given assignment). A bounded wait backstops a request that is refused,
@@ -337,6 +346,18 @@ export function createWorkerStreamClient({
     }
     if (frame?.kind === "directive") {
       directiveHandler?.(frame);
+      return;
+    }
+    // 2026-07-27 (the duplicate-run wall) — a control-side WITHDRAWAL was a pure
+    // row flip the worker never learned about: its session kept running and its
+    // run record stayed `running` forever, walling every future run for the item
+    // behind the duplicate-run guard. The control's dispatch tick now notifies the
+    // holder; this dispatches the frame to the registered withdraw handler
+    // (mesh-worker-execution.mjs's createMeshWorkerWithdrawHandler), which kills
+    // any live session and settles the run record as cancelled. Unregistered →
+    // dropped, exactly like a directive with no directiveHandler.
+    if (frame?.kind === WITHDRAW_KIND) {
+      withdrawHandler?.(frame);
       return;
     }
     // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push DOWN-frame:
@@ -745,6 +766,13 @@ export function createWorkerStreamClient({
     directiveHandler = typeof handler === "function" ? handler : null;
   }
 
+  // onWithdraw(handler) — 2026-07-27 (the duplicate-run wall): registers the ONE
+  // handler invoked with a PARSED withdraw DOWN-frame, mirroring onDirective /
+  // onRecoveryPush exactly. Additive — unregistered drops withdraw frames.
+  function onWithdraw(handler) {
+    withdrawHandler = typeof handler === "function" ? handler : null;
+  }
+
   // notifyDrop() — an explicit signal the connection dropped (production wires this
   // from the transport's own onDrop/close event); schedules a backoff reconnect over
   // the injected ticker. The reconnect itself does not resend a frame on its own — a
@@ -793,6 +821,7 @@ export function createWorkerStreamClient({
     requestWriteCredential,
     onDirective,
     onRecoveryPush,
+    onWithdraw,
     notifyDrop,
     stop,
     get connected() { return connected; },

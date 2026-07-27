@@ -274,6 +274,45 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       }
     }
 
+    // 2026-07-27 (the duplicate-run wall) — WITHDRAW NOTIFY. A withdrawal used to
+    // be a control-side row flip the holder never learned about: its session kept
+    // running and its run record stayed `running`, walling every future run for
+    // the item behind the duplicate-run guard. Each withdrawn row is now notified
+    // to its target node exactly once per launcher lifetime (the caller-held
+    // `withdrawNotifiedIds` Set, the dispatchedIds discipline); the worker's
+    // handler is idempotent, so a post-restart re-notify of an old row is a
+    // logged no-op there, never a second effect. Feature-gated on the caller
+    // passing the Set — every existing caller/test that doesn't is byte-identical.
+    const withdrawNotifiedIds = options.withdrawNotifiedIds;
+    if (withdrawNotifiedIds != null) {
+      for (const row of rows) {
+        if (row.state !== "withdrawn") continue;
+        if (withdrawNotifiedIds.has(row.assignmentId)) continue;
+        if (streamServer?.directiveTargets?.get?.(row.targetNodeId) == null) continue; // retried once the worker connects
+        const result = streamServer.dispatchDirective({
+          kind: "withdraw",
+          to: row.targetNodeId,
+          assignmentId: row.assignmentId,
+          itemRef: row.itemRef,
+          workspaceId: row.workspaceId,
+          runId: row.runId ?? null,
+          at: now,
+        });
+        if (result?.sent) {
+          withdrawNotifiedIds.add(row.assignmentId);
+          try {
+            options.onDispatchLog?.({
+              code: "mesh-withdraw-notify",
+              level: "info",
+              message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: withdraw notified (run ${row.runId ?? "none"})`,
+            });
+          } catch (error) {
+            reportDegrade("mesh-assignment-reclaim", error);
+          }
+        }
+      }
+    }
+
     return await reclaimStaleAssignments(store, ws, workspaceId, { now });
   } finally {
     store.close?.();

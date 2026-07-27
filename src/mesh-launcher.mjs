@@ -42,7 +42,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -826,6 +826,14 @@ export async function startLauncher(ws, options = {}) {
           path: null,
         }, options);
       },
+      // 2026-07-27 (the wrong-base retries) — a worker's FAILED frame lands in the
+      // control's durable log WITH its code, so a 2-second deterministic failure
+      // names itself in one `aof mesh logs` read instead of an SSH inspection.
+      onAssignmentFailure: (frame, { nodeId: fromNode } = {}) => emitWarning(launcherWarnings, {
+        code: `assignment-failed:${frame?.code ?? "no-code"}`,
+        message: `worker ${fromNode ?? "?"}: assignment ${frame?.assignmentId ?? "?"} failed${frame?.code ? ` (${frame.code})` : " (the frame carried NO code)"}${frame?.runId ? ` — run ${frame.runId}` : ""}`,
+        path: null,
+      }, options),
       ...(options?.controlStreamServerOptions ?? {}),
     });
 
@@ -1031,6 +1039,24 @@ export async function startLauncher(ws, options = {}) {
         ...(options?.workerExecutionOptions ?? {}),
       });
       client.onRecoveryPush(recoveryHandler);
+
+      // 2026-07-27 (the duplicate-run wall) — the control-driven WITHDRAW handler,
+      // registered on the SAME client beside onDirective/onRecoveryPush: kill any
+      // live session for a withdrawn assignment and settle its run record as
+      // cancelled, so the duplicate-run guard never walls the item's future runs
+      // behind a ghost `running` record. Same literal-key discipline; the log
+      // channel is the SAME emitWarning wiring the execution handler's onLog uses.
+      const withdrawHandler = createMeshWorkerWithdrawHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "withdraw-notify", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        now: nowFn,
+      });
+      client.onWithdraw?.((frame) => {
+        Promise.resolve(withdrawHandler(frame)).catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
+      });
     }
 
     if (transport != null) {
@@ -1109,6 +1135,10 @@ export async function startLauncher(ws, options = {}) {
   // tick is caught here (the .catch below) and the next tick simply re-attempts —
   // never a daemon crash.
   const dispatchedAssignmentIds = new Set();
+  // 2026-07-27 (the duplicate-run wall) — the withdraw-notify once-guard, the same
+  // caller-held-Set discipline as dispatchedAssignmentIds (best-effort; the
+  // worker's handler is idempotent, so a post-restart re-notify is a no-op there).
+  const withdrawNotifiedAssignmentIds = new Set();
   let controlTickHandle = null;
   let controlDispatchReclaimTicker = null;
   // The driver requires a REAL stream-server handle (a genuine directiveTargets
@@ -1137,6 +1167,7 @@ export async function startLauncher(ws, options = {}) {
         storeOptions,
         buildDirectiveFrame,
         dispatchedIds: dispatchedAssignmentIds,
+        withdrawNotifiedIds: withdrawNotifiedAssignmentIds,
         // 2026-07-27 — the dispatch DECISION (command + baseBranch) lands in the
         // durable log channel; level rides the entry (info, not warn).
         onDispatchLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "mesh-dispatch", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),

@@ -120,7 +120,7 @@ import { findWork, loadWorkspace } from "./work.mjs";
 // resolves EXACTLY the directory a real interactive `claude` session (cwd =
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
-import { startRun, completeRun } from "./run-store.mjs";
+import { startRun, completeRun, readRuns } from "./run-store.mjs";
 import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
@@ -1412,6 +1412,24 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     return { outcome: "failed", failureReason: "agent_error", sessionId: null };
   }
 
+  // 2026-07-27 (withdraw notify) — hand the caller a kill for THIS live PTY the
+  // moment it exists, so a control-side withdrawal can end the run instead of
+  // leaving it grinding with a run record stuck `running`. The kill routes through
+  // the SAME term.kill() every settle path uses; the caller's registry (not this
+  // driver) decides when it may be called. Optional and guarded — every caller
+  // that never passes it is byte-identical.
+  try {
+    options.onPtyLive?.(() => {
+      try {
+        term.kill();
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
+    });
+  } catch (error) {
+    reportDegrade("mesh-worker-execution", error);
+  }
+
   // ADR-013 AMENDMENT — the transcript-dir watch is kicked off ALONGSIDE the spawned
   // session (never awaited here: the watch and the driven session run concurrently).
   // `watchController` lets `finish` below stop the watch the moment THIS invocation's
@@ -1718,6 +1736,22 @@ function logAssignmentFailure(assignmentId, code, detail) {
   console.error(`[mesh-worker] assignment ${assignmentId} failed (${code}): ${detail}`);
 }
 
+// ── control-driven WITHDRAWAL (2026-07-27, the duplicate-run wall) ────────────
+//
+// Measured live: `aof mesh assign 18 --withdraw` flipped the control-side row and
+// NOTHING ELSE — the worker's session kept running and its run record stayed
+// `running`, so the run store's duplicate-run guard refused every future run for
+// the item, deterministically, until an operator settled the record by hand. The
+// control's dispatch tick now sends a withdraw DOWN-frame to the holder; these two
+// module-scoped structures are how the frame reaches the live run:
+//   - livePtyKills: assignmentId → a kill for the CURRENTLY live PTY (registered
+//     by the execution bracket around its spawn, removed when the spawn settles);
+//   - withdrawnByControl: assignmentIds whose withdrawal arrived — consumed by the
+//     bracket (before spawn: never spawn; after settle: settle the run record as
+//     cancelled and send no frame — the row is already terminal).
+const livePtyKills = new Map();
+const withdrawnByControl = new Set();
+
 // createMeshWorkerExecutionHandler(options) → handler(directive) — the function
 // `client.onDirective(handler)` registers (worker-stream-client.mjs). Every
 // collaborator is INJECTED (the transport/ticker injection idiom):
@@ -1955,6 +1989,21 @@ export function createMeshWorkerExecutionHandler(options = {}) {
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
+  // reportAssignmentFailure — 2026-07-27 (the wrong-base retries): every coded
+  // failure in this handler used to reach ONLY the daemon's stderr
+  // (logAssignmentFailure's console.error — unreadable on a supervised daemon,
+  // gone with a closed terminal), so a deterministic 2-second failure took an SSH
+  // inspection to name. The SAME line now also rides the launcher's log channel
+  // (durable sink + the stream forward into the control's node_logs ring).
+  const reportAssignmentFailure = (assignmentId, code, detail) => {
+    logAssignmentFailure(assignmentId, code, detail);
+    try {
+      options.onLog?.({ code, level: "warn", message: `assignment ${assignmentId} failed (${code}): ${detail}` });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+
   // milestone 35 / ADR-008 — the AUTHORITATIVE dispatch-once guard. The launcher's
   // in-memory "already dispatched" Set (mesh-launcher.mjs) is best-effort ONLY
   // (rebuilt empty on a control-node restart); THIS Set is what the system rests
@@ -1986,8 +2035,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     try {
       ws = await loadWs();
     } catch (error) {
-      logAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
-      await sendAssignmentStatus?.(assignmentId, "failed", {});
+      reportAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
+      await sendAssignmentStatus?.(assignmentId, "failed", { code: "workspace-load-failed" });
       return;
     }
 
@@ -2027,7 +2076,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         try {
           pulledCloneUrl = await requestCloneUrl({ assignmentId, workspaceId });
         } catch (error) {
-          logAssignmentFailure(assignmentId, error?.code ?? "clone-url-request-failed", `clone-url PULL to control failed, falling through to local registry: ${String(error?.message ?? error)}`);
+          reportAssignmentFailure(assignmentId, error?.code ?? "clone-url-request-failed", `clone-url PULL to control failed, falling through to local registry: ${String(error?.message ?? error)}`);
         }
       }
       resolvedCloneUrl = resolveCloneUrl(ws)
@@ -2053,7 +2102,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           hasRepo = await workerHasRepo(ws, workspaceId, nodeId, { openStore, globalWorkStoreOptions });
         } catch (error) {
           const code = error?.code ?? "assignment-repo-unavailable";
-          logAssignmentFailure(assignmentId, code, String(error?.message ?? error));
+          reportAssignmentFailure(assignmentId, code, String(error?.message ?? error));
           await sendAssignmentStatus?.(assignmentId, "failed", { code });
           return;
         }
@@ -2061,7 +2110,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     }
 
     if (!hasRepo) {
-      logAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
+      reportAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
       await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-repo-unavailable" });
       return;
     }
@@ -2090,7 +2139,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       try {
         ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });
       } catch (error) {
-        logAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
+        reportAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
         await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
         return;
       }
@@ -2158,8 +2207,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         // A structural miss (an unresolvable/traversal ref) is a `failed` terminal —
         // task 03's retain-on-failed rule applies here too: the worktree stays for
         // inspection (never removed), the same as every other failed outcome below.
-        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", {});
+        reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
+        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
@@ -2175,8 +2224,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // applied to the primary tree, never a second path-construction strategy.
       item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
       if (item == null) {
-        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", {});
+        reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
+        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
@@ -2187,6 +2236,19 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // running — the worktree is materialized, the run is minted; the assignment's
       // runId is this run's id (the ADR-004 link the frame carries).
       await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId });
+
+      // 2026-07-27 (withdraw notify) — a withdrawal that arrived BEFORE the spawn:
+      // never spawn a session for a run the operator already withdrew; settle the
+      // just-minted record as cancelled and retain the worktree.
+      if (withdrawnByControl.delete(assignmentId)) {
+        try {
+          await completeRun(item, { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() });
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+        onCleanup(assignmentId, "failed", worktreePath);
+        return;
+      }
 
       // Drive the ref to a terminal state via the driver (the INJECTED spawn seam) —
       // milestone 38 / story 05, ADR-013: the directive's WHOLE command string
@@ -2207,6 +2269,14 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           onOutputChunk,
           watchTranscriptSessionId,
           watchTranscriptCompletion,
+          // 2026-07-27 (withdraw notify) — the driver hands back a kill for its
+          // live PTY the moment it spawns; the withdraw handler uses it to end a
+          // withdrawn run instead of leaving it grinding. Registered here (the one
+          // place assignmentId is in scope) and removed the moment the spawn
+          // settles below.
+          onPtyLive: (kill) => {
+            livePtyKills.set(assignmentId, kill);
+          },
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
           // 2026-07-23, structural invariant 7) — REPORT THE JOIN KEY WHILE THE RUN
           // IS LIVE. The driver calls this the instant its transcript watch resolves
@@ -2228,6 +2298,22 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // marker). A run whose transcript never appears (or whose watch was aborted
       // before one did) degrades to null here, never a crash.
       const sessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
+
+      // 2026-07-27 (withdraw notify) — the spawn settled: its kill is dead weight.
+      livePtyKills.delete(assignmentId);
+      // A withdrawal that arrived DURING the run (the handler killed the PTY):
+      // settle the record as cancelled — never `failed` — and send NO status frame
+      // (the row is already terminal; the control's terminal-guard would refuse
+      // it). The worktree takes the retain branch, same as failed.
+      if (withdrawnByControl.delete(assignmentId)) {
+        try {
+          await completeRun(item, { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() });
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+        onCleanup(assignmentId, "failed", worktreePath);
+        return;
+      }
 
       // task 02 (ADR-013 invariant 4) — a `needs-input` outcome branches out BEFORE
       // completeRun is ever called: run-store's OWN closed transition table (19/
@@ -2305,7 +2391,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           onCleanup(assignmentId, "done", worktreePath);
         } catch (pushError) {
           const code = pushError?.code ?? "push-failed";
-          logAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
+          reportAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
           await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
           onCleanup(assignmentId, "failed", worktreePath);
         }
@@ -2321,9 +2407,82 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // worker-stream-client.mjs:133, so a rethrow here would surface only as an
       // unhandled rejection, never a caught fault — swallow it after the coded
       // status is streamed).
-      await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId });
+      livePtyKills.delete(assignmentId); // never leak a kill past its bracket
+      await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId, code: error?.code ?? "assignment-execution-failed" });
       const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
-      logAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
+      reportAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
+    }
+  };
+}
+
+// createMeshWorkerWithdrawHandler(options) → handler(frame) — the function
+// `client.onWithdraw(handler)` registers (worker-stream-client.mjs). 2026-07-27,
+// the duplicate-run wall: a control-side withdrawal must reach the HOLDER — kill
+// any live session for the assignment and settle its run record as `cancelled`
+// (running>cancelled is a legal transition), so the run store's duplicate-run
+// guard never walls the item's future runs behind a ghost. Two cases:
+//   - a LIVE session on this daemon: mark withdrawnByControl + kill the PTY; the
+//     execution bracket (which owns the run record) consumes the mark and settles
+//     cancelled itself — one owner per record, no race.
+//   - NO live session (a parked pre-restart run, or the record simply left
+//     behind): settle the record directly, resolving the workspace through the
+//     SAME launch-or-scoped-checkout repoint the execution handler uses.
+// Idempotent and never-throwing: an unknown assignment, an absent record, or an
+// already-terminal record is a logged no-op.
+export function createMeshWorkerWithdrawHandler(options = {}) {
+  const { loadWs, globalWorkStoreOptions, onLog, now } = options;
+  const resolveNow = () => (typeof now === "function" ? now() : now ?? new Date().toISOString());
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "withdraw-notify", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  return async function handleWithdraw(frame) {
+    const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+    if (assignmentId == null) return;
+    const kill = livePtyKills.get(assignmentId);
+    if (kill != null) {
+      withdrawnByControl.add(assignmentId);
+      try {
+        kill();
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
+      log("info", `assignment ${assignmentId}: live session killed (withdrawn by control); its bracket settles the run record as cancelled`);
+      return;
+    }
+    const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : null;
+    const itemRef = typeof frame?.itemRef === "string" && frame.itemRef.length > 0 ? frame.itemRef : null;
+    const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+    if (runId == null || itemRef == null || workspaceId == null) {
+      log("info", `assignment ${assignmentId}: withdrawn — no run/item on the frame, nothing to settle here`);
+      return;
+    }
+    try {
+      let ws = await loadWs();
+      if (workspaceId !== resolveWorkspaceId(ws)) {
+        ws = await loadWorkspace(meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {}), undefined, { env: globalWorkStoreOptions?.env });
+      }
+      const item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
+      if (item == null) {
+        log("warn", `assignment ${assignmentId}: itemRef "${itemRef}" does not resolve here — run ${runId} not settled`);
+        return;
+      }
+      const run = (await readRuns(item)).find((record) => record.runId === runId) ?? null;
+      if (run == null) {
+        log("info", `assignment ${assignmentId}: run ${runId} has no record on this worker — nothing to settle`);
+        return;
+      }
+      if (run.state !== "running" && run.state !== "queued") {
+        log("info", `assignment ${assignmentId}: run ${runId} is already ${run.state} — nothing to settle`);
+        return;
+      }
+      await completeRun(item, { runId, outcome: "cancelled", now: resolveNow() });
+      log("info", `assignment ${assignmentId}: run ${runId} settled cancelled (withdrawn by control) — the duplicate-run guard is clear`);
+    } catch (error) {
+      log("warn", `assignment ${assignmentId}: settling run ${runId} failed: ${String(error?.message ?? error)}`);
     }
   };
 }
