@@ -33,9 +33,29 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 | **Item 1 — launcher decouple** | ✅ DONE (core) | `ad72943` | `aof.exe` is a payload-first launcher; deploy = file copy + restart; SEA only for bootstrap/release; BUILD_ID stamped + surfaced (`--version`, daemon startup, log sink); `.bak` pruning. **Remote build-id DONE:** the presence record carries `buildId` as its sixth additive key (publisher → wire gate → store → `aof mesh status` node lines show `· build payload <stamp>`) — surviving the liveness merge by construction, F23's fix proving itself on the first new key. **Left (optional):** daemons self-restart when the installed stamp changes — install becomes the whole deploy. |
 | **Item 0 — the umbrella closes** | ✅ DONE (measured; convention recorded) | deletion commit | The four disease forms each have their structural cure + a gate that keeps it cured: **one home per fact** (identity: `workspace-identity.mjs` + gate; presence shape: one authority + F23 merge fix; doc set: shared const), **one door per act** (3 phase doors, one factory, faces are transport, 4 gates), **errors are events** (97-site sweep, silent-catch BAN at the 2-site sanctioned floor, sink + remote ring), **the build is honest** (payload launcher, stamps everywhere incl. remote presence). **Deletion tranche:** dead lease wire-kind surface removed (`LEASE_SIGNAL_KIND`/`leaseRelayEnvelope`/`pushLeaseSignal`); dead guards + duplicate derivations already retired in-wave. **Measured vs the baseline:** standing arch failures 10 → **0** (698 green); silent catches 43 (honest count 97) → **2** sanctioned; identity derivations 17 sites → **1 home**; scar markers 1,670 → 1,563. Lines grew (41.3k → 43.3k) — the overhaul added verification surface, and that is the point. **Recorded decision:** the remaining comment-mass reduction is an ongoing convention (scar comments retire as files are touched, with the gates preventing new debt classes), not a blocking work item — grinding 1,500 historical comments in one pass would churn every file for cosmetic gain. |
 
+## Wave (d) — command spine & effects ledger (the cascade seams)
+
+> Scoped 2026-07-27 from the operator's command-layer review ("side effects not happening is the
+> biggest problem") + two full codebase maps. The settled design is
+> [PRD-command-spine-effects-ledger.md](../../planning/PRD-command-spine-effects-ledger.md); this
+> table is its milestone cut. The disease is m42's own class one level deeper: write seams have one
+> home (waves (a)–(c)'s win), but **cascade seams have none** — "what must happen after X" lives
+> inline at whichever call site needed it first (`completeRun`: 8 sites, exactly 1 does the status
+> rollback; global publish is a per-command import decision; reindex renumbers refs that key six
+> stores and tells none). Rule three: **one ledger per consequence** — effects are declared, not
+> remembered.
+
+| Leg | Status | Commits | What |
+|---|---|---|---|
+| **d1 — command-spine-faces** | 🔴 NOT BUILT | — | One generic CLI face + a route table derived from `listCommands()`, replacing the nine verbatim face copies and the `if`-ladders; per-command flag specs (retiring the six `*_FLAGS` sets + `parseOptions`' boolean allow-list); one error envelope + exit-code policy, `console.log` confined to the face; the ~45 unregistered verbs become Commands (assets/packages/project first — self-contained); the four upward imports into `commands/` inverted and the `mesh-repo` ↔ `mesh-worker-execution` cycle broken; bijection/route-coverage gates re-derived from the registry instead of grepping the ladder. **No behaviour change.** |
+| **d2 — effects-ledger-foundation** | 🔴 NOT BUILT | — | The per-node journal (events + per-reactor steps), `transitionRun` as the ONLY event-raiser, `effects.mjs` (closed vocabulary, locus per reactor), the dispatcher (CLI: sync drain before exit, per-reactor outcomes in the envelope; daemon: converge-tick drain; failures → degrade log, retried, never silent). The run-completion cascade ports end-to-end: all 8 `completeRun` sites become `transition + drain`; `failureReason` carried structurally so resumed failures stay retryable. **Exit drill: kill a worker between transition and settle → the settle lands on the next drain, on the live soak.** |
+| **d3 — bridge-facts-and-outbox** | 🔴 NOT BUILT | — | Facts over the bridge: durable outbox (ack/cursor, at-least-once redelivery) for remote-locus steps; `control-stream-server` apply-handlers reduce to guard + append-into-control's-own-journal, whose tick drains the same effects table; directive responses correlated by id (async RPC with a durable receipt); the apply-seam guards (holder, terminal-never-regresses) move inside the shared transition so ALL writers inherit them. Depends d2. |
+| **d4 — cascade-ports** | 🔴 NOT BUILT | — | The sweep: publish-on-mutate becomes a `local`-locus reactor (every per-command `withGlobalWorkPropagation` import deleted); the two reclaim implementations unify on one transition edge + shared cascade; insert/reindex emits `stream.reindexed` (run-record refs, Notion sidecar, projection remap — the silent page mis-binding dies); the two `writeLock` bypasses (`aof init`, `project migrate`) adopt read-merge; Notion status sync becomes an `integration:notion` reactor deduped by contentHash. Each port deletes its inline copies and lands the writer-isolation gate for its store. Depends d3. |
+| **d5 — fact-projection-split** | 🔴 NOT BUILT | — | Every store declared FACT or PROJECTION; the shared SQLite's derived tables (`work_items`, descriptors) gated from its fact tables (`global_assignments`, directives, branches, recovery pushes) by schema-level classification, not a warning comment; `aof doctor --explain <event>` prints a cascade with loci, `--converge` drains anything pending; the file-store reconciler scan closes the write-vs-append crash window. Depends d4. |
+
 ---
 
-## Status: ALL ROADMAP ITEMS DONE (2026-07-26) · LIVE-SOAK FIXES ON BRANCH (2026-07-27)
+## Status: WAVES (a)–(c) DONE (2026-07-26) · LIVE-SOAK FIXES ON BRANCH (2026-07-27) · WAVE (d) SCOPED, NOT BUILT (2026-07-27)
 
 > 2026-07-27: the first full live-soak day surfaced a family of post-overhaul defects (run
 > truncation, wrong-base dispatch, ghost run records, unlogged decisions, invisible stops). All
@@ -51,8 +71,8 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 | **Per-item branch (the brittleness cure)** | 🔴 NOT BUILT — scoped ~half-day | One derivable branch per item (`aof/mesh/<ref>`), the `global_item_branches` side table demoted to cache, and run-settled DOC changes landing on the default branch — so no code path can ever again "forget" where an item's work lives (the 2026-07-27 wrong-base dispatch class dies structurally, and main-based reads stop lying about refined items). |
 | **Missing tests for the soak-day fixes** | 🔴 OWED | Nine enumerated lanes in [STATE.md](STATE.md) §MISSING TESTS — the withdraw/settle/ghost-record code shipped under fire and is verified live but not pinned. |
 
-Every wave's legs are landed, unit-verified, committed to `main`, synced to both machines and
-staged in the control node's payload. Two items carry recorded scope decisions (`--follow` and the
+Waves (a)–(c)'s legs are landed, unit-verified, committed to `main`, synced to both machines and
+staged in the control node's payload; wave (d) is scoped, designed, and unbuilt. Two items carry recorded scope decisions (`--follow` and the
 self-restart leg → the deferred backlog in [../ROADMAP.md](../ROADMAP.md); the comment-mass
 convention in item 0's row). What remains below is LIVE verification, which requires operator
 restarts and a real dead-run drill — tracked as caveats, not as open work.
@@ -68,9 +88,11 @@ restarts and a real dead-run drill — tracked as caveats, not as open work.
 
 ## Suggested order for what's left
 
-1. Item 7 legs 2–3 (startup reclaim + control staleness) — completes the biggest flakiness source.
-2. F23 presence one-home + F24 descriptor workspaces — the desktop fleet stops lying about idle.
-3. Item 4's identity rebuild (one module, clone-time id, migration, call-site retirement).
-4. Refine/verify doors (the one-door completion).
-5. Item 3's sweep to zero + item 6 console leg + item 1's remote build-id — steady background slices.
-6. Item 0's deletion pass, measured, last.
+1. Merge the soak-day branch + land the nine owed test lanes ([STATE.md](STATE.md) §MISSING TESTS) —
+   pin what shipped under fire before anything moves again.
+2. Per-item branch (the brittleness cure, ~half-day) — kills the wrong-base dispatch class
+   structurally, independent of wave (d).
+3. Wave (d) in leg order d1 → d5: d1 is pure mechanics (safe to interleave with soak operation);
+   d2's live kill-drill is the gate the later legs build on; d3–d5 each leave the soak running.
+4. The interactive-terminal + liveness live drills (the standing caveats) whenever both machines
+   next restart — unchanged by wave (d).

@@ -309,3 +309,29 @@ different machines that an operator has to know. It cost a manual unblock on 202
 
 **The fix.** On startup a worker knows its own `running` records cannot be alive — reclaim them (and
 report the reclaim) before accepting new work.
+
+---
+
+## 8. CRLF jams the bundle drift-guard — `aof work update` was silently dead on Windows
+
+**Status:** open (found 2026-07-27, while propagating the architect codebase-health charter).
+**Severity:** medium — the bundle self-update path, the mechanism that keeps agent charters current,
+did not work on the control node.
+
+**What's wrong.** The bundle renderer writes generated files (`.claude/agents|commands`,
+`.codex/agents|skills`) with LF and records LF-content hashes in `.aof/aof.lock.json`. Those files
+are also git-tracked, and git on Windows checks them out CRLF. On-disk hash ≠ lock hash for **every**
+generated file, so `aof work update` classified all 59 as `drift-warning: was modified; not
+overwriting` — permanently, with no hand edit anywhere. (Cosmetic sibling: the drift message exists
+twice — `render-plan.mjs` says "use --force to overwrite", `cli.mjs` drops the hint — same fact, two
+homes.)
+
+**How it bites.** Charter updates shipped in the bundle never reach the runtime copies: on 2026-07-27
+the developer, researcher and continue charters were all stale on the control node, and the new
+architect codebase-health duty needed `--force` to land. Silent — update reports success with
+drift-warnings that read as "protecting your edits" when there are none.
+
+**The fix.** One newline rule for generated bundle files: pin them LF in `.gitattributes`
+(`.claude/** text eol=lf`, `.codex/** text eol=lf`, plus `.aof` templates) and renormalize once — or
+have the drift check hash newline-normalized content. Either way, drift must mean *content* drift.
+And one home for the drift message.

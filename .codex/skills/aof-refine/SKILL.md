@@ -5,7 +5,7 @@ description: Refine a work item — break a milestone into independent stories, 
 
 <!-- aof-generated: true; aof-runtime: codex -->
 
-Use this skill when the user asks for `$aof-refine <item ref - NN or slug> [--autonomous] [--solo]`, or asks to run the AOF `aof:refine` procedure in Codex.
+Use this skill when the user asks for `$aof-refine <item ref - NN or slug> [--autonomous]`, or asks to run the AOF `aof:refine` procedure in Codex.
 
 Where this procedure mentions `$ARGUMENTS`, use the text the user supplied after the skill name.
 Where it mentions Claude slash command `/aof:refine`, treat that as this Codex skill invocation.

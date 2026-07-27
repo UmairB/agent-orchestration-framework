@@ -4,7 +4,7 @@ number: 42
 slug: structural-overhaul
 title: "Structural overhaul — one home, one door, no silence"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-27
 ---
 <!--
   Milestone SPEC.md — the record doc. Answers ONE question: why + scope of this milestone.
@@ -43,6 +43,12 @@ An outsider can verify the milestone was met without reading any diff:
 - **One door per act.** Continue / refine / verify / run each have exactly one issuance path with
   the routing decision inside it; board, fleet, and CLI are transports over that door
   (`work:continue` is the proven pattern) (item 0).
+- **One ledger per consequence.** Every fact mutation flows through its store's one transition,
+  which appends a domain event to a durable per-node journal; consequences live in one executable
+  effects table, locus-routed, drained locally or durably enqueued over the bridge — a crashed
+  process leaves *pending* events, never lost cascades. Verified by killing a worker between a
+  run's transition and its assignment settle on the live soak (wave (d); design:
+  [PRD-command-spine-effects-ledger](../../planning/PRD-command-spine-effects-ledger.md)).
 - **The build is honest.** A running daemon can state which build it is (`aof mesh status`); the
   soak-loop deploy is restart-not-rebuild (JS payload beside the launcher, SEA reserved for release
   artefacts); stale `.bak` binaries are pruned to the last N (item 1).
@@ -70,6 +76,18 @@ In scope:
   worker projection or degrade honestly; worker startup run-reclaim.
 - **Wave (c) — the honest build** (item 1): launcher/payload decoupling for the dev/soak loop,
   build id stamped and visible at runtime, `.bak` pruning; SEA kept only as the release artefact.
+- **Wave (d) — command spine & effects ledger** (item 0 one level deeper; added 2026-07-27, design:
+  [PRD-command-spine-effects-ledger](../../planning/PRD-command-spine-effects-ledger.md)): one
+  generic CLI face over the registry (all ~84 verbs registered; the nine face copies, six flag
+  vocabularies and 41 hand-decided exit-code sites collapse); mutations emit durable domain events
+  from one transition seam; one effects table maps each event to its reactors, each tagged with the
+  locus of the store it mutates (`checkout` / `control-store` / `local` / `integration:<name>`),
+  drained synchronously by the CLI, on the converge tick by daemons, and durably enqueued over the
+  bridge for remote loci; the mesh carries facts, directives and read-only queries — never remote
+  effect execution; the known cascades port onto the ledger (run completion's 8 divergent sites,
+  publish-on-mutate, the two reclaim halves, insert/reindex, the lock read-merge bypasses); Notion
+  becomes a reactor; every store is declared FACT or PROJECTION with `aof doctor
+  --explain/--converge` to read and replay the ledger.
 - **The deletion pass** (item 0): retire scar comments, dead fallbacks, and duplicate derivations
   made obsolete by the waves above — measured before/after.
 - **Regression cover for every rewrite**: each rewritten seam lands with the fitness function that
@@ -111,3 +129,7 @@ independently landable rewrites; every story leaves the two-machine soak running
 - **`test/arch/acd-*` fitness convention** — the enforcement mechanism for the new invariants
   (no-empty-catch, one identity home, CLI↔bundle parity); requires wave (a)'s zero-failure baseline
   to gate anything.
+- **[PRD-command-spine-effects-ledger.md](../../planning/PRD-command-spine-effects-ledger.md)** —
+  wave (d)'s settled design (2026-07-27, argued to rest in-session): the command spine, transitions
+  as the only event-raisers, the per-node journal + effects table with loci, the three-channel
+  bridge, idempotent reactors; the ROADMAP's legs d1–d5 are its milestone cut.
