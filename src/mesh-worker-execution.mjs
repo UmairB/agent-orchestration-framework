@@ -1136,12 +1136,31 @@ function pendingHumanInputTool(message) {
 // answered and the session is live again. Every other pending stop_reason is "still
 // working" -> null. NEVER throws (an absent or half-written file is simply "nothing
 // settled yet").
-async function readTranscriptTerminalOutcome(file) {
+async function readTranscriptTerminalOutcome(file, sinceOffset = 0) {
   let text;
   try {
     text = await readFile(file, "utf8");
   } catch {
     return null;
+  }
+  // RESUME baseline (m42 terminal-resume, measured 2026-07-27 14:37Z): a resumed
+  // session's transcript already ENDS in a settled outcome — the very state it
+  // parked with — and reading it as the verdict killed the fresh PTY ~12s after
+  // every resume ("resume it again to continue", forever). Records at or before
+  // `sinceOffset` (the file's size at spawn) are PRE-resume history: only what
+  // the resumed process writes AFTER it counts. The slice may start mid-line —
+  // drop the partial first line (its record is pre-baseline anyway).
+  if (sinceOffset > 0) {
+    // Drop a PARTIAL first line only when the baseline cut mid-record (the byte
+    // before the offset is not a newline) — a baseline that ends exactly on a
+    // record boundary must keep the very next line (it is the first POST-resume
+    // record, and dropping it would blind the watch to a fast outcome).
+    const cutMidLine = sinceOffset <= text.length && sinceOffset > 0 && text[sinceOffset - 1] !== "\n";
+    text = text.slice(sinceOffset);
+    if (cutMidLine) {
+      const firstNewline = text.indexOf("\n");
+      text = firstNewline === -1 ? "" : text.slice(firstNewline + 1);
+    }
   }
   const lines = text.split("\n");
   // True once any record LATER than the last assistant record is a `user` record —
@@ -1252,6 +1271,9 @@ export async function defaultWatchTranscriptCompletion({
   idleMs = COMPLETION_IDLE_MS,
   declaredIdleMs = DECLARED_COMPLETION_IDLE_MS,
   now = () => Date.now(),
+  // The resume baseline (see readTranscriptTerminalOutcome): only records
+  // written AFTER this byte offset count as an outcome. 0 = a fresh session.
+  sinceOffset = 0,
   // m42 "interactive worker terminals" — the LIVE-QUESTION report pair, both
   // optional and fire-and-forget. A PENDING human-input outcome (a live
   // AskUserQuestion at a live PTY) used to settle after the short declared window
@@ -1317,7 +1339,7 @@ export async function defaultWatchTranscriptCompletion({
       // transcripts is a session mid-work, not a quiet one (the exact truncation
       // measured live on `/aof:continue 18`, twice).
       const mtimeMs = await latestSessionActivityMtimeMs(projectsDir, sessionId);
-      const outcome = await readTranscriptTerminalOutcome(file);
+      const outcome = await readTranscriptTerminalOutcome(file, sinceOffset);
       // ANY movement anywhere in the tree restarts the quiet stretch — the session is
       // alive (a background agent wrote, a new turn began, a tool ran).
       if (mtimeMs !== lastMtimeMs) {
@@ -1700,14 +1722,27 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     // uses the real watch, tests omit or inject it (no real transcript is ever read).
     const watchTranscriptCompletion = options.watchTranscriptCompletion ?? defaultWatchTranscriptCompletion;
     watchPromise
-      .then((sid) => {
+      .then(async (sid) => {
         if (settled || typeof sid !== "string" || sid.length === 0) return;
+        // RESUME baseline: the transcript already ends in the outcome the session
+        // PARKED with — snapshot its size so the completion watch only settles on
+        // records the resumed process writes from here on (measured 2026-07-27:
+        // without this, the stale sentinel killed every resume ~12s in).
+        let sinceOffset = 0;
+        if (typeof options.resumeSessionId === "string" && options.resumeSessionId.length > 0) {
+          try {
+            sinceOffset = (await stat(path.join(claudeProjectsDir({ cwd: brief.worktreeCwd, env: launch.env ?? process.env }), `${sid}.jsonl`))).size;
+          } catch {
+            sinceOffset = 0; // no pre-existing transcript — a fresh baseline
+          }
+        }
         return Promise.resolve(
           watchTranscriptCompletion({
             cwd: brief.worktreeCwd,
             env: launch.env ?? process.env,
             sessionId: sid,
             signal: watchController.signal,
+            sinceOffset,
             // m42 interactive worker terminals — the live-question report pair,
             // bridged to the caller's ONE seam (`options.onNeedsInputPending`):
             // true = a live question is waiting (report needs-input, session stays

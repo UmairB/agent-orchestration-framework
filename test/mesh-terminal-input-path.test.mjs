@@ -535,6 +535,43 @@ export const meshTerminalInputPathTests = [
     }),
   },
   {
+    name: "terminal-resume/baseline: the completion watch IGNORES the pre-resume transcript tail (the stale parked sentinel killed every resume ~12s in) and settles only on POST-resume records",
+    async run() {
+      const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-resume-baseline-"));
+      try {
+        const cwd = path.join(tmp, "wt");
+        await mkdir(cwd, { recursive: true });
+        const env = { CLAUDE_CONFIG_DIR: path.join(tmp, "claude") };
+        const projectsDir = claudeProjectsDir({ cwd, env });
+        await mkdir(projectsDir, { recursive: true });
+        const sessionId = "sess-stale-tail";
+        const file = path.join(projectsDir, `${sessionId}.jsonl`);
+        // The PRE-resume history: the session parked on the sentinel this morning.
+        await writeFile(file, `${JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn", content: [{ type: "text", text: `blocked.\n${NEEDS_INPUT_SENTINEL}\n` }] } })}\n`, "utf8");
+        const { size: sinceOffset } = await (await import("node:fs/promises")).stat(file);
+
+        let settled = null;
+        const watch = defaultWatchTranscriptCompletion({
+          cwd, env, sessionId,
+          pollMs: 10, declaredIdleMs: 30, idleMs: 60_000,
+          sinceOffset,
+        }).then((result) => { settled = result; return result; });
+
+        // The stale tail must NOT settle the watch — the resumed session is alive.
+        await sleep(150);
+        assert.equal(settled, null, "the pre-resume sentinel is HISTORY, not a verdict — the fresh PTY must not be killed");
+
+        // A POST-resume completion settles normally.
+        await appendFile(file, `${JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn", content: [{ type: "text", text: `carried on and finished.\n${DIRECTIVE_COMPLETE_SENTINEL}\n` }] } })}\n`, "utf8");
+        const result = await watch;
+        assert.equal(result.outcome, "done", "a record written AFTER the resume is the real outcome");
+        assert.equal(result.declared, true);
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    },
+  },
+  {
     name: "terminal-resume/apply-seam: `running` + code `resumed` from the HOLDER revives a FAILED row — and ONLY that (no code stays refused; withdrawn stays terminal)",
     async run() {
       const home = await mkdtemp(path.join(os.tmpdir(), "aof-resume-revival-"));
