@@ -10,7 +10,7 @@
 // happens ONLY when the launcher binary itself must change (--sea; automatic
 // when no exe is installed yet) or when the Rust desktop app changes (--desktop).
 //
-//   node scripts/install-local.mjs [--sea] [--desktop] [--skip-ui] [--dry-run] [--install-dir <dir>]
+//   node scripts/install-local.mjs [--sea] [--desktop] [--wsl [distro]] [--skip-ui] [--dry-run] [--install-dir <dir>]
 //
 //   (default)       payload install: sync src/, node_modules (prod closure),
 //                   bundle/, ui/dist, package.json + write BUILD_ID.json
@@ -18,6 +18,10 @@
 //                   artefact / bootstrap change; implied when the exe is absent)
 //   --desktop       also cargo-build the Tauri desktop app and place
 //                   aof-mesh-desktop.exe (Windows only — the app targets WebView2)
+//   --wsl [distro]  ALSO sync this working tree into the WSL worker node's own clone
+//                   (Windows only; default distro, override with a name). See the
+//                   WSL target block below for why the distro needs a separate tree.
+//   --wsl-dir       the distro-side repo dir (default ~/aof)
 //   --skip-ui       reuse the existing ui/dist (skip the `ui:build` step)
 //   --dry-run       print the plan; build/copy nothing
 //   --install-dir   override the target dir (else AOF_GLOBAL_HOME/bin, else ~/.aof/bin)
@@ -41,11 +45,20 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const KEEP_BAKS = 3;
 
 function parseArgs(argv) {
-  const o = { sea: false, desktop: false, skipUi: false, dryRun: false, installDir: null };
+  const o = { sea: false, desktop: false, wsl: false, wslDistro: null, wslDir: null, skipUi: false, dryRun: false, installDir: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--sea") o.sea = true;
     else if (a === "--desktop") o.desktop = true;
+    else if (a === "--wsl") {
+      o.wsl = true;
+      // An OPTIONAL distro name may follow (`--wsl Ubuntu-22.04`). A following token
+      // that starts with "--" is the NEXT flag, not the distro — so a bare `--wsl`
+      // targets the default distro without swallowing anything.
+      const next = argv[i + 1];
+      if (next != null && !next.startsWith("--")) o.wslDistro = argv[++i];
+    }
+    else if (a === "--wsl-dir") o.wslDir = argv[++i];
     else if (a === "--skip-ui") o.skipUi = true;
     else if (a === "--dry-run") o.dryRun = true;
     else if (a === "--install-dir") o.installDir = argv[++i];
@@ -244,6 +257,53 @@ function installPayload(installDir) {
   return buildId;
 }
 
+// --------------------------------------------------- the WSL worker target ----
+// A WSL2 distro is a FULL mesh node (own kernel, own IP, own filesystem, own aof
+// identity), which makes it the cheapest possible second machine for testing the mesh.
+// It cannot, however, run the Windows payload, and it cannot share this repo's tree:
+//
+//   - node-pty ships prebuilds for darwin-{arm64,x64} and win32-{arm64,x64} ONLY. There
+//     is no linux-x64 prebuild, so the distro must COMPILE it (node-gyp) against its own
+//     Node — this repo's node_modules holds a win32 binary the distro cannot load.
+//   - Node resolves symlinks BEFORE looking for node_modules, so symlinking the distro's
+//     src/ at this repo's src/ would make `import "ws"` resolve from THIS tree's
+//     node_modules (win32) and fail. A copy is what keeps resolution on the native tree.
+//
+// So the distro keeps its OWN clone (npm-linked, `origin` = this repo), and this target
+// pushes the WORKING tree into it — uncommitted work included, which is the whole point
+// of a local test node and the one thing the Mac worker's `git pull` flow cannot do.
+const WSL_DEFAULT_DIR = "~/source/aof";
+
+// The deploy stamp: the sha256 of the package-lock.json that the distro's node_modules
+// was last installed from. A src-only sync is fast and almost always right — but a
+// DEPENDENCY change needs a native reinstall + node-pty rebuild, and silently skipping
+// that leaves a stale native binary that fails at daemon start, far from the cause.
+const WSL_DEPLOY_STAMP = ".aof-wsl-deploy";
+
+// toWslPath("C:\\Source\\umair\\aof") → "/mnt/c/Source/umair/aof". Done HERE rather than
+// by shelling out to `wslpath` because wsl.exe RE-SERIALISES its argument vector into a
+// single command line — a multi-line script (or anything quote-heavy) passed as one argv
+// element does not survive it. So the distro side is a real FILE (scripts/deploy-wsl.sh)
+// invoked with three short, well-behaved arguments.
+function toWslPath(winPath) {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(winPath);
+  if (!m) return winPath.replace(/\\/g, "/");
+  return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, "/")}`;
+}
+
+// Deploy this working tree into the WSL distro. Throws on failure so main()'s catch
+// reports it like any other install fault.
+function deployWsl(o) {
+  const distro = o.wslDistro;
+  const wslDir = o.wslDir ?? WSL_DEFAULT_DIR;
+  const repoWsl = toWslPath(repoRoot);
+  console.log(`\n=== sync the WSL worker node (${distro ?? "default distro"}:${wslDir}) ===`);
+  const args = [];
+  if (distro) args.push("-d", distro);
+  args.push("--", "bash", `${repoWsl}/scripts/deploy-wsl.sh`, repoWsl, wslDir, WSL_DEPLOY_STAMP);
+  execFileSync("wsl.exe", args, { stdio: "inherit" });
+}
+
 function main() {
   const o = parseArgs(process.argv.slice(2));
   const isWin = process.platform === "win32";
@@ -262,10 +322,15 @@ function main() {
   console.log(`  payload            : yes (the default deploy — restart, not rebuild)`);
   console.log(`  SEA launcher exe   : ${buildSea ? (exeInstalled ? "yes (--sea)" : "yes (no exe installed yet)") : "no (unchanged; pass --sea to rebuild)"}`);
   console.log(`  desktop app        : ${o.desktop ? "yes" : "no"}`);
+  console.log(`  WSL worker node    : ${o.wsl ? `yes (${o.wslDistro ?? "default distro"}:${o.wslDir ?? WSL_DEFAULT_DIR})` : "no"}`);
   console.log(`  dry-run            : ${o.dryRun}`);
 
   if (o.desktop && !isWin) {
     console.error("\n--desktop is Windows-only (the app targets WebView2 / aof-mesh-desktop.exe). Omit it on this OS.");
+    process.exit(1);
+  }
+  if (o.wsl && !isWin) {
+    console.error("\n--wsl is Windows-only (it drives wsl.exe against a local distro). Omit it on this OS.");
     process.exit(1);
   }
 
@@ -276,6 +341,7 @@ function main() {
     console.log(`  ${n++}. payload install: sync src/, bundle/, ui/dist, node_modules (prod closure), package.json + BUILD_ID.json into ${installDir}`);
     if (buildSea) console.log(`  ${n++}. node scripts/build-sea.mjs -> dist-sea/, then rename ${exeName} -> ${exeName}.bak.<ts> + place the fresh ${exeName} (+ node-pty-sidecar)`);
     if (o.desktop) console.log(`  ${n++}. cargo build --release + place aof-mesh-desktop.exe`);
+    if (o.wsl) console.log(`  ${n++}. sync src/ + package.json into ${o.wslDistro ?? "the default distro"}:${o.wslDir ?? WSL_DEFAULT_DIR}, reinstalling natively only if package-lock.json changed`);
     console.log(`  ${n}. prune ${exeName}.bak.* / aof-mesh-desktop.exe.bak.* beyond the newest ${KEEP_BAKS}`);
     return;
   }
@@ -312,6 +378,9 @@ function main() {
     if (!existsSync(desktopBuilt)) throw new Error(`desktop build did not produce ${desktopBuilt}`);
     backupThenPlace(desktopBuilt, path.join(installDir, "aof-mesh-desktop.exe"));
   }
+
+  // --- 4b. the WSL worker node (a SEPARATE machine that happens to share this box) ---
+  if (o.wsl) deployWsl(o);
 
   // --- 5. reclaim stale .bak binaries (keep the newest KEEP_BAKS) ---
   console.log(`\n=== prune .bak binaries (keep ${KEEP_BAKS}) ===`);
