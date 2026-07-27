@@ -112,6 +112,115 @@ doc: state
 - The soak stays up throughout; any stage that would require stopping both nodes needs a re-think
   before it needs a schedule.
 
+## 2026-07-27 — the live-soak day (branch `fix/worker-completion-and-milestone-cascade`, UNMERGED)
+
+The first full day of running the overhauled system against milestone 18 on let-shield. Every
+defect below was found LIVE by the operator, root-caused from the durable stores/logs, fixed on the
+branch, and verified (698/0 arch + focused behavioral suites per commit). **Main is untouched at
+`54f6bbf` — the branch is pushed and awaits the operator's review/merge (standing rule: no pushes
+to main without explicit signoff).**
+
+### Governing process rules established (operator, verbatim intent)
+- NO pushing/merging to main without explicit operator signoff. Work lands on feature branches.
+- No test-running ceremony while a live problem is unfixed — diagnose at the source first.
+- The operator drives; SSH to the Mac worker is `umairb@umairs-mac-mini` with key `~/.ssh/aof_mesh`
+  (now pinned in `~/.ssh/config`); read/cleanup over SSH is fine, NEVER daemon starts (no login
+  session → unauthenticated `claude`).
+
+### The commit ledger (in order, each measured-defect-driven)
+| Commit | What / why (measured trigger) |
+|---|---|
+| `1b50d75` | Completion is DECLARED or tree-quiet. The 5-min parent-transcript silence window truncated `/aof:continue 18` at ~15 min for the SECOND day (background developers write `<sessionId>/subagents/*.jsonl`, which the watch never read). Idle clock now spans the whole session tree; `AOF_DIRECTIVE_COMPLETE` sentinel (producer+detector, the NEEDS_INPUT pairing) settles declared completions in 10s; undeclared end_turn out-waits 15 min. |
+| `ba3256f` | A MILESTONE continue = the autonomous cascade. Operator: "continue xy should be a continuation of the entire milestone." `ASSIGNMENT_PHASES` += `autonomous`; the continue door resolves the dispatch target's TYPE (local-then-streamed) and maps milestone→`/aof:autonomous <ref>`; bundle continue.md's milestone branch now DELEGATES to /aof:autonomous (one loop implementation). |
+| `c6a3217` | A worker resolves a descriptorless workspace through its mesh checkout — killed the every-5s `workspace-workdir-unresolvable` spam that filled 259/260 of the remote log ring and destroyed its diagnostic value. |
+| `c2358d7` | Source-mode build stamp carries the git hash (`source c2358d7+dirty`) — a pulled-but-not-restarted worker was invisible (ran 74-min-stale code through a whole test). |
+| `858af5e` | The board list re-fetches while work is in flight — the execution overlay (incl. the sessionId the mirror needs) rides /api/work/list, which loaded exactly once; the operator had to hard-refresh to be OFFERED the terminal. |
+| `8cdf975` | The INVISIBLE STOP: a session parked on an unanswered AskUserQuestion is `tool_use`-pending, so both detectors read "still working" — the assignment showed `running` for 28+ min while waiting on a human. `HUMAN_INPUT_TOOL_NAMES` detection → needs-input, declared. |
+| `e165abe` | `phaseRunsOnItemBranch` — ONE home for "phase runs on the item's existing branch". The dispatch tick hand-spelled `continue\|\|verify`, so the first `autonomous` dispatch carried NO baseBranch → fresh worktree off main → NONE of the refined stories → the session tried to re-refine/re-scope a bare milestone. THE day's worst defect. |
+| `3ce8737` | Dispatch + worktree-base DECISIONS durably logged (tick logs `<command> on <branch>`; worker logs `worktree on EXISTING branch …`); log entries carry their own level. The wrong-base dispatch was diagnosable only by inference because both decisions were unrecorded. |
+| `1b59cee` | (a) WITHDRAW REACHES ITS HOLDER: withdraw DOWN-frame (tick, once-guarded) → worker kills the live PTY (`onPtyLive` registry) + settles the run record `cancelled`; pre-spawn + post-settle guards. (b) Failure codes durable: `reportAssignmentFailure` → sink/ring; codes on the code-less frames; control logs received failed frames WITH code (`onAssignmentFailure` peek). (c) Board dead-tab banner (ephemeral board ports die with every restart; the tab clicked into the void). |
+| `9817f6b` | Startup reclaim settles the stranded run RECORD (`failed/runtime_offline`) — the ghost family's last member, measured within the hour of (a) shipping. Every terminal path now settles its record: withdraw→cancelled, startup→failed/retryable, bracket→done/failed. |
+
+### The incident ledger (what actually happened live)
+1. **The duplicate-run wall** (root cause of "Continue does nothing"): withdrawn run `0015`'s
+   record stayed `running` in the checkout → the run store's duplicate-run guard refused every new
+   `startRun` for item 18 in ~2s, with the failure code visible NOWHERE off the worker's tty.
+   Hand-cleared via the door (`aof work run-complete 18 --outcome failed --reason runtime_offline`
+   over SSH), then fixed structurally (`1b59cee`, `9817f6b`).
+2. **The wrong-base run** (`2977de1d`): dispatched `/aof:autonomous 18` with no baseBranch
+   (`e165abe`'s trigger); the session, seeing a bare milestone, burned 28 min re-refining and asked
+   an AskUserQuestion about re-scoping — invisible on the board (`8cdf975`'s trigger). Withdrawn;
+   its junk local branch + 8 older stale worktrees/branches cleaned on the Mac (only
+   `aof/mesh/18-73ab17b2…` remains, matching origin); its phantom workspace registration
+   (`fe4dc90dc42b04cd`, 61 junk work items published from inside the worktree) pruned via
+   `scripts/prune-projection.mjs --apply`.
+3. **Board dead tabs**: board servers ride EPHEMERAL ports and die with each daemon restart; two
+   rounds of "button does nothing" were stale tabs (old bundle + dead port). Fixed forward
+   (`858af5e` + banner in `1b59cee`); a stale tab from BEFORE the deploy still can't warn (old JS)
+   — one hard reopen from the fleet was required post-deploy.
+
+### Deploy state (as of this entry)
+- Control (umairs-msi): `payload 1b59cee.20260727T122954` running. `9817f6b` is committed/pushed
+  but NOT deployed — it is a restart-time fix; picks up at the next natural install+restart.
+- Mac (umairs-mac-mini): `source 1b59cee+dirty` running (operator pulled + restarted). `9817f6b`
+  pending its next pull + restart.
+- LIVE NOW: run `0017` (assignment `00858ddc`, session `89d1f151`) running `/aof:autonomous 18 on
+  aof/mesh/18-73ab17b2…` — the first run with every fix live on both machines. A session monitor
+  in the driving session watches the assignment row.
+
+### MISSING TESTS (write these before/while merging — today's code shipped under fire)
+- [ ] `createMeshWorkerWithdrawHandler` — all three paths: live-PTY kill (flag consumed by the
+      bracket → record `cancelled`), no-live-session direct settle (the measured case), and
+      idempotence (absent/terminal record = logged no-op). Fixture: temp checkout + item + running
+      run record with `brief.assignmentId`.
+- [ ] `settleStrandedRunRecords` — stranded dir → record settled `failed/runtime_offline`; absent
+      record no-op; one entry's fault never blocks the next.
+- [ ] The execution bracket's withdraw guards — pre-spawn (never spawn a withdrawn run) and
+      post-settle (record → cancelled, NO status frame sent).
+- [ ] Driver `onPtyLive` — registered on spawn, kill routes to `term.kill()`, registry cleared on
+      settle AND on the generic-catch path.
+- [ ] `reportAssignmentFailure` → `onLog` routing (level warn, code preserved) + the codes now on
+      previously code-less failed frames (`workspace-load-failed`, `assignment-ref-unresolved`,
+      `assignment-execution-failed`).
+- [ ] Control's `onAssignmentFailure` peek — a failed frame reaches the sink with its code; a
+      non-failed frame doesn't; a sink fault never crashes the accept loop.
+- [ ] Worker-stream-client `onWithdraw` registration + kind dispatch (mirror the onDirective lane).
+- [ ] `resolveDirectivePhase` STREAMED-row fallback branch (local branch covered in
+      board-mesh-execution.test.mjs; the streamed-type path is not).
+- [ ] Board UI: `serverGone` banner (3 silent failures / TypeError action) and the in-flight list
+      re-poll effect — no React harness exists; decide headless extraction vs a component test.
+- COVERED today (for the fresh session's orientation): completion tree-quiet + declared sentinel +
+  pending-question lanes (mesh-worker-completion-detection), autonomous mapper/phase set + door
+  type resolution + baseBranch-for-every-non-refine-phase + withdraw-notify tick once-guard
+  (mesh-assignment-directive, board-mesh-execution), checkout descriptor fallback
+  (mesh-workspace-workdir-absolute), source git stamp (build-info).
+
+### Residual defects / deferred work (known, not yet built)
+- **THE structural debt (operator: "insanely brittle"; scoped, ~half-day):** work lives on
+  per-assignment branches (`aof/mesh/<ref>-<assignmentId>`) that only the `global_item_branches`
+  side table remembers — every consumer must remember to consult it (today's wrong-base dispatch
+  is what forgetting looks like). Cure: ONE derivable branch per item (`aof/mesh/<ref>`), side
+  table demoted to cache; plus run-settled DOC changes landing on the default branch so main-based
+  reads (local continue, `work next`, validate, the board's local rows) stop lying about refined
+  items.
+- **Terminal INPUT path** (operator's explicit next feature): the dock mirror is read-only; a
+  needs-input session can only be answered by resume-at-the-worker. Design mapped: browser input
+  on the existing `/ws/terminal-view` socket (tuple-bound) → UI pushes a `terminal-input` envelope
+  into the loopback relay → serve process (self-subscribed) → `directiveTargets` → worker
+  `term.write`, with the `acd-fleet-terminal-mirror-read-only` gate deliberately rewritten to pin
+  the constrained shape. Parked mid-exploration when the wrong-base incident hit.
+- needs-input runs have no board affordance yet (the code rides the status frame; nothing renders it).
+- A pre-deploy board tab cannot warn (old bundle) — inherent; only hurts once per UI deploy.
+- `stream-frame-refused` message template misnames non-descriptor refusals (says "no registered
+  descriptor" for `assignment-status-already-terminal`).
+- Transient `ERR_SQLITE_ERROR: database is locked` warnings at daemon start — wants busy_timeout.
+- The Mac's launch workspace (`f693d197…`, its aof clone) streams snapshots the control refuses as
+  `unknown-workspace` every reconnect — harmless noise, but noise.
+- let-shield's INSTALLED bundle still has the old continue.md (`aof work update` there pending);
+  only affects hand-typed `/aof:continue` — the mesh dispatch types `/aof:autonomous` directly.
+- `aof mesh assign` lacks `--workspace` (cwd-derived; the withdraw this morning initially targeted
+  the WRONG workspace silently from the aof cwd).
+
 ## Verification
 
 <!-- Pointers, not restatements. -->

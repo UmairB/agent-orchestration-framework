@@ -35,7 +35,13 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 
 ---
 
-## Status: ALL ROADMAP ITEMS DONE (2026-07-26)
+## Status: ALL ROADMAP ITEMS DONE (2026-07-26) · LIVE-SOAK FIXES ON BRANCH (2026-07-27)
+
+> 2026-07-27: the first full live-soak day surfaced a family of post-overhaul defects (run
+> truncation, wrong-base dispatch, ghost run records, unlogged decisions, invisible stops). All
+> fixed + verified on branch `fix/worker-completion-and-milestone-cascade` (10 commits, pushed,
+> UNMERGED — operator merges). Full ledger, missing tests, and residuals: [STATE.md](STATE.md)
+> §"2026-07-27 — the live-soak day".
 
 Every wave's legs are landed, unit-verified, committed to `main`, synced to both machines and
 staged in the control node's payload. Two items carry recorded scope decisions (`--follow` and the
