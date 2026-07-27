@@ -113,7 +113,7 @@ import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile, readFile, rename, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { findWork, loadWorkspace } from "./work.mjs";
+import { findWork, listItems, loadWorkspace } from "./work.mjs";
 // milestone 38 / story 05 (ADR-013 AMENDMENT, F-38.05) — `claudeProjectsDir` is the
 // EXISTING slug/projects-dir seam (work-observe.mjs, milestone observability): reused
 // VERBATIM (never re-implemented) so the session_id transcript-dir watch below
@@ -2413,6 +2413,53 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       reportAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
     }
   };
+}
+
+// settleStrandedRunRecords(stranded, options) — 2026-07-27, the ghost-record
+// family's LAST member (measured the same day, on the first daemon restart after
+// the withdraw fix shipped): the startup reclaim reported a stranded assignment
+// `failed/daemon-restarted` and left its run record `running` — the duplicate-run
+// guard then walls the item exactly as the withdraw case did. Run-record
+// settlement is part of EVERY terminal path, and this is the startup path's
+// settle: for each stranded worktree, resolve its checkout, find the running run
+// record minted for that assignmentId (the bracket stamps brief.assignmentId),
+// and complete it failed/runtime_offline — the retryable infra classification, the
+// same one the autonomous loop's own reclaim uses for a crashed host. Idempotent
+// (an absent or already-terminal record is a logged no-op) and NEVER throws — a
+// settle fault is reported per entry and the next entry still settles.
+export async function settleStrandedRunRecords(stranded, options = {}) {
+  const { globalWorkStoreOptions, now, onLog } = options;
+  const resolveNow = () => (typeof now === "function" ? now() : now ?? new Date().toISOString());
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "startup-reclaim", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  for (const entry of Array.isArray(stranded) ? stranded : []) {
+    const assignmentId = entry?.assignmentId;
+    if (typeof assignmentId !== "string" || assignmentId.length === 0) continue;
+    try {
+      const checkoutRoot = checkoutRootForWorktree(entry.worktreePath);
+      const ws = await loadWorkspace(checkoutRoot, undefined, { env: globalWorkStoreOptions?.env });
+      const items = await listItems(ws.workDir);
+      let settled = false;
+      for (const item of items) {
+        const ghost = (await readRuns(item)).find(
+          (run) => run.state === "running" && run?.brief?.assignmentId === assignmentId,
+        ) ?? null;
+        if (ghost == null) continue;
+        await completeRun(item, { runId: ghost.runId, outcome: "failed", failureReason: "runtime_offline", now: resolveNow() });
+        log("info", `stranded assignment ${assignmentId}: run ${ghost.runId} settled failed/runtime_offline (daemon restarted) — the duplicate-run guard is clear`);
+        settled = true;
+        break;
+      }
+      if (!settled) log("info", `stranded assignment ${assignmentId}: no running run record to settle`);
+    } catch (error) {
+      log("warn", `stranded assignment ${assignmentId}: settling its run record failed: ${String(error?.message ?? error)}`);
+    }
+  }
 }
 
 // createMeshWorkerWithdrawHandler(options) → handler(frame) — the function

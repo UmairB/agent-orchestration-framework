@@ -42,7 +42,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1324,6 +1324,15 @@ export async function startLauncher(ws, options = {}) {
         }, options);
         await streamClient.sendAssignmentStatus(entry.assignmentId, "failed", { code: "daemon-restarted" });
       }
+      // 2026-07-27 (the ghost-record family, last member) — the report above flips
+      // the ASSIGNMENT; this settles each stranded run's RECORD (failed/
+      // runtime_offline), so the duplicate-run guard never walls the item behind a
+      // record whose process died with the previous daemon.
+      await settleStrandedRunRecords(stranded, {
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        now: nowFn,
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "startup-reclaim", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+      });
     })().catch((error) => {
       emitWarning(launcherWarnings, { code: "startup-reclaim-failed", message: error?.message ?? String(error), path: null }, options);
     });
