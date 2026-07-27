@@ -43,6 +43,14 @@ honest: **done** means committed + unit-verified; live-soak caveats are listed a
 > UNMERGED — operator merges). Full ledger, missing tests, and residuals: [STATE.md](STATE.md)
 > §"2026-07-27 — the live-soak day".
 
+## Next work (operator-ordered, not yet built)
+
+| Item | Status | What |
+|---|---|---|
+| **Interactive worker terminals** | 🔴 NOT BUILT — design mapped | The board dock's mirror of a worker session is READ-ONLY; a needs-input session can only be answered by resuming at the worker (operator did this dance live 2026-07-27 — "Next step is to make the terminal interactable. Rather than continuing on worker"). Design (mapped in [STATE.md](STATE.md) residuals): browser keystrokes ride the EXISTING `/ws/terminal-view` socket tuple-bound (no cross-session injection possible) → the mesh-ui process pushes a `terminal-input` envelope into the loopback relay → the serve process (self-subscribed to its own broker) validates + routes down the worker's stream connection (`directiveTargets`) → the worker's input registry writes the live PTY. Requires the DELIBERATE rewrite of `acd-fleet-terminal-mirror-read-only` (SECURITY T14's read-only decision is operator-overridden; the gate pins the new constrained shape instead of absence). Also wants a needs-input affordance on the board (the `code` already rides the status frame; nothing renders it). |
+| **Per-item branch (the brittleness cure)** | 🔴 NOT BUILT — scoped ~half-day | One derivable branch per item (`aof/mesh/<ref>`), the `global_item_branches` side table demoted to cache, and run-settled DOC changes landing on the default branch — so no code path can ever again "forget" where an item's work lives (the 2026-07-27 wrong-base dispatch class dies structurally, and main-based reads stop lying about refined items). |
+| **Missing tests for the soak-day fixes** | 🔴 OWED | Nine enumerated lanes in [STATE.md](STATE.md) §MISSING TESTS — the withdraw/settle/ghost-record code shipped under fire and is verified live but not pinned. |
+
 Every wave's legs are landed, unit-verified, committed to `main`, synced to both machines and
 staged in the control node's payload. Two items carry recorded scope decisions (`--follow` and the
 self-restart leg → the deferred backlog in [../ROADMAP.md](../ROADMAP.md); the comment-mass
