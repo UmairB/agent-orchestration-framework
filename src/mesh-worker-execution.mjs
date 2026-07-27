@@ -2121,6 +2121,20 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       worktreePath = baseBranch != null
         ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, baseBranch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
+      // 2026-07-27 (the wrong-base dispatch) — the worker's OWN half of the
+      // decision record: which base this worktree was actually built from. Rides
+      // the launcher's log channel (durable sink + the control's node_logs ring),
+      // so "did it run on the item's branch or fresh off main" is one
+      // `aof mesh logs --node` read, never an SSH inspection. Never blocks the run.
+      try {
+        options.onLog?.({
+          code: "worker-worktree-base",
+          level: "info",
+          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : `fresh branch ${branch} off ${commitish}`}`,
+        });
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
 
       // VERIFICATION (live worktree streaming, 2026-07-25) — from HERE the agent's output
       // lands in this worktree, so from here the worker streams it. Registered the moment

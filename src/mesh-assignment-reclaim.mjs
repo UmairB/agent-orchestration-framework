@@ -33,6 +33,8 @@ import { openGlobalWorkProjectionStore, readWorkItemRuns } from "./global-work-s
 // operator-chosen phase from the additive side-table and maps it to the command string;
 // the refine default above delegates to the SAME mapper.
 import { readAssignmentPhase, assignmentDirectiveCommand, phaseRunsOnItemBranch, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
+// m42 item 3 — a log-channel fault is reported, never thrown into the tick.
+import { reportDegrade } from "./degrade.mjs";
 
 // The PRODUCTION row source: every assignment row for `workspaceId`, off the SAME
 // bulk reader story 03's status shape already uses (no second query surface).
@@ -253,6 +255,20 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       if (result?.sent) {
         dispatchedIds.add(row.assignmentId);
         console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: directive sent`);
+        // 2026-07-27 (the wrong-base dispatch) — the DECISION, durably. The line
+        // above goes to stderr only and names neither the command nor the base
+        // branch, so the one fact that mattered ("what did the tick actually send")
+        // was unrecoverable after the fact. This entry rides the launcher's log
+        // channel into the durable sink; a sink fault never blocks the dispatch.
+        try {
+          options.onDispatchLog?.({
+            code: "mesh-dispatch",
+            level: "info",
+            message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: ${command}${baseBranch != null ? ` on ${baseBranch}` : " (no base branch — worker branches fresh)"}`,
+          });
+        } catch (error) {
+          reportDegrade("mesh-assignment-reclaim", error);
+        }
       } else {
         console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: send did not complete (${result?.code ?? "unknown"}); will retry next tick`);
       }

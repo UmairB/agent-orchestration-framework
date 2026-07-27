@@ -1548,7 +1548,9 @@ async function meshServeDaemonCommand(args) {
     handle = await startLauncher(workspace, {
       onWarning: (warning) => {
         console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
-        const entry = { at: new Date().toISOString(), level: "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null };
+        // 2026-07-27 — an event may carry its OWN level (the dispatch/worktree
+        // DECISION records are info, not warn); anything level-less stays warn.
+        const entry = { at: new Date().toISOString(), level: warning.level ?? "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null };
         logSink.write(entry);
         forwardLogEntry?.(entry);
       },

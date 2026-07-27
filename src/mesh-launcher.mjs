@@ -935,6 +935,11 @@ export async function startLauncher(ws, options = {}) {
         // stream-client.mjs). Called ONLY at the push seam
         // (pushWorktreeBranch/mesh-worker-execution.mjs), never speculatively.
         requestWriteCredential: (request) => client.requestWriteCredential(request),
+        // 2026-07-27 (the wrong-base dispatch) — the worker's worktree-base
+        // decision record, wired to the SAME launcher log channel every other
+        // warning rides (durable sink + the stream forward into the control's
+        // node_logs ring). A literal key, the F12 discipline.
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "worker-execution", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
         // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
         // F-38.06 — the HYBRID transport): THE FIX — the worker terminal-bridge
         // PRODUCER, a LITERAL key HERE (never reachable only through the
@@ -1132,6 +1137,9 @@ export async function startLauncher(ws, options = {}) {
         storeOptions,
         buildDirectiveFrame,
         dispatchedIds: dispatchedAssignmentIds,
+        // 2026-07-27 — the dispatch DECISION (command + baseBranch) lands in the
+        // durable log channel; level rides the entry (info, not warn).
+        onDispatchLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "mesh-dispatch", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null }, options);
       });
