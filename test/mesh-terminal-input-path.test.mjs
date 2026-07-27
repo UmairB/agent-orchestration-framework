@@ -572,6 +572,32 @@ export const meshTerminalInputPathTests = [
     },
   },
   {
+    name: "terminal-input/launch-env: a worker session's env is SCRUBBED of the IDE-attachment vector (CLAUDE_CODE_SSE_PORT / TERM_PROGRAM / VSCODE_*) — a daemon-spawned claude must never attach to a human's editor",
+    async run() {
+      const { resolveInteractiveDriverLaunch } = await import("../src/mesh-worker-execution.mjs");
+      const launch = resolveInteractiveDriverLaunch("claude", {
+        which: createFakeWhich(["claude"]),
+        env: {
+          PATH: "/usr/bin",
+          HOME: "/Users/op",
+          CLAUDE_CODE_SSE_PORT: "45064",
+          TERM_PROGRAM: "vscode",
+          TERM_PROGRAM_VERSION: "1.130.0",
+          VSCODE_GIT_IPC_HANDLE: "/tmp/vscode-git.sock",
+          VSCODE_INJECTION: "1",
+        },
+      });
+      assert.ok(launch, "the launch resolves");
+      assert.equal(launch.env.CLAUDE_CODE_SSE_PORT, undefined, "the IDE SSE port never reaches a worker session (measured live: it attached the session to the operator's VS Code and killed pty stdin)");
+      assert.equal(launch.env.TERM_PROGRAM, undefined);
+      assert.equal(launch.env.TERM_PROGRAM_VERSION, undefined);
+      assert.ok(Object.keys(launch.env).every((k) => !k.startsWith("VSCODE_")), "no VSCODE_* var survives");
+      assert.equal(launch.env.PATH, "/usr/bin", "non-IDE env rides through untouched");
+      assert.equal(launch.env.HOME, "/Users/op");
+      assert.ok(typeof launch.env.AOF_TERMINAL_SESSION === "string", "the provider's own session env is intact");
+    },
+  },
+  {
     name: "terminal-resume/apply-seam: `running` + code `resumed` from the HOLDER revives a FAILED row — and ONLY that (no code stays refused; withdrawn stays terminal)",
     async run() {
       const home = await mkdtemp(path.join(os.tmpdir(), "aof-resume-revival-"));

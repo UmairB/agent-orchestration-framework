@@ -1427,6 +1427,21 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
     args.push("--resume", options.resumeSessionId);
   }
   const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
+  // A WORKER session must NEVER attach to a human's IDE (measured live
+  // 2026-07-27: the daemon was started from a VS Code terminal, so every
+  // spawned claude inherited CLAUDE_CODE_SSE_PORT + TERM_PROGRAM=vscode +
+  // VSCODE_* and silently attached itself to the operator's OWN VS Code — the
+  // session footer read "In <file>" from the human's editor, and the pty's
+  // stdin went DEAD to typed input while the IDE channel held the session.
+  // That is both the interactive-terminal input killer AND a wrong-surface
+  // routing hazard (permission prompts to an editor nobody is watching). The
+  // worker launch env is scrubbed of the IDE-attachment vector; everything
+  // else rides through untouched.
+  for (const key of Object.keys(sessionEnv)) {
+    if (key.startsWith("VSCODE_") || key === "CLAUDE_CODE_SSE_PORT" || key === "TERM_PROGRAM" || key === "TERM_PROGRAM_VERSION") {
+      delete sessionEnv[key];
+    }
+  }
   return { bin, args, env: sessionEnv, providerId };
 }
 
