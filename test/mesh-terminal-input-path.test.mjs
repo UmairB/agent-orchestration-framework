@@ -210,7 +210,7 @@ export const meshTerminalInputPathTests = [
       inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: "sess-someone-else", bytes: "evil\r" });
       inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: "sess-someone-else", bytes: "evil2\r" });
       assert.equal(ptys[0].writes.length, writesBefore, "a foreign session id never writes any PTY");
-      assert.equal(logs.filter((l) => l.code === "terminal-input").length, 1, "the foreign-session drop is logged ONCE, not per keystroke");
+      assert.equal(logs.filter((l) => l.code === "terminal-input" && /no live PTY/.test(l.message)).length, 1, "the foreign-session drop is logged ONCE, not per keystroke (delivery breadcrumbs are separate lines)");
 
       // Settle the run; the registry must clear — late input is a drop.
       exitLever(0);
