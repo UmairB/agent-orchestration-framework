@@ -239,8 +239,8 @@ What is PROVEN (each with its instrument, all on the branch):
   keepalive both ends), fire-and-forget CLI lying (real, fixed — confirm-at-source), the
   stale-sentinel park (real, fixed — post-resume baseline), daemon-wide pty death (cat test),
   node-pty/node-25 (fresh-process test), IDE-attachment as the input killer (env scrubbed —
-  a REAL hygiene/security fix, `4974c82`, but input stayed dead), load-window timing (probes
-  at +3/+5 min pending as of this entry).
+  a REAL hygiene/security fix, `4974c82`, but input stayed dead), load-window timing
+  (FALSIFIED — probes at +3 and +5 minutes on run 0025: zero echo both times).
 
 Debug scaffolding still in the tree (remove once resolved): per-write delivery breadcrumbs
 with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
