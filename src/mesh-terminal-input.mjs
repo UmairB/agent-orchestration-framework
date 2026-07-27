@@ -22,7 +22,7 @@
 //
 // PURE IN-MEMORY: no fs, no store, no durable write — a lost input frame is a
 // keystroke the operator retypes, never a correctness fault.
-import { TERMINAL_INPUT_KIND } from "./mesh-terminal-relay-bridge.mjs";
+import { TERMINAL_INPUT_KIND, TERMINAL_RESUME_KIND } from "./mesh-terminal-relay-bridge.mjs";
 import { reportDegrade } from "./degrade.mjs";
 
 // createTerminalInputRouter({ dispatchDirective, now, onLog }) → { apply(frame) }.
@@ -51,11 +51,39 @@ export function createTerminalInputRouter({ dispatchDirective, now, onLog } = {}
     // disturbing anything else.
     apply(envelope) {
       if (envelope == null || typeof envelope !== "object") return false;
-      if (envelope.kind !== TERMINAL_INPUT_KIND) return false;
+      if (envelope.kind !== TERMINAL_INPUT_KIND && envelope.kind !== TERMINAL_RESUME_KIND) return false;
       if (typeof dispatchDirective !== "function") return false;
       const signal = envelope.signal;
       const nodeId = typeof envelope.nodeId === "string" && envelope.nodeId.length > 0 ? envelope.nodeId : null;
       const sessionId = signal != null && typeof signal.sessionId === "string" && signal.sessionId.length > 0 ? signal.sessionId : null;
+
+      // The RESUME lane (m42 quick-fix): a CLI-pushed request to re-attach a
+      // parked/killed session — routed down the holder's stream like the input
+      // lane, carrying the worktree-resolution context. Logged (a resume is a
+      // deliberate operator act, one line — unlike a keystroke).
+      if (envelope.kind === TERMINAL_RESUME_KIND) {
+        const assignmentId = signal != null && typeof signal.assignmentId === "string" && signal.assignmentId.length > 0 ? signal.assignmentId : null;
+        const workspaceId = signal != null && typeof signal.workspaceId === "string" && signal.workspaceId.length > 0 ? signal.workspaceId : null;
+        const itemRef = signal != null && typeof signal.itemRef === "string" && signal.itemRef.length > 0 ? signal.itemRef : null;
+        if (nodeId == null || sessionId == null || assignmentId == null || workspaceId == null) {
+          log("warn", "terminal-resume-invalid", "terminal-resume frame dropped: missing nodeId/sessionId/assignmentId/workspaceId");
+          return false;
+        }
+        let result;
+        try {
+          result = dispatchDirective({ kind: TERMINAL_RESUME_KIND, to: nodeId, sessionId, assignmentId, workspaceId, itemRef, at: resolveNow() });
+        } catch (error) {
+          reportDegrade("mesh-terminal-input", error);
+          return false;
+        }
+        if (result?.sent !== true) {
+          log("warn", "terminal-resume-target-not-connected", `terminal resume for session ${sessionId} dropped: node ${nodeId} has no live stream connection (${result?.code ?? "no-code"})`);
+          return false;
+        }
+        log("info", "terminal-resume-dispatched", `terminal resume dispatched: session ${sessionId} (assignment ${assignmentId}) -> ${nodeId}`);
+        return true;
+      }
+
       const bytes = signal != null && typeof signal.bytes === "string" && signal.bytes.length > 0 ? signal.bytes : null;
       if (nodeId == null || sessionId == null || bytes == null) {
         log("warn", "terminal-input-invalid", "terminal-input frame dropped: missing nodeId/sessionId/bytes");

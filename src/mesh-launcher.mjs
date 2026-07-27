@@ -42,7 +42,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, createMeshWorkerTerminalInputHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, createMeshWorkerTerminalInputHandler, createMeshWorkerTerminalResumeHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -1107,6 +1107,27 @@ export async function startLauncher(ws, options = {}) {
         } catch (error) {
           reportDegrade("mesh-launcher", error);
         }
+      });
+
+      // m42 quick-fix — the control-driven RESUME of a parked/killed session
+      // (`aof mesh terminal-resume`): spawn `claude --resume` in the assignment's
+      // retained worktree, stream its PTY UP under the RESUMED session id (the
+      // fleet's existing tuple revives), and bind the input registry so the
+      // interactive terminal types into it. Same literal-key + log-channel
+      // discipline as every handler above.
+      const terminalResumeHandler = createMeshWorkerTerminalResumeHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        nodeId,
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-resume", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),
+        onSessionEnd: (sessionId) => client.sendTerminalEnd(sessionId),
+        ...(options?.workerExecutionOptions ?? {}),
+      });
+      client.onTerminalResume?.((frame) => {
+        Promise.resolve(terminalResumeHandler(frame)).catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
       });
     }
 

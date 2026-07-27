@@ -764,6 +764,15 @@ async function meshCommand(args) {
     return;
   }
 
+  // `aof mesh terminal-resume <sessionId> [--node <id>]` — re-attach a parked/
+  // killed worker session (m42 quick-fix): the control pushes a resume over the
+  // loopback relay; the worker spawns `claude --resume` in the assignment's
+  // retained worktree and the existing terminal tuple comes back to life.
+  if (subcommand === "terminal-resume") {
+    await meshVerbCli("mesh:terminal-resume", rest, { positionalAllowed: true, extraFlags: ["node"] });
+    return;
+  }
+
   // No sub: render the usage and exit 0 (recognised, not an error).
   if (sub === undefined) {
     if (options.json) {

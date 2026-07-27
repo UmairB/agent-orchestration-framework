@@ -31,15 +31,19 @@ import { mkdtemp, mkdir, rm, writeFile, appendFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createTerminalInputRouter } from "../src/mesh-terminal-input.mjs";
-import { TERMINAL_INPUT_KIND, buildTerminalInputEnvelope, TERMINAL_FRAME_KIND } from "../src/mesh-terminal-relay-bridge.mjs";
+import { TERMINAL_INPUT_KIND, buildTerminalInputEnvelope, TERMINAL_FRAME_KIND, TERMINAL_RESUME_KIND, buildTerminalResumeEnvelope } from "../src/mesh-terminal-relay-bridge.mjs";
 import { createWorkerStreamClient } from "../src/worker-stream-client.mjs";
 import {
   createMeshWorkerExecutionHandler,
   createMeshWorkerTerminalInputHandler,
+  createMeshWorkerTerminalResumeHandler,
   defaultWatchTranscriptCompletion,
   NEEDS_INPUT_SENTINEL,
   DIRECTIVE_COMPLETE_SENTINEL,
 } from "../src/mesh-worker-execution.mjs";
+import { meshWorktreePath } from "../src/mesh-worktree.mjs";
+import { meshTerminalResumeCommand } from "../src/commands/mesh-terminal-resume.mjs";
+import { updateAssignmentState } from "../src/assignment-record.mjs";
 import { claudeProjectsDir } from "../src/work-observe.mjs";
 import { loadWorkspace } from "../src/work.mjs";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
@@ -361,6 +365,146 @@ export const meshTerminalInputPathTests = [
         } finally {
           store.close?.();
         }
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+
+  // ── 6. the RESUME lane (m42 quick-fix: `aof mesh terminal-resume`) ───────
+  {
+    name: "terminal-resume/router: a valid resume envelope routes DOWN the holder's stream with its worktree-resolution context; a context-less one drops with a coded warn",
+    async run() {
+      const dispatched = [];
+      const logs = [];
+      const router = createTerminalInputRouter({
+        dispatchDirective: (d) => { dispatched.push(d); return { sent: true }; },
+        now: () => NOW,
+        onLog: (entry) => logs.push(entry),
+      });
+      const ok = router.apply(buildTerminalResumeEnvelope("worker-a", { sessionId: "sess-1", assignmentId: "asg-1", workspaceId: "ws-1", itemRef: "18" }));
+      assert.equal(ok, true);
+      assert.deepEqual(dispatched, [{ kind: TERMINAL_RESUME_KIND, to: "worker-a", sessionId: "sess-1", assignmentId: "asg-1", workspaceId: "ws-1", itemRef: "18", at: NOW }]);
+      assert.equal(router.apply(buildTerminalResumeEnvelope("worker-a", { sessionId: "sess-1" })), false, "no assignment/workspace context — dropped");
+      assert.ok(logs.some((l) => l.code === "terminal-resume-invalid"), "the context-less drop is a coded warn");
+      assert.equal(dispatched.length, 1);
+    },
+  },
+  {
+    name: "terminal-resume/client: a terminal-resume DOWN-frame dispatches to the registered onTerminalResume handler",
+    async run() {
+      let deliver = null;
+      const transport = { onMessage(fn) { deliver = fn; }, connect: async () => {}, send: async () => {} };
+      const client = createWorkerStreamClient({ nodeId: NODE_ID, workspaceId: "ws-1", transport });
+      const received = [];
+      client.onTerminalResume((frame) => received.push(frame));
+      deliver(JSON.stringify({ kind: TERMINAL_RESUME_KIND, to: NODE_ID, sessionId: "sess-1", assignmentId: "asg-1", workspaceId: "ws-1", itemRef: "18", at: NOW }));
+      assert.equal(received.length, 1);
+      assert.equal(received[0].assignmentId, "asg-1");
+    },
+  },
+  {
+    name: "terminal-resume/worker: spawns `claude --resume <id>` in the RETAINED worktree, revives the EXISTING tuple (output stamped with the resumed id, input bound under it), sweeps on exit; a missing worktree and an already-live session are logged no-ops",
+    run: async () => withMeshWorkerExecFixture(async (fx) => {
+      const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
+      const sessionId = "sess-resume-1";
+      const assignmentId = "asg-resume-1";
+      const worktreePath = meshWorktreePath(fx.root, assignmentId);
+      await mkdir(worktreePath, { recursive: true });
+
+      let levers = null;
+      const { spawn, spawnCalls, ptys } = createFakePtySpawn({ onWrite: ({ emitData, emitExit }) => { levers = levers ?? { emitData, emitExit }; } });
+      const logs = [];
+      const output = [];
+      const ended = [];
+      const resumeHandler = createMeshWorkerTerminalResumeHandler({
+        loadWs: () => Promise.resolve(ws),
+        globalWorkStoreOptions: { env: fx.env },
+        nodeId: NODE_ID,
+        onLog: (entry) => logs.push(entry),
+        onOutputChunk: (chunk, sid) => output.push([chunk, sid]),
+        onSessionEnd: (sid) => ended.push(sid),
+        ptySpawn: spawn,
+        which: createFakeWhich(["claude"]),
+        livenessIntervalMs: 0,
+      });
+      const inputHandler = createMeshWorkerTerminalInputHandler({ onLog: () => {} });
+
+      // A missing worktree refuses before any spawn.
+      await resumeHandler({ sessionId: "sess-gone", assignmentId: "asg-gone", workspaceId: fx.workspaceId });
+      assert.equal(spawnCalls.length, 0, "no worktree, no spawn");
+      assert.ok(logs.some((l) => l.level === "warn" && /worktree is gone/.test(l.message)));
+
+      // The real resume: spawned in the retained worktree with the resume flag.
+      await resumeHandler({ sessionId, assignmentId, workspaceId: fx.workspaceId, itemRef: fx.itemRef });
+      assert.equal(spawnCalls.length, 1, "one PTY for the resume");
+      assert.ok(spawnCalls[0].args.includes("--resume") && spawnCalls[0].args.includes(sessionId), "the spawn carries --resume <sessionId>");
+      assert.equal(spawnCalls[0].options.cwd, worktreePath, "the PTY runs IN the assignment's retained worktree");
+
+      // Input types into it through the SAME lane the interactive terminal uses…
+      inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId, bytes: "carry on\r" });
+      assert.ok(ptys[0].writes.includes("carry on\r"), "the resumed tuple accepts terminal input");
+      // …and its output rides UP stamped with the RESUMED session id (the tuple
+      // the fleet/dock already knows — an open tab simply starts painting).
+      levers.emitData("resumed and thinking…");
+      assert.deepEqual(output.at(-1), ["resumed and thinking…", sessionId]);
+
+      // A second resume while live is a no-op (never a second PTY on the tuple).
+      await resumeHandler({ sessionId, assignmentId, workspaceId: fx.workspaceId });
+      assert.equal(spawnCalls.length, 1, "already-live resume never double-spawns");
+      assert.ok(logs.some((l) => /already live/.test(l.message)));
+
+      // Exit sweeps the registries + sends the end marker for the tuple.
+      levers.emitExit(0);
+      assert.deepEqual(ended, [sessionId], "the end-of-stream marker rides the resumed tuple");
+      const writesAfter = ptys[0].writes.length;
+      inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId, bytes: "too late\r" });
+      assert.equal(ptys[0].writes.length, writesAfter, "input never reaches an ended resume (registry swept)");
+    }),
+  },
+  {
+    name: "terminal-resume/cli: resolves the session's assignment from the store, pushes the envelope to the holder (or --node override); unknown session and unconfigured relay refuse loudly",
+    async run() {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-resume-cli-"));
+      try {
+        const store = await openGlobalWorkProjectionStore({ env: { AOF_GLOBAL_HOME: home } });
+        let assignmentId;
+        try {
+          const record = assembleAssignmentRecord({ itemRef: "18", workspaceId: "ws-1", targetNodeId: "umairs-mac-mini", issuer: "control-a", now: NOW });
+          insertAssignment(store, record);
+          updateAssignmentState(store, record.assignmentId, "running", { now: NOW, runId: "run-17", sessionId: "sess-89d1" });
+          assignmentId = record.assignmentId;
+        } finally {
+          store.close?.();
+        }
+
+        const pushed = [];
+        const ctx = {
+          workspace: { config: {} },
+          globalWorkStoreOptions: { env: { AOF_GLOBAL_HOME: home } },
+          createTerminalResumePush: () => ({ push: async (envelope) => { pushed.push(envelope); }, close() {} }),
+        };
+        const result = await meshTerminalResumeCommand.run({ session: "sess-89d1" }, ctx);
+        assert.equal(result.ok, true);
+        assert.equal(result.node, "umairs-mac-mini", "the holder comes from the assignment row");
+        assert.equal(result.assignmentId, assignmentId);
+        assert.equal(pushed[0].kind, TERMINAL_RESUME_KIND);
+        assert.equal(pushed[0].nodeId, "umairs-mac-mini");
+        assert.deepEqual(pushed[0].signal, { sessionId: "sess-89d1", assignmentId, workspaceId: "ws-1", itemRef: "18" });
+
+        const overridden = await meshTerminalResumeCommand.run({ session: "sess-89d1", node: "other-node" }, ctx);
+        assert.equal(overridden.node, "other-node", "--node overrides the row's holder");
+
+        await assert.rejects(
+          () => meshTerminalResumeCommand.run({ session: "sess-nobody" }, ctx),
+          (error) => error.code === "session-unknown",
+          "a session no assignment captured refuses loudly",
+        );
+        await assert.rejects(
+          () => meshTerminalResumeCommand.run({ session: "sess-89d1" }, { ...ctx, createTerminalResumePush: () => null }),
+          (error) => error.code === "relay-unconfigured",
+          "no loopback relay here (not the control node) refuses loudly",
+        );
       } finally {
         await rm(home, { recursive: true, force: true });
       }

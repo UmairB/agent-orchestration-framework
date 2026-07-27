@@ -145,6 +145,12 @@ function argsFor(sub) {
     // m42 wave (a) — mesh:logs, the durable-log reader: an absent log is
     // absent-not-error, so the bare fixture run exits 0 with { entries: [] }.
     case "logs": return ["mesh", "logs", "--json"];
+    // m42 quick-fix — mesh:terminal-resume. The bare fixture's store holds no
+    // assignment carrying any session id, so the run refuses with ONE structured
+    // { ok:false, code:"session-unknown" } envelope — exit 1 + parseable (the
+    // gate accepts [0,1]), proving the single-envelope --json discipline
+    // without a live mesh or relay.
+    case "terminal-resume": return ["mesh", "terminal-resume", "sess-nope", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

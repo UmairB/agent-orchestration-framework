@@ -37,6 +37,16 @@ export const TERMINAL_FRAME_KIND = "terminal-frame";
 // import it from here.
 export const TERMINAL_INPUT_KIND = "terminal-input";
 
+// The RESUME kind (m42 quick-fix, operator-requested: "run `claude --resume <id>`
+// so it can continue from the terminated session"). A control-side CLI
+// (`aof mesh terminal-resume`) pushes this envelope into the loopback relay; the
+// serve process routes it down the holder's stream; the worker spawns
+// `claude --resume <sessionId>` in the assignment's RETAINED worktree and stamps
+// the new PTY's terminal frames with the RESUMED session id — so the fleet's
+// EXISTING (nodeId, sessionId) tuple simply comes back to life (mirror + input),
+// no new discovery surface.
+export const TERMINAL_RESUME_KIND = "terminal-resume";
+
 // loopbackRelayUrl(config) → string | null — milestone 38 / story 06 (ADR-014
 // AMENDMENT 2026-07-19, hardening owed-before-done). The SHARED dial-url derivation for
 // BOTH relay transports below (createTerminalRelayPushTransport, the control-side
@@ -125,6 +135,25 @@ export function buildTerminalInputEnvelope(nodeId, sessionId, bytes) {
     kind: TERMINAL_INPUT_KIND,
     nodeId,
     signal: { sessionId: sessionId ?? null, bytes },
+  };
+}
+
+// buildTerminalResumeEnvelope(nodeId, { sessionId, assignmentId, workspaceId,
+// itemRef }) — the resume request, on the SAME FROZEN { kind, nodeId, signal }
+// shape (nodeId = the TARGET worker, exactly as the input envelope). The signal
+// carries the full worktree-resolution context the worker needs (the assignment
+// names the retained worktree dir; the workspaceId names which checkout). A pure
+// projection of its inputs — no fs, no clock, no network.
+export function buildTerminalResumeEnvelope(nodeId, { sessionId, assignmentId, workspaceId, itemRef } = {}) {
+  return {
+    kind: TERMINAL_RESUME_KIND,
+    nodeId,
+    signal: {
+      sessionId: sessionId ?? null,
+      assignmentId: assignmentId ?? null,
+      workspaceId: workspaceId ?? null,
+      itemRef: itemRef ?? null,
+    },
   };
 }
 

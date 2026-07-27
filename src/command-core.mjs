@@ -158,6 +158,11 @@ import { meshServeCommand } from "./commands/mesh-serve.mjs";
 // (TECH_DEBT item 2). Additive — one import + one COMMANDS entry; takes the
 // `mesh:` prefix so the mesh bijection gate covers it with no edit.
 import { meshLogsCommand } from "./commands/mesh-logs.mjs";
+// m42 quick-fix — mesh:terminal-resume, the control-driven re-attach of a
+// parked/killed worker session (`claude --resume` in the retained worktree).
+// Additive — one import + one COMMANDS entry; takes the `mesh:` prefix so the
+// mesh bijection gate covers it with no edit.
+import { meshTerminalResumeCommand } from "./commands/mesh-terminal-resume.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -234,6 +239,7 @@ const COMMANDS = [
   meshRevokeCommand,
   meshServeCommand,
   meshLogsCommand,
+  meshTerminalResumeCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,
