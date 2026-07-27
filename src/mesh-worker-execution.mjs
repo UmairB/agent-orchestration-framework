@@ -2731,12 +2731,13 @@ export function createMeshWorkerTerminalInputHandler(options = {}) {
 //     apply seam legalizes exactly that transition; every other terminal-row
 //     frame is still refused);
 //   - the session is DRIVEN by the SAME driver as any run
-//     (driveInteractiveClaudeSession + `resumeSessionId`): the transcript watch
-//     captures the FORKED session id and reports it on the row, so the board /
-//     fleet / mirror / input registry all converge on the LIVE tuple; the
-//     needs-input lanes (live question + sentinel) work exactly as on a first
-//     run; completion settles the run record AND the row (done/failed), or
-//     parks needs-input with the code visible.
+//     (driveInteractiveClaudeSession + `resumeSessionId`): `claude --resume`
+//     KEEPS the session id (measured — it appends the SAME transcript), so the
+//     identity is known at spawn and injected, never derived; the board / fleet /
+//     mirror / input registry are all on the one live tuple from the first byte;
+//     the needs-input lanes (live question + sentinel) work exactly as on a
+//     first run; completion settles the run record AND the row (done/failed),
+//     or parks needs-input with the code visible.
 // The worktree is always RETAINED (this bracket does not push; a resumed
 // session's committed work goes home via `aof mesh recover-push` — one door per
 // act). Idempotent: an assignment with a live PTY on this daemon is a logged
@@ -2820,14 +2821,23 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
           commandDelayMs: options.commandDelayMs,
           livenessIntervalMs: options.livenessIntervalMs,
           onOutputChunk,
-          watchTranscriptSessionId: options.watchTranscriptSessionId,
+          // The session id is KNOWN AT SPAWN — `claude --resume` keeps the SAME
+          // session id and appends the SAME transcript (measured on the Mac
+          // 2026-07-27 15:26Z: 89d1f151….jsonl growing under the resumed
+          // process). The default watch looks for a NEW transcript file, which
+          // never appears on a resume — capturedSessionId stayed null, every
+          // output frame was dropped unroutable, and input never bound: a live
+          // session, fully invisible. A KNOWN fact is not derived (m42): resolve
+          // instantly with the resumed id — frames stamp from the first byte,
+          // input binds at once, and the completion watch reads the RIGHT file.
+          watchTranscriptSessionId: async () => sessionId,
           watchTranscriptCompletion: options.watchTranscriptCompletion,
           onPtyLive: (kill, write) => {
             livePtyKills.set(assignmentId, kill);
             if (typeof write === "function") livePtyWrites.set(assignmentId, write);
           },
-          // The FORKED session id is the live tuple — bind input under it and
-          // report it on the row so every surface converges on the same truth.
+          // Fires immediately with the RESUMED id (injected above) — bind input
+          // and re-affirm the id on the row's running frame.
           onSessionIdCaptured: (sid) => {
             const write = livePtyWrites.get(assignmentId);
             if (write != null && typeof sid === "string" && sid.length > 0) {

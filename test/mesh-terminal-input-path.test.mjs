@@ -406,11 +406,10 @@ export const meshTerminalInputPathTests = [
     },
   },
   {
-    name: "terminal-resume/worker: a resume is a REAL RUN — record minted, row revived (running/code resumed), the FORKED session id reported + input-bound, completion settling record AND row; missing worktree / already-live are logged no-ops",
+    name: "terminal-resume/worker: a resume is a REAL RUN — record minted, row revived (running/code resumed), the RESUMED id live from the first byte (claude --resume KEEPS the id — known at spawn, never derived), completion settling record AND row; missing worktree / already-live are logged no-ops",
     run: async () => withMeshWorkerExecFixture(async (fx) => {
       const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
       const oldSessionId = "sess-resume-old";
-      const forkedSessionId = "sess-resume-forked";
       const assignmentId = "asg-resume-1";
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
       await mkdir(worktreePath, { recursive: true });
@@ -432,7 +431,6 @@ export const meshTerminalInputPathTests = [
         which: createFakeWhich(["claude"]),
         commandDelayMs: 0,
         livenessIntervalMs: 0,
-        watchTranscriptSessionId: async () => forkedSessionId,
         watchTranscriptCompletion: () => new Promise((resolve) => { completionResolve = resolve; }),
       });
       const inputHandler = createMeshWorkerTerminalInputHandler({ onLog: () => {} });
@@ -442,28 +440,25 @@ export const meshTerminalInputPathTests = [
       assert.equal(spawnCalls.length, 0, "no worktree, no spawn");
       assert.ok(logs.some((l) => l.level === "warn" && /worktree is gone/.test(l.message)));
 
-      // The real resume, driven through the REAL driver.
+      // The real resume, driven through the REAL driver. No session-id watch is
+      // injected: the bracket must KNOW the id (claude --resume keeps it) — a
+      // derived-id design left the live session invisible (measured 2026-07-27).
       const running = resumeHandler({ sessionId: oldSessionId, assignmentId, workspaceId: fx.workspaceId, itemRef: fx.itemRef });
       await waitFor(() => spawnCalls.length === 1);
-      assert.ok(spawnCalls[0].args.includes("--resume") && spawnCalls[0].args.includes(oldSessionId), "the spawn carries --resume <oldSessionId>");
+      assert.ok(spawnCalls[0].args.includes("--resume") && spawnCalls[0].args.includes(oldSessionId), "the spawn carries --resume <sessionId>");
       assert.equal(spawnCalls[0].options.cwd, worktreePath, "the PTY runs IN the assignment's retained worktree");
 
-      // The row revives FIRST (running + code resumed), then the FORKED session
-      // id lands on it — the whole system converges on the live tuple.
-      await waitFor(() => recorder.frames.some((f) => f.state === "running" && f.sessionId === forkedSessionId));
+      // The row revives (running + code resumed) and the RESUMED id is on the
+      // frames immediately — the tuple the row (and any open tab) already holds.
+      await waitFor(() => recorder.frames.some((f) => f.state === "running" && f.sessionId === oldSessionId));
       assert.equal(recorder.frames[0].state, "running");
       assert.equal(recorder.frames[0].code, "resumed", "the revival frame carries the sanctioned resume code");
-      const captured = recorder.frames.find((f) => f.sessionId === forkedSessionId);
-      assert.equal(captured.code, "resumed");
 
-      // Input binds under the FORKED id (the live tuple), not the old one.
+      // Input binds under the RESUMED id, live from spawn.
       await waitFor(() => {
-        inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: forkedSessionId, bytes: "carry on\r" });
+        inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: oldSessionId, bytes: "carry on\r" });
         return ptys[0].writes.includes("carry on\r");
       });
-      const writesBefore = ptys[0].writes.length;
-      inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: oldSessionId, bytes: "stale tuple\r" });
-      assert.equal(ptys[0].writes.length, writesBefore, "the OLD session id is not a live tuple after the fork");
 
       // A second resume while live is a no-op (never a second run/PTY).
       await resumeHandler({ sessionId: oldSessionId, assignmentId, workspaceId: fx.workspaceId, itemRef: fx.itemRef });
@@ -475,7 +470,7 @@ export const meshTerminalInputPathTests = [
       await running;
       const doneFrame = recorder.frames.at(-1);
       assert.equal(doneFrame.state, "done");
-      assert.equal(doneFrame.sessionId, forkedSessionId);
+      assert.equal(doneFrame.sessionId, oldSessionId);
       const item = await findWork(fx.workDir, fx.itemRef).then((m) => m.find((r) => r.ref === fx.itemRef));
       const runs = await readRuns(item);
       const resumedRun = runs.find((r) => r.brief?.resumedFrom === oldSessionId);
@@ -484,7 +479,7 @@ export const meshTerminalInputPathTests = [
 
       // …and the registries are swept.
       const writesAfter = ptys[0].writes.length;
-      inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: forkedSessionId, bytes: "too late\r" });
+      inputHandler({ kind: TERMINAL_INPUT_KIND, sessionId: oldSessionId, bytes: "too late\r" });
       assert.equal(ptys[0].writes.length, writesAfter, "input never reaches a settled resume (registry swept)");
     }),
   },
@@ -513,7 +508,6 @@ export const meshTerminalInputPathTests = [
         which: createFakeWhich(["claude"]),
         commandDelayMs: 0,
         livenessIntervalMs: 0,
-        watchTranscriptSessionId: async () => "sess-fork-a",
         watchTranscriptCompletion: () => new Promise((resolve) => { completionResolve = resolve; }),
       });
 
