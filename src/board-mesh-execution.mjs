@@ -50,7 +50,7 @@ export async function readExecutionOverlay(workspace, options = {}) {
     store = await openStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
 
     const rows = store.db.prepare(
-      "SELECT assignment_id, item_ref, target_node_id, state, session_id, updated_at FROM global_assignments WHERE workspace_id = ? ORDER BY updated_at ASC",
+      "SELECT assignment_id, item_ref, target_node_id, state, session_id, code, updated_at FROM global_assignments WHERE workspace_id = ? ORDER BY updated_at ASC",
     ).all(workspaceId);
 
     for (const row of rows) {
@@ -70,6 +70,10 @@ export async function readExecutionOverlay(workspace, options = {}) {
         state: row.state,
         nodeId: row.target_node_id,
         sessionId: row.session_id ?? null,
+        // m42 interactive worker terminals — the status-refinement code
+        // (`needs-input`): the board renders "waiting on you", and the terminal
+        // affordance is where the answer is typed.
+        code: row.code ?? null,
         updatedAt: row.updated_at ?? null,
         // The branch the work actually lives on (recorded on every successful push) — the
         // answer to "where IS the work, then?" when the local checkout does not have it.

@@ -132,7 +132,10 @@ export const meshWorkerCompletionDetectionTests = [
           },
         };
         await write("ask-1", [asst("tool_use", "working"), askPending]);
-        assert.deepEqual(await settle("ask-1"), { outcome: "needs-input", declared: true }, "an UNANSWERED AskUserQuestion is a session waiting on a human — needs-input, declared");
+        // m42 interactive worker terminals: the pending flag marks this as a LIVE
+        // question (answerable through the terminal) — the watch reports it
+        // immediately but parks it only after the LONG window.
+        assert.deepEqual(await settle("ask-1"), { outcome: "needs-input", declared: true, pending: true }, "an UNANSWERED AskUserQuestion is a session waiting on a human — needs-input, declared, and PENDING (live)");
 
         // The SAME question WITH its answer behind it is a live session again —
         // never settles (the next assistant turn is coming).

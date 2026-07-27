@@ -169,9 +169,18 @@ export function DetailPanel({
         {item.execution ? (
           <div className="mono mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className={item.execution.active ? "font-semibold text-primary" : "font-semibold"}>
-                {item.execution.active ? `running on ${item.execution.nodeId}` : `last run ${item.execution.state} on ${item.execution.nodeId}`}
-              </span>
+              {/* m42 interactive worker terminals — a session the worker reports
+                  WAITING ON A HUMAN (code: needs-input) says so, amber, ahead of
+                  the generic "running": the primary button is the answer's door. */}
+              {item.execution.active && item.execution.code === "needs-input" ? (
+                <span className="font-semibold text-amber-500">
+                  waiting for your input on {item.execution.nodeId}
+                </span>
+              ) : (
+                <span className={item.execution.active ? "font-semibold text-primary" : "font-semibold"}>
+                  {item.execution.active ? `running on ${item.execution.nodeId}` : `last run ${item.execution.state} on ${item.execution.nodeId}`}
+                </span>
+              )}
               {item.execution.branch ? (
                 <span className="truncate" title={`The mesh work for this item lives on branch ${item.execution.branch}`}>
                   · branch {item.execution.branch}

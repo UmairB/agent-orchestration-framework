@@ -1169,7 +1169,12 @@ async function readTranscriptTerminalOutcome(file) {
         // waiting on a person — the invisible-stop defect. Declared: the model
         // explicitly asked; the watch needs only the short confirmation window.
         if (stop === "tool_use" && !answeredAfterAssistant && pendingHumanInputTool(message)) {
-          return { outcome: "needs-input", declared: true };
+          // `pending: true` — the question is LIVE (mid-turn, an interactive
+          // widget waiting at a live PTY), unlike the sentinel case below where
+          // the turn already ENDED. m42 interactive worker terminals: a live
+          // question is answerable through the terminal-input path, so the watch
+          // reports it immediately but parks it only after the LONG window.
+          return { outcome: "needs-input", declared: true, pending: true };
         }
         return null;
       }
@@ -1247,6 +1252,23 @@ export async function defaultWatchTranscriptCompletion({
   idleMs = COMPLETION_IDLE_MS,
   declaredIdleMs = DECLARED_COMPLETION_IDLE_MS,
   now = () => Date.now(),
+  // m42 "interactive worker terminals" — the LIVE-QUESTION report pair, both
+  // optional and fire-and-forget. A PENDING human-input outcome (a live
+  // AskUserQuestion at a live PTY) used to settle after the short declared window
+  // — killing the very session the operator could now answer through the
+  // interactive terminal, ~10s after the question rendered. Instead:
+  //   - onPendingInput() fires ONCE the moment a pending question is detected
+  //     (the caller reports `code: needs-input` up while the session stays LIVE);
+  //   - onPendingInputCleared() fires ONCE when the question is answered (the
+  //     transcript shows a user record behind it — the outcome reads null again
+  //     and the session is working; the caller clears the code);
+  //   - a pending question that stays unanswered must out-wait the LONG idleMs
+  //     window before it settles needs-input (the park -> resume-later fallback,
+  //     unchanged in meaning, now a last resort instead of the only path).
+  // The SENTINEL needs-input (the turn deliberately ENDED on the protocol line)
+  // keeps the short declared window — that turn is over; parking is correct.
+  onPendingInput,
+  onPendingInputCleared,
 } = {}) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return null;
   const projectsDir = claudeProjectsDir({ cwd, env });
@@ -1274,6 +1296,20 @@ export async function defaultWatchTranscriptCompletion({
     try { signal?.addEventListener?.("abort", onAbort, { once: true }); } catch (error) { /* no signal */
       reportDegrade("mesh-worker-execution", error); }
 
+    // The live-question latch: true while a pending human-input outcome has been
+    // reported and not yet answered — flips the report pair exactly once per episode.
+    let pendingReported = false;
+    const firePending = (fn) => {
+      try {
+        const result = fn?.();
+        if (result && typeof result.catch === "function") {
+          result.catch((error) => reportDegrade("mesh-worker-execution", error));
+        }
+      } catch (error) {
+        // a report fault never disturbs the watch itself.
+        reportDegrade("mesh-worker-execution", error);
+      }
+    };
     const tick = async () => {
       if (settled) return;
       // The quiet-stretch clock reads the WHOLE session tree, never just the parent
@@ -1288,10 +1324,23 @@ export async function defaultWatchTranscriptCompletion({
         lastMtimeMs = mtimeMs;
         stableSince = now();
       }
+      // m42 interactive worker terminals — the live-question report pair (see the
+      // parameter note above): detected → report once; answered → clear once.
+      const pendingNow = outcome?.pending === true;
+      if (pendingNow && !pendingReported) {
+        pendingReported = true;
+        firePending(onPendingInput);
+      } else if (!pendingNow && pendingReported) {
+        pendingReported = false;
+        firePending(onPendingInputCleared);
+      }
       // A DECLARED outcome (the model printed its sentinel) confirms after the short
       // window; an undeclared `end_turn` is a guess and must out-wait the long
-      // fallback window (the premature-done defect both windows exist to close).
-      const requiredIdleMs = outcome?.declared === true ? declaredIdleMs : idleMs;
+      // fallback window (the premature-done defect both windows exist to close). A
+      // PENDING live question also out-waits the LONG window — it is answerable
+      // through the interactive terminal, so parking it fast would kill the very
+      // session the operator is about to type into.
+      const requiredIdleMs = outcome?.declared === true && !pendingNow ? declaredIdleMs : idleMs;
       if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= requiredIdleMs) {
         settleWatch(outcome);
         return;
@@ -1419,13 +1468,27 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
   // driver) decides when it may be called. Optional and guarded — every caller
   // that never passes it is byte-identical.
   try {
-    options.onPtyLive?.(() => {
-      try {
-        term.kill();
-      } catch (error) {
-        reportDegrade("mesh-worker-execution", error);
-      }
-    });
+    options.onPtyLive?.(
+      () => {
+        try {
+          term.kill();
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+      },
+      // m42 "interactive worker terminals" — the ADDITIVE second argument: a write
+      // into THIS live PTY, the input direction's one seam (the same term.write the
+      // driver itself types the directive command through). The caller's registry —
+      // never this driver — decides which frames may reach it; a caller that reads
+      // only the first argument is byte-identical to before.
+      (bytes) => {
+        try {
+          term.write(String(bytes));
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+      },
+    );
   } catch (error) {
     reportDegrade("mesh-worker-execution", error);
   }
@@ -1634,7 +1697,19 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       .then((sid) => {
         if (settled || typeof sid !== "string" || sid.length === 0) return;
         return Promise.resolve(
-          watchTranscriptCompletion({ cwd: brief.worktreeCwd, env: launch.env ?? process.env, sessionId: sid, signal: watchController.signal }),
+          watchTranscriptCompletion({
+            cwd: brief.worktreeCwd,
+            env: launch.env ?? process.env,
+            sessionId: sid,
+            signal: watchController.signal,
+            // m42 interactive worker terminals — the live-question report pair,
+            // bridged to the caller's ONE seam (`options.onNeedsInputPending`):
+            // true = a live question is waiting (report needs-input, session stays
+            // up, answerable through the terminal); false = it was answered
+            // (clear the report). Optional + guarded like every other seam here.
+            onPendingInput: () => options.onNeedsInputPending?.(true),
+            onPendingInputCleared: () => options.onNeedsInputPending?.(false),
+          }),
         ).then((result) => {
           if (settled || result == null) return;
           try { term.kill(); } catch (error) { /* already-exited guard (win32) */
@@ -1751,6 +1826,37 @@ function logAssignmentFailure(assignmentId, code, detail) {
 //     cancelled and send no frame — the row is already terminal).
 const livePtyKills = new Map();
 const withdrawnByControl = new Set();
+
+// ── interactive worker terminals (m42; SECURITY T14 operator-overridden) ──────
+//
+// The INPUT direction's registries, beside the kill registry they mirror:
+//   - livePtyWrites: assignmentId → a write into the CURRENTLY live PTY
+//     (registered by the bracket beside its kill, removed with it);
+//   - liveSessionInputs: captured sessionId → that SAME write, bound the moment
+//     the transcript watch resolves the session id. The browser routes on the
+//     (nodeId, sessionId) tuple, so the session id — never the assignment id —
+//     is the input frame's join key; a session whose id was never captured is
+//     simply unreachable for input (exactly as it is unreachable for the mirror).
+// Both cleared by clearLivePtyRegistries the moment the spawn settles — input
+// can never reach a PTY whose bracket has moved on.
+const livePtyWrites = new Map();
+const liveSessionInputs = new Map();
+
+// clearLivePtyRegistries(assignmentId) — the ONE settle-side sweep for every
+// per-PTY registry (kill + write + any session binding pointing at that write).
+// Value-identity scan for the session binding: the bracket knows its assignment
+// id at settle, not necessarily its captured session id, and the registries are
+// bounded by the handful of concurrently-live PTYs on one worker.
+function clearLivePtyRegistries(assignmentId) {
+  livePtyKills.delete(assignmentId);
+  const write = livePtyWrites.get(assignmentId);
+  livePtyWrites.delete(assignmentId);
+  if (write != null) {
+    for (const [sessionId, bound] of liveSessionInputs) {
+      if (bound === write) liveSessionInputs.delete(sessionId);
+    }
+  }
+}
 
 // createMeshWorkerExecutionHandler(options) → handler(directive) — the function
 // `client.onDirective(handler)` registers (worker-stream-client.mjs). Every
@@ -2274,8 +2380,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // withdrawn run instead of leaving it grinding. Registered here (the one
           // place assignmentId is in scope) and removed the moment the spawn
           // settles below.
-          onPtyLive: (kill) => {
+          onPtyLive: (kill, write) => {
             livePtyKills.set(assignmentId, kill);
+            // m42 interactive worker terminals — the write registers beside its
+            // kill; the session binding waits for the captured id below.
+            if (typeof write === "function") livePtyWrites.set(assignmentId, write);
           },
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
           // 2026-07-23, structural invariant 7) — REPORT THE JOIN KEY WHILE THE RUN
@@ -2285,12 +2394,33 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // THIS is the only place the per-directive context the report needs
           // (`assignmentId`, and the runId minted just above) is in scope, so the
           // handler-level seam above is bound to it here.
-          onSessionIdCaptured: (sessionId) => onSessionIdCaptured?.(sessionId, { assignmentId, runId: runRecord.runId }),
+          onSessionIdCaptured: (sessionId) => {
+            // m42 interactive worker terminals — the captured id is the input
+            // frame's join key: bind it to this bracket's live-PTY write so a
+            // routed keystroke can reach EXACTLY this session (and nothing else).
+            const write = livePtyWrites.get(assignmentId);
+            if (write != null && typeof sessionId === "string" && sessionId.length > 0) {
+              liveSessionInputs.set(sessionId, write);
+            }
+            return onSessionIdCaptured?.(sessionId, { assignmentId, runId: runRecord.runId });
+          },
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06e; ADR-014 AMENDMENT
           // 2026-07-23, structural invariant 8) — forwarded VERBATIM (no per-
           // directive context is needed: the end frame routes on the (nodeId,
           // sessionId) tuple the bytes already rode, never on the assignment).
           onSessionEnd,
+          // m42 interactive worker terminals — a LIVE question reports needs-input
+          // WITHOUT ending the run: the assignment row gains the code while the
+          // session stays up (answerable through the terminal); an answered
+          // question clears it (a code-less running frame nulls the column — the
+          // apply seam's code semantics are verbatim-per-frame). The park path
+          // (below, outcome === "needs-input") still reports the same code at
+          // settle, so a session that out-waited the long window reads identically.
+          onNeedsInputPending: (pending) => {
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, ...(pending ? { code: "needs-input" } : {}) }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
         },
       );
       // task 03 (ADR-013 amendment) — the session_id the driver resolved via its
@@ -2299,8 +2429,9 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // before one did) degrades to null here, never a crash.
       const sessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
 
-      // 2026-07-27 (withdraw notify) — the spawn settled: its kill is dead weight.
-      livePtyKills.delete(assignmentId);
+      // 2026-07-27 (withdraw notify) — the spawn settled: its kill (and, m42, its
+      // input write + session binding) are dead weight.
+      clearLivePtyRegistries(assignmentId);
       // A withdrawal that arrived DURING the run (the handler killed the PTY):
       // settle the record as cancelled — never `failed` — and send NO status frame
       // (the row is already terminal; the control's terminal-guard would refuse
@@ -2407,7 +2538,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // worker-stream-client.mjs:133, so a rethrow here would surface only as an
       // unhandled rejection, never a caught fault — swallow it after the coded
       // status is streamed).
-      livePtyKills.delete(assignmentId); // never leak a kill past its bracket
+      clearLivePtyRegistries(assignmentId); // never leak a kill/write past its bracket
       await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId, code: error?.code ?? "assignment-execution-failed" });
       const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
       reportAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
@@ -2530,6 +2661,51 @@ export function createMeshWorkerWithdrawHandler(options = {}) {
       log("info", `assignment ${assignmentId}: run ${runId} settled cancelled (withdrawn by control) — the duplicate-run guard is clear`);
     } catch (error) {
       log("warn", `assignment ${assignmentId}: settling run ${runId} failed: ${String(error?.message ?? error)}`);
+    }
+  };
+}
+
+// createMeshWorkerTerminalInputHandler(options) → handler(frame) — the function
+// `client.onTerminalInput(handler)` registers (worker-stream-client.mjs). m42
+// "interactive worker terminals": an operator keystroke arrives as a
+// terminal-input DOWN-frame ({ sessionId, bytes }) and may write EXACTLY ONE
+// thing — the live PTY whose CAPTURED session id equals the frame's sessionId
+// (liveSessionInputs, bound at session-id capture, cleared at settle). Everything
+// else is a drop:
+//   - no live PTY bound to that session (a parked needs-input session, a settled
+//     run, a foreign/garbled id) → dropped, logged ONCE per session id (a human
+//     typing at a dead session would otherwise log every keystroke);
+//   - a malformed frame → dropped silently (the same shape-guard posture every
+//     frame handler here keeps).
+// Never throws; never logs the CONTENT of the bytes (an operator's answer may be
+// sensitive — codes and session ids only).
+export function createMeshWorkerTerminalInputHandler(options = {}) {
+  const { onLog } = options;
+  const reportedMisses = new Set();
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "terminal-input", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  return function handleTerminalInput(frame) {
+    const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : null;
+    const bytes = typeof frame?.bytes === "string" && frame.bytes.length > 0 ? frame.bytes : null;
+    if (sessionId == null || bytes == null) return;
+    const write = liveSessionInputs.get(sessionId);
+    if (write == null) {
+      if (!reportedMisses.has(sessionId)) {
+        reportedMisses.add(sessionId);
+        log("info", `terminal input for session ${sessionId}: no live PTY with that captured session on this worker — dropped (a parked needs-input session is resumed with \`claude --resume\`, not typed into)`);
+      }
+      return;
+    }
+    reportedMisses.delete(sessionId);
+    try {
+      write(bytes);
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
     }
   };
 }

@@ -4,8 +4,11 @@ import type { WorkItem } from "./api";
 // The action the primary button represents:
 //   view     — a live LOCAL session is already bound to this item → "View terminal"
 //   mirror   — a worker is executing it AND its session is captured → the dock opens
-//              the fleet's read-only mirror (m42 item 6: one terminal surface; a
-//              remote session is a SOURCE of the dock, never a second widget)
+//              the worker's live session over the tuple-bound terminal-view socket
+//              (m42: INTERACTIVE — one terminal surface; a remote session is a
+//              SOURCE of the dock, never a second widget). `needsInput` marks a
+//              session the worker reports waiting on a human (code: needs-input) —
+//              the label leads with Answer.
 //   running  — a worker node is executing it, session not yet captured → disabled,
 //              names the node (2026-07-26: offering "Continue" here dispatched a
 //              second run that the assign core then refused — running work is
@@ -22,6 +25,7 @@ export type PrimaryAction = {
   label: string;
   command?: string;
   disabled?: boolean;
+  needsInput?: boolean;
   nodeId?: string;
   sessionId?: string;
 };

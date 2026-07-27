@@ -36,7 +36,7 @@
 // mesh-relay broker binds loopback only, so a worker cannot reach it from another
 // machine). The frozen envelope is built by the bridge module (the single source of
 // the `terminal-frame` kind + shape).
-import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-terminal-relay-bridge.mjs";
+import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope, TERMINAL_INPUT_KIND } from "./mesh-terminal-relay-bridge.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. This client
 // RECEIVES the `recovery-push` DOWN-frame (dispatched by the control daemon, carrying a
 // one-shot write credential) and REPLIES with a `recovery-push-result` UP-frame. The
@@ -251,6 +251,9 @@ export function createWorkerStreamClient({
   let recoveryPushHandler = null;
   // 2026-07-27 (the duplicate-run wall) — the withdraw DOWN-frame's one handler.
   let withdrawHandler = null;
+  // m42 "interactive worker terminals" — the terminal-input DOWN-frame's handler
+  // (mesh-worker-execution.mjs's createMeshWorkerTerminalInputHandler).
+  let terminalInputHandler = null;
   // milestone 38 / ADR-009 — pending clone-credential-request correlation, keyed by
   // assignmentId (per-clone, per-assignment: at most ONE clone-miss is ever in flight
   // for a given assignment). A bounded wait backstops a request that is refused,
@@ -358,6 +361,15 @@ export function createWorkerStreamClient({
     // dropped, exactly like a directive with no directiveHandler.
     if (frame?.kind === WITHDRAW_KIND) {
       withdrawHandler?.(frame);
+      return;
+    }
+    // m42 "interactive worker terminals" — an operator keystroke routed down from
+    // the control (tuple-bound at the fleet face, validated by the control's input
+    // router). Dispatched to the registered handler, which writes ONLY the live
+    // PTY whose captured sessionId matches exactly. Unregistered → dropped, like
+    // every other kind here.
+    if (frame?.kind === TERMINAL_INPUT_KIND) {
+      terminalInputHandler?.(frame);
       return;
     }
     // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push DOWN-frame:
@@ -773,6 +785,13 @@ export function createWorkerStreamClient({
     withdrawHandler = typeof handler === "function" ? handler : null;
   }
 
+  // onTerminalInput(handler) — m42 "interactive worker terminals": registers the
+  // ONE handler invoked with a PARSED terminal-input DOWN-frame, mirroring the
+  // onDirective/onWithdraw lane exactly. Additive — unregistered drops input.
+  function onTerminalInput(handler) {
+    terminalInputHandler = typeof handler === "function" ? handler : null;
+  }
+
   // notifyDrop() — an explicit signal the connection dropped (production wires this
   // from the transport's own onDrop/close event); schedules a backoff reconnect over
   // the injected ticker. The reconnect itself does not resend a frame on its own — a
@@ -822,6 +841,7 @@ export function createWorkerStreamClient({
     onDirective,
     onRecoveryPush,
     onWithdraw,
+    onTerminalInput,
     notifyDrop,
     stop,
     get connected() { return connected; },

@@ -329,7 +329,13 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // `runId`: `undefined` (no session id on this frame) leaves any
   // previously-captured value intact in updateAssignmentState.
   const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : undefined;
-  const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId });
+  // m42 interactive worker terminals — the status-refinement `code` (e.g.
+  // `needs-input`) is persisted VERBATIM PER FRAME (a code-less frame CLEARS it),
+  // deliberately unlike runId/sessionId's absent-is-not-a-clear: the code
+  // describes the CURRENT posture of the session (waiting on a human right now),
+  // not a captured fact, so each frame's word is the whole truth.
+  const code = typeof frame?.code === "string" && frame.code.length > 0 ? frame.code : null;
+  const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId, code });
   // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a `done` means the worker's
   // push succeeded (it sends done only AFTER the push); record the branch it reported as
   // this item's active branch, keyed by the assignment ROW's OWN workspace/item (never a

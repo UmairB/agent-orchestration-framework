@@ -144,6 +144,9 @@ import { meshWorkerDriverInteractivePtyTests } from "../test/mesh-worker-driver-
 import { meshWorkerTrustWorktreeTests } from "../test/mesh-worker-trust-worktree.test.mjs";
 import { meshWorkerCommandTimingTests } from "../test/mesh-worker-command-timing.test.mjs";
 import { meshWorkerCompletionDetectionTests } from "../test/mesh-worker-completion-detection.test.mjs";
+// m42 "interactive worker terminals" — the terminal-input behavioural lanes
+// (router, client dispatch, worker delivery, pending-question, code column).
+import { meshTerminalInputPathTests } from "../test/mesh-terminal-input-path.test.mjs";
 import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
 import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
 import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
@@ -158,7 +161,7 @@ import { archTests as acdWorkerDriverNoHeadlessPrintTests } from "../test/arch/a
 // aof:verify 38 — no test file here.
 import { meshTerminalRelayBridgeTests } from "../test/mesh-terminal-relay-bridge.test.mjs";
 import { meshFleetTerminalViewMirrorTests } from "../test/mesh-fleet-terminal-view-mirror.test.mjs";
-import { archTests as acdFleetTerminalMirrorReadOnlyTests } from "../test/arch/acd-fleet-terminal-mirror-read-only.test.mjs";
+import { archTests as acdFleetTerminalInputConstrainedTests } from "../test/arch/acd-fleet-terminal-input-constrained.test.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER F-38.06):
 // the transport is a HYBRID (an option-(a) draft was falsified at source — serveRelay
 // binds LOOPBACK ONLY, so a worker cannot reach it off-host). Each leg on the bind it
@@ -1889,10 +1892,13 @@ export const tests = [
   ...meshWorkerDriverSessionIdTests,
   ...acdWorkerDriverNoHeadlessPrintTests,
   // milestone 38 / story 06 — worker-terminal-streaming (ADR-014, tasks 00-02
-  // traceability modules + the acd-fleet-terminal-mirror-read-only fitness function)
+  // traceability modules), plus m42's interactive-terminal-input lanes and the
+  // acd-fleet-terminal-input-constrained fitness (the operator-overridden rewrite
+  // of acd-fleet-terminal-mirror-read-only).
   ...meshTerminalRelayBridgeTests,
   ...meshFleetTerminalViewMirrorTests,
-  ...acdFleetTerminalMirrorReadOnlyTests,
+  ...meshTerminalInputPathTests,
+  ...acdFleetTerminalInputConstrainedTests,
   ...acdTerminalStreamTransportWiredTests,
   ...meshTerminalStreamRelayTransportWiredTests,
   ...meshWorkerDriverOutputChunkTests,

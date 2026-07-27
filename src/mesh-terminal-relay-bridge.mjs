@@ -26,6 +26,17 @@ import { reportDegrade } from "./degrade.mjs";
 // source so the bridge and its tests agree on the literal.
 export const TERMINAL_FRAME_KIND = "terminal-frame";
 
+// The INPUT direction's own opaque kind (m42 "interactive worker terminals" —
+// operator-overriding SECURITY T14's original read-only decision). A browser
+// keystroke rides the fleet face's tuple-bound /ws/terminal-view socket, is
+// wrapped in THIS kind by the mesh-ui process, crosses the loopback relay to the
+// serve process, and is routed DOWN the worker's admitted stream connection —
+// where it may write ONLY the live PTY whose captured sessionId matches exactly.
+// One home for the literal: the relay envelope, the control router
+// (mesh-terminal-input.mjs) and the worker stream client's dispatch branch all
+// import it from here.
+export const TERMINAL_INPUT_KIND = "terminal-input";
+
 // loopbackRelayUrl(config) → string | null — milestone 38 / story 06 (ADR-014
 // AMENDMENT 2026-07-19, hardening owed-before-done). The SHARED dial-url derivation for
 // BOTH relay transports below (createTerminalRelayPushTransport, the control-side
@@ -96,6 +107,24 @@ export function buildTerminalEndEnvelope(nodeId, sessionId) {
     kind: TERMINAL_FRAME_KIND,
     nodeId,
     signal: { sessionId: sessionId ?? null, end: true },
+  };
+}
+
+// buildTerminalInputEnvelope(nodeId, sessionId, bytes) — the INPUT direction's
+// envelope, on the SAME FROZEN { kind, nodeId, signal } shape as the two builders
+// above (the relay never parses `signal`; sessionId rides INSIDE it, never as a
+// fourth top-level key). Here `nodeId` is the TARGET worker (the tuple's own
+// nodeId — the output direction's source becomes the input direction's
+// destination; one tuple, two directions). `bytes` are the browser's keystrokes
+// VERBATIM — opaque terminal input, coerced to a string only, never parsed and
+// never branched on (a pasted "{...}" must reach the PTY as typed text, so there
+// is deliberately NO control-message sniffing on this lane). A pure projection of
+// its inputs — no fs, no clock, no network.
+export function buildTerminalInputEnvelope(nodeId, sessionId, bytes) {
+  return {
+    kind: TERMINAL_INPUT_KIND,
+    nodeId,
+    signal: { sessionId: sessionId ?? null, bytes },
   };
 }
 

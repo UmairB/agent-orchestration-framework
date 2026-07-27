@@ -42,7 +42,7 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, createMeshWorkerTerminalInputHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
@@ -68,6 +68,12 @@ import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // `createTerminalRelayPushTransport` is used ONLY on the CONTROL side (the loopback
 // push into the broker) — never on the worker side.
 import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
+// m42 "interactive worker terminals" — the INPUT direction (T14 operator-overridden).
+// The serve process SELF-SUBSCRIBES to its own loopback broker (the same subscriber
+// machinery the fleet mirror uses) and hands inbound frames to the input router,
+// which routes a valid terminal-input down the worker's admitted stream connection.
+import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
+import { createTerminalInputRouter } from "./mesh-terminal-input.mjs";
 // milestone 35 / ADR-008 — the control-side dispatch/reclaim driver's DATA-LAYER
 // orchestrator (owns the ONE store-open for both the dispatch scan AND the ADR-005
 // reclaim call — this launcher module itself imports NO SQLite-store module
@@ -718,6 +724,9 @@ export async function startLauncher(ws, options = {}) {
   // needs no launcher-held handle — it rides the existing stream client.)
   let relayBroker = null;
   let controlTerminalPush = null;
+  // m42 "interactive worker terminals" — the serve process's SELF-subscription to its
+  // own loopback broker (the input direction's inbound leg). Disposed in stop().
+  let terminalInputSubscriber = null;
   // VERIFICATION (2026-07-26) — the per-(node, workspace, code) throttle clock for the
   // control server's refused-frame reports (wired below). Held on the launcher, not the
   // server, so it lives exactly as long as this daemon does.
@@ -858,6 +867,33 @@ export async function startLauncher(ws, options = {}) {
       } catch (error) {
         emitWarning(launcherWarnings, { code: error?.code ?? "relay-broker-start-failed", message: error?.message ?? "The mesh-relay broker failed to start.", path: null }, options);
         relayBroker = null;
+      }
+      // m42 "interactive worker terminals" — the INPUT direction's inbound leg, a
+      // LITERAL production wiring (the F12 discipline): the serve process subscribes
+      // to its OWN broker (the fan-out is broadcast-to-others, so this socket — a
+      // different client than controlTerminalPush's — receives what the mesh-ui
+      // process pushes) and hands every frame to the input router, which is
+      // kind-blind to everything but terminal-input and routes a valid frame down
+      // the worker's admitted stream connection via the SAME dispatchDirective seam
+      // the withdraw notify uses. Reuses the mirror's subscriber machinery whole
+      // (parse + backoff + reconnect) — the router deliberately keeps the mirror's
+      // own `apply` contract so no second transport path exists. A start fault is a
+      // degraded input lane, never a dead daemon.
+      if (relayBroker != null && streamServer != null) {
+        const inputRouter = createTerminalInputRouter({
+          dispatchDirective: (directive) => streamServer.dispatchDirective(directive),
+          now: () => resolveNow(options),
+          onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-input", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        });
+        try {
+          terminalInputSubscriber = await startTerminalMirrorSubscriber({
+            transport: createTerminalMirrorSubscriberTransport(config),
+            mirror: inputRouter,
+          });
+        } catch (error) {
+          emitWarning(launcherWarnings, { code: "terminal-input-subscriber-failed", message: error?.message ?? "The terminal-input relay subscriber failed to start.", path: null }, options);
+          terminalInputSubscriber = null;
+        }
       }
     }
   } else if (role === "worker" && options?.streamClient !== false) {
@@ -1056,6 +1092,21 @@ export async function startLauncher(ws, options = {}) {
         Promise.resolve(withdrawHandler(frame)).catch((error) => {
           reportDegrade("mesh-launcher", error);
         });
+      });
+
+      // m42 "interactive worker terminals" — the terminal-input DOWN-frame's
+      // handler, registered beside the withdraw lane it mirrors: write ONLY the
+      // live PTY whose captured session id matches the frame's. Same literal-key
+      // discipline, same log channel.
+      const terminalInputHandler = createMeshWorkerTerminalInputHandler({
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-input", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+      });
+      client.onTerminalInput?.((frame) => {
+        try {
+          terminalInputHandler(frame);
+        } catch (error) {
+          reportDegrade("mesh-launcher", error);
+        }
       });
     }
 
@@ -1354,6 +1405,7 @@ export async function startLauncher(ws, options = {}) {
     streamClient?.stop?.();
     relayBroker?.stop?.();
     controlTerminalPush?.close?.();
+    terminalInputSubscriber?.stop?.();
   };
 
   return {

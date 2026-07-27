@@ -8,7 +8,7 @@ import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 // run-store.mjs imports no store/mesh module — no cycle.
 import { readRuns } from "./run-store.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 6;
+export const GLOBAL_WORK_SCHEMA_VERSION = 7;
 
 // The record docs a board/CLI face may request by NAME (work:doc's input contract)
 // and therefore exactly the doc bodies a worker streams for its active worktree —
@@ -202,7 +202,8 @@ function migrateSchema(db, existingVersion) {
         assigned_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         reclaimed_at TEXT,
-        session_id TEXT
+        session_id TEXT,
+        code TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_global_assignments_item ON global_assignments(workspace_id, item_ref);
       -- schema v5 (TECH_DEBT item 6 — finish the board bridge). Worker-STREAMED
@@ -278,10 +279,18 @@ function migrateSchema(db, existingVersion) {
     // table. The migration is IN PLACE — the table is never dropped, recreated,
     // or wiped, so a live fleet's dispatch history survives the upgrade (an
     // assignment row is operator/worker-CREATED state, unrecoverable if lost).
-    const hasSessionIdColumn = db.prepare("PRAGMA table_info(global_assignments)").all()
-      .some((column) => column.name === "session_id");
+    const assignmentColumns = db.prepare("PRAGMA table_info(global_assignments)").all();
+    const hasSessionIdColumn = assignmentColumns.some((column) => column.name === "session_id");
     if (!hasSessionIdColumn) {
       db.exec("ALTER TABLE global_assignments ADD COLUMN session_id TEXT");
+    }
+    // schema v7 (m42 interactive worker terminals) — the status-refinement `code`
+    // a worker's assignment-status frame carries (today: `needs-input`), persisted
+    // so the board/fleet can RENDER a session waiting on a human (the code used to
+    // ride the frame and die there). Same in-place ALTER discipline as session_id.
+    const hasCodeColumn = assignmentColumns.some((column) => column.name === "code");
+    if (!hasCodeColumn) {
+      db.exec("ALTER TABLE global_assignments ADD COLUMN code TEXT");
     }
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {

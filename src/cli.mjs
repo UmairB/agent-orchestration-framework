@@ -33,6 +33,10 @@ import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
 // wired as a LITERAL `startTerminalRelaySubscriber` key at the production
 // `serveMeshUi({...})` call site below (meshUiCommand).
 import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
+// m42 "interactive worker terminals" — the INPUT direction's loopback push, wired
+// as a LITERAL `terminalInputPush` key at the same production call site (null when
+// no relay is configured — the route then stays output-only).
+import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
 import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
 import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
 import { recoverPush } from "./commands/mesh-recover-push.mjs";
@@ -1249,6 +1253,7 @@ async function meshUiCommand(args) {
       port,
       scope,
       startTerminalRelaySubscriber: (mirror) => startTerminalMirrorSubscriber({ transport: createTerminalMirrorSubscriberTransport(config), mirror }),
+      terminalInputPush: createTerminalRelayPushTransport(config),
     });
   } catch (error) {
     if (error.code === "ui-build-missing") {

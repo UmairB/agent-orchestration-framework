@@ -64,17 +64,32 @@ export const boardActionTests = [
   {
     // m42 item 6 (reworked at the operator's insistence): the board has ONE terminal
     // surface — the dock — and a running item WITH a captured session opens it as the
-    // fleet's read-only mirror. A remote session is a SOURCE of the dock, never a
-    // second widget.
-    name: "board-action/a worker is executing it WITH a captured session → View terminal opens the dock as the read-only mirror",
+    // worker's live session (INTERACTIVE since m42's terminal-input path). A remote
+    // session is a SOURCE of the dock, never a second widget.
+    name: "board-action/a worker is executing it WITH a captured session → Open terminal opens the dock on the worker's live session",
     async run() {
       const running = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: "3ffa37de-ce0c", updatedAt: null, branch: null } };
       const a = primaryAction(running, { hasBreakdown: true, liveForRef: false });
       assert.equal(a.kind, "mirror");
-      assert.equal(a.label, "View terminal — umairs-mac-mini");
+      assert.equal(a.label, "Open terminal — umairs-mac-mini");
+      assert.equal(a.needsInput, false, "a working session is not waiting on a human");
       assert.equal(a.nodeId, "umairs-mac-mini");
       assert.equal(a.sessionId, "3ffa37de-ce0c", "the full (nodeId, sessionId) tuple rides the action — the dock needs both");
       assert.equal(a.disabled, undefined, "watchable running work is not a dead end");
+    },
+  },
+  {
+    // m42 interactive worker terminals — a session the worker reports WAITING ON A
+    // HUMAN (code: needs-input) leads with that: the terminal affordance is the
+    // door the answer is typed through, not just a viewport.
+    name: "board-action/a running session waiting on a human (code: needs-input) → the affordance says Answer",
+    async run() {
+      const waiting = { ...item("in-progress"), execution: { assignmentId: "a1", active: true, state: "running", nodeId: "umairs-mac-mini", sessionId: "3ffa37de-ce0c", code: "needs-input", updatedAt: null, branch: null } };
+      const a = primaryAction(waiting, { hasBreakdown: true, liveForRef: false });
+      assert.equal(a.kind, "mirror");
+      assert.equal(a.label, "Answer on umairs-mac-mini");
+      assert.equal(a.needsInput, true);
+      assert.equal(a.sessionId, "3ffa37de-ce0c");
     },
   },
   {
