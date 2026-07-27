@@ -140,6 +140,7 @@ to main without explicit signoff).**
 | `3ce8737` | Dispatch + worktree-base DECISIONS durably logged (tick logs `<command> on <branch>`; worker logs `worktree on EXISTING branch …`); log entries carry their own level. The wrong-base dispatch was diagnosable only by inference because both decisions were unrecorded. |
 | `1b59cee` | (a) WITHDRAW REACHES ITS HOLDER: withdraw DOWN-frame (tick, once-guarded) → worker kills the live PTY (`onPtyLive` registry) + settles the run record `cancelled`; pre-spawn + post-settle guards. (b) Failure codes durable: `reportAssignmentFailure` → sink/ring; codes on the code-less frames; control logs received failed frames WITH code (`onAssignmentFailure` peek). (c) Board dead-tab banner (ephemeral board ports die with every restart; the tab clicked into the void). |
 | `9817f6b` | Startup reclaim settles the stranded run RECORD (`failed/runtime_offline`) — the ghost family's last member, measured within the hour of (a) shipping. Every terminal path now settles its record: withdraw→cancelled, startup→failed/retryable, bracket→done/failed. |
+| `5c03269` | **INTERACTIVE WORKER TERMINALS** (Next-work #1; T14 read-only operator-overridden). Input path: dock keystroke → tuple-bound `/ws/terminal-view` (mesh-ui wraps bytes with THE SOCKET'S OWN tuple; content-blind, 32 KB-bounded, clean-degrading) → loopback relay → serve SELF-subscribed router (`mesh-terminal-input.mjs`, reusing the mirror's subscriber machinery whole) → `terminal-input` DOWN-frame over the admitted stream → worker writes ONLY the live PTY whose CAPTURED sessionId matches (`liveSessionInputs`, bound at capture, swept at settle incl. the generic-catch path). **Plus the lane that makes it useful:** a pending AskUserQuestion no longer parks ~10s in — it reports `code: needs-input` immediately (persisted, schema v7 additive `code` column, verbatim-per-frame so an answer clears it), keeps the PTY alive for the answer, and parks only after the LONG 15-min window (resume-later is now the fallback, not the only path; the SENTINEL needs-input keeps its fast park — that turn deliberately ended). Board: `Answer on <node>` affordance + amber "waiting for your input" line; dock remote badge `remote · <node>` (interactive). Gate DELIBERATELY rewritten: `acd-fleet-terminal-mirror-read-only` → `acd-fleet-terminal-input-constrained` (pins tuple-bound entry, session-exact delivery, pure mirror/bridge, fleet-page-stays-monitor — plants incl. content-routed handler, first-live-PTY fallback, the old absence itself). Focused 89/0; arch 698/0 across 221 files. |
 
 ### The incident ledger (what actually happened live)
 1. **The duplicate-run wall** (root cause of "Continue does nothing"): withdrawn run `0015`'s
@@ -167,6 +168,13 @@ to main without explicit signoff).**
 - LIVE NOW: run `0017` (assignment `00858ddc`, session `89d1f151`) running `/aof:autonomous 18 on
   aof/mesh/18-73ab17b2…` — the first run with every fix live on both machines. A session monitor
   in the driving session watches the assignment row.
+- **2026-07-27 (later): `5c03269` (interactive terminals) INSTALLED as `payload 5c03269+dirty` —
+  RESTART THE DESKTOP APP PROMPTLY.** Schema v7 is an in-place additive migrate, but the guard is
+  one-directional: the first NEW-payload process to open the store (the desktop's own status poll
+  does this within seconds) stamps it v7, after which the still-running OLD daemons' per-tick /
+  per-request store OPENS refuse ("newer than this build supports") until restart — long-held
+  handles keep working, so no corruption, but dispatch/reclaim ticks + board reads degrade in the
+  window. Mac: `git pull` the branch + operator restart (its own store migrates then).
 
 ### MISSING TESTS (write these before/while merging — today's code shipped under fire)
 - [ ] `createMeshWorkerWithdrawHandler` — all three paths: live-PTY kill (flag consumed by the
@@ -203,13 +211,14 @@ to main without explicit signoff).**
   table demoted to cache; plus run-settled DOC changes landing on the default branch so main-based
   reads (local continue, `work next`, validate, the board's local rows) stop lying about refined
   items.
-- **Terminal INPUT path** (operator's explicit next feature): the dock mirror is read-only; a
-  needs-input session can only be answered by resume-at-the-worker. Design mapped: browser input
-  on the existing `/ws/terminal-view` socket (tuple-bound) → UI pushes a `terminal-input` envelope
-  into the loopback relay → serve process (self-subscribed) → `directiveTargets` → worker
-  `term.write`, with the `acd-fleet-terminal-mirror-read-only` gate deliberately rewritten to pin
-  the constrained shape. Parked mid-exploration when the wrong-base incident hit.
-- needs-input runs have no board affordance yet (the code rides the status frame; nothing renders it).
+- ~~**Terminal INPUT path**~~ **BUILT (`5c03269`, unit-verified; live two-machine verification
+  pending both restarts).** Exactly the mapped design, plus one recorded decision the mapping
+  didn't cover: the pending-AskUserQuestion park had to move to the LONG window (the ~10s park
+  would have killed the very session the operator was about to type into — the input path alone
+  was useless against it). Live verification checklist: dock `Answer on <node>` on a real pending
+  question → typed answer lands in the worker PTY → code clears on the row → run continues.
+- ~~needs-input runs have no board affordance yet~~ BUILT in `5c03269` (`code` persisted schema v7;
+  `Answer on <node>` primary action + amber "waiting for your input" panel line).
 - A pre-deploy board tab cannot warn (old bundle) — inherent; only hurts once per UI deploy.
 - `stream-frame-refused` message template misnames non-descriptor refusals (says "no registered
   descriptor" for `assignment-status-already-terminal`).
