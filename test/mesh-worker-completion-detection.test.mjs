@@ -114,6 +114,48 @@ export const meshWorkerCompletionDetectionTests = [
         await write("dc-1", [asst("end_turn", "All stories built and reviewed.\nAOF_DIRECTIVE_COMPLETE")]);
         assert.deepEqual(await settle("dc-1"), { outcome: "done", declared: true });
 
+        // ── the INVISIBLE STOP (measured live 2026-07-27, /aof:autonomous 18) ──
+        // The session asked its scope question through the interactive
+        // AskUserQuestion widget instead of printing NEEDS_INPUT and ending its
+        // turn — a pending question is a tool_use turn, so the pre-fix detector
+        // read "still working" and the assignment showed `running` for 28+
+        // minutes while the session sat waiting on a human.
+        const askPending = {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            stop_reason: "tool_use",
+            content: [
+              { type: "text", text: "I need a decision on the scope split." },
+              { type: "tool_use", id: "tu-1", name: "AskUserQuestion", input: { questions: [] } },
+            ],
+          },
+        };
+        await write("ask-1", [asst("tool_use", "working"), askPending]);
+        assert.deepEqual(await settle("ask-1"), { outcome: "needs-input", declared: true }, "an UNANSWERED AskUserQuestion is a session waiting on a human — needs-input, declared");
+
+        // The SAME question WITH its answer behind it is a live session again —
+        // never settles (the next assistant turn is coming).
+        const askAnswered = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu-1", content: "Do the split" }] } };
+        await write("ask-2", [asst("tool_use", "working"), askPending, askAnswered]);
+        const ac3 = new AbortController();
+        const answeredP = settle("ask-2", { signal: ac3.signal });
+        await new Promise((r) => setTimeout(r, 60));
+        ac3.abort();
+        assert.equal(await answeredP, null, "an ANSWERED question is a working session — nothing settles");
+
+        // An ordinary pending tool (Bash mid-run) is genuinely still working.
+        const bashPending = {
+          type: "assistant",
+          message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "tu-2", name: "Bash", input: { command: "npm test" } }] },
+        };
+        await write("ask-3", [bashPending]);
+        const ac4 = new AbortController();
+        const bashP = settle("ask-3", { signal: ac4.signal });
+        await new Promise((r) => setTimeout(r, 60));
+        ac4.abort();
+        assert.equal(await bashP, null, "a pending ORDINARY tool call never reads as needs-input");
+
         // a transcript whose last turn is tool_use is STILL WORKING — it never settles.
         await write("work-1", [asst("tool_use", "still editing")]);
         const ac = new AbortController();

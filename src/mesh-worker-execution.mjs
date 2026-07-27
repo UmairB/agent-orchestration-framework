@@ -1106,6 +1106,23 @@ export const COMPLETION_IDLE_MS = 15 * 60 * 1000;
 // flush mid-write, nowhere near a wait a human would notice.
 export const DECLARED_COMPLETION_IDLE_MS = 10 * 1000;
 
+// HUMAN_INPUT_TOOL_NAMES — the closed set of tools whose PENDING call means the
+// session is, definitionally, waiting on a human (measured live 2026-07-27,
+// `/aof:autonomous 18`: instead of printing the NEEDS_INPUT line and ending its
+// turn, the session asked its scope question through the interactive
+// AskUserQuestion widget. A pending question is a `tool_use` turn, so BOTH
+// detectors read "still working" — the assignment showed a healthy `running` for
+// 28+ minutes while the session sat waiting, and the operator only discovered it
+// by opening the read-only mirror). An ORDINARY pending tool (Bash, Edit, a
+// subagent Task) is genuinely "still working" and must never match here.
+export const HUMAN_INPUT_TOOL_NAMES = ["AskUserQuestion"];
+
+function pendingHumanInputTool(message) {
+  const content = message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => block?.type === "tool_use" && HUMAN_INPUT_TOOL_NAMES.includes(block?.name));
+}
+
 // readTranscriptTerminalOutcome(file) => { outcome, declared } | null — the
 // transcript's SETTLED outcome, or null while the session is still working. Scans the
 // jsonl from the end for the last assistant record: `stop_reason: "end_turn"` means
@@ -1113,9 +1130,12 @@ export const DECLARED_COMPLETION_IDLE_MS = 10 * 1000;
 // `needs-input` if that turn's own text carries the sentinel, else `done`. `declared`
 // is true when the finished turn EXPLICITLY declared its outcome (either sentinel) —
 // the watch settles a declared outcome fast, and makes an undeclared one out-wait the
-// long idle window. Any other stop_reason (`tool_use`, or a not-yet-terminated
-// streaming turn) is "still working" -> null. NEVER throws (an absent or half-written
-// file is simply "nothing settled yet").
+// long idle window. A `tool_use` turn whose UNANSWERED call is a human-input tool
+// (HUMAN_INPUT_TOOL_NAMES above) is `needs-input`, declared — the session is waiting
+// on a person, not working; any user/tool_result record AFTER it means it was
+// answered and the session is live again. Every other pending stop_reason is "still
+// working" -> null. NEVER throws (an absent or half-written file is simply "nothing
+// settled yet").
 async function readTranscriptTerminalOutcome(file) {
   let text;
   try {
@@ -1124,6 +1144,9 @@ async function readTranscriptTerminalOutcome(file) {
     return null;
   }
   const lines = text.split("\n");
+  // True once any record LATER than the last assistant record is a `user` record —
+  // i.e. the assistant's pending tool call already has its answer in the stream.
+  let answeredAfterAssistant = false;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i].trim();
     if (line.length === 0) continue;
@@ -1133,11 +1156,23 @@ async function readTranscriptTerminalOutcome(file) {
     } catch {
       continue;
     }
+    if (record?.type === "user") {
+      answeredAfterAssistant = true;
+      continue;
+    }
     const message = record?.message;
     if (record?.type === "assistant" && message && typeof message === "object") {
       const stop = message.stop_reason;
       if (stop == null) return null;
-      if (stop !== "end_turn") return null;
+      if (stop !== "end_turn") {
+        // A pending HUMAN-INPUT tool call with no answer behind it is a session
+        // waiting on a person — the invisible-stop defect. Declared: the model
+        // explicitly asked; the watch needs only the short confirmation window.
+        if (stop === "tool_use" && !answeredAfterAssistant && pendingHumanInputTool(message)) {
+          return { outcome: "needs-input", declared: true };
+        }
+        return null;
+      }
       let body = "";
       const content = message.content;
       if (Array.isArray(content)) {
