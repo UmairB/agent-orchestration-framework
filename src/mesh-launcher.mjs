@@ -1408,7 +1408,11 @@ export async function startLauncher(ws, options = {}) {
       // record whose process died with the previous daemon.
       await settleStrandedRunRecords(stranded, {
         globalWorkStoreOptions: options?.globalWorkStoreOptions,
-        now: nowFn,
+        // NOT `nowFn` — that const lives in the worker-branch block ABOVE, out of
+        // scope here: referencing it threw `nowFn is not defined` on EVERY worker
+        // restart (measured on the Mac 2026-07-27 13:49Z), so the ghost-record
+        // settle this block exists for never once ran in production.
+        now: () => resolveNow(options),
         onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "startup-reclaim", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
       });
     })().catch((error) => {

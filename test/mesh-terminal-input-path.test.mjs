@@ -603,9 +603,13 @@ export const meshTerminalInputPathTests = [
           workspace: { config: {} },
           globalWorkStoreOptions: { env: { AOF_GLOBAL_HOME: home } },
           createTerminalResumePush: () => ({ push: async (envelope) => { pushed.push(envelope); }, close() {} }),
+          // Nothing worker-side runs in this unit — the confirm poll must give up
+          // fast and report honestly (dispatched, NOT confirmed).
+          confirmTimeoutMs: 50,
         };
         const result = await meshTerminalResumeCommand.run({ session: "sess-89d1" }, ctx);
         assert.equal(result.ok, true);
+        assert.equal(result.confirmed, false, "no worker moved the row — the CLI must NOT claim success (the fire-and-forget lie, measured twice live)");
         assert.equal(result.node, "umairs-mac-mini", "the holder comes from the assignment row");
         assert.equal(result.assignmentId, assignmentId);
         assert.equal(pushed[0].kind, TERMINAL_RESUME_KIND);

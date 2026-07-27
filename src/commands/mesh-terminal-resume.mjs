@@ -67,6 +67,7 @@ export const meshTerminalResumeCommand = {
         400,
       );
     }
+    const dispatchedAt = new Date().toISOString();
     try {
       await push.push(buildTerminalResumeEnvelope(nodeId, {
         sessionId,
@@ -78,15 +79,44 @@ export const meshTerminalResumeCommand = {
       try { push.close?.(); } catch (error) { reportDegrade("mesh-terminal-resume", error); }
     }
 
+    // 3. CONFIRM AT THE SOURCE — never report a fire-and-forget push as success
+    //    (measured 2026-07-27: two resumes were dropped — one in a serve-restart
+    //    race, one against a dead worker — while this command printed a
+    //    success-shaped message both times). The dispatch is real the moment the
+    //    WORKER's lifecycle frames land back in the store: poll the assignment
+    //    row for an update newer than the dispatch. Not confirmed within the
+    //    window = say so, with the exact places the truth lives.
+    const confirmTimeoutMs = Number.isFinite(ctx?.confirmTimeoutMs) ? ctx.confirmTimeoutMs : 10_000;
+    let confirmedRow = null;
+    const deadline = Date.now() + confirmTimeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, confirmTimeoutMs)));
+      const probe = await openGlobalWorkProjectionStore({ ...storeOptions, paths: storeOptions.paths ?? globalMeshPaths(storeOptions) });
+      try {
+        const current = probe.db.prepare(
+          "SELECT state, run_id, session_id, code, updated_at FROM global_assignments WHERE assignment_id = ?",
+        ).get(row.assignment_id);
+        if (current != null && typeof current.updated_at === "string" && current.updated_at > dispatchedAt) {
+          confirmedRow = current;
+          break;
+        }
+      } finally {
+        probe.close?.();
+      }
+    }
+
     return {
       ok: true,
       dispatched: true,
+      confirmed: confirmedRow != null,
       sessionId,
       node: nodeId,
       assignmentId: row.assignment_id,
       itemRef: row.item_ref,
       workspaceId: row.workspace_id,
-      assignmentState: row.state,
+      assignmentState: confirmedRow?.state ?? row.state,
+      confirmedCode: confirmedRow?.code ?? null,
+      confirmedRunId: confirmedRow?.run_id ?? null,
     };
   },
 
@@ -98,14 +128,17 @@ export const meshTerminalResumeCommand = {
     }),
 
     render(result) {
+      if (!result.confirmed) {
+        return [
+          `resume dispatched but NOT CONFIRMED: session ${result.sessionId} -> ${result.node} — the assignment row did not move within the confirmation window.`,
+          `Most likely the worker daemon on ${result.node} is not running or its stream is down (a dead daemon still reads "live" on mesh status — that is FABRIC liveness, the machine, not the daemon).`,
+          `Check: \`aof mesh logs mesh-serve --tail 20\` on the control (a routed dispatch logs terminal-resume-dispatched; a dead target logs terminal-resume-target-not-connected), then start the worker and re-run this command.`,
+        ].join("\n");
+      }
       return [
-        `resume dispatched: session ${result.sessionId} -> ${result.node} (assignment ${result.assignmentId}, item ${result.itemRef}, row ${result.assignmentState})`,
-        `The worker resumes it as a REAL run: a run record is minted, the row revives to running (code: resumed),`,
-        `and the board's terminal affordance re-arms on the live session as it reports in — watch the item on the board,`,
-        `or \`aof mesh logs --node ${result.node}\` for the worker's terminal-resume lines.`,
-        ...(result.assignmentState !== "failed" && result.assignmentState !== "running"
-          ? [`NOTE: the row is ${result.assignmentState} — only a FAILED row revives (done/withdrawn stay terminal); the session still resumes and streams, but the row will not flip.`]
-          : []),
+        `resume CONFIRMED: session ${result.sessionId} -> ${result.node} (assignment ${result.assignmentId}, item ${result.itemRef})`,
+        `row: ${result.assignmentState}${result.confirmedCode ? ` (code: ${result.confirmedCode})` : ""}${result.confirmedRunId ? ` · run ${result.confirmedRunId}` : ""}`,
+        `The board's terminal affordance re-arms on the live session as it reports in.`,
       ].join("\n");
     },
 
