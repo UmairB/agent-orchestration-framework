@@ -186,6 +186,22 @@ export function DetailPanel({
                   · branch {item.execution.branch}
                 </span>
               ) : null}
+              {/* m42 quick-fix — the RESUME door. A SETTLED row that captured a
+                  session has no primary terminal affordance (the button is
+                  Continue), but its tuple is still addressable: an operator who
+                  ran `aof mesh terminal-resume` needs a way back INTO the revived
+                  session. The dock opens on the row's own (nodeId, sessionId) —
+                  live paints, dead reads connecting… until resumed. */}
+              {!item.execution.active && item.execution.sessionId ? (
+                <button
+                  type="button"
+                  onClick={() => onMirror(item.ref, item.execution!.nodeId, item.execution!.sessionId!)}
+                  className="underline underline-offset-2 hover:text-foreground"
+                  title={`Open the terminal for session ${shortSession(item.execution.sessionId)} on ${item.execution.nodeId} — a resumed session (aof mesh terminal-resume) paints here`}
+                >
+                  · open terminal →
+                </button>
+              ) : null}
               {/* "It's running — where do I watch it?" (operator, 2026-07-26). The board's
                   own terminal dock is a LOCAL pty, so a live worker session is only
                   visible in the fleet's read-only mirror. Until the board embeds that
