@@ -2871,6 +2871,32 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
       await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, code: "resumed" });
 
       log("info", `session ${sessionId} RESUMING (assignment ${assignmentId}, item ${itemRef}, run ${runRecord.runId}): claude --resume in ${worktreePath}`);
+
+      // IN-DAEMON PTY SELF-TEST (2026-07-27, cycle 13 — temporary): pty WRITES
+      // deliver in a fresh process on this same machine/node/lib but vanish
+      // inside the daemon (reads flow; writes + resize ioctls die silently, no
+      // error). This spawns a THROWAWAY `cat` pty inside THIS daemon process,
+      // writes to it, and logs echo-or-silence — discriminating "pty input is
+      // dead daemon-process-wide" from "only the claude term is affected".
+      // Removed once the input path is live-proven.
+      if (process.platform !== "win32") {
+        (async () => {
+          try {
+            const probeSpawn = options.ptySpawn ?? defaultPtySpawn;
+            const probe = await probeSpawn("/bin/cat", [], { name: "xterm-256color", cols: 80, rows: 24, cwd: worktreePath, env: process.env });
+            let echoed = "";
+            const sub = probe.onData?.((d) => { echoed += String(d); });
+            setTimeout(() => { try { probe.write("pty-selftest\r"); } catch (error) { reportDegrade("mesh-worker-execution", error); } }, 500);
+            setTimeout(() => {
+              log("info", `pty-selftest: in-daemon cat echo ${echoed.includes("pty-selftest") ? "OK" : `SILENT (got ${echoed.length} bytes)`}`);
+              try { sub?.dispose?.(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
+              try { probe.kill(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
+            }, 3000).unref?.();
+          } catch (error) {
+            log("warn", `pty-selftest: spawn failed: ${String(error?.message ?? error)}`);
+          }
+        })();
+      }
       const outcome = await spawnRuntime(
         // command: null — a resume re-attaches to the conversation; there is no
         // directive to type (the driver's command write is already null-guarded).
