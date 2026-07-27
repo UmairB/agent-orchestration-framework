@@ -22,6 +22,7 @@ import { meshWorkerBranchName, meshWorktreePath } from "../src/mesh-worktree.mjs
 import { loadWorkspace } from "../src/work.mjs";
 import {
   ASSIGNMENT_PHASES,
+  phaseRunsOnItemBranch,
   DEFAULT_ASSIGNMENT_PHASE,
   isAssignmentPhase,
   assignmentDirectiveCommand,
@@ -216,6 +217,36 @@ export const meshAssignmentDirectiveTests = [
       assert.equal(byId.get("asg-cont")?.command, "/aof:continue 18");
       assert.equal(byId.get("asg-refine")?.baseBranch, undefined, "a refine branches fresh — no baseBranch");
       assert.equal(byId.get("asg-cont-nobranch")?.baseBranch, undefined, "a continue with no recorded branch carries none (first-ever run falls back to fresh)");
+    }),
+  },
+  {
+    // MEASURED 2026-07-27 (the first autonomous dispatch, milestone 18 live): the
+    // tick hand-spelled `phase === "continue" || phase === "verify"` at its call
+    // site, so `autonomous` fell to the no-baseBranch default and the worker built
+    // the milestone in a FRESH worktree off main — none of the refine's stories
+    // existed there. The predicate now lives in ONE home (phaseRunsOnItemBranch):
+    // every non-refine phase carries the recorded branch.
+    name: "dispatch: an AUTONOMOUS assignment carries the item's recorded branch too — every non-refine phase accumulates on the ONE branch (the 2026-07-27 wrong-base defect)",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-auto", itemRef: "18", targetNodeId: "worker-a" });
+      seedAssigned(store, { assignmentId: "asg-verify", itemRef: "22", targetNodeId: "worker-a" });
+      setAssignmentPhase(store, "asg-auto", "autonomous");
+      setAssignmentPhase(store, "asg-verify", "verify");
+      setItemBranch(store, "ws-1", "18", "aof/mesh/18-73ab17b2");
+      setItemBranch(store, "ws-1", "22", "aof/mesh/22-feedface");
+
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-27T10:00:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+      });
+
+      const byId = new Map(streamServer.dispatched.map((f) => [f.assignmentId, f]));
+      assert.equal(byId.get("asg-auto")?.command, "/aof:autonomous 18", "the autonomous phase dispatches the cascade");
+      assert.equal(byId.get("asg-auto")?.baseBranch, "aof/mesh/18-73ab17b2", "…ON the item's recorded branch — the refined stories are THERE, never a fresh worktree off main");
+      assert.equal(byId.get("asg-verify")?.baseBranch, "aof/mesh/22-feedface", "verify still carries the branch (the one-home predicate covers every non-refine phase)");
+      assert.equal(phaseRunsOnItemBranch("refine"), false, "refine mints the branch — it never carries one");
+      assert.equal(phaseRunsOnItemBranch("nonsense"), false, "an unknown phase degrades branchless, matching the mapper's refine degrade");
     }),
   },
   {

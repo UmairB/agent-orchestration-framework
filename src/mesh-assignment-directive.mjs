@@ -32,6 +32,21 @@ export function isAssignmentPhase(value) {
   return typeof value === "string" && ASSIGNMENT_PHASES.includes(value);
 }
 
+// phaseRunsOnItemBranch(phase) — THE ONE HOME for "does this phase run on the
+// item's EXISTING mesh branch". Every phase except `refine` accumulates on the
+// branch the refine created (continue-on-existing-branch, 2026-07-25): a refine
+// mints the branch, everything after builds on it. MEASURED (2026-07-27, the
+// first autonomous dispatch): the dispatch tick hand-spelled
+// `phase === "continue" || phase === "verify"` at its own call site, so the new
+// `autonomous` phase silently fell to the no-baseBranch default — the worker
+// built milestone 18 in a FRESH worktree off main, where none of the refine's
+// stories exist, and the session reasoned from a wrong-base checkout. A phase
+// list spelled anywhere but here is that defect waiting to recur; an unknown
+// phase answers false (the mapper's own refine degrade carries no branch).
+export function phaseRunsOnItemBranch(phase) {
+  return isAssignmentPhase(phase) && phase !== "refine";
+}
+
 // assignmentDirectiveCommand(phase, itemRef) — the phase → whole-command-string mapper
 // the worker types into its interactive `claude` PTY. `refine` carries `--autonomous`
 // (the headless-worker cascade — a worker has no human to stop at each sub-step, exactly

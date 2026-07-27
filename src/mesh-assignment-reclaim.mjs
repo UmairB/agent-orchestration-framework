@@ -32,7 +32,7 @@ import { openGlobalWorkProjectionStore, readWorkItemRuns } from "./global-work-s
 // (which lifecycle command the worker runs). The dispatch call site below reads the
 // operator-chosen phase from the additive side-table and maps it to the command string;
 // the refine default above delegates to the SAME mapper.
-import { readAssignmentPhase, assignmentDirectiveCommand, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
+import { readAssignmentPhase, assignmentDirectiveCommand, phaseRunsOnItemBranch, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
 
 // The PRODUCTION row source: every assignment row for `workspaceId`, off the SAME
 // bulk reader story 03's status shape already uses (no second query surface).
@@ -231,11 +231,15 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       const command = phase != null
         ? assignmentDirectiveCommand(phase, row.itemRef)
         : defaultAssignmentDirectiveCommand(row.itemRef);
-      // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify runs on
-      // the item's EXISTING active branch (the refine's), so its commits accumulate there
-      // rather than on a fresh branch off main. A refine (or an item with no prior push,
-      // readItemBranch → null) carries no baseBranch and the worker branches fresh.
-      const baseBranch = phase === "continue" || phase === "verify"
+      // VERIFICATION (continue-on-existing-branch, 2026-07-25; REVISED 2026-07-27) —
+      // every non-refine phase runs on the item's EXISTING active branch (the
+      // refine's), so its commits accumulate there rather than on a fresh branch off
+      // main. The predicate is the ONE HOME in mesh-assignment-directive.mjs — a
+      // hand-spelled phase list HERE is exactly how the first `autonomous` dispatch
+      // built milestone 18 off main with none of its refined stories (measured
+      // 2026-07-27). A refine (or an item with no prior push, readItemBranch → null)
+      // carries no baseBranch and the worker branches fresh.
+      const baseBranch = phaseRunsOnItemBranch(phase)
         ? readItemBranch(store, row.workspaceId, row.itemRef)
         : null;
       const result = streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
