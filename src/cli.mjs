@@ -644,7 +644,11 @@ async function meshCommand(args) {
   const subcommand = sub;
   const [, ...rest] = args;
   if (subcommand === "identity") {
-    await meshVerbCli("mesh:identity", rest, { positionalAllowed: true });
+    // --name / --address: the registration overrides (2026-07-27) — the escape hatch
+    // for a machine that cannot derive a usable identity from itself (a WSL2 guest
+    // inherits the Windows hostname, so both the nodeId and the advertised host
+    // collide with its host's).
+    await meshVerbCli("mesh:identity", rest, { positionalAllowed: true, extraFlags: ["name", "address"] });
     return;
   }
   if (subcommand === "status") {

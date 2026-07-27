@@ -224,6 +224,21 @@ export async function loadWorkspace(cwd = process.cwd(), explicitConfig, { hostn
     }
     config = { ...config, mesh: meshOverlay };
   }
+  // The ADVERTISED ADDRESS override (2026-07-27, the `direct` fabric's identity leg) —
+  // overlaid on its OWN precedence, deliberately NOT nested under the nodeId branch
+  // above: `mesh.address` is machine reachability, not identity derivation, so a node
+  // that pinned only an address must still get it. It is the ONE home for the override
+  // (mesh-fabric's selfAddress reads config.mesh.address; mesh:identity publishes the
+  // SAME value as the descriptor's `host`), so the two never drift.
+  //
+  // WHY it exists: on `direct` a peer is found by resolving its advertised host, and a
+  // guest can INHERIT its host machine's name (a WSL2 distro defaults to the Windows
+  // hostname — measured: both answer `Umairs-MSI`). Resolving that name from either
+  // side returns the HOST, so without an explicit address the guest is unreachable and
+  // its nodeId collides. `aof mesh identity --name <id> --address <ip>` breaks both.
+  if (typeof sidecar.address === "string" && sidecar.address.length > 0) {
+    config = { ...config, mesh: { ...config.mesh, address: sidecar.address } };
+  }
 
   // Expose the MACHINE-WIDE identity write target (34/story 00) so every minting caller
   // (mesh:identity / mesh:heartbeat / the launcher) persists the id+salt to the SAME

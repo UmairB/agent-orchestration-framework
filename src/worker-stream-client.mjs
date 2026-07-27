@@ -890,15 +890,26 @@ export function createWorkerStreamClient({
 // closes/errors post-open (a pre-open error is already reported through connect()'s
 // own rejection, never double-reported here). Additive — a caller that never calls
 // onDrop gets byte-identical connect/send/close behaviour.
-export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
+// `credential` (2026-07-27, the `direct` fabric cutover) — this node's enrollment
+// relayAuth token (config.mesh.credential.relayAuth). When present it rides the ws
+// UPGRADE in an `Authorization: Bearer …` header, which is how the control node
+// resolves WHO this connection is on a fabric that has no address oracle. The header
+// name/prefix matches the relay broker's own auth gate (mesh-relay.mjs's
+// readPresentedCredential) so both surfaces read the credential identically.
+// ABSENT is not an error here — a node that never enrolled simply connects without
+// one and is refused at the gate, which is the honest outcome.
+export function createWorkerWsTransport(url, { WebSocketImpl, credential = null } = {}) {
   let dropHandler = null;
   let messageHandler = null;
   let currentSocket = null;
+  const connectOptions = typeof credential === "string" && credential.length > 0
+    ? { headers: { Authorization: `Bearer ${credential}` } }
+    : undefined;
   return {
     async connect() {
       const { WebSocket } = WebSocketImpl ? { WebSocket: WebSocketImpl } : await import("ws");
       return new Promise((resolve, reject) => {
-        const ws = new WebSocket(url);
+        const ws = connectOptions ? new WebSocket(url, connectOptions) : new WebSocket(url);
         let settled = false;
         // HALF-OPEN DETECTION (2026-07-27, measured three stream deaths in one
         // day): a TCP connection that silently loses its peer keeps ACCEPTING

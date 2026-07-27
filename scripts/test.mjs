@@ -944,6 +944,7 @@ import { archTests as acdFabricSingleSeamTests } from "../test/arch/acd-fabric-s
 // Online-≠-dialable handled outcomes (resolvePeerReachability, an injected dial closure),
 // the presence record assembly/read staying byte-unchanged, the unconfigured-mesh floor.
 import { meshFabricSeamTests } from "../test/mesh-fabric-seam.test.mjs";
+import { meshDirectFabricTests } from "../test/mesh-direct-fabric.test.mjs";
 import { meshFabricLivenessCutoverTests } from "../test/mesh-fabric-liveness-cutover.test.mjs";
 // milestone 33 (story 01) — fabric-native transport + coordination launcher: task 02
 // (02_broker-retirement.feature, dedicated behavioural coverage, review Fix 5) — a
@@ -1753,6 +1754,7 @@ export const tests = [
   ...acdFabricSingleSeamTests,
   // milestone 33 (story 01) — fabric-native transport + coordination launcher: tasks 00–04
   ...meshFabricSeamTests,
+  ...meshDirectFabricTests,
   ...meshFabricLivenessCutoverTests,
   ...meshBrokerRetirementTests,
   // milestone 24 — device-code group-enrollment (story 00/01/02): imported since

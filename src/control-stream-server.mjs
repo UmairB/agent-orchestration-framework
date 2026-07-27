@@ -1005,9 +1005,38 @@ export async function startControlStreamServer({
   });
   const wss = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (request, socket, head) => {
-    const origin = resolve(request);
-    if (!isTailnetPeer(origin, { peerNodeIds: roster })) {
+  // ASYNC gate (2026-07-27): a credential resolver must re-read the LIVE registry per
+  // decision (SECURITY T2 — never a serve-start snapshot, so a node revoked after its
+  // credential was issued is denied on its NEXT connect), and that read is async. The
+  // handler therefore awaits `resolve`; a resolver that is synchronous (the default
+  // address join, and every existing test double) is unaffected — `await` on a plain
+  // value is the value. ANY throw out of the resolver destroys the socket: an
+  // un-resolvable connection is never admitted (fail-closed, the same direction the
+  // null-nodeId path already took).
+  server.on("upgrade", async (request, socket, head) => {
+    let origin = null;
+    try {
+      origin = await resolve(request);
+    } catch (error) {
+      reportDegrade("control-stream-server", error);
+      socket.destroy();
+      return;
+    }
+    // ADMISSION (2026-07-27, the `direct` fabric cutover). The resolver may declare
+    // itself AUTHORITATIVE — it resolved this connection's identity from a presented
+    // ENROLLMENT CREDENTIAL rather than from the socket's remote address. That check
+    // (mesh-registry.mjs's verifyCredential, wired by mesh-launcher.mjs) already
+    // proves BOTH halves the roster gate below stands for: the token hashes to an
+    // admitted roster entry, AND that entry is not revoked. Re-checking it against
+    // the FABRIC peer list would be wrong, not merely redundant — on a no-overlay
+    // fabric there is no peer table to be in.
+    //
+    // Fail-closed is preserved on both paths: an authoritative resolver returns a
+    // null nodeId when verification FAILS, and a null nodeId is never admitted.
+    const admitted = origin?.authoritative === true
+      ? typeof origin.nodeId === "string" && origin.nodeId.length > 0
+      : isTailnetPeer(origin, { peerNodeIds: roster });
+    if (!admitted) {
       // A refused connection writes NOTHING to the global store — destroyed upstream
       // of the ws accept, before any frame can ever be read.
       socket.destroy();

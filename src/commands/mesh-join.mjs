@@ -178,9 +178,21 @@ export const meshJoinCommand = {
       throw faceError("mesh:join needs this node's identity (config.mesh.nodeId) — run `aof mesh identity` first.", "no-node-identity");
     }
 
+    // The ADVERTISED host — the SAME rule mesh:identity publishes by
+    // (config.mesh.address ?? the real hostname). Enrolment is the SECOND site that
+    // publishes this node's descriptor, and the two must not disagree: whichever ran
+    // last wins on the control, so a hardcoded os.hostname() here silently undid an
+    // operator's `mesh identity --address` the moment they joined.
+    //
+    // It matters most for exactly the node this override exists for: a WSL2 guest's
+    // hostname does not resolve from anywhere else (guests register in no DNS), so a
+    // name-valued host is an address nobody can dial.
+    const advertisedHost = typeof config?.mesh?.address === "string" && config.mesh.address.length > 0
+      ? config.mesh.address
+      : os.hostname();
     const nodeRecord = assembleDescriptor({
       nodeId,
-      hostname: os.hostname(),
+      hostname: advertisedHost,
       platform: process.platform,
       runtimes: Array.isArray(config.runtimes) ? config.runtimes : [],
       aofVersion: aofVersion(),

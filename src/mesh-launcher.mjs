@@ -49,6 +49,13 @@ import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, create
 // commit+push handler on the SAME client (createMeshRecoveryPushHandler, above).
 import { runRecoveryPushDispatchTick } from "./mesh-recovery-push.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
+// (2026-07-27, the `direct` fabric cutover) — CONNECTION IDENTITY BY CREDENTIAL. The
+// control stream server deliberately does not import this surface itself (its own
+// header: the credential/roster/enrollment surface is a heavier boundary than the
+// server's admission gate warrants), so THIS launcher — which already owns config,
+// the workspace handle and every other injected provider — builds the resolver and
+// hands it down through the server's existing `resolveOrigin` seam.
+import { readRegistry, verifyCredential } from "./mesh-registry.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
 // closing BLOCKER F-38.06 — the HYBRID transport). An option-(a) draft (push the
@@ -551,6 +558,42 @@ function peerNodeIdsFrom(peers) {
     .filter((id) => typeof id === "string" && id.length > 0);
 }
 
+// readPresentedCredential(request) — the presented relayAuth token off the ws upgrade's
+// `Authorization` header, tolerant of an optional `Bearer ` prefix. Byte-identical in
+// behaviour to mesh-relay.mjs's own reader (the enrollment surface's auth gate), so the
+// two admission surfaces agree on how a credential is carried. A missing/blank header
+// is an ABSENT credential (null), which the caller turns into a refusal.
+function readPresentedCredential(request) {
+  const header = request?.headers?.authorization;
+  if (typeof header !== "string") return null;
+  const value = header.replace(/^Bearer\s+/i, "").trim();
+  return value.length > 0 ? value : null;
+}
+
+// createCredentialOriginResolver(ws) — the control server's `resolveOrigin`, resolving a
+// connection's identity from the ENROLLMENT CREDENTIAL it presents rather than from its
+// remote address (2026-07-27). Returns { nodeId, authoritative: true } — `authoritative`
+// tells the server this decision already subsumes its roster gate (verifyCredential
+// checks BOTH roster membership and the revocation list), which is what lets a node be
+// admitted on a fabric that has no peer table to be in.
+//
+// A failed verification returns { nodeId: null, authoritative: true } — still
+// authoritative, deliberately: a bad credential must be a REFUSAL, never a silent
+// fall-through to the address join (that would let an un-credentialed peer in by
+// virtue of its IP, re-opening exactly the hole this closes).
+//
+// SECURITY T2 — the registry is re-read PER CONNECTION (never a serve-start snapshot),
+// so a node revoked after its credential was issued is denied on its very next connect.
+function createCredentialOriginResolver(ws) {
+  return async (request) => {
+    const presented = readPresentedCredential(request);
+    if (presented == null) return { nodeId: null, authoritative: true };
+    const registry = await readRegistry(ws);
+    const verdict = verifyCredential(registry, presented);
+    return { nodeId: verdict?.ok === true ? verdict.nodeId : null, authoritative: true };
+  };
+}
+
 // defaultConnectWorkerStreamClient(client, ws) — review fix P1.7b: push an INITIAL
 // snapshot over the client's already-constructed transport so the stream genuinely
 // carries state from the moment it opens (never an inert client that only ever
@@ -796,6 +839,13 @@ export async function startLauncher(ws, options = {}) {
       ...(servicePort != null ? { port: servicePort } : {}),
       peerNodeIds: peerNodeIdsFrom(peers),
       peersByAddress: peers,
+      // CONNECTION IDENTITY BY CREDENTIAL (2026-07-27) — a LITERAL key at the
+      // production call site, BEFORE the controlStreamServerOptions test spread, so a
+      // resolver reachable only through that spread can never leave production on the
+      // address join (the F12/F-38.05 discipline). Applies on EVERY fabric: enrollment
+      // issues a credential regardless of fabric, so this is not a `direct`-only path —
+      // it is simply the correct answer to "who is this connection".
+      resolveOrigin: createCredentialOriginResolver(ws),
       httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
       mintCloneCredential: resolvedMintCloneCredential,
       mintWriteCredential: resolvedMintWriteCredential,
@@ -924,7 +974,15 @@ export async function startLauncher(ws, options = {}) {
       // the one existing "print it live in production, no-op under test" seam.
       emitWarning(launcherWarnings, { code: "worker-stream-dial-target", message: `resolving worker stream to ${dialUrl}`, path: null }, options);
       const createTransport = options?.createWorkerWsTransport ?? createWorkerWsTransport;
-      transport = createTransport(dialUrl, options?.workerWsTransportOptions ?? {});
+      // The enrollment credential rides the ws upgrade (2026-07-27) — it is how the
+      // control node identifies this connection on a fabric with no address oracle.
+      // A LITERAL key here, BEFORE the workerWsTransportOptions test spread, so the
+      // production path can never be credential-less by virtue of a test seam (the
+      // F12 discipline this launcher keeps for every injected provider).
+      transport = createTransport(dialUrl, {
+        credential: config?.mesh?.credential?.relayAuth ?? null,
+        ...(options?.workerWsTransportOptions ?? {}),
+      });
     } else if (resolved.message) {
       emitWarning(launcherWarnings, { code: "worker-stream-target-unresolved", message: resolved.message, path: null }, options);
     }
