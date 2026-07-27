@@ -1509,11 +1509,31 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
       // driver itself types the directive command through). The caller's registry —
       // never this driver — decides which frames may reach it; a caller that reads
       // only the first argument is byte-identical to before.
+      //
+      // LIVE-DEBUG DISCRIMINATOR (2026-07-27, cycle 12): bytes are provably
+      // delivered here yet a resumed claude sometimes never reacts. Each write now
+      // (a) reports the TARGET pid so the breadcrumb names WHICH pty it fed, and
+      // (b) schedules a one-shot resize jiggle 500ms later — SIGWINCH forces any
+      // live TUI to repaint, so the mirror shows whether this term's child is
+      // genuinely attached. Remove once the input path has a live-proven cycle.
       (bytes) => {
         try {
           term.write(String(bytes));
+          const debug = { pid: term.pid ?? null };
+          setTimeout(() => {
+            try {
+              term.resize(81, 24);
+              setTimeout(() => {
+                try { term.resize(80, 24); } catch (error) { reportDegrade("mesh-worker-execution", error); }
+              }, 120);
+            } catch (error) {
+              reportDegrade("mesh-worker-execution", error);
+            }
+          }, 500).unref?.();
+          return debug;
         } catch (error) {
           reportDegrade("mesh-worker-execution", error);
+          return { pid: null };
         }
       },
     );
@@ -2744,13 +2764,13 @@ export function createMeshWorkerTerminalInputHandler(options = {}) {
     }
     reportedMisses.delete(sessionId);
     try {
-      write(bytes);
+      const delivered = write(bytes);
       // DELIVERY BREADCRUMB (2026-07-27 live debug): the one unwitnessed hop —
       // every verified layer said "delivered" while the TUI never reacted, so the
-      // write itself now testifies. Content is NEVER logged (an answer may be
-      // sensitive); byte count + session only. Remove or throttle once the
-      // input path has a live-proven cycle.
-      log("info", `delivered ${Buffer.byteLength(String(bytes))} byte(s) to session ${sessionId}'s live PTY`);
+      // write itself now testifies, INCLUDING which pty pid it fed (cycle-12
+      // discriminator). Content is NEVER logged (an answer may be sensitive);
+      // byte count + session + pid only. Remove once live-proven.
+      log("info", `delivered ${Buffer.byteLength(String(bytes))} byte(s) to session ${sessionId}'s live PTY (pid ${delivered?.pid ?? "?"})`);
     } catch (error) {
       reportDegrade("mesh-worker-execution", error);
     }
