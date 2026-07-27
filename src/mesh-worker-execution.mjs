@@ -2745,6 +2745,12 @@ export function createMeshWorkerTerminalInputHandler(options = {}) {
     reportedMisses.delete(sessionId);
     try {
       write(bytes);
+      // DELIVERY BREADCRUMB (2026-07-27 live debug): the one unwitnessed hop —
+      // every verified layer said "delivered" while the TUI never reacted, so the
+      // write itself now testifies. Content is NEVER logged (an answer may be
+      // sensitive); byte count + session only. Remove or throttle once the
+      // input path has a live-proven cycle.
+      log("info", `delivered ${Buffer.byteLength(String(bytes))} byte(s) to session ${sessionId}'s live PTY`);
     } catch (error) {
       reportDegrade("mesh-worker-execution", error);
     }
