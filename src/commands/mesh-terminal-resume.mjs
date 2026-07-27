@@ -100,8 +100,12 @@ export const meshTerminalResumeCommand = {
     render(result) {
       return [
         `resume dispatched: session ${result.sessionId} -> ${result.node} (assignment ${result.assignmentId}, item ${result.itemRef}, row ${result.assignmentState})`,
-        `fire-and-forget: the worker spawns \`claude --resume\` in the assignment's retained worktree.`,
-        `Watch it: the item's terminal (the SAME tuple) goes live when the session paints — or \`aof mesh logs --node ${result.node}\` for the worker's terminal-resume line.`,
+        `The worker resumes it as a REAL run: a run record is minted, the row revives to running (code: resumed),`,
+        `and the board's terminal affordance re-arms on the live session as it reports in — watch the item on the board,`,
+        `or \`aof mesh logs --node ${result.node}\` for the worker's terminal-resume lines.`,
+        ...(result.assignmentState !== "failed" && result.assignmentState !== "running"
+          ? [`NOTE: the row is ${result.assignmentState} — only a FAILED row revives (done/withdrawn stay terminal); the session still resumes and streams, but the row will not flip.`]
+          : []),
       ].join("\n");
     },
 

@@ -1122,6 +1122,12 @@ export async function startLauncher(ws, options = {}) {
         onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-resume", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
         onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),
         onSessionEnd: (sessionId) => client.sendTerminalEnd(sessionId),
+        // The resume is a REAL run: its lifecycle frames ride the same status
+        // seam every bracket outcome does (running/code resumed → captured
+        // session id → done/failed/needs-input).
+        sendAssignmentStatus: (...args) => client.sendAssignmentStatus(...args),
+        now: () => resolveNow(options),
+        commandDelayMs: INTERACTIVE_COMMAND_READY_DELAY_MS,
         ...(options?.workerExecutionOptions ?? {}),
       });
       client.onTerminalResume?.((frame) => {

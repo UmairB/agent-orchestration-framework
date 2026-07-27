@@ -313,8 +313,19 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // transition rules), so THIS apply seam — the only door worker frames come
   // through — is where the invariant lives. Refused, and reportable (the skip
   // reaches onFrameSkipped like every other refusal).
+  //
+  // ONE sanctioned exception (m42 terminal-resume): the HOLDER reporting
+  // `running` with `code: "resumed"` revives a FAILED row — a control-dispatched
+  // resume is a run continuing, and the row must tell that truth. Exactly
+  // failed→running, exactly the resume code, still holder-only (T6 above):
+  // a stale startup-reclaim broadcast carries no resume code and stays refused;
+  // done/withdrawn/reclaimed rows stay terminal (done means done; a withdrawal
+  // was the operator's own decision).
   if (!isActiveAssignmentState(existing.state)) {
-    return { applied: false, skipped: true, code: "assignment-status-already-terminal", workspaceId: existing.workspace_id };
+    const resumedRevival = existing.state === "failed" && state === "running" && frame?.code === "resumed";
+    if (!resumedRevival) {
+      return { applied: false, skipped: true, code: "assignment-status-already-terminal", workspaceId: existing.workspace_id };
+    }
   }
 
   const now = options.now ?? new Date().toISOString();

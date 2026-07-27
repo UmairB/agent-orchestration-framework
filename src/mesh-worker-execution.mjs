@@ -1398,6 +1398,12 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
   // below) — trust fires BEFORE the system prompt is read, so no in-session mode can
   // catch it.
   const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", WORKER_SESSION_INSTRUCTION];
+  // m42 terminal-resume — the ONE additive launch variation: re-attach to a
+  // persisted conversation instead of starting fresh. Everything else about the
+  // launch (permission mode, worker instruction, env) is deliberately identical.
+  if (typeof options.resumeSessionId === "string" && options.resumeSessionId.length > 0) {
+    args.push("--resume", options.resumeSessionId);
+  }
   const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
   return { bin, args, env: sessionEnv, providerId };
 }
@@ -2712,30 +2718,33 @@ export function createMeshWorkerTerminalInputHandler(options = {}) {
 
 // createMeshWorkerTerminalResumeHandler(options) → handler(frame) — the function
 // `client.onTerminalResume(handler)` registers (worker-stream-client.mjs). m42
-// quick-fix (operator-requested): a control-driven `aof mesh terminal-resume`
-// re-attaches a PARKED/KILLED session — this spawns `claude --resume <sessionId>`
-// in the assignment's RETAINED worktree and wires the new PTY into BOTH existing
-// terminal lanes:
-//   - OUTPUT: every chunk rides `options.onOutputChunk(chunk, sessionId)` stamped
-//     with the RESUMED session id — the fleet's EXISTING (nodeId, sessionId)
-//     tuple (the one on the assignment row, the one an already-open dock tab is
-//     subscribed to) simply comes back to life. `claude --resume` forks a NEW
-//     internal session id; that is a local detail — the tuple is routing, and
-//     the resumed id is the one the fleet knows.
-//   - INPUT: the PTY's write registers in liveSessionInputs under the SAME
-//     resumed id, so the interactive terminal types straight into it.
-// Deliberately OUTSIDE the execution bracket: no run record is minted or settled
-// (the original run already settled; this is an operator re-attach, not a new
-// run), no assignment-status frames are sent (the row may be terminal — the
-// apply seam would rightly refuse a regression). The PTY's end sends the
-// end-of-stream marker; exit (or a dead pid, same 15s signal-0 probe as the
-// driver) sweeps the registries. Idempotent: a session that is ALREADY live on
-// this daemon is a logged no-op, never a second PTY on the same tuple.
+// terminal-resume, REWORKED the same day it shipped (operator: the first cut was
+// a side-channel PTY re-attach that left the WHOLE system lying — row `failed`,
+// board offering Continue beside a live session, no run record, presence idle).
+//
+// A resume is a RUN CONTINUING, so it flows through the ONE lifecycle everything
+// else already reads:
+//   - a run record is MINTED (startRun — the duplicate-run guard therefore walls
+//     a concurrent Continue, exactly as it should);
+//   - the assignment row comes back via a worker-reported `running` frame with
+//     `code: "resumed"` — the ONE sanctioned revival of a `failed` row (the
+//     apply seam legalizes exactly that transition; every other terminal-row
+//     frame is still refused);
+//   - the session is DRIVEN by the SAME driver as any run
+//     (driveInteractiveClaudeSession + `resumeSessionId`): the transcript watch
+//     captures the FORKED session id and reports it on the row, so the board /
+//     fleet / mirror / input registry all converge on the LIVE tuple; the
+//     needs-input lanes (live question + sentinel) work exactly as on a first
+//     run; completion settles the run record AND the row (done/failed), or
+//     parks needs-input with the code visible.
+// The worktree is always RETAINED (this bracket does not push; a resumed
+// session's committed work goes home via `aof mesh recover-push` — one door per
+// act). Idempotent: an assignment with a live PTY on this daemon is a logged
+// no-op, never a second session.
 export function createMeshWorkerTerminalResumeHandler(options = {}) {
-  const { loadWs, globalWorkStoreOptions, nodeId, onLog, onOutputChunk, onSessionEnd } = options;
-  const ptySpawn = options.ptySpawn ?? defaultPtySpawn;
-  const which = options.which;
-  const livenessIntervalMs = options.livenessIntervalMs ?? 15_000;
+  const { loadWs, globalWorkStoreOptions, nodeId, onLog, onOutputChunk, onSessionEnd, sendAssignmentStatus } = options;
+  const spawnRuntime = options.spawnRuntime ?? driveInteractiveClaudeSession;
+  const resolveNow = () => (typeof options.now === "function" ? options.now() : options.now ?? new Date().toISOString());
   const log = (level, message) => {
     try {
       onLog?.({ code: "terminal-resume", level, message });
@@ -2747,14 +2756,17 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
     const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : null;
     const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
     const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
-    if (sessionId == null || assignmentId == null || workspaceId == null) {
-      log("warn", "terminal-resume frame dropped: missing sessionId/assignmentId/workspaceId");
+    const itemRef = typeof frame?.itemRef === "string" && frame.itemRef.length > 0 ? frame.itemRef : null;
+    if (sessionId == null || assignmentId == null || workspaceId == null || itemRef == null) {
+      log("warn", "terminal-resume frame dropped: missing sessionId/assignmentId/workspaceId/itemRef");
       return;
     }
-    if (liveSessionInputs.has(sessionId)) {
-      log("info", `session ${sessionId} is already live on this worker — resume is a no-op`);
+    if (livePtyKills.has(assignmentId)) {
+      log("info", `assignment ${assignmentId} already has a live session on this worker — resume is a no-op`);
       return;
     }
+    let runRecord = null;
+    let item = null;
     try {
       // Repoint to the assignment's OWN checkout — the recovery-push handler's
       // exact resolution, so resume and recovery never drift on where "here" is.
@@ -2769,86 +2781,97 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
         log("warn", `session ${sessionId}: assignment ${assignmentId}'s worktree is gone (${worktreePath}) — nothing to resume in (a cleanly-done run removes its worktree)`);
         return;
       }
-
-      const launch = resolveInteractiveDriverLaunch("claude", { which });
-      if (launch == null) {
-        log("warn", `session ${sessionId}: the claude binary did not resolve on this worker — resume refused`);
+      item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
+      if (item == null) {
+        log("warn", `session ${sessionId}: itemRef "${itemRef}" does not resolve in ${ws.workDir} — resume refused`);
         return;
       }
-      // The SAME launch posture as the driver (permission-mode auto + the worker
-      // system prompt), plus the resume flag: the process re-attaches to the
-      // persisted conversation (RESEARCH §4.3 — a NEW process on the SAME
-      // conversation; the worktree's folder trust persisted from the original run).
-      const term = await ptySpawn(launch.bin, [...launch.args, "--resume", sessionId], {
-        name: "xterm-256color",
-        cols: 80,
-        rows: 24,
-        cwd: worktreePath,
-        env: launch.env,
-      });
 
-      let settled = false;
-      let livenessTimer = null;
-      let dataSub = null;
-      let exitSub = null;
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        if (livenessTimer != null) { clearInterval(livenessTimer); livenessTimer = null; }
-        try { dataSub?.dispose?.(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
-        try { exitSub?.dispose?.(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
-        clearLivePtyRegistries(assignmentId);
-        try {
-          const ended = onSessionEnd?.(sessionId);
-          if (ended && typeof ended.catch === "function") {
-            ended.catch((error) => reportDegrade("mesh-worker-execution", error));
-          }
-        } catch (error) {
-          reportDegrade("mesh-worker-execution", error);
-        }
-        log("info", `session ${sessionId}: resumed session ended`);
-      };
+      // The RUN, minted like any run — the store now tells the truth ("this item
+      // is being worked on"), and the duplicate-run guard walls a parallel start.
+      runRecord = await startRun(item, { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } });
+      // The row revives: worker-reported running with the resume code (the one
+      // transition the apply seam sanctions out of `failed`). The board flips to
+      // "running on <node>" and the Open-terminal affordance re-arms from here.
+      await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, code: "resumed" });
 
-      // OUTPUT — stamped with the RESUMED id: the fleet's existing tuple revives.
-      dataSub = term.onData?.((chunk) => {
-        try {
-          onOutputChunk?.(String(chunk), sessionId);
-        } catch (error) {
-          reportDegrade("mesh-worker-execution", error);
-        }
-      }) ?? null;
-      exitSub = term.onExit?.(() => settle()) ?? null;
+      log("info", `session ${sessionId} RESUMING (assignment ${assignmentId}, item ${itemRef}, run ${runRecord.runId}): claude --resume in ${worktreePath}`);
+      const outcome = await spawnRuntime(
+        // command: null — a resume re-attaches to the conversation; there is no
+        // directive to type (the driver's command write is already null-guarded).
+        { itemRef, worktreeCwd: worktreePath, task: item?.title ?? itemRef, command: null },
+        {
+          ptySpawn: options.ptySpawn,
+          which: options.which,
+          resumeSessionId: sessionId,
+          commandDelayMs: options.commandDelayMs,
+          livenessIntervalMs: options.livenessIntervalMs,
+          onOutputChunk,
+          watchTranscriptSessionId: options.watchTranscriptSessionId,
+          watchTranscriptCompletion: options.watchTranscriptCompletion,
+          onPtyLive: (kill, write) => {
+            livePtyKills.set(assignmentId, kill);
+            if (typeof write === "function") livePtyWrites.set(assignmentId, write);
+          },
+          // The FORKED session id is the live tuple — bind input under it and
+          // report it on the row so every surface converges on the same truth.
+          onSessionIdCaptured: (sid) => {
+            const write = livePtyWrites.get(assignmentId);
+            if (write != null && typeof sid === "string" && sid.length > 0) {
+              liveSessionInputs.set(sid, write);
+            }
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId: sid, code: "resumed" }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
+          // The live-question lane works on a resumed session exactly as on a
+          // first run: report while alive, clear on answer (back to the resumed
+          // code, never a bare clear — the row still says WHY it is running).
+          onNeedsInputPending: (pending) => {
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, code: pending ? "needs-input" : "resumed" }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
+          onSessionEnd,
+        },
+      );
+      clearLivePtyRegistries(assignmentId);
+      const forkedSessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
 
-      // INPUT + control — the same registries the bracket uses, so the
-      // terminal-input lane and a control withdraw both reach this PTY.
-      const write = (bytes) => {
-        try {
-          term.write(String(bytes));
-        } catch (error) {
-          reportDegrade("mesh-worker-execution", error);
-        }
-      };
-      livePtyKills.set(assignmentId, () => {
-        try { term.kill(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
-      });
-      livePtyWrites.set(assignmentId, write);
-      liveSessionInputs.set(sessionId, write);
-
-      // The driver's own dead-pid probe: a vanished child must not leave a
-      // zombie tuple bound forever.
-      if (typeof term.pid === "number" && Number.isFinite(term.pid) && livenessIntervalMs > 0) {
-        livenessTimer = setInterval(() => {
-          try {
-            process.kill(term.pid, 0);
-          } catch {
-            settle();
-          }
-        }, livenessIntervalMs);
+      if (outcome.outcome === "needs-input") {
+        await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId: forkedSessionId, code: "needs-input" });
+        log("info", `session ${sessionId}: resumed session parked needs-input (run ${runRecord.runId} stays running; resume it again to continue)`);
+        return;
       }
-
-      log("info", `session ${sessionId} RESUMED (assignment ${assignmentId}, node ${nodeId ?? "?"}): claude --resume in ${worktreePath} — the existing terminal tuple is live again`);
+      const settledOutcome = outcome.outcome === "done" ? "done" : "failed";
+      try {
+        await completeRun(item, { runId: runRecord.runId, outcome: settledOutcome, now: resolveNow() });
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
+      // done WITHOUT a branch fact: this bracket does not push (recover-push is
+      // the push door), so it never claims the work went anywhere it didn't.
+      await sendAssignmentStatus?.(assignmentId, settledOutcome, {
+        runId: runRecord.runId,
+        sessionId: forkedSessionId,
+        ...(settledOutcome === "failed" && outcome.failureReason ? { code: outcome.failureReason } : {}),
+      });
+      log("info", `session ${sessionId}: resumed run ${runRecord.runId} settled ${settledOutcome} — worktree retained (push home via aof mesh recover-push if it produced commits)`);
     } catch (error) {
+      clearLivePtyRegistries(assignmentId);
       log("warn", `session ${sessionId}: resume failed: ${String(error?.message ?? error)}`);
+      if (runRecord != null && item != null) {
+        try {
+          await completeRun(item, { runId: runRecord.runId, outcome: "failed", now: resolveNow() });
+        } catch (settleError) {
+          reportDegrade("mesh-worker-execution", settleError);
+        }
+        try {
+          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code: "terminal-resume-failed" });
+        } catch (statusError) {
+          reportDegrade("mesh-worker-execution", statusError);
+        }
+      }
     }
   };
 }
