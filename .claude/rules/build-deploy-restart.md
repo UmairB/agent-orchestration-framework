@@ -23,15 +23,17 @@ node scripts/install-local.mjs        # payload file-copy — NO SEA build (~sec
 `aof-mesh-desktop.exe` supervises both daemons — `aof.exe mesh serve --serve` and `aof.exe mesh ui`
 run as its children and die with it. Do not start daemons by hand from an agent shell; relaunch the
 supervisor and let it spawn them in its own environment (a hand-spawned daemon inherits the wrong
-cwd/env — workspace identity is still partly cwd-derived, TECH_DEBT item 4):
+cwd/env — workspace identity is still partly cwd-derived, TECH_DEBT item 4).
 
-```powershell
-Stop-Process -Name aof-mesh-desktop -Force        # daemons die with the supervisor
-Start-Process "$env:USERPROFILE\.aof\bin\aof-mesh-desktop.exe" -WorkingDirectory "$env:USERPROFILE\.aof\bin"
+The restart flow (operator, 2026-07-27): QUIT the desktop app (its own UI — a graceful exit, never
+`Stop-Process -Force`), then relaunch through the CLI verb:
+
+```
+aof mesh desktop run
 ```
 
 Agents: only do this when the operator explicitly asks for a restart; otherwise install and hand
-back ("restart to pick this up").
+back ("restart to pick this up"). Never force-kill the process.
 
 ## Verify at the source — never assume the deploy landed
 

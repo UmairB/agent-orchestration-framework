@@ -140,6 +140,7 @@ to main without explicit signoff).**
 | `3ce8737` | Dispatch + worktree-base DECISIONS durably logged (tick logs `<command> on <branch>`; worker logs `worktree on EXISTING branch …`); log entries carry their own level. The wrong-base dispatch was diagnosable only by inference because both decisions were unrecorded. |
 | `1b59cee` | (a) WITHDRAW REACHES ITS HOLDER: withdraw DOWN-frame (tick, once-guarded) → worker kills the live PTY (`onPtyLive` registry) + settles the run record `cancelled`; pre-spawn + post-settle guards. (b) Failure codes durable: `reportAssignmentFailure` → sink/ring; codes on the code-less frames; control logs received failed frames WITH code (`onAssignmentFailure` peek). (c) Board dead-tab banner (ephemeral board ports die with every restart; the tab clicked into the void). |
 | `9817f6b` | Startup reclaim settles the stranded run RECORD (`failed/runtime_offline`) — the ghost family's last member, measured within the hour of (a) shipping. Every terminal path now settles its record: withdraw→cancelled, startup→failed/retryable, bracket→done/failed. |
+| `97dde09` | **TERMINAL RESUME** (operator quick-fix, same hour): `aof mesh terminal-resume <sessionId> [--node]` — control resolves the session's assignment from the store, pushes a `terminal-resume` envelope over the loopback relay (the input lane's IPC), the serve router DOWN-frames the holder, and the worker spawns `claude --resume <sessionId>` in the assignment's RETAINED worktree. The new PTY's frames are stamped with the RESUMED session id, so the EXISTING tuple (the row's own — an open dock tab stuck `connecting…`) comes back to life, mirrored AND typeable. Outside the execution bracket by design (no run record, no status frames — terminal rows never regress); idempotent; dead-pid probed; end-marker + registry sweep on exit. Loud refusals: `session-unknown`, `relay-unconfigured` (off the control node). Requires BOTH sides on ≥ this commit: the control serve's router (else the envelope is silently kind-dropped) and the worker handler. |
 | `5c03269` | **INTERACTIVE WORKER TERMINALS** (Next-work #1; T14 read-only operator-overridden). Input path: dock keystroke → tuple-bound `/ws/terminal-view` (mesh-ui wraps bytes with THE SOCKET'S OWN tuple; content-blind, 32 KB-bounded, clean-degrading) → loopback relay → serve SELF-subscribed router (`mesh-terminal-input.mjs`, reusing the mirror's subscriber machinery whole) → `terminal-input` DOWN-frame over the admitted stream → worker writes ONLY the live PTY whose CAPTURED sessionId matches (`liveSessionInputs`, bound at capture, swept at settle incl. the generic-catch path). **Plus the lane that makes it useful:** a pending AskUserQuestion no longer parks ~10s in — it reports `code: needs-input` immediately (persisted, schema v7 additive `code` column, verbatim-per-frame so an answer clears it), keeps the PTY alive for the answer, and parks only after the LONG 15-min window (resume-later is now the fallback, not the only path; the SENTINEL needs-input keeps its fast park — that turn deliberately ended). Board: `Answer on <node>` affordance + amber "waiting for your input" line; dock remote badge `remote · <node>` (interactive). Gate DELIBERATELY rewritten: `acd-fleet-terminal-mirror-read-only` → `acd-fleet-terminal-input-constrained` (pins tuple-bound entry, session-exact delivery, pure mirror/bridge, fleet-page-stays-monitor — plants incl. content-routed handler, first-live-PTY fallback, the old absence itself). Focused 89/0; arch 698/0 across 221 files. |
 
 ### The incident ledger (what actually happened live)
@@ -222,7 +223,24 @@ to main without explicit signoff).**
 - A pre-deploy board tab cannot warn (old bundle) — inherent; only hurts once per UI deploy.
 - `stream-frame-refused` message template misnames non-descriptor refusals (says "no registered
   descriptor" for `assignment-status-already-terminal`).
-- Transient `ERR_SQLITE_ERROR: database is locked` warnings at daemon start — wants busy_timeout.
+- ~~Transient~~ **CONTINUOUS** `ERR_SQLITE_ERROR: database is locked` warnings (measured
+  2026-07-27 post-restart: every ~5s) — the projection runs `journal_mode: delete` with NO
+  busy_timeout, and the desktop status poll + the board's in-flight list re-poll + the serve
+  daemon's write ticks now collide every cycle. Wants `PRAGMA busy_timeout` + WAL. Write ticks
+  retry next cycle so no data is lost, but any tick can silently skip a beat.
+- **Dead-tuple mirror reads `connecting…` forever** (measured 2026-07-27: the operator opened
+  the terminal on a stale `running` row after both restarts): the terminal-view upgrade accepts
+  any tuple, the in-memory mirror was wiped by the control restart, the session's PTY died with
+  the worker restart — so no byte ever arrives and the dock never leaves `connecting…`. The
+  OPERATOR REMEDY now exists (`aof mesh terminal-resume <sessionId>`, `97dde09` — the dead tuple
+  revives in place); the UX half still wants an honest "no live stream for this session" answer
+  (route-side grace-window close, or a board affordance that offers the resume directly).
+- **Worker startup-reclaim frames are fire-once** (measured 2026-07-27: the Mac worker restarted
+  in the ~3-min window while the control was ALSO down; its `failed/daemon-restarted` report for
+  run 0017's stranded worktree died on the dead connection, and the control row read a stale
+  `running` for 35+ min — the dual-staleness reclaim rightly refuses to fire while the node's
+  stream is LIVE and heartbeating). Wants the startup reclaim re-armed on RECONNECT, not only on
+  daemon start.
 - The Mac's launch workspace (`f693d197…`, its aof clone) streams snapshots the control refuses as
   `unknown-workspace` every reconnect — harmless noise, but noise.
 - let-shield's INSTALLED bundle still has the old continue.md (`aof work update` there pending);
