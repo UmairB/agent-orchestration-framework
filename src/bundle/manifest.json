@@ -147,7 +147,7 @@
         "id": "aof-architect",
         "kind": "agent"
       },
-      "hash": "sha256:07b56c67e1b6149d5dd55d81d6bd2ab977a95a8230bda37985a4ea564634dba8"
+      "hash": "sha256:a8fa73d413aed2005c02ae0485e99849e59e4b10ccd121b7d274eb2431e8a0ae"
     },
     {
       "path": ".claude/agents/aof-compliance.md",
@@ -453,7 +453,7 @@
         "id": "aof-architect",
         "kind": "agent"
       },
-      "hash": "sha256:e517289eb0f239d11b18f8bc6fa5632df78b82546864fe957d4f382b0c5d27db"
+      "hash": "sha256:48a94c1305937862fb2053f813c330bbbd6d9ea2c38d2c8ffa3169d7fa99c838"
     },
     {
       "path": ".codex/agents/aof-compliance.md",
