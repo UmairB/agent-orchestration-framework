@@ -11,6 +11,132 @@ doc: state
 
 ## Progress
 
+- **2026-07-28 (fifth pass): d1 WAVE-2 COMPLETE — the whole work family + the top-level
+  faces onto the route table.** 21 more registered verbs carry `cli.route` + `cli.spec`
+  (class B — the commands' adapters were already the truth; only the doors moved): `work
+  list/validate/next/doctor/feedback`, `run-start/run-status/run-retry`,
+  `continue/refine/verify` (the phase-door factory routes itself), the `insert-*` family +
+  `promote-gap`, `work upgrade` (top-level `aof upgrade` delegates through `runCommandFace` —
+  the sanctioned two-spellings form), `import milestone`, `migrate` (one-word route), and the
+  four-word notion routes (`work integrations notion sync-work/associate`, usage refusals now
+  thrown from the argv adapters before invoke). DELETED: `runVerbCli`, `workInsertCli`, and
+  every work-family face copy (`workListCommand`, `workValidateCommand`, `workDoctorCommand`,
+  `workNextCommand`, `workFeedbackCommand`, the run wrappers, `upgradeCommand`,
+  `migrateCommand`, `importMilestoneCommandCli`, `notionSyncWorkCli`, `notionAssociateCli`);
+  the import/notion group ladders are unknown-shims. Face growth: `faceCtx` reaches
+  `cli.json`/`cli.exit` (work:doctor's --strict advisory gate + strict-aware json summary;
+  work:validate's findings→exit-1 gate), and the ONE --json error envelope carries a
+  structured `shifted` count when present (work-insert-cli-confirm-envelope's pinned
+  contract, now the face's). 43 routes derive collision-free.
+  `acd-migrate-command-cli-bijection` moved to the route-or-ladder form. Verified: focused
+  arch+unit 143/0 (route-derived, work/migrate/graph/mesh bijections incl. the spawn probe of
+  every work:* verb, cli-face-contract byte-pins, insert confirm envelope + count gates,
+  work-list, upgrade dry-run/apply, migrate-core, notion associate/dry-run/parser, validate
+  staleness, effects-ledger, silent-catch, work-list-contract); full BDD integration suite
+  green (spawn mode). cli.mjs 2,472 → 1,990 lines (3,419 at wave start).
+
+- **2026-07-28 (fourth pass): d1 WAVE-1 COMPLETE — the tail (`assets apply` + `packages
+  install`) through the spine.** The two big flows are registry Commands
+  (`commands/assets-apply.mjs`, `commands/packages-install.mjs`) on the pure-outcome write-verb
+  idiom: run() executes and returns a mode-discriminated outcome (validation-failed / dry-run /
+  strict-failed / applied; dry-run / installed), the render reproduces the retired transcript
+  byte-for-byte and in order. Helper moves with them: `runtimesForApply` → assets-apply.mjs;
+  `formatFriendlyApplyAction`/`successMarker`/`relativeDisplayPath` → render-plan.mjs (still
+  imported by the inline work-init/work-update/planning-init faces); the
+  frameworkInstall/installFromLock machinery → packages-install.mjs; `printValidationResult` /
+  `printAdapterWarnings` / `strictAdapterWarningsFailed` retired onto validate-shared.mjs +
+  cli.exit. Two documented normalisations on `packages install` (both previously unasserted):
+  the terminal "Framework install/replay failed for …" summary now ENDS THE STDOUT DOCUMENT
+  instead of riding a thrown error to stderr (the transcript would be lost under the pure model —
+  pinned in `packages.feature`), and non-dry-run `--json` emits one structured document.
+  `interactiveInstallCommand` deleted (dead, zero callers). The packages ladder is now an
+  unknown-subcommand shim; assets keeps only `ui` (launcher idiom). NEW BDD pins: the failure
+  summary on stdout, the `--json` error envelope for an unknown package, from-lock-without-lock
+  refusal. Verified: full BDD integration suite green (spawn mode, incl. packages/adapter-policy
+  byte contracts), focused arch+unit 96/0 (route-derived, effects-ledger, bijection,
+  status-rollback, unified-lock, planning-lock, silent-catch, frameworks, clean, config-editor,
+  planning-init), child-process smoke green. cli.mjs 2,749 → 2,472 lines.
+
+- **2026-07-28 (third pass): d1 WAVE-1 LARGELY COMPLETE — 14 more verbs through the spine.**
+  The assets/packages/project families are registry Commands end-to-end except the two big flows:
+  `assets show/add/remove/use/unuse/validate/clean`, `packages show/add/remove/validate`,
+  `project validate/doctor/migrate` — inline handlers deleted, byte-identical renders, flag
+  vocabularies declared per command. The face grew its two missing adapters: ASYNC `cli.argv`
+  (assets:add completes a missing kind/id interactively in the argv adapter — prompting is face
+  domain; run() stays headless for board/MCP) and `cli.exit(result)` (validate/doctor findings
+  gate exit 1 through the face — commands no longer touch process.exitCode). Helper homes:
+  `spine/flags.mjs` (runtime-flag interpretation, one home), `formatApplyAction` →
+  render-plan.mjs, `packageDiagnostics` → packages.mjs, `commands/validate-shared.mjs` (one
+  validation-report engine under project:validate / assets:validate / packages:validate).
+  NEW BDD: `config-family.feature` (8 scenarios — exit gates, --json envelopes, ref-verb
+  refusals, legacy migration); the legacy features (lifecycle/packages/dsl/adapter-policy) now
+  drive the migrated commands directly. cli.mjs 3,419 → 2,749 lines. Wave-1 tail recorded in the
+  plan: `assets apply` + `packages install` (helper-module moves), `assets ui` (launcher), `init`.
+
+- **2026-07-28 (second pass): d2 CODE-COMPLETE (the sweep) + the folder home + the manifest fix.**
+  Operator direction ("regenerate; proper folder structure; continue with the next leg"):
+  - **Folder home for the new approach:** the spine and ledger moved off flat `src/` into their
+    own folders — `src/spine/face.mjs` (the ONE generic face + route table) and `src/effects/`
+    (`table.mjs` the vocabulary, `journal.mjs` the storage, `dispatch.mjs` the topology,
+    `run-transitions.mjs` the seam). Every importer, gate and doc reference moved with them; the
+    `acd-effects-ledger` caller scans now pin repo-relative paths.
+  - **The d2 SWEEP:** all 7 worker-side `completeRun` sites in `mesh-worker-execution.mjs`
+    (withdraw pre-spawn / live-PTY / direct, the execution bracket's settle, the startup
+    ghost-record reclaim, terminal-resume settle + its generic-catch) now settle through
+    `transitionRunComplete` — the fact cannot land without its durable `run.completed` event, and
+    a FAILED worker run rolls the primary checkout's item back to not-started via the DECLARED
+    reactor (the "8 call sites, exactly 1 does the rollback" measurement is dead: it is now 0
+    inline sites, 1 ledger entry). Worker sites deliberately pass no workspace (publish reactor
+    skips — worker-side publish is d3 `settle-assignment` territory; avoids re-opening the
+    phantom-worktree-workspace class). New gate tooth: `completeRun(` is callable ONLY from
+    `run-store.mjs` + the transition seam. Suites green post-sweep: bracketing, withdraw,
+    retention, reclaim, push-before-remove, liveness, completion-detection, needs-input (44
+    tests), + the 4 route/ledger/rollback/bijection gate files (14), + integration 98/0.
+    **d2's only remaining item is the LIVE kill-drill** (needs deploy + operator restarts).
+  - **Bundle manifest regenerated** (operator call) — `acd-bundle-manifest-hashes` green; the
+    arch board is back to zero standing failures.
+
+- **2026-07-28: WAVE (d) LEGS d1+d2 — INFRASTRUCTURE LANDED, FIRST MIGRATIONS PROVEN (uncommitted
+  working tree on `fix/worker-completion-and-milestone-cascade`; operator reviews/commits).** The
+  spine and the ledger exist and carry real traffic:
+  - **d1 (spine):** `src/spine/face.mjs` — the ONE generic CLI face (per-command `cli.spec` flag
+    vocabularies replacing the global boolean allow-list for migrated verbs; the ONE `--json` error
+    envelope `{ ok:false, error, code }` + exit-code policy; loud `unknown-flag` refusals) and the
+    registry-derived route table (`cli.route` on the Command, longest-prefix dispatch in `run()`
+    BEFORE the legacy ladder). Six verbs migrated as the worked examples of each class:
+    `assets:list` / `packages:list` / `project:show` (class A — unregistered inline → Command;
+    `packageSummaries` moved cli.mjs → packages.mjs), `work:doc` / `work:tasks` (class B — face
+    copies deleted), `work:run-complete` (class C — the cascade port). Byte-identical output where
+    asserted (`cli-face-contract` green untouched).
+  - **d2 (ledger):** `effects/journal.mjs` (per-node `journal.sqlite`: events + per-reactor steps,
+    one-transaction append, `busy_timeout` from birth — the projection's lock-storm lesson),
+    `effects.mjs` (the closed vocabulary; `run.completed` → `rollback-status`@checkout +
+    `publish-projection`@local, array order = cascade order), `effects/dispatch.mjs` (locus-routed
+    drain; failures → `effect-failed` degrade + retry under an attempts ceiling, never silent;
+    per-reactor outcomes ride the result envelope; journal-less ephemeral fallback so behaviour
+    never gates on the ledger's health), `run-transitions.mjs` (`transitionRunComplete` — the run
+    store's ONLY event-raiser; write-then-append, reconciler = d5). The face sweeps pending steps
+    after every routed invoke — **the crash-window property (kill between transition and settle →
+    the next drain pays) is pinned at unit level (`acd-effects-ledger`) and black-box
+    (`effects-ledger.feature`)**; the LIVE kill-drill on the soak stays owed.
+  - **Tests restructured integration/BDD-first** (the operator's finding: `test/integration` was
+    unmaintained since ~May — why everything felt brittle): convention-resolved step modules
+    (feature basename ↔ steps module, no central map), a declarative step registry + shared
+    grammar, `command-spine.feature` (7 scenarios — the contract every migrated verb inherits) and
+    `effects-ledger.feature` (4 scenarios incl. crash recovery), README with the
+    migrate-with-a-scenario policy. Full integration suite 98/0 in BOTH spawn and in-process modes.
+  - **Gates moved with the shape they assert:** `acd-work-command-cli-bijection` accepts
+    route-table OR ladder (registry-derived); `acd-status-rollback-bounded` now requires
+    run-complete to reach the rollback THROUGH the ledger (and forbids the direct call);
+    NEW `acd-command-route-derived` (collision-free, resolvable, spec'd, no-second-door) and
+    `acd-effects-ledger` (vocabulary shape, appendEvent only from the transition seam, the
+    crash-window pin). Arch sweep 706/707 — the one red is PRE-EXISTING
+    (`acd-bundle-manifest-hashes`: commit `2546a06` edited `aof-architect.md` without regenerating
+    the bundle manifest; operator call — regenerate or amend, untouched by this work).
+  - **The plan for the rest** — every remaining verb (3 waves), the 7 worker-side `completeRun`
+    sites, d3–d5 — is [WAVE-D-MIGRATION.md](WAVE-D-MIGRATION.md), with the per-class migration
+    rituals.
+
 - **2026-07-27: SCOPE EXTENDED — wave (d), command spine & effects ledger.** The operator's
   command-layer review ("side effects not happening is the biggest problem with this codebase") +
   two full codebase maps found item 0's disease one level deeper than waves (a)–(c) reached: write
