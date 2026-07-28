@@ -1,19 +1,23 @@
-// work:run-complete — the terminal transition running→outcome on a run (ADR-001/003).
+// work:run-complete — the terminal transition running→outcome on a run (ADR-001/003),
+// PORTED to the effects ledger (m42 wave (d) leg d2 — the first cascade off the
+// inline pattern). The run ORDER is load-bearing: (1) validate the outcome
+// against the closed set done|failed|cancelled BEFORE resolving anything;
+// (2) resolve the target EXACT (resolveItemExact — a typo never completes a run
+// on the wrong item); (3) hand the terminal edge to transitionRunComplete — the
+// run store's ONLY event-raiser — which writes the fact, appends `run.completed`
+// to the per-node journal, and drains the event's local-locus reactors
+// synchronously before returning.
 //
-// A thin WRITE wrapper over story 00's src/run-store.mjs. The run ORDER is
-// load-bearing: (1) validate the outcome is one of the closed set done|failed|
-// cancelled BEFORE resolving anything (catches --outcome bogus AND --outcome "");
-// (2) resolve the target EXACT (resolveItemExact — a typo never completes a run on
-// the wrong item, mirroring run-start's write-isolation); (3) delegate to the store's
-// completeRun, letting its no-running-run / ambiguous-run / illegal-transition errors
-// (each carrying .code) propagate to the face. runId defaults to the item's single
-// in-flight running run; an explicit runId disambiguates when more than one is in
-// flight. The store writes only under runs/; this command never touches frontmatter.
+// The CASCADE THIS FILE USED TO REMEMBER INLINE (20/ADR-005 status rollback +
+// publish-on-mutate) now lives DECLARED in src/effects/table.mjs's "run.completed"
+// entry — this command can no longer forget it, and neither can the other
+// completeRun call sites as they port (the wave-(d) migration plan's d2 sweep).
+// A reactor failure is a failed journal step + degrade event (retried by later
+// drains), never a silent skip and never a lost completion.
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "./errors.mjs";
-import { completeRun } from "../run-store.mjs";
-import { rollbackItemStatus } from "../work.mjs";
-import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
+import { transitionRunComplete } from "../effects/run-transitions.mjs";
+import { renderWithPropagationWarnings, appendPropagationWarning } from "../global-work-publisher.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
 const VALID_OUTCOMES = new Set(["done", "failed", "cancelled"]);
@@ -55,27 +59,54 @@ export const runCompleteCommand = {
     const item = await resolveItemExact(ctx.workspace.workDir, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
 
-    // (3) Let the store perform the terminal transition; its no-running-run /
-    // ambiguous-run / illegal-transition errors (each carrying .code) propagate. The
-    // reason is written onto failureReason only on a → failed transition (store-side).
+    // (3) The transition seam: fact write (the store's no-running-run /
+    // ambiguous-run / illegal-transition rejections propagate untouched, and
+    // nothing is appended on a refusal) + `run.completed` event + sync drain of
+    // its checkout/local reactors (rollback-status, publish-projection — in that
+    // declared order, so the published snapshot carries the rolled-back status).
     const reason = typeof input.reason === "string" ? input.reason : null;
-    const record = await completeRun(item, { runId: input.runId, outcome, failureReason: reason, now: input.now });
+    const { record, eventId, effects } = await transitionRunComplete(
+      item,
+      { runId: input.runId, outcome, failureReason: reason, now: input.now },
+      { workspace: ctx.workspace, journalOptions: ctx.effectsJournalOptions ?? {} },
+    );
 
-    // (4) Status rollback (20/ADR-005): a run completed as FAILED rolls its in-progress
-    // item back to not-started so the stream is left honest — the failed path CALLS the
-    // work.mjs writer (best-effort: an item not in-progress / without a record doc is a
-    // no-op, the completion still succeeds; any other rollback fault propagates).
-    if (outcome === "failed") {
-      try {
-        await rollbackItemStatus(item, "not-started");
-      } catch (error) {
-        if (error.code !== "rollback-not-applicable") throw error;
-      }
+    // The result envelope: the run record (today's wire, byte-compatible) plus
+    // the ADDITIVE per-reactor outcomes (PRD: outcomes ride the envelope). The
+    // publish reactor's warning keeps riding the established propagationWarnings
+    // key so existing renderers/consumers see exactly what they used to.
+    let result = {
+      ...record,
+      effects: effects.map(({ event, key, locus, status, error }) => ({
+        event,
+        key,
+        locus,
+        status,
+        ...(error ? { error } : {}),
+      })),
+      ...(eventId ? { eventId } : {}),
+    };
+    const publish = effects.find((outcome_) => outcome_.key === "publish-projection");
+    if (publish?.detail?.warning) {
+      result = appendPropagationWarning(result, publish.detail.warning);
     }
-    return await withGlobalWorkPropagation(record, ctx.workspace, ctx);
+    return result;
   },
 
   cli: {
+    // m42 wave (d) leg d1 — dispatched by the registry-derived route table
+    // through the ONE generic face; the runVerbCli branch in cli.mjs is retired
+    // for this verb (its single-envelope --json discipline is now the face's).
+    route: ["work", "run-complete"],
+    spec: {
+      usage: "aof work run-complete <ref> --outcome done|failed|cancelled [--run <runId>] [--reason <reason>] [--json]",
+      flags: {
+        outcome: { type: "string", description: "terminal outcome: done|failed|cancelled" },
+        run: { type: "string", description: "target run id (defaults to the single running run)" },
+        reason: { type: "string", description: "failureReason recorded on --outcome failed" },
+      },
+    },
+
     // `aof work run-complete <ref> --outcome done|failed|cancelled [--run <runId>] [--reason <reason>]`.
     argv: (positionals, options) => ({
       ref: positionals[0],

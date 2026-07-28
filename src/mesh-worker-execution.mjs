@@ -120,7 +120,16 @@ import { findWork, listItems, loadWorkspace } from "./work.mjs";
 // resolves EXACTLY the directory a real interactive `claude` session (cwd =
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
-import { startRun, completeRun, readRuns } from "./run-store.mjs";
+import { startRun, readRuns } from "./run-store.mjs";
+// m42 wave (d) leg d2 (the sweep) — every terminal settle on this worker goes
+// through the run store's ONE event-raiser: fact write + durable `run.completed`
+// event + sync drain of its checkout/local reactors. This module can no longer
+// call completeRun directly (acd-effects-ledger pins it): the cascade — status
+// rollback on failed, projection publish where a workspace is passed — comes
+// from the LEDGER (src/effects/table.mjs), not from whichever call site
+// remembered it. A crash between the fact and the drain leaves PENDING journal
+// steps the next drain (any face, any process) pays.
+import { transitionRunComplete } from "./effects/run-transitions.mjs";
 import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
@@ -2424,7 +2433,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // just-minted record as cancelled and retain the worktree.
       if (withdrawnByControl.delete(assignmentId)) {
         try {
-          await completeRun(item, { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() });
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
         } catch (error) {
           reportDegrade("mesh-worker-execution", error);
         }
@@ -2514,7 +2527,11 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // it). The worktree takes the retain branch, same as failed.
       if (withdrawnByControl.delete(assignmentId)) {
         try {
-          await completeRun(item, { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() });
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
         } catch (error) {
           reportDegrade("mesh-worker-execution", error);
         }
@@ -2543,12 +2560,20 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         return;
       }
 
-      const completed = await completeRun(item, {
-        runId: runRecord.runId,
-        outcome: outcome.outcome,
-        failureReason: outcome.failureReason ?? null,
-        now: resolveNow(),
-      });
+      // The bracket's settle — through the transition seam, so a FAILED outcome
+      // rolls the primary checkout's item back to not-started via the declared
+      // reactor (the "8 call sites, exactly 1 does the rollback" disease dies
+      // here) and the event survives a crash between fact and cascade.
+      const { record: completed } = await transitionRunComplete(
+        item,
+        {
+          runId: runRecord.runId,
+          outcome: outcome.outcome,
+          failureReason: outcome.failureReason ?? null,
+          now: resolveNow(),
+        },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      );
 
       // task 03/07 — cleanup on done, retain on failed; on a `done` AGENT outcome,
       // story 07 (ADR-015) inserts a PUSH before that cleanup can ever run. `force:true`
@@ -2657,7 +2682,11 @@ export async function settleStrandedRunRecords(stranded, options = {}) {
           (run) => run.state === "running" && run?.brief?.assignmentId === assignmentId,
         ) ?? null;
         if (ghost == null) continue;
-        await completeRun(item, { runId: ghost.runId, outcome: "failed", failureReason: "runtime_offline", now: resolveNow() });
+        await transitionRunComplete(
+          item,
+          { runId: ghost.runId, outcome: "failed", failureReason: "runtime_offline", now: resolveNow() },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        );
         log("info", `stranded assignment ${assignmentId}: run ${ghost.runId} settled failed/runtime_offline (daemon restarted) — the duplicate-run guard is clear`);
         settled = true;
         break;
@@ -2733,7 +2762,11 @@ export function createMeshWorkerWithdrawHandler(options = {}) {
         log("info", `assignment ${assignmentId}: run ${runId} is already ${run.state} — nothing to settle`);
         return;
       }
-      await completeRun(item, { runId, outcome: "cancelled", now: resolveNow() });
+      await transitionRunComplete(
+        item,
+        { runId, outcome: "cancelled", now: resolveNow() },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      );
       log("info", `assignment ${assignmentId}: run ${runId} settled cancelled (withdrawn by control) — the duplicate-run guard is clear`);
     } catch (error) {
       log("warn", `assignment ${assignmentId}: settling run ${runId} failed: ${String(error?.message ?? error)}`);
@@ -2970,7 +3003,11 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
       }
       const settledOutcome = outcome.outcome === "done" ? "done" : "failed";
       try {
-        await completeRun(item, { runId: runRecord.runId, outcome: settledOutcome, now: resolveNow() });
+        await transitionRunComplete(
+          item,
+          { runId: runRecord.runId, outcome: settledOutcome, now: resolveNow() },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        );
       } catch (error) {
         reportDegrade("mesh-worker-execution", error);
       }
@@ -2987,7 +3024,11 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
       log("warn", `session ${sessionId}: resume failed: ${String(error?.message ?? error)}`);
       if (runRecord != null && item != null) {
         try {
-          await completeRun(item, { runId: runRecord.runId, outcome: "failed", now: resolveNow() });
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "failed", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
         } catch (settleError) {
           reportDegrade("mesh-worker-execution", settleError);
         }
