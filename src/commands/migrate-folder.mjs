@@ -242,6 +242,16 @@ export const migrateFolderCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs migrateCommand copy is deleted.
+    route: ["migrate"],
+    spec: {
+      usage: "aof migrate <folder> [--dry-run] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "preview the conversion without writing" },
+      },
+    },
+
     // `aof migrate <folder> [--dry-run] [--json]`.
     argv: (positionals, options = {}) => {
       const input = { folder: positionals[0] };

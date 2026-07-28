@@ -239,11 +239,32 @@ export const notionSyncWorkCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs notionSyncWorkCli copy is deleted. The
+    // missing-milestone usage refusal moved into the argv adapter (thrown BEFORE
+    // invoke, so nothing is pushed to Notion — the retired guard's contract).
+    route: ["work", "integrations", "notion", "sync-work"],
+    spec: {
+      usage: "aof work integrations notion sync-work <milestone> [--dry-run] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "plan the sync without any Notion egress" },
+      },
+    },
+
     // `aof work integrations notion sync-work <milestone> [--dry-run] [--json]`.
-    argv: (positionals, options = {}) => ({
-      milestone: positionals[0],
-      dryRun: !!options.dryRun,
-    }),
+    argv: (positionals, options = {}) => {
+      if (positionals[0] == null) {
+        throw commandError(
+          "Usage: aof work integrations notion sync-work <milestone> [--dry-run] [--json]",
+          "usage",
+          400,
+        );
+      }
+      return {
+        milestone: positionals[0],
+        dryRun: !!options.dryRun,
+      };
+    },
 
     // Human render: the no-op prints the setup hint naming the config block; a
     // configured run prints a per-item summary (one line per applied op).

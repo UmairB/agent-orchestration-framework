@@ -182,6 +182,17 @@ export const importMilestoneCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs importMilestoneCommandCli copy is
+    // deleted (the `aof import` ladder keeps only its unknown-unit shim).
+    route: ["import", "milestone"],
+    spec: {
+      usage: "aof import milestone <repo> [selector] [--dry-run] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "preview the import without writing" },
+      },
+    },
+
     // `aof import milestone <repo> [selector] [--dry-run] [--json]`.
     argv: (positionals, options = {}) => {
       const input = { repo: positionals[0] };

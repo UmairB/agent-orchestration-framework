@@ -212,6 +212,16 @@ export function createPhaseDoorCommand(phase) {
     },
 
     cli: {
+      // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table
+      // + the ONE generic face; the cli.mjs runVerbCli branches are deleted.
+      route: ["work", phase],
+      spec: {
+        usage: `aof work ${phase} <ref> [--node <id>] [--json]`,
+        flags: {
+          node: { type: "string", description: "the node to run on (defaults to the last node that worked on it)" },
+        },
+      },
+
       // `aof work <phase> <ref> [--node <id>]`
       argv: (positionals, options = {}) => ({
         ref: positionals[0],

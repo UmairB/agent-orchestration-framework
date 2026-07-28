@@ -162,6 +162,18 @@ export const runStartCommand = {
     return await withGlobalWorkPropagation(record, ws, ctx);  },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face (whose --json single-envelope discipline IS the retired
+    // runVerbCli's); the cli.mjs face copy is deleted.
+    route: ["work", "run-start"],
+    spec: {
+      usage: "aof work run-start <ref> [--session <id>] [--brief '<json>'] [--json]",
+      flags: {
+        session: { type: "string", description: "the initiating session id" },
+        brief: { type: "string", description: "opaque JSON brief persisted on the run" },
+      },
+    },
+
     // `aof work run-start <ref> [--session …] [--brief '<json>']`. The brief arrives
     // as a JSON STRING on the CLI; the argv adapter parses it (undefined stays
     // undefined — an omitted --brief defaults to {} in run). `now` is a white-box

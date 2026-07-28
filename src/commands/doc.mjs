@@ -82,6 +82,15 @@ export const docCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 — dispatched by the registry-derived route table
+    // through the ONE generic face (spine/face.mjs); the verbatim
+    // workDocCommand face copy in cli.mjs is retired. The spec IS the flag
+    // vocabulary: only --json/--config (BASE_FLAGS) apply here.
+    route: ["work", "doc"],
+    spec: {
+      usage: "aof work doc <ref> <DOC> [--json]",
+    },
+
     // `aof work doc <ref> <DOC>` — two positionals map onto the input.
     argv: (positionals) => ({ ref: positionals[0], doc: positionals[1] }),
 

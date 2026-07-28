@@ -5,7 +5,7 @@
 // maps onto the engine's REQUIRED `parent` selector (ADR-006). Independent of
 // story 02's top-level pair — disjoint number space, own scaffold, own
 // best-effort `## Stories` checklist update (ADR-003 Tier 2).
-import { runInsertStory } from "./insert-shared.mjs";
+import { INSERT_FLAGS, runInsertStory } from "./insert-shared.mjs";
 
 export const insertStoryCommand = {
   id: "work:insert-story",
@@ -33,6 +33,16 @@ export const insertStoryCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs workInsertCli branch is deleted.
+    route: ["work", "insert-story"],
+    spec: {
+      usage: "aof work insert-story <slug> --at <P> --under <M> [--yes] [--json]",
+      flags: {
+        ...INSERT_FLAGS,
+        under: { type: "string", description: "the parent milestone number (required)" },
+      },
+    },
     // `aof work insert-story <slug> --at <SS> --under <NN> [--yes|--force] [--json]`.
     argv: (positionals, options) => ({
       slug: positionals[0],

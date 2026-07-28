@@ -63,6 +63,18 @@ export const feedbackCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "feedback"],
+    spec: {
+      usage: 'aof work feedback <ref> --note "…" [--actor …] [--refs …] [--json]',
+      flags: {
+        note: { type: "string", description: "the feedback note (required)" },
+        actor: { type: "string", description: "who raised it (defaults to \"you\")" },
+        refs: { type: "string", description: "verbatim refs recorded on the bullet" },
+      },
+    },
+
     // `aof work feedback <ref> --note "…" [--actor …] [--refs …]`.
     argv: (positionals, options) => ({
       ref: positionals[0],

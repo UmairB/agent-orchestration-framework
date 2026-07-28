@@ -199,6 +199,37 @@ import { promoteGapToChoreCommand } from "./commands/promote-gap-to-chore.mjs";
 // CLI-only by design (no board affordance requested — the same BOARD_DEFERRED
 // carve-out `insert-milestone`/`insert-chore`/etc already use).
 import { upgradeCommand } from "./commands/upgrade.mjs";
+// m42 wave (d) leg d1 (PRD-command-spine-effects-ledger) — the first three
+// class-A migrations off cli.mjs's inline ladder: previously UNREGISTERED verbs
+// (assets/packages/project family — self-contained, no cascade surface) become
+// registry Commands carrying `cli.route` + `cli.spec`, dispatched by the
+// registry-derived route table through the ONE generic face
+// (src/spine/face.mjs). The remaining ~40 inline verbs follow the wave-(d)
+// migration plan (wiki/work/42_structural-overhaul/WAVE-D-MIGRATION.md).
+import { assetsListCommand } from "./commands/assets-list.mjs";
+import { packagesListCommand } from "./commands/packages-list.mjs";
+import { projectShowCommand } from "./commands/project-show.mjs";
+// m42 wave (d) leg d1, WAVE 1 COMPLETION (2026-07-28) — the rest of the
+// assets/packages/project families off the inline ladder: reads and writers
+// alike are registry Commands on the route table, including the two big flows
+// (assets:apply, packages:install — the wave-1 tail). Still inline by design:
+// assets ui (launcher idiom) and init (shares apply's machinery + the d4
+// writeLock item).
+import { assetsShowCommand } from "./commands/assets-show.mjs";
+import { assetsAddCommand } from "./commands/assets-add.mjs";
+import { assetsRemoveCommand } from "./commands/assets-remove.mjs";
+import { assetsUseCommand, assetsUnuseCommand } from "./commands/assets-refs.mjs";
+import { assetsCleanCommand } from "./commands/assets-clean.mjs";
+import { assetsValidateCommand } from "./commands/assets-validate.mjs";
+import { assetsApplyCommand } from "./commands/assets-apply.mjs";
+import { packagesShowCommand } from "./commands/packages-show.mjs";
+import { packagesAddCommand } from "./commands/packages-add.mjs";
+import { packagesRemoveCommand } from "./commands/packages-remove.mjs";
+import { packagesValidateCommand } from "./commands/packages-validate.mjs";
+import { packagesInstallCommand } from "./commands/packages-install.mjs";
+import { projectValidateCommand } from "./commands/project-validate.mjs";
+import { projectDoctorCommand } from "./commands/project-doctor.mjs";
+import { projectMigrateCommand } from "./commands/project-migrate.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -254,6 +285,27 @@ const COMMANDS = [
   // door (one factory, one decision, one scope rule) with their own lifecycle phase.
   refineDoorCommand,
   verifyDoorCommand,
+  // m42 wave (d) leg d1 — the first route-table commands (see the import note).
+  assetsListCommand,
+  packagesListCommand,
+  projectShowCommand,
+  // m42 wave (d) leg d1, wave-1 completion — the families in full.
+  assetsShowCommand,
+  assetsAddCommand,
+  assetsRemoveCommand,
+  assetsUseCommand,
+  assetsUnuseCommand,
+  assetsCleanCommand,
+  assetsValidateCommand,
+  assetsApplyCommand,
+  packagesShowCommand,
+  packagesAddCommand,
+  packagesRemoveCommand,
+  packagesValidateCommand,
+  packagesInstallCommand,
+  projectValidateCommand,
+  projectDoctorCommand,
+  projectMigrateCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

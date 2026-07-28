@@ -25,15 +25,24 @@ export const nextCommand = {
     return await nextWork(ws.workDir, scope);
   },
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "next"],
+    spec: {
+      usage: "aof work next [range] [--json]",
+      flags: {},
+    },
+
     // `aof work next [scope]` — an optional positional maps onto the input.
     argv: (positionals) => (positionals[0] ? { scope: positionals[0] } : {}),
 
     // Reproduces today's `aof work next` human render byte-for-byte: a scope-aware
-    // (faceCtx.scope) done line, the blocked line naming the unmet drivers, or the
+    // done line, the blocked line naming the unmet drivers, or the
     // ready item's two-line `ref … / cwd-relative path` form.
     render(result, faceCtx = {}) {
+      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
       if (result.state === "done") {
-        return `Nothing actionable${faceCtx.scope ? ` in ${faceCtx.scope}` : ""} — everything is done.`;
+        return `Nothing actionable${scope ? ` in ${scope}` : ""} — everything is done.`;
       }
       if (result.state === "blocked") {
         return `Blocked: ${result.ref} (${result.slug}) waits on milestone(s) ${result.waitingOn.join(", ")} — not done.`;

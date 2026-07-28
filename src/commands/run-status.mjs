@@ -63,6 +63,14 @@ export const runStatusCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "run-status"],
+    spec: {
+      usage: "aof work run-status <ref> [--json]",
+      flags: {},
+    },
+
     // `aof work run-status <ref>` — one positional maps onto the input.
     argv: (positionals) => ({ ref: positionals[0] }),
 

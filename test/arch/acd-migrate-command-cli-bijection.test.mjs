@@ -109,25 +109,35 @@ export const archTests = [
     },
   },
   {
-    name: "arch/migrate-bijection: cli.mjs routes the top-level `migrate` verb to migrateCommand, which reaches migrate:folder via getCommand → invoke",
+    name: "arch/migrate-bijection: the top-level `migrate` verb reaches migrate:folder — a route-table entry or a migrateCommand ladder face",
     run: async () => {
+      // m42 wave (d) leg d1 (wave 2): migrate:folder migrated onto the
+      // registry-derived route table (cli.route: ["migrate"] + the ONE generic
+      // face) — reachability is now a REGISTRY fact, mirroring the
+      // acd-work-command-cli-bijection route-or-ladder update. The ladder form
+      // stays accepted so this gate never forces a route back out.
+      const { deriveRouteTable } = await import("../../src/spine/face.mjs");
+      const routes = deriveRouteTable(listCommands());
+      const routed = routes.has("migrate") && routes.get("migrate").id === "migrate:folder";
+
+      if (!routed) {
+        const source = stripComments(await readFile(CLI_MJS));
+        const dispatch = runDispatchBody(source);
+        assert.ok(dispatch.length > 0, "the top-level run(argv) dispatcher is defined");
+        assert.ok(/command\s*===\s*["']migrate["']/.test(dispatch), 'run dispatches `command === "migrate"`');
+        const face = functionBody(source, "migrateCommand");
+        assert.ok(face.length > 0, "migrateCommand is defined in cli.mjs");
+        assert.ok(/getCommand\(\s*["']migrate:folder["']\s*\)/.test(face), 'migrateCommand resolves getCommand("migrate:folder")');
+        assert.ok(/invoke\(/.test(face), "migrateCommand reaches the command through invoke (the registry door)");
+      }
+
+      // Either way: `migrate` must NOT sit in the removed-command list (the reclaim).
       const source = stripComments(await readFile(CLI_MJS));
-      // (b1) the top-level dispatcher routes `command === "migrate"` to migrateCommand.
       const dispatch = runDispatchBody(source);
-      assert.ok(dispatch.length > 0, "the top-level run(argv) dispatcher is defined");
-      assert.ok(/command\s*===\s*["']migrate["']/.test(dispatch), 'run dispatches `command === "migrate"`');
-      assert.ok(/migrateCommand\s*\(/.test(dispatch), "the migrate verb calls migrateCommand(rest)");
-      // `migrate` is NO LONGER a removed-command stub (the reclaim).
       const removedListMatch = dispatch.match(/\[([^\]]*)\]\.includes\(command\)/);
       if (removedListMatch) {
         assert.ok(!/["']migrate["']/.test(removedListMatch[1]), 'migrate is removed from the removed-command list (reclaimed)');
       }
-      // (b2) the migrateCommand face reaches the command via getCommand + invoke.
-      const face = functionBody(source, "migrateCommand");
-      assert.ok(face.length > 0, "migrateCommand is defined in cli.mjs");
-      assert.ok(/getCommand\(\s*["']migrate:folder["']\s*\)/.test(face), 'migrateCommand resolves getCommand("migrate:folder")');
-      assert.ok(/invoke\(/.test(face), "migrateCommand reaches the command through invoke (the registry door)");
-      assert.ok(/cli\.json|cli\.render/.test(face), "migrateCommand projects via cli.json/cli.render");
     },
   },
   {

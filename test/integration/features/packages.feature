@@ -119,8 +119,22 @@ Feature: AOF package semantics
     Then the command should fail
     And stdout should contain `network-boundary: running`
     And stdout should contain `retry: npx get-shit-done-cc@latest --codex --local`
+    And stdout should contain `Framework install failed for codex.`
     And JSON file `.aof/aof.lock.json` should contain framework install attempt `claude` with status `success`
     And JSON file `.aof/aof.lock.json` should contain framework install attempt `codex` with status `failed`
+
+  Scenario: Packages install refuses unknown packages with a structured JSON error
+    Given a project with .aof package config
+    When I run `packages install nope --json`
+    Then the command should fail
+    And stdout should contain `"ok": false`
+    And stdout should contain `does not have installer support yet`
+
+  Scenario: Packages install from lock requires a lock file
+    Given a project with .aof package config
+    When I run `packages install --from-lock --dry-run`
+    Then the command should fail
+    And stderr should contain `No lock file found`
 
   Scenario: Packages install replays framework install intent from lock
     Given a project with .aof package config

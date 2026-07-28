@@ -23,6 +23,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+// m42 wave (d) leg d1 — a work:* command may now dispatch through the
+// registry-DERIVED route table (cli.route + the one generic face) instead of a
+// hand-kept `subcommand === "…"` ladder branch; the gate accepts EITHER door
+// and re-derives the routed set from the registry, never from grepping.
+import { deriveRouteTable } from "../../src/spine/face.mjs";
 import { startRun } from "../../src/run-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -223,14 +228,19 @@ export const archTests = [
     },
   },
   {
-    name: "arch/15 ADR-005: workCommand in cli.mjs has a reachable dispatch branch per registry-derived work:* subcommand",
+    name: "arch/15 ADR-005: every registry-derived work:* subcommand is CLI-reachable — a route-table entry or a workCommand dispatch branch",
     run: async () => {
       const body = workCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       assert.ok(body.length > 0, "workCommand is defined in cli.mjs");
+      // m42 wave (d) leg d1: the route table is derived from the registry, so a
+      // migrated verb's reachability is a registry fact, not a source grep.
+      const routes = deriveRouteTable(listCommands());
       for (const sub of subcommands()) {
+        const routed = routes.has(`work ${sub}`);
+        const laddered = new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body);
         assert.ok(
-          new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body),
-          `workCommand dispatches \`subcommand === "${sub}"\` (no command the CLI cannot run)`
+          routed || laddered,
+          `work:${sub} is CLI-reachable — via cli.route ["work","${sub}"] or a workCommand dispatch branch (no command the CLI cannot run)`
         );
       }
     },

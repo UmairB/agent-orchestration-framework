@@ -71,6 +71,14 @@ export const tasksCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 — dispatched by the registry-derived route table
+    // through the ONE generic face (spine/face.mjs); the verbatim
+    // workTasksCommand face copy in cli.mjs is retired.
+    route: ["work", "tasks"],
+    spec: {
+      usage: "aof work tasks <ref> [--json]",
+    },
+
     // `aof work tasks <ref>` — one positional maps onto the input.
     argv: (positionals) => ({ ref: positionals[0] }),
 

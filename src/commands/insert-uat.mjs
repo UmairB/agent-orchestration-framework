@@ -4,7 +4,7 @@
 // thin-over-engine shape. The ONE difference from insert-milestone: `--depends`
 // authors the new session's `depends:` frontmatter, renumbered against the
 // POST-shift stream (ADR-006 depends-framing rule — see insert-shared.mjs).
-import { runInsertTopLevel } from "./insert-shared.mjs";
+import { INSERT_FLAGS, runInsertTopLevel } from "./insert-shared.mjs";
 
 export const insertUatCommand = {
   id: "work:insert-uat",
@@ -33,6 +33,17 @@ export const insertUatCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs workInsertCli branch is deleted.
+    route: ["work", "insert-uat"],
+    spec: {
+      usage: "aof work insert-uat <slug> --at <P> [--depends 0,2] [--yes] [--json]",
+      flags: {
+        ...INSERT_FLAGS,
+        depends: { type: "string", description: "comma-separated driver positions the gate waits on" },
+      },
+    },
+
     // `aof work insert-uat <slug> --at <P> [--depends a,b] [--yes|--force] [--json]`.
     argv: (positionals, options) => ({
       slug: positionals[0],

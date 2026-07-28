@@ -5,6 +5,46 @@ const VALID_RUNTIMES = new Set(supportedRuntimes());
 const VALID_RESOURCE_KINDS = new Set(supportedResourceKinds());
 const VALID_SOURCE_TYPES = new Set(["npm", "git", "file"]);
 
+// The read-model summary a package list/show surface renders: declared package
+// fields joined with the lock's install attempts. Moved here from cli.mjs
+// (m42 wave (d) leg d1 — command logic leaves the face file; one home, shared
+// by the packages:* registry commands and any remaining inline handler).
+export function packageSummaries(packages, lock) {
+  const attempts = Array.isArray(lock?.frameworkInstallAttempts) ? lock.frameworkInstallAttempts : [];
+  return packages.map((pkg) => ({
+    id: pkg.id,
+    namespace: pkg.namespace,
+    source: pkg.source,
+    sourceDescriptor: pkg.sourceDescriptor,
+    runtimes: pkg.runtimes ?? [],
+    installAttempts: attempts.filter((attempt) => attempt.framework === pkg.id)
+  }));
+}
+
+// Per-package validation diagnostics over a RAW config (each entry run through
+// normalizePackage, its throw surfaced as a { severity, path, message } row).
+// Moved here from cli.mjs (m42 wave (d) leg d1 — shared by packages:validate).
+export function packageDiagnostics(raw) {
+  const diagnostics = [];
+  if (raw.packages !== undefined && !Array.isArray(raw.packages)) {
+    return [{ severity: "error", path: "packages", message: "packages must be an array when provided." }];
+  }
+
+  for (const [index, pkg] of (Array.isArray(raw.packages) ? raw.packages : []).entries()) {
+    try {
+      normalizePackage(pkg, index);
+    } catch (error) {
+      const pathMatch = error.message.match(/^(packages\[\d+\](?:\.[A-Za-z0-9_]+)?)/);
+      diagnostics.push({
+        severity: "error",
+        path: pathMatch?.[1] ?? `packages[${index}]`,
+        message: error.message
+      });
+    }
+  }
+  return diagnostics;
+}
+
 export function normalizePackages(packages = []) {
   if (!Array.isArray(packages)) {
     throw new Error("packages must be an array when provided.");

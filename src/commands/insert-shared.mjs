@@ -108,6 +108,15 @@ export function stripBundleMarker(text) {
   return text.replace(/^﻿?<!--[^\n]*-->(?:\r?\n)+(?=\S)/, "");
 }
 
+// The shared insert-verb flag vocabulary (m42 wave (d) leg d1, wave 2): every
+// insert-* face takes a position, the confirm bypass, and its legacy --force
+// alias; insert-uat/-story extend with their own selector flags.
+export const INSERT_FLAGS = Object.freeze({
+  at: Object.freeze({ type: "string", description: "the 0-based position to insert at" }),
+  yes: Object.freeze({ type: "boolean", description: "confirm an above-threshold shift without prompting" }),
+  force: Object.freeze({ type: "boolean", description: "alias of --yes" }),
+});
+
 // The born-stamp (ADR-002, milestone 40): `<schema-version>` / `<aof-version>`
 // resolve to the RUNNING build's own WORK_ITEM_SCHEMA_VERSION / packageVersionString()
 // — never a pinned literal, so the stamp can never drift behind the current

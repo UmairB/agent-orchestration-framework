@@ -102,8 +102,20 @@ export const doctorCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted. The ADVISORY exit
+    // gate (error always fails; warn fails only under --strict) rides cli.exit —
+    // run's findings stay identical across --strict (the gate is the face).
+    route: ["work", "doctor"],
+    spec: {
+      usage: "aof work doctor [scope] [--json] [--strict]",
+      flags: {
+        strict: { type: "boolean", description: "treat warn findings as failures" },
+      },
+    },
+
     // `aof work doctor [scope] [--json] [--strict]` — the optional positional maps
-    // onto the input; --strict/--json are face flags (parseOptions reads them).
+    // onto the input; --strict/--json are face flags.
     argv: (positionals) => (positionals[0] ? { scope: positionals[0] } : {}),
 
     // The human render: a healthy line on a clean stream (finding-oriented, silent
@@ -111,8 +123,9 @@ export const doctorCommand = {
     // the anchor path shown CWD-RELATIVE (the CLI's path-projection face — run
     // carries the raw absolute, the face relativises to process.cwd()).
     render(result, faceCtx = {}) {
+      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
       if (result.findings.length === 0) {
-        return `healthy — ${faceCtx.scope ? `${faceCtx.scope} is` : "work stream is"} coherent.`;
+        return `healthy — ${scope ? `${scope} is` : "work stream is"} coherent.`;
       }
       return result.findings
         .map((finding) => {
@@ -128,7 +141,7 @@ export const doctorCommand = {
     // reflect the FACE gate (ADR-002): error ⇒ never healthy; warn ⇒ unhealthy
     // only under --strict. The finding SET is identical with/without --strict.
     json(result, faceCtx = {}) {
-      const strict = Boolean(faceCtx.strict);
+      const strict = doctorStrict(faceCtx);
       const findings = result.findings.map((finding) => ({
         code: finding.code,
         severity: finding.severity,
@@ -140,8 +153,21 @@ export const doctorCommand = {
       const failed = errors > 0 || (strict && warnings > 0);
       return { healthy: !failed, strict, errors, warnings, findings };
     },
+
+    exit(result, faceCtx = {}) {
+      const strict = doctorStrict(faceCtx);
+      const errors = result.findings.filter((finding) => finding.severity === "error").length;
+      const warns = result.findings.filter((finding) => finding.severity === "warn").length;
+      return errors > 0 || (strict && warns > 0) ? 1 : 0;
+    },
   },
 };
+
+// The face flag read once: the generic face passes { positionals, options };
+// a direct adapter caller may still pass { strict } (the pre-route shape).
+function doctorStrict(faceCtx = {}) {
+  return Boolean(faceCtx.strict ?? faceCtx.options?.strict);
+}
 
 function scopeOf(input) {
   const scope = typeof input?.scope === "string" ? input.scope.trim() : "";

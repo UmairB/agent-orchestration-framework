@@ -3,21 +3,17 @@ import { access, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, loadProjectConfig } from "./dsl.mjs";
-import { applyConfig, supportedRuntimes } from "./adapters.mjs";
-import { executeFrameworkInstallPlan, frameworkPlanFromLock, gsdPackageFromConfig, installFramework, knownFrameworks, planFrameworkInstall } from "./frameworks.mjs";
-import { mergeFrameworkInstallAttempts, readLock, writeLock } from "./lock.mjs";
-import { createLockManifest, createRenderPlan, executeApplyActions, planApplyActions, summarizeLockManifest } from "./render-plan.mjs";
-import { readJson, writeText, sweepStaleTempFiles } from "./fs.mjs";
-import { normalizePackage } from "./packages.mjs";
+import { formatFriendlyApplyAction, relativeDisplayPath } from "./render-plan.mjs";
+import { writeText, sweepStaleTempFiles } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
-import { promptResourceInput, selectRuntimes } from "./prompt.mjs";
-import { findProjectConfig, globalMeshPaths, globalWorkspacePaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
-import { collectAdapterWarnings } from "./adapter-warnings.mjs";
-import { adapterWarningsForConfig, doctorConfig, inspectConfig, inspectGlobalConfig, validateConfig, validateGlobalConfig } from "./config-inspect.mjs";
-import { addProjectGlobalRef, removeProjectGlobalRef } from "./config-editor.mjs";
+import { selectRuntimes } from "./prompt.mjs";
+import { globalMeshPaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { loadWorkspace, findWork } from "./work.mjs";
 import { invoke, getCommand } from "./command-core.mjs";
+// m42 wave (d) leg d1 — the registry-derived route table + the ONE generic face,
+// and the shared runtime-flag interpretation (one home; the local copies are gone).
+import { resolveRoute, runCommandFace } from "./spine/face.mjs";
+import { hasRuntimeOptions, parseRuntimes } from "./spine/flags.mjs";
 import { serveStdio } from "./graph-mcp-server.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
@@ -89,6 +85,17 @@ export async function run(argv) {
     return;
   }
 
+  // m42 wave (d) leg d1 — THE ROUTE TABLE, derived from the registry (never a
+  // hand-kept ladder): any command declaring `cli.route` dispatches here through
+  // the ONE generic face (src/spine/face.mjs) BEFORE the legacy ladder below.
+  // As verbs migrate (WAVE-D-MIGRATION.md), their ladder branches are deleted;
+  // when the last one goes, run() IS argv → route table → face.
+  const routed = resolveRoute(argv);
+  if (routed) {
+    await runCommandFace(routed.command, routed.rest);
+    return;
+  }
+
   if (command === "init") {
     await initCommand(rest);
     return;
@@ -143,22 +150,16 @@ export async function run(argv) {
     return;
   }
 
-  // story 29 — reclaim the top-level `migrate` verb: convert a source folder INTO a
-  // managed milestone under work.dir (the import contrast). A thin argv → invoke(
-  // "migrate:folder") → render/--json face, mirroring importMilestoneCommandCli.
-  if (command === "migrate") {
-    await migrateCommand(rest);
-    return;
-  }
+  // `aof migrate <folder>` — MIGRATED (m42 wave (d) leg d1, wave 2):
+  // migrate:folder carries `cli.route: ["migrate"]` and dispatches through the
+  // route table above; no ladder branch remains.
 
-  // milestone 40 / story 02 — reclaim the top-level `upgrade` verb: run the
-  // migration registry engine over the CURRENT work stream (the contrast with
-  // `migrate`: migrate converts a FOREIGN folder in; upgrade advances the
-  // stream's OWN items to this build's schema). A thin argv -> invoke(
-  // "work:upgrade") -> render/--json face, mirroring migrateCommand exactly.
-  // Also reachable as `aof work upgrade` (workCommand, below) — the SAME face.
+  // milestone 40 / story 02 — the top-level `upgrade` spelling: the SAME
+  // work:upgrade command the `aof work upgrade` route reaches, delegated
+  // through the generic face (the bare-`aof project` sanctioned-delegation
+  // precedent — one door, two spellings).
   if (command === "upgrade") {
-    await upgradeCommand(rest);
+    await runCommandFace(getCommand("work:upgrade"), rest);
     return;
   }
 
@@ -172,50 +173,9 @@ export async function run(argv) {
 async function assetsCommand(args) {
   const [subcommand, ...rest] = args;
 
-  if (subcommand === "add") {
-    await assetsAddCommand(rest);
-    return;
-  }
-
-  if (subcommand === "list") {
-    await assetsListCommand(rest);
-    return;
-  }
-
-  if (subcommand === "show") {
-    await assetsShowCommand(rest);
-    return;
-  }
-
-  if (subcommand === "remove") {
-    await assetsRemoveCommand(rest);
-    return;
-  }
-
-  if (subcommand === "use") {
-    await assetsUseCommand(rest);
-    return;
-  }
-
-  if (subcommand === "unuse") {
-    await assetsUnuseCommand(rest);
-    return;
-  }
-
-  if (subcommand === "apply") {
-    await assetsApplyCommand(rest);
-    return;
-  }
-
-  if (subcommand === "validate") {
-    await assetsValidateCommand(rest);
-    return;
-  }
-
-  if (subcommand === "clean") {
-    await assetsCleanCommand(rest);
-    return;
-  }
+  // add/list/show/remove/use/unuse/validate/clean/apply — MIGRATED (m42 wave
+  // (d) leg d1): registry Commands routed in run() through the generic face;
+  // they never reach this ladder. Still here: ui (the launcher idiom).
 
   if (subcommand === "ui") {
     await assetsUiCommand(rest);
@@ -225,64 +185,28 @@ async function assetsCommand(args) {
   throw new Error(`Unknown assets command "${subcommand ?? ""}".\n\nExamples:\n  aof assets add skill code-review\n  aof assets add --global skill shared-review\n  aof assets apply --dry-run`);
 }
 
+// add/list/show/remove/validate/install — ALL MIGRATED (m42 wave (d) leg d1):
+// registry Commands routed in run() through the generic face. Only an unknown
+// subcommand ever reaches this shim.
 async function packagesCommand(args) {
-  const [subcommand, ...rest] = args;
-
-  if (subcommand === "add") {
-    await packagesAddCommand(rest);
-    return;
-  }
-
-  if (subcommand === "list") {
-    await packagesListCommand(rest);
-    return;
-  }
-
-  if (subcommand === "show") {
-    await packagesShowCommand(rest);
-    return;
-  }
-
-  if (subcommand === "remove") {
-    await packagesRemoveCommand(rest);
-    return;
-  }
-
-  if (subcommand === "validate") {
-    await packagesValidateCommand(rest);
-    return;
-  }
-
-  if (subcommand === "install") {
-    await packagesInstallCommand(rest);
-    return;
-  }
-
+  const [subcommand] = args;
   throw new Error(`Unknown packages command "${subcommand ?? ""}".\n\nExamples:\n  aof packages add gsd --codex\n  aof packages install gsd --dry-run\n  aof packages install --from-lock --dry-run`);
 }
 
 async function projectCommand(args) {
   const [subcommand = "show", ...rest] = args;
 
+  // "show" — MIGRATED (m42 wave (d) leg d1): `aof project show` dispatches via
+  // the route table in run(); this branch remains ONLY for the bare `aof project`
+  // default spelling, delegating to the SAME registered command + generic face
+  // (one door, two spellings — the upgrade/work-upgrade precedent).
   if (subcommand === "show") {
-    await projectShowCommand(rest);
+    await runCommandFace(getCommand("project:show"), rest);
     return;
   }
 
-  if (subcommand === "validate") {
-    await validateCommand(rest);
-    return;
-  }
-
-  if (subcommand === "doctor") {
-    await doctorCommand(rest);
-    return;
-  }
-
-  if (subcommand === "migrate") {
-    await projectMigrateCommand(rest);
-    return;
-  }
+  // validate/doctor/migrate — MIGRATED (m42 wave (d) leg d1): registry Commands
+  // routed in run() through the generic face; they never reach this ladder.
 
   if (subcommand === "provision") {
     await projectProvisionCli(rest);
@@ -342,15 +266,13 @@ async function workCommand(args) {
     return;
   }
 
-  if (subcommand === "list") {
-    await workListCommand(rest);
-    return;
-  }
-
-  if (subcommand === "validate") {
-    await workValidateCommand(rest);
-    return;
-  }
+  // list / validate / doc / tasks / next / doctor / feedback / run-* / continue /
+  // refine / verify / the insert-* family / promote-gap — MIGRATED (m42 wave (d)
+  // leg d1, wave 2): registry Commands carrying `cli.route`, dispatched in run()
+  // through the route table + the ONE generic face; they never reach this
+  // ladder. Their face copies (workListCommand, workValidateCommand,
+  // workDoctorCommand, workNextCommand, workFeedbackCommand, the run-verb
+  // wrappers + runVerbCli, workInsertCli) are deleted.
 
   // `aof work observe <ref>` — a CLI-only diagnostic face (the mesh-desktop /
   // mesh-session idiom: deliberately OUTSIDE the work:* command registry, since it
@@ -363,116 +285,9 @@ async function workCommand(args) {
     return;
   }
 
-  // milestone 41 / story 02 — the two additive insert-top-level dispatch
-  // branches, ABOVE the unknown-subcommand fallthrough (the m19/m22 additive-verb
-  // idiom). The EXACT `subcommand === "<sub>"` form the
-  // acd-work-command-cli-bijection grep requires; both reuse the shared
-  // workInsertCli face.
-  if (subcommand === "insert-milestone") {
-    await workInsertCli("work:insert-milestone", rest);
-    return;
-  }
-
-  if (subcommand === "insert-uat") {
-    await workInsertCli("work:insert-uat", rest);
-    return;
-  }
-
-  // milestone 41 / story 03 — the nested-axis dispatch branch, same shape as
-  // the two above (`--under NN` maps onto the engine's REQUIRED `parent`
-  // selector at the shared workInsertCli face's argv adapter, ADR-006).
-  if (subcommand === "insert-story") {
-    await workInsertCli("work:insert-story", rest);
-    return;
-  }
-
-  // milestone 39 / story 03 (gap-to-chore, ADR-001, feasibility flag 4) —
-  // work:insert-chore joins the SAME insert-top-level dispatch family (the
-  // shared workInsertCli face); work:promote-gap is its own thin verb but rides
-  // the SAME face (same --json single-envelope discipline).
-  if (subcommand === "insert-chore") {
-    await workInsertCli("work:insert-chore", rest);
-    return;
-  }
-
-  if (subcommand === "promote-gap") {
-    await workInsertCli("work:promote-gap", rest);
-    return;
-  }
-
-  // milestone 40 / story 02 — `aof work upgrade` is the SAME face as the
-  // top-level `aof upgrade` verb above (both reach work:upgrade); nested here
-  // so the registry-derived acd-work-command-cli-bijection guard (every
-  // work:* command has a reachable `aof work <sub>` dispatch branch) stays
-  // satisfied for work:upgrade's `work:` id.
-  if (subcommand === "upgrade") {
-    await upgradeCommand(rest);
-    return;
-  }
-
-  if (subcommand === "doctor") {
-    await workDoctorCommand(rest);
-    return;
-  }
-
-  if (subcommand === "next") {
-    await workNextCommand(rest);
-    return;
-  }
-
-  // `aof work continue <ref> [--node <id>]` — THE single continue door (2026-07-26).
-  // Same shape as every other registry-backed verb; the command decides WHERE.
-  if (subcommand === "continue") {
-    await runVerbCli("work:continue", rest);
-    return;
-  }
-
-  // m42 wave (b) — the one-door completion: `aof work refine <ref> [--node <id>]`
-  // and `aof work verify <ref> [--node <id>]` are the SAME door (one factory, one
-  // decision) with their own lifecycle phase.
-  if (subcommand === "refine") {
-    await runVerbCli("work:refine", rest);
-    return;
-  }
-  if (subcommand === "verify") {
-    await runVerbCli("work:verify", rest);
-    return;
-  }
-
-  if (subcommand === "doc") {
-    await workDocCommand(rest);
-    return;
-  }
-
-  if (subcommand === "tasks") {
-    await workTasksCommand(rest);
-    return;
-  }
-
-  if (subcommand === "feedback") {
-    await workFeedbackCommand(rest);
-    return;
-  }
-
-  if (subcommand === "run-start") {
-    await workRunStartCommand(rest);
-    return;
-  }
-
-  if (subcommand === "run-complete") {
-    await workRunCompleteCommand(rest);
-    return;
-  }
-
-  if (subcommand === "run-status") {
-    await workRunStatusCommand(rest);
-    return;
-  }
-
-  if (subcommand === "run-retry") {
-    await workRunRetryCommand(rest);
-    return;
-  }
+  // milestone 40 / story 02 — `aof work upgrade` rides work:upgrade's route
+  // table entry; this branch never fires (the route dispatches first) but the
+  // top-level `aof upgrade` spelling below delegates to the SAME command.
 
   if (subcommand === "init") {
     await workInitCommand(rest);
@@ -938,13 +753,11 @@ function emitMeshError(asJson, message, code) {
 // argv → invoke("import:milestone") → render/--json face over the registered
 // command, mirroring graphVerbCommand (the getCommand → loadWorkspace → invoke →
 // cli.json/render idiom, INCLUDING the --json single-structured-envelope discipline).
+// `aof import <unit>` — only the unknown-unit shim remains (m42 wave (d) leg
+// d1, wave 2): `import milestone` rides import:milestone's route table entry
+// and never reaches this ladder (importMilestoneCommandCli deleted).
 async function importCommand(args) {
-  const [unit, ...rest] = args;
-
-  if (unit === "milestone") {
-    await importMilestoneCommandCli(rest);
-    return;
-  }
+  const [unit] = args;
 
   // SPEC §Scope: the unit of import is a milestone, not arbitrary content —
   // "milestone" is the only supported sub-noun in v0, so an unknown sub-noun
@@ -955,95 +768,10 @@ async function importCommand(args) {
   process.exitCode = 1;
 }
 
-// `aof import milestone <repo> [selector]` — the thin face over the registered
-// import:milestone command (13/ADR-002). Mirrors graphVerbCommand: getCommand →
-// loadWorkspace → invoke → cli.json/render. A missing <repo> throws the command's
-// missing-repo usage error (propagated to bin/aof.mjs: stderr + non-zero exit). In
-// --json mode a command error is emitted as a SINGLE structured envelope
-// { ok:false, error, code } on stdout (+ non-zero exit), exactly like the graph
-// verbs — so `aof import milestone … --json` always emits one parseable envelope.
-async function importMilestoneCommandCli(args) {
-  const options = parseOptions(args);
-  const command = getCommand("import:milestone");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error (missing-repo / ambiguous /
-  // unsupported) propagates to bin/aof.mjs (stderr + non-zero exit).
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
-
-// `aof migrate <folder> [--dry-run] [--json]` — the thin face over the registered
-// migrate:folder command (story 29). Mirrors importMilestoneCommandCli EXACTLY:
-// parseOptions → getCommand("migrate:folder") → loadWorkspace → invoke →
-// cli.render/cli.json. A missing <folder> throws the command's missing-folder usage
-// error (propagated to bin/aof.mjs: stderr + non-zero exit); a nonexistent /
-// unreadable path throws the distinct source-read error resolveImportSource raises.
-// In --json mode a command error is emitted as a SINGLE structured envelope
-// { ok:false, error, code } on stdout (+ non-zero exit), like the import/graph verbs.
-async function migrateCommand(args) {
-  const options = parseOptions(args);
-  const command = getCommand("migrate:folder");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error (missing-folder / nothing-
-  // recoverable / source-read) propagates to bin/aof.mjs (stderr + non-zero exit).
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
-
-// `aof upgrade [--dry-run] [--json]` — the thin face over the registered
-// work:upgrade command (milestone 40 / story 02, ADR-005). Mirrors
-// migrateCommand EXACTLY: parseOptions → getCommand → loadWorkspace → invoke →
-// cli.render/cli.json. Bare `aof upgrade` APPLIES; `--dry-run` PREVIEWS and
-// writes nothing (the aof project migrate dry-run/apply face). In --json mode
-// a command error (e.g. schema-newer-than-build) is emitted as a SINGLE
-// structured envelope { ok:false, error, code } on stdout (+ non-zero exit),
-// like the import/migrate/graph verbs. Also reachable as `aof work upgrade`
-// (workCommand, above) — the SAME function, both routes reach the one command.
-async function upgradeCommand(args) {
-  const options = parseOptions(args);
-  const command = getCommand("work:upgrade");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error (schema-newer-than-build)
-  // propagates to bin/aof.mjs (stderr + non-zero exit).
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
+// migrateCommand / upgradeCommand — RETIRED (m42 wave (d) leg d1, wave 2):
+// migrate:folder routes as ["migrate"]; work:upgrade routes as
+// ["work","upgrade"] with the top-level `aof upgrade` spelling delegating
+// through runCommandFace in run().
 
 // `aof work integrations <provider> …` — the namespace seam for board/issue-tracker
 // integrations (17/ADR-002). `integrations notion` is the only provider in this
@@ -1064,21 +792,13 @@ async function workIntegrationsCommand(args) {
   process.exitCode = 1;
 }
 
-// `aof work integrations notion <verb> …` — the Notion provider's verb dispatch.
-// `sync-work` is the only verb (17/ADR-002). An unknown verb exits non-zero with a
-// usage message; nothing is pushed to Notion.
+// `aof work integrations notion <verb> …` — only the unknown-verb shim remains
+// (m42 wave (d) leg d1, wave 2): sync-work/associate ride their four-word route
+// table entries and never reach this ladder (notionSyncWorkCli /
+// notionAssociateCli deleted; their usage refusals live in the commands' argv
+// adapters).
 async function notionIntegrationCommand(args) {
-  const [verb, ...rest] = args;
-
-  if (verb === "sync-work") {
-    await notionSyncWorkCli(rest);
-    return;
-  }
-
-  if (verb === "associate") {
-    await notionAssociateCli(rest);
-    return;
-  }
+  const [verb] = args;
 
   console.error(
     `Unknown notion integration verb "${verb ?? ""}". Usage: aof work integrations notion <sync-work <milestone> [--dry-run] | associate <ref> --board <key|none> --parent <id|key|none>> [--json]`
@@ -1086,82 +806,6 @@ async function notionIntegrationCommand(args) {
   process.exitCode = 1;
 }
 
-// `aof work integrations notion sync-work <milestone> [--dry-run] [--json]` — the
-// thin face over the registered notion:sync-work command (17/ADR-002), routing
-// through invoke (the registry door, never a direct path). Mirrors the import /
-// graph-verb idiom: getCommand → loadWorkspace → invoke → cli.json/render. A MISSING
-// <milestone> exits non-zero with a usage message for `integrations notion sync-work
-// <milestone>` (and pushes nothing to Notion). In --json mode a command error is
-// emitted as a SINGLE structured envelope { ok:false, error, code } on stdout (+
-// non-zero exit), exactly like the import/graph verbs.
-async function notionSyncWorkCli(args) {
-  const options = parseOptions(args);
-  const command = getCommand("notion:sync-work");
-
-  // A missing <milestone> is a usage error caught BEFORE any workspace load /
-  // invoke, so the error path constructs no Notion egress at all.
-  if (options._[0] == null) {
-    console.error(
-      "Usage: aof work integrations notion sync-work <milestone> [--dry-run] [--json]"
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error propagates to bin/aof.mjs (stderr +
-  // non-zero exit).
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
-
-// `aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]`
-// — the thin face over the registered notion:associate command (18/ADR-004), routing
-// through invoke (the registry door). Mirrors notionSyncWorkCli: getCommand →
-// loadWorkspace → invoke → cli.json/render. A MISSING <ref>, or neither --board nor
-// --parent, exits non-zero with a usage message BEFORE any workspace load (and writes
-// nothing). In --json mode a command error is emitted as a SINGLE structured envelope
-// { ok:false, error, code } on stdout (+ non-zero exit), like the sync-work verb.
-async function notionAssociateCli(args) {
-  const options = parseOptions(args);
-  const command = getCommand("notion:associate");
-
-  if (options._[0] == null || (options.board == null && options.parent == null)) {
-    console.error(
-      "Usage: aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]"
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
 
 async function workUiCommand(args) {
   const options = parseOptions(args);
@@ -1981,54 +1625,12 @@ async function workFindCommand(args) {
   }
 }
 
-// `aof work list [scope] [--json]` — the whole work stream as the board's data
-// source. `--json` emits the frozen flat-array contract (ADR-002) as pure JSON
-// on stdout (no human chrome); the bare command prints a depth-indented human
-// listing (ref · type · status · title), optionally narrowed to a scope subtree.
-async function workListCommand(args) {
-  const options = parseOptions(args);
-  const scope = options._[0];
-  // Rewired through the registry (ADR-002/003): the data comes from work:list via
-  // invoke; the CLI applies its own face projection (here, pretty 2-space --json)
-  // and keeps the scope-view affordance below (a CLI-face presentation, not
-  // operation logic). list's input takes no positionals, so cli.argv ignores them.
-  const command = getCommand("work:list");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const rows = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  // JSON mode is the contract surface: the WHOLE stream, pure JSON, byte-stable
-  // across runs. The human render (the command's CLI adapter) applies the
-  // scope-narrowing view affordance — the contract `--json` form stays the full
-  // stream so the board binds to one fixture.
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(rows), null, 2));
-    return;
-  }
-  console.log(command.cli.render(rows, { scope }));
-}
-
-async function workValidateCommand(args) {
-  const options = parseOptions(args);
-  const scope = options._[0];
-  // Rewired through the registry (ADR-002/003): work:validate returns the richer
-  // { findings } envelope with RAW absolute paths. The CLI --json adapter
-  // (cli.json) UNWRAPS to the bare [{path,problem}] array and re-bases each path
-  // to cwd (path.relative, OS separators) — the CLI's historical wire, preserved
-  // byte-for-byte. The scoped human framing below stays a CLI-face affordance.
-  const command = getCommand("work:validate");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result), null, 2));
-    if (result.findings.length > 0) process.exitCode = 1;
-    return;
-  }
-
-  console.log(command.cli.render(result, { scope }));
-  // A non-empty findings list is a non-zero exit (today's CLI behaviour).
-  if (result.findings.length > 0) process.exitCode = 1;
-}
+// workListCommand / workValidateCommand / workDoctorCommand / workNextCommand /
+// workFeedbackCommand / the run-verb wrappers + runVerbCli / workInsertCli —
+// RETIRED (m42 wave (d) leg d1, wave 2): every one of these verbs carries
+// cli.route + cli.spec and dispatches through the route table + the ONE
+// generic face (src/spine/face.mjs), whose --json single-envelope discipline
+// (incl. the insert family's shifted count) IS these faces' one home.
 
 // `aof work observe <ref> [--write] [--json] [--stall <min>]` — mine Claude Code
 // session transcripts for the milestone's per-agent time/token spend + stall gaps.
@@ -2077,206 +1679,6 @@ async function workObserveCommand(args) {
   }
 }
 
-// The shared insert-top-level face (milestone 41 / story 02, ADR-002/004) —
-// getCommand -> loadWorkspace -> invoke -> cli.json/render, mirroring
-// projectProvisionCli's single-structured-envelope --json discipline. ADR-004's
-// never-deadlock guard: an above-threshold caller without --yes is a command
-// error (code "insert-confirm-required"), caught here and emitted as ONE
-// { ok:false, error, code, shifted } envelope (+ non-zero exit) in --json mode —
-// never a hang on an unanswered prompt. The non-json face lets the error
-// propagate to bin/aof.mjs (stderr + non-zero exit).
-async function workInsertCli(id, args) {
-  const options = parseOptions(args);
-  const command = getCommand(id);
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const input = command.cli.argv(options._, options);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, input, { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(
-        JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error", shifted: error.shifted ?? null }, null, 2),
-      );
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  const result = await invoke(command.id, input, { workspace });
-  console.log(command.cli.render(result));
-}
-
-// `aof work doctor [scope] [--json] [--strict]` — the FACE over work:doctor
-// (15/ADR-002), the validate sibling with the ADVISORY exit policy. The command's
-// `run` returns the basis-neutral { findings } envelope with RAW absolute paths;
-// the CLI --json adapter (cli.json) re-bases each path to cwd and carries the
-// { healthy, strict, errors, warnings, findings } summary. The --strict EXIT GATE
-// lives HERE (not in run): an `error` ALWAYS exits non-zero; a `warn` exits
-// non-zero ONLY under --strict — mirroring `configCommand`'s
-// `failed = errors.length > 0 || (strict && warns.length > 0)` form verbatim, with
-// `warn` in place of config's `warning`. `run`'s findings are identical across
-// --strict (the gate is the face, not the run).
-async function workDoctorCommand(args) {
-  const options = parseOptions(args);
-  const scope = options._[0];
-  const strict = Boolean(options.strict);
-  const command = getCommand("work:doctor");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  const errors = result.findings.filter((finding) => finding.severity === "error");
-  const warns = result.findings.filter((finding) => finding.severity === "warn");
-  const failed = errors.length > 0 || (strict && warns.length > 0);
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result, { strict }), null, 2));
-  } else {
-    console.log(command.cli.render(result, { scope }));
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
-async function workNextCommand(args) {
-  const options = parseOptions(args);
-  const scope = options._[0];
-  // Rewired through the registry (ADR-002/003): work:next returns the core result
-  // with a RAW absolute path; the CLI --json adapter (cli.json) re-bases it to cwd
-  // (path.relative) and leaves a path-less (done) result whole — today's wire,
-  // byte-for-byte. The scoped done/blocked human lines stay a CLI-face affordance.
-  const command = getCommand("work:next");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result), null, 2));
-    return;
-  }
-
-  console.log(command.cli.render(result, { scope }));
-}
-
-// `aof work doc <ref> <DOC> [--json]` — a thin argv → command → result face over
-// work:doc (ADR-003). A READ: resolves with the command's resolver (slug-fallback
-// tolerated). `--json` emits the command's `{ ref, doc, present, body }` result;
-// the bare command prints the body (or an absence line). An unknown DOC name /
-// unresolved ref throws the command's error (invalid-doc / ref-not-found) up to
-// bin/aof.mjs, which prints error.message to stderr and exits non-zero.
-async function workDocCommand(args) {
-  const options = parseOptions(args);
-  const command = getCommand("work:doc");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result), null, 2));
-    return;
-  }
-  console.log(command.cli.render(result));
-}
-
-// `aof work tasks <ref> [--json]` — a thin argv → command → result face over
-// work:tasks (ADR-003). A READ: a resolved item with no tasks dir is the empty
-// list (exit 0); an unresolved ref throws ref-not-found up to the top-level catch
-// (stderr + non-zero exit). `--json` emits the `{ ref, tasks }` command result.
-async function workTasksCommand(args) {
-  const options = parseOptions(args);
-  const command = getCommand("work:tasks");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result), null, 2));
-    return;
-  }
-  console.log(command.cli.render(result));
-}
-
-// `aof work feedback <ref> --note "…" [--actor …] [--refs …]` — the ONLY CLI work
-// write, a thin argv → command → result face over work:feedback (ADR-003). The
-// command resolves EXACT-only (resolveItemExact): a non-exact ref throws
-// ref-not-found rather than writing to a slug-matched wrong item, and a missing
-// note throws missing-note BEFORE any write — both propagate to bin/aof.mjs
-// (stderr + non-zero exit). An omitted --actor defaults to "you" inside the
-// command. `--json` emits the `{ ok, bullet }` result.
-async function workFeedbackCommand(args) {
-  const options = parseOptions(args);
-  const command = getCommand("work:feedback");
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-
-  if (options.json) {
-    console.log(JSON.stringify(command.cli.json(result), null, 2));
-    return;
-  }
-  console.log(command.cli.render(result));
-}
-
-// `aof work run-start <ref> [--session …] [--brief '<json>'] [--json]` — a thin
-// argv → invoke("work:run-start") → render/--json face over the registered command
-// (ADR-003). A WRITE: resolveItemExact rejects a non-exact ref with ref-not-found.
-// The --json face mirrors projectProvisionCli: it emits EXACTLY ONE structured
-// envelope on stdout (success command.cli.json(result), OR { ok:false, error, code }
-// + non-zero exit) — the CLI error matrix (01_cli-face.feature) requires the failure
-// to surface as a structured JSON document on stdout, not on stderr.
-async function workRunStartCommand(args) {
-  await runVerbCli("work:run-start", args);
-}
-
-// `aof work run-complete <ref> --outcome done|failed|cancelled [--run <runId>]
-//  [--json]` — the terminal-transition WRITE, same single-envelope --json discipline.
-// invalid-outcome (a --outcome outside the closed set, including ""), ref-not-found
-// (a non-exact ref), no-running-run / ambiguous-run / illegal-transition all surface
-// as the structured { ok:false, error, code } envelope under --json.
-async function workRunCompleteCommand(args) {
-  await runVerbCli("work:run-complete", args);
-}
-
-// `aof work run-status <ref> [--json]` — the observability READ over work:run-status
-// (resolveItem slug-fallback tolerated). An item with no runs is the empty history,
-// not an error; an unresolved ref surfaces ref-not-found through the same envelope.
-async function workRunStatusCommand(args) {
-  await runVerbCli("work:run-status", args);
-}
-
-// `aof work run-retry <ref> [--run <runId>] [--max-attempts N] [--json]` — the
-// resume WRITE over work:run-retry (20/ADR-003). resolveItemExact rejects a non-exact
-// ref. Same single-envelope --json discipline: the store's coded rejections
-// (not-retryable / attempts-exhausted / no-retryable-run / duplicate-run) surface as
-// the structured { ok:false, error, code } envelope on stdout (+ non-zero exit).
-async function workRunRetryCommand(args) {
-  await runVerbCli("work:run-retry", args);
-}
-
-// The shared run-verb face: getCommand → loadWorkspace → invoke → cli.json/render,
-// with the projectProvisionCli single-envelope --json discipline. In --json mode a
-// command error is caught and emitted as ONE structured JSON envelope on stdout
-// (+ non-zero exit), so every `aof work run-* … --json` prints exactly one parseable
-// JSON document (success OR structured error). The non-json face lets the error
-// propagate to bin/aof.mjs (stderr + non-zero exit).
-async function runVerbCli(id, args) {
-  const options = parseOptions(args);
-  const command = getCommand(id);
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error propagates to bin/aof.mjs
-  // (stderr + non-zero exit).
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
-}
 
 async function initCommand(args) {
   const options = parseOptions(args);
@@ -2330,553 +1732,32 @@ async function guideAfterInit(targetDir, runtimes, options) {
   console.log("- Edit assets in the setup UI with `aof assets ui`.");
 }
 
-async function assetsAddCommand(args) {
-  const options = parseOptions(args);
-  let [kind, id] = options._;
-  let interactiveInput = null;
-  if (!kind && !id) {
-    interactiveInput = await promptResourceInput({
-      global: Boolean(options.global),
-      description: options.description,
-      skipBody: true,
-      runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : undefined
-    });
-    kind = interactiveInput.kind;
-    id = interactiveInput.id;
-  } else if (!kind || !id) {
-    const promptInput = await promptResourceInput({
-      global: Boolean(options.global),
-      kind,
-      id,
-      description: options.description,
-      skipBody: true,
-      runtimes: hasRuntimeOptions(options) ? parseRuntimes(options) : undefined
-    });
-    interactiveInput = promptInput;
-    kind = promptInput.kind;
-    id = promptInput.id;
-  }
+// assetsListCommand — RETIRED (m42 wave (d) leg d1): now the registered
+// assets:list command (src/commands/assets-list.mjs), routed through the
+// generic face. Byte-identical output; flag vocabulary declared on the command.
 
-  const input = {
-    kind,
-    id,
-    name: options.name,
-    description: interactiveInput?.description ?? options.description,
-    body: options.body ?? interactiveInput?.body,
-    runtimes: interactiveInput?.runtimes ?? (hasRuntimeOptions(options) ? parseRuntimes(options) : supportedRuntimes()),
-    force: Boolean(options.force),
-    dryRun: Boolean(options.dryRun)
-  };
-  const { scaffoldGlobalResource, scaffoldResource } = await import("./scaffold.mjs");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const result = options.global
-    ? await scaffoldGlobalResource(input)
-    : await scaffoldResource(targetDir, input);
+// printValidationResult — RETIRED (m42 wave (d) leg d1): the shared report
+// lives in src/commands/validate-shared.mjs (renderValidationReport).
 
-  if (result.dryRun) {
-    console.log(`write: ${result.assetPath}`);
-    console.log(`write: ${result.configPath}`);
-    return;
-  }
-
-  console.log(`Created ${result.assetPath}`);
-  console.log(`Updated ${result.configPath}`);
-  console.log(`Next: edit the source file directly or run \`aof assets ui\`.`);
-}
-
-async function assetsListCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const inspection = options.global ? await inspectGlobalConfig() : await inspectConfig(targetDir, options);
-  if (options.json) {
-    printJson({
-      scope: options.global ? "global" : "project",
-      configPath: inspection.configPath,
-      resources: inspection.resources
-    });
-    return;
-  }
-
-  console.log(`${options.global ? "global" : "project"}: ${inspection.configPath}`);
-  if (inspection.resources.length === 0) {
-    console.log("resources: 0");
-    return;
-  }
-  console.log(`resources: ${inspection.resources.length}`);
-  for (const resource of inspection.resources) {
-    console.log(`- ${resource.kind}:${resource.id} runtimes=${resource.runtimes.join(",")}`);
-  }
-}
-
-async function assetsShowCommand(args) {
-  const options = parseOptions(args);
-  const [kind, id] = options._;
-  if (!kind || !id) {
-    throw new Error("Usage: aof assets show [--global] <kind> <id> [--json]");
-  }
-
-  const paths = options.global ? globalWorkspacePaths() : workspacePaths(path.resolve(options.target ?? process.cwd()));
-  if (!await exists(paths.configPath)) {
-    const command = options.global ? "aof assets add --global <kind> <id>" : "aof assets add <kind> <id>";
-    throw new Error(`Config not found at ${paths.configPath}. Run ${command} first.`);
-  }
-
-  const raw = await readJson(paths.configPath);
-  const resource = (raw.resources ?? []).find((item) => item.kind === kind && item.id === id);
-  if (!resource) {
-    throw new Error(`Resource not found: ${kind}:${id}`);
-  }
-
-  const sourcePath = resource.path ? path.resolve(path.dirname(paths.configPath), resource.path) : null;
-  const bodyExists = sourcePath ? await exists(sourcePath) : Boolean(resource.body || resource.prompt || resource.instructions);
-  const payload = {
-    configPath: paths.configPath,
-    resource: {
-      ...resource,
-      sourcePath,
-      bodyExists
-    }
-  };
-
-  if (options.json) {
-    printJson(payload);
-    return;
-  }
-
-  console.log(`${options.global ? "global" : "project"}: ${paths.configPath}`);
-  console.log(`resource: ${resource.kind}:${resource.id}`);
-  if (resource.name) console.log(`name: ${resource.name}`);
-  if (resource.description) console.log(`description: ${resource.description}`);
-  console.log(`runtimes: ${(resource.runtimes ?? supportedRuntimes()).join(",")}`);
-  if (sourcePath) console.log(`path: ${sourcePath}`);
-  console.log(`body: ${bodyExists ? "present" : "missing"}`);
-}
-
-async function assetsRemoveCommand(args) {
-  const options = parseOptions(args);
-  const [kind, id] = options._;
-  if (!kind || !id) {
-    throw new Error("Usage: aof assets remove [--global] <kind> <id> [--dry-run] [--force]");
-  }
-
-  const paths = options.global ? globalWorkspacePaths() : workspacePaths(path.resolve(options.target ?? process.cwd()));
-  if (!await exists(paths.configPath)) {
-    throw new Error(`Config not found at ${paths.configPath}.`);
-  }
-
-  const raw = await readJson(paths.configPath);
-  const resources = Array.isArray(raw.resources) ? raw.resources : [];
-  const index = resources.findIndex((resource) => resource.kind === kind && resource.id === id);
-  if (index < 0) {
-    throw new Error(`Resource not found: ${kind}:${id}`);
-  }
-
-  const resource = resources[index];
-  const sourcePath = resource.path ? path.resolve(path.dirname(paths.configPath), resource.path) : null;
-  const assetDir = sourcePath ? path.dirname(sourcePath) : null;
-  const config = {
-    ...raw,
-    resources: resources.filter((_resource, resourceIndex) => resourceIndex !== index)
-  };
-
-  if (options.dryRun) {
-    if (assetDir) console.log(`delete: ${assetDir}`);
-    console.log(`write: ${paths.configPath}`);
-    console.log("dry-run: no source assets or config files were changed");
-    return;
-  }
-
-  if (assetDir) await rm(assetDir, { recursive: true, force: true });
-  await writeText(paths.configPath, `${JSON.stringify(config, null, 2)}\n`);
-  if (assetDir) console.log(`Deleted ${assetDir}`);
-  console.log(`Updated ${paths.configPath}`);
-  console.log("Generated runtime outputs were not removed. Run `aof assets clean` to remove lock-owned generated files.");
-}
-
-async function assetsUseCommand(args) {
-  await assetsGlobalRefCommand("use", args);
-}
-
-async function assetsUnuseCommand(args) {
-  await assetsGlobalRefCommand("unuse", args);
-}
-
-async function assetsGlobalRefCommand(action, args) {
-  const options = parseOptions(args);
-  const [kind, id] = options._;
-  if (!options.global || !kind || !id) {
-    throw new Error(`Usage: aof assets ${action} --global <kind> <id>`);
-  }
-
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const update = action === "use" ? addProjectGlobalRef : removeProjectGlobalRef;
-  const result = await update(targetDir, { kind, id }, options);
-  if (!result.ok) {
-    for (const item of result.diagnostics ?? []) console.log(`${item.severity}: ${item.path} ${item.message}`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const verb = action === "use" ? "Added" : "Removed";
-  console.log(`${verb} global reference ${kind}:${id}`);
-  console.log(`Updated ${workspacePaths(targetDir).configPath}`);
-}
-
-async function assetsValidateCommand(args) {
-  const options = parseOptions(args);
-  if (options.global) {
-    await printValidationResult(await validateGlobalConfig(), options, "global config passed validation");
-    return;
-  }
-
-  await validateCommand(args);
-}
-
-async function printValidationResult(diagnostics, options, successMessage) {
-  const errors = diagnostics.filter((item) => item.severity === "error");
-  const warnings = diagnostics.filter((item) => item.severity === "warning");
-  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
-
-  if (options.json) {
-    printJson({
-      valid: !failed,
-      strict: Boolean(options.strict),
-      errors: errors.length,
-      warnings: warnings.length,
-      diagnostics
-    });
-  } else if (!failed) {
-    console.log(`valid: ${successMessage}`);
-    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
-  } else {
-    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
-    console.log(`invalid: ${reason}`);
-    for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
-async function assetsApplyCommand(args) {
-  const options = parseOptions(args);
-  if (options.install) {
-    throw new Error("aof assets apply does not run package installers. Use `aof packages install ...` for package execution.");
-  }
-  if (options.global) {
-    throw new Error("aof assets apply does not support global runtime output. Reference global source assets with `aof assets use --global ...`, then run `aof assets apply`.");
-  }
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const configPath = await findProjectConfig(targetDir, options.config);
-  const paths = workspacePaths(targetDir);
-  const runtimes = await runtimesForApply(configPath, options);
-  const validationDiagnostics = await validateConfig(targetDir, options);
-  const validationErrors = validationDiagnostics.filter((item) => item.severity === "error");
-  if (validationErrors.length > 0) {
-    await printValidationResult(validationDiagnostics, options, "config passed validation");
-    return;
-  }
-  const config = await loadProjectConfig(configPath);
-  const adapterWarnings = collectAdapterWarnings(config, {
-    targetDir,
-    runtimes,
-    global: Boolean(options.global)
-  });
-  const desiredOutputs = await createRenderPlan(config, {
-    targetDir,
-    runtimes,
-    global: Boolean(options.global)
-  });
-  const previousLock = await readLock(paths.lockPath);
-  const actions = await planApplyActions(desiredOutputs, previousLock, {
-    targetDir,
-    force: Boolean(options.force)
-  });
-
-  const manifest = createLockManifest({
-    actions,
-    desiredOutputs,
-    previousLock,
-    config,
-    runtimes,
-    global: Boolean(options.global)
-  });
-
-  if (options.dryRun) {
-    const summary = summarizeLockManifest(manifest);
-    if (options.json) {
-      printJson({ dryRun: true, strict: Boolean(options.strict), adapterWarnings, actions, lockPreview: summary });
-      if (options.strict && adapterWarnings.length > 0) process.exitCode = 1;
-      return;
-    }
-    console.log("dry-run: no files or lock state were written");
-    printAdapterWarnings(adapterWarnings);
-    if (strictAdapterWarningsFailed(options, adapterWarnings)) return;
-    if (actions.length > 0) console.log("Planned asset changes");
-    for (const item of actions) {
-      console.log(options.verbose ? formatApplyAction(item) : formatFriendlyApplyAction(item, { dryRun: true }));
-    }
-    console.log(`Would update ${relativeDisplayPath(paths.lockPath, targetDir)} (${summary.files} file${summary.files === 1 ? "" : "s"}, ${summary.frameworks} framework intent${summary.frameworks === 1 ? "" : "s"})`);
-    return;
-  }
-
-  printAdapterWarnings(adapterWarnings);
-  if (strictAdapterWarningsFailed(options, adapterWarnings)) return;
-  if (actions.length > 0) console.log("Applied assets");
-  for (const item of actions) {
-    console.log(options.verbose ? formatApplyAction(item) : formatFriendlyApplyAction(item, { targetDir }));
-  }
-
-  await executeApplyActions(actions);
-  await writeLock(paths.lockPath, manifest);
-  console.log(`${successMarker()} Updated ${relativeDisplayPath(paths.lockPath, targetDir)}`);
-}
-
-async function assetsCleanCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const { createCleanPlan, executeCleanPlan } = await import("./clean.mjs");
-  const plan = await createCleanPlan(targetDir);
-
-  if (!plan.lock) {
-    console.log(`clean: no lock file found at ${plan.lockPath}`);
-    return;
-  }
-
-  if (options.dryRun) {
-    console.log("dry-run: no generated files or lock entries will be removed");
-  }
-
-  if (plan.actions.length === 0) {
-    console.log("clean: no generated file entries in lock");
-  }
-
-  for (const item of plan.actions) {
-    console.log(formatApplyAction(item));
-  }
-  console.log(`lock-preview: remove ${plan.removedCount} file entr${plan.removedCount === 1 ? "y" : "ies"}`);
-
-  if (options.dryRun) return;
-
-  await executeCleanPlan(plan);
-  console.log(`lock: ${plan.lockPath}`);
-}
+// assetsApplyCommand — RETIRED (m42 wave (d) leg d1): now the registered
+// assets:apply command (src/commands/assets-apply.mjs), routed through the
+// generic face. Byte-identical output; runtimesForApply moved with it, the
+// friendly-action/marker/display helpers to render-plan.mjs.
 
 async function assetsUiCommand(args) {
   const options = parseOptions(args);
   await setupUiCommand({ ...options, uiMode: "assets" });
 }
 
-async function packagesAddCommand(args) {
-  const options = parseOptions(args);
-  const [packageId] = options._;
-  if (packageId !== "gsd") {
-    throw new Error("Usage: aof packages add gsd [--codex] [--claude] [--runtime list] [--source source] [--package npm-package] [--dry-run]");
-  }
+// packagesListCommand — RETIRED (m42 wave (d) leg d1): now the registered
+// packages:list command (src/commands/packages-list.mjs), routed through the
+// generic face. Byte-identical output; packageSummaries moved to packages.mjs.
 
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const configPath = await findProjectConfig(targetDir, options.config);
-  const raw = await readJson(configPath);
-  const pkg = normalizePackage(packageIntentFromOptions(options, raw), 0);
-  const packages = [
-    ...(Array.isArray(raw.packages) ? raw.packages.filter((item) => item?.id !== "gsd") : []),
-    packageForConfig(pkg)
-  ];
-  const nextConfig = { ...raw, packages };
-
-  if (options.dryRun) {
-    console.log(`dry-run: no config changes were written and no installer code ran`);
-    console.log(`write: ${configPath}`);
-    console.log(`package: gsd source=${pkg.source} runtimes=${pkg.runtimes.join(",")}`);
-    return;
-  }
-
-  await writeText(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
-  console.log(`Updated ${configPath}`);
-  console.log(`package: gsd source=${pkg.source} runtimes=${pkg.runtimes.join(",")}`);
-  console.log("Next: run `aof packages install gsd --dry-run` to preview installer commands.");
-}
-
-async function packagesListCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const config = await loadProjectConfig(await findProjectConfig(targetDir, options.config));
-  const paths = workspacePaths(targetDir);
-  const lock = await readLock(paths.lockPath);
-  const packages = packageSummaries(config.packages ?? [], lock);
-
-  if (options.json) {
-    printJson({ packages });
-    return;
-  }
-
-  console.log(`packages: ${packages.length}`);
-  for (const pkg of packages) {
-    const attempts = pkg.installAttempts.length;
-    console.log(`- ${pkg.id} namespace=${pkg.namespace} source=${pkg.source} runtimes=${pkg.runtimes.join(",")} attempts=${attempts}`);
-  }
-}
-
-async function packagesShowCommand(args) {
-  const options = parseOptions(args);
-  const [packageId] = options._;
-  if (!packageId) throw new Error("Usage: aof packages show <id> [--json]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const config = await loadProjectConfig(await findProjectConfig(targetDir, options.config));
-  const paths = workspacePaths(targetDir);
-  const lock = await readLock(paths.lockPath);
-  const pkg = packageSummaries(config.packages ?? [], lock).find((item) => item.id === packageId);
-  if (!pkg) throw new Error(`Package "${packageId}" is not configured. Run \`aof packages add gsd\` to declare GSD package intent.`);
-
-  if (options.json) {
-    printJson(pkg);
-    return;
-  }
-
-  console.log(`package: ${pkg.id}`);
-  console.log(`namespace: ${pkg.namespace}`);
-  console.log(`source: ${pkg.source}`);
-  console.log(`runtimes: ${pkg.runtimes.join(",")}`);
-  console.log(`installAttempts: ${pkg.installAttempts.length}`);
-  for (const attempt of pkg.installAttempts) {
-    console.log(`- ${attempt.runtime} status=${attempt.status} scope=${attempt.scope}`);
-  }
-}
-
-async function packagesRemoveCommand(args) {
-  const options = parseOptions(args);
-  const [packageId] = options._;
-  if (!packageId) throw new Error("Usage: aof packages remove <id> [--dry-run]");
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const configPath = await findProjectConfig(targetDir, options.config);
-  const raw = await readJson(configPath);
-  const packages = Array.isArray(raw.packages) ? raw.packages : [];
-  if (!packages.some((item) => item?.id === packageId)) {
-    throw new Error(`Package "${packageId}" is not configured.`);
-  }
-  const nextConfig = { ...raw, packages: packages.filter((item) => item?.id !== packageId) };
-
-  if (options.dryRun) {
-    console.log("dry-run: no config changes were written and no runtime files or lock attempts were removed");
-    console.log(`remove-package: ${packageId}`);
-    console.log(`write: ${configPath}`);
-    return;
-  }
-
-  await writeText(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
-  console.log(`Updated ${configPath}`);
-  console.log(`Removed package intent ${packageId}`);
-  console.log("Runtime files and lock install attempts were not removed.");
-}
-
-async function packagesValidateCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const configPath = await findProjectConfig(targetDir, options.config);
-  const raw = await readJson(configPath);
-  const diagnostics = packageDiagnostics(raw);
-  const errors = diagnostics.filter((item) => item.severity === "error");
-  const warnings = diagnostics.filter((item) => item.severity === "warning");
-  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
-
-  if (options.json) {
-    printJson({
-      valid: !failed,
-      strict: Boolean(options.strict),
-      errors: errors.length,
-      warnings: warnings.length,
-      diagnostics
-    });
-  } else if (!failed) {
-    console.log("valid: packages passed validation");
-    if (warnings.length > 0) console.log(`warnings: ${warnings.length}`);
-  } else {
-    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warnings.length} warning(s) under --strict`;
-    console.log(`invalid: ${reason}`);
-    for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
-async function packagesInstallCommand(args) {
-  const options = parseOptions(args);
-  if (options.fromLock) {
-    await installFromLockCommand(options);
-    return;
-  }
-
-  const [packageId] = options._;
-  if (packageId) {
-    if (packageId !== "gsd") {
-      throw new Error(`Package "${packageId}" does not have installer support yet. Phase 20 supports GSD installer execution only.`);
-    }
-    const targetDir = path.resolve(options.target ?? process.cwd());
-    const config = await loadProjectConfig(await findProjectConfig(targetDir, options.config));
-    if (!gsdPackageFromConfig(config) && !options.source && !options.package) {
-      throw new Error("GSD package intent is not configured. Run `aof packages add gsd` first.");
-    }
-    await frameworkInstallCommand(packageId, options);
-    return;
-  }
-
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const config = await loadProjectConfig(await findProjectConfig(targetDir, options.config));
-  const installable = (config.packages ?? []).filter((pkg) => pkg.id === "gsd");
-  if (installable.length === 0) {
-    throw new Error("No installable packages are configured. Run `aof packages add gsd` first.");
-  }
-  for (const pkg of installable) {
-    await frameworkInstallCommand(pkg.id, options);
-  }
-}
-
-// `aof project migrate [dir]` — the LEGACY config-format migration (root
-// aof.config.json → .aof/aof.config.json). Renamed from `migrateCommand` when the
-// top-level `migrate` verb was reclaimed for folder→managed-milestone migration
-// (story 29); this is the project-config migrator, reached only via `project migrate`.
-async function projectMigrateCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
-  const paths = workspacePaths(targetDir);
-  const sourcePath = legacyConfigPath(targetDir);
-
-  if (!await exists(sourcePath)) {
-    throw new Error(`No legacy config found at ${sourcePath}.`);
-  }
-
-  if (!options.force && await exists(paths.configPath)) {
-    throw new Error(`AOF workspace config already exists at ${paths.configPath}. Re-run with --force to replace it.`);
-  }
-
-  const legacyConfig = await readJson(sourcePath);
-  const resolved = await loadConfig(sourcePath);
-  if (options.dryRun) {
-    console.log(`write: ${paths.configPath}`);
-    console.log(`write: ${paths.lockPath}`);
-    return;
-  }
-
-  await writeWorkspaceConfig(targetDir, {
-    ...resolved,
-    $schema: "https://aof.local/schemas/aof.schema.json",
-    name: legacyConfig.name ?? resolved.name
-  });
-  await writeText(paths.lockPath, `${JSON.stringify({
-    version: 1,
-    migratedAt: new Date().toISOString(),
-    source: "aof.config.json",
-    runtimes: [...new Set(resolved.resources.flatMap((resource) => resource.runtimes))],
-    items: resolved.resources.map((resource) => ({
-      id: resource.id,
-      kind: resource.kind,
-      source: "legacy",
-      runtimes: resource.runtimes
-    }))
-  }, null, 2)}\n`);
-
-  console.log(`Created ${paths.configPath}`);
-  console.log(`${paths.configPath} is now authoritative; root aof.config.json is legacy and was left untouched.`);
-}
+// packagesInstallCommand — RETIRED (m42 wave (d) leg d1): now the registered
+// packages:install command (src/commands/packages-install.mjs), routed through
+// the generic face; the frameworkInstall/installFromLock machinery moved with
+// it. Byte-identical transcript; the failure summary now ends the stdout
+// document (the exit rides cli.exit).
 
 async function setupUiCommand(options) {
   const description = "project/global asset editor";
@@ -2944,243 +1825,17 @@ function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
   });
 }
 
-async function projectShowCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
+// projectShowCommand — RETIRED (m42 wave (d) leg d1): now the registered
+// project:show command (src/commands/project-show.mjs), routed through the
+// generic face (bare `aof project` delegates to the same command above).
 
-  const inspection = await inspectConfig(targetDir, options);
-  if (options.json) {
-    printJson(inspection);
-    return;
-  }
-  console.log(`config: ${inspection.configPath}`);
-  console.log(`name: ${inspection.name ?? "(unresolved)"}`);
-  console.log(`resources: ${inspection.resources.length}`);
-  for (const resource of inspection.resources) {
-    console.log(`- ${resource.kind}:${resource.id} source=${resource.source ?? "local"} runtimes=${resource.runtimes.join(",")}`);
-  }
-  console.log(`globalRefs: ${inspection.globalRefs.length}`);
-  for (const ref of inspection.globalRefs) {
-    console.log(`- global:${ref.kind}:${ref.id}`);
-  }
-  console.log(`packages: ${inspection.packages.length}`);
-  for (const pkg of inspection.packages) {
-    console.log(`- ${pkg.id} source=${pkg.source} runtimes=${(pkg.runtimes ?? []).join(",")}`);
-  }
-  if (inspection.legacyConfigIsStale) console.log(`warning: root aof.config.json is legacy; ${inspection.configPath} is authoritative`);
-}
+// frameworkInstallCommand / installFromLockCommand — RETIRED (m42 wave (d)
+// leg d1): the machinery lives in src/commands/packages-install.mjs.
 
-async function validateCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const diagnostics = await validateConfig(targetDir, options);
-  const adapterWarnings = await adapterWarningsForConfig(targetDir, {
-    ...options,
-    runtimes: parseRuntimes(options)
-  });
-  const errors = diagnostics.filter((item) => item.severity === "error");
-  const warnings = diagnostics.filter((item) => item.severity === "warning");
-  const warningCount = warnings.length + adapterWarnings.length;
-  const failed = errors.length > 0 || (options.strict && warningCount > 0);
-
-  if (options.json) {
-    printJson({
-      valid: !failed,
-      strict: Boolean(options.strict),
-      errors: errors.length,
-      warnings: warningCount,
-      diagnostics,
-      adapterWarnings
-    });
-  } else if (!failed) {
-    console.log("valid: config passed validation");
-    if (warningCount > 0) console.log(`warnings: ${warningCount}`);
-    printAdapterWarnings(adapterWarnings);
-  } else {
-    const reason = errors.length > 0 ? `${errors.length} error(s)` : `${warningCount} warning(s) under --strict`;
-    console.log(`invalid: ${reason}`);
-    for (const item of diagnostics) console.log(`${item.severity}: ${item.path} ${item.message}`);
-    printAdapterWarnings(adapterWarnings);
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
-async function doctorCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const report = await doctorConfig(targetDir, {
-    ...options,
-    runtimes: parseRuntimes(options)
-  });
-  const errors = report.checks.filter((item) => item.severity === "error");
-  const warnings = report.checks.filter((item) => item.severity === "warning");
-  const failed = errors.length > 0 || (options.strict && warnings.length > 0);
-
-  if (options.json) {
-    printJson({
-      healthy: !failed,
-      strict: Boolean(options.strict),
-      errors: errors.length,
-      warnings: warnings.length,
-      ...report
-    });
-  } else {
-    console.log(`doctor: ${failed ? "issues found" : "healthy"}`);
-    for (const check of report.checks) {
-      console.log(`${check.severity}: ${check.id} - ${check.message}`);
-    }
-    printAdapterWarnings(report.adapterWarnings);
-    for (const suggestion of report.suggestions) {
-      console.log(`next: ${suggestion}`);
-    }
-  }
-
-  if (failed) process.exitCode = 1;
-}
-
-async function frameworkInstallCommand(framework, options) {
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const paths = workspacePaths(targetDir);
-  let config = null;
-  try {
-    config = await loadConfig(await findProjectConfig(targetDir, options.config));
-  } catch (error) {
-    if (options.config) throw error;
-  }
-  const pkg = framework === "gsd" ? gsdPackageFromConfig(config) : null;
-  const previousLock = await readLock(paths.lockPath);
-  const source = options.package ?? options.source ?? pkg?.source;
-  const packageOptions = pkg && source === pkg.source ? pkg : null;
-  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : (pkg?.runtimes ?? parseRuntimes(options));
-  const plan = planFrameworkInstall(framework, {
-    package: packageOptions,
-    source,
-    namespace: pkg?.namespace,
-    runtimes,
-    global: Boolean(options.global),
-    force: Boolean(options.force),
-    previousLock
-  });
-
-  if (options.dryRun) {
-    if (options.json) {
-      printJson({ dryRun: true, network: false, commands: plan });
-      return;
-    }
-    console.log("dry-run: no network or installer commands will run");
-    for (const item of plan) console.log(item.skipped ? `skip: ${item.command} reason=${item.skipReason}` : item.command);
-    return;
-  }
-
-  for (const item of plan) {
-    if (item.skipped) {
-      console.log(`skip: ${item.runtime} ${item.skipReason}`);
-      continue;
-    }
-    console.log(`network-boundary: running ${item.command}`);
-    console.log(`package: ${item.packageSource} runtime=${item.runtime} scope=${item.scope}`);
-    console.log("warning: this command may access the network and execute npm package code");
-  }
-
-  const attempts = executeFrameworkInstallPlan(plan);
-  await writeLock(paths.lockPath, mergeFrameworkInstallAttempts(previousLock, attempts));
-  for (const attempt of attempts) {
-    console.log(`attempt: ${attempt.runtime} status=${attempt.status} exit=${attempt.exitStatus}`);
-  }
-  const failed = attempts.filter((attempt) => attempt.status === "failed");
-  if (failed.length > 0) {
-    for (const attempt of failed) console.log(`retry: ${attempt.command}`);
-    throw new Error(`Framework install failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
-  }
-}
-
-async function installFromLockCommand(options) {
-  const targetDir = path.resolve(options.target ?? process.cwd());
-  const paths = workspacePaths(targetDir);
-  const previousLock = await readLock(paths.lockPath);
-  if (!previousLock) throw new Error(`No lock file found at ${paths.lockPath}.`);
-  const plan = frameworkPlanFromLock(previousLock, { previousLock });
-  if (plan.length === 0) throw new Error("No framework intent found in lock state.");
-
-  if (options.dryRun) {
-    if (options.json) {
-      printJson({ dryRun: true, fromLock: true, network: false, commands: plan });
-      return;
-    }
-    console.log("dry-run: no network or installer commands will run");
-    for (const item of plan) console.log(item.command);
-    return;
-  }
-
-  for (const item of plan) {
-    console.log(`network-boundary: replaying ${item.command}`);
-    console.log(`package: ${item.packageSource} runtime=${item.runtime} scope=${item.scope}`);
-    console.log("warning: this command may access the network and execute npm package code");
-  }
-  const attempts = executeFrameworkInstallPlan(plan);
-  await writeLock(paths.lockPath, mergeFrameworkInstallAttempts(previousLock, attempts));
-  const failed = attempts.filter((attempt) => attempt.status === "failed");
-  if (failed.length > 0) throw new Error(`Framework replay failed for ${failed.map((attempt) => attempt.runtime).join(", ")}.`);
-}
-
-function packageIntentFromOptions(options, rawConfig) {
-  const source = options.source ?? (options.package ? `npm:${options.package}` : "npm:get-shit-done-cc@latest");
-  return {
-    id: "gsd",
-    namespace: "gsd",
-    source,
-    runtimes: hasRuntimeOptions(options)
-      ? parseRuntimes(options)
-      : (Array.isArray(rawConfig.runtimes) && rawConfig.runtimes.length > 0 ? [...new Set(rawConfig.runtimes)] : supportedRuntimes())
-  };
-}
-
-function packageForConfig(pkg) {
-  return {
-    id: pkg.id,
-    namespace: pkg.namespace,
-    source: pkg.source,
-    runtimes: pkg.runtimes
-  };
-}
-
-function packageSummaries(packages, lock) {
-  const attempts = Array.isArray(lock?.frameworkInstallAttempts) ? lock.frameworkInstallAttempts : [];
-  return packages.map((pkg) => ({
-    id: pkg.id,
-    namespace: pkg.namespace,
-    source: pkg.source,
-    sourceDescriptor: pkg.sourceDescriptor,
-    runtimes: pkg.runtimes ?? [],
-    installAttempts: attempts.filter((attempt) => attempt.framework === pkg.id)
-  }));
-}
-
-function packageDiagnostics(raw) {
-  const diagnostics = [];
-  if (raw.packages !== undefined && !Array.isArray(raw.packages)) {
-    return [{ severity: "error", path: "packages", message: "packages must be an array when provided." }];
-  }
-
-  for (const [index, pkg] of (Array.isArray(raw.packages) ? raw.packages : []).entries()) {
-    try {
-      normalizePackage(pkg, index);
-    } catch (error) {
-      const pathMatch = error.message.match(/^(packages\[\d+\](?:\.[A-Za-z0-9_]+)?)/);
-      diagnostics.push({
-        severity: "error",
-        path: pathMatch?.[1] ?? `packages[${index}]`,
-        message: error.message
-      });
-    }
-  }
-  return diagnostics;
-}
-
-async function interactiveInstallCommand(options) {
-  throw new Error("Interactive project setup is being redesigned. Use `aof init`, `aof assets add ...`, and `aof assets add --global ...` for now.");
-}
+// packageSummaries — moved to src/packages.mjs (m42 wave (d) leg d1: command
+// logic leaves the face file); imported above for the remaining inline users.
+// interactiveInstallCommand — DELETED with the packages:install migration
+// (dead code: zero callers).
 
 async function writeInstallLock(targetDir, items, runtimes, dbPath) {
   const lockPath = workspacePaths(targetDir).lockPath;
@@ -3228,32 +1883,6 @@ function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function parseRuntimes(options) {
-  const selected = [];
-  if (options.claude) selected.push("claude");
-  if (options.codex) selected.push("codex");
-
-  if (options.runtime) {
-    selected.push(...String(options.runtime).split(",").map((runtime) => runtime.trim()).filter(Boolean));
-  }
-
-  if (selected.length === 0) return supportedRuntimes();
-  return [...new Set(selected)];
-}
-
-function hasRuntimeOptions(options) {
-  return Boolean(options.claude || options.codex || options.runtime);
-}
-
-async function runtimesForApply(configPath, options) {
-  if (hasRuntimeOptions(options)) return parseRuntimes(options);
-  const raw = await readJson(configPath);
-  if (Array.isArray(raw.runtimes) && raw.runtimes.length > 0) {
-    return [...new Set(raw.runtimes)];
-  }
-  return supportedRuntimes();
-}
-
 function removedCommandError(command) {
   if (command === "catalog") {
     return new Error(`Removed command "catalog".\n\nCatalog is not currently supported. Project and global .aof assets are the active source model:\n  aof assets add skill\n  aof assets add --global skill\n  aof assets list --global`);
@@ -3271,16 +1900,6 @@ function removedCommandError(command) {
     config: ["aof project show", "aof project validate", "aof project doctor"]
   };
   return new Error(`Removed command "${command}".\n\nAOF now uses namespaced commands:\n${replacements[command].map((item) => `  ${item}`).join("\n")}`);
-}
-
-function formatApplyAction(item) {
-  const parts = [
-    `${item.action}: ${item.path}`,
-    item.runtime ? `runtime=${item.runtime}` : null,
-    item.resource ? `source=${item.resource.kind}:${item.resource.id}` : null,
-    item.reason ? `reason=${item.reason}` : null
-  ].filter(Boolean);
-  return parts.join(" ");
 }
 
 async function exists(filePath) {
@@ -3350,60 +1969,12 @@ Defaults:
 `;
 }
 
-function formatFriendlyApplyAction(item, options = {}) {
-  const displayPath = relativeDisplayPath(item.path, options.targetDir);
-  if (options.dryRun) {
-    const verbs = {
-      create: "Would create",
-      update: "Would update",
-      delete: "Would remove",
-      skip: "Would keep",
-      "drift-warning": "Warning"
-    };
-    const verb = verbs[item.action] ?? item.action;
-    if (item.action === "drift-warning") return `drift-warning: ${displayPath} was modified; not overwriting`;
-    return `${verb} ${displayPath}`;
-  }
-
-  const verbs = {
-    create: "Created",
-    update: "Updated",
-    delete: "Removed",
-    skip: "Kept",
-    "drift-warning": "Warning"
-  };
-  if (item.action === "drift-warning") return `drift-warning: ${displayPath} was modified; not overwriting`;
-  return `${successMarker()} ${verbs[item.action] ?? item.action} ${displayPath}`;
-}
-
-function successMarker() {
-  if (process.stdout.isTTY) return "\u001b[32m\u2713\u001b[0m";
-  return "\u2713";
-}
-
-function relativeDisplayPath(filePath, targetDir = process.cwd()) {
-  const relativePath = path.isAbsolute(filePath) ? path.relative(targetDir, filePath) : filePath;
-  return relativePath.replaceAll("\\", "/");
-}
-
-function printAdapterWarnings(warnings = []) {
-  if (warnings.length === 0) return;
-  console.log("adapter-warnings:");
-  for (const warning of warnings) {
-    const source = warning.kind && warning.id ? `${warning.kind}:${warning.id}` : warning.kind;
-    const output = warning.generatedPath ? ` output=${warning.generatedPath}` : "";
-    console.log(`- [${warning.code}] ${warning.path} runtime=${warning.runtime} source=${source}${output}`);
-    console.log(`  reason: ${warning.reason}`);
-    console.log(`  remediation: ${warning.remediation}`);
-  }
-}
-
-function strictAdapterWarningsFailed(options, warnings = []) {
-  if (!options.strict || warnings.length === 0) return false;
-  console.log(`strict: ${warnings.length} adapter warning(s) treated as failure`);
-  process.exitCode = 1;
-  return true;
-}
+// formatFriendlyApplyAction / successMarker / relativeDisplayPath — moved to
+// src/render-plan.mjs with the assets:apply migration (m42 wave (d) leg d1);
+// imported above for the remaining inline work-init/work-update/planning-init
+// faces. printAdapterWarnings / strictAdapterWarningsFailed — RETIRED (the
+// adapter-warnings block renders via validate-shared adapterWarningLines;
+// strictness is command data behind cli.exit).
 
 // Main-module guard. `bin/aof.mjs` is the canonical entry, and importers (tests,
 // other modules) only ever call the exported `run`. But if this file is executed

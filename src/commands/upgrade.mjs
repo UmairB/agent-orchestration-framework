@@ -34,9 +34,22 @@ export const upgradeCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face. The `aof work upgrade` route is canonical (the
+    // bijection gate's work:* reachability); the top-level `aof upgrade`
+    // spelling stays a run() branch delegating to runCommandFace with the SAME
+    // command (the bare-`aof project` sanctioned-delegation precedent).
+    route: ["work", "upgrade"],
+    spec: {
+      usage: "aof upgrade [--dry-run] [--changelog] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "preview the migrations without writing" },
+        changelog: { type: "boolean", description: "emit the generated upgrade changelog and touch nothing" },
+      },
+    },
+
     // `aof upgrade [--dry-run] [--changelog] [--json]` (also reachable as
-    // `aof work upgrade`, the SAME face — cli.mjs's workCommand dispatch
-    // reuses this one function).
+    // `aof work upgrade` — the route above; both spellings reach this one face).
     argv: (positionals, options = {}) => ({
       dryRun: Boolean(options.dryRun),
       changelog: Boolean(options.changelog),

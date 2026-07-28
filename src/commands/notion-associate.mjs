@@ -195,13 +195,34 @@ export const notionAssociateCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs notionAssociateCli copy is deleted. The
+    // usage refusal (missing ref, or neither --board nor --parent) moved into
+    // the argv adapter — thrown BEFORE invoke, nothing written.
+    route: ["work", "integrations", "notion", "associate"],
+    spec: {
+      usage: "aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]",
+      flags: {
+        board: { type: "string", description: "the board key to route through (or none)" },
+        parent: { type: "string", description: "the Notion parent page id/key (or none)" },
+      },
+    },
+
     // `aof work integrations notion associate <ref> --board <key> --parent <id|key|none> [--json]`.
-    // parseOptions is generic, so `--board ops` / `--parent p1` flow through as options.
-    argv: (positionals, options = {}) => ({
-      ref: positionals[0],
-      board: options.board,
-      parent: options.parent,
-    }),
+    argv: (positionals, options = {}) => {
+      if (positionals[0] == null || (options.board == null && options.parent == null)) {
+        throw commandError(
+          "Usage: aof work integrations notion associate <ref> --board <key|none> --parent <id|key|none> [--json]",
+          "usage",
+          400,
+        );
+      }
+      return {
+        ref: positionals[0],
+        board: options.board,
+        parent: options.parent,
+      };
+    },
 
     // Human render: a one-line confirmation of what was written / cleared.
     render(result) {
