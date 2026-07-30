@@ -163,6 +163,17 @@ import { meshLogsCommand } from "./commands/mesh-logs.mjs";
 // Additive — one import + one COMMANDS entry; takes the `mesh:` prefix so the
 // mesh bijection gate covers it with no edit.
 import { meshTerminalResumeCommand } from "./commands/mesh-terminal-resume.mjs";
+// m42 wave (d) leg d1 (wave-3 tail) — the previously CLI-only nested mesh verbs
+// as registered Commands riding the route table: mesh:assign (--to/--withdraw,
+// + the --workspace residual closed), mesh:recover-push (global-store oriented,
+// workspace-free), mesh:repo-publish (the three-word route). Their cores stay
+// in the same modules for the white-box tests; cli.mjs's face copies +
+// emitMeshError are deleted. acd-desktop-verbs-outside-bijection reworked in
+// the SAME change (ui stays the CLI-only launcher verb; repo keeps only the
+// unknown-verb shim).
+import { meshAssignCommand } from "./commands/mesh-assign.mjs";
+import { meshRecoverPushCommand } from "./commands/mesh-recover-push.mjs";
+import { meshRepoPublishCommand } from "./commands/mesh-repo.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -271,6 +282,10 @@ const COMMANDS = [
   meshServeCommand,
   meshLogsCommand,
   meshTerminalResumeCommand,
+  // m42 wave (d) leg d1 (wave-3 tail) — the nested verbs join the registry.
+  meshAssignCommand,
+  meshRecoverPushCommand,
+  meshRepoPublishCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

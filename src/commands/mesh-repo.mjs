@@ -34,6 +34,7 @@ import { readJson, writeText } from "../fs.mjs";
 import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
 import { resolveWorkspaceId } from "../workspace-identity.mjs";
 import { isWellFormedCloneUrl } from "../mesh-worker-execution.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 function isPlainObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -190,3 +191,56 @@ export async function publishRepoToMesh(ws, ctx = {}) {
     warning: propagation.warning ?? null,
   };
 }
+
+// mesh:repo-publish — the registered Command over the core above (m42 wave (d)
+// leg d1, wave-3 tail): `aof mesh repo publish` rides its THREE-WORD route
+// through the route table + the ONE generic face (the four-word notion routes
+// precedent); cli.mjs's meshRepoCommand face copy is deleted, leaving only the
+// no-verb/unknown-verb shim the route table cannot express. A failed snapshot
+// stays a non-fatal warning line (the marker still lands); only a real fault
+// is a thrown, coded error the face envelopes.
+export const meshRepoPublishCommand = {
+  id: "mesh:repo-publish",
+  input: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+
+  async run(_input, ctx) {
+    return await publishRepoToMesh(ctx.workspace, {});
+  },
+
+  cli: {
+    route: ["mesh", "repo", "publish"],
+    spec: {
+      usage: "aof mesh repo publish [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
+    argv: (positionals) => {
+      guardMeshPositionals("repo publish", positionals);
+      return {};
+    },
+
+    render(result) {
+      const lines = [
+        `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
+        `Marked as a mesh repo in ${result.configPath}.`,
+      ];
+      lines.push(
+        result.cloneUrl
+          ? `Clone URL: ${result.cloneUrl}`
+          : "Clone URL: none configured and none detected from `git remote get-url origin` — a worker clone-miss for this workspace will fail loud (assignment-repo-unavailable) until one is set.",
+      );
+      if (!result.published && result.warning) {
+        lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
+      } else {
+        lines.push("Snapshot written to the global mesh store.");
+      }
+      return lines.join("\n");
+    },
+
+    json: (result) => ({ ok: true, ...result }),
+  },
+};

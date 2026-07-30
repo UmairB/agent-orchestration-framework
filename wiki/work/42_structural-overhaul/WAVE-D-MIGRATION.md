@@ -137,14 +137,36 @@ fixed en route (pre-existing at HEAD, verified by stash): the identity frozen-sc
 lists in `mesh-identity-cli-face` + `mesh-identity-status-commands` still expected `skills`,
 removed from the descriptor at 34/02 by operator directive. cli.mjs: 1,990 → 1,752 lines.
 
-Wave 3 tail — **the UNREGISTERED mesh verbs as Commands** (class A + a gate rework):
-`mesh ui`, `mesh repo`, `mesh assign` (+ its `--workspace` gap, STATE residual),
-`mesh recover-push`, `mesh desktop`, `mesh serve` daemon branch — retiring
-`MESH_UI_FLAGS`/`MESH_REPO_FLAGS`/`MESH_ASSIGN_FLAGS`/`MESH_RECOVER_PUSH_FLAGS` +
-`emitMeshError` as each lands. NOTE: `acd-desktop-verbs-outside-bijection` PINS
-ui/repo/assign as ladder-only-and-unregistered — registering them requires reworking that
-gate in the SAME change. The launcher verbs (`ui`, `serve --serve`, `desktop run`) keep the
-registered-run-as-probe idiom (mesh:serve precedent) when they land.
+Wave 3 tail, part 1 — **the flag-bearing nested verbs as Commands**: ✅ DONE 2026-07-30
+(class A). `mesh:assign` (route ["mesh","assign"], `--to`/`--withdraw` + the
+`--workspace` flag — the STATE residual closed), `mesh:recover-push`
+(["mesh","recover-push"], `spec.workspace: false` — global-store oriented, runs from
+anywhere like the retired face), `mesh:repo-publish` (the THREE-word
+["mesh","repo","publish"] route — the four-word notion precedent). Cores stay in their
+modules (a core's `{ ok:false, error, code }` becomes a THROWN command error in
+mesh:assign's run; recover-push's run RETURNS coded outcomes verbatim). DELETED from
+cli.mjs: `meshRepoCommand`/`meshAssignCommand`/`meshRecoverPushCommand`,
+`MESH_REPO_FLAGS`/`MESH_ASSIGN_FLAGS`/`MESH_RECOVER_PUSH_FLAGS`, and **`emitMeshError`
+(zero callers — the generic envelope is the one home)**. The repo no-verb/unknown-verb
+shim stays in meshCommand (refusals a route cannot express). `acd-desktop-verbs-outside-
+bijection` REWORKED in the same change: it now pins the LAUNCHER boundary only — `ui`
+(launcher) + `repo` (shim) ladder-only-and-unregistered; assign/recover-push moved INTO
+the mesh bijection (proof (b) reads each command's OWN declared route, so the three-word
+route counts). Two carried-over contracts documented: `mesh recover-push --json` prints
+the coded result VERBATIM at exit 0 even on failure (the retired face's shape — callers
+read `ok`/`code` off the document; non-json stays stderr + exit 1), and its pre-invoke
+"Requesting recovery push…" stdout progress line is DROPPED (the face's one-document
+discipline). Two `command-spine.feature` scenarios pin the routed refusal envelope + the
+three-word route. Fixed en route (pre-existing at HEAD, macOS-only):
+`test/support/mesh-assign-fixture.mjs` now realpaths its root — the raw symlinked
+os.tmpdir() made the fixture's path-derived workspaceId disagree with the spawned CLI's,
+so the already-active cross-process scenario could never match rows on macOS. cli.mjs:
+1,752 → 1,520 lines.
+
+Wave 3 tail, part 2 — **the launcher verbs** (blocked on the launcher seam design):
+`mesh ui`, `mesh desktop`, `mesh serve` daemon branch keep their CLI-only ladder
+branches; they land as registered-run-as-probe Commands (mesh:serve precedent) when the
+seam is designed, retiring `MESH_UI_FLAGS` with `ui`.
 **End state:** `parseOptions` + its boolean allow-list have zero callers and are deleted;
 `helpText()` derives its verb listing from the registry.
 

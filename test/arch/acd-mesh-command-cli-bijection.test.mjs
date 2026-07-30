@@ -155,6 +155,16 @@ function argsFor(sub) {
     // gate accepts [0,1]), proving the single-envelope --json discipline
     // without a live mesh or relay.
     case "terminal-resume": return ["mesh", "terminal-resume", "sess-nope", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail) — the previously CLI-only nested verbs.
+    // assign: the fixture's 03/01 resolves but "node-x" is not in the hermetic
+    // registry, so the run refuses { ok:false, code:"assignment-target-unknown" }
+    // — exit 1 + parseable. recover-push: an unknown assignmentId returns the
+    // coded { ok:false, code:"recovery-unknown-assignment" } result VERBATIM at
+    // exit 0 (the retired face's json contract, carried over). repo-publish:
+    // publishes into the hermetic global home — exit 0 + { ok:true, … }.
+    case "assign": return ["mesh", "assign", "03/01", "--to", "node-x", "--json"];
+    case "recover-push": return ["mesh", "recover-push", "assign-nope", "--json"];
+    case "repo-publish": return ["mesh", "repo", "publish", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }
@@ -192,15 +202,20 @@ export const archTests = [
     run: async () => {
       const body = meshCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       // The SKELETON itself is gated: meshCommand must be defined (the CLI-only
-      // nested verbs ui/repo/assign/recover-push/desktop + serve --serve live there).
+      // launcher verbs ui/desktop + serve --serve + the repo shim live there).
       assert.ok(body.length > 0, "meshCommand is defined in cli.mjs (the face skeleton)");
+      // The route door is the command's OWN declared cli.route (mesh:repo-publish
+      // rides the three-word ["mesh","repo","publish"] — never inferred from the
+      // id's op segment), resolved through the derived table to itself.
       const routes = deriveRouteTable(listCommands());
-      for (const sub of subcommands()) {
-        const routed = routes.has(`mesh ${sub}`);
+      for (const command of listCommands().filter((entry) => entry.id.startsWith("mesh:"))) {
+        const sub = command.id.slice("mesh:".length);
+        const route = command.cli?.route;
+        const routed = Array.isArray(route) && route.length > 0 && routes.get(route.join(" ")) === command;
         const laddered = new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body);
         assert.ok(
           routed || laddered,
-          `mesh ${sub} is reachable via the route table or a meshCommand branch (no mesh command the CLI cannot run)`
+          `${command.id} is reachable via its declared route or a meshCommand branch (no mesh command the CLI cannot run)`
         );
       }
     },

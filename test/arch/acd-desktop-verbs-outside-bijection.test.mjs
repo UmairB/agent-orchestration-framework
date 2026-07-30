@@ -1,21 +1,21 @@
 // Fitness function: acd-desktop-verbs-outside-bijection (milestone 36 / ADR-003,
-// fitness #5) — "The new desktop install + run/launch verbs are CLI-ONLY nested verbs
-//  under `aof mesh` (siblings to ui/repo/assign), deliberately OUTSIDE the
-//  acd-mesh-command-cli-bijection — they do NOT register as `mesh:*` commands (their
-//  flag-bearing face doesn't fit the single-positional meshVerbCli / `mesh:<verb>`
-//  registry shape). So they add NO registry id and cannot redden the bijection gate,
-//  exactly as `ui`/`repo`/`assign` already sit outside it."
+// fitness #5; REWORKED with m42 wave (d) leg d1's wave-3 tail) — the original
+// rationale ("their flag-bearing face doesn't fit the single-positional meshVerbCli
+// shape") died with meshVerbCli: `assign`/`recover-push`/`repo publish` are registered
+// Commands on the route table now. What this gate still protects is the LAUNCHER
+// boundary: a verb whose real body is a long-lived process (`mesh ui`, `mesh desktop
+// run`) stays a CLI-only ladder branch — NO registry id, so no bijection probe can
+// hang on a serve — until the launcher seam is designed (the registered-run-as-probe
+// idiom is the sanctioned landing shape when they migrate). `repo` also stays
+// laddered, but only as the no-verb/unknown-verb SHIM (publish itself is
+// mesh:repo-publish, a three-word route the shim cannot shadow).
 //
 // TWO PROOFS, one file:
-//  A. STANDING invariant (armed NOW): the CLI-only nested-verb precedent is intact —
-//     `aof mesh ui`/`repo`/`assign` dispatch in meshCommand but register NO `mesh:ui`/
-//     `mesh:repo`/`mesh:assign` command id (they are correctly outside the bijection).
-//     This is a real assertion today (those verbs exist) — it protects the seam the
-//     new desktop verbs join.
-//  B. GUARD-IF-PRESENT (armed at build): once the desktop verbs land in meshCommand,
-//     their names (the install verb + the run verb) must ALSO have NO matching `mesh:*`
-//     registry id — CLI-only, like their siblings. A clean no-op until the dispatch
-//     branches exist.
+//  A. STANDING invariant (armed NOW): `aof mesh ui`/`repo` dispatch in meshCommand
+//     but register NO `mesh:ui`/`mesh:repo` command id (ui = launcher; repo = the
+//     inner-verb shim).
+//  B. GUARD-IF-PRESENT (armed at build): any desktop verb with a dispatch branch
+//     must ALSO have NO matching `mesh:*` registry id — CLI-only, like ui.
 //  Self-check (m03 non-vacuous): a synthetic registry containing `mesh:ui` would fail
 //     the "no registry id for a CLI-only nested verb" assertion the real registry passes.
 import assert from "node:assert/strict";
@@ -50,10 +50,11 @@ const registryMeshVerbs = () =>
       .map((c) => c.id.slice("mesh:".length)),
   );
 
-// The CLI-only nested verbs that MUST sit outside the bijection. The three existing
-// siblings are asserted NOW; the two milestone-36 desktop verbs are guard-if-present
-// (checked only once their dispatch branch appears in meshCommand).
-const EXISTING_CLI_ONLY_NESTED_VERBS = ["ui", "repo", "assign"];
+// The CLI-only nested verbs that MUST sit outside the bijection: `ui` (the launcher
+// idiom) and `repo` (the no-verb/unknown-verb shim — publish is mesh:repo-publish).
+// `assign`/`recover-push` moved INTO the bijection with the wave-3 tail; the
+// milestone-36 desktop verbs are guard-if-present.
+const EXISTING_CLI_ONLY_NESTED_VERBS = ["ui", "repo"];
 // The milestone-36 install + run verb NAMES. (The exact spelling is the build story's
 // call; these are the candidate names the ADR records. The guard fires for whichever
 // of them actually lands a `subcommand === "<verb>"` dispatch branch.)
@@ -61,7 +62,7 @@ const DESKTOP_CANDIDATE_VERBS = ["desktop", "install", "app", "launch", "run"];
 
 export const archTests = [
   {
-    name: "arch/36 ADR-003 (acd-desktop-verbs-outside-bijection, standing): the existing CLI-only nested verbs (ui/repo/assign) dispatch in meshCommand but register NO mesh:* id",
+    name: "arch/36 ADR-003 (acd-desktop-verbs-outside-bijection, standing): the CLI-only nested verbs (ui launcher, repo shim) dispatch in meshCommand but register NO mesh:* id",
     run: async () => {
       const body = meshCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       assert.ok(body.length > 0, "meshCommand is defined");

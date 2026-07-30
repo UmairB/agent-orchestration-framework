@@ -32,9 +32,9 @@ import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber 
 // as a LITERAL `terminalInputPush` key at the same production call site (null when
 // no relay is configured — the route then stays output-only).
 import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
-import { publishRepoToMesh } from "./commands/mesh-repo.mjs";
-import { assignWork, withdrawWork } from "./commands/mesh-assign.mjs";
-import { recoverPush } from "./commands/mesh-recover-push.mjs";
+// publishRepoToMesh / assignWork+withdrawWork / recoverPush — no longer imported
+// here (m42 wave (d) leg d1, wave-3 tail): mesh:repo-publish / mesh:assign /
+// mesh:recover-push are registered Commands riding the route table.
 // milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
 // nested-verb sub-group (the mesh-repo.mjs/mesh-assign.mjs `← 1 cli.mjs` shape).
 // Deliberately outside the mesh:* registry (see the meshCommand dispatch note below).
@@ -394,49 +394,41 @@ async function meshCommand(args) {
   const sub = options._[0];
 
   // identity / status / heartbeat / relay / invite / join / revoke / logs /
-  // terminal-resume — MIGRATED (m42 wave (d) leg d1, wave 3): registry Commands
-  // carrying `cli.route`, dispatched in run() through the route table + the ONE
-  // generic face (meshVerbCli RETIRED — its --workspace resolution, positional
-  // discipline, and node-not-found read-miss split moved to the face +
-  // commands/mesh-face-shared.mjs). Still here: the CLI-only nested verbs
-  // (ui/repo/assign/recover-push/desktop), the `serve --serve` daemon branch,
-  // and the bare-usage/unknown-sub shims.
+  // terminal-resume — MIGRATED (m42 wave (d) leg d1, wave 3); assign /
+  // recover-push / repo publish — MIGRATED (wave-3 tail): registry Commands
+  // carrying `cli.route` (repo publish rides the three-word route
+  // mesh:repo-publish), dispatched in run() through the route table + the ONE
+  // generic face (meshVerbCli, meshRepoCommand, meshAssignCommand,
+  // meshRecoverPushCommand + emitMeshError RETIRED). Still here: the CLI-only
+  // launcher verbs (ui/desktop), the `serve --serve` daemon branch, the repo
+  // no-verb/unknown-verb shim, and the bare-usage/unknown-sub shims.
   const subcommand = sub;
   const [, ...rest] = args;
   // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
   // the unknown-sub fallthrough (the m22 additive-branch idiom). `aof mesh ui` is a
   // CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
-  // command — it does NOT route through meshVerbCli and does NOT enter the mesh
-  // bijection (ADR-002 §note). It stands up the OWN thin fleet serve-face
+  // command — the launcher idiom; it stands up its OWN thin fleet serve-face
   // (src/mesh-ui-serve.mjs), reaching fleet data only through invoke("mesh:status").
   if (subcommand === "ui") {
     await meshUiCommand(rest);
     return;
   }
-  // milestone 34 / story 06 (ADR-010) — the additive `aof mesh repo <verb>` sub-group,
-  // ABOVE the unknown-sub fallthrough. Like `ui` and the `serve --serve` daemon it is a
-  // CLI-ONLY nested verb, NOT a registered mesh:* command — so it is (correctly)
-  // OUTSIDE the flat acd-mesh-command-cli-bijection (which maps registry mesh:* ids to
-  // `subcommand === "<sub>"` branches; a nested `repo publish` has no flat registry id).
+  // `aof mesh repo publish` — MIGRATED (mesh:repo-publish, the three-word
+  // route). This shim owns ONLY the refusals the route table cannot express:
+  // no verb, or an unknown inner verb. Same envelope discipline as the
+  // unknown-sub shim below.
   if (subcommand === "repo") {
-    await meshRepoCommand(rest);
-    return;
-  }
-  // milestone 35 / story 00 (ADR-001/003/007) — the additive `aof mesh assign <ref>
-  // --to <nodeId>` / `--withdraw` dispatch verb, ABOVE the unknown-sub fallthrough.
-  // Like `repo`/`ui` it is a CLI-ONLY nested verb, NOT a registered mesh:* command
-  // (the --to/--withdraw flags don't fit the single-positional meshVerbCli face) — so
-  // it is (correctly) OUTSIDE the flat acd-mesh-command-cli-bijection.
-  if (subcommand === "assign") {
-    await meshAssignCommand(rest);
-    return;
-  }
-  // VERIFICATION (live soak 2026-07-25) — the additive `aof mesh recover-push
-  // <assignmentId>` control-driven recovery verb. A CLI-ONLY nested verb like
-  // `assign`/`repo`/`ui` (its single-positional assignmentId + long poll don't fit the
-  // meshVerbCli face), so it too is OUTSIDE the flat acd-mesh-command-cli-bijection.
-  if (subcommand === "recover-push") {
-    await meshRecoverPushCommand(rest);
+    const verb = rest.find((token) => typeof token === "string" && !token.startsWith("--"));
+    const asJson = rest.some((token) => token === "--json" || (typeof token === "string" && token.startsWith("--json=")));
+    const refusal = verb === undefined
+      ? { message: "`aof mesh repo` needs a verb.\n\nUsage:\n  aof mesh repo publish   publish this repo into the mesh", code: "invalid-input" }
+      : { message: `Unknown mesh repo verb "${verb}".`, code: "unknown-subcommand" };
+    if (asJson) {
+      console.log(JSON.stringify({ ok: false, error: refusal.message, code: refusal.code }, null, 2));
+    } else {
+      console.error(refusal.message);
+    }
+    process.exitCode = 1;
     return;
   }
   // milestone 36 / story 03 (ADR-003) — the additive `aof mesh desktop <install|run>`
@@ -494,19 +486,9 @@ async function meshCommand(args) {
 // the ONE generic face. Its three face-level behaviours moved with it: the
 // `--workspace <path|id>` resolution into the face (resolveWorkspaceRoot), the
 // positional discipline + read-miss split into commands/mesh-face-shared.mjs.
-
-// Emit a mesh face error: under --json ONE { ok:false, error, code } document on stdout
-// (+ non-zero exit); otherwise the message on stderr (+ non-zero exit). Callers
-// are the REMAINING CLI-only nested verbs (repo/assign/recover-push) — deleted
-// when they migrate (the wave-3 tail).
-function emitMeshError(asJson, message, code) {
-  if (asJson) {
-    console.log(JSON.stringify({ ok: false, error: message, code }, null, 2));
-  } else {
-    console.error(message);
-  }
-  process.exitCode = 1;
-}
+// emitMeshError — RETIRED with the wave-3 tail (its last callers, the
+// repo/assign/recover-push face copies, are registered Commands now; the
+// generic face owns the one envelope).
 
 // `aof import <unit> <repo> [selector] [--dry-run] [--json]` — the top-level
 // import dispatch (a sibling of `aof graph` / `aof work`, 13/ADR-002). The only
@@ -712,227 +694,13 @@ async function meshUiCommand(args) {
   });
 }
 
-// `aof mesh repo <verb>` — the per-repo mesh membership sub-group (milestone 34 / story
-// 06, ADR-010). Today the ONE verb is `publish`: it writes the local per-repo published
-// marker into .aof/aof.config.json AND publishes a snapshot into the machine-wide global
-// store now (src/commands/mesh-repo.mjs's publishRepoToMesh). CLI-only (see the dispatch
-// branch note). A failed snapshot is a non-fatal warning (the marker still lands);
-// only a real fault is a non-zero mesh-face error.
-const MESH_REPO_FLAGS = new Set(["json", "config"]);
-
-async function meshRepoCommand(args) {
-  const verb = typeof args[0] === "string" && !args[0].startsWith("--") ? args[0] : undefined;
-  const rest = verb === undefined ? args : args.slice(1);
-
-  const flagTokens = rest
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0]);
-  const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => !MESH_REPO_FLAGS.has(flag));
-  const options = parseOptions(rest);
-  if (wantsJson) options.json = true;
-
-  if (unknownFlag) {
-    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
-    return;
-  }
-  if (verb === undefined) {
-    emitMeshError(options.json, "`aof mesh repo` needs a verb.\n\nUsage:\n  aof mesh repo publish   publish this repo into the mesh", "invalid-input");
-    return;
-  }
-  if (verb !== "publish") {
-    emitMeshError(options.json, `Unknown mesh repo verb "${verb}".`, "unknown-subcommand");
-    return;
-  }
-  if (options._.length > 0) {
-    emitMeshError(options.json, `"repo publish" takes no positional argument (got "${options._[0]}").`, "invalid-input");
-    return;
-  }
-
-  let result;
-  try {
-    const workspace = await loadWorkspace(process.cwd(), options.config);
-    result = await publishRepoToMesh(workspace, {});
-  } catch (error) {
-    emitMeshError(options.json, error.message, error.code ?? "error");
-    return;
-  }
-
-  if (options.json) {
-    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
-    return;
-  }
-  const lines = [
-    `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
-    `Marked as a mesh repo in ${result.configPath}.`,
-  ];
-  lines.push(
-    result.cloneUrl
-      ? `Clone URL: ${result.cloneUrl}`
-      : "Clone URL: none configured and none detected from `git remote get-url origin` — a worker clone-miss for this workspace will fail loud (assignment-repo-unavailable) until one is set.",
-  );
-  if (!result.published && result.warning) {
-    lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
-  } else {
-    lines.push("Snapshot written to the global mesh store.");
-  }
-  console.log(lines.join("\n"));
-}
-
-// `aof mesh assign <ref> --to <nodeId>` / `--withdraw` — the operator dispatch verb
-// (milestone 35 / story 00, ADR-001/003/007). CLI-only (see the dispatch branch
-// note); core kept in commands/mesh-assign.mjs so it is unit-testable without
-// spawning the CLI. One `--json` envelope: `{ ok:true, …record }` on a clean mint/
-// withdraw, `{ ok:false, error, code }` on any coded refusal — never a second shape.
-const MESH_ASSIGN_FLAGS = new Set(["json", "config", "to", "withdraw"]);
-
-async function meshAssignCommand(args) {
-  const flagTokens = args
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0]);
-  const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => !MESH_ASSIGN_FLAGS.has(flag));
-  const options = parseOptions(args);
-  if (wantsJson) options.json = true;
-
-  if (unknownFlag) {
-    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
-    return;
-  }
-
-  const ref = options._[0];
-  if (typeof ref !== "string" || ref.length === 0) {
-    emitMeshError(
-      options.json,
-      "`aof mesh assign` needs a work ref.\n\nUsage:\n  aof mesh assign <ref> --to <nodeId>   assign a work item to a node\n  aof mesh assign <ref> --withdraw      withdraw the active assignment",
-      "invalid-input",
-    );
-    return;
-  }
-  if (options._.length > 1) {
-    emitMeshError(options.json, `"mesh assign" takes exactly one positional ref (got "${options._[1]}").`, "invalid-input");
-    return;
-  }
-  if (options.withdraw && options.to) {
-    emitMeshError(options.json, `"mesh assign" takes either --to <nodeId> or --withdraw, not both.`, "invalid-input");
-    return;
-  }
-  if (!options.withdraw && (typeof options.to !== "string" || options.to.length === 0)) {
-    emitMeshError(options.json, "`aof mesh assign <ref>` needs --to <nodeId> (or --withdraw).", "invalid-input");
-    return;
-  }
-
-  let workspace;
-  try {
-    workspace = await loadWorkspace(process.cwd(), options.config);
-  } catch (error) {
-    emitMeshError(options.json, error.message, error.code ?? "error");
-    return;
-  }
-
-  if (options.withdraw) {
-    let result;
-    try {
-      result = await withdrawWork(workspace, ref, {});
-    } catch (error) {
-      emitMeshError(options.json, error.message, error.code ?? "error");
-      return;
-    }
-    if (!result.ok) {
-      emitMeshError(options.json, result.error, result.code);
-      return;
-    }
-    if (options.json) {
-      console.log(JSON.stringify({ ok: true, assignment: result.assignment }, null, 2));
-      return;
-    }
-    console.log(
-      result.assignment == null
-        ? `No assignment exists for "${ref}"; nothing to withdraw.`
-        : `Withdrew the assignment for "${ref}" (assignmentId ${result.assignment.assignmentId}).`,
-    );
-    return;
-  }
-
-  let result;
-  try {
-    result = await assignWork(workspace, ref, options.to, {});
-  } catch (error) {
-    emitMeshError(options.json, error.message, error.code ?? "error");
-    return;
-  }
-  if (!result.ok) {
-    emitMeshError(options.json, result.error, result.code);
-    return;
-  }
-  if (options.json) {
-    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
-    return;
-  }
-  console.log(`Assigned "${ref}" to "${result.targetNodeId}" (assignmentId ${result.assignmentId}).`);
-}
-
-// `aof mesh recover-push <assignmentId>` — the control-driven recovery verb
-// (VERIFICATION, live two-machine soak 2026-07-25). Run on the CONTROL node to push a
-// stalled/terminal assignment's stranded worktree home. CLI-only (see the dispatch
-// branch note); core kept in commands/mesh-recover-push.mjs so it is unit-testable
-// without spawning the CLI. One `--json` envelope: `{ ok, code, ... }` — the SAME
-// single-shape discipline meshAssignCommand keeps. The target worker is determined
-// ENTIRELY by the assignment record (its own target_node_id), so the operator supplies
-// only the assignmentId; the command then blocks (polling the request row) until the
-// daemon+worker settle it pushed/failed, or reports it still-pending on timeout.
-const MESH_RECOVER_PUSH_FLAGS = new Set(["json"]);
-
-async function meshRecoverPushCommand(args) {
-  const flagTokens = args
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0]);
-  const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => !MESH_RECOVER_PUSH_FLAGS.has(flag));
-  const options = parseOptions(args);
-  if (wantsJson) options.json = true;
-
-  if (unknownFlag) {
-    emitMeshError(options.json, `Unknown option "--${unknownFlag}".`, "invalid-input");
-    return;
-  }
-
-  const assignmentId = options._[0];
-  if (typeof assignmentId !== "string" || assignmentId.length === 0) {
-    emitMeshError(
-      options.json,
-      "`aof mesh recover-push` needs an assignmentId.\n\nUsage:\n  aof mesh recover-push <assignmentId>   commit + push a stalled assignment's stranded worktree home",
-      "invalid-input",
-    );
-    return;
-  }
-  if (options._.length > 1) {
-    emitMeshError(options.json, `"mesh recover-push" takes exactly one positional assignmentId (got "${options._[1]}").`, "invalid-input");
-    return;
-  }
-
-  if (!options.json) {
-    console.log(`Requesting recovery push for assignment "${assignmentId}" — minting a write credential and dispatching to its worker…`);
-  }
-
-  let result;
-  try {
-    result = await recoverPush(assignmentId, {});
-  } catch (error) {
-    emitMeshError(options.json, error.message, error.code ?? "error");
-    return;
-  }
-
-  if (options.json) {
-    console.log(JSON.stringify(result, null, 2));
-    return;
-  }
-  if (!result.ok) {
-    emitMeshError(options.json, result.error ?? `Recovery push ${result.code}${result.detail ? ` (${result.detail})` : ""}.`, result.code);
-    return;
-  }
-  console.log(`Pushed "${result.itemRef}" home from "${result.targetNodeId}" (assignment ${result.assignmentId}${result.detail ? `, ${result.detail}` : ""}).`);
-}
+// meshRepoCommand / meshAssignCommand / meshRecoverPushCommand — RETIRED (m42
+// wave (d) leg d1, wave-3 tail): mesh:repo-publish / mesh:assign /
+// mesh:recover-push are registered Commands in their own modules
+// (commands/mesh-repo.mjs, mesh-assign.mjs, mesh-recover-push.mjs), riding the
+// route table + the ONE generic face. The repo no-verb/unknown-verb shim lives
+// in meshCommand; recover-push's pre-invoke progress line and its json-exit-0
+// on coded failure are documented in WAVE-D-MIGRATION.md.
 
 // `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
 // 01, ADR-003.1/.3): the long-lived `--serve` face over the one-shot launcher core

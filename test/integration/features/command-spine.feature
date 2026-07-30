@@ -50,6 +50,18 @@ Feature: Command spine — one route table, one face, one envelope
     Then the command should fail
     And stderr should contain `Unknown document "NONSENSE"`
 
+  Scenario: a routed nested mesh verb refuses bad input with the one envelope
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh assign --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
+  Scenario: a three-word route dispatches through the same face
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh repo publish --json`
+    Then the command should succeed
+    And the JSON result field "ok" should be true
+
   Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
     Given a work stream with milestone "03" titled "Board"
     When I run `work doctor --json`
