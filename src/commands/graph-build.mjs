@@ -3,7 +3,7 @@
 // the resulting graph.json, and returns a BuildResult whose counts are derived
 // from the graph (RESEARCH §C/§D), NEVER parsed from graphify's markdown stdout.
 //
-//   input  { path, backend?, tokenBudget?, offline? }
+//   input  { path, backend?, tokenBudget?, offline?, outRoot? }
 //   result BuildResult { graphPath, projectRoot, nodeCount, edgeCount,
 //                        hyperedgeCount, builtAt, backend, egress, stdout }
 //
@@ -81,6 +81,7 @@ export const graphBuildCommand = {
       backend: { type: "string" },
       tokenBudget: { type: "number" },
       offline: { type: "boolean" },
+      outRoot: { type: "string" },
     },
     required: ["path"],
     additionalProperties: false,
@@ -88,6 +89,14 @@ export const graphBuildCommand = {
 
   async run(input, ctx) {
     const projectRoot = ctx.workspace.projectRoot;
+    // The artifact root: the directory whose graphify-out/graph.json this build writes
+    // and reports. Defaults to projectRoot — the CODEBASE graph every graph:impact /
+    // graph:query read resolves. An in-process caller building a DIFFERENT graph over
+    // the same repo (the memory backend's work-stream graph) passes its own root so the
+    // replacing extraction cannot evict the codebase graph. Not a CLI flag: the CLI face
+    // has exactly one graph, and a user-supplied root would put the artifact somewhere
+    // the query family cannot find (#756).
+    const outRoot = input.outRoot ?? projectRoot;
     const backend = input.backend ?? null;
 
     // ADR-001 enforcement: offline:true FORBIDS a network backend. Reject BEFORE
@@ -109,10 +118,11 @@ export const graphBuildCommand = {
       throw commandError(resolved.hint, "graphify-missing", 424);
     }
 
-    // Spawn the pinned binary via the sole driver seam (cwd = projectRoot, #756).
+    // Spawn the pinned binary via the sole driver seam (cwd = projectRoot, #756;
+    // the artifact lands under outRoot).
     const built = runGraphifyBuild(
       { path: input.path, backend, tokenBudget: input.tokenBudget },
-      { projectRoot }
+      { projectRoot, outRoot }
     );
 
     // Counts come from graph.json (ADR-001 invariant), never from stdout.
@@ -124,7 +134,7 @@ export const graphBuildCommand = {
     const egress = classifyEgress(backend);
 
     return {
-      graphPath: graphJsonPath(projectRoot),
+      graphPath: graphJsonPath(outRoot),
       projectRoot,
       nodeCount: normalized.nodes.length,
       edgeCount: normalized.edges.length,

@@ -57,6 +57,27 @@ const INDEX_REL = path.join(".aof", "aof.memory.graphify.index.json");
 // The index-format version (mirrors 05/INDEX_VERSION; bump on a record-shape change).
 export const GRAPHIFY_INDEX_VERSION = 1;
 
+// The WORK-STREAM graph's own artifact root — beside this backend's own record store
+// under `.aof/` (git-ignored, and never on the mesh: acd-memory-index-never-on-mesh),
+// so the artifact lands at `.aof/memory-graph/graphify-out/graph.json`.
+//
+// It is separate from the projectRoot for one measured reason: graphify extraction
+// REPLACES the single graph.json under a root, and this backend builds a DIFFERENT
+// graph over the SAME repo than `aof graph build` does — work documents (spec_*,
+// story_*) versus code coupling. While both wrote `<projectRoot>/graphify-out/
+// graph.json`, whichever ran last silently evicted the other: a memory reindex (or an
+// `aof import milestone`, which triggers one) replaced a code graph with work-item
+// nodes, after which `graph impact <file>` answered `present: false` with zero edges —
+// indistinguishable from the architectural fact "this module has no coupling". The
+// codebase graph, which the refine / code-review / aof-architect guidance all mandate
+// grounding structural decisions in, was the casualty. Two roots, no collision.
+const WORK_GRAPH_REL = path.join(".aof", "memory-graph");
+
+// The root the work-stream graph is written under and read from (never projectRoot).
+export function workGraphRoot(projectRoot) {
+  return path.join(projectRoot, WORK_GRAPH_REL);
+}
+
 // The extraction backend the work-stream graph is built with (ADR-003). `claude-cli`
 // is graphify's native, credential-local default (keyless, billed-to-plan). The model
 // is tunable via graphify's own GRAPHIFY_CLAUDE_CLI_MODEL — a knob, not an aof contract.
@@ -135,9 +156,12 @@ async function attemptGraphBuild(ctx) {
   const backend = GRAPHIFY_EXTRACTION_BACKEND;
   try {
     const graphCtx = await buildGraphCtx(ctx);
+    // outRoot pins the work-stream graph to its OWN artifact (see workGraphRoot): the
+    // build replaces whatever graph.json sits under the root it is given, and the
+    // codebase graph must never be that casualty.
     const build = await invoke(
       "graph:build",
-      { path: ctx.workDir, backend },
+      { path: ctx.workDir, backend, outRoot: workGraphRoot(ctx.projectRoot) },
       graphCtx
     );
     return {
@@ -203,10 +227,13 @@ async function reindex(only, ctx = {}) {
   const store = await buildStore(only, ctx);
   const storePath = graphifyIndexPath(projectRoot);
   await writeText(storePath, `${JSON.stringify(store, null, 2)}\n`);
-  // Git-ignore BOTH derived artifacts (ADR-005): the record store (the F-02 `.aof/`
-  // baseline) and graphify-out/ (the projectRoot nested ignore this story owns).
+  // Git-ignore EVERY derived artifact (ADR-005): the record store (the F-02 `.aof/`
+  // baseline), graphify-out/ (the projectRoot nested ignore this story owns — the
+  // CODEBASE graph's, kept even though this backend no longer writes it), and the
+  // work-stream graph's own out dir under workGraphRoot.
   await ensureAofGitignore(projectRoot);
   await ensureGraphifyOutGitignore(projectRoot);
+  await ensureGraphifyOutGitignore(workGraphRoot(projectRoot));
 
   const graph = await attemptGraphBuild(ctx);
 
@@ -228,13 +255,18 @@ async function reindex(only, ctx = {}) {
 // built graph.json via the PURE `graph-normalize.mjs` helpers — NOT a graphify spawn
 // (09/ADR-001: structure comes from graph.json, never graph:query's opaque stdout).
 // The path is the build-returned graphPath when present (story-00 reindex's
-// BuildResult), else the ADR-006 default `<projectRoot>/graphify-out/graph.json`.
-// When the graph is ABSENT or unreadable, returns null → recall's base-ranking null
-// case (ADR-001 / ADR-004 degrade). Never throws. A test may inject a normalized
-// graph directly on `ctx.normalizedGraph` (the fixture path, no disk).
+// BuildResult), else this backend's OWN work-graph artifact —
+// `.aof/memory-graph/graphify-out/graph.json` (workGraphRoot), NOT
+// `<projectRoot>/graphify-out/graph.json`. Reading the projectRoot artifact made the
+// re-rank signal whatever `aof graph build` last wrote there — a CODE graph whose node
+// ids no work record can match — and pointed recall at the very artifact this backend
+// used to evict. When the graph is ABSENT or unreadable, returns null → recall's
+// base-ranking null case (ADR-001 / ADR-004 degrade). Never throws. A test may inject a
+// normalized graph directly on `ctx.normalizedGraph` (the fixture path, no disk).
 function loadNormalizedGraph(ctx = {}) {
   if (ctx.normalizedGraph !== undefined) return ctx.normalizedGraph;
-  const graphPath = ctx.graphPath ?? (ctx.projectRoot ? graphJsonPath(ctx.projectRoot) : null);
+  const graphPath = ctx.graphPath
+    ?? (ctx.projectRoot ? graphJsonPath(workGraphRoot(ctx.projectRoot)) : null);
   if (!graphPath || !existsSync(graphPath)) return null;
   try {
     return normalizeGraph(readGraph(graphPath));
@@ -377,7 +409,11 @@ async function status(ctx = {}) {
   const records = Array.isArray(store?.records) ? store.records : [];
   const lessons = records.filter((r) => r.recordType === "lesson").length;
   const adrs = records.filter((r) => r.recordType === "adr").length;
-  const graphPath = path.join(projectRoot ?? ".", "graphify-out", "graph.json");
+  // The WORK-STREAM graph's own artifact (workGraphRoot), resolved through the shared
+  // graphJsonPath helper — never `<projectRoot>/graphify-out/graph.json`. Reading the
+  // projectRoot artifact reported graphPresent:true whenever a CODEBASE graph happened
+  // to exist, i.e. "recall is graph-grounded" for a graph recall cannot use.
+  const graphPath = graphJsonPath(workGraphRoot(projectRoot ?? "."));
   const graphPresent = existsSync(graphPath);
   const { graphState, graphHint } = resolveGraphState(ctx, graphPresent);
   return {
