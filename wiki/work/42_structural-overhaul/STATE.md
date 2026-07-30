@@ -11,6 +11,21 @@ doc: state
 
 ## Progress
 
+- **2026-07-30 (check-in): waves 1+2 committed (5 commits, pushed, UNMERGED) + three residuals
+  found while auditing what was logged.** Commits: bundle-manifest regen, the spine face + BDD
+  harness, the effects ledger + d2 sweep, the 43-verb route-table migration, the wave-(d) ledger
+  docs. The audit found three items no doc carried, now in
+  [WAVE-D-MIGRATION.md](WAVE-D-MIGRATION.md) §"Owed from waves 1+2": (1) `test/integration/cli.ps1`
+  — a SECOND, hand-kept step-ladder runner over the same features — is BROKEN by the restructure
+  (its switch knows 6 of the now-8 features and throws on the rest) and still wired to
+  `npm run test:integration:ps`; an operator decision (delete vs teach) is owed. (2)
+  `work:doctor --strict` lost its only pin when the gate moved into `cli.exit` — the bijection
+  accepts [0,1] and the BDD `doctor --strict` scenarios drive `project doctor`, so a regression
+  would be silent. (3) Dead pre-route compat in four `faceCtx` readers. **Caveat on the history:**
+  the five commits are organised for review by leg; only the branch TIP is suite-verified (the
+  spine commit's feature files exercise commands that register in the later refactor commit), so
+  squash-merge unless bisectability is wanted.
+
 - **2026-07-28 (fifth pass): d1 WAVE-2 COMPLETE — the whole work family + the top-level
   faces onto the route table.** 21 more registered verbs carry `cli.route` + `cli.spec`
   (class B — the commands' adapters were already the truth; only the doors moved): `work

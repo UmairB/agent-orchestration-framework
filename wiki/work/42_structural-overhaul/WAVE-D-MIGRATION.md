@@ -96,6 +96,29 @@ CLI-only-by-design verbs (`work find/observe/init/update/memory/orchestrator/del
 *-headroom`, `planning init`, `session`): register as Commands with `route` when touched;
 they are LOW priority — no cascade surface, no face copies.
 
+### Owed from waves 1+2 (found at the 2026-07-30 check-in, not yet done)
+
+1. **`test/integration/cli.ps1` is BROKEN by the BDD restructure — operator decision owed.**
+   It is a SECOND runner (52 KB, last touched 2026-06-21) over the SAME `features/` directory,
+   wired as `npm run test:integration:ps`, carrying its own hand-kept
+   `switch ($FeatureName) { … default { throw "No step module registered" } }` map — precisely
+   the ladder disease wave (d) exists to kill. Its map knows 6 features; the directory now holds
+   8, so `command-spine`/`config-family`/`effects-ledger` throw. **Decide: delete it (the .mjs
+   runner supersedes it — convention resolution means a new feature never edits a runner) or
+   teach it the same convention.** Deleting also retires the duplicated step grammar; nothing
+   else references it but that one npm script.
+2. **`work:doctor --strict` lost its only pin.** The advisory gate (error ⇒ always fail; warn ⇒
+   fail only under `--strict`) moved out of `workDoctorCommand` into `cli.exit` with wave 2, and
+   NOTHING asserts it: `acd-work-command-cli-bijection` accepts `[0,1]` for doctor by design, and
+   the only `doctor --strict` BDD scenarios drive `project doctor` (a different command). A
+   regression would be silent. Owed: one scenario — a warn-carrying stream exits 0 bare, 1 under
+   `--strict`, with an identical finding set both ways.
+3. **Dead compat in four faceCtx readers.** `list`/`next`/`validate`/`doctor` read
+   `faceCtx.scope ?? faceCtx.positionals?.[0]` (and doctor `faceCtx.strict ?? faceCtx.options?.strict`)
+   — the left branch is the PRE-route shape and now has zero callers (the generic face always
+   passes `{ positionals, options }`). Drop the `??` left-hand side when wave 3 touches these
+   files; keeping it invites a second calling convention.
+
 Wave 3 — **graph + mesh** (needs the launcher seam decision):
 graph verbs via route table (delete `graphVerbCommand`); `graph serve` keeps the launcher idiom.
 Mesh registered verbs via route table (delete `meshVerbCli` + `emitMeshError` — the generic
