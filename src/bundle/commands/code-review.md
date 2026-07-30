@@ -37,18 +37,26 @@ default = the whole branch) and the **`--auto-complete`** flag.
 
    **Surface the PR-impact blast-radius as ranking context (advisory).** Run unconditionally (a silent
    no-op when graphify is absent): when handing the diff to `aof-architect`, first build the codebase graph
-   fresh — `aof graph build src` (the repo source root; read back the `builtAt`/`egress`/counts so
+   fresh — `aof graph build .` (the project root, NO `--backend` — the code-only build: no key, zero
+   egress, docs in the tree are fine; read back the `builtAt`/`egress`/counts so
    freshness is visible) — then run **`aof graph impact <the files changed in the diff>`**. It returns,
    deterministically, each changed file's **dependents** (`imported/called by ←` — the blast-radius: who
    breaks if this changes) and **dependencies**. Rank the review by that blast-radius — review the changed
    files with the most dependents first. (You MAY also run `aof graph triage` for graphify's own
    PR-impact queue as a secondary, fuzzier signal; `graph impact` on the actual diff is the exact one.)
+   Graphify extraction replaces the single project graph; never target a package or `src` subtree,
+   because doing so evicts every file outside that subtree. A changed file reported `present: false` is not
+   covered by the graph — rank it as UNKNOWN blast-radius, never as zero.
    The agent **READS** the structured impact as advisory context. **Advisory only:** the impact is ranking context for the
    reviewer; it is **never** an auto-block input to the merge — the merge gate (step 6: CI-green +
    no-blocking-finding) is **unchanged**, and any concern the rank raises flows through the normal
    human/agent-judged finding path, never a separate graph-gate (no wiring into
    `work.codeReview.autoComplete`). If `aof graph build`/`triage` returns the structured `graphify-missing`
-   miss, note the graph is unavailable and review unranked exactly as before — no block, no crash, no noise.
+   miss — or the build FAILS with `graphify-build-failed` / `graphify-no-persist`, meaning no usable graph
+   was produced — note the graph is unavailable and review unranked exactly as before: no block, no crash,
+   no noise, and no ranking off a stale artifact. A build reporting `unchanged: true` is a **success**, not
+   a failure: graphify rewrites only on a topology change, so that means the graph is already current —
+   rank the review with it.
 
    Its verdict also flags surfaces:
    - **attack surface** (auth, secrets, tenant isolation, untrusted input, crypto) → spawn

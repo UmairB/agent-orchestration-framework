@@ -33,12 +33,14 @@
 // tests are behaviour-preserved (they still import them from here). The spawn
 // helpers need the live binary, so they are exercised only by @manual scenarios.
 import { spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
+import path from "node:path";
 import { resolveManagedBinary } from "./tool-store.mjs";
 // The PURE normalizer (extracted 10/01) — re-exported below so existing 09
 // importers (`src/commands/graph-*.mjs`, the 09 tests) keep importing from here.
-import { graphJsonPath, readGraph, normalizeGraph } from "./graph-normalize.mjs";
+import { graphJsonPath, readGraph, normalizeGraph, graphArtifactBuiltAt } from "./graph-normalize.mjs";
 
-export { graphJsonPath, readGraph, normalizeGraph };
+export { graphJsonPath, readGraph, normalizeGraph, graphArtifactBuiltAt };
 
 // The two names RESEARCH §G flags as load-bearing: install via the PyPI package
 // `graphifyy` (double-y), invoke the `graphify` binary (single-y). A doctor/lock
@@ -96,19 +98,46 @@ export function resolveGraphifyBinary(options = {}) {
 // spawn when the binary is absent (ADR-004): callers guard with
 // resolveGraphifyBinary() first and throw a structured graphify-missing error.
 
-// graphifyBuildArgs(input, projectRoot) — the PURE, testable core of the build
-// argv (the `normalizeGraph` idiom: a no-spawn helper a unit test can drive
-// without the live binary). graphify 0.8.44 `extract <path>` defaults `--out` to
-// the EXTRACTION TARGET (`<path>`), NOT the cwd — so when the build target ≠
-// projectRoot, the #756 `cwd=projectRoot` discipline (which fixes the READ verbs)
-// does NOT control extract's WRITE location, and the graph lands under the target
-// folder where the driver can't find it under projectRoot. Fix: ALWAYS pin
-// `--out <projectRoot>` so the artifact lands at <projectRoot>/graphify-out/ for
-// the query family to read (verify-2026-06-22, finding-F2). A null/absent backend
-// still passes NO --backend flag → code/AST only, zero egress (the ADR-006 inv. 4
+// graphifyBuildArgs(input, outRoot) — the PURE, testable core of the build argv
+// (the `normalizeGraph` idiom: a no-spawn helper a unit test can drive without the
+// live binary). graphify 0.8.44 `extract <path>` defaults `--out` to the EXTRACTION
+// TARGET (`<path>`), NOT the cwd — so when the build target ≠ the artifact root, the
+// #756 `cwd=projectRoot` discipline (which fixes the READ verbs) does NOT control
+// extract's WRITE location, and the graph lands under the target folder where the
+// driver can't find it. Fix: ALWAYS pin `--out <outRoot>` so the artifact lands at
+// <outRoot>/graphify-out/ for the query family to read (verify-2026-06-22,
+// finding-F2).
+//
+// TWO VERBS, chosen by whether a doc/media backend was asked for — because `extract`
+// CANNOT honour aof's no-backend contract (measured against graphify 0.8.44,
+// 2026-07-30):
+//
+//   - `extract <path> --out <outRoot>` — the SEMANTIC build. Needs a backend the
+//     moment the corpus holds a single doc/paper/image file: with none it exits 1
+//     ("no LLM API key found (N doc/paper/image file(s) need semantic extraction)")
+//     and writes NOTHING AT ALL, not even the code half. So "omit --backend for a
+//     code-only build" was a promise `extract` could not keep on any repo with a
+//     README — before the honesty fix that surfaced as a silent no-op, and after it
+//     as a hard `graphify-build-failed`. Neither is a usable code-only build.
+//   - `update <path>` — the CODE-ONLY build, "re-extract code files and update the
+//     graph (no LLM needed)". Measured on a corpus WITH a doc file: exit 0, no key,
+//     no backend flag, code coupling + structural document nodes, clustering without
+//     LLM community labels. This is what egress=none has always meant, so it is the
+//     verb a no-backend build must actually run.
+//
+// `update` takes no `--out` (it writes <path>/graphify-out/), so it is only correct
+// when the extraction target IS the artifact root — exactly the whole-project
+// `aof graph build .` the guidance mandates. A no-backend SUBTREE build therefore
+// stays on `extract`, where `--out` still pins the artifact and a doc file in the
+// subtree fails loudly rather than lying. A tokenBudget is an LLM-extraction knob, so
+// its presence also keeps the build on `extract` — never silently dropped.
+// Either way NO --backend flag is passed → zero egress (the ADR-006 inv. 4
 // egress=none privacy invariant; preserved exactly).
-export function graphifyBuildArgs(input, projectRoot) {
-  const args = ["extract", input.path, "--out", projectRoot];
+export function graphifyBuildArgs(input, outRoot, projectRoot = outRoot) {
+  if (isCodeOnlyWholeRootBuild(input, outRoot, projectRoot)) {
+    return ["update", outRoot];
+  }
+  const args = ["extract", input.path, "--out", outRoot];
   if (input.backend) {
     args.push("--backend", input.backend);
   }
@@ -116,6 +145,23 @@ export function graphifyBuildArgs(input, projectRoot) {
     args.push("--token-budget", String(input.tokenBudget));
   }
   return args;
+}
+
+// True when the request is "the whole artifact root, code only, zero egress" — the one
+// shape `graphify update` can serve correctly (it has no --out, so the target must BE
+// the root it writes under). PURE + exported so the verb choice is assertable without a
+// spawn. A RELATIVE target resolves against `projectRoot` because that is the spawn cwd
+// (#756), while the artifact root it must match is `outRoot` — the two differ only for
+// the memory backend's work-stream graph, which always names a backend and so never
+// reaches here. `path.resolve` both sides so `.`, a trailing separator and an absolute
+// target all compare equal; a subtree, a backend, or a tokenBudget answers false and
+// keeps the build on `extract`.
+export function isCodeOnlyWholeRootBuild(input, outRoot, projectRoot = outRoot) {
+  if (input.backend) return false;
+  if (input.tokenBudget != null) return false;
+  if (typeof input.path !== "string") return false;
+  if (typeof outRoot !== "string" || typeof projectRoot !== "string") return false;
+  return path.resolve(projectRoot, input.path) === path.resolve(outRoot);
 }
 
 // ---------------------------------------------------------- spawn-safety envelope ----
@@ -180,35 +226,131 @@ function throwOnSpawnError(result, options) {
   throw error;
 }
 
-// graph build — `graphify extract <path> --out <projectRoot> [--backend X]
-// [--token-budget N]` (RESEARCH §B; finding-F2). cwd = projectRoot so the query
-// family finds <projectRoot>/graphify-out/graph.json (#756, RESEARCH §I), AND
-// `--out projectRoot` so extract WRITES there (its --out default is <path>, the
-// target — not cwd). A null/absent backend passes NO --backend flag → code/AST
-// only, zero egress (privacy boundary, ADR-005). The spawn is BOUNDED (timeout +
-// ignored stdin, see graphifySpawnOptions) so a blocking extraction can't hang aof —
-// an overrun throws graphify-timeout, which the memory reindex catches and skips soft.
-export function runGraphifyBuild(input, { projectRoot }) {
-  const resolved = resolveGraphifyBinary();
+// graph build — `graphify extract <path> --out <outRoot> [--backend X]
+// [--token-budget N]`, or `graphify update <outRoot>` for a code-only build
+// (RESEARCH §B; finding-F2; graphifyBuildArgs owns the verb choice). cwd =
+// projectRoot so the query family finds <projectRoot>/graphify-out/graph.json (#756,
+// RESEARCH §I), AND `--out <outRoot>` so extract WRITES there (its --out default is
+// <path>, the target — not cwd). A null/absent backend passes NO --backend flag →
+// code/AST only, zero egress (privacy boundary, ADR-005). The spawn is BOUNDED
+// (timeout + ignored stdin, see graphifySpawnOptions) so a blocking extraction can't
+// hang aof — an overrun throws graphify-timeout, which the memory reindex catches and
+// skips soft.
+//
+// WHAT COUNTS AS A FAILED BUILD (measured against graphify 0.8.44, 2026-07-30 —
+// re-derived after the first version of this guard broke the ordinary case):
+//
+//   exit != 0                     → graphify-build-failed, carrying its stderr.
+//   exit 0, NO artifact           → graphify-no-persist. Nothing to read at all.
+//   exit 0, artifact UNCHANGED    → SUCCESS, `unchanged: true`.
+//   exit 0, artifact rewritten    → SUCCESS, `unchanged: false`.
+//
+// The third row is the correction. graphify rewrites ONLY on a topology change: a
+// re-run over an untouched corpus prints "No code-graph topology changes detected;
+// outputs left untouched" and exits 0, and so does a run after an edit that adds no
+// node or edge (measured: adding `export const version = 2` to an extracted module
+// leaves the artifact byte-identical, while adding a function or a file rewrites it).
+// So an unchanged artifact after a zero exit is graphify ASSERTING the graph is
+// already current — the ordinary steady state of any repo whose graph is up to date.
+// Treating it as a failure meant a second consecutive build could never succeed, and
+// the shipped guidance then told the agent to abandon a perfectly current graph and
+// fall back to grep-and-infer: the exact harm this family of fixes exists to prevent,
+// reached by a new route.
+//
+// This is also why staleness is NOT inferred from source mtimes. "Any source file
+// newer than the artifact ⇒ stale" is wrong for the same measured reason — graphify
+// deliberately does not rewrite for a non-topological edit, so that rule fails loudly
+// on a current graph. aof has no honest, spawn-free way to second-guess graphify's own
+// currency verdict, so it does not try; it reports the fact (`unchanged`) and lets the
+// caller read it. The genuine "exited 0 and wrote nothing it should have" is caught
+// upstream by the status check — the originally-reported defect exited 1 every time —
+// and downstream by graph:build's structured read of the artifact, which turns an
+// absent/corrupt/unparseable graph into a build failure rather than a stack trace.
+//
+// TWO ROOTS, deliberately separable. `projectRoot` is the spawn cwd (the #756 read
+// discipline); `outRoot` is the directory whose `graphify-out/graph.json` this build
+// writes and reports — and it DEFAULTS to projectRoot, so the codebase graph is
+// untouched. It exists because graphify extraction REPLACES the single artifact under
+// a root, and aof builds two unrelated graphs: the CODEBASE graph (`aof graph build`,
+// read by graph:impact/query) and the memory backend's WORK-STREAM graph (built over
+// wiki/work as a recall re-rank signal). Sharing one artifact meant whichever ran last
+// evicted the other — a memory reindex silently replaced the code graph with work-item
+// nodes, and `graph impact` then answered `present: false` over it, indistinguishable
+// from "this module has no coupling". The memory backend passes its own outRoot so the
+// two graphs can never collide.
+export function runGraphifyBuild(
+  input,
+  { projectRoot, outRoot = projectRoot, resolveBinary = resolveGraphifyBinary, spawn = spawnSync }
+) {
+  const resolved = resolveBinary();
   if (!resolved.found) {
     const error = new Error(resolved.hint);
     error.code = "graphify-missing";
     throw error;
   }
-  const args = graphifyBuildArgs(input, projectRoot);
+  const graphPath = graphJsonPath(outRoot);
+  const before = graphArtifactStat(graphPath);
+  const args = graphifyBuildArgs(input, outRoot, projectRoot);
   const options = graphifySpawnOptions({ projectRoot });
-  const result = spawnSync(resolved.path, args, options);
+  const result = spawn(resolved.path, args, options);
   throwOnSpawnError(result, options);
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || "").trim();
+    const error = new Error(
+      `graphify ${args[0]} exited with status ${result.status}${detail ? `: ${detail}` : "."}`
+    );
+    error.code = "graphify-build-failed";
+    throw error;
+  }
+  // A zero exit with NO artifact at all is the one unambiguous "the build produced
+  // nothing" — nothing to read, nothing to answer over. Loud, unconditionally.
+  const after = graphArtifactStat(graphPath);
+  if (!after) {
+    const error = new Error(
+      `graphify ${args[0]} exited successfully but no graph exists at ${graphPath}.`
+    );
+    error.code = "graphify-no-persist";
+    throw error;
+  }
   return {
-    graphPath: graphJsonPath(projectRoot),
+    graphPath,
     stdout: result.stdout ?? "",
     status: result.status,
+    // The SHARED derivation (graph-normalize), not `after.mtime` — the two stat
+    // flavours round differently, so deriving it here would report a builtAt a
+    // millisecond off the one `graph:impact` prints for the same untouched file.
+    builtAt: graphArtifactBuiltAt(graphPath),
+    // Whether this run rewrote the artifact. NOT a failure when false: graphify
+    // rewrites only on a TOPOLOGY change, so an untouched artifact after a zero exit
+    // is graphify asserting the graph is already current. Reported so a caller can
+    // tell "rebuilt" from "already current" — two different facts, both successes.
+    unchanged: sameGraphArtifact(before, after),
   };
+}
+
+// Snapshot the one artifact before and after extraction; a successful process
+// is not a successful build unless that artifact was actually persisted.
+function graphArtifactStat(graphPath) {
+  try {
+    return statSync(graphPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function sameGraphArtifact(before, after) {
+  return before != null
+    && before.size === after.size
+    && before.mtimeNs === after.mtimeNs
+    && before.ctimeNs === after.ctimeNs
+    && before.ino === after.ino;
 }
 
 // graph query — `graphify query "<question>" [--dfs|--bfs] [--budget N]`
 // (RESEARCH §B). cwd = projectRoot (#756). stdout is graphify's human markdown,
 // carried opaque (RESEARCH §C); the structured handle is graphPath.
+// Query reads the artifact written by the build above; it never spawns a build.
 export function runGraphifyQuery(input, { projectRoot }) {
   const resolved = resolveGraphifyBinary();
   if (!resolved.found) {

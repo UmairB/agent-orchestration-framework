@@ -28,7 +28,7 @@ import path from "node:path";
 import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import graphifyBackend from "../src/memory/graphify-backend.mjs";
-import { graphifyIndexPath } from "../src/memory/graphify-backend.mjs";
+import { graphifyIndexPath, workGraphRoot } from "../src/memory/graphify-backend.mjs";
 import { reindex as localReindex, memoryIndexPath } from "../src/memory/local-indexing.mjs";
 
 const MEMORY_RECORD_KEYS = [
@@ -270,9 +270,112 @@ export const graphifyReindexTests = [
       assert.ok(call, "reindex reached invoke('graph:build')");
       assert.equal(call.input.path, path.join(projectRoot, "wiki", "work"), "the build targets the work stream (ADR-006)");
       assert.equal(call.input.backend, "claude-cli", "the extraction backend is surfaced as claude-cli (ADR-003)");
+      // The work-stream graph is pinned to its OWN artifact root, never the projectRoot
+      // one the codebase graph occupies (see workGraphRoot).
+      assert.equal(
+        call.input.outRoot,
+        workGraphRoot(projectRoot),
+        "the build writes the work-stream graph under its own root, not the projectRoot codebase graph"
+      );
+      assert.notEqual(call.input.outRoot, projectRoot, "the work-stream graph root is NOT the projectRoot");
       // The seam-bridge constructed a {workspace} ctx (ADR-002) — never the bare memory ctx.
       assert.ok(call.ctx && call.ctx.workspace, "the graph command receives a {workspace}-shaped ctx (the seam-bridge)");
       assert.equal(call.ctx.workspace.projectRoot, projectRoot, "the {workspace} carries the projectRoot the command reads");
+    },
+  },
+  {
+    // The eviction regression, end to end. graphify extraction REPLACES the single
+    // graph.json under the root it is given, and this backend builds a WORK-DOCUMENT
+    // graph over the same repo that `aof graph build` builds a CODE graph for. While
+    // both used <projectRoot>/graphify-out/graph.json, a reindex (or an `aof import
+    // milestone`, which triggers one) silently replaced a 20k-node code graph with
+    // work-item nodes — after which `aof graph impact <file>` answered `present:false`
+    // with zero edges, indistinguishable from "this module has no coupling".
+    //
+    // The injected invoke models the REPLACING write honestly, defaulting to the
+    // projectRoot exactly as the pre-fix build did when handed no outRoot — so
+    // removing the outRoot from attemptGraphBuild puts the work graph back on top of
+    // the code graph and reds this test.
+    name: "graphify/reindex: a reindex NEVER evicts the codebase graph (the two graphs have separate artifacts)",
+    run: async () => {
+      const { projectRoot } = await tempStream(["00"]);
+
+      // A pre-existing CODEBASE graph, exactly where `aof graph build .` leaves one.
+      const codeGraphPath = path.join(projectRoot, "graphify-out", "graph.json");
+      const codeGraph = `${JSON.stringify({
+        nodes: [{ id: "src_auth", source_file: "src/auth.mjs", file_type: "code" }],
+        links: [],
+      })}\n`;
+      await mkdir(path.dirname(codeGraphPath), { recursive: true });
+      await writeFile(codeGraphPath, codeGraph, "utf8");
+
+      // An invoke that WRITES like the real replacing extraction does: a work-document
+      // graph into <outRoot>/graphify-out/graph.json, falling back to the projectRoot
+      // when the caller pins no root (the pre-fix behaviour).
+      const calls = [];
+      const invoke = async (id, input, ctx) => {
+        calls.push({ id, input });
+        if (id !== "graph:build") throw new Error(`unexpected invoke: ${id}`);
+        const root = input.outRoot ?? ctx.workspace.projectRoot;
+        const written = path.join(root, "graphify-out", "graph.json");
+        await mkdir(path.dirname(written), { recursive: true });
+        await writeFile(
+          written,
+          `${JSON.stringify({ nodes: [{ id: "spec_m00", file_type: "document" }], links: [] })}\n`,
+          "utf8"
+        );
+        return { graphPath: written, egress: "docs-media" };
+      };
+
+      const result = await graphifyBackend.reindex(null, ctxFor(projectRoot, { invoke }));
+
+      assert.ok(result.graph?.built, "the work-stream graph was built");
+      assert.equal(
+        await readFile(codeGraphPath, "utf8"),
+        codeGraph,
+        "the codebase graph is byte-identical after a reindex — the work-stream graph did not evict it"
+      );
+      const workGraphPath = path.join(workGraphRoot(projectRoot), "graphify-out", "graph.json");
+      assert.ok(existsSync(workGraphPath), "the work-stream graph landed under its own root");
+      assert.match(
+        await readFile(workGraphPath, "utf8"),
+        /spec_m00/,
+        "the work-stream artifact holds the work-document graph"
+      );
+    },
+  },
+  {
+    // The READ half of the same separation: recall re-ranks against the WORK graph, so a
+    // codebase graph sitting at the projectRoot must not be what the signal comes from.
+    // Before the split, `loadNormalizedGraph` read <projectRoot>/graphify-out/graph.json
+    // — whatever `aof graph build` last wrote — and `status` reported graphPresent:true
+    // off the same file, i.e. "recall is graph-grounded" for a graph recall cannot use.
+    name: "graphify/status: graphPresent reports the WORK-stream graph, not a codebase graph at the projectRoot",
+    run: async () => {
+      const { projectRoot } = await tempStream(["00"]);
+      await mkdir(path.join(projectRoot, "graphify-out"), { recursive: true });
+      await writeFile(
+        path.join(projectRoot, "graphify-out", "graph.json"),
+        `${JSON.stringify({ nodes: [{ id: "src_auth", file_type: "code" }], links: [] })}\n`,
+        "utf8"
+      );
+
+      const absent = await graphifyBackend.status(ctxFor(projectRoot, {}));
+      assert.equal(
+        absent.graphPresent,
+        false,
+        "a codebase graph at the projectRoot does NOT count as the work-stream graph being present"
+      );
+
+      const workGraphPath = path.join(workGraphRoot(projectRoot), "graphify-out", "graph.json");
+      await mkdir(path.dirname(workGraphPath), { recursive: true });
+      await writeFile(
+        workGraphPath,
+        `${JSON.stringify({ nodes: [{ id: "spec_m00", file_type: "document" }], links: [] })}\n`,
+        "utf8"
+      );
+      const present = await graphifyBackend.status(ctxFor(projectRoot, {}));
+      assert.equal(present.graphPresent, true, "the work-stream graph at its own root IS reported present");
     },
   },
 ];

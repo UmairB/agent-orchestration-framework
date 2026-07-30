@@ -3,9 +3,9 @@
 // the resulting graph.json, and returns a BuildResult whose counts are derived
 // from the graph (RESEARCH §C/§D), NEVER parsed from graphify's markdown stdout.
 //
-//   input  { path, backend?, tokenBudget?, offline? }
+//   input  { path, backend?, tokenBudget?, offline?, outRoot? }
 //   result BuildResult { graphPath, projectRoot, nodeCount, edgeCount,
-//                        hyperedgeCount, builtAt, backend, egress, stdout }
+//                        hyperedgeCount, builtAt, backend, egress, unchanged, stdout }
 //
 // Paths are RAW ABSOLUTE (basis-neutral, 08/ADR-002); the CLI face relativises
 // for display. `egress` reports whether the doc/media backend HOP ran: "none"
@@ -72,6 +72,30 @@ export function classifyEgress(backend) {
   return backend == null ? "none" : "docs-media";
 }
 
+// readBuiltGraph(graphPath) — the normalizing read of the artifact a build just
+// verified, and the build's LAST honesty check. Exported pure (the graphifyBuildArgs /
+// classifyEgress idiom) so the failure path is drivable without the live binary: a real
+// spawn would simply overwrite any corrupt fixture, so this cannot be reached through
+// `invoke` at all.
+//
+// The driver can only see THAT a file exists. Here we find out whether it is a graph. A
+// zero exit over a truncated, corrupt or unparseable artifact is a failed build however
+// cheerful the process was — and this is the honest remnant of the artifact-unchanged
+// guard it replaces: it asserts a USABLE graph, rather than guessing at staleness from
+// mtimes graphify deliberately does not update. Structured, so the caller sees a build
+// failure instead of a SyntaxError escaping as a stack trace.
+export function readBuiltGraph(graphPath) {
+  try {
+    return normalizeGraph(readGraph(graphPath));
+  } catch (error) {
+    throw commandError(
+      `graphify exited successfully but ${graphPath} is not a readable graph: ${error.message}`,
+      "graphify-no-persist",
+      424
+    );
+  }
+}
+
 export const graphBuildCommand = {
   id: "graph:build",
   input: {
@@ -81,6 +105,7 @@ export const graphBuildCommand = {
       backend: { type: "string" },
       tokenBudget: { type: "number" },
       offline: { type: "boolean" },
+      outRoot: { type: "string" },
     },
     required: ["path"],
     additionalProperties: false,
@@ -88,6 +113,14 @@ export const graphBuildCommand = {
 
   async run(input, ctx) {
     const projectRoot = ctx.workspace.projectRoot;
+    // The artifact root: the directory whose graphify-out/graph.json this build writes
+    // and reports. Defaults to projectRoot — the CODEBASE graph every graph:impact /
+    // graph:query read resolves. An in-process caller building a DIFFERENT graph over
+    // the same repo (the memory backend's work-stream graph) passes its own root so the
+    // replacing extraction cannot evict the codebase graph. Not a CLI flag: the CLI face
+    // has exactly one graph, and a user-supplied root would put the artifact somewhere
+    // the query family cannot find (#756).
+    const outRoot = input.outRoot ?? projectRoot;
     const backend = input.backend ?? null;
 
     // ADR-001 enforcement: offline:true FORBIDS a network backend. Reject BEFORE
@@ -109,14 +142,15 @@ export const graphBuildCommand = {
       throw commandError(resolved.hint, "graphify-missing", 424);
     }
 
-    // Spawn the pinned binary via the sole driver seam (cwd = projectRoot, #756).
+    // Spawn the pinned binary via the sole driver seam (cwd = projectRoot, #756;
+    // the artifact lands under outRoot).
     const built = runGraphifyBuild(
       { path: input.path, backend, tokenBudget: input.tokenBudget },
-      { projectRoot }
+      { projectRoot, outRoot }
     );
 
     // Counts come from graph.json (ADR-001 invariant), never from stdout.
-    const normalized = normalizeGraph(readGraph(built.graphPath));
+    const normalized = readBuiltGraph(built.graphPath);
 
     // egress: "none" when no backend ran (code/AST only); "docs-media" when ANY
     // --backend drove the doc/media hop (ADR-001/005). ollama is still
@@ -124,14 +158,18 @@ export const graphBuildCommand = {
     const egress = classifyEgress(backend);
 
     return {
-      graphPath: graphJsonPath(projectRoot),
+      graphPath: graphJsonPath(outRoot),
       projectRoot,
       nodeCount: normalized.nodes.length,
       edgeCount: normalized.edges.length,
       hyperedgeCount: normalized.hyperedges.length,
-      builtAt: new Date().toISOString(),
+      builtAt: built.builtAt,
       backend,
       egress,
+      // true when graphify found nothing to change and left the artifact untouched —
+      // a SUCCESS meaning "the graph is already current", not a soft failure. Surfaced
+      // so a caller can distinguish it from a rebuild without re-stat'ing anything.
+      unchanged: built.unchanged,
       stdout: built.stdout,
     };
   },
@@ -146,9 +184,13 @@ export const graphBuildCommand = {
       return input;
     },
 
-    // Human render: the opaque graphify markdown + a one-line graph summary.
+    // Human render: the opaque graphify markdown + a one-line graph summary. An
+    // untouched artifact says so in plain words — "already current" is the honest
+    // reading of graphify's no-topology-change no-op, and stating it stops the next
+    // reader from mistaking a steady state for a build that quietly did nothing.
     render(result) {
-      const summary = `Built ${result.nodeCount} nodes, ${result.edgeCount} edges, ${result.hyperedgeCount} hyperedges (egress: ${result.egress}).`;
+      const verb = result.unchanged ? "Already current at" : "Built";
+      const summary = `${verb} ${result.nodeCount} nodes, ${result.edgeCount} edges, ${result.hyperedgeCount} hyperedges (egress: ${result.egress}, built ${result.builtAt}).`;
       return result.stdout ? `${result.stdout}\n${summary}` : summary;
     },
 
