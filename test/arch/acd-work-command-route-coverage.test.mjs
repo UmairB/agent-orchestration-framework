@@ -86,6 +86,11 @@ const BOARD_DEFERRED = new Set([
   "observe",
   "use-headroom",
   "unuse-headroom",
+  // init/update render the ACD bundle into a repo — machine-level install
+  // actions an operator runs from the CLI; the board has no install affordance
+  // asked for.
+  "init",
+  "update",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

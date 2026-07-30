@@ -152,6 +152,12 @@ function argsFor(sub) {
     // Claude transcripts exist for the fixture — found:false, exit 0. The
     // headroom pair: config-only read-merge-write into the fixture's own
     // .aof/aof.config.json — { configPath, notes }, exit 0.
+    // init: a dry-run render plan into the fixture — exit 0. update: the bare
+    // fixture carries no install manifest, so the run reports the retired
+    // { notInitialized: true, … } document — exit 1 + parseable (the gate
+    // accepts [0,1]).
+    case "init": return ["work", "init", "--dry-run", "--json"];
+    case "update": return ["work", "update", "--dry-run", "--json"];
     case "find": return ["work", "find", "03", "--json"];
     case "observe": return ["work", "observe", "03", "--json"];
     case "use-headroom": return ["work", "use-headroom", "--json"];
@@ -267,9 +273,13 @@ export const archTests = [
           const result = runCli(root, argsFor(sub));
           // `validate` and `doctor` are the reads that DESIGN to exit 1 when
           // findings exist (validate on any finding; doctor on an error or a
-          // warn-under-strict) — both 0 and 1 are clean runs for them; every other
-          // op exits 0. None may crash (>1 or a null status from a thrown error).
-          const acceptable = sub === "validate" || sub === "doctor" ? [0, 1] : [0];
+          // warn-under-strict); `update` on the bare fixture reports the coded
+          // { notInitialized: true, … } refusal document at exit 1 (m42 wave (d)
+          // — the mesh-bijection precedent: a coded refusal that still emits ONE
+          // parseable document is a clean probe). Both 0 and 1 are clean runs
+          // for those; every other op exits 0. None may crash (>1 or a null
+          // status from a thrown error).
+          const acceptable = ["validate", "doctor", "update"].includes(sub) ? [0, 1] : [0];
           assert.ok(
             acceptable.includes(result.status),
             `aof ${argsFor(sub).join(" ")} exits ${acceptable.join("/")} (got ${result.status}; stderr: ${result.stderr})`

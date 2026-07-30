@@ -232,11 +232,21 @@ copy deleted; spec.workspace:false since its run never read ctx.workspace — th
 old best-effort load fed nothing). Route-coverage carve-outs + bijection
 argsFor rows landed with them; three command-spine scenarios pin the find
 read-miss split, the one-document config verb, and the provision route.
-**End state (still owed):** the remaining parseOptions callers — work
-init/update (pure-outcome idiom, guarded/notInitialized refusal shape to
-decide), the orchestrator/delegation trio + planning init (PRINTING/PROMPTING
-CORES — their console.log/prompt moves face-ward with the migration), top-level
-init (interactive selectRuntimes ⇒ async argv, the assets:add precedent), and
+**The CLI-only batch, second half opener (same day): work:init / work:update**
+(class A, the pure-outcome pair in commands/init-update.mjs — one module, the
+shared notInstallable renderer as LINES). The refusal-shape decision: the
+guarded / not-initialised message now ENDS THE STDOUT DOCUMENT (render) with
+cli.exit gating 1 — the packages:install normalisation precedent (previously
+stderr) — while the --json refusal doc keeps its exact retired shape
+({ guarded|notInitialized, manifest, message }). The work bijection's spawn
+proof adopted the mesh gate's [0,1]-for-coded-refusals policy for `update`
+(the bare fixture is legitimately not-initialised). Fixed en route
+(pre-existing at HEAD, verified by stash): work-init's codex pin still expected
+`[--solo]` in the refine argument-hint, removed from the bundle long ago.
+**End state (still owed):** the remaining parseOptions callers — the
+orchestrator/delegation trio + planning init (PRINTING/PROMPTING CORES — their
+console.log/prompt moves face-ward with the migration), top-level init
+(interactive selectRuntimes ⇒ async argv, the assets:add precedent), and
 meshCommand's usage/unknown-sub parse; then `parseOptions` + its boolean
 allow-list are deleted and `helpText()` derives its verb listing from the
 registry. (`work memory` and `session` delegate wholesale without parseOptions

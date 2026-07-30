@@ -117,6 +117,15 @@ Feature: Command spine — one route table, one face, one envelope
     Then the command should succeed
     And stdout should contain `configPath`
 
+  Scenario: a write verb's refusal ends the stdout document and keeps its retired json shape
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work update --dry-run`
+    Then the command should fail
+    And stdout should contain `No ACD install found`
+    When I run `work update --dry-run --json`
+    Then the command should fail
+    And the JSON result field "notInitialized" should be true
+
   Scenario: a class-B face copy retires onto its route (provision)
     Given a work stream with milestone "03" titled "Board"
     When I run `project provision graphify --dry-run --json`

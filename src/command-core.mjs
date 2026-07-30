@@ -198,6 +198,7 @@ import { assetsUiCommand } from "./commands/assets-ui.mjs";
 import { findCommand } from "./commands/find.mjs";
 import { observeCommand } from "./commands/observe.mjs";
 import { useHeadroomCommand, unuseHeadroomCommand } from "./commands/headroom.mjs";
+import { workInitCommand, workUpdateCommand } from "./commands/init-update.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -320,6 +321,8 @@ const COMMANDS = [
   observeCommand,
   useHeadroomCommand,
   unuseHeadroomCommand,
+  workInitCommand,
+  workUpdateCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

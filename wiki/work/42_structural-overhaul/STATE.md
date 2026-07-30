@@ -11,6 +11,23 @@ doc: state
 
 ## Progress
 
+- **2026-07-30 (ninth pass): work:init / work:update onto the route table (the
+  pure-outcome pair).** One module (commands/init-update.mjs) carries both; the
+  retired reportNotInstallable becomes render LINES. The refusal decision: the
+  guarded / not-initialised message now ends the STDOUT document with cli.exit
+  gating 1 (the packages:install normalisation precedent — previously stderr);
+  the --json refusal doc keeps its exact retired shape ({ guarded|
+  notInitialized, manifest, message } — smoked byte-identical, incl. the full
+  init→guarded→update cycle). The work bijection spawn proof adopts [0,1] for
+  `update` (a coded one-document refusal is a clean probe — the mesh-gate
+  precedent). cli.mjs 1,038 → 921 lines; parseOptions callers left: the
+  orchestrator/delegation trio, planning init, top-level init, meshCommand's
+  usage parse. Fixed en route (pre-existing at HEAD, verified by stash):
+  work-init's codex pin still expected `[--solo]` in the refine argument-hint —
+  removed from the bundle long ago; red on every machine. Verified: arch sweep
+  709/709, BDD 120/120 (a new command-spine scenario pins the normalised
+  refusal + retired json shape).
+
 - **2026-07-30 (eighth pass): the CLI-only batch, first half — find/observe/
   headroom/provision onto the route table.** `work:find` (bare-array --json +
   the read-miss split: no-match prints on stdout and exits 1 on the human face,

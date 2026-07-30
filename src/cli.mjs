@@ -1,7 +1,7 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { formatFriendlyApplyAction, relativeDisplayPath } from "./render-plan.mjs";
+import { relativeDisplayPath } from "./render-plan.mjs";
 import { writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { selectRuntimes } from "./prompt.mjs";
@@ -12,7 +12,6 @@ import { getCommand } from "./command-core.mjs";
 // and the shared runtime-flag interpretation (one home; the local copies are gone).
 import { resolveRoute, runCommandFace } from "./spine/face.mjs";
 import { hasRuntimeOptions, parseRuntimes } from "./spine/flags.mjs";
-import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
 import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
@@ -208,16 +207,6 @@ async function workCommand(args) {
   // milestone 40 / story 02 — `aof work upgrade` rides work:upgrade's route
   // table entry; this branch never fires (the route dispatches first) but the
   // top-level `aof upgrade` spelling below delegates to the SAME command.
-
-  if (subcommand === "init") {
-    await workInitCommand(rest);
-    return;
-  }
-
-  if (subcommand === "update") {
-    await workUpdateCommand(rest);
-    return;
-  }
 
   if (subcommand === "memory") {
     await workMemoryCommandCli(rest);
@@ -567,104 +556,12 @@ async function workDelegationModelCommand(args) {
 // rides the result as `notes` so the render reproduces the transcript and the
 // --json face stays one document.
 
-async function workInitCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options._[0] ?? process.cwd());
-  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : ["claude"];
-
-  const result = await initWork({
-    targetDir,
-    runtimes,
-    dryRun: Boolean(options.dryRun),
-    force: Boolean(options.force),
-    withHeadroom: Boolean(options.withHeadroom)
-  });
-
-  if (result.guarded) {
-    if (options.json) {
-      printJson({ guarded: true, manifest: relativeDisplayPath(result.manifestPath, targetDir), message: result.message });
-    } else {
-      console.error(result.message);
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  if (options.json) {
-    printJson({
-      targetDir: path.relative(process.cwd(), targetDir) || ".",
-      runtimes: result.runtimes,
-      dryRun: result.dryRun,
-      summary: result.summary,
-      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
-      actions: result.actions.map((item) => ({ action: item.action, path: relativeDisplayPath(item.path, targetDir) })),
-      notInstallable: result.notInstallable
-    });
-    return;
-  }
-
-  if (result.dryRun) {
-    console.log("dry-run: the following files would be written (nothing written):");
-  }
-  for (const item of result.actions) {
-    console.log(`  ${formatFriendlyApplyAction(item, { dryRun: result.dryRun, targetDir })}`);
-  }
-  reportNotInstallable(result.notInstallable);
-  if (!result.dryRun) {
-    const { created, updated, skipped } = result.summary;
-    const drift = result.summary["drift-warning"];
-    console.log(`Initialised ACD: ${created} created, ${updated} updated, ${skipped} kept, ${drift} drift-warning.`);
-    console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
-  }
-}
-
-async function workUpdateCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options._[0] ?? process.cwd());
-
-  const result = await updateWork({
-    targetDir,
-    dryRun: Boolean(options.dryRun),
-    force: Boolean(options.force)
-  });
-
-  if (result.notInitialized) {
-    if (options.json) {
-      printJson({ notInitialized: true, manifest: relativeDisplayPath(result.manifestPath, targetDir), message: result.message });
-    } else {
-      console.error(result.message);
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  if (options.json) {
-    printJson({
-      targetDir: path.relative(process.cwd(), targetDir) || ".",
-      runtimes: result.runtimes,
-      dryRun: result.dryRun,
-      summary: result.summary,
-      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
-      actions: result.actions.map((item) => ({ action: item.action, path: relativeDisplayPath(item.path, targetDir) })),
-      notInstallable: result.notInstallable
-    });
-    return;
-  }
-
-  if (result.dryRun) {
-    console.log("dry-run: the following changes would be applied (nothing written):");
-  }
-  for (const item of result.actions) {
-    console.log(`  ${formatFriendlyApplyAction(item, { dryRun: result.dryRun, targetDir })}`);
-  }
-  reportNotInstallable(result.notInstallable);
-  if (!result.dryRun) {
-    const { created, updated, skipped, deleted } = result.summary;
-    const drift = result.summary["drift-warning"];
-    console.log(`Updated ACD: ${created} created, ${updated} updated, ${skipped} up-to-date, ${deleted} deleted, ${drift} drift-warning.`);
-    console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
-  }
-}
+// workInitCommand / workUpdateCommand — RETIRED (m42 wave (d) leg d1,
+// wave-3 tail): work:init / work:update are registered Commands
+// (commands/init-update.mjs) on the route table (pure-outcome idiom; the
+// guarded/not-initialised refusal message now ends the stdout document — the
+// packages:install normalisation precedent — with cli.exit gating 1; the
+// --json refusal doc keeps its retired shape).
 
 // `aof work memory <verb>` — delegates to the memory seam (milestone 05, story
 // 00). The seam owns argv/scope parsing, config-driven backend selection, the
@@ -759,20 +656,6 @@ async function planningInitCommand(args) {
     console.log("Codex: marketplace registered; plugins NOT installed (see the manual fallback above).");
   }
   console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
-}
-
-function reportNotInstallable(notInstallable = []) {
-  if (notInstallable.length === 0) return;
-  const byRuntime = new Map();
-  for (const item of notInstallable) {
-    const list = byRuntime.get(item.runtime) ?? [];
-    list.push(item);
-    byRuntime.set(item.runtime, list);
-  }
-  for (const [runtime, items] of byRuntime) {
-    const kinds = [...new Set(items.map((item) => item.kind))].join(", ");
-    console.log(`Not installable on ${runtime} (${kinds}): ${items.map((item) => item.id).join(", ")} — unsupported by the capability matrix; not written.`);
-  }
 }
 
 // workFindCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail): work:find is a
