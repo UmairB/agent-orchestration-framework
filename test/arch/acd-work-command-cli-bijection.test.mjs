@@ -147,6 +147,15 @@ function argsFor(sub) {
     // --json is the NON-BLOCKING probe by FACE POLICY (--json never launches),
     // so the spawn returns with the would-serve document — exit 0 + parseable.
     case "ui": return ["work", "ui", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch). find: the fixture's
+    // milestone 03 resolves — the bare-array rows document, exit 0. observe: no
+    // Claude transcripts exist for the fixture — found:false, exit 0. The
+    // headroom pair: config-only read-merge-write into the fixture's own
+    // .aof/aof.config.json — { configPath, notes }, exit 0.
+    case "find": return ["work", "find", "03", "--json"];
+    case "observe": return ["work", "observe", "03", "--json"];
+    case "use-headroom": return ["work", "use-headroom", "--json"];
+    case "unuse-headroom": return ["work", "unuse-headroom", "--json"];
     case "list": return ["work", "list", "--json"];
     case "doc": return ["work", "doc", "03", "SPEC", "--json"];
     case "tasks": return ["work", "tasks", "03/01", "--json"];

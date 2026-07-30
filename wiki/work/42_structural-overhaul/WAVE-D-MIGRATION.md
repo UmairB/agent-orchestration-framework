@@ -218,11 +218,29 @@ BOARD_DEFERRED carve-out (the verb IS the door into the board — a board servin
 a launch-the-board route is a category error, documented there);
 `acd-launcher-seam`'s armed list pins all five riders. One command-spine
 scenario pins all three probes.
-**End state (still owed):** the low-priority CLI-only verbs (work find/observe/
-init/update/memory/orchestrator/delegation*/*-headroom, planning init, session,
-top-level init, project provision's face copy); then `parseOptions` + its
-boolean allow-list have zero callers and are deleted; `helpText()` derives its
-verb listing from the registry.
+**The CLI-only batch, first half (same day):** `work:find` (class A — the
+bare-array --json document and the no-match stdout+exit-1 read-miss carried,
+--json staying `[]` at 0 via a faceCtx-aware cli.exit), `work:observe` (class A
+— spec.workspace:false, the --if-enabled gate loading its own workspace;
+documented change: a skipped `--if-enabled --json` run now emits ONE
+`{ skipped:true }` document where it printed nothing), `work:use-headroom` /
+`work:unuse-headroom` (class A — the cores' injectable `log` becomes a
+COLLECTOR: the install hint rides the result as `notes`, so the render
+reproduces the transcript in order and the NEW --json face stays one document),
+`project:provision` (class B — route + spec added; the projectProvisionCli face
+copy deleted; spec.workspace:false since its run never read ctx.workspace — the
+old best-effort load fed nothing). Route-coverage carve-outs + bijection
+argsFor rows landed with them; three command-spine scenarios pin the find
+read-miss split, the one-document config verb, and the provision route.
+**End state (still owed):** the remaining parseOptions callers — work
+init/update (pure-outcome idiom, guarded/notInitialized refusal shape to
+decide), the orchestrator/delegation trio + planning init (PRINTING/PROMPTING
+CORES — their console.log/prompt moves face-ward with the migration), top-level
+init (interactive selectRuntimes ⇒ async argv, the assets:add precedent), and
+meshCommand's usage/unknown-sub parse; then `parseOptions` + its boolean
+allow-list are deleted and `helpText()` derives its verb listing from the
+registry. (`work memory` and `session` delegate wholesale without parseOptions
+— they may stay laddered without blocking the end-state.)
 
 Also owed in d1 (PRD): invert the four upward imports into `commands/`, break the
 `mesh-repo` ↔ `mesh-worker-execution` cycle, and confine `console.log` to the face

@@ -6,17 +6,15 @@ import { writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { selectRuntimes } from "./prompt.mjs";
 import { isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
-import { loadWorkspace, findWork } from "./work.mjs";
-import { invoke, getCommand } from "./command-core.mjs";
+import { loadWorkspace } from "./work.mjs";
+import { getCommand } from "./command-core.mjs";
 // m42 wave (d) leg d1 — the registry-derived route table + the ONE generic face,
 // and the shared runtime-flag interpretation (one home; the local copies are gone).
 import { resolveRoute, runCommandFace } from "./spine/face.mjs";
 import { hasRuntimeOptions, parseRuntimes } from "./spine/flags.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
-import { observeMilestone, observabilityEnabled } from "./work-observe.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
-import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
 import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
 // serveBoard / serveStdio / the vite dev spawn — no longer imported here (m42
@@ -184,85 +182,28 @@ async function projectCommand(args) {
     return;
   }
 
-  // validate/doctor/migrate — MIGRATED (m42 wave (d) leg d1): registry Commands
-  // routed in run() through the generic face; they never reach this ladder.
-
-  if (subcommand === "provision") {
-    await projectProvisionCli(rest);
-    return;
-  }
+  // validate/doctor/migrate — MIGRATED (m42 wave (d) leg d1); provision —
+  // MIGRATED (wave-3 tail, class B — projectProvisionCli deleted; the command
+  // carries route ["project","provision"] with spec.workspace: false): registry
+  // Commands routed in run() through the generic face; they never reach this
+  // ladder.
 
   throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run\n  aof project provision graphify [--version 0.8.44] [--uninstall] [--dry-run] [--json]`);
-}
-
-// `aof project provision <tool> [--version V] [--force] [--uninstall] [--dry-run]
-//  [--json]` — the 12/ADR-003 lifecycle surface, routed through the command core
-// (invoke("project:provision", …), the 08 bijection). It mirrors graphVerbCommand's
-// getCommand → loadWorkspace → invoke → cli.json/render idiom, INCLUDING the
-// --json single-pass envelope (print ONLY command.cli.json(result)). Unlike the
-// graph verbs, provision is GLOBAL-STORE oriented and reads no project files —
-// loadWorkspace is best-effort (a dir with no .aof config still provisions), so it
-// is wrapped in try/catch and a minimal ctx is passed when no workspace resolves.
-async function projectProvisionCli(args) {
-  const options = parseOptions(args);
-  const command = getCommand("project:provision");
-
-  let workspace;
-  try {
-    workspace = await loadWorkspace(process.cwd(), options.config);
-  } catch {
-    // Provision does not need a real project — proceed with no workspace.
-    workspace = undefined;
-  }
-  const ctx = { workspace };
-
-  const input = command.cli.argv(options._, options);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, input, ctx);
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      // A single structured error envelope (mirrors graphVerbCommand) — the
-      // --json face always emits one parseable envelope, success OR error.
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error propagates to bin/aof.mjs
-  // (stderr + non-zero exit).
-  const result = await invoke(command.id, input, ctx);
-  console.log(command.cli.render(result));
 }
 
 async function workCommand(args) {
   const [subcommand, ...rest] = args;
 
-  if (subcommand === "find") {
-    await workFindCommand(rest);
-    return;
-  }
-
   // list / validate / doc / tasks / next / doctor / feedback / run-* / continue /
   // refine / verify / the insert-* family / promote-gap — MIGRATED (m42 wave (d)
-  // leg d1, wave 2): registry Commands carrying `cli.route`, dispatched in run()
-  // through the route table + the ONE generic face; they never reach this
-  // ladder. Their face copies (workListCommand, workValidateCommand,
-  // workDoctorCommand, workNextCommand, workFeedbackCommand, the run-verb
-  // wrappers + runVerbCli, workInsertCli) are deleted.
-
-  // `aof work observe <ref>` — a CLI-only diagnostic face (the mesh-desktop /
-  // mesh-session idiom: deliberately OUTSIDE the work:* command registry, since it
-  // reads Claude Code session transcripts rather than the work store). Mines
-  // per-agent time/token spend + stall gaps for a milestone and (with --write)
-  // drops an `observability/` folder into it. Not registry-registered => the
-  // acd-work-command-cli-bijection guard (registry -> CLI) does not require it.
-  if (subcommand === "observe") {
-    await workObserveCommand(rest);
-    return;
-  }
+  // leg d1, wave 2); find / observe / use-headroom / unuse-headroom / ui —
+  // MIGRATED (wave-3 tail, the CLI-only batch + the launcher seam): registry
+  // Commands carrying `cli.route`, dispatched in run() through the route table
+  // + the ONE generic face; they never reach this ladder. Their face copies
+  // (workListCommand, workValidateCommand, workDoctorCommand, workNextCommand,
+  // workFeedbackCommand, the run-verb wrappers + runVerbCli, workInsertCli,
+  // workFindCommand, workObserveCommand, the headroom pair, workUiCommand) are
+  // deleted.
 
   // milestone 40 / story 02 — `aof work upgrade` rides work:upgrade's route
   // table entry; this branch never fires (the route dispatches first) but the
@@ -305,16 +246,6 @@ async function workCommand(args) {
 
   if (subcommand === "delegation-model") {
     await workDelegationModelCommand(rest);
-    return;
-  }
-
-  if (subcommand === "use-headroom") {
-    await workUseHeadroomCommand(rest);
-    return;
-  }
-
-  if (subcommand === "unuse-headroom") {
-    await workUnuseHeadroomCommand(rest);
     return;
   }
 
@@ -630,24 +561,11 @@ async function workDelegationModelCommand(args) {
   }
 }
 
-// `aof work use-headroom [dir]` — enable the headroom plugin (config-only read-merge-
-// write of work.headroom; never the lock). PATH-checks headroom and prints a one-line
-// install hint when it is absent, but always writes the config and never installs (ADR-004/005).
-async function workUseHeadroomCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
-  const result = await useHeadroom({ targetDir });
-  console.log(`Enabled headroom in ${result.configPath}`);
-}
-
-// `aof work unuse-headroom [dir]` — disable the headroom plugin (sets enabled:false but
-// keeps the block so the providers choice survives; never the lock) (ADR-004).
-async function workUnuseHeadroomCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
-  const result = await unuseHeadroom({ targetDir });
-  console.log(`Disabled headroom in ${result.configPath}`);
-}
+// workUseHeadroomCommand / workUnuseHeadroomCommand — RETIRED (m42 wave (d)
+// leg d1, wave-3 tail): work:use-headroom / work:unuse-headroom are registered
+// Commands (commands/headroom.mjs) on the route table; the cores' install hint
+// rides the result as `notes` so the render reproduces the transcript and the
+// --json face stays one document.
 
 async function workInitCommand(args) {
   const options = parseOptions(args);
@@ -857,33 +775,10 @@ function reportNotInstallable(notInstallable = []) {
   }
 }
 
-async function workFindCommand(args) {
-  const options = parseOptions(args);
-  const query = options._[0];
-  if (!query) {
-    throw new Error("Usage: aof work find <ref | query>   (e.g. aof work find 04, aof work find 04/02, aof work find auth)");
-  }
-
-  const { workDir } = await loadWorkspace(process.cwd(), options.config);
-  const rows = await findWork(workDir, query);
-
-  if (options.json) {
-    console.log(JSON.stringify(rows.map((row) => ({ ...row, dir: path.relative(process.cwd(), row.dir) })), null, 2));
-    return;
-  }
-
-  if (rows.length === 0) {
-    console.log(`No work item matches "${query}".`);
-    process.exitCode = 1;
-    return;
-  }
-
-  for (const row of rows) {
-    const title = row.title ? `  — ${row.title}` : "";
-    console.log(`${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${row.slug}${title}`);
-    console.log(`        ${path.relative(process.cwd(), row.dir)}`);
-  }
-}
+// workFindCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail): work:find is a
+// registered Command (commands/find.mjs) on the route table — the bare-array
+// --json document and the no-match stdout+exit-1 read-miss are carried
+// contracts (--json stays [] at exit 0).
 
 // workListCommand / workValidateCommand / workDoctorCommand / workNextCommand /
 // workFeedbackCommand / the run-verb wrappers + runVerbCli / workInsertCli —
@@ -892,52 +787,10 @@ async function workFindCommand(args) {
 // generic face (src/spine/face.mjs), whose --json single-envelope discipline
 // (incl. the insert family's shifted count) IS these faces' one home.
 
-// `aof work observe <ref> [--write] [--json] [--stall <min>]` — mine Claude Code
-// session transcripts for the milestone's per-agent time/token spend + stall gaps.
-// A READ by default; `--write` drops `wiki/work/<folder>/observability/{report.md,
-// agents.json}` into the milestone. The config opt-in (`work.observability.enabled`)
-// gates AUTOMATIC generation by the lifecycle — an explicit invocation here always
-// runs (an operator asked for it directly).
-async function workObserveCommand(args) {
-  const options = parseOptions(args);
-  const ref = options._[0];
-  if (!ref) {
-    throw new Error('Usage: aof work observe <milestone-ref> [--write] [--json] [--stall <minutes>] [--if-enabled]');
-  }
-  // `--if-enabled` self-gates on the opt-in config flag (work.observability.enabled)
-  // and no-ops when off. This is the form the lifecycle (aof:retrospective) calls, so
-  // the bundle instruction can invoke observe unconditionally and the CLI decides —
-  // deterministic, rather than asking the agent to branch on config. A DIRECT
-  // `aof work observe` (no --if-enabled) always runs: an operator asked for it.
-  if (options.ifEnabled) {
-    const workspace = await loadWorkspace(process.cwd(), options.config);
-    if (!observabilityEnabled(workspace.config)) {
-      if (!options.json) console.log("observability disabled (set work.observability.enabled to enable) — skipped.");
-      return;
-    }
-  }
-  const stallMs = options.stall != null ? Number(options.stall) * 60 * 1000 : undefined;
-  const result = await observeMilestone({
-    cwd: process.cwd(),
-    ref,
-    stallMs,
-    // Stamp with the caller's wall clock (Date.now is fine in the CLI process).
-    generatedAt: Date.now(),
-    write: Boolean(options.write),
-  });
-
-  if (options.json) {
-    console.log(JSON.stringify(result.json, null, 2));
-  } else {
-    console.log(result.report);
-    if (!result.found) {
-      console.log(`\n(no Claude Code transcripts found under ${result.projectsDir})`);
-    }
-    if (result.written) {
-      console.log(`\nWrote ${path.relative(process.cwd(), result.written.reportPath)} + agents.json`);
-    }
-  }
-}
+// workObserveCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail): work:observe
+// is a registered Command (commands/observe.mjs) on the route table. Documented
+// change: a skipped `--if-enabled --json` run now emits ONE { skipped: true }
+// document (previously nothing — the one-document discipline).
 
 
 async function initCommand(args) {

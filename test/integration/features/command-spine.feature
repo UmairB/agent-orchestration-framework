@@ -99,6 +99,30 @@ Feature: Command spine — one route table, one face, one envelope
     Then the command should fail
     And the JSON error envelope should carry code "invalid-input"
 
+  Scenario: a routed read keeps its bare-array --json document and read-miss exit split
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work find 03 --json`
+    Then the command should succeed
+    And stdout should contain `"ref": "03"`
+    When I run `work find nothing-matches --json`
+    Then the command should succeed
+    And stdout should contain `[]`
+    When I run `work find nothing-matches`
+    Then the command should fail
+    And stdout should contain `No work item matches "nothing-matches".`
+
+  Scenario: a CLI-only config verb rides the route table with one json document
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work use-headroom --json`
+    Then the command should succeed
+    And stdout should contain `configPath`
+
+  Scenario: a class-B face copy retires onto its route (provision)
+    Given a work stream with milestone "03" titled "Board"
+    When I run `project provision graphify --dry-run --json`
+    Then the command should succeed
+    And the JSON result field "tool" should be "graphify"
+
   Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
     Given a work stream with milestone "03" titled "Board"
     When I run `work doctor --json`

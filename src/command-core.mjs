@@ -190,6 +190,14 @@ import { meshDesktopInstallCommand, meshDesktopRunCommand } from "./commands/mes
 import { graphServeCommand } from "./commands/graph-serve.mjs";
 import { workUiCommand } from "./commands/work-ui.mjs";
 import { assetsUiCommand } from "./commands/assets-ui.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch) — the low-priority
+// CLI-only work verbs join the registry as routed Commands: work:find (the
+// resolver read), work:observe (the transcript miner), the headroom toggle
+// pair. Their cli.mjs faces are deleted; project:provision (below, m12) gained
+// its route in the same change (class B — its face copy is deleted too).
+import { findCommand } from "./commands/find.mjs";
+import { observeCommand } from "./commands/observe.mjs";
+import { useHeadroomCommand, unuseHeadroomCommand } from "./commands/headroom.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -308,6 +316,10 @@ const COMMANDS = [
   graphServeCommand,
   workUiCommand,
   assetsUiCommand,
+  findCommand,
+  observeCommand,
+  useHeadroomCommand,
+  unuseHeadroomCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

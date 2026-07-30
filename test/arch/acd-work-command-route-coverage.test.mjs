@@ -78,6 +78,14 @@ const BOARD_DEFERRED = new Set([
   // serving a "launch the board" route makes no sense — the verb is the door
   // INTO the board, so it is CLI-only by nature, not a deferred affordance.
   "ui",
+  // m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch) — operator/diagnostic
+  // CLI verbs with no board affordance asked for: find (the board has its own
+  // list/resolve reads), observe (a transcript-mining diagnostic), the headroom
+  // toggle pair (machine-level plugin config, an operator CLI action).
+  "find",
+  "observe",
+  "use-headroom",
+  "unuse-headroom",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

@@ -11,6 +11,23 @@ doc: state
 
 ## Progress
 
+- **2026-07-30 (eighth pass): the CLI-only batch, first half — find/observe/
+  headroom/provision onto the route table.** `work:find` (bare-array --json +
+  the read-miss split: no-match prints on stdout and exits 1 on the human face,
+  `[]` at 0 under --json — a faceCtx-aware cli.exit), `work:observe`
+  (spec.workspace:false; documented change: skipped `--if-enabled --json` now
+  emits `{ skipped:true }` instead of nothing), `work:use-headroom` /
+  `work:unuse-headroom` (the cores' injectable `log` becomes a collector — the
+  install hint rides the result as `notes`, keeping the transcript order AND
+  the new --json face one-document; the first paid instalment of the
+  confine-console.log owed item), `project:provision` (class B: route + spec;
+  projectProvisionCli deleted — its best-effort workspace load fed nothing, the
+  run only ever read ctx.env). cli.mjs 1,185 → 1,038 lines; remaining
+  parseOptions callers: work init/update, the orchestrator/delegation trio,
+  planning init, top-level init, meshCommand's usage parse. Verified: full arch
+  sweep 709/709, BDD 119/119 (three new command-spine scenarios), byte smokes
+  of every migrated path incl. the provision missing-tool refusal identical.
+
 - **2026-07-30 (seventh pass): the LAST launcher verbs onto the seam — every
   serve verb in the CLI is a registered Command now.** `graph:serve` (probe =
   `mcpServeProbe`, the MCP identity/protocol/tool descriptors off the commands'
