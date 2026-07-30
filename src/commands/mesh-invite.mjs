@@ -32,6 +32,7 @@ import {
   appendPendingInvite,
 } from "../mesh-registry.mjs";
 import { resolveCodeTtlSeconds, sha256Hex } from "../mesh-relay.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 // A structured command error the mesh face renders as ONE { ok:false, error, code }
 // envelope. The property is ASSIGNED (not an object-literal field) deliberately — the
@@ -117,9 +118,20 @@ export const meshInviteCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "invite"],
+    spec: {
+      usage: "aof mesh invite [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh invite` — no positional (the code is RETURNED, not supplied; the
     // injected issuedAt is a white-box input, not a flag).
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("invite", positionals);
+      return {};
+    },
 
     render(result) {
       return [

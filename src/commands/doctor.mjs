@@ -123,7 +123,7 @@ export const doctorCommand = {
     // the anchor path shown CWD-RELATIVE (the CLI's path-projection face — run
     // carries the raw absolute, the face relativises to process.cwd()).
     render(result, faceCtx = {}) {
-      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
+      const scope = faceCtx.positionals?.[0];
       if (result.findings.length === 0) {
         return `healthy — ${scope ? `${scope} is` : "work stream is"} coherent.`;
       }
@@ -163,10 +163,10 @@ export const doctorCommand = {
   },
 };
 
-// The face flag read once: the generic face passes { positionals, options };
-// a direct adapter caller may still pass { strict } (the pre-route shape).
+// The face flag read once: the generic face passes { positionals, options } —
+// the ONE calling convention (the pre-route { strict } shape is retired).
 function doctorStrict(faceCtx = {}) {
-  return Boolean(faceCtx.strict ?? faceCtx.options?.strict);
+  return Boolean(faceCtx.options?.strict);
 }
 
 function scopeOf(input) {

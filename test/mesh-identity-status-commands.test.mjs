@@ -21,7 +21,9 @@ import { loadWorkspace } from "../src/work.mjs";
 import { getCommand, invoke } from "../src/command-core.mjs";
 import { meshDir, nodeRecordPath, publishNodeRecord } from "../src/mesh-store.mjs";
 
-const FROZEN_KEYS = ["nodeId", "host", "os", "runtimes", "skills", "aofVersion", "publishedAt"];
+// 34/story 02 (operator directive): `skills` is REMOVED from the descriptor
+// (see assembleDescriptor) — the frozen schema is six keys.
+const FROZEN_KEYS = ["nodeId", "host", "os", "runtimes", "aofVersion", "publishedAt"];
 
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-meshcmd-"));

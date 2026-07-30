@@ -63,9 +63,13 @@ export function registerCommonSteps(registry) {
     );
   });
 
-  registry.define(/^the JSON result field "([^"]+)" should be (true|false|"[^"]*")$/, (context, field, expected) => {
+  registry.define(/^the JSON result field "([^"]+)" should be (true|false|-?\d+|"[^"]*")$/, (context, field, expected) => {
     const parsed = JSON.parse(context.lastResult.stdout);
-    const value = expected === "true" ? true : expected === "false" ? false : expected.slice(1, -1);
+    const value =
+      expected === "true" ? true
+      : expected === "false" ? false
+      : /^-?\d+$/.test(expected) ? Number(expected)
+      : expected.slice(1, -1);
     assert.equal(parsed[field], value, `JSON field "${field}" is ${expected}`);
   });
 

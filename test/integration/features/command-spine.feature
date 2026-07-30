@@ -49,3 +49,17 @@ Feature: Command spine — one route table, one face, one envelope
     When I run `work doc 03 NONSENSE`
     Then the command should fail
     And stderr should contain `Unknown document "NONSENSE"`
+
+  Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work doctor --json`
+    Then the command should succeed
+    And the JSON result field "healthy" should be true
+    And the JSON result field "errors" should be 0
+    And stdout should contain `milestone-no-stories`
+    When I run `work doctor --strict --json`
+    Then the command should fail
+    And the JSON result field "healthy" should be false
+    And the JSON result field "strict" should be true
+    And the JSON result field "errors" should be 0
+    And stdout should contain `milestone-no-stories`

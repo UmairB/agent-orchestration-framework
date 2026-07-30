@@ -11,6 +11,7 @@
 // is thin over src/mesh-relay.mjs's relayStatus probe, which reads config via the raw
 // optional-chain and stands up no listener.
 import { relayStatus } from "../mesh-relay.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 export const meshRelayCommand = {
   id: "mesh:relay",
@@ -32,8 +33,19 @@ export const meshRelayCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "relay"],
+    spec: {
+      usage: "aof mesh relay [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh relay` — no positional (the role is config-driven, not a named ref).
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("relay", positionals);
+      return {};
+    },
 
     // The status line: who hosts the relay + whether this node is it.
     render(result) {

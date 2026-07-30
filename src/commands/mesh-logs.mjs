@@ -8,6 +8,7 @@
 // at, so "no log yet" and "wrong machine/home" are distinguishable at a glance.
 // The remote-node read (`--node <id>`, over the fabric) is the deferred second leg.
 import { commandError } from "./errors.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import { readMeshLog, meshLogPath } from "../mesh-log.mjs";
 // m42 / item 2's REMOTE read — `--node <id>` answers from the control's node_logs
 // ring (streamed up by each worker's daemon), no SSH archaeology.
@@ -49,12 +50,27 @@ export const meshLogsCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "logs"],
+    spec: {
+      usage: "aof mesh logs [proc] [--tail N] [--node <id>] [--workspace <path|id>] [--json]",
+      flags: {
+        tail: { type: "string", description: "how many trailing entries to read" },
+        node: { type: "string", description: "read a remote node's streamed log entries" },
+        ...MESH_WORKSPACE_FLAG,
+      },
+    },
+
     // `aof mesh logs [proc] [--tail N]` — one optional positional + the tail knob.
-    argv: (positionals, options = {}) => ({
-      ...(typeof positionals[0] === "string" && positionals[0].length > 0 ? { proc: positionals[0] } : {}),
-      ...(options.tail != null ? { tail: Number(options.tail) } : {}),
-      ...(typeof options.node === "string" && options.node.length > 0 ? { node: options.node } : {}),
-    }),
+    argv: (positionals, options = {}) => {
+      guardMeshPositionals("logs", positionals, { max: 1 });
+      return {
+        ...(typeof positionals[0] === "string" && positionals[0].length > 0 ? { proc: positionals[0] } : {}),
+        ...(options.tail != null ? { tail: Number(options.tail) } : {}),
+        ...(typeof options.node === "string" && options.node.length > 0 ? { node: options.node } : {}),
+      };
+    },
 
     render(result) {
       if (result.entries.length === 0) {

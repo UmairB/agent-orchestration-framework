@@ -103,6 +103,14 @@ export const graphImpactCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "impact"],
+    spec: {
+      usage: "aof graph impact <path> [<path> ...] [--json]",
+      flags: {},
+    },
+
     // `aof graph impact <path> [<path> ...]`.
     argv: (positionals) => ({ paths: positionals }),
 

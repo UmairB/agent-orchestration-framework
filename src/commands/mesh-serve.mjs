@@ -8,6 +8,7 @@
 // RETURNS, never hanging on a daemon). The actual long-lived daemon is startLauncher, invoked
 // by the CLI's `--serve` face, not by this one-shot probe.
 import { launcherProbe } from "../mesh-launcher.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 export const meshServeCommand = {
   id: "mesh:serve",
@@ -27,9 +28,23 @@ export const meshServeCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — NO cli.route, DELIBERATELY: the route table
+    // matches argv WORDS only (flags never participate), so a routed
+    // ["mesh","serve"] would swallow `aof mesh serve --serve` and the daemon
+    // branch would be unreachable. The serve ladder branch in cli.mjs stays and
+    // DELEGATES the bare probe through runCommandFace (the sanctioned
+    // bare-`aof project` delegation form) until the launcher seam is designed.
+    spec: {
+      usage: "aof mesh serve [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh serve` — no positional (the daemon publishes/syncs THIS node, not a
     // named ref).
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("serve", positionals);
+      return {};
+    },
 
     // The status line: fabric health + self-address + registered mesh peer count + control-node role.
     render(result) {

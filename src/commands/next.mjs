@@ -40,7 +40,7 @@ export const nextCommand = {
     // done line, the blocked line naming the unmet drivers, or the
     // ready item's two-line `ref … / cwd-relative path` form.
     render(result, faceCtx = {}) {
-      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
+      const scope = faceCtx.positionals?.[0];
       if (result.state === "done") {
         return `Nothing actionable${scope ? ` in ${scope}` : ""} — everything is done.`;
       }

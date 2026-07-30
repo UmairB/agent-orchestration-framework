@@ -26,6 +26,7 @@ import os from "node:os";
 import { listItems } from "../work.mjs";
 import { aofVersion, resolveInstallSalt } from "./mesh-identity.mjs";
 import { deriveNodeId, sidecarPathFor } from "../node-identity.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import {
   assemblePresenceRecord,
   readActiveRuns,
@@ -87,8 +88,19 @@ export const meshHeartbeatCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "heartbeat"],
+    spec: {
+      usage: "aof mesh heartbeat [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh heartbeat` — no positional (it publishes THIS node, not a named ref).
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("heartbeat", positionals);
+      return {};
+    },
 
     // The publish confirmation names the node id + its in-flight count.
     render(result) {

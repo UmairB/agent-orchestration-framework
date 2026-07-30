@@ -137,6 +137,18 @@ export const graphBuildCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "build"],
+    spec: {
+      usage: "aof graph build <folder> [--backend claude] [--token-budget N] [--offline] [--json]",
+      flags: {
+        backend: { type: "string", description: "graphify backend (e.g. claude)" },
+        tokenBudget: { type: "string", description: "token budget for the build" },
+        offline: { type: "boolean", description: "build without network egress" },
+      },
+    },
+
     // `aof graph build <folder> [--backend X] [--token-budget N] [--offline]`.
     argv: (positionals, options = {}) => {
       const input = { path: positionals[0] };

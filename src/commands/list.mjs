@@ -68,7 +68,7 @@ export const listCommand = {
     // so the scope is `positionals[0]`. `dir` is already forward-slashed, so no
     // path projection is needed for the human view.
     render(rows, faceCtx = {}) {
-      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
+      const scope = faceCtx.positionals?.[0];
       const listed = rows.filter((row) => inScope(row, scope));
       if (listed.length === 0) return `Nothing in scope${scope ? ` for "${scope}"` : ""}.`;
       return listed

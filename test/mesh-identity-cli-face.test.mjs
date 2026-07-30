@@ -70,9 +70,11 @@ export const meshIdentityCliFaceTests = [
         const json = runCli(root, ["mesh", "identity", "--json"]);
         assert.equal(json.status, 0, `identity --json exits 0 (stderr: ${json.stderr})`);
         const record = JSON.parse(json.stdout);
+        // 34/story 02 (operator directive): `skills` is REMOVED from the
+        // descriptor (see assembleDescriptor) — the frozen schema is six keys.
         assert.deepEqual(
           Object.keys(record),
-          ["nodeId", "host", "os", "runtimes", "skills", "aofVersion", "publishedAt"],
+          ["nodeId", "host", "os", "runtimes", "aofVersion", "publishedAt"],
           "the JSON is a node record carrying the complete frozen schema"
         );
       } finally {
@@ -134,8 +136,11 @@ export const meshIdentityCliFaceTests = [
         const rows = [
           { invocation: ["identity", "never-synced"], code: "node-not-found" },
           { invocation: ["identity", ""], code: "invalid-input" },
-          { invocation: ["identity", "--bogus-flag"], code: "invalid-input" },
-          { invocation: ["status", "--bogus-flag"], code: "invalid-input" },
+          // m42 wave (d) leg d1 (wave 3) — the mesh verbs ride the ONE generic
+          // face, whose spec-parse refusal is the MORE SPECIFIC "unknown-flag"
+          // code (previously the mesh face folded it into "invalid-input").
+          { invocation: ["identity", "--bogus-flag"], code: "unknown-flag" },
+          { invocation: ["status", "--bogus-flag"], code: "unknown-flag" },
           { invocation: ["status", "umair-mbp"], code: "invalid-input" },
         ];
         for (const { invocation, code } of rows) {

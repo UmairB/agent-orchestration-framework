@@ -44,7 +44,7 @@ export const validateCommand = {
     // line (scope-aware) on a clean stream; otherwise the numbered
     // issue list with cwd-relative paths and the trailing test-traceability note.
     render(result, faceCtx = {}) {
-      const scope = faceCtx.scope ?? faceCtx.positionals?.[0];
+      const scope = faceCtx.positionals?.[0];
       if (result.findings.length === 0) {
         return `PASS — ${scope ? `${scope} is` : "work stream is"} well-formed.`;
       }

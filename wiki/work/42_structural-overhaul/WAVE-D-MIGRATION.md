@@ -96,36 +96,55 @@ CLI-only-by-design verbs (`work find/observe/init/update/memory/orchestrator/del
 *-headroom`, `planning init`, `session`): register as Commands with `route` when touched;
 they are LOW priority — no cascade surface, no face copies.
 
-### Owed from waves 1+2 (found at the 2026-07-30 check-in, not yet done)
+### Owed from waves 1+2: ✅ ALL THREE PAID 2026-07-30 (with the wave-3 landing)
 
-1. **`test/integration/cli.ps1` is BROKEN by the BDD restructure — operator decision owed.**
-   It is a SECOND runner (52 KB, last touched 2026-06-21) over the SAME `features/` directory,
-   wired as `npm run test:integration:ps`, carrying its own hand-kept
-   `switch ($FeatureName) { … default { throw "No step module registered" } }` map — precisely
-   the ladder disease wave (d) exists to kill. Its map knows 6 features; the directory now holds
-   8, so `command-spine`/`config-family`/`effects-ledger` throw. **Decide: delete it (the .mjs
-   runner supersedes it — convention resolution means a new feature never edits a runner) or
-   teach it the same convention.** Deleting also retires the duplicated step grammar; nothing
-   else references it but that one npm script.
-2. **`work:doctor --strict` lost its only pin.** The advisory gate (error ⇒ always fail; warn ⇒
-   fail only under `--strict`) moved out of `workDoctorCommand` into `cli.exit` with wave 2, and
-   NOTHING asserts it: `acd-work-command-cli-bijection` accepts `[0,1]` for doctor by design, and
-   the only `doctor --strict` BDD scenarios drive `project doctor` (a different command). A
-   regression would be silent. Owed: one scenario — a warn-carrying stream exits 0 bare, 1 under
-   `--strict`, with an identical finding set both ways.
-3. **Dead compat in four faceCtx readers.** `list`/`next`/`validate`/`doctor` read
-   `faceCtx.scope ?? faceCtx.positionals?.[0]` (and doctor `faceCtx.strict ?? faceCtx.options?.strict`)
-   — the left branch is the PRE-route shape and now has zero callers (the generic face always
-   passes `{ positionals, options }`). Drop the `??` left-hand side when wave 3 touches these
-   files; keeping it invites a second calling convention.
+1. **`cli.ps1` DELETED** (the operator-owed decision, taken with the wave-3 landing): the .mjs
+   runner supersedes it — convention resolution means a new feature never edits a runner; the
+   hand-kept feature map was the ladder disease itself. Gone with it: the five `.steps.ps1`
+   modules, the `test:integration:ps` npm script, the README line.
+2. **`work:doctor --strict` pinned**: `command-spine.feature` grew the advisory-gate scenario
+   (a warn-carrying stream — the no-stories milestone fixture — exits 0 bare / 1 under
+   `--strict`, `errors` 0 and the same `milestone-no-stories` finding both ways). The common
+   grammar's JSON-field step now accepts integers alongside booleans/strings.
+3. **Dead compat dropped**: `list`/`next`/`validate`/`doctor` read `faceCtx.positionals`/
+   `faceCtx.options` only — the pre-route `faceCtx.scope`/`faceCtx.strict` left-hand sides are
+   gone (zero callers confirmed by grep).
 
-Wave 3 — **graph + mesh** (needs the launcher seam decision):
-graph verbs via route table (delete `graphVerbCommand`); `graph serve` keeps the launcher idiom.
-Mesh registered verbs via route table (delete `meshVerbCli` + `emitMeshError` — the generic
-envelope subsumes it); then the UNREGISTERED mesh verbs as Commands: `mesh ui`, `mesh repo`,
-`mesh assign` (+ its `--workspace` gap, STATE residual), `mesh recover-push`, `mesh desktop`,
-`mesh serve` daemon branch — retiring `MESH_UI_FLAGS`/`MESH_REPO_FLAGS`/`MESH_ASSIGN_FLAGS`/
-`MESH_RECOVER_PUSH_FLAGS` + `meshVerbCli`'s `extraFlags` as each lands.
+Wave 3 — **graph + mesh registered verbs**: ✅ DONE 2026-07-30 (the unregistered mesh tail
+remains — see below). Graph: `build/query/triage/impact` carry `cli.route` + `cli.spec`
+(class B); `graphVerbCommand` + its four branches DELETED; `graph serve` keeps the launcher
+idiom as a ladder branch. Mesh: `identity/status/heartbeat/relay/invite/join/revoke/logs/
+terminal-resume` carry routes (class B); `meshVerbCli` DELETED. Its three face behaviours
+moved: **`--workspace <path|id>` resolution into the generic face** (`resolveWorkspaceRoot` in
+face.mjs — path-or-descriptor-id, `workspace-unresolvable`/`workspace-unknown` codes, active
+only for commands declaring the flag), **the positional discipline + read-miss split into
+`commands/mesh-face-shared.mjs`** (`guardMeshPositionals` thrown from argv adapters,
+`refuseReadMiss` thrown from identity's render/json — byte-identical refusal text, the
+command-level null untouched for other faces). The face also grew the **raw `--json` scan**
+(the meshVerbCli precedent, now THE policy): a spec-parse refusal under `--json` is ONE
+envelope on stdout, never a stderr leak. **`mesh:serve` deliberately carries NO route** — the
+route table matches words only, so a routed ["mesh","serve"] would swallow `--serve`; its
+ladder branch delegates the bare probe through `runCommandFace` (the bare-`aof project`
+sanctioned form) until the launcher seam is designed. `emitMeshError` SURVIVES for the three
+CLI-only nested verbs still calling it (repo/assign/recover-push) — it dies with them.
+Gates: `acd-graph-command-cli-bijection` + `acd-mesh-command-cli-bijection` proof (b)
+rewritten to the route-OR-ladder form (the work-bijection precedent).
+**Documented contract change (previously pinned):** an unknown flag on a mesh verb under
+`--json` now emits code `unknown-flag` (the face's more specific vocabulary) instead of the
+mesh face's folded `invalid-input`; the message is the face's `Unknown flag "--x" for
+mesh:<verb>. Usage: …` form. `test/mesh-identity-cli-face.test.mjs` updated. Two STALE pins
+fixed en route (pre-existing at HEAD, verified by stash): the identity frozen-schema key
+lists in `mesh-identity-cli-face` + `mesh-identity-status-commands` still expected `skills`,
+removed from the descriptor at 34/02 by operator directive. cli.mjs: 1,990 → 1,752 lines.
+
+Wave 3 tail — **the UNREGISTERED mesh verbs as Commands** (class A + a gate rework):
+`mesh ui`, `mesh repo`, `mesh assign` (+ its `--workspace` gap, STATE residual),
+`mesh recover-push`, `mesh desktop`, `mesh serve` daemon branch — retiring
+`MESH_UI_FLAGS`/`MESH_REPO_FLAGS`/`MESH_ASSIGN_FLAGS`/`MESH_RECOVER_PUSH_FLAGS` +
+`emitMeshError` as each lands. NOTE: `acd-desktop-verbs-outside-bijection` PINS
+ui/repo/assign as ladder-only-and-unregistered — registering them requires reworking that
+gate in the SAME change. The launcher verbs (`ui`, `serve --serve`, `desktop run`) keep the
+registered-run-as-probe idiom (mesh:serve precedent) when they land.
 **End state:** `parseOptions` + its boolean allow-list have zero callers and are deleted;
 `helpText()` derives its verb listing from the registry.
 

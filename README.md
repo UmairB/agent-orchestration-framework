@@ -259,7 +259,6 @@ Other entry points:
 
 ```sh
 node ./test/integration/cli.mjs      # BDD feature tests — launch the CLI as an external process
-npm run test:integration:ps          # PowerShell integration parity (Windows; skips elsewhere)
 npm run test:smoke:cli               # focused process-boundary smoke test
 npm run ui:build                     # build the setup UI / board front-end (cross-platform wrapper)
 npm run check                        # full closeout check

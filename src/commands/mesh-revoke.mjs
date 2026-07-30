@@ -24,6 +24,7 @@ import {
   writeRegistry,
   appendRevocation,
 } from "../mesh-registry.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 // A structured command error the mesh face renders as ONE { ok:false, error, code }
 // envelope (the property is ASSIGNED, not an object-literal field).
@@ -103,9 +104,20 @@ export const meshRevokeCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "revoke"],
+    spec: {
+      usage: "aof mesh revoke <node> [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh revoke <node>` — ONE positional: the nodeId to revoke. (revokedAt is a
     // white-box input, not a flag; production revokes against wall-clock.)
-    argv: (positionals) => ({ node: positionals[0] }),
+    argv: (positionals) => {
+      guardMeshPositionals("revoke", positionals, { max: 1 });
+      return { node: positionals[0] };
+    },
 
     render(result) {
       return `Revoked ${result.nodeId} at ${result.revokedAt} — removed from the roster and recorded as revoked.`;

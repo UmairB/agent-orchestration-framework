@@ -19,6 +19,7 @@
 // terminal stream are the confirmation. Control-node only — an unconfigured
 // relay (not the control machine) is a loud coded refusal, never a silent no-op.
 import { commandError } from "./errors.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import { openGlobalWorkProjectionStore } from "../global-work-store.mjs";
 import { globalMeshPaths } from "../workspace.mjs";
 import { buildTerminalResumeEnvelope, createTerminalRelayPushTransport } from "../mesh-terminal-relay-bridge.mjs";
@@ -121,11 +122,25 @@ export const meshTerminalResumeCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "terminal-resume"],
+    spec: {
+      usage: "aof mesh terminal-resume <sessionId> [--node <id>] [--workspace <path|id>] [--json]",
+      flags: {
+        node: { type: "string", description: "the node the session lives on" },
+        ...MESH_WORKSPACE_FLAG,
+      },
+    },
+
     // `aof mesh terminal-resume <sessionId> [--node <id>]`.
-    argv: (positionals, options = {}) => ({
-      ...(typeof positionals[0] === "string" && positionals[0].length > 0 ? { session: positionals[0] } : {}),
-      ...(typeof options.node === "string" && options.node.length > 0 ? { node: options.node } : {}),
-    }),
+    argv: (positionals, options = {}) => {
+      guardMeshPositionals("terminal-resume", positionals, { max: 1 });
+      return {
+        ...(typeof positionals[0] === "string" && positionals[0].length > 0 ? { session: positionals[0] } : {}),
+        ...(typeof options.node === "string" && options.node.length > 0 ? { node: options.node } : {}),
+      };
+    },
 
     render(result) {
       if (!result.confirmed) {

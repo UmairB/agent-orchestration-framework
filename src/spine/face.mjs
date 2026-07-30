@@ -125,7 +125,20 @@ export function resolveRoute(argv, commands = listCommands()) {
 export async function runCommandFace(command, args) {
   const cli = command.cli ?? {};
   const spec = cli.spec ?? {};
-  const options = parseSpecArgv(args, spec, command.id);
+
+  // Honour --json from the RAW argv before spec-parsing (m42 wave (d) leg d1,
+  // wave 3 — the meshVerbCli precedent, now THE policy): a refused flag must
+  // not swallow the operator's --json, so even a spec-parse refusal is ONE
+  // structured envelope on stdout when --json was asked for.
+  const wantsJson = args.some((arg) => arg === "--json" || (typeof arg === "string" && arg.startsWith("--json=")));
+  let options;
+  try {
+    options = parseSpecArgv(args, spec, command.id);
+  } catch (error) {
+    if (!wantsJson) throw error;
+    emitJsonErrorEnvelope(error);
+    return;
+  }
   const faceCtx = { positionals: options._, options };
 
   if (options.json === true) {
@@ -134,18 +147,7 @@ export async function runCommandFace(command, args) {
       console.log(JSON.stringify(cli.json(result, faceCtx), null, 2));
       applyExitAdapter(cli, result, faceCtx);
     } catch (error) {
-      // EXACTLY ONE structured document on stdout — success or failure — so
-      // every `aof … --json` is parseable without sniffing stderr. An error
-      // carrying a structured `shifted` count (the insert family's
-      // confirm-required refusal, ADR-004's never-deadlock guard) keeps it in
-      // the envelope — callers read the shift size without re-deriving it.
-      console.log(JSON.stringify({
-        ok: false,
-        error: error.message,
-        code: error.code ?? "error",
-        ...(error.shifted !== undefined ? { shifted: error.shifted } : {}),
-      }, null, 2));
-      process.exitCode = 1;
+      emitJsonErrorEnvelope(error);
     }
     await sweepPendingEffects();
     return;
@@ -159,16 +161,60 @@ export async function runCommandFace(command, args) {
   await sweepPendingEffects();
 }
 
+// EXACTLY ONE structured document on stdout — success or failure — so every
+// `aof … --json` is parseable without sniffing stderr. An error carrying a
+// structured `shifted` count (the insert family's confirm-required refusal,
+// ADR-004's never-deadlock guard) keeps it in the envelope — callers read the
+// shift size without re-deriving it.
+function emitJsonErrorEnvelope(error) {
+  console.log(JSON.stringify({
+    ok: false,
+    error: error.message,
+    code: error.code ?? "error",
+    ...(error.shifted !== undefined ? { shifted: error.shifted } : {}),
+  }, null, 2));
+  process.exitCode = 1;
+}
+
 async function performInvoke(command, options) {
   const ctx = {};
   if (command.cli?.spec?.workspace !== false) {
-    ctx.workspace = await loadWorkspace(process.cwd(), options.config);
+    ctx.workspace = await loadWorkspace(await resolveWorkspaceRoot(options), options.config);
   }
   // argv adapters may be ASYNC: interactive verbs complete their missing
   // positionals by prompting (a face-side concern — prompting never lives in a
   // command's run, which other faces invoke headlessly).
   const input = await command.cli.argv(options._, options);
   return await invoke(command.id, input, ctx);
+}
+
+// m42 wave (b) item 4, re-homed with wave (d) wave 3 — CWD-INDEPENDENT workspace
+// resolution for verbs that DECLARE a `workspace` flag (the mesh family): a path
+// loads that workspace; a bare id resolves its registered projectRoot through
+// the global descriptor store (the fleet's own registry) and refuses loudly when
+// unknown — never a silent fall-through to the cwd. Commands that do not declare
+// the flag are untouched (an undeclared --workspace is refused at spec-parse).
+async function resolveWorkspaceRoot(options) {
+  const requested = typeof options.workspace === "string" ? options.workspace.trim() : "";
+  if (requested === "") return process.cwd();
+  if (existsSync(requested)) return requested;
+  const { openGlobalWorkProjectionStore } = await import("../global-work-store.mjs");
+  let resolvedRoot = null;
+  try {
+    const store = await openGlobalWorkProjectionStore({});
+    try {
+      const row = store.db.prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?").get(requested);
+      resolvedRoot = row?.project_root ?? null;
+    } finally {
+      store.close?.();
+    }
+  } catch (error) {
+    throw commandError(`Could not resolve --workspace "${requested}": ${error.message}`, "workspace-unresolvable");
+  }
+  if (resolvedRoot == null) {
+    throw commandError(`Unknown workspace "${requested}" — not a path, and no registered workspace descriptor carries that id.`, "workspace-unknown");
+  }
+  return resolvedRoot;
 }
 
 // cli.exit(result, faceCtx) — the OPTIONAL exit-code adapter for verbs whose

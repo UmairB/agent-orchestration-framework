@@ -23,6 +23,7 @@
 import os from "node:os";
 import crypto from "node:crypto";
 import { publishNodeRecord, readNodeRecord, readNodeRecords } from "../mesh-store.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals, refuseReadMiss } from "./mesh-face-shared.mjs";
 import { deriveNodeId, assembleDescriptor, sidecarPathFor, writeSidecarPatch, sanitizeHostname } from "../node-identity.mjs";
 // milestone 28 / story 00 (ADR-003): the version read routes through the ONE
 // SEA-safe asset-base seam instead of joining a path off a bare
@@ -191,21 +192,40 @@ export const meshIdentityCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "identity"],
+    spec: {
+      usage: "aof mesh identity [<id>] [--name <id>] [--address <ip-or-host>] [--workspace <path|id>] [--json]",
+      flags: {
+        name: { type: "string", description: "registration override: the node id to publish as" },
+        address: { type: "string", description: "registration override: the address to advertise" },
+        ...MESH_WORKSPACE_FLAG,
+      },
+    },
+
     // `aof mesh identity [<id>] [--name <id>] [--address <ip-or-host>]` — an optional
     // positional is the read ref; the two options are the publish-side registration
     // overrides (the hostname-collision escape hatch).
-    argv: (positionals, options = {}) => ({ ref: positionals[0], name: options.name, address: options.address }),
+    argv: (positionals, options = {}) => {
+      guardMeshPositionals("identity", positionals, { max: 1 });
+      return { ref: positionals[0], name: options.name, address: options.address };
+    },
 
-    // Publish confirmation names the node id; a read renders the node line. (A
-    // null read never reaches here — meshVerbCli surfaces node-not-found first.)
-    render(result) {
+    // Publish confirmation names the node id; a read renders the node line. A
+    // null READ (a ref was supplied, no record) is the face-level node-not-found.
+    render(result, faceCtx = {}) {
+      refuseReadMiss(result, faceCtx);
       if (result == null) return "No node record.";
       const caps = describeCaps(result);
       return `Node ${result.nodeId} — ${caps}`;
     },
 
     // The --json face is the bare node record (publish OR read), per the feature.
-    json: (result) => result,
+    json(result, faceCtx = {}) {
+      refuseReadMiss(result, faceCtx);
+      return result;
+    },
   },
 };
 
@@ -352,9 +372,20 @@ export const meshStatusCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "status"],
+    spec: {
+      usage: "aof mesh status [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh status` — no positional; an injected now is a white-box test input, not
     // a CLI flag, so the live face renders against wall-clock.
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("status", positionals);
+      return {};
+    },
 
     // The human render is composed of a NODES half + a BOARDS section (milestone 25 /
     // story 01, task 01). The NODES half is BYTE-IDENTICAL to m23: one line per node

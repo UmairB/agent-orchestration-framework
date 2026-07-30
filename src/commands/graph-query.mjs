@@ -60,6 +60,17 @@ export const graphQueryCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "query"],
+    spec: {
+      usage: 'aof graph query "<question>" [--strategy dfs|bfs] [--budget N] [--json]',
+      flags: {
+        strategy: { type: "string", description: "traversal strategy (dfs|bfs)" },
+        budget: { type: "string", description: "node budget for the traversal" },
+      },
+    },
+
     // `aof graph query "<question>" [--strategy dfs|bfs] [--budget N]`.
     argv: (positionals, options = {}) => {
       const input = { question: positionals[0] };

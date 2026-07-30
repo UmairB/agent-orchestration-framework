@@ -1,6 +1,5 @@
 import path from "node:path";
 import { access, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatFriendlyApplyAction, relativeDisplayPath } from "./render-plan.mjs";
@@ -342,38 +341,13 @@ async function workCommand(args) {
   throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work orchestrator [fable|opus] [--show]\n  aof work delegation [on|off] [--model fable|opus] [--gpt-model <id>] [--no-model] [--show]\n  aof work delegation-model [<id>] [--show]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]\n  aof work upgrade [--dry-run] [--json]`);
 }
 
-// `aof graph <verb>` — the top-level graphify dispatch (sibling to `aof work`,
-// 09/ADR-001). Each verb is a thin argv → invoke("graph:<verb>") → render/--json
-// face over the registered command, exactly the workListCommand idiom. The
-// `serve` verb is the seam story 04 (mcp-server-runtime) will fill — declared but
-// not implemented here (ADR-005 amendment), so it currently falls through to the
-// unknown-verb error, which story 04 replaces with the server launch.
+// `aof graph <verb>` — build/query/triage/impact MIGRATED (m42 wave (d) leg d1,
+// wave 3): registry Commands carrying `cli.route`, dispatched in run() through
+// the route table + the ONE generic face (graphVerbCommand RETIRED — the face's
+// --json single-envelope discipline is the same contract). Still here: `serve`
+// (the launcher idiom — a long-lived stdio MCP server) + the unknown-verb shim.
 async function graphCommand(args) {
   const [subcommand, ...rest] = args;
-
-  if (subcommand === "build") {
-    await graphVerbCommand("graph:build", rest);
-    return;
-  }
-
-  if (subcommand === "query") {
-    await graphVerbCommand("graph:query", rest);
-    return;
-  }
-
-  if (subcommand === "triage") {
-    await graphVerbCommand("graph:triage", rest);
-    return;
-  }
-
-  // `aof graph impact <path> [<path> ...]` (milestone 11 re-open / ADR-007): the
-  // DETERMINISTIC, edge-based coupling lookup the running agents consume — exact
-  // dependencies + dependents for the given files, computed from graph.json (no
-  // fuzz, no spawn). Thin argv → invoke("graph:impact") → render/--json face.
-  if (subcommand === "impact") {
-    await graphVerbCommand("graph:impact", rest);
-    return;
-  }
 
   // `aof graph serve` (story 04, ADR-005 amendment): launch the stdio MCP server
   // the story-02 rendered MCP config entry targets (command:"aof", args:["graph",
@@ -386,38 +360,6 @@ async function graphCommand(args) {
 
   console.error(`Unknown graph command "${subcommand ?? ""}".\n\nExamples:\n  aof graph build <folder> [--backend claude] [--json]\n  aof graph query "what calls main" [--json]\n  aof graph impact src/command-core.mjs [src/cli.mjs ...] [--json]\n  aof graph triage [--mode conflicts] [--json]\n  aof graph serve`);
   process.exitCode = 1;
-}
-
-// The shared graph verb face: getCommand → loadWorkspace → invoke → cli.json/
-// render (the workListCommand idiom). CRITICAL (the reachability @executable
-// scenario): in --json mode, a command error (graphify-missing / no-graph) is
-// caught and emitted as a SINGLE structured JSON envelope { ok:false, error, code }
-// on stdout (+ non-zero exit), so `aof graph <verb> --json` ALWAYS emits one
-// parseable JSON envelope — success OR structured error — even with no binary or
-// no graph present. The non-json face lets the error propagate to bin/aof.mjs
-// (stderr + non-zero exit).
-async function graphVerbCommand(id, args) {
-  const options = parseOptions(args);
-  const command = getCommand(id);
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      // A single structured error envelope — proves the verb is dispatched even
-      // when its preconditions (live binary / built graph) are not met.
-      console.log(JSON.stringify({ ok: false, error: error.message, code: error.code ?? "error" }, null, 2));
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  // Non-json: render the result; a command error propagates to bin/aof.mjs
-  // (stderr + non-zero exit), which is the missing-graph @executable path.
-  const result = await invoke(command.id, command.cli.argv(options._, options), { workspace });
-  console.log(command.cli.render(result));
 }
 
 // `aof graph serve` — start the stdio MCP server (story 04, ADR-005 amendment).
@@ -451,65 +393,16 @@ async function meshCommand(args) {
   const options = parseOptions(args);
   const sub = options._[0];
 
-  // milestone 22 / story 01 — the two additive node-identity dispatch branches, ABOVE
-  // the unknown-sub fallthrough (so identity/status leave the unknown-sub matrix). The
-  // EXACT `subcommand === "<sub>"` form the acd-mesh-command-cli-bijection grep requires.
-  // The args after the sub token are the verb's argv (the `const [sub, ...rest]` idiom
-  // the import dispatcher uses).
+  // identity / status / heartbeat / relay / invite / join / revoke / logs /
+  // terminal-resume — MIGRATED (m42 wave (d) leg d1, wave 3): registry Commands
+  // carrying `cli.route`, dispatched in run() through the route table + the ONE
+  // generic face (meshVerbCli RETIRED — its --workspace resolution, positional
+  // discipline, and node-not-found read-miss split moved to the face +
+  // commands/mesh-face-shared.mjs). Still here: the CLI-only nested verbs
+  // (ui/repo/assign/recover-push/desktop), the `serve --serve` daemon branch,
+  // and the bare-usage/unknown-sub shims.
   const subcommand = sub;
   const [, ...rest] = args;
-  if (subcommand === "identity") {
-    // --name / --address: the registration overrides (2026-07-27) — the escape hatch
-    // for a machine that cannot derive a usable identity from itself (a WSL2 guest
-    // inherits the Windows hostname, so both the nodeId and the advertised host
-    // collide with its host's).
-    await meshVerbCli("mesh:identity", rest, { positionalAllowed: true, extraFlags: ["name", "address"] });
-    return;
-  }
-  if (subcommand === "status") {
-    await meshVerbCli("mesh:status", rest, { positionalAllowed: false });
-    return;
-  }
-  // milestone 23 / story 00 — the additive presence-publish dispatch branch, ABOVE the
-  // unknown-sub fallthrough. The EXACT `subcommand === "heartbeat"` form the
-  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
-  // mesh:heartbeat takes no positional (it publishes THIS node's presence, not a ref).
-  if (subcommand === "heartbeat") {
-    await meshVerbCli("mesh:heartbeat", rest, { positionalAllowed: false });
-    return;
-  }
-  // milestone 23 / story 01 — the additive relay-mode dispatch branch, ABOVE the
-  // unknown-sub fallthrough. The EXACT `subcommand === "relay"` form the
-  // acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli face.
-  // `aof mesh relay` is the relay-mode serve verb; its registered run is the NON-BLOCKING
-  // status probe (so `aof mesh relay --json` runs clean + returns, never hanging on a
-  // listen). mesh:relay takes no positional (the role is config-driven, not a named ref).
-  if (subcommand === "relay") {
-    await meshVerbCli("mesh:relay", rest, { positionalAllowed: false });
-    return;
-  }
-  // milestone 24 / story 01 — the two additive device-code-enrollment dispatch
-  // branches, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "<sub>"`
-  // form the acd-mesh-command-cli-bijection grep requires; reuse the shared
-  // meshVerbCli face. mesh:invite takes no positional (the control node MINTS — the
-  // code is RETURNED once, never supplied); mesh:join takes ONE positional — the
-  // presented 6-digit code the operator read off `aof mesh invite`.
-  if (subcommand === "invite") {
-    await meshVerbCli("mesh:invite", rest, { positionalAllowed: false });
-    return;
-  }
-  if (subcommand === "join") {
-    await meshVerbCli("mesh:join", rest, { positionalAllowed: true, extraFlags: ["control", "url"] });
-    return;
-  }
-  // milestone 24 / story 02 — the additive revoke dispatch branch, ABOVE the unknown-sub
-  // fallthrough. The EXACT `subcommand === "revoke"` form the acd-mesh-command-cli-bijection
-  // grep requires; reuses the shared meshVerbCli face. mesh:revoke takes ONE positional —
-  // the nodeId to revoke (the control node removes it from the roster + records a revocation).
-  if (subcommand === "revoke") {
-    await meshVerbCli("mesh:revoke", rest, { positionalAllowed: true });
-    return;
-  }
   // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
   // the unknown-sub fallthrough (the m22 additive-branch idiom). `aof mesh ui` is a
   // CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
@@ -557,38 +450,21 @@ async function meshCommand(args) {
     await meshDesktopCommand(rest);
     return;
   }
-  // milestone 33 / story 01 (ADR-003) — the additive coordination-launcher dispatch
-  // branch, ABOVE the unknown-sub fallthrough. The EXACT `subcommand === "serve"` form
-  // the acd-mesh-command-cli-bijection grep requires; reuses the shared meshVerbCli
-  // face for the bare (non-blocking probe) call. `aof mesh serve --serve` is the
-  // FOREGROUND presence+sync daemon (the long-lived face over the one-shot core, NEVER
-  // the bijection-probed run) — it preflights the fabric via probeFabric and
-  // refuses-with-guidance if degraded, publishes this node's presence, runs global work propagation, and periodically
-  // re-reads resolvePeers; it binds NO listening
-  // broker socket. `aof mesh serve` (no --serve) stays the non-blocking probe.
+  // milestone 33 / story 01 (ADR-003) — the coordination-launcher dispatch branch,
+  // ABOVE the unknown-sub fallthrough. `aof mesh serve --serve` is the FOREGROUND
+  // presence+sync daemon (the long-lived face over the one-shot core, NEVER the
+  // bijection-probed run). The bare (non-blocking probe) spelling DELEGATES
+  // through runCommandFace (the bare-`aof project` sanctioned-delegation form) —
+  // mesh:serve deliberately carries NO cli.route: the route table matches argv
+  // words only (flags never participate), so a routed ["mesh","serve"] would
+  // swallow `--serve` and the daemon branch would be unreachable. This branch
+  // stays until the launcher seam is designed.
   if (subcommand === "serve") {
     if (parseOptions(rest).serve) {
       await meshServeDaemonCommand(rest);
       return;
     }
-    await meshVerbCli("mesh:serve", rest, { positionalAllowed: false });
-    return;
-  }
-
-  // `aof mesh logs [proc] [--tail N]` — the durable-log reader (m42 wave (a),
-  // TECH_DEBT item 2): read what a daemon logged without redirecting stdout by
-  // hand. The optional positional is the proc (mesh-serve default).
-  if (subcommand === "logs") {
-    await meshVerbCli("mesh:logs", rest, { positionalAllowed: true, extraFlags: ["tail", "node"] });
-    return;
-  }
-
-  // `aof mesh terminal-resume <sessionId> [--node <id>]` — re-attach a parked/
-  // killed worker session (m42 quick-fix): the control pushes a resume over the
-  // loopback relay; the worker spawns `claude --resume` in the assignment's
-  // retained worktree and the existing terminal tuple comes back to life.
-  if (subcommand === "terminal-resume") {
-    await meshVerbCli("mesh:terminal-resume", rest, { positionalAllowed: true, extraFlags: ["node"] });
+    await runCommandFace(getCommand("mesh:serve"), rest);
     return;
   }
 
@@ -613,130 +489,16 @@ async function meshCommand(args) {
   process.exitCode = 1;
 }
 
-// The shared mesh-verb face (milestone 22 / story 01, ADR-001) — modelled on
-// runVerbCli/graphVerbCommand: getCommand → loadWorkspace → invoke → cli.json/render,
-// with the single-structured-envelope --json discipline (08/ADR-003). In --json mode a
-// command error (or a face-level error this helper raises) is caught and emitted as ONE
-// { ok:false, error, code } document on stdout (+ non-zero exit); the non-json face
-// prints + exits non-zero. The FACE owns two errors the command itself does not raise:
-//   - invalid-input : an unknown flag (only --json/--config are recognised), an
-//                     empty-string id (`identity ""`), or a stray positional (`status
-//                     umair-mbp` — status takes no id). Rejected, not silently ignored.
-//   - node-not-found: a READ of an id with NO record in the tree (the absent-read on
-//                     the READ path is a FACE error — distinct from the command-level
-//                     absent null the mesh:identity run returns).
-// opts.positionalAllowed: whether the sub accepts ONE id positional (identity yes,
-// status no). The recognised flags on the mesh face are --json and --config; any other
-// --flag is invalid-input, UNLESS named in opts.extraFlags.
-async function meshVerbCli(id, args, { positionalAllowed = false, extraFlags = [] } = {}) {
-  const command = getCommand(id);
-
-  // Detect --json + an unknown flag from the RAW args, NOT from parseOptions's keys:
-  // parseOptions consumes the token AFTER an unrecognised flag as its value, so an
-  // unknown flag (`--bogus-flag --json`) would otherwise swallow `--json` and the
-  // error would miss the JSON envelope. Scanning the raw flag tokens keeps --json
-  // honoured AND reports the operator's original spelling.
-  const flagTokens = args
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0]);
-  const wantsJson = flagTokens.includes("json");
-  // --workspace joins --json/--config as a face-wide flag (m42 item 4 — the
-  // cwd-independent target selector every mesh verb accepts).
-  const unknownFlag = flagTokens.find((flag) => flag !== "json" && flag !== "config" && flag !== "workspace" && !extraFlags.includes(flag));
-
-  const options = parseOptions(args);
-  // Force the resolved --json onto the parsed options so an unknown flag that
-  // consumed the `--json` token still routes through the single-envelope face.
-  if (wantsJson) options.json = true;
-
-  // FACE input-validation (invalid-input), BEFORE any workspace load or invoke:
-  //   (a) an unknown flag — only --json/--config are recognised on the mesh face;
-  //   (b) a stray positional to a sub that takes no id (status);
-  //   (c) an empty-string id (identity "" is not a readable id);
-  //   (d) more than one positional.
-  let inputError = null;
-  if (unknownFlag) {
-    inputError = `Unknown option "--${unknownFlag}".`;
-  } else if (!positionalAllowed && options._.length > 0) {
-    inputError = `"${id.slice("mesh:".length)}" takes no positional argument (got "${options._[0]}").`;
-  } else if (positionalAllowed && options._.length > 1) {
-    inputError = `"${id.slice("mesh:".length)}" takes at most one id (got ${options._.length}).`;
-  } else if (positionalAllowed && options._.length === 1 && options._[0] === "") {
-    inputError = `An empty id is not a readable node id.`;
-  }
-  if (inputError) {
-    emitMeshError(options.json, inputError, "invalid-input");
-    return;
-  }
-
-  // m42 wave (b) / item 4 — CWD-INDEPENDENT workspace resolution. Every mesh verb
-  // used to resolve its workspace from process.cwd() alone, so a recovery command
-  // run from the wrong directory silently operated on the WRONG workspace
-  // (measured live: `aof mesh assign 18 --withdraw` reported "No assignment
-  // exists" while the row sat in the store under another workspace's id).
-  // `--workspace <path|id>` names the target explicitly: a path loads that
-  // workspace; a bare id resolves its registered projectRoot through the global
-  // descriptor store (the fleet's own registry) and refuses loudly when unknown —
-  // never a silent fall-through to the cwd.
-  let workspaceRoot = process.cwd();
-  const requestedWorkspace = typeof options.workspace === "string" ? options.workspace.trim() : "";
-  if (requestedWorkspace !== "") {
-    if (existsSync(requestedWorkspace)) {
-      workspaceRoot = requestedWorkspace;
-    } else {
-      const { openGlobalWorkProjectionStore } = await import("./global-work-store.mjs");
-      let resolvedRoot = null;
-      try {
-        const store = await openGlobalWorkProjectionStore({});
-        try {
-          const row = store.db.prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?").get(requestedWorkspace);
-          resolvedRoot = row?.project_root ?? null;
-        } finally {
-          store.close?.();
-        }
-      } catch (error) {
-        emitMeshError(options.json, `Could not resolve --workspace "${requestedWorkspace}": ${error.message}`, "workspace-unresolvable");
-        return;
-      }
-      if (resolvedRoot == null) {
-        emitMeshError(options.json, `Unknown workspace "${requestedWorkspace}" — not a path, and no registered workspace descriptor carries that id.`, "workspace-unknown");
-        return;
-      }
-      workspaceRoot = resolvedRoot;
-    }
-  }
-  const workspace = await loadWorkspace(workspaceRoot, options.config);
-  const input = command.cli.argv(options._, options);
-
-  if (options.json) {
-    try {
-      const result = await invoke(command.id, input, { workspace });
-      // FACE read-miss split: a READ (a ref was supplied) that resolves to null is a
-      // face-level node-not-found — the command returns null (not an error) by design.
-      if (positionalAllowed && options._.length === 1 && result == null) {
-        emitMeshError(true, `No node record for "${options._[0]}".`, "node-not-found");
-        return;
-      }
-      console.log(JSON.stringify(command.cli.json(result), null, 2));
-    } catch (error) {
-      emitMeshError(true, error.message, error.code ?? "error");
-    }
-    return;
-  }
-
-  // Non-json: render; a read-miss is the same node-not-found face error (stderr +
-  // non-zero exit); a command error propagates to bin/aof.mjs.
-  const result = await invoke(command.id, input, { workspace });
-  if (positionalAllowed && options._.length === 1 && result == null) {
-    emitMeshError(false, `No node record for "${options._[0]}".`, "node-not-found");
-    return;
-  }
-  console.log(command.cli.render(result));
-}
-
+// meshVerbCli — RETIRED (m42 wave (d) leg d1, wave 3): every registered mesh
+// verb carries cli.route + cli.spec and dispatches through the route table +
+// the ONE generic face. Its three face-level behaviours moved with it: the
+// `--workspace <path|id>` resolution into the face (resolveWorkspaceRoot), the
+// positional discipline + read-miss split into commands/mesh-face-shared.mjs.
 
 // Emit a mesh face error: under --json ONE { ok:false, error, code } document on stdout
-// (+ non-zero exit); otherwise the message on stderr (+ non-zero exit).
+// (+ non-zero exit); otherwise the message on stderr (+ non-zero exit). Callers
+// are the REMAINING CLI-only nested verbs (repo/assign/recover-push) — deleted
+// when they migrate (the wave-3 tail).
 function emitMeshError(asJson, message, code) {
   if (asJson) {
     console.log(JSON.stringify({ ok: false, error: message, code }, null, 2));

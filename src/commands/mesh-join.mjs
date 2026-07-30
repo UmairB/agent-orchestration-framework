@@ -24,6 +24,7 @@ import { resolvePeers } from "../mesh-fabric.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
 import { publishNodeRecord } from "../mesh-store.mjs";
 import { aofVersion } from "./mesh-identity.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "../degrade.mjs";
 
@@ -261,8 +262,23 @@ export const meshJoinCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "join"],
+    spec: {
+      usage: "aof mesh join <code> [--control <nodeId>] [--url <wss-url>] [--workspace <path|id>] [--json]",
+      flags: {
+        control: { type: "string", description: "the control node to present the code to" },
+        url: { type: "string", description: "the relay url to enroll against" },
+        ...MESH_WORKSPACE_FLAG,
+      },
+    },
+
     // `aof mesh join <code>` — ONE positional: the presented 6-digit code.
-    argv: (positionals, options = {}) => ({ code: positionals[0], control: options.control, relayUrl: options.url }),
+    argv: (positionals, options = {}) => {
+      guardMeshPositionals("join", positionals, { max: 1 });
+      return { code: positionals[0], control: options.control, relayUrl: options.url };
+    },
 
     render(result) {
       return `Joined the mesh as ${result.nodeId} — credential stored at ${result.configPath ?? "global AOF config"}.`;
