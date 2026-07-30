@@ -243,14 +243,67 @@ proof adopted the mesh gate's [0,1]-for-coded-refusals policy for `update`
 (the bare fixture is legitimately not-initialised). Fixed en route
 (pre-existing at HEAD, verified by stash): work-init's codex pin still expected
 `[--solo]` in the refine argument-hint, removed from the bundle long ago.
-**End state (still owed):** the remaining parseOptions callers — the
-orchestrator/delegation trio + planning init (PRINTING/PROMPTING CORES — their
-console.log/prompt moves face-ward with the migration), top-level init
-(interactive selectRuntimes ⇒ async argv, the assets:add precedent), and
-meshCommand's usage/unknown-sub parse; then `parseOptions` + its boolean
-allow-list are deleted and `helpText()` derives its verb listing from the
-registry. (`work memory` and `session` delegate wholesale without parseOptions
-— they may stay laddered without blocking the end-state.)
+**The CLI-only batch, closing half — the d1 END-STATE REACHED (2026-07-30):**
+`parseOptions` + its global boolean allow-list and `printJson` are DELETED;
+every registered verb's flag vocabulary is its own cli.spec, and `helpText()`
+derives its verb listing from the registry. The last five faces landed as
+class A:
+- **The model-config trio** (`work:orchestrator` / `work:delegation` /
+  `work:delegation-model`, one module `commands/orchestrator-delegation.mjs` —
+  the aof:delegate skill's surface). The two ritual moves: PROMPTS into the
+  async argv adapters (the orchestrator-model picker + its
+  AOF_ORCHESTRATOR_INPUT seam, exported from work-orchestrator.mjs; the
+  assets:add precedent), PRINTS into collector-fed renders (the headroom
+  precedent — the cores' `log` collects `notes`; byte-identical transcripts
+  smoked for show/set/hint/skip/model-only). NEW --json faces (one document,
+  notes stripped; previously --json was accepted-and-ignored); `--show` is the
+  machine probe the bijection spawns. Documented changes: a bad `--model` is
+  refused in the FACE pre-write (code `invalid-input`; previously the toggle
+  flipped first and the error followed), the delegation prompt now fires
+  pre-invoke (before the toggle lines print — the one-resolved-input
+  discipline), and a stringly `--state` is no longer silently accepted.
+- **`planning:init`** (`commands/planning-init.mjs`, route ["planning","init"]).
+  The printing core's injectable log is a collector; the render reproduces the
+  retired transcript in order (dry-run preview, boundary prints, codex degrade
+  + manual fallback, the Pinned/Installed/Manifest tail). The
+  guarded/sha-rejected/install-failed refusal message now ENDS THE STDOUT
+  DOCUMENT (the packages:install normalisation) with cli.exit gating 1; the
+  --json refusal document keeps its exact retired shape. Runtime/scope
+  validation stays the core's (the face's duplicate pre-checks retired); a
+  thrown refusal under --json is now the ONE envelope (previously a stderr
+  leak). planningCommand is an unknown-sub shim.
+- **`project:init`** (`commands/project-init.mjs`, the top-level `aof init` on
+  the one-word route ["init"] — the migrate:folder precedent). Interactive
+  selectRuntimes completes in the async argv; the config-exists/legacy guards
+  are CODED refusals in run() (`config-exists` / `legacy-config`, retired
+  messages verbatim), with an argv-side guard PEEK so the picker never opens
+  when run() will refuse (the retired guard-before-prompt order,
+  single-entry-two-mode's pin — the authoritative decision stays in run()).
+  The catalog-era flags (--items/--defaults/--select) are declared only to
+  keep their helpful retired refusal. writeInstallLock moved with it (still
+  wholesale — the d4 writeLock read-merge item untouched). NEW --json face.
+- **meshCommand's usage parse** — the parseOptions call became the shims'
+  token-scan idiom (first non-flag token = sub; --json by raw scan). Corner
+  case documented: `aof mesh --unknownflag value` now treats `value` as the
+  (unknown) sub where parseOptions consumed it as the flag's value.
+- **`helpText()` REGISTRY-DERIVED** — the shape decision: a Usage block for
+  the one-word routes (init, migrate), then per-family sections (Project /
+  Assets / Packages / Work / Planning / Graph / Mesh / Import) listing each
+  routed command's own `cli.spec.usage` in registry order, then a static tail
+  (`Also:` for the deliberately-unrouted work memory / session doors +
+  the Defaults prose). lifecycle.feature's one stale help pin updated to the
+  derived assets:add line.
+Gates: the trio joins the work bijection (argsFor: `--show --json`) and the
+route-coverage BOARD_DEFERRED carve-out; four command-spine scenarios pin the
+trio's probes, the pre-write model refusal, the planning dry-run document, and
+the init route (coded guard + dry-run plan + catalog refusal). Fixed en route
+(pre-existing at HEAD, verified by stash): command-core-contract's WORK_IDS
+still ended at wave (b) — the wave-2/3 additions (init/update/find/observe/
+headroom pair/ui) had never joined the exact-set assertion, so the suite was
+red on every machine that ran it; the closing-half trio landed in the same
+edit. (`work memory` and `session` stay laddered by design — they delegate
+wholesale and carry no parseOptions.) cli.mjs: 921 → 647 lines (3,419 at the
+wave's start).
 
 Also owed in d1 (PRD): invert the four upward imports into `commands/`, break the
 `mesh-repo` ↔ `mesh-worker-execution` cycle, and confine `console.log` to the face

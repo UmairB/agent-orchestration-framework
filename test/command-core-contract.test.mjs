@@ -68,6 +68,21 @@ const WORK_IDS = [
   // door (one factory, one decision, one scope rule) with their own phase.
   "work:refine",
   "work:verify",
+  // m42 wave (d) leg d1 (the CLI-only batch) — the previously CLI-only faces as
+  // registered route-table Commands: init/update (the ACD bundle render pair),
+  // find/observe (reads), the headroom toggle pair, work:ui (the launcher-seam
+  // board door), and the model-config trio (orchestrator / delegation /
+  // delegation-model — prompts in async argv adapters, prints in renders).
+  "work:init",
+  "work:update",
+  "work:find",
+  "work:observe",
+  "work:use-headroom",
+  "work:unuse-headroom",
+  "work:ui",
+  "work:orchestrator",
+  "work:delegation",
+  "work:delegation-model",
 ];
 
 // --- fixture builders (mirrors board-api.test.mjs) ---------------------------

@@ -199,6 +199,16 @@ import { findCommand } from "./commands/find.mjs";
 import { observeCommand } from "./commands/observe.mjs";
 import { useHeadroomCommand, unuseHeadroomCommand } from "./commands/headroom.mjs";
 import { workInitCommand, workUpdateCommand } from "./commands/init-update.mjs";
+// m42 wave (d) leg d1 (the CLI-only batch, closing half) — the last
+// prompting/printing faces off parseOptions: the model-config trio
+// (work:orchestrator / work:delegation / work:delegation-model — prompts moved
+// into async argv adapters, prints into collector-fed renders), planning:init
+// (the pm-skills installer over its printing core), and project:init (the
+// top-level `aof init`, interactive selectRuntimes in the async argv — the
+// assets:add precedent — on the one-word route, the migrate:folder precedent).
+import { workOrchestratorCommand, workDelegationCommand, workDelegationModelCommand } from "./commands/orchestrator-delegation.mjs";
+import { planningInitCommand } from "./commands/planning-init.mjs";
+import { projectInitCommand } from "./commands/project-init.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -323,6 +333,12 @@ const COMMANDS = [
   unuseHeadroomCommand,
   workInitCommand,
   workUpdateCommand,
+  // m42 wave (d) leg d1 (the CLI-only batch, closing half) — see the import note.
+  workOrchestratorCommand,
+  workDelegationCommand,
+  workDelegationModelCommand,
+  planningInitCommand,
+  projectInitCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

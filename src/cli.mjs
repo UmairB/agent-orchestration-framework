@@ -1,21 +1,16 @@
-import path from "node:path";
-import { access } from "node:fs/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { relativeDisplayPath } from "./render-plan.mjs";
-import { writeText } from "./fs.mjs";
-import { writeWorkspaceConfig } from "./workspace-writer.mjs";
-import { selectRuntimes } from "./prompt.mjs";
-import { isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { pathToFileURL } from "node:url";
 import { loadWorkspace } from "./work.mjs";
-import { getCommand } from "./command-core.mjs";
-// m42 wave (d) leg d1 — the registry-derived route table + the ONE generic face,
-// and the shared runtime-flag interpretation (one home; the local copies are gone).
+import { getCommand, listCommands } from "./command-core.mjs";
+// m42 wave (d) leg d1 — the registry-derived route table + the ONE generic
+// face. listCommands feeds helpText, whose verb listing is DERIVED from the
+// registry (each routed command's cli.spec.usage) — never a hand-kept text.
 import { resolveRoute, runCommandFace } from "./spine/face.mjs";
-import { hasRuntimeOptions, parseRuntimes } from "./spine/flags.mjs";
-import { updateWork } from "./work-update.mjs";
 import { workMemoryCommand } from "./work-memory.mjs";
-import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
-import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
+// selectOrchestratorModel / showOrchestratorModel / setDelegationCommand /
+// setDelegationModelCommand / showDelegation / updateWork — no longer imported
+// here (m42 wave (d) leg d1, the CLI-only batch closing half): the model-config
+// trio (work:orchestrator / work:delegation / work:delegation-model) is
+// registered in commands/orchestrator-delegation.mjs, riding the route table.
 // serveBoard / serveStdio / the vite dev spawn — no longer imported here (m42
 // wave (d) leg d1, wave-3 tail): the work:ui / graph:serve / assets:ui launch
 // bodies own them in their command modules (the launcher seam).
@@ -37,7 +32,10 @@ import { meshSessionCommand } from "./commands/mesh-session.mjs";
 // imported here (m42 wave (d) leg d1, wave-3 tail): the `aof mesh serve --serve`
 // daemon body moved into commands/mesh-serve.mjs as mesh:serve's cli.launch
 // (the launcher seam).
-import { initPlanning } from "./planning-init.mjs";
+// initPlanning — no longer imported here (m42 wave (d) leg d1, the CLI-only
+// batch closing half): planning:init is registered in commands/planning-init.mjs.
+// selectRuntimes / writeWorkspaceConfig / the workspace guards — likewise
+// retired with the top-level init migration (project:init, commands/project-init.mjs).
 // milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
 // (the dev-only vite re-exec route) + the version string for `aof --version`
 // (ADR-004's "node mode = everything else" — an argv branch of the SAME run()
@@ -78,10 +76,9 @@ export async function run(argv) {
     return;
   }
 
-  if (command === "init") {
-    await initCommand(rest);
-    return;
-  }
+  // `aof init` — MIGRATED (m42 wave (d) leg d1, the CLI-only batch closing
+  // half): project:init carries `cli.route: ["init"]` (the one-word route,
+  // migrate:folder precedent) and dispatches through the route table above.
 
   if (command === "assets") {
     await assetsCommand(rest);
@@ -223,20 +220,10 @@ async function workCommand(args) {
     return;
   }
 
-  if (subcommand === "orchestrator") {
-    await workOrchestratorCommand(rest);
-    return;
-  }
-
-  if (subcommand === "delegation") {
-    await workDelegationCommand(rest);
-    return;
-  }
-
-  if (subcommand === "delegation-model") {
-    await workDelegationModelCommand(rest);
-    return;
-  }
+  // orchestrator / delegation / delegation-model — MIGRATED (m42 wave (d) leg
+  // d1, the CLI-only batch closing half): the model-config trio is registered
+  // in commands/orchestrator-delegation.mjs, riding the route table; the
+  // prompts live in their async argv adapters, the prints in their renders.
 
   throw new Error(`Unknown work command "${subcommand ?? ""}".\n\nExamples:\n  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force] [--with-headroom]\n  aof work update [dir] [--dry-run] [--force]\n  aof work find 04\n  aof work find 04/02\n  aof work find auth --json\n  aof work list\n  aof work list 03\n  aof work list --json\n  aof work doc 04 SPEC\n  aof work tasks 04/02 --json\n  aof work feedback 04/02 --note "spec was thin" --actor qa\n  aof work run-start 19 [--session sess-1] [--brief '{"initiator":"operator"}'] [--json]\n  aof work run-complete 19 --outcome done|failed [--run <runId>] [--reason timeout] [--json]\n  aof work run-status 19 [--json]\n  aof work run-retry 19 [--run <runId>] [--max-attempts 3] [--json]\n  aof work memory recall "pin line endings"\n  aof work validate\n  aof work doctor [scope] [--json] [--strict]\n  aof work next 03-10\n  aof work ui [--port 4180]\n  aof work integrations notion sync-work 17 [--dry-run] [--json]\n  aof work orchestrator [fable|opus] [--show]\n  aof work delegation [on|off] [--model fable|opus] [--gpt-model <id>] [--no-model] [--show]\n  aof work delegation-model [<id>] [--show]\n  aof work use-headroom\n  aof work unuse-headroom\n  aof work insert-milestone "widget-support" --at 2 [--yes] [--json]\n  aof work insert-uat "release-gate" --at 1 [--depends 0,2] [--yes] [--json]\n  aof work insert-story "auth-guard" --at 1 --under 5 [--yes] [--json]\n  aof work insert-chore "tidy-config" --at 2 [--yes] [--json]\n  aof work promote-gap "warnings_delivered field" --discharge "a production path writes warnings_delivered" [--status open] [--at 2] [--yes] [--json]\n  aof work upgrade [--dry-run] [--json]`);
 }
@@ -264,14 +251,16 @@ async function graphCommand(args) {
 // arrive with 01/02). The unknown-sub ladder mirrors graphCommand's
 // console.error(usage) + process.exitCode = 1, and the --json single-structured
 // envelope discipline (08/ADR-003): exactly ONE { ok:false, error, code } document on
-// stdout naming the rejected sub. With zero verbs today, EVERY sub (including "" and a
-// whitespace token) is unknown — the parseOptions positional carries "" / "   " as
-// options._[0] distinct from `undefined` (no sub), so the matrix is distinguishable.
+// stdout naming the rejected sub. EVERY unrouted sub (including "" and a whitespace
+// token) is unknown — the first non-flag token carries "" / "   " distinct from
+// `undefined` (no sub), so the matrix is distinguishable. The token scan replaced
+// parseOptions with its retirement (m42 wave (d) leg d1, closing half) — the
+// repo/desktop shims below already used this idiom.
 const MESH_USAGE = `aof mesh — the mesh node face (routing only; verbs arrive with later stories).\n\nUsage:\n  aof mesh            show this usage\n  aof mesh --json     the usage envelope as JSON`;
 
 async function meshCommand(args) {
-  const options = parseOptions(args);
-  const sub = options._[0];
+  const sub = args.find((token) => typeof token === "string" && !token.startsWith("--"));
+  const asJson = args.some((token) => token === "--json" || (typeof token === "string" && token.startsWith("--json=")));
 
   // identity / status / heartbeat / relay / invite / join / revoke / logs /
   // terminal-resume — MIGRATED (m42 wave (d) leg d1, wave 3); assign /
@@ -325,7 +314,7 @@ async function meshCommand(args) {
 
   // No sub: render the usage and exit 0 (recognised, not an error).
   if (sub === undefined) {
-    if (options.json) {
+    if (asJson) {
       console.log(JSON.stringify({ ok: true, usage: MESH_USAGE.split("\n") }, null, 2));
       return;
     }
@@ -333,9 +322,10 @@ async function meshCommand(args) {
     return;
   }
 
-  // Any sub present (story 00 has ZERO verbs, so every sub — including "" and "   " —
-  // is unknown): reject with ONE envelope naming the rejected sub, non-zero exit.
-  if (options.json) {
+  // Any sub present (every routed verb dispatched before this ladder, so any
+  // sub that reaches here — including "" and "   " — is unknown): reject with
+  // ONE envelope naming the rejected sub, non-zero exit.
+  if (asJson) {
     console.log(JSON.stringify({ ok: false, error: `Unknown mesh sub-command "${sub}".`, code: "unknown-subcommand" }, null, 2));
     process.exitCode = 1;
     return;
@@ -439,116 +429,13 @@ async function notionIntegrationCommand(args) {
 // meshDesktopCommand — RETIRED (same change): mesh:desktop-install /
 // mesh:desktop-run are registered three-word routes (commands/mesh-desktop.mjs);
 // only the no-verb/unknown-verb shim remains in meshCommand.
-// `aof work orchestrator [model] [dir] [--show]` — set the model the main ACD
-// (orchestrating) session runs on. Config-only read-merge-write of
-// settings.claude.model in .aof/aof.config.json (never the lock); the render engine
-// projects it into .claude/settings.json. With no model arg it prompts Fable 5 vs
-// Opus 4.8; `--show` reports the current value without mutating.
-async function workOrchestratorCommand(args) {
-  const options = parseOptions(args);
-  const positionals = options._ ?? [];
-  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
 
-  if (options.show) {
-    await showOrchestratorModel({ targetDir });
-    return;
-  }
-
-  const model = options.model ?? positionals[0];
-  await selectOrchestratorModel({ targetDir, model });
-}
-
-// `aof work delegation [on|off] [dir] [--model fable|opus] [--no-model] [--show]` —
-// flip whether gpt-5.6 (via Codex) is in play, then pick the orchestrator model.
-// Writes work.agents.delegation (never the lock) and re-renders so the codex-*
-// skills follow the toggle: off ⇒ disable-model-invocation present (won't auto-fire),
-// on ⇒ dropped (auto-invocable). Default off ≡ Claude-only. After setting the toggle
-// it prompts Fable 5 vs Opus 4.8 (skip with --no-model).
-async function workDelegationCommand(args) {
-  const options = parseOptions(args);
-  const positionals = options._ ?? [];
-  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
-  const gptModel = options.gptModel;
-
-  if (options.show || (positionals.length === 0 && options.state === undefined && gptModel === undefined)) {
-    await showDelegation({ targetDir });
-    return;
-  }
-
-  // The on/off toggle is optional here — `--gpt-model <id>` alone sets only the Codex
-  // delegation model (the convenience twin of `aof work delegation-model`). When a
-  // state IS given, flip it first, then apply any model change, then re-render once.
-  const state = options.state ?? positionals[0];
-  if (state !== undefined) {
-    await setDelegationCommand({ targetDir, state });
-  }
-  if (gptModel !== undefined) {
-    await setDelegationModelCommand({ targetDir, model: gptModel });
-  }
-
-  // Re-render so the changes take effect on the installed codex-* skills — the toggle
-  // drives their `disable-model-invocation` (off ⇒ present/blocked, on ⇒ dropped/auto-
-  // invocable) and the model is baked into every `{{delegationModel}}` recipe. Uses the
-  // SAME update path (force re-render), which also keeps the lock consistent. If the
-  // project isn't init'd yet, the config is written and `aof work init` will honour it.
-  const update = await updateWork({ targetDir, force: true });
-  if (update.notInitialized) {
-    console.log("Config written. This project isn't ACD-initialised yet — run `aof work init` and it will be applied.");
-  } else {
-    console.log("Re-rendered the codex-* skills to match the config. Reload your Claude Code session so it picks up the change.");
-  }
-
-  // A model-only invocation (`--gpt-model` with no on/off) is done — don't touch the
-  // orchestrator model.
-  if (state === undefined) {
-    return;
-  }
-
-  // After flipping delegation, also pick the orchestrator (main-session) model —
-  // Fable 5 or Opus 4.8 — so the two model decisions are made together. `--no-model`
-  // skips it; `--model fable|opus` sets it without a prompt; otherwise prompt when
-  // interactive (or the AOF_ORCHESTRATOR_INPUT test seam is set), and on a
-  // non-interactive run with no --model just print a hint rather than hang.
-  if (options.noModel) {
-    console.log("Orchestrator model left unchanged. Set it anytime with `aof work orchestrator fable|opus`.");
-    return;
-  }
-  const model = options.model;
-  const canPrompt = process.stdin.isTTY || process.env.AOF_ORCHESTRATOR_INPUT !== undefined;
-  if (model !== undefined || canPrompt) {
-    await selectOrchestratorModel({ targetDir, model });
-  } else {
-    console.log("Orchestrator model left unchanged. Choose one with `aof work orchestrator fable|opus`, or re-run with `--model fable|opus`.");
-  }
-}
-
-// `aof work delegation-model [<id>] [dir] [--show]` — get or set the Codex delegation
-// model (config-only; never the lock), the moving variable the codex-* skills and ACD
-// agents target. No id (or --show) reports the current model; an id writes
-// work.agents.delegationModel and re-renders so the baked `{{delegationModel}}` recipes
-// pick up the new model. Distinct from `--model fable|opus` (the orchestrator/Claude side).
-async function workDelegationModelCommand(args) {
-  const options = parseOptions(args);
-  const positionals = options._ ?? [];
-  const targetDir = path.resolve(options.dir ?? options.target ?? (positionals.length > 1 ? positionals[1] : process.cwd()));
-
-  if (options.show || positionals.length === 0) {
-    await showDelegation({ targetDir });
-    return;
-  }
-
-  await setDelegationModelCommand({ targetDir, model: positionals[0] });
-
-  // Re-render so the new model is baked into the installed codex-* skills and agents
-  // (the `{{delegationModel}}` substitution runs on the same force-update path the toggle
-  // uses). If the project isn't init'd yet, the config is written and init will honour it.
-  const update = await updateWork({ targetDir, force: true });
-  if (update.notInitialized) {
-    console.log("Config written. This project isn't ACD-initialised yet — run `aof work init` and the model will be applied.");
-  } else {
-    console.log("Re-rendered the codex-* skills to target the new model. Reload your Claude Code session so it picks up the change.");
-  }
-}
+// workOrchestratorCommand / workDelegationCommand / workDelegationModelCommand —
+// RETIRED (m42 wave (d) leg d1, the CLI-only batch closing half): the
+// model-config trio is registered in commands/orchestrator-delegation.mjs on
+// the route table. The prompts (the orchestrator-model picker, its
+// AOF_ORCHESTRATOR_INPUT seam intact) moved into the async argv adapters; the
+// prints into collector-fed renders; a bad --model is refused pre-write.
 
 // workUseHeadroomCommand / workUnuseHeadroomCommand — RETIRED (m42 wave (d)
 // leg d1, wave-3 tail): work:use-headroom / work:unuse-headroom are registered
@@ -571,91 +458,15 @@ async function workMemoryCommandCli(args) {
   await workMemoryCommand(args, { loadWorkspace });
 }
 
+// `aof planning <sub>` — `init` MIGRATED (m42 wave (d) leg d1, the CLI-only
+// batch closing half): planning:init is a registered Command
+// (commands/planning-init.mjs) on the route table; the printing core's log is
+// a collector there, and the refusal message now ends the stdout document (the
+// packages:install normalisation precedent). Only an unknown subcommand ever
+// reaches this shim.
 async function planningCommand(args) {
-  const [subcommand, ...rest] = args;
-
-  if (subcommand === "init") {
-    await planningInitCommand(rest);
-    return;
-  }
-
+  const [subcommand] = args;
   throw new Error(`Unknown planning command "${subcommand ?? ""}".\n\nExamples:\n  aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--scope user|project|local] [--force]`);
-}
-
-async function planningInitCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options._[0] ?? process.cwd());
-  const runtime = options.runtime ?? "claude";
-
-  if (!["claude", "codex"].includes(runtime)) {
-    throw new Error(`Unsupported runtime "${runtime}". Expected one of: claude, codex.`);
-  }
-
-  // ADR-010: declarations default to project scope (the repo's .claude/settings.json)
-  // so the planner travels with the repo, not the user's global settings.
-  const scope = options.scope ?? "project";
-  if (!["user", "project", "local"].includes(scope)) {
-    throw new Error(`Unsupported scope "${scope}". Expected one of: user, project, local.`);
-  }
-
-  const result = await initPlanning({
-    targetDir,
-    runtime,
-    scope,
-    dryRun: Boolean(options.dryRun),
-    force: Boolean(options.force),
-    withOptional: Boolean(options.withOptional),
-    // In --json mode, suppress the human boundary/warning/codex lines so stdout is
-    // pure JSON (the plan/codex/manualFallback are carried in the JSON payload).
-    log: options.json ? () => {} : undefined
-  });
-
-  // Guarded refusal (ADR-006), sha rejection (ADR-002), and a failed runtime step
-  // (the honesty gate) all map to a non-zero exit, mirroring the work-init guard.
-  if (result.guarded || result.shaRejected || result.installFailed) {
-    if (options.json) {
-      printJson({
-        guarded: Boolean(result.guarded),
-        shaRejected: Boolean(result.shaRejected),
-        installFailed: Boolean(result.installFailed),
-        manifest: relativeDisplayPath(result.manifestPath, targetDir),
-        message: result.message
-      });
-    } else {
-      console.error(result.message);
-    }
-    process.exitCode = 1;
-    return;
-  }
-
-  if (options.json) {
-    printJson({
-      targetDir: path.relative(process.cwd(), targetDir) || ".",
-      runtime: result.runtime,
-      dryRun: result.dryRun,
-      sha: result.sha,
-      plan: result.planCommands,
-      codex: result.codex,
-      manualFallback: result.manualFallback,
-      manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, targetDir) : null,
-      plugins: result.manifest?.plugins ?? null
-    });
-    return;
-  }
-
-  if (result.dryRun) {
-    // The plan/codex preview lines were already printed by initPlanning via the
-    // console.log default. Nothing more to print for a dry-run.
-    return;
-  }
-
-  console.log(`Pinned the pm-skills marketplace at ${result.sha} for ${result.runtime}.`);
-  if (result.runtime === "claude") {
-    console.log(`Installed ${result.manifest.plugins.length} planner plugin(s): ${result.manifest.plugins.map((entry) => entry.name).join(", ")}.`);
-  } else {
-    console.log("Codex: marketplace registered; plugins NOT installed (see the manual fallback above).");
-  }
-  console.log(`Manifest: ${relativeDisplayPath(result.manifestPath, targetDir)}`);
 }
 
 // workFindCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail): work:find is a
@@ -676,57 +487,13 @@ async function planningInitCommand(args) {
 // document (previously nothing — the one-document discipline).
 
 
-async function initCommand(args) {
-  const options = parseOptions(args);
-  const targetDir = path.resolve(options.target ?? options._[0] ?? process.cwd());
-  const paths = workspacePaths(targetDir);
-
-  if (!options.force && await exists(paths.configPath)) {
-    throw new Error(`Config already exists at ${paths.configPath}. Re-run with --force to replace it.`);
-  }
-
-  if (!options.force && await isLegacyConfigOnlyProject(targetDir)) {
-    throw new Error(`Legacy config already exists at ${legacyConfigPath(targetDir)}. Run aof project migrate to create .aof/ explicitly.`);
-  }
-
-  if (options.items || options.defaults || options.select) {
-    throw new Error("Catalog-backed init items are not available yet. Use `aof assets add ...` for project assets or `aof assets add --global ...` for reusable global assets.");
-  }
-
-  const runtimes = hasRuntimeOptions(options) ? parseRuntimes(options) : await selectRuntimes();
-  const config = {
-    name: path.basename(targetDir),
-    resources: [],
-    globalRefs: [],
-    packages: []
-  };
-
-  if (options.dryRun) {
-    console.log(`write: ${paths.configPath}`);
-    console.log(`write: ${paths.lockPath}`);
-    console.log("dry-run: no files written");
-    return;
-  }
-
-  await writeWorkspaceConfig(targetDir, {
-    ...config,
-    $schema: "https://aof.local/schemas/aof.schema.json",
-    runtimes
-  });
-  await writeInstallLock(targetDir, [], runtimes, null);
-  console.log(`Created ${paths.configPath}`);
-  await guideAfterInit(targetDir, runtimes, options);
-}
-
-async function guideAfterInit(targetDir, runtimes, options) {
-  console.log("Next steps:");
-  console.log("- Add project assets with `aof assets add skill`.");
-  console.log("- Add reusable global assets with `aof assets add --global skill`.");
-  console.log("- Add managed packages with `aof packages add gsd`.");
-  console.log("- Validate this project with `aof project validate`.");
-  console.log("- Render outputs with `aof assets apply --dry-run` then `aof assets apply`.");
-  console.log("- Edit assets in the setup UI with `aof assets ui`.");
-}
+// initCommand / guideAfterInit / writeInstallLock — RETIRED (m42 wave (d) leg
+// d1, the CLI-only batch closing half): `aof init` is the registered
+// project:init command (commands/project-init.mjs) on the one-word route. The
+// interactive selectRuntimes completion lives in its async argv adapter (the
+// assets:add precedent); the guards throw CODED refusals from run() with the
+// retired messages; the lock seed moved with it (still wholesale — the d4
+// writeLock read-merge item is untouched).
 
 // assetsListCommand — RETIRED (m42 wave (d) leg d1): now the registered
 // assets:list command (src/commands/assets-list.mjs), routed through the
@@ -764,55 +531,16 @@ async function guideAfterInit(targetDir, runtimes, options) {
 // leg d1): the machinery lives in src/commands/packages-install.mjs.
 
 // packageSummaries — moved to src/packages.mjs (m42 wave (d) leg d1: command
-// logic leaves the face file); imported above for the remaining inline users.
-// interactiveInstallCommand — DELETED with the packages:install migration
-// (dead code: zero callers).
+// logic leaves the face file). interactiveInstallCommand — DELETED with the
+// packages:install migration (dead code: zero callers).
 
-async function writeInstallLock(targetDir, items, runtimes, dbPath) {
-  const lockPath = workspacePaths(targetDir).lockPath;
-  const lock = {
-    version: 1,
-    generatedAt: new Date().toISOString(),
-    catalog: dbPath,
-    runtimes,
-    items: items.map((item) => ({
-      id: item.id,
-      kind: item.kind,
-      source: item.source,
-      runtimes: item.runtimes
-    }))
-  };
-
-  await writeText(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
-}
-
-function parseOptions(args) {
-  const options = { _: [] };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!arg.startsWith("--")) {
-      options._.push(arg);
-      continue;
-    }
-
-    const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
-    const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-
-    if (["claude", "codex", "global", "local", "dryRun", "force", "select", "interactive", "noGuide", "noServe", "defaults", "json", "fromLock", "strict", "install", "verbose", "archived", "withOptional", "withHeadroom", "uninstall", "withdraw", "serve", "yes", "changelog", "write", "ifEnabled", "show", "noModel"].includes(key)) {
-      options[key] = true;
-      continue;
-    }
-
-    options[key] = inlineValue ?? args[++index];
-  }
-
-  return options;
-}
-
-function printJson(value) {
-  console.log(JSON.stringify(value, null, 2));
-}
+// parseOptions + its global boolean allow-list, printJson — DELETED (m42 wave
+// (d) leg d1, the CLI-only batch closing half — the d1 end-state): every
+// registered verb's flag vocabulary is its OWN cli.spec, parsed by
+// parseSpecArgv in the one generic face; the last callers (init / planning
+// init / the model-config trio / meshCommand's usage scan) migrated or moved
+// to the shims' token-scan idiom. A typo'd flag can no longer silently become
+// a stringly option anywhere in the CLI.
 
 function removedCommandError(command) {
   if (command === "catalog") {
@@ -833,61 +561,59 @@ function removedCommandError(command) {
   return new Error(`Removed command "${command}".\n\nAOF now uses namespaced commands:\n${replacements[command].map((item) => `  ${item}`).join("\n")}`);
 }
 
-async function exists(filePath) {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
+// helpText — REGISTRY-DERIVED (m42 wave (d) leg d1, the d1 end-state): the
+// verb listing is each routed command's own cli.spec.usage, grouped by route
+// family — never a hand-kept text that drifts from the real vocabulary. The
+// one-word routes (init, migrate) open the Usage block; the static tail names
+// the deliberately-unrouted doors (work memory, session) and the standing
+// defaults prose.
+const HELP_FAMILY_TITLES = Object.freeze({
+  usage: "Usage",
+  project: "Project",
+  assets: "Assets",
+  packages: "Packages",
+  work: "Work (ACD work stream)",
+  planning: "Planning",
+  graph: "Graph",
+  mesh: "Mesh",
+  import: "Import",
+});
+const HELP_FAMILY_ORDER = ["usage", "project", "assets", "packages", "work", "planning", "graph", "mesh", "import"];
+const HELP_USAGE_WORD_ORDER = ["init", "migrate"];
 
 function helpText() {
+  const families = new Map();
+  for (const command of listCommands()) {
+    const route = command.cli?.route;
+    if (!Array.isArray(route) || route.length === 0) continue;
+    const family = route.length === 1 ? "usage" : route[0];
+    const entries = families.get(family) ?? [];
+    entries.push({ word: route[0], usage: command.cli.spec?.usage ?? `aof ${route.join(" ")}` });
+    families.set(family, entries);
+  }
+  const usageRank = (word) => {
+    const index = HELP_USAGE_WORD_ORDER.indexOf(word);
+    return index === -1 ? HELP_USAGE_WORD_ORDER.length : index;
+  };
+  families.get("usage")?.sort((a, b) => usageRank(a.word) - usageRank(b.word));
+
+  const sections = [];
+  for (const family of [...HELP_FAMILY_ORDER, ...families.keys()]) {
+    const entries = families.get(family);
+    if (!entries) continue;
+    families.delete(family);
+    const title = HELP_FAMILY_TITLES[family] ?? `${family[0].toUpperCase()}${family.slice(1)}`;
+    sections.push(`${title}:\n${entries.map((entry) => `  ${entry.usage}`).join("\n")}`);
+  }
+
   return `aof - Agent Orchestration Framework
 
-Usage:
-  aof init [dir] [--claude] [--codex] [--runtime claude,codex] [--force] [--dry-run]
+${sections.join("\n\n")}
 
-Project:
-  aof project show [--json]
-  aof project validate [--json] [--strict]
-  aof project doctor [--json] [--strict]
-  aof project migrate [dir] [--force] [--dry-run]
-
-Assets:
-  aof assets add skill|command|rule|agent [id] [--runtime claude,codex] [--description text] [--force]
-  aof assets add --global skill|rule|agent [id] [--runtime claude,codex] [--description text] [--force]
-  aof assets list [--global] [--json]
-  aof assets show [--global] kind id [--json]
-  aof assets remove kind id [--dry-run]
-  aof assets use --global kind id
-  aof assets unuse --global kind id
-  aof assets apply [--config aof.config.json] [--target dir] [--claude] [--codex] [--dry-run] [--force] [--strict]
-  aof assets validate [--global] [--json] [--strict]
-  aof assets clean [--dry-run] [--force]
-  aof assets ui [--port 4177] [--api-port 4178]
-
-Packages:
-  aof packages add gsd [--claude] [--codex] [--runtime claude,codex] [--source source]
-  aof packages list [--json]
-  aof packages show gsd [--json]
-  aof packages remove gsd [--dry-run]
-  aof packages validate [--json] [--strict]
-  aof packages install [gsd] [--claude] [--codex] [--global] [--dry-run] [--force] [--json]
-  aof packages install --from-lock [--dry-run] [--json]
-
-Work (ACD work stream):
-  aof work init [dir] [--dry-run] [--runtime claude,codex] [--force]   render the ACD bundle into a repo
-  aof work update [dir] [--dry-run] [--force]   re-render the bundle, drift-checked against the install manifest
-  aof work find <ref | query> [--json]   resolve a milestone (04), story (04/02), or slug (auth)
-  aof work list [scope] [--json]         the whole stream (or a subtree); --json emits the flat-array board contract
+Also:
   aof work memory <verb> [args] [--json]   recall/brief/ingest/reindex/status via the configured backend
-  aof work validate [ref] [--json]       folder↔frontmatter, tag vocabulary, depends graph
-  aof work next [range] [--json]         next actionable item in dependency order (drives autonomous)
-  aof work ui [--port]                   serve the BUILT board (ui/dist) same-origin (api + terminal ws + static, one origin)
-  aof migrate <folder> [--dry-run] [--json]   convert an existing folder INTO a managed milestone under work.dir (the import contrast)
-  aof upgrade [--dry-run] [--changelog] [--json]   advance the work stream's OWN items to this build's schema (bare = apply, --dry-run = preview only, --changelog emits the generated upgrade changelog)
-  aof planning init [dir] [--dry-run] [--with-optional] [--runtime claude|codex] [--force]   install the bought planner (pm-skills), record pinned-sha provenance
+  aof session start|ping|end               assistant-session presence (fired from editor hooks)
+  aof --version                            version + runtime-mode/build provenance
 
 Defaults:
   init creates an empty project .aof workspace for the selected coding assistants.
@@ -902,8 +628,8 @@ Defaults:
 
 // formatFriendlyApplyAction / successMarker / relativeDisplayPath — moved to
 // src/render-plan.mjs with the assets:apply migration (m42 wave (d) leg d1);
-// imported above for the remaining inline work-init/work-update/planning-init
-// faces. printAdapterWarnings / strictAdapterWarningsFailed — RETIRED (the
+// the command modules import them directly (nothing in this face file needs
+// them). printAdapterWarnings / strictAdapterWarningsFailed — RETIRED (the
 // adapter-warnings block renders via validate-shared adapterWarningLines;
 // strictness is command data behind cli.exit).
 

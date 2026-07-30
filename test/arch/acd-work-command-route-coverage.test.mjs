@@ -91,6 +91,13 @@ const BOARD_DEFERRED = new Set([
   // asked for.
   "init",
   "update",
+  // m42 wave (d) leg d1 (the CLI-only batch, closing half) — the model-config
+  // trio (the aof:delegate skill's surface): operator CLI decisions over
+  // .aof/aof.config.json (interactive pickers in their argv adapters); no
+  // board affordance asked for.
+  "orchestrator",
+  "delegation",
+  "delegation-model",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

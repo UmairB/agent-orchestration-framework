@@ -104,7 +104,10 @@ export function resolveOrchestratorModel(requested) {
 
 // Interactive picker. Test seam: AOF_ORCHESTRATOR_INPUT short-circuits the TTY
 // prompt (mirrors prompt.mjs's AOF_TEST_* stubs) so the flow is exercised in CI.
-async function promptOrchestratorModel() {
+// EXPORTED for the work:orchestrator / work:delegation cli.argv adapters (m42
+// wave (d) leg d1): prompting is a FACE concern — the argv adapter completes a
+// missing model interactively, so run() stays headless for every other face.
+export async function promptOrchestratorModel() {
   if (process.env.AOF_ORCHESTRATOR_INPUT !== undefined) {
     const resolved = resolveOrchestratorModel(process.env.AOF_ORCHESTRATOR_INPUT);
     if (!resolved) {

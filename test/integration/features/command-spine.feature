@@ -132,6 +132,50 @@ Feature: Command spine — one route table, one face, one envelope
     Then the command should succeed
     And the JSON result field "tool" should be "graphify"
 
+  Scenario: the model-config trio rides the route table with --show as the read probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work delegation --show --json`
+    Then the command should succeed
+    And the JSON result field "state" should be "off"
+    And the JSON result field "model" should be "gpt-5.6-sol"
+    When I run `work delegation --show`
+    Then the command should succeed
+    And stdout should contain `Codex delegation: off (default)`
+    When I run `work orchestrator --show --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "show"
+    When I run `work delegation-model --show --json`
+    Then the command should succeed
+    And the JSON result field "model" should be "gpt-5.6-sol"
+
+  Scenario: a bad orchestrator model is refused in the face, before any write
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work orchestrator sonnet --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
+  Scenario: planning init previews through the route table with one json document
+    Given a work stream with milestone "03" titled "Board"
+    When I run `planning init --dry-run --json`
+    Then the command should succeed
+    And the JSON result field "dryRun" should be true
+    And the JSON result field "sha" should be "<sha>"
+    When I run `planning init --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: the following runtime commands would be run (nothing run, nothing written):`
+
+  Scenario: top-level init rides the one-word route — coded guard, dry-run plan
+    Given a work stream with milestone "03" titled "Board"
+    When I run `init --claude --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "config-exists"
+    When I run `init --claude --force --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: no files written`
+    When I run `init --items x --claude`
+    Then the command should fail
+    And stderr should contain `Catalog-backed init items are not available yet`
+
   Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
     Given a work stream with milestone "03" titled "Board"
     When I run `work doctor --json`

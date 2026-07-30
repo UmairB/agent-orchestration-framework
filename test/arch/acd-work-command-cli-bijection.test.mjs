@@ -162,6 +162,13 @@ function argsFor(sub) {
     case "observe": return ["work", "observe", "03", "--json"];
     case "use-headroom": return ["work", "use-headroom", "--json"];
     case "unuse-headroom": return ["work", "unuse-headroom", "--json"];
+    // m42 wave (d) leg d1 (the CLI-only batch, closing half) — the model-config
+    // trio probes with --show: the read face (config-only, mutates nothing on
+    // the fixture) — the set faces would prompt (orchestrator/delegation) or
+    // write config, neither of which belongs in a spawn probe.
+    case "orchestrator": return ["work", "orchestrator", "--show", "--json"];
+    case "delegation": return ["work", "delegation", "--show", "--json"];
+    case "delegation-model": return ["work", "delegation-model", "--show", "--json"];
     case "list": return ["work", "list", "--json"];
     case "doc": return ["work", "doc", "03", "SPEC", "--json"];
     case "tasks": return ["work", "tasks", "03/01", "--json"];
