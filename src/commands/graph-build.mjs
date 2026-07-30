@@ -129,7 +129,7 @@ export const graphBuildCommand = {
       nodeCount: normalized.nodes.length,
       edgeCount: normalized.edges.length,
       hyperedgeCount: normalized.hyperedges.length,
-      builtAt: new Date().toISOString(),
+      builtAt: built.builtAt,
       backend,
       egress,
       stdout: built.stdout,

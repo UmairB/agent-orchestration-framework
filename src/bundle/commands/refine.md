@@ -68,7 +68,7 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
 
      **Ground boundaries in the codebase graph first.** Run unconditionally (a silent no-op when graphify
      is absent — mirrors the memory-recall hook above): **before** drawing any story boundary, build the
-     codebase graph fresh — `aof graph build src` (the repo source root, where call/dependency coupling
+     codebase graph fresh — `aof graph build .` (the project root, where call/dependency coupling
      lives; read back the `builtAt`/`egress`/counts the `BuildResult` returns so freshness is visible) —
      then run `aof graph impact <the candidate modules / files at each boundary>` to get the **exact**
      dependents + dependencies of each from the graph's edges (deterministic — not the fuzzy
@@ -77,7 +77,8 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      reports — a boundary that cuts a file away from the modules that import it is a bad cut — and **cite
      the graph-derived coupling** in the breakdown rationale / `ARCHITECTURE.md`. **Advisory only:** YOU
      draw the partition using your own judgment — the graph informs it, never auto-rewrites it; no graph
-     output feeds a gate or work-mutation. If
+     output feeds a gate or work-mutation. Graphify extraction replaces the single project graph; never
+     target a package or `src` subtree, because doing so evicts every file outside that subtree. If
      `aof graph build` returns the structured `graphify-missing` miss, note the graph is unavailable and
      draw boundaries from reading the source exactly as before — no block, no crash, no noise.
 

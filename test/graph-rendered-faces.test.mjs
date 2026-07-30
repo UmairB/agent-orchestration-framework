@@ -158,6 +158,8 @@ export const graphRenderedFacesTests = [
           const body = await readFile(filePath, "utf8");
           assert.match(body, /aof-generated: true/, `${runtime}: rendered skill carries the aof stamp`);
           assert.match(body, /aof graph build/, `${runtime}: rendered skill names aof graph build`);
+          assert.match(body, /aof graph build \./, `${runtime}: rendered skill builds the whole project root`);
+          assert.match(body, /replaces|evicts/, `${runtime}: rendered skill warns that subset builds replace the graph`);
         }
 
         // And the rendered output objects exist for both runtimes (the render seam).

@@ -4,7 +4,7 @@
 //  (`aof graph build/query/triage`) / the aof MCP face (graph_query/graph_triage) /
 //  the pure readGraph reads. 11 adds NO new graphify spawn site and NO new
 //  graph-reaching module — it is PURE PROMPT-WIRING (inherits 09/ADR-005 inv. 2,
-//  acd-graph-no-face-spawn). Scope = the codebase (`aof graph build src`), distinct
+//  acd-graph-no-face-spawn). Scope = the codebase (`aof graph build .`), distinct
 //  from 10's work-stream scope."
 //
 // This EXTENDS the 09 acd-graph-no-face-spawn idiom for 11. Two halves:
@@ -197,12 +197,14 @@ export const archTests = [
       const codeReview = await readFile(SEAMS.codeReview, "utf8");
 
       // Every seam builds via `aof graph build` (the codebase-scope command — ADR-005:
-      // scope = the codebase, `aof graph build src`).
+      // scope = the codebase, `aof graph build .`).
       for (const [label, text] of [["aof-architect", architect], ["refine (break-down)", refine], ["code-review (PR triage)", codeReview]]) {
         assert.match(text, /aof graph build\b/, `${label} invokes the registered \`aof graph build\` command`);
-        // Codebase scope (ADR-005): the build target is the codebase (`src`), not the
+        // Codebase scope (ADR-005): the build target is the whole project (`.`), not the
         // work stream — distinguishes 11 from 10.
-        assert.match(text, /aof graph build\s+src\b/, `${label} builds the CODEBASE scope (\`aof graph build src\`), not the work stream`);
+        // Mutation proof: changing this back to a package or `src` subtree goes red.
+        assert.match(text, /aof graph build\s+\.(?:`|\s)/, `${label} builds the WHOLE PROJECT (\`aof graph build .\`)`);
+        assert.match(text, /replac\w+|evict\w+/, `${label} warns that subset builds replace the graph`);
       }
       // ADR-007: every coupling/impact consumer now invokes the DETERMINISTIC
       // `aof graph impact` (exact edge-based dependents + dependencies) as its primary

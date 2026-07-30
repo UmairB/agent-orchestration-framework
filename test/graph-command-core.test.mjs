@@ -15,6 +15,7 @@
 //        @executable rows; the query/triage SUCCESS rows are @manual)
 import assert from "node:assert/strict";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
+import { statSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ import {
   normalizeGraph,
   graphifyBuildArgs,
   graphifySpawnOptions,
+  runGraphifyBuild,
   GRAPHIFY_TIMEOUT_ENV,
   DEFAULT_GRAPHIFY_TIMEOUT_MS,
 } from "../src/graphify.mjs";
@@ -296,6 +298,99 @@ export const graphCommandCoreTests = [
         projectRoot,
         "--out still pins the projectRoot when a backend is set"
       );
+    },
+  },
+
+  {
+    name: "graph-core/00 a non-zero graphify build fails loudly instead of reading the stale graph",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
+
+        // Mutation proof: removing the status guard makes this return a successful
+        // stale BuildResult; this assertion then goes red.
+        const error = await assertRejectsWithCode(
+          () => runGraphifyBuild(
+            { path: "apps/portal/src" },
+            {
+              projectRoot: repo,
+              resolveBinary: () => ({ found: true, path: "graphify-test" }),
+              spawn: () => ({
+                status: 1,
+                stdout: "[graphify extract] scanned 412 code, 9 docs",
+                stderr: "error: no LLM API key found",
+              }),
+            }
+          ),
+          "graphify-build-failed"
+        );
+        assert.match(error.message, /no LLM API key found/, "the child stderr explains why no graph was written");
+        assert.match(await readFile(graphPath, "utf8"), /stale/, "the stale artifact remains identifiable as stale");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "graph-core/00 a zero exit that persists nothing fails loudly",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
+
+        // Mutation proof: removing the before/after artifact guard makes this
+        // unchanged graph report success; this assertion then goes red.
+        await assertRejectsWithCode(
+          () => runGraphifyBuild(
+            { path: "apps/portal/src" },
+            {
+              projectRoot: repo,
+              resolveBinary: () => ({ found: true, path: "graphify-test" }),
+              spawn: () => ({ status: 0, stdout: "scan complete", stderr: "" }),
+            }
+          ),
+          "graphify-no-persist"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "graph-core/00 a persisted build reports builtAt from the artifact mtime",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      const artifactTime = new Date("2024-02-03T04:05:06.000Z");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
+
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => {
+              writeFileSync(graphPath, '{"nodes":[{"id":"fresh"},{"id":"second"}],"links":[]}\n', "utf8");
+              utimesSync(graphPath, artifactTime, artifactTime);
+              return { status: 0, stdout: "wrote graph.json", stderr: "" };
+            },
+          }
+        );
+
+        // Mutation proof: replacing the artifact mtime with the call-time clock
+        // makes this exact historical timestamp assertion fail.
+        assert.equal(result.builtAt, artifactTime.toISOString());
+        assert.equal(result.builtAt, statSync(graphPath).mtime.toISOString());
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
     },
   },
 

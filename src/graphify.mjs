@@ -33,6 +33,7 @@
 // tests are behaviour-preserved (they still import them from here). The spawn
 // helpers need the live binary, so they are exercised only by @manual scenarios.
 import { spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { resolveManagedBinary } from "./tool-store.mjs";
 // The PURE normalizer (extracted 10/01) — re-exported below so existing 09
 // importers (`src/commands/graph-*.mjs`, the 09 tests) keep importing from here.
@@ -188,27 +189,69 @@ function throwOnSpawnError(result, options) {
 // only, zero egress (privacy boundary, ADR-005). The spawn is BOUNDED (timeout +
 // ignored stdin, see graphifySpawnOptions) so a blocking extraction can't hang aof —
 // an overrun throws graphify-timeout, which the memory reindex catches and skips soft.
-export function runGraphifyBuild(input, { projectRoot }) {
-  const resolved = resolveGraphifyBinary();
+export function runGraphifyBuild(
+  input,
+  { projectRoot, resolveBinary = resolveGraphifyBinary, spawn = spawnSync }
+) {
+  const resolved = resolveBinary();
   if (!resolved.found) {
     const error = new Error(resolved.hint);
     error.code = "graphify-missing";
     throw error;
   }
+  const graphPath = graphJsonPath(projectRoot);
+  const before = graphArtifactStat(graphPath);
   const args = graphifyBuildArgs(input, projectRoot);
   const options = graphifySpawnOptions({ projectRoot });
-  const result = spawnSync(resolved.path, args, options);
+  const result = spawn(resolved.path, args, options);
   throwOnSpawnError(result, options);
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || "").trim();
+    const error = new Error(
+      `graphify extract exited with status ${result.status}${detail ? `: ${detail}` : "."}`
+    );
+    error.code = "graphify-build-failed";
+    throw error;
+  }
+  const after = graphArtifactStat(graphPath);
+  if (!after || sameGraphArtifact(before, after)) {
+    const error = new Error(
+      `graphify extract exited successfully but did not persist ${graphPath}.`
+    );
+    error.code = "graphify-no-persist";
+    throw error;
+  }
   return {
-    graphPath: graphJsonPath(projectRoot),
+    graphPath,
     stdout: result.stdout ?? "",
     status: result.status,
+    builtAt: after.mtime.toISOString(),
   };
+}
+
+// Snapshot the one artifact before and after extraction; a successful process
+// is not a successful build unless that artifact was actually persisted.
+function graphArtifactStat(graphPath) {
+  try {
+    return statSync(graphPath, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function sameGraphArtifact(before, after) {
+  return before != null
+    && before.size === after.size
+    && before.mtimeNs === after.mtimeNs
+    && before.ctimeNs === after.ctimeNs
+    && before.ino === after.ino;
 }
 
 // graph query — `graphify query "<question>" [--dfs|--bfs] [--budget N]`
 // (RESEARCH §B). cwd = projectRoot (#756). stdout is graphify's human markdown,
 // carried opaque (RESEARCH §C); the structured handle is graphPath.
+// Query reads the artifact written by the build above; it never spawns a build.
 export function runGraphifyQuery(input, { projectRoot }) {
   const resolved = resolveGraphifyBinary();
   if (!resolved.found) {

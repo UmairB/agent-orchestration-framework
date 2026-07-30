@@ -37,12 +37,14 @@ default = the whole branch) and the **`--auto-complete`** flag.
 
    **Surface the PR-impact blast-radius as ranking context (advisory).** Run unconditionally (a silent
    no-op when graphify is absent): when handing the diff to `aof-architect`, first build the codebase graph
-   fresh — `aof graph build src` (the repo source root; read back the `builtAt`/`egress`/counts so
+   fresh — `aof graph build .` (the project root; read back the `builtAt`/`egress`/counts so
    freshness is visible) — then run **`aof graph impact <the files changed in the diff>`**. It returns,
    deterministically, each changed file's **dependents** (`imported/called by ←` — the blast-radius: who
    breaks if this changes) and **dependencies**. Rank the review by that blast-radius — review the changed
    files with the most dependents first. (You MAY also run `aof graph triage` for graphify's own
    PR-impact queue as a secondary, fuzzier signal; `graph impact` on the actual diff is the exact one.)
+   Graphify extraction replaces the single project graph; never target a package or `src` subtree,
+   because doing so evicts every file outside that subtree.
    The agent **READS** the structured impact as advisory context. **Advisory only:** the impact is ranking context for the
    reviewer; it is **never** an auto-block input to the merge — the merge gate (step 6: CI-green +
    no-blocking-finding) is **unchanged**, and any concern the rank raises flows through the normal

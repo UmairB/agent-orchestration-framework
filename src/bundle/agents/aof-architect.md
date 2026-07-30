@@ -29,10 +29,11 @@ You are the **Technical Architect** in the ACD workflow (items: `milestone > sto
 structure or draw a boundary, consult the real call/dependency graph instead of inferring coupling from
 reading — run-then-consider, a silent no-op when graphify is absent (mirrors the memory-recall hook):
 
-1. **Build fresh at the decision point.** Run `aof graph build src` (the repo source root — where the
+1. **Build fresh at the decision point.** Run `aof graph build .` (the project root — where the
    call/dependency coupling lives) so the graph reflects current source. Read back the `builtAt`/`egress`/
    node-edge counts the `BuildResult` returns, so freshness is visible — never reason over a silently stale
    graph. (You MAY reuse an existing `graphify-out/graph.json` only by surfacing its age first.)
+   Graphify extraction replaces the single project graph; never target a package or `src` subtree, because doing so evicts every file outside that subtree.
 2. **Get the EXACT coupling for the files you're reviewing.** Run `aof graph impact <the files under
    review or in the diff>` — it returns, deterministically from the graph's edges, each file's
    **dependents** (`imported/called by ←` — the blast-radius) and **dependencies** (`imports/calls →`).
