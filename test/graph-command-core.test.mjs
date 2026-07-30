@@ -31,7 +31,7 @@ import {
   GRAPHIFY_TIMEOUT_ENV,
   DEFAULT_GRAPHIFY_TIMEOUT_MS,
 } from "../src/graphify.mjs";
-import { classifyEgress, isNetworkBackend } from "../src/commands/graph-build.mjs";
+import { classifyEgress, isNetworkBackend, readBuiltGraph } from "../src/commands/graph-build.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -471,16 +471,15 @@ export const graphCommandCoreTests = [
     },
   },
   {
-    name: "graph-core/00 a zero exit that persists nothing fails loudly",
+    // The CEILING of the no-persist guard, narrowed to what it can honestly claim: a
+    // zero exit that leaves NO artifact at all. There is nothing to read and nothing to
+    // answer over, whatever the process reported.
+    name: "graph-core/00 a zero exit that leaves NO artifact at all fails loudly",
     async run() {
       const { repo } = await makeRepo();
-      const graphPath = path.join(repo, "graphify-out", "graph.json");
       try {
-        await mkdir(path.dirname(graphPath), { recursive: true });
-        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
-
-        // Mutation proof: removing the before/after artifact guard makes this
-        // unchanged graph report success; this assertion then goes red.
+        // Mutation proof: dropping the `!after` guard makes this return a BuildResult
+        // over a graph that does not exist; the rejection assertion then goes red.
         await assertRejectsWithCode(
           () => runGraphifyBuild(
             { path: "apps/portal/src" },
@@ -492,6 +491,114 @@ export const graphCommandCoreTests = [
           ),
           "graphify-no-persist"
         );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The FLOOR the first version of this guard destroyed. graphify rewrites only on a
+    // TOPOLOGY change — a re-run over an unchanged corpus, and equally a run after an
+    // edit that adds no node or edge, exits 0 and leaves the artifact byte-identical
+    // (measured against 0.8.44). Treating that as `graphify-no-persist` meant a second
+    // consecutive build could never succeed on any repo whose graph was current, and
+    // the shipped guidance then told the agent to abandon that current graph.
+    name: "graph-core/00 an untouched artifact after a zero exit is a SUCCESS reporting unchanged, not a failure",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      const artifactTime = new Date("2024-07-08T09:10:11.000Z");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"current"}],"links":[]}\n', "utf8");
+        utimesSync(graphPath, artifactTime, artifactTime);
+
+        // Mutation proof: restoring `|| sameGraphArtifact(before, after)` to the throw
+        // makes this call reject, and every assertion below goes red.
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => ({
+              status: 0,
+              stdout: "[graphify watch] No code-graph topology changes detected; outputs left untouched.",
+              stderr: "",
+            }),
+          }
+        );
+
+        assert.equal(result.unchanged, true, "the untouched artifact is reported as unchanged");
+        assert.equal(result.graphPath, graphPath, "the build still reports the artifact it verified");
+        assert.equal(
+          result.builtAt,
+          artifactTime.toISOString(),
+          "builtAt still comes from the artifact, so the caller sees a real timestamp rather than a failure"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The remaining ceiling, moved to where it can be checked honestly. The driver can
+    // only see THAT a file exists; graph:build reads it, so a zero exit over a
+    // truncated/corrupt artifact is a structured build failure rather than an escaping
+    // SyntaxError. This is what the over-eager unchanged-artifact guard was reaching for.
+    name: "graph-core/00 a zero exit over a CORRUPT artifact is a structured build failure, not a stack trace",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        // A half-written graph — exactly what a crash or a full disk leaves behind.
+        // Asserted on the exported read (a real spawn would overwrite the fixture, so
+        // this path is unreachable through `invoke`).
+        await writeFile(graphPath, '{"nodes":[{"id":"trunc', "utf8");
+
+        // Mutation proof: removing the try/catch in readBuiltGraph makes this throw an
+        // unstructured SyntaxError (code undefined), reddening the code assertion.
+        const error = await assertRejectsWithCode(
+          async () => readBuiltGraph(graphPath),
+          "graphify-no-persist"
+        );
+        assert.match(error.message, /not a readable graph/, "the failure says the artifact is unreadable");
+
+        // …and a VALID artifact still reads through untouched (the control: a guard
+        // that rejects everything would pass the assertion above on its own).
+        await writeFile(graphPath, '{"nodes":[{"id":"a"},{"id":"b"}],"links":[]}\n', "utf8");
+        assert.equal(readBuiltGraph(graphPath).nodes.length, 2, "a valid graph normalizes as before");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // A rewritten artifact is the OTHER success, and must be distinguishable from the
+    // one above — `unchanged` is a fact the caller reads, so it has to be right in both
+    // directions (a hardcoded `true` would pass the floor test alone).
+    name: "graph-core/00 a rewritten artifact reports unchanged:false",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"old"}],"links":[]}\n', "utf8");
+        utimesSync(graphPath, new Date("2024-01-01T00:00:00.000Z"), new Date("2024-01-01T00:00:00.000Z"));
+
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => {
+              writeFileSync(graphPath, '{"nodes":[{"id":"a"},{"id":"b"}],"links":[]}\n', "utf8");
+              return { status: 0, stdout: "[graphify watch] Rebuilt: 2 nodes, 1 edges", stderr: "" };
+            },
+          }
+        );
+
+        assert.equal(result.unchanged, false, "a rewritten artifact is NOT reported as unchanged");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }

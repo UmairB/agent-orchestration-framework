@@ -52,9 +52,11 @@ default = the whole branch) and the **`--auto-complete`** flag.
    no-blocking-finding) is **unchanged**, and any concern the rank raises flows through the normal
    human/agent-judged finding path, never a separate graph-gate (no wiring into
    `work.codeReview.autoComplete`). If `aof graph build`/`triage` returns the structured `graphify-missing`
-   miss — or the build fails with `graphify-build-failed` / `graphify-no-persist`, meaning it persisted
-   nothing and whatever graph is on disk predates this review — note the graph is unavailable and review
-   unranked exactly as before: no block, no crash, no noise, and no ranking off the stale artifact.
+   miss — or the build FAILS with `graphify-build-failed` / `graphify-no-persist`, meaning no usable graph
+   was produced — note the graph is unavailable and review unranked exactly as before: no block, no crash,
+   no noise, and no ranking off a stale artifact. A build reporting `unchanged: true` is a **success**, not
+   a failure: graphify rewrites only on a topology change, so that means the graph is already current —
+   rank the review with it.
 
    Its verdict also flags surfaces:
    - **attack surface** (auth, secrets, tenant isolation, untrusted input, crypto) → spawn

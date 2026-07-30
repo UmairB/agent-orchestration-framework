@@ -56,9 +56,11 @@ reading — run-then-consider, a silent no-op when graphify is absent (mirrors t
    status-write, or work-mutation.
 5. **No-op when absent.** If `aof graph build` returns the structured `graphify-missing` miss, note that
    the graph is unavailable and proceed on grep-and-infer exactly as before — no block, no crash, no noise.
-   A `graphify-build-failed` / `graphify-no-persist` failure is the SAME situation, not a worse one: the
-   build wrote nothing, so any graph still on disk describes an earlier state. Say the graph is unavailable
-   and infer from reading — never fall back onto the surviving artifact as if the build had succeeded.
+   A `graphify-build-failed` / `graphify-no-persist` failure is the SAME situation, not a worse one: no
+   usable graph was produced, so any graph still on disk describes an earlier state. Say the graph is
+   unavailable and infer from reading — never fall back onto the surviving artifact as if the build had
+   succeeded. A build reporting `unchanged: true` is the OPPOSITE case and a success: graphify rewrites
+   only on a topology change, so an untouched artifact means the graph is already current. Use it.
 </codebase-graph-grounding>
 
 <output>

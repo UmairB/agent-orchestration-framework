@@ -81,11 +81,13 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      output feeds a gate or work-mutation. Graphify extraction replaces the single project graph; never
      target a package or `src` subtree, because doing so evicts every file outside that subtree. A module
      `graph impact` reports `present: false` for is **not covered** by the graph — its coupling is UNKNOWN,
-     so never draw a boundary on the strength of an empty answer. If `aof graph build` returns the
-     structured `graphify-missing` miss — or fails with `graphify-build-failed` / `graphify-no-persist`,
-     which means it wrote nothing and any graph on disk is older than this session — note the graph is
-     unavailable and draw boundaries from reading the source exactly as before: no block, no crash, no
-     noise, and no reading of the stale artifact as if it were this build's output.
+     so never draw a boundary on the strength of an empty answer. A build reporting `unchanged: true`
+     **succeeded**: graphify rewrites only when the graph's topology actually changed, so that is "already
+     current", and the graph is yours to use. Only if `aof graph build` returns the structured
+     `graphify-missing` miss — or FAILS with `graphify-build-failed` / `graphify-no-persist`, which means
+     no usable graph was produced — note the graph is unavailable and draw boundaries from reading the
+     source exactly as before: no block, no crash, no noise, and no reading of a stale artifact as if it
+     were this build's output.
 
 - **story — Contract (Three Amigos):** author the task `.feature` files under `tasks/`: PO writes the
   headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility. **Litmus**
