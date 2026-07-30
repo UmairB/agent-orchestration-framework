@@ -375,7 +375,7 @@ import { archTests as acdDesktopNoMeshLogicTests } from "../test/arch/acd-deskto
 import { archTests as acdDesktopSingleDataPathTests } from "../test/arch/acd-desktop-single-data-path.test.mjs";
 import { archTests as acdDesktopReadOnlyFleetTests } from "../test/arch/acd-desktop-read-only-fleet.test.mjs";
 import { archTests as acdDesktopTrustedSpawnTests } from "../test/arch/acd-desktop-trusted-spawn.test.mjs";
-import { archTests as acdDesktopVerbsOutsideBijectionTests } from "../test/arch/acd-desktop-verbs-outside-bijection.test.mjs";
+import { archTests as acdLauncherSeamTests } from "../test/arch/acd-launcher-seam.test.mjs";
 // milestone 36 / story 03 — the `aof mesh desktop install|run` CLI-only nested verbs (ADR-003):
 // verb dispatch + --json single-envelope + no mesh:* id (task 00); the staged-then-swap idempotent
 // install into $HOME/.aof/bin + WebView2 bootstrapper placed file + friendly-refusal matrix (task 01);
@@ -2001,7 +2001,7 @@ export const tests = [
   ...acdDesktopSingleDataPathTests,
   ...acdDesktopReadOnlyFleetTests,
   ...acdDesktopTrustedSpawnTests,
-  ...acdDesktopVerbsOutsideBijectionTests,
+  ...acdLauncherSeamTests,
   ...acdGlobalMeshPathsHomeTests,
   ...acdGlobalStoreNoNativeDepTests,
   ...acdGlobalPropagationSinglePredicateTests,

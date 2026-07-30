@@ -209,7 +209,7 @@ export { assignError };
 // mesh:assign — the registered Command over the two cores above (m42 wave (d)
 // leg d1, wave-3 tail): `aof mesh assign <ref> --to <nodeId>` / `--withdraw`
 // rides the route table + the ONE generic face; cli.mjs's meshAssignCommand
-// face copy is deleted. A core-level coded refusal ({ ok:false, error, code })
+// face copy is deleted. A core-level coded refusal ({ ok:false, error, code, … })
 // becomes a THROWN command error here, so the face's one envelope/exit policy
 // applies; the cores themselves keep returning structured results for their
 // white-box tests and any non-CLI caller. Declaring `--workspace` closes the

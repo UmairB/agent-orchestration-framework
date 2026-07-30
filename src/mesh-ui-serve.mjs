@@ -110,6 +110,36 @@ export function meshUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
 
+// m42 wave (d) leg d1 (wave-3 tail) — the NON-BLOCKING probe behind the registered
+// mesh:ui command's run (the launcher seam's probe rule: --json never launches). A
+// pure read of "what WOULD serve": the resolved port/scope/projectDir, whether the
+// built fleet bundle is present (the ui-build-missing precheck), and whether a
+// relay is configured for the terminal-mirror legs (best-effort config read — a
+// non-workspace cwd degrades to relayConfigured:false, the launch path's own
+// posture). Lives HERE so the dist resolution keeps one home — the probe and
+// serveMeshUi can never disagree about where the bundle is.
+export async function meshUiProbe({ projectDir = process.cwd(), port = DEFAULT_MESH_UI_PORT, repoRoot, scope = "global", configPath } = {}) {
+  const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
+  const resolvedProjectDir = path.resolve(projectDir);
+  let relayConfigured = false;
+  try {
+    const { config } = await loadWorkspace(resolvedProjectDir, configPath);
+    relayConfigured = typeof config?.mesh?.relay?.url === "string" && config.mesh.relay.url.length > 0;
+  } catch {
+    relayConfigured = false;
+  }
+  return {
+    mode: "fleet",
+    scope,
+    port,
+    projectDir: resolvedProjectDir,
+    uiDist: dist,
+    uiBuildPresent: existsSync(path.join(dist, "index.html")),
+    relayConfigured,
+    fleetUrl: `http://127.0.0.1:${port}/?mode=fleet&scope=${scope}`,
+  };
+}
+
 // milestone 34 / story 03 (ADR-006) — `scope` selects the default `/api/mesh/status`
 // data source: both "global" (the default) and "local" read the machine-wide
 // projection via queryGlobalMeshStatus; local scope narrows work items to the

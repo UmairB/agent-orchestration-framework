@@ -141,6 +141,25 @@ export async function runCommandFace(command, args) {
   }
   const faceCtx = { positionals: options._, options };
 
+  // m42 wave (d) leg d1 (wave-3 tail) — THE LAUNCHER SEAM. A command whose real
+  // body is a long-lived foreground process declares cli.launch(options): null ⇒
+  // not launcher mode (fall through to the probe/invoke path below); a function ⇒
+  // the launcher body, awaited until the process ends. The probe rule is FACE
+  // POLICY, checked before the seam is even consulted: --json NEVER launches —
+  // every launcher verb's machine face is its non-blocking registered run, so no
+  // bijection spawn-probe can hang on a serve. cli.argv still runs first (the
+  // positional discipline + input shaping govern BOTH doors); the body owns its
+  // workspace posture, announce lines, friendly coded refusals and shutdown, and
+  // the face never sweeps effects behind it (a daemon owns its own drain).
+  if (options.json !== true && typeof cli.launch === "function") {
+    const body = cli.launch(options);
+    if (body != null) {
+      const input = await cli.argv(options._, options);
+      await body(input, faceCtx);
+      return;
+    }
+  }
+
   if (options.json === true) {
     try {
       const result = await performInvoke(command, options);

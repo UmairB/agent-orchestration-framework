@@ -168,12 +168,21 @@ import { meshTerminalResumeCommand } from "./commands/mesh-terminal-resume.mjs";
 // + the --workspace residual closed), mesh:recover-push (global-store oriented,
 // workspace-free), mesh:repo-publish (the three-word route). Their cores stay
 // in the same modules for the white-box tests; cli.mjs's face copies +
-// emitMeshError are deleted. acd-desktop-verbs-outside-bijection reworked in
-// the SAME change (ui stays the CLI-only launcher verb; repo keeps only the
-// unknown-verb shim).
+// emitMeshError are deleted. (The old acd-desktop-verbs-outside-bijection gate
+// that governed this boundary is acd-launcher-seam now — ui/serve ride the
+// launcher seam below; repo/desktop keep only their unknown-verb shims.)
 import { meshAssignCommand } from "./commands/mesh-assign.mjs";
 import { meshRecoverPushCommand } from "./commands/mesh-recover-push.mjs";
 import { meshRepoPublishCommand } from "./commands/mesh-repo.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, part 2) — the launcher seam's first riders:
+// mesh:ui (probe run + cli.launch fleet-server body; the retired cli.mjs
+// meshUiCommand/MESH_UI_FLAGS face) and the desktop verbs as plain three-word
+// routes (mesh:desktop-install / mesh:desktop-run — one-shot, NOT launcher
+// verbs; the no-verb/unknown-verb shim stays in cli.mjs's meshCommand).
+// mesh:serve (above) gained its route + cli.launch daemon body in the same
+// change — the route table now carries every registered mesh verb.
+import { meshUiCommand } from "./commands/mesh-ui.mjs";
+import { meshDesktopInstallCommand, meshDesktopRunCommand } from "./commands/mesh-desktop.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -286,6 +295,9 @@ const COMMANDS = [
   meshAssignCommand,
   meshRecoverPushCommand,
   meshRepoPublishCommand,
+  meshUiCommand,
+  meshDesktopInstallCommand,
+  meshDesktopRunCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

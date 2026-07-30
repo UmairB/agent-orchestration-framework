@@ -163,12 +163,50 @@ os.tmpdir() made the fixture's path-derived workspaceId disagree with the spawne
 so the already-active cross-process scenario could never match rows on macOS. cli.mjs:
 1,752 → 1,520 lines.
 
-Wave 3 tail, part 2 — **the launcher verbs** (blocked on the launcher seam design):
-`mesh ui`, `mesh desktop`, `mesh serve` daemon branch keep their CLI-only ladder
-branches; they land as registered-run-as-probe Commands (mesh:serve precedent) when the
-seam is designed, retiring `MESH_UI_FLAGS` with `ui`.
-**End state:** `parseOptions` + its boolean allow-list have zero callers and are deleted;
-`helpText()` derives its verb listing from the registry.
+Wave 3 tail, part 2 — **the launcher seam + the launcher verbs**: designed + landed
+2026-07-30. **THE SEAM (`cli.launch`):** a command whose real body is a long-lived
+foreground process declares ONE optional adapter, `cli.launch(options)`, consulted by
+the generic face after spec-parse. `null` ⇒ not launcher mode (the normal
+probe/invoke path). A function ⇒ the launcher body: the face first runs
+`await cli.argv(positionals, options)` (so the positional discipline + input shaping
+govern BOTH doors), then awaits `body(input, faceCtx)` until the process ends. The
+body owns its workspace posture (required for serve, best-effort for ui), its
+announce lines, its friendly coded refusals (stderr + exit 1, never a stack for the
+expected classes) and its signal-driven shutdown; it lives in the command's own
+module, never the face file. **The probe rule: `--json` NEVER launches** — the face
+checks `options.json` BEFORE consulting `cli.launch`, so every launcher verb's
+machine face is its non-blocking registered run (the probe) by FACE POLICY, and no
+bijection spawn-probe can ever hang on a serve. The face never sweeps effects after
+a launch (a daemon owns its own drain). Landed on the seam: **mesh:serve** (route
+["mesh","serve"] + a declared `serve` boolean; bare = the probe, `--serve` = the
+daemon body moved whole into commands/mesh-serve.mjs; the "route would swallow
+--serve" objection died with the seam), **mesh:ui** (class A: probe run =
+`meshUiProbe` — port/scope/projectDir/uiBuildPresent/relayConfigured, non-blocking —
+launch body = the fleet server moved whole into commands/mesh-ui.mjs;
+`MESH_UI_FLAGS` retired). **mesh desktop install/run are NOT launcher verbs** (one-
+shot: install copies files, run spawns DETACHED and returns) — they landed as plain
+class A three-word routes `mesh:desktop-install` / `mesh:desktop-run` (flags
+--install-dir / --app-artifact / --bootstrapper-artifact; ctx-injected
+env/spawnFn/artifact seams preserved for the white-box tests), with the desktop
+no-verb/unknown-verb SHIM staying in meshCommand (the repo-shim precedent).
+DELETED from cli.mjs: `meshUiCommand` + `MESH_UI_FLAGS`, `meshServeDaemonCommand`,
+the serve/ui ladder branches, the meshDesktopCommand dispatch (the mesh-desktop face
+fn + its local parser/envelope die in mesh-desktop.mjs). Documented contract
+changes: `mesh serve --serve --json` now emits the PROBE document (previously
+started the daemon with --json ignored); launcher/desktop verbs adopt the family's
+loud refusals (`Unknown flag "--x" for mesh:<verb>` replacing `Unknown option
+"--x".`, code `unknown-flag`; stray positionals refused via guardMeshPositionals
+where they were silently ignored). Gates moved with the shape:
+`acd-desktop-verbs-outside-bijection` → **`acd-launcher-seam`** (the shims stay
+ladder-only + unregistered; every cli.launch command keeps a runnable probe; the
+face's json-before-launch ordering is pinned structurally + self-checked);
+`acd-mesh-ui-global-default`'s structural half + `acd-terminal-stream-transport-
+wired` inv. 7 now read commands/mesh-ui.mjs; the mesh bijection argsFor maps
+ui/desktop-install/desktop-run.
+**End state (still owed):** `graph serve` / `work ui` / `assets ui` onto the same
+seam when their families migrate; then `parseOptions` + its boolean allow-list have
+zero callers and are deleted; `helpText()` derives its verb listing from the
+registry.
 
 Also owed in d1 (PRD): invert the four upward imports into `commands/`, break the
 `mesh-repo` ↔ `mesh-worker-execution` cycle, and confine `console.log` to the face

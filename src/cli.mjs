@@ -1,12 +1,12 @@
 import path from "node:path";
-import { access, rm } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatFriendlyApplyAction, relativeDisplayPath } from "./render-plan.mjs";
-import { writeText, sweepStaleTempFiles } from "./fs.mjs";
+import { writeText } from "./fs.mjs";
 import { writeWorkspaceConfig } from "./workspace-writer.mjs";
 import { selectRuntimes } from "./prompt.mjs";
-import { globalMeshPaths, isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
+import { isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "./workspace.mjs";
 import { loadWorkspace, findWork } from "./work.mjs";
 import { invoke, getCommand } from "./command-core.mjs";
 // m42 wave (d) leg d1 — the registry-derived route table + the ONE generic face,
@@ -22,35 +22,24 @@ import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
 import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
 import { serveBoard } from "./board-serve.mjs";
-import { serveMeshUi, DEFAULT_MESH_UI_PORT } from "./mesh-ui-serve.mjs";
-// milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
-// F-38.06, option (a)): the fleet CONSUMER seam — a real relay subscription,
-// wired as a LITERAL `startTerminalRelaySubscriber` key at the production
-// `serveMeshUi({...})` call site below (meshUiCommand).
-import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
-// m42 "interactive worker terminals" — the INPUT direction's loopback push, wired
-// as a LITERAL `terminalInputPush` key at the same production call site (null when
-// no relay is configured — the route then stays output-only).
-import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
-// publishRepoToMesh / assignWork+withdrawWork / recoverPush — no longer imported
-// here (m42 wave (d) leg d1, wave-3 tail): mesh:repo-publish / mesh:assign /
-// mesh:recover-push are registered Commands riding the route table.
-// milestone 36 / story 03 (ADR-003) — the CLI-only `aof mesh desktop <install|run>`
-// nested-verb sub-group (the mesh-repo.mjs/mesh-assign.mjs `← 1 cli.mjs` shape).
-// Deliberately outside the mesh:* registry (see the meshCommand dispatch note below).
-import { meshDesktopCommand } from "./commands/mesh-desktop.mjs";
+// serveMeshUi + the fleet mirror/relay wiring — no longer imported here (m42
+// wave (d) leg d1, wave-3 tail): `aof mesh ui` is the registered mesh:ui
+// launcher-seam command (commands/mesh-ui.mjs owns the production serveMeshUi
+// call site and its LITERAL startTerminalRelaySubscriber/terminalInputPush
+// keys). publishRepoToMesh / assignWork+withdrawWork / recoverPush /
+// meshDesktopCommand — likewise retired: mesh:repo-publish / mesh:assign /
+// mesh:recover-push / mesh:desktop-install / mesh:desktop-run are registered
+// Commands riding the route table.
 // milestone 38 / story 00 (ADR-002) — `aof session start|ping|end`, the
 // assistant-agnostic session-presence CLI seam. A CLI-only TOP-LEVEL command (the
 // mesh-desktop.mjs nested-verb shape, but at the top level rather than under
 // `mesh`) — NOT a registered mesh:* command (its stdin-JSON/env identity resolution
 // doesn't fit meshVerbCli's single-positional shape).
 import { meshSessionCommand } from "./commands/mesh-session.mjs";
-// milestone 33 / story 01 (ADR-003) — the coordination-launcher serve seam:
-// `aof mesh serve --serve` is a foreground per-node presence+sync daemon over
-// src/mesh-launcher.mjs's startLauncher; the registered mesh:serve probe deliberately
-// does NOT run it (command-core.mjs: the registered run is the non-blocking probe).
-import { startLauncher } from "./mesh-launcher.mjs";
-import { acquireMeshLauncherLock } from "./mesh-launcher-lock.mjs";
+// startLauncher / acquireMeshLauncherLock / createMeshLogSink — no longer
+// imported here (m42 wave (d) leg d1, wave-3 tail): the `aof mesh serve --serve`
+// daemon body moved into commands/mesh-serve.mjs as mesh:serve's cli.launch
+// (the launcher seam).
 import { initPlanning } from "./planning-init.mjs";
 // milestone 28 / story 00 (ADR-003/ADR-004): the ONE SEA-safe asset-base seam
 // (the dev-only vite re-exec route) + the version string for `aof --version`
@@ -58,12 +47,9 @@ import { initPlanning } from "./planning-init.mjs";
 // dispatch, never a fork ahead of it, mirroring the existing `help` branch).
 import { assetBase, packageVersionString } from "./asset-base.mjs";
 // TECH_DEBT item 1 — which code is this process actually running (source /
-// payload / embedded + the install's build stamp)? Surfaced on --version and on
-// every daemon startup line, so a stale build is VISIBLE rather than inferred.
+// payload / embedded + the install's build stamp)? Surfaced on --version (the
+// daemons' startup lines moved to their launcher-seam bodies).
 import { readBuildInfo, buildInfoString } from "./build-info.mjs";
-// m42 wave (a) / TECH_DEBT item 2 — the daemons' durable JSONL log sink (warnings
-// tee beside the live stderr; startup records the build id).
-import { createMeshLogSink } from "./mesh-log.mjs";
 
 export async function run(argv) {
   const [command, ...rest] = argv;
@@ -395,24 +381,17 @@ async function meshCommand(args) {
 
   // identity / status / heartbeat / relay / invite / join / revoke / logs /
   // terminal-resume — MIGRATED (m42 wave (d) leg d1, wave 3); assign /
-  // recover-push / repo publish — MIGRATED (wave-3 tail): registry Commands
-  // carrying `cli.route` (repo publish rides the three-word route
-  // mesh:repo-publish), dispatched in run() through the route table + the ONE
-  // generic face (meshVerbCli, meshRepoCommand, meshAssignCommand,
-  // meshRecoverPushCommand + emitMeshError RETIRED). Still here: the CLI-only
-  // launcher verbs (ui/desktop), the `serve --serve` daemon branch, the repo
-  // no-verb/unknown-verb shim, and the bare-usage/unknown-sub shims.
+  // recover-push / repo publish — MIGRATED (wave-3 tail); ui / serve /
+  // desktop install / desktop run — MIGRATED (wave-3 tail part 2, the launcher
+  // seam): registry Commands carrying `cli.route` (repo publish + the desktop
+  // verbs ride three-word routes; ui and serve declare `cli.launch` bodies —
+  // bare `mesh ui` and `mesh serve --serve` launch through the seam, --json is
+  // always the non-blocking probe), dispatched in run() through the route table
+  // + the ONE generic face. Still here: the repo + desktop no-verb/unknown-verb
+  // shims (refusals a route cannot express) and the bare-usage/unknown-sub
+  // shims.
   const subcommand = sub;
   const [, ...rest] = args;
-  // milestone 25 / story 02 (ADR-003) — the additive fleet-UI serve branch, ABOVE
-  // the unknown-sub fallthrough (the m22 additive-branch idiom). `aof mesh ui` is a
-  // CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
-  // command — the launcher idiom; it stands up its OWN thin fleet serve-face
-  // (src/mesh-ui-serve.mjs), reaching fleet data only through invoke("mesh:status").
-  if (subcommand === "ui") {
-    await meshUiCommand(rest);
-    return;
-  }
   // `aof mesh repo publish` — MIGRATED (mesh:repo-publish, the three-word
   // route). This shim owns ONLY the refusals the route table cannot express:
   // no verb, or an unknown inner verb. Same envelope discipline as the
@@ -431,32 +410,22 @@ async function meshCommand(args) {
     process.exitCode = 1;
     return;
   }
-  // milestone 36 / story 03 (ADR-003) — the additive `aof mesh desktop <install|run>`
-  // sub-group, ABOVE the unknown-sub fallthrough. Like `repo`/`ui`/`assign` it is a
-  // CLI-ONLY nested verb, NOT a registered mesh:* command (the nested inner-verb face
-  // doesn't fit the single-positional meshVerbCli shape) — so it is (correctly)
-  // OUTSIDE the flat acd-mesh-command-cli-bijection (fitness acd-desktop-verbs-
-  // outside-bijection). Routes the WHOLE `desktop` sub to the one new command
-  // module (commands/mesh-desktop.mjs), which then dispatches on its own inner verb.
+  // `aof mesh desktop install|run` — MIGRATED (mesh:desktop-install /
+  // mesh:desktop-run, three-word routes). This shim owns ONLY the refusals the
+  // route table cannot express: no verb, or an unknown inner verb (the repo-shim
+  // precedent; the refusal bytes are the retired meshDesktopCommand face's own).
   if (subcommand === "desktop") {
-    await meshDesktopCommand(rest);
-    return;
-  }
-  // milestone 33 / story 01 (ADR-003) — the coordination-launcher dispatch branch,
-  // ABOVE the unknown-sub fallthrough. `aof mesh serve --serve` is the FOREGROUND
-  // presence+sync daemon (the long-lived face over the one-shot core, NEVER the
-  // bijection-probed run). The bare (non-blocking probe) spelling DELEGATES
-  // through runCommandFace (the bare-`aof project` sanctioned-delegation form) —
-  // mesh:serve deliberately carries NO cli.route: the route table matches argv
-  // words only (flags never participate), so a routed ["mesh","serve"] would
-  // swallow `--serve` and the daemon branch would be unreachable. This branch
-  // stays until the launcher seam is designed.
-  if (subcommand === "serve") {
-    if (parseOptions(rest).serve) {
-      await meshServeDaemonCommand(rest);
-      return;
+    const verb = rest.find((token) => typeof token === "string" && !token.startsWith("--"));
+    const asJson = rest.some((token) => token === "--json" || (typeof token === "string" && token.startsWith("--json=")));
+    const refusal = verb === undefined
+      ? { message: "`aof mesh desktop` needs a verb.\n\nUsage:\n  aof mesh desktop install   install the desktop app\n  aof mesh desktop run       launch the installed desktop app", code: "invalid-input" }
+      : { message: `Unknown mesh desktop verb "${verb}".`, code: "unknown-subcommand" };
+    if (asJson) {
+      console.log(JSON.stringify({ ok: false, error: refusal.message, code: refusal.code }, null, 2));
+    } else {
+      console.error(refusal.message);
     }
-    await runCommandFace(getCommand("mesh:serve"), rest);
+    process.exitCode = 1;
     return;
   }
 
@@ -592,107 +561,11 @@ async function workUiCommand(args) {
   });
 }
 
-// `aof mesh ui [--port 4181] [--local]` — the read-only fleet mission-control web
-// surface (milestone 25 / story 02, ADR-003; milestone 34 / story 03, ADR-006). A
-// CLI-ONLY serve verb (a sibling to `aof work ui`), NOT a registered mesh:*
-// command. It stands up its OWN thin fleet serve-face (serveMeshUi) — one
-// 127.0.0.1 server serving the ui/dist bundle with ?mode=fleet + the single
-// GET /api/mesh/status route — and mirrors the board's ui-build-missing +
-// EADDRINUSE friendly refusals (never a stack trace). Default port 4181 clears
-// assets-ui 4177/4178 + board 4180, so the fleet view runs ON TOP of a board on
-// one machine.
-//
-// milestone 34 / story 03 (ADR-006) — `aof mesh ui` is GLOBAL by default: it
-// passes scope "global" to serveMeshUi and does NOT require the current
-// directory to be a mesh-enabled workspace to start (serveMeshUi loads no
-// workspace up front; the global read only opens the machine-wide projection
-// store). `--local` passes scope "local" + this directory as projectDir — the
-// pre-existing focused-workspace view, unchanged. The announced browser URL
-// always names the selected scope (`?mode=fleet&scope=<global|local>`) so a
-// bookmarked/shared link reproduces the same view. An unrecognized flag (e.g.
-// `--workspace`) is rejected BEFORE serveMeshUi is ever called — the CLI's own
-// input-validation guard, mirroring meshVerbCli's "Unknown option" phrasing.
-const MESH_UI_FLAGS = new Set(["port", "local", "target"]);
-
-async function meshUiCommand(args) {
-  const flagTokens = args
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0])
-    .map((flag) => flag.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()));
-  const unknownFlag = flagTokens.find((flag) => !MESH_UI_FLAGS.has(flag));
-  if (unknownFlag) {
-    console.error(`Unknown option "--${unknownFlag}".`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const options = parseOptions(args);
-  const port = Number.parseInt(options.port ?? String(DEFAULT_MESH_UI_PORT), 10);
-  const projectDir = path.resolve(options.target ?? process.cwd());
-  const scope = options.local ? "local" : "global";
-
-  // milestone 38 / story 06 — ADR-014 AMENDMENT: resolve `config` best-effort —
-  // `aof mesh ui` requires NO mesh-enabled workspace to START (ADR-006's
-  // existing global-by-default posture), so a `loadWorkspace` fault (cwd is not
-  // a workspace at all, no aof.config.json, …) degrades to `config: undefined`
-  // rather than refusing the command. `createTerminalMirrorSubscriberTransport`
-  // already returns `null` for an undefined/unconfigured relay (no
-  // `config.mesh.relay.url`), so `startTerminalMirrorSubscriber` cleanly
-  // degrades to `{ connected:false }` — the mirror simply never receives a live
-  // frame; every other route on the fleet face still serves.
-  let config;
-  try {
-    ({ config } = await loadWorkspace(projectDir, options.config));
-  } catch {
-    config = undefined;
-  }
-
-  let session;
-  try {
-    session = await serveMeshUi({
-      projectDir,
-      port,
-      scope,
-      startTerminalRelaySubscriber: (mirror) => startTerminalMirrorSubscriber({ transport: createTerminalMirrorSubscriberTransport(config), mirror }),
-      terminalInputPush: createTerminalRelayPushTransport(config),
-    });
-  } catch (error) {
-    if (error.code === "ui-build-missing") {
-      console.error(error.message);
-      process.exitCode = 1;
-      return;
-    }
-    if (error.code === "EADDRINUSE") {
-      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
-      process.exitCode = 1;
-      return;
-    }
-    throw error;
-  }
-
-  const { server, fleetUrl } = session;
-  console.log("AOF mesh ui is running locally.");
-  // TECH_DEBT item 1 — the daemon's startup line records which build it runs
-  // (a SECOND line: the announce line above is a pinned contract).
-  console.log(`Build: ${buildInfoString(readBuildInfo())}`);
-  // m42 wave (a) / item 2 — the ui daemon's durable startup record (same sink family
-  // as mesh-serve's; the fleet server's own faults land via its error paths below).
-  const uiLogSink = createMeshLogSink("mesh-ui", { env: process.env });
-  uiLogSink.write({ level: "info", code: "daemon-started", message: `mesh ui running (build ${buildInfoString(readBuildInfo())})` });
-  console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
-  console.log(`Project: ${projectDir}`);
-  console.log("Press Ctrl+C to stop the fleet view.");
-
-  await new Promise((resolve) => {
-    const shutdown = () => {
-      server.close(() => {
-        resolve();
-      });
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
-}
+// meshUiCommand + MESH_UI_FLAGS — RETIRED (m42 wave (d) leg d1, wave-3 tail
+// part 2, the launcher seam): `aof mesh ui` is the registered mesh:ui command
+// (src/commands/mesh-ui.mjs) — probe run + cli.launch fleet-server body — on
+// the route table. The production serveMeshUi call site (with its LITERAL
+// startTerminalRelaySubscriber / terminalInputPush keys) moved with it.
 
 // meshRepoCommand / meshAssignCommand / meshRecoverPushCommand — RETIRED (m42
 // wave (d) leg d1, wave-3 tail): mesh:repo-publish / mesh:assign /
@@ -702,93 +575,13 @@ async function meshUiCommand(args) {
 // in meshCommand; recover-push's pre-invoke progress line and its json-exit-0
 // on coded failure are documented in WAVE-D-MIGRATION.md.
 
-// `aof mesh serve --serve` — the FOREGROUND presence+sync daemon (milestone 33 / story
-// 01, ADR-003.1/.3): the long-lived `--serve` face over the one-shot launcher core
-// (src/mesh-launcher.mjs's startLauncher). Preflights the fabric and refuses-with-
-// guidance if degraded (never starting a loop over a dead fabric); a healthy preflight
-// publishes this node's presence, starts global work propagation, and
-// periodically re-reads the fabric peer-map — binding NO listening broker socket (the
-// "bind" is the fabric self-address). Traps SIGINT/SIGTERM to stop cleanly.
-async function meshServeDaemonCommand(args) {
-  const options = parseOptions(args);
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  const launcherLock = await acquireMeshLauncherLock({ env: process.env });
-  if (!launcherLock.acquired) {
-    const pid = launcherLock.pid != null ? ` (pid ${launcherLock.pid})` : "";
-    console.error(`AOF mesh launcher is already running${pid}.`);
-    process.exitCode = 1;
-    return;
-  }
-
-  let handle = null;
-  // m42 wave (a) / TECH_DEBT item 2 — the durable sink. Warnings TEE here beside the
-  // live stderr line (a supervised daemon's stderr goes nowhere; this file is the
-  // record). Startup/shutdown are logged too, with the build id, so "which build ran
-  // when" is answerable from the file alone.
-  const logSink = createMeshLogSink("mesh-serve", { env: process.env });
-  // m42 / item 2's REMOTE read — a worker forwards each log event UP its stream so
-  // the control's `aof mesh logs --node <id>` answers from its own store. Wired
-  // after startLauncher returns (the client exists then); a forward fault is
-  // already failure-isolated inside sendLogEntries.
-  let forwardLogEntry = null;
-  try {
-    // review fix (live soak, 2026-07-17): a connect failure, propagation fault, or
-    // dispatch-tick error used to be accumulated into handle.warnings and never read
-    // again by this foreground loop — the daemon's own log showed nothing regardless
-    // of what actually went wrong. Every warning now prints live, timestamped, as it
-    // happens.
-    handle = await startLauncher(workspace, {
-      onWarning: (warning) => {
-        console.error(`[mesh ${new Date().toISOString()}] ${warning.code}: ${warning.message}`);
-        // 2026-07-27 — an event may carry its OWN level (the dispatch/worktree
-        // DECISION records are info, not warn); anything level-less stays warn.
-        const entry = { at: new Date().toISOString(), level: warning.level ?? "warn", code: warning.code ?? "warning", message: warning.message ?? "", path: warning.path ?? null };
-        logSink.write(entry);
-        forwardLogEntry?.(entry);
-      },
-    });
-    if (handle.refused) {
-      console.error(`The fabric is not ready to serve (${handle.probe.reason ?? "degraded"}):`);
-      for (const line of handle.guidance.lines) console.error(`  ${line}`);
-      process.exitCode = 1;
-      return;
-    }
-
-    console.log(`AOF mesh launcher is running (node ${handle.record.nodeId}).`);
-    // TECH_DEBT item 1 — same second-line build report as mesh ui's.
-    console.log(`Build: ${buildInfoString(readBuildInfo())}`);
-    console.log(`Self-address: ${handle.selfAddress ?? "(unresolved)"}`);
-    console.log(`Log: ${logSink.path}`);
-    console.log("Press Ctrl+C to stop the launcher.");
-    logSink.write({ level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, node: handle.record.nodeId });
-    if (handle.streamClient != null && typeof handle.streamClient.sendLogEntries === "function") {
-      const client = handle.streamClient;
-      forwardLogEntry = (entry) => {
-        void client.sendLogEntries([entry]);
-      };
-      forwardLogEntry({ at: new Date().toISOString(), level: "info", code: "daemon-started", message: `mesh serve running (node ${handle.record.nodeId}, build ${buildInfoString(readBuildInfo())})`, path: null });
-    }
-    // m38-F26 (m42 wave (a)) — reclaim .tmp-* orphans a crashed publisher left in
-    // the presence/nodes stores (age-gated; a live writer's temp is never touched).
-    for (const dir of [path.join(globalMeshPaths({ env: process.env }).meshRoot, "presence"), globalMeshPaths({ env: process.env }).nodesRoot]) {
-      const swept = await sweepStaleTempFiles(dir);
-      if (swept.removed.length > 0) {
-        logSink.write({ level: "info", code: "temp-orphans-swept", message: `reclaimed ${swept.removed.length} stale .tmp-* file(s) in ${dir}` });
-      }
-    }
-
-    await new Promise((resolve) => {
-      const shutdown = () => {
-        handle.stop();
-        resolve();
-      };
-      process.once("SIGINT", shutdown);
-      process.once("SIGTERM", shutdown);
-    });
-  } finally {
-    await launcherLock.release();
-  }
-}
+// meshServeDaemonCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail part 2,
+// the launcher seam): the `--serve` daemon body is mesh:serve's cli.launch
+// (src/commands/mesh-serve.mjs); the route table carries both spellings and
+// the face's probe rule keeps `--json` non-blocking.
+// meshDesktopCommand — RETIRED (same change): mesh:desktop-install /
+// mesh:desktop-run are registered three-word routes (commands/mesh-desktop.mjs);
+// only the no-verb/unknown-verb shim remains in meshCommand.
 // `aof work orchestrator [model] [dir] [--show]` — set the model the main ACD
 // (orchestrating) session runs on. Config-only read-merge-write of
 // settings.claude.model in .aof/aof.config.json (never the lock); the render engine

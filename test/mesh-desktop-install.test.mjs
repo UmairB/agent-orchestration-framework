@@ -14,7 +14,12 @@ import {
   DESKTOP_APP_EXE,
   WEBVIEW2_BOOTSTRAPPER,
 } from "../src/commands/mesh-desktop.mjs";
-import { meshDesktopCommand } from "../src/commands/mesh-desktop.mjs";
+// m42 wave (d) leg d1 (wave-3 tail) — the CLI face is the registered
+// mesh:desktop-install command through the ONE generic face (the retired
+// meshDesktopCommand nested face's tests now drive runCommandFace with the
+// verb's declared flags — full face fidelity, no spawn).
+import { getCommand } from "../src/command-core.mjs";
+import { runCommandFace } from "../src/spine/face.mjs";
 import { withMeshDesktopFixture, seedInstalledApp } from "./support/mesh-desktop-fixture.mjs";
 
 // Capture console.log/console.error output around a call (the CLI-face --json
@@ -183,13 +188,17 @@ export const meshDesktopInstallTests = [
   },
   // CLI-face envelope proof: `aof mesh desktop install --json` refusal shape
   // (the { ok:false, error, code } single envelope, install's own coded refusal
-  // reaching the CLI face, not just the core function).
+  // reaching the generic face, not just the core function). The plain (non-json)
+  // face contract is the thrown coded error — the face propagates it to
+  // bin/aof.mjs, which prints error.message to stderr (one calm sentence, never
+  // a stack trace).
   {
-    name: "mesh-desktop-install/01 the CLI face (meshDesktopCommand) renders install's refusal as a single { ok:false, error, code } --json envelope, and a plain-text one-sentence refusal otherwise",
+    name: "mesh-desktop-install/01 the routed face renders install's refusal as a single { ok:false, error, code } --json envelope, and a thrown one-sentence coded error otherwise",
     async run() {
       await withMeshDesktopFixture(async ({ installDir }) => {
+        const command = getCommand("mesh:desktop-install");
         const { logs } = await captureConsole(() =>
-          meshDesktopCommand(["install", "--json"], { installDir, appArtifactPath: undefined, bootstrapperArtifactPath: undefined }),
+          runCommandFace(command, ["--install-dir", installDir, "--json"]),
         );
         assert.equal(logs.length, 1, "exactly one line printed under --json");
         const parsed = JSON.parse(logs[0]);
@@ -197,21 +206,30 @@ export const meshDesktopInstallTests = [
         assert.equal(parsed.code, "app-artifact-missing");
         assert.equal(typeof parsed.error, "string");
 
-        const { errors } = await captureConsole(() =>
-          meshDesktopCommand(["install"], { installDir, appArtifactPath: undefined, bootstrapperArtifactPath: undefined }),
+        await assert.rejects(
+          () => runCommandFace(command, ["--install-dir", installDir]),
+          (error) => {
+            assert.equal(error.code, "app-artifact-missing", "the plain face propagates the coded refusal to bin/aof.mjs");
+            assert.doesNotMatch(error.message, /at\s+\S+\s+\(.*:\d+:\d+\)/, "no stack trace frame in the refusal message");
+            return true;
+          },
         );
-        assert.equal(errors.length, 1, "exactly one calm sentence on stderr, never a stack trace");
-        assert.doesNotMatch(errors[0], /at\s+\S+\s+\(.*:\d+:\d+\)/, "no stack trace frame in the printed refusal");
       }, { seedArtifacts: false });
     },
   },
-  // CLI-face success proof: install succeeds end-to-end through the CLI face.
+  // CLI-face success proof: install succeeds end-to-end through the routed face,
+  // artifacts supplied via the verb's own declared flags.
   {
-    name: "mesh-desktop-install/01 the CLI face (meshDesktopCommand) installs successfully end-to-end and reports ok:true under --json",
+    name: "mesh-desktop-install/01 the routed face installs successfully end-to-end and reports ok:true under --json",
     async run() {
       await withMeshDesktopFixture(async ({ installDir, appArtifactPath, bootstrapperArtifactPath }) => {
         const { logs } = await captureConsole(() =>
-          meshDesktopCommand(["install", "--json"], { installDir, appArtifactPath, bootstrapperArtifactPath }),
+          runCommandFace(getCommand("mesh:desktop-install"), [
+            "--install-dir", installDir,
+            "--app-artifact", appArtifactPath,
+            "--bootstrapper-artifact", bootstrapperArtifactPath,
+            "--json",
+          ]),
         );
         assert.equal(logs.length, 1);
         const parsed = JSON.parse(logs[0]);

@@ -5,9 +5,12 @@
 //  surface and do NOT invoke the workspace-local `mesh:status` command for the
 //  default global read."
 //
-// Structural half: src/cli.mjs's meshUiCommand computes scope "global" unless
-// --local is present, and passes it straight to serveMeshUi (no silent
-// re-defaulting to "local" anywhere in between). Behavioural half: a server
+// Structural half: the registered mesh:ui verb (src/commands/mesh-ui.mjs since
+// the m42 wave-(d) launcher-seam migration; formerly cli.mjs's meshUiCommand)
+// computes scope "global" unless --local is present, and passes it straight to
+// serveMeshUi (no silent re-defaulting to "local" anywhere in between) — the
+// ONE shaping (resolveUiLaunchConfig) feeds both the probe and the launch body,
+// so the two doors can never disagree. Behavioural half: a server
 // STARTED with the default (no scope override) answers the machine-wide
 // queryGlobalMeshStatus read, and invoke("mesh:status") is never reached for it —
 // proven by pointing the "local" data source at a workspace that would THROW if
@@ -23,7 +26,7 @@ import { loadWorkspace } from "../../src/work.mjs";
 import { openGlobalWorkProjectionStore } from "../../src/global-work-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const CLI_PATH = path.join(repoRoot, "src", "cli.mjs");
+const CLI_PATH = path.join(repoRoot, "src", "commands", "mesh-ui.mjs");
 
 function stripComments(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -66,19 +69,19 @@ async function makeWorkspace(root, nodeId) {
 
 export const archTests = [
   {
-    name: "arch/34 ADR-006: meshUiCommand defaults scope to \"global\" (no --local) and only flips to \"local\" under --local",
+    name: "arch/34 ADR-006: the mesh:ui verb defaults scope to \"global\" (no --local) and only flips to \"local\" under --local",
     async run() {
       const source = stripComments(await readFile(CLI_PATH, "utf8"));
-      const start = source.indexOf("async function meshUiCommand");
-      assert.ok(start >= 0, "meshUiCommand is defined in cli.mjs");
-      const body = source.slice(start, start + 2000);
+      // The ONE shaping both doors (probe run + launch body) share.
       assert.ok(
-        /const\s+scope\s*=\s*options\.local\s*\?\s*["']local["']\s*:\s*["']global["']/.test(body),
-        "meshUiCommand computes scope as \"global\" unless --local is set",
+        /scope:\s*options\.local\s*\?\s*["']local["']\s*:\s*["']global["']/.test(source),
+        "resolveUiLaunchConfig computes scope as \"global\" unless --local is set",
       );
+      // The launch body passes the computed scope straight through to serveMeshUi
+      // (a literal `scope` key at the production call site).
       assert.ok(
-        /serveMeshUi\s*\(\s*\{[^}]*scope[^}]*\}\s*\)/.test(body),
-        "meshUiCommand passes the computed scope straight through to serveMeshUi",
+        /serveMeshUi\s*\(\s*\{[\s\S]*?\bscope\b[\s\S]*?\}\s*\)/.test(source),
+        "the mesh:ui launch body passes the computed scope straight through to serveMeshUi",
       );
     },
   },

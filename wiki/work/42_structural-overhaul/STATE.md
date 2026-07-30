@@ -11,6 +11,61 @@ doc: state
 
 ## Progress
 
+- **2026-07-30 (sixth pass): THE LAUNCHER SEAM designed + landed — d1 wave-3 tail
+  part 2 COMPLETE; every registered mesh verb now rides the route table.** The
+  blocked design question ("where does a long-lived foreground body live for a
+  routed command?") is answered with ONE optional adapter: `cli.launch(options)`,
+  consulted by the generic face after spec-parse — `null` falls through to the
+  probe/invoke path; a function is the launcher body, awaited until process end
+  (cli.argv runs first, so the positional discipline governs both doors; the body
+  owns workspace posture / announces / friendly refusals / shutdown, and lives in
+  the command's module). **The probe rule is FACE POLICY: `--json` never launches**
+  — checked before the seam is consulted, so every launcher verb's machine face is
+  its non-blocking probe and no bijection spawn-probe can hang on a serve by
+  construction. Landed on it: **mesh:serve** (route ["mesh","serve"] at last — the
+  "route would swallow --serve" objection died with the seam; daemon body moved
+  whole into commands/mesh-serve.mjs), **mesh:ui** (new registered command:
+  `meshUiProbe` run — port/scope/projectDir/uiBuildPresent/relayConfigured — +
+  the fleet-server launch body in commands/mesh-ui.mjs; the serveMeshUi call site
+  with its LITERAL mirror/input-push keys moved with it). **mesh desktop
+  install/run turned out NOT to be launcher verbs** (one-shot: install copies,
+  run spawns DETACHED and returns) — landed as plain class A three-word routes
+  mesh:desktop-install / mesh:desktop-run with ctx-injectable env/spawnFn/artifact
+  seams kept for the white-box tests; the desktop no-verb/unknown-verb shim joins
+  the repo shim in meshCommand. DELETED from cli.mjs: meshUiCommand +
+  MESH_UI_FLAGS, meshServeDaemonCommand, the ui/serve/desktop dispatch branches
+  (cli.mjs 1,520 → 1,313 lines). Documented contract changes: `mesh serve --serve
+  --json` is now the probe document; launcher/desktop verbs adopt the face's loud
+  refusals (`Unknown flag "--x" for mesh:<verb>` / `unknown-flag`; stray
+  positionals refused). Gates moved with the shape:
+  `acd-desktop-verbs-outside-bijection` → **`acd-launcher-seam`** (shims
+  ladder-only + unregistered; every cli.launch command keeps a runnable probe;
+  the face's json-before-launch guard pinned + self-checked);
+  `acd-mesh-ui-global-default` structural half + `acd-terminal-stream-transport-
+  wired` inv.7 now read commands/mesh-ui.mjs; the mesh bijection argsFor maps
+  ui/desktop-install/desktop-run. Verified: full arch sweep + focused face/mesh
+  suites green, BDD integration 115/115 (four NEW command-spine scenarios pin the
+  probe rule, the mesh:ui probe, the desktop three-word route and the desktop
+  shim), launch-path smoke byte-identical (announce lines, EADDRINUSE refusal,
+  SIGTERM clean exit). **Fixed en route (ALL pre-existing at HEAD, verified by
+  stash — the Windows-authored-fixture/stale-pin class):** mesh-desktop-fixture
+  seeded a mode-0644 "runnable" app (every already-installed scenario refused
+  desktop-not-runnable on macOS); mesh-ui-global-scope's raw-symlink tmpdir broke
+  the Project:-line identity compare (realpath, the assign-fixture precedent);
+  mesh-identity-cli-face pinned a hostname-dependent roster (the machine's
+  self-healed record collided with the seeded "umair-desktop" only on the author
+  machine) and demanded `skills` on the six-key m34 self descriptor;
+  mesh-identity-status-commands leaked node records across tests through the
+  shared process-level AOF_GLOBAL_HOME (per-fixture homes now, the
+  mesh-ui-global-scope idiom). Also fixed: the wave-3 tail's OWN commit left
+  `acd-assignment-target-not-connected-loud` red — a mesh-assign.mjs COMMENT
+  reading "({ ok:false, error, code })" trips the gate's raw-source (comment-
+  blind) codeless-literal scan; reworded to the `code,` form the sibling comment
+  uses. Full arch sweep 709/709 after both. Remaining in d1: `graph serve` / `work ui` /
+  `assets ui` onto the same seam when their families migrate, the low-priority
+  CLI-only verbs, then the parseOptions/helpText end-state; plus the PRD's
+  import-inversion/cycle/console.log items.
+
 - **2026-07-30 (check-in): waves 1+2 committed (5 commits, pushed, UNMERGED) + three residuals
   found while auditing what was logged.** Commits: bundle-manifest regen, the spine face + BDD
   harness, the effects ledger + d2 sweep, the 43-verb route-table migration, the wave-(d) ledger

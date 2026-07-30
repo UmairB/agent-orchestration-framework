@@ -1,10 +1,12 @@
-// `aof mesh desktop install` / `aof mesh desktop run` — the CLI-only nested-verb
-// sub-group that installs and launches the Tauri desktop supervisor alongside the
-// m28 `aof` SEA binary (milestone 36 / story 03, ADR-003). The exact
-// `commands/mesh-repo.mjs`/`commands/mesh-assign.mjs` shape (`← 1 cli.mjs`): kept
-// out of cli.mjs so the placement/discovery/launch logic is unit-testable without
-// spawning the CLI, and out of the mesh:* registry (the nested `desktop <verb>`
-// face doesn't fit meshVerbCli's single-positional shape — ADR-003 decision 1).
+// `aof mesh desktop install` / `aof mesh desktop run` — install and launch the
+// Tauri desktop supervisor alongside the m28 `aof` SEA binary (milestone 36 /
+// story 03, ADR-003). Registered Commands since m42 wave (d) leg d1's wave-3
+// tail: mesh:desktop-install / mesh:desktop-run ride THREE-WORD routes through
+// the registry-derived route table + the ONE generic face (the
+// mesh:repo-publish precedent — ADR-003's original "doesn't fit the
+// single-positional meshVerbCli shape" rationale died with meshVerbCli). The
+// core placement/discovery/launch logic stays here, unit-testable without
+// spawning the CLI.
 //
 // Two verbs:
 //   install(options) — places the desktop app executable(s) + the WebView2
@@ -28,6 +30,7 @@ import { access, constants as fsConstants, copyFile, mkdir, mkdtemp, rename, rm,
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { guardMeshPositionals } from "./mesh-face-shared.mjs";
 
 // The desktop app's placed file names (Windows-first, ADR-001 §Tauri). Kept as
 // named constants so install/run agree on exactly what "the installed app" means.
@@ -285,128 +288,111 @@ export async function launchDesktopApp(options = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The CLI face: `aof mesh desktop <install|run>` (task 00_verb-dispatch.feature).
-// A nested CLI-only sub-group — cli.mjs's meshCommand routes the WHOLE `desktop`
-// sub here via ONE additive `subcommand === "desktop"` branch (the mesh-repo.mjs
-// nested-group precedent); THIS function then routes on its OWN inner verb
-// (install/run), never registering a mesh:* id for either.
+// The registered Commands: `aof mesh desktop install` / `aof mesh desktop run`
+// (m42 wave (d) leg d1, wave-3 tail — formerly the CLI-only meshDesktopCommand
+// nested face, retired with its local parser/envelope). NOT launcher verbs:
+// install copies files and returns; run spawns the app DETACHED and returns —
+// so both are plain class A three-word routes (the mesh:repo-publish
+// precedent), and their --json probes stay hermetic in the bijection gate (no
+// installed app in an isolated AOF_GLOBAL_HOME ⇒ a coded refusal, never a real
+// launch). The no-verb/unknown-verb SHIM stays in cli.mjs's meshCommand (the
+// repo-shim precedent — refusals a route cannot express). The retired face's
+// ctx seams survive on run(input, ctx): env / spawnFn / artifact paths are
+// injectable by the white-box tests through invoke(), with the input flags
+// taking precedence exactly as the face's options did.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MESH_DESKTOP_FLAGS = new Set(["json", "appArtifact", "bootstrapperArtifact", "installDir"]);
+export const meshDesktopInstallCommand = {
+  id: "mesh:desktop-install",
+  input: {
+    type: "object",
+    properties: {
+      installDir: { type: "string" },
+      appArtifact: { type: "string" },
+      bootstrapperArtifact: { type: "string" },
+    },
+    additionalProperties: false,
+  },
 
-function emitDesktopEnvelope(asJson, ok, payload) {
-  if (asJson) {
-    // The single-structured-envelope discipline (08/ADR-003): stdout carries
-    // EXACTLY one { ok, ... } document. The message/{help text} field is never
-    // part of the JSON body — only ok/error/code/the verb's own result fields.
-    const { message, ...jsonPayload } = payload;
-    console.log(JSON.stringify({ ok, ...jsonPayload }, null, 2));
-    if (!ok) process.exitCode = 1;
-    return;
-  }
-  if (ok) {
-    if (typeof payload.message === "string") console.log(payload.message);
-    return;
-  }
-  console.error(payload.error);
-  process.exitCode = 1;
-}
-
-function desktopFlagTokens(args) {
-  return args
-    .filter((arg) => typeof arg === "string" && arg.startsWith("--"))
-    .map((arg) => arg.slice(2).split("=", 2)[0])
-    .map((flag) => flag.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()));
-}
-
-// A tiny local option parser (mirrors cli.mjs's own parseOptions shape) so this
-// module has no dependency on cli.mjs internals — the `← 1 cli.mjs` graph edge
-// stays one-directional.
-function parseDesktopOptions(args) {
-  const options = { _: [] };
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (typeof arg !== "string" || !arg.startsWith("--")) {
-      options._.push(arg);
-      continue;
-    }
-    const [rawKey, inlineValue] = arg.slice(2).split("=", 2);
-    const key = rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-    if (key === "json") {
-      options[key] = true;
-      continue;
-    }
-    options[key] = inlineValue ?? args[++index];
-  }
-  return options;
-}
-
-// meshDesktopCommand(args) — the ONE export cli.mjs's `subcommand === "desktop"`
-// branch calls. `args` is everything after `desktop` (e.g. ["install", "--json"]).
-export async function meshDesktopCommand(args, ctx = {}) {
-  const verb = typeof args[0] === "string" && !args[0].startsWith("--") ? args[0] : undefined;
-  const rest = verb === undefined ? args : args.slice(1);
-
-  const flagTokens = desktopFlagTokens(rest);
-  const wantsJson = flagTokens.includes("json");
-  const unknownFlag = flagTokens.find((flag) => !MESH_DESKTOP_FLAGS.has(flag));
-  const options = parseDesktopOptions(rest);
-  if (wantsJson) options.json = true;
-
-  if (unknownFlag) {
-    emitDesktopEnvelope(options.json, false, { error: `Unknown option "--${unknownFlag}".`, code: "invalid-input" });
-    return;
-  }
-
-  if (verb === undefined) {
-    emitDesktopEnvelope(options.json, false, {
-      error: "`aof mesh desktop` needs a verb.\n\nUsage:\n  aof mesh desktop install   install the desktop app\n  aof mesh desktop run       launch the installed desktop app",
-      code: "invalid-input",
+  async run(input, ctx = {}) {
+    // A coded refusal from the core (app-artifact-missing / install-dir-not-
+    // writable) THROWS — the face's one envelope applies (--json: { ok:false,
+    // error, code }; bare: stderr + exit 1, never a stack for these classes).
+    return await installDesktopApp({
+      installDir: input.installDir ?? ctx.installDir,
+      env: ctx.env,
+      appArtifactPath: input.appArtifact ?? ctx.appArtifactPath,
+      bootstrapperArtifactPath: input.bootstrapperArtifact ?? ctx.bootstrapperArtifactPath,
     });
-    return;
-  }
+  },
 
-  if (verb === "install") {
-    let result;
-    try {
-      result = await installDesktopApp({
-        installDir: options.installDir ?? ctx.installDir,
-        env: ctx.env,
-        appArtifactPath: options.appArtifact ?? ctx.appArtifactPath,
-        bootstrapperArtifactPath: options.bootstrapperArtifact ?? ctx.bootstrapperArtifactPath,
-      });
-    } catch (error) {
-      emitDesktopEnvelope(options.json, false, { error: error.message, code: error.code ?? "install-failed" });
-      return;
-    }
-    emitDesktopEnvelope(options.json, true, {
-      ...result,
-      message: `Installed the desktop app into ${result.installDir}.`,
+  cli: {
+    route: ["mesh", "desktop", "install"],
+    spec: {
+      usage: "aof mesh desktop install [--app-artifact <path>] [--bootstrapper-artifact <path>] [--install-dir <dir>] [--json]",
+      workspace: false,
+      flags: {
+        appArtifact: { type: "string", description: "path to the packaged desktop app artifact" },
+        bootstrapperArtifact: { type: "string", description: "path to the WebView2 bootstrapper artifact" },
+        installDir: { type: "string", description: "override the per-user install dir" },
+      },
+    },
+
+    argv: (positionals, options) => {
+      guardMeshPositionals("desktop install", positionals);
+      return {
+        ...(options.installDir !== undefined ? { installDir: options.installDir } : {}),
+        ...(options.appArtifact !== undefined ? { appArtifact: options.appArtifact } : {}),
+        ...(options.bootstrapperArtifact !== undefined ? { bootstrapperArtifact: options.bootstrapperArtifact } : {}),
+      };
+    },
+
+    render: (result) => `Installed the desktop app into ${result.installDir}.`,
+
+    json: (result) => ({ ok: true, ...result }),
+  },
+};
+
+export const meshDesktopRunCommand = {
+  id: "mesh:desktop-run",
+  input: {
+    type: "object",
+    properties: {
+      installDir: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+
+  async run(input, ctx = {}) {
+    // Discovery refusals (desktop-not-installed / desktop-not-runnable) THROW —
+    // the face envelopes them; a successful launch is DETACHED and this run
+    // returns immediately (never a long-lived body — not a launcher-seam verb).
+    return await launchDesktopApp({
+      installDir: input.installDir ?? ctx.installDir,
+      env: ctx.env,
+      spawnFn: ctx.spawnFn,
     });
-    return;
-  }
+  },
 
-  if (verb === "run") {
-    let result;
-    try {
-      result = await launchDesktopApp({
-        installDir: options.installDir ?? ctx.installDir,
-        env: ctx.env,
-        spawnFn: ctx.spawnFn,
-      });
-    } catch (error) {
-      emitDesktopEnvelope(options.json, false, { error: error.message, code: error.code ?? "run-failed" });
-      return;
-    }
-    emitDesktopEnvelope(options.json, true, {
-      ...result,
-      message: `Launched the desktop app (${result.appPath}).`,
-    });
-    return;
-  }
+  cli: {
+    route: ["mesh", "desktop", "run"],
+    spec: {
+      usage: "aof mesh desktop run [--install-dir <dir>] [--json]",
+      workspace: false,
+      flags: {
+        installDir: { type: "string", description: "override the per-user install dir" },
+      },
+    },
 
-  emitDesktopEnvelope(options.json, false, {
-    error: `Unknown mesh desktop verb "${verb}".`,
-    code: "unknown-subcommand",
-  });
-}
+    argv: (positionals, options) => {
+      guardMeshPositionals("desktop run", positionals);
+      return {
+        ...(options.installDir !== undefined ? { installDir: options.installDir } : {}),
+      };
+    },
+
+    render: (result) => `Launched the desktop app (${result.appPath}).`,
+
+    json: (result) => ({ ok: true, ...result }),
+  },
+};

@@ -13,9 +13,16 @@ import path from "node:path";
 import {
   discoverDesktopApp,
   launchDesktopApp,
-  meshDesktopCommand,
   DESKTOP_APP_EXE,
 } from "../src/commands/mesh-desktop.mjs";
+// m42 wave (d) leg d1 (wave-3 tail) — the CLI face is the registered
+// mesh:desktop-run command through the ONE generic face. The success envelope is
+// asserted at the core+adapter level (invoke with an injected spawnFn — the face
+// cannot inject a fake spawn, and a face-level success would launch a REAL
+// process); the refusal path drives runCommandFace whole (it refuses before any
+// spawn).
+import { getCommand, invoke } from "../src/command-core.mjs";
+import { runCommandFace } from "../src/spine/face.mjs";
 import { withMeshDesktopFixture, seedInstalledApp } from "./support/mesh-desktop-fixture.mjs";
 
 async function captureConsole(run) {
@@ -163,42 +170,49 @@ export const meshDesktopRunTests = [
       });
     },
   },
-  // CLI-face proof: `aof mesh desktop run --json` emits the single { ok:true, ... }
-  // envelope reporting the launch.
+  // Command+adapter proof: mesh:desktop-run's registered run (an injected fake
+  // spawn — no real process) returns the launch report, and its cli.json adapter
+  // shapes the single { ok:true, ... } envelope the face prints under --json.
   {
-    name: "mesh-desktop-run/02 the CLI face emits the single { ok:true, ... } envelope reporting the launch under --json",
+    name: "mesh-desktop-run/02 the registered command reports the launch and its --json adapter shapes the single { ok:true, ... } envelope",
     async run() {
       await withMeshDesktopFixture(async ({ installDir }) => {
         await seedInstalledApp(installDir);
-        const { spawnFn } = makeFixtureSpawn();
-        const { logs } = await captureConsole(() =>
-          meshDesktopCommand(["run", "--json"], { installDir, spawnFn }),
-        );
-        assert.equal(logs.length, 1, "exactly one line under --json");
-        const parsed = JSON.parse(logs[0]);
+        const { spawnFn, calls } = makeFixtureSpawn();
+        const command = getCommand("mesh:desktop-run");
+        const result = await invoke("mesh:desktop-run", { installDir }, { spawnFn });
+        assert.equal(calls.length, 1, "the injected spawn ran exactly once");
+        const parsed = command.cli.json(result);
         assert.equal(parsed.ok, true);
         assert.equal(parsed.appPath, path.join(installDir, DESKTOP_APP_EXE));
       });
     },
   },
-  // CLI-face refusal proof: `aof mesh desktop run` (not installed) is the single
-  // { ok:false, error, code } envelope under --json, and a calm one-line refusal
-  // otherwise — never a stack trace, exit non-zero handled at the outer dispatch
-  // test (mesh-desktop-dispatch.test.mjs covers the spawned-process exit code).
+  // CLI-face refusal proof: `aof mesh desktop run --json` (not installed) is the
+  // single { ok:false, error, code } envelope through the REAL routed face —
+  // the refusal fires at discovery, before any spawn, so the whole face runs.
+  // The plain face contract is the thrown coded error (bin/aof.mjs prints
+  // error.message to stderr — one calm sentence, never a stack trace).
   {
-    name: "mesh-desktop-run/02 the CLI face's not-installed refusal is the single { ok:false, error, code } envelope, and a calm sentence otherwise, never a stack trace",
+    name: "mesh-desktop-run/02 the routed face's not-installed refusal is the single { ok:false, error, code } envelope, and a thrown one-sentence coded error otherwise",
     async run() {
       await withMeshDesktopFixture(async ({ installDir }) => {
-        const { logs } = await captureConsole(() => meshDesktopCommand(["run", "--json"], { installDir }));
+        const command = getCommand("mesh:desktop-run");
+        const { logs } = await captureConsole(() => runCommandFace(command, ["--install-dir", installDir, "--json"]));
         assert.equal(logs.length, 1);
         const parsed = JSON.parse(logs[0]);
         assert.equal(parsed.ok, false);
         assert.equal(parsed.code, "desktop-not-installed");
         assert.match(parsed.error, /aof mesh desktop install/);
 
-        const { errors } = await captureConsole(() => meshDesktopCommand(["run"], { installDir }));
-        assert.equal(errors.length, 1);
-        assert.doesNotMatch(errors[0], /at\s+\S+\s+\(.*:\d+:\d+\)/, "no stack trace frame in the printed refusal");
+        await assert.rejects(
+          () => runCommandFace(command, ["--install-dir", installDir]),
+          (error) => {
+            assert.equal(error.code, "desktop-not-installed");
+            assert.doesNotMatch(error.message, /at\s+\S+\s+\(.*:\d+:\d+\)/, "no stack trace frame in the refusal message");
+            return true;
+          },
+        );
       }, { seedArtifacts: false });
     },
   },

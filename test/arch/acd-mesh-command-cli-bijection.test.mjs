@@ -165,6 +165,17 @@ function argsFor(sub) {
     case "assign": return ["mesh", "assign", "03/01", "--to", "node-x", "--json"];
     case "recover-push": return ["mesh", "recover-push", "assign-nope", "--json"];
     case "repo-publish": return ["mesh", "repo", "publish", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail, part 2) — the launcher seam + the desktop
+    // three-word routes. ui: --json is the NON-BLOCKING probe by FACE POLICY (the
+    // seam's probe rule — --json never launches), so the spawn returns with the
+    // would-serve document — exit 0 + parseable. desktop-install: no artifacts
+    // supplied ⇒ { ok:false, code:"app-artifact-missing" } — exit 1 + parseable.
+    // desktop-run: nothing installed in the hermetic AOF_GLOBAL_HOME's bin ⇒
+    // { ok:false, code:"desktop-not-installed" } — exit 1 + parseable; no real
+    // app is ever launched by this probe.
+    case "ui": return ["mesh", "ui", "--json"];
+    case "desktop-install": return ["mesh", "desktop", "install", "--json"];
+    case "desktop-run": return ["mesh", "desktop", "run", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

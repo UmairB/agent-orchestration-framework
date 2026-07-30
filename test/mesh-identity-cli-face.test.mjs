@@ -112,10 +112,25 @@ export const meshIdentityCliFaceTests = [
         assert.equal(json.status, 0, `status --json exits 0 (stderr: ${json.stderr})`);
         const parsed = JSON.parse(json.stdout);
         assert.ok(Array.isArray(parsed.nodes), "the JSON has a 'nodes' array");
-        const ids = parsed.nodes.map((n) => n.nodeId).sort();
-        assert.deepEqual(ids, ["umair-desktop", "umair-mbp"], "both nodes carried with their ids");
+        const ids = parsed.nodes.map((n) => n.nodeId);
+        // Subset, not deepEqual: the roster ALSO carries THIS machine's own
+        // hostname-derived identity record (the load-time self-heal), which on
+        // the fixture's author machine happened to collide with the seeded
+        // "umair-desktop" and hid — a hostname-dependent pin that could never
+        // pass elsewhere (pre-existing at HEAD, verified by stash 2026-07-30;
+        // the wave-3 stale-pin class).
+        for (const id of ["umair-desktop", "umair-mbp"]) {
+          assert.ok(ids.includes(id), `the roster carries seeded node ${id} (got: ${ids.join(", ")})`);
+        }
         for (const node of parsed.nodes) {
-          assert.ok(Array.isArray(node.runtimes) && Array.isArray(node.skills), "each node carries capabilities");
+          // `skills` only for the SEEDED peers: the machine's own self-healed
+          // record follows the m34 frozen six-key descriptor, which removed
+          // skills (operator directive) — pinning skills on every node was the
+          // same stale-pin class.
+          assert.ok(Array.isArray(node.runtimes), "each node carries runtimes");
+          if (["umair-desktop", "umair-mbp"].includes(node.nodeId)) {
+            assert.ok(Array.isArray(node.skills), "a seeded peer record carries its skills as persisted");
+          }
         }
         const human = runCli(root, ["mesh", "status"]);
         assert.equal(human.status, 0, `status exits 0 (stderr: ${human.stderr})`);

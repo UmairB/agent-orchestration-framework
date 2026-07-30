@@ -1,25 +1,27 @@
-// Spawn-level coverage for the `aof mesh ui` CLI verb (meshUiCommand, src/cli.mjs) —
-// milestone 25 / story 02 (QA F1/F2). The in-process serveMeshUi tests
+// Spawn-level coverage for the `aof mesh ui` CLI verb — milestone 25 / story 02
+// (QA F1/F2); the verb is the registered mesh:ui launcher-seam command since m42
+// wave (d) leg d1's wave-3 tail (src/commands/mesh-ui.mjs — the launch body, the
+// retired cli.mjs meshUiCommand's bytes). The in-process serveMeshUi tests
 // (mesh-ui-serve.test.mjs) exercise the SERVER; this file exercises the VERB FACE the
 // module tests can't reach: the human announce line, the documented default-port
 // (4181) bind, the --port override, and the exact EADDRINUSE friendly refusal + exit 1
-// (the cli.mjs:957 literal). It drives the REAL CLI (bin/aof.mjs mesh ui).
+// (the launch body's literal). It drives the REAL CLI (bin/aof.mjs mesh ui).
 //
 // Mirrors work-ui-verb-rename.test.mjs's launch/teardown idiom: `aof mesh ui` BLOCKS on
 // the fleet server until SIGINT/SIGTERM, so the blocking launches spawn directly and
 // read stdout until the "running locally" line, hit the announced origin to confirm the
-// bind, then SIGTERM the child (the meshUiCommand server.close shutdown). The busy-port
+// bind, then SIGTERM the child (the launch body's server.close shutdown). The busy-port
 // refusal is a non-blocking exit read through spawnCliAsync (the child exits 1 on its own).
 // serveMeshUi resolves ui/dist against the REAL aof repo root (the built bundle), so the
 // fixture only supplies the mesh stream (a config + a minimal .mesh so the aggregate is
 // non-empty). node:assert/strict.
 //
-// NOTE on ui-build-missing (cli.mjs:951-954): NOT asserted at the verb level. meshUiCommand
-// calls serveMeshUi({ projectDir, port }) WITHOUT repoRoot, so the guard keys on the REAL
-// repo's ui/dist (present after `npm --prefix ui run build`), NOT on the fixture / --target.
-// It is not cleanly triggerable here without an artificial hack, so it stays covered at the
-// module boundary in mesh-ui-serve.test.mjs ("a missing ui/dist build is a friendly
-// ui-build-missing refusal").
+// NOTE on ui-build-missing: NOT asserted at the verb level. The launch body calls
+// serveMeshUi({ projectDir, port, scope, … }) WITHOUT repoRoot, so the guard keys on the
+// REAL repo's ui/dist (present after `npm --prefix ui run build`), NOT on the fixture /
+// --target. It is not cleanly triggerable here without an artificial hack, so it stays
+// covered at the module boundary in mesh-ui-serve.test.mjs ("a missing ui/dist build is
+// a friendly ui-build-missing refusal").
 import assert from "node:assert/strict";
 import net from "node:net";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
@@ -253,7 +255,7 @@ export const meshUiCliFaceTests = [
         assert.equal(
           r.stderr.trim(),
           `Port ${port} is already in use. Pass --port <n> to pick another.`,
-          "the refusal is the exact frozen EADDRINUSE guidance line (cli.mjs:957)"
+          "the refusal is the exact frozen EADDRINUSE guidance line (the mesh:ui launch body)"
         );
         assert.ok(!/is running locally\./.test(r.stdout), "no fleet server is started");
       } finally {

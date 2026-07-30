@@ -62,6 +62,31 @@ Feature: Command spine — one route table, one face, one envelope
     Then the command should succeed
     And the JSON result field "ok" should be true
 
+  Scenario: a launcher verb's --json is the non-blocking probe, never the daemon
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh serve --serve --json`
+    Then the command should succeed
+    And the JSON result field "launcherRunning" should be false
+
+  Scenario: a launcher verb registered on the seam answers --json with its probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh ui --json`
+    Then the command should succeed
+    And the JSON result field "scope" should be "global"
+    And the JSON result field "relayConfigured" should be false
+
+  Scenario: the desktop verbs ride three-word routes with the one envelope
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh desktop install --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "app-artifact-missing"
+
+  Scenario: the desktop no-verb shim still owns the refusal a route cannot express
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh desktop --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
   Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
     Given a work stream with milestone "03" titled "Board"
     When I run `work doctor --json`

@@ -16,7 +16,7 @@
 // 00/02 publish helpers (no mock query layer — the same publish→query round trip
 // story 00/02's own tests use).
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,7 +78,11 @@ async function makeWorkspace(root, { name = path.basename(root), mesh = {}, seed
 // mesh-ui-serve.test.mjs's makeRepo, but WITHOUT mesh.enabled (local-only fixture;
 // the global default scenario must not depend on any global propagation).
 async function makeLocalRepo() {
-  const repo = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-global-scope-local-"));
+  // realpath: macOS's os.tmpdir() is a /var → /private/var symlink, and the
+  // spawned CLI resolves its cwd — a raw mkdtemp path would fail the Project:-
+  // line identity comparison (pre-existing at HEAD, verified by stash
+  // 2026-07-30; the mesh-assign-fixture realpath precedent).
+  const repo = await realpath(await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-global-scope-local-")));
   const meshDir = path.join(repo, ".aof", "mesh");
   await mkdir(path.join(repo, ".aof"), { recursive: true });
   await mkdir(path.join(meshDir, "nodes"), { recursive: true });
@@ -255,10 +259,11 @@ export const meshUiGlobalScopeTests = [
       // The real aof checkout's ui/dist always exists in this dev tree (the CLI
       // spawn face can't remove it), so — mirroring mesh-ui-cli-face.test.mjs's own
       // documented NOTE on this exact limitation — the build-missing contract is
-      // driven in-process here, through the SAME code path meshUiCommand's catch
-      // block reaches (error.code === "ui-build-missing" → console.error + exit 1,
-      // never a stack trace), proving `--local` (scope:"local") hits the identical
-      // mapping as the default global scope (no scope-conditional bypass).
+      // driven in-process here, through the SAME code path the mesh:ui launch
+      // body's catch block reaches (error.code === "ui-build-missing" →
+      // console.error + exit 1, never a stack trace), proving `--local`
+      // (scope:"local") hits the identical mapping as the default global scope
+      // (no scope-conditional bypass).
       const repo = await makeLocalRepo();
       const noBuildRoot = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-ui-global-scope-nobuild-"));
       try {
@@ -267,7 +272,7 @@ export const meshUiGlobalScopeTests = [
           (error) => {
             assert.equal(error.code, "ui-build-missing");
             assert.ok(/The fleet UI build is missing/.test(error.message));
-            // meshUiCommand's catch prints error.message ONLY (cli.mjs), never
+            // the mesh:ui launch body's catch prints error.message ONLY, never
             // error.stack — the operator-facing text itself carries no stack frame.
             assert.ok(!/at\s+\S+:\d+:\d+/.test(error.message), "the operator-facing message carries no stack-trace frame");
             return true;
@@ -290,7 +295,11 @@ export const meshUiGlobalScopeTests = [
           env: { ...process.env, NODE_NO_WARNINGS: "1" },
         });
         assert.equal(r.status, 1, `exits 1 on an unknown flag (stderr: ${r.stderr})`);
-        assert.equal(r.stderr.trim(), 'Unknown option "--workspace".', "stderr explains the unknown option by name");
+        // m42 wave (d) leg d1 (wave-3 tail) — the documented contract change that
+        // came with mesh:ui joining the route table: the refusal is the generic
+        // face's spec-parse vocabulary (`Unknown flag "--x" for mesh:ui` + usage),
+        // replacing the retired MESH_UI_FLAGS guard's `Unknown option "--x".`.
+        assert.match(r.stderr, /^Unknown flag "--workspace" for mesh:ui\./, "stderr explains the unknown flag by name in the face's vocabulary");
         assert.ok(!/is running locally\./.test(r.stdout), "serveMeshUi is never reached — no fleet server announce");
       } finally {
         await cleanup(repo);
