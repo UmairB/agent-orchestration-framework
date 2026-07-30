@@ -25,6 +25,23 @@ export function boardUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
 
+// m42 wave (d) leg d1 (wave-3 tail) — the NON-BLOCKING probe behind work:ui's
+// registered run (the launcher seam's probe rule: --json never launches). What
+// WOULD serve: the resolved port/projectDir, whether the built board bundle is
+// present (the ui-build-missing precheck), and the URL the launch would announce.
+// Lives HERE so the probe and serveBoard resolve the dist identically.
+export function boardUiProbe({ projectDir = process.cwd(), port = 4180, repoRoot } = {}) {
+  const dist = repoRoot ? boardUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
+  return {
+    mode: "board",
+    port,
+    projectDir: path.resolve(projectDir),
+    uiDist: dist,
+    uiBuildPresent: existsSync(path.join(dist, "index.html")),
+    boardUrl: `http://127.0.0.1:${port}/?mode=board`,
+  };
+}
+
 export async function serveBoard({ projectDir = process.cwd(), port = 4178, repoRoot, spawn, which, recordSessions = true } = {}) {
   const dist = repoRoot ? boardUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
 

@@ -203,10 +203,26 @@ face's json-before-launch ordering is pinned structurally + self-checked);
 `acd-mesh-ui-global-default`'s structural half + `acd-terminal-stream-transport-
 wired` inv. 7 now read commands/mesh-ui.mjs; the mesh bijection argsFor maps
 ui/desktop-install/desktop-run.
-**End state (still owed):** `graph serve` / `work ui` / `assets ui` onto the same
-seam when their families migrate; then `parseOptions` + its boolean allow-list have
-zero callers and are deleted; `helpText()` derives its verb listing from the
-registry.
+**Part 2 continued (same day): the remaining launcher verbs onto the seam.**
+`graph:serve` (probe = `mcpServeProbe` — server identity + protocol + the tool
+descriptors off the commands' own frozen schemas; launch = the serveStdio loop,
+its own loadWorkspace), `work:ui` (probe = `boardUiProbe` — port/projectDir/
+uiBuildPresent/boardUrl; launch = the board body, byte-identical announces +
+refusals), `assets:ui` (probe = ports + editor URL; launch = the setup-UI body
+INCLUDING the `--no-serve`/`--dry-run` not-started print — a seam body need not
+be long-lived — and the DEV-ONLY vite re-exec moved with it, still routing
+through assetBase so acd-sea-safe-asset-base needs no edit). The assets + graph
+group ladders are unknown-verb shims only now. Gate deltas: work/graph bijection
+argsFor map `ui`/`serve` (probe spawns); `work:ui` joins the route-coverage
+BOARD_DEFERRED carve-out (the verb IS the door into the board — a board serving
+a launch-the-board route is a category error, documented there);
+`acd-launcher-seam`'s armed list pins all five riders. One command-spine
+scenario pins all three probes.
+**End state (still owed):** the low-priority CLI-only verbs (work find/observe/
+init/update/memory/orchestrator/delegation*/*-headroom, planning init, session,
+top-level init, project provision's face copy); then `parseOptions` + its
+boolean allow-list have zero callers and are deleted; `helpText()` derives its
+verb listing from the registry.
 
 Also owed in d1 (PRD): invert the four upward imports into `commands/`, break the
 `mesh-repo` ↔ `mesh-worker-execution` cycle, and confine `console.log` to the face

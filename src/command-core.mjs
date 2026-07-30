@@ -183,6 +183,13 @@ import { meshRepoPublishCommand } from "./commands/mesh-repo.mjs";
 // change — the route table now carries every registered mesh verb.
 import { meshUiCommand } from "./commands/mesh-ui.mjs";
 import { meshDesktopInstallCommand, meshDesktopRunCommand } from "./commands/mesh-desktop.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, part 2 continued) — the remaining launcher
+// verbs onto the SAME seam: graph:serve (the stdio MCP server), work:ui (the
+// board), assets:ui (the setup-UI editor + its dev-only vite re-exec). Each is a
+// probe run + a cli.launch body; their cli.mjs ladder branches are deleted.
+import { graphServeCommand } from "./commands/graph-serve.mjs";
+import { workUiCommand } from "./commands/work-ui.mjs";
+import { assetsUiCommand } from "./commands/assets-ui.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -298,6 +305,9 @@ const COMMANDS = [
   meshUiCommand,
   meshDesktopInstallCommand,
   meshDesktopRunCommand,
+  graphServeCommand,
+  workUiCommand,
+  assetsUiCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,

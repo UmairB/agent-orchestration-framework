@@ -143,6 +143,10 @@ async function buildFixture() {
 // feedback writes to the milestone/story STATE.md with a real note.
 function argsFor(sub) {
   switch (sub) {
+    // m42 wave (d) leg d1 (wave-3 tail) — work:ui rides the launcher seam:
+    // --json is the NON-BLOCKING probe by FACE POLICY (--json never launches),
+    // so the spawn returns with the would-serve document — exit 0 + parseable.
+    case "ui": return ["work", "ui", "--json"];
     case "list": return ["work", "list", "--json"];
     case "doc": return ["work", "doc", "03", "SPEC", "--json"];
     case "tasks": return ["work", "tasks", "03/01", "--json"];

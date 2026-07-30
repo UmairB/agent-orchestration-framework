@@ -1,6 +1,5 @@
 import path from "node:path";
 import { access } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatFriendlyApplyAction, relativeDisplayPath } from "./render-plan.mjs";
 import { writeText } from "./fs.mjs";
@@ -13,7 +12,6 @@ import { invoke, getCommand } from "./command-core.mjs";
 // and the shared runtime-flag interpretation (one home; the local copies are gone).
 import { resolveRoute, runCommandFace } from "./spine/face.mjs";
 import { hasRuntimeOptions, parseRuntimes } from "./spine/flags.mjs";
-import { serveStdio } from "./graph-mcp-server.mjs";
 import { initWork } from "./work-init.mjs";
 import { updateWork } from "./work-update.mjs";
 import { observeMilestone, observabilityEnabled } from "./work-observe.mjs";
@@ -21,7 +19,9 @@ import { workMemoryCommand } from "./work-memory.mjs";
 import { useHeadroom, unuseHeadroom } from "./work-headroom.mjs";
 import { selectOrchestratorModel, showOrchestratorModel } from "./work-orchestrator.mjs";
 import { setDelegationCommand, setDelegationModelCommand, showDelegation } from "./work-delegation.mjs";
-import { serveBoard } from "./board-serve.mjs";
+// serveBoard / serveStdio / the vite dev spawn — no longer imported here (m42
+// wave (d) leg d1, wave-3 tail): the work:ui / graph:serve / assets:ui launch
+// bodies own them in their command modules (the launcher seam).
 // serveMeshUi + the fleet mirror/relay wiring — no longer imported here (m42
 // wave (d) leg d1, wave-3 tail): `aof mesh ui` is the registered mesh:ui
 // launcher-seam command (commands/mesh-ui.mjs owns the production serveMeshUi
@@ -45,7 +45,7 @@ import { initPlanning } from "./planning-init.mjs";
 // (the dev-only vite re-exec route) + the version string for `aof --version`
 // (ADR-004's "node mode = everything else" — an argv branch of the SAME run()
 // dispatch, never a fork ahead of it, mirroring the existing `help` branch).
-import { assetBase, packageVersionString } from "./asset-base.mjs";
+import { packageVersionString } from "./asset-base.mjs";
 // TECH_DEBT item 1 — which code is this process actually running (source /
 // payload / embedded + the install's build stamp)? Surfaced on --version (the
 // daemons' startup lines moved to their launcher-seam bodies).
@@ -155,18 +155,12 @@ export async function run(argv) {
   throw new Error(`Unknown command "${command}".\n\n${helpText()}`);
 }
 
+// add/list/show/remove/use/unuse/validate/clean/apply/ui — ALL MIGRATED (m42
+// wave (d) leg d1; ui with the launcher seam, wave-3 tail): registry Commands
+// routed in run() through the generic face. Only an unknown subcommand ever
+// reaches this shim.
 async function assetsCommand(args) {
-  const [subcommand, ...rest] = args;
-
-  // add/list/show/remove/use/unuse/validate/clean/apply — MIGRATED (m42 wave
-  // (d) leg d1): registry Commands routed in run() through the generic face;
-  // they never reach this ladder. Still here: ui (the launcher idiom).
-
-  if (subcommand === "ui") {
-    await assetsUiCommand(rest);
-    return;
-  }
-
+  const [subcommand] = args;
   throw new Error(`Unknown assets command "${subcommand ?? ""}".\n\nExamples:\n  aof assets add skill code-review\n  aof assets add --global skill shared-review\n  aof assets apply --dry-run`);
 }
 
@@ -289,10 +283,10 @@ async function workCommand(args) {
     return;
   }
 
-  if (subcommand === "ui") {
-    await workUiCommand(rest);
-    return;
-  }
+  // `aof work ui` — MIGRATED with the launcher seam (m42 wave (d) leg d1,
+  // wave-3 tail): work:ui's probe run + cli.launch board body live in
+  // commands/work-ui.mjs; it rides the route table and never reaches this
+  // ladder.
 
   if (subcommand === "integrations") {
     await workIntegrationsCommand(rest);
@@ -328,35 +322,15 @@ async function workCommand(args) {
 }
 
 // `aof graph <verb>` — build/query/triage/impact MIGRATED (m42 wave (d) leg d1,
-// wave 3): registry Commands carrying `cli.route`, dispatched in run() through
-// the route table + the ONE generic face (graphVerbCommand RETIRED — the face's
-// --json single-envelope discipline is the same contract). Still here: `serve`
-// (the launcher idiom — a long-lived stdio MCP server) + the unknown-verb shim.
+// wave 3); `serve` MIGRATED with the launcher seam (wave-3 tail —
+// graph:serve's probe run + cli.launch stdio body live in
+// commands/graph-serve.mjs): registry Commands carrying `cli.route`, dispatched
+// in run() through the route table + the ONE generic face. Only an unknown verb
+// ever reaches this shim.
 async function graphCommand(args) {
-  const [subcommand, ...rest] = args;
-
-  // `aof graph serve` (story 04, ADR-005 amendment): launch the stdio MCP server
-  // the story-02 rendered MCP config entry targets (command:"aof", args:["graph",
-  // "serve"]). It is a thin transport face over the SAME command core — it reaches
-  // the graph ONLY through invoke("graph:…"), and spawns no graphify itself.
-  if (subcommand === "serve") {
-    await graphServeCommand(rest);
-    return;
-  }
-
+  const [subcommand] = args;
   console.error(`Unknown graph command "${subcommand ?? ""}".\n\nExamples:\n  aof graph build <folder> [--backend claude] [--json]\n  aof graph query "what calls main" [--json]\n  aof graph impact src/command-core.mjs [src/cli.mjs ...] [--json]\n  aof graph triage [--mode conflicts] [--json]\n  aof graph serve`);
   process.exitCode = 1;
-}
-
-// `aof graph serve` — start the stdio MCP server (story 04, ADR-005 amendment).
-// loadWorkspace resolves the ctx the server's tool handlers pass to invoke; the
-// server then speaks line-delimited JSON-RPC 2.0 over stdin/stdout until EOF. It
-// reaches the graph ONLY through invoke("graph:…") and spawns no graphify itself
-// (the driver src/graphify.mjs is the sole spawn site — ADR-006 inv. 2).
-async function graphServeCommand(args) {
-  const options = parseOptions(args);
-  const workspace = await loadWorkspace(process.cwd(), options.config);
-  await serveStdio({ workspace });
 }
 
 // `aof mesh <sub>` — the greenfield top-level mesh dispatch (a sibling to `aof work`
@@ -520,46 +494,9 @@ async function notionIntegrationCommand(args) {
 }
 
 
-async function workUiCommand(args) {
-  const options = parseOptions(args);
-  // Default to 4180 so it does not collide with `aof assets ui` (4177 frontend /
-  // 4178 API); the board serves on this single port.
-  const port = Number.parseInt(options.port ?? "4180", 10);
-  const projectDir = path.resolve(options.target ?? process.cwd());
-
-  let session;
-  try {
-    session = await serveBoard({ projectDir, port });
-  } catch (error) {
-    if (error.code === "ui-build-missing") {
-      console.error(error.message);
-      process.exitCode = 1;
-      return;
-    }
-    if (error.code === "EADDRINUSE") {
-      console.error(`Port ${port} is already in use. Pass --port <n> to pick another.`);
-      process.exitCode = 1;
-      return;
-    }
-    throw error;
-  }
-
-  const { server, boardUrl } = session;
-  console.log("AOF work ui is running locally.");
-  console.log(`Open this URL in your browser: ${boardUrl}`);
-  console.log(`Project: ${projectDir}`);
-  console.log("Press Ctrl+C to stop the board.");
-
-  await new Promise((resolve) => {
-    const shutdown = () => {
-      server.close(() => {
-        resolve();
-      });
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
-}
+// workUiCommand — RETIRED (m42 wave (d) leg d1, wave-3 tail, the launcher
+// seam): `aof work ui` is the registered work:ui command (commands/work-ui.mjs)
+// — probe run + cli.launch board body — on the route table.
 
 // meshUiCommand + MESH_UI_FLAGS — RETIRED (m42 wave (d) leg d1, wave-3 tail
 // part 2, the launcher seam): `aof mesh ui` is the registered mesh:ui command
@@ -1067,10 +1004,11 @@ async function guideAfterInit(targetDir, runtimes, options) {
 // generic face. Byte-identical output; runtimesForApply moved with it, the
 // friendly-action/marker/display helpers to render-plan.mjs.
 
-async function assetsUiCommand(args) {
-  const options = parseOptions(args);
-  await setupUiCommand({ ...options, uiMode: "assets" });
-}
+// assetsUiCommand / setupUiCommand / startSetupUiFrontend — RETIRED (m42 wave
+// (d) leg d1, wave-3 tail, the launcher seam): `aof assets ui` is the
+// registered assets:ui command (commands/assets-ui.mjs) — probe run +
+// cli.launch editor body — on the route table; the DEV-ONLY vite re-exec (the
+// acd-sea-safe-asset-base allow-list note) moved with it.
 
 // packagesListCommand — RETIRED (m42 wave (d) leg d1): now the registered
 // packages:list command (src/commands/packages-list.mjs), routed through the
@@ -1081,72 +1019,6 @@ async function assetsUiCommand(args) {
 // the generic face; the frameworkInstall/installFromLock machinery moved with
 // it. Byte-identical transcript; the failure summary now ends the stdout
 // document (the exit rides cli.exit).
-
-async function setupUiCommand(options) {
-  const description = "project/global asset editor";
-
-  if (options.noServe || options.dryRun) {
-    console.log("Setup UI not started.");
-    console.log("Run `aof assets ui` to open the local project/global asset editor.");
-    return;
-  }
-
-  const uiPort = Number.parseInt(options.port ?? "4177", 10);
-  const apiPort = Number.parseInt(options.apiPort ?? String(uiPort + 1), 10);
-  const { serveSetupUi } = await import("./setup-ui.mjs");
-  const { server } = await serveSetupUi(null, { port: apiPort });
-  const frontend = startSetupUiFrontend(uiPort, `http://127.0.0.1:${apiPort}`);
-  const uiUrl = `http://127.0.0.1:${uiPort}/?mode=assets`;
-
-  console.log("AOF assets UI is running locally.");
-  console.log(`Open this URL in your browser: ${uiUrl}`);
-  console.log(`Project: ${process.cwd()}`);
-  console.log(`Use the UI for ${description}. Keep this terminal open while you use it.`);
-  console.log("Press Ctrl+C to stop the setup UI.");
-
-  await new Promise((resolve, reject) => {
-    const shutdown = () => {
-      frontend.kill();
-      server.close(() => {
-        resolve();
-      });
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-    frontend.once("exit", (code) => {
-      server.close(() => {
-        if (code === 0 || code === null) {
-          resolve();
-        } else {
-          reject(new Error(`Setup UI frontend exited with code ${code}.`));
-        }
-      });
-    });
-  });
-}
-
-// DEV-ONLY: the vite UI dev server re-exec (RESEARCH §0; ADR-003 allow-list).
-// Never on the shipped path — a SEA never runs vite. Re-homed onto the ONE
-// asset-base seam for correctness (the same repoRoot-derivation every other
-// site used), but allow-listed from the "must serve packaged assets" assertion
-// (acd-sea-safe-asset-base fitness #1) since this line never executes in a SEA.
-function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
-  // "version" resolves to the repo root in dev (the same base package.json/
-  // work-bundle-manifest.mjs read); it never runs under a SEA (dev-only path).
-  const repoRoot = assetBase("version");
-  const uiDir = path.join(repoRoot, "ui");
-  const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
-  return spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
-    cwd: uiDir,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      VITE_AOF_UI_MODE: "assets",
-      VITE_AOF_API_URL: apiUrl,
-      BROWSER: "none"
-    }
-  });
-}
 
 // projectShowCommand — RETIRED (m42 wave (d) leg d1): now the registered
 // project:show command (src/commands/project-show.mjs), routed through the

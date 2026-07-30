@@ -73,6 +73,11 @@ const BOARD_DEFERRED = new Set([
   "insert-chore",
   "promote-gap",
   "upgrade",
+  // m42 wave (d) leg d1 (wave-3 tail) — work:ui is the BOARD LAUNCHER itself
+  // (a launcher-seam command: probe run + cli.launch serve body). A board
+  // serving a "launch the board" route makes no sense — the verb is the door
+  // INTO the board, so it is CLI-only by nature, not a deferred affordance.
+  "ui",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

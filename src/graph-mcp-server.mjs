@@ -82,6 +82,20 @@ function toolDescriptors() {
   });
 }
 
+// m42 wave (d) leg d1 (wave-3 tail) — the NON-BLOCKING probe behind graph:serve's
+// registered run (the launcher seam's probe rule: --json never launches). What
+// WOULD serve: the MCP server identity + protocol + the advertised tool
+// descriptors (each carrying its registered command's own frozen input schema).
+// Lives HERE so the probe and the stdio loop can never disagree about the surface.
+export function mcpServeProbe() {
+  return {
+    mode: "mcp-stdio",
+    server: MCP_SERVER_INFO,
+    protocolVersion: MCP_PROTOCOL_VERSION,
+    tools: toolDescriptors(),
+  };
+}
+
 // JSON-RPC 2.0 envelope helpers. A response always echoes the request id.
 function rpcResult(id, result) {
   return { jsonrpc: "2.0", id, result };

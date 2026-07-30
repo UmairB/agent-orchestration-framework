@@ -15,14 +15,24 @@
 // forward — the moment story 01 renames `board`→`ui` it stays green; the moment it
 // leaves a dangling branch (or drops the verb) it reds. (ADR-001, fitness table B.)
 //
-// NOTE: `subcommand === "ui"` is matched ONLY inside the `workCommand` body, so the
-// `meshCommand` `subcommand === "ui"` branch (milestone 25 / ADR-003, the `aof mesh ui`
-// serve verb) does NOT satisfy this work-side check — the two dispatchers are isolated
-// exactly as acd-mesh-command-cli-bijection isolates meshCommand.
+// NOTE: `subcommand === "ui"` is matched ONLY inside the `workCommand` body, so any
+// OTHER dispatcher's `ui` branch does NOT satisfy this work-side check — the
+// dispatchers are isolated exactly as acd-mesh-command-cli-bijection isolates
+// meshCommand.
+//
+// REWORKED with m42 wave (d) leg d1's wave-3 tail (the launcher seam): the `ui`
+// serve verb's door is the ROUTE TABLE now (work:ui carries cli.route
+// ["work","ui"]; its ladder branch is deleted), so the XOR runs over THREE
+// candidate doors — the old `board` ladder branch, a `ui` ladder branch, and the
+// routed work:ui — and exactly ONE may exist. The broken states stay red: a dead
+// board branch surviving beside the route, a ladder branch shadowing the route
+// (a second door), or the serve verb vanishing entirely.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getCommand, listCommands } from "../../src/command-core.mjs";
+import { deriveRouteTable } from "../../src/spine/face.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CLI_MJS = path.join(repoRoot, "src", "cli.mjs");
@@ -50,21 +60,25 @@ function hasBranch(body, sub) {
 
 export const archTests = [
   {
-    name: "arch/25 ADR-001: workCommand dispatches EXACTLY ONE of the board/ui serve verb (XOR — locks the rename, green on both sides)",
+    name: "arch/25 ADR-001: the work board/ui serve verb has EXACTLY ONE door (board ladder | ui ladder | routed work:ui) — locks the rename AND the seam migration",
     run: async () => {
       const body = workCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       // The dispatcher itself is gated (workCommand must be defined).
       assert.ok(body.length > 0, "workCommand is defined in cli.mjs (the work face dispatcher)");
       const hasBoard = hasBranch(body, "board");
-      const hasUi = hasBranch(body, "ui");
-      // XOR: exactly one of the two serve-verb literals is present.
-      assert.notEqual(
-        hasBoard,
-        hasUi,
-        `workCommand dispatches EXACTLY ONE serve verb — got board=${hasBoard}, ui=${hasUi}. ` +
-          "Both present = a dead `subcommand === \"board\"` branch left behind after the rename; " +
-          "neither present = the board/ui serve verb vanished with no replacement (25/ADR-001)."
+      const hasUiLadder = hasBranch(body, "ui");
+      const uiCommand = getCommand("work:ui");
+      const uiRouted = uiCommand != null && deriveRouteTable(listCommands()).get("work ui") === uiCommand;
+      const doors = [hasBoard, hasUiLadder, uiRouted].filter(Boolean).length;
+      assert.equal(
+        doors,
+        1,
+        `the work serve verb has EXACTLY ONE door — got board-ladder=${hasBoard}, ui-ladder=${hasUiLadder}, ui-routed=${uiRouted}. ` +
+          "More than one = a dead branch or a ladder shadowing the route (a second door); " +
+          "zero = the board/ui serve verb vanished with no replacement (25/ADR-001)."
       );
+      // The rename itself stays locked: the old board branch may never return.
+      assert.equal(hasBoard, false, "the retired `subcommand === \"board\"` branch stays gone (25/ADR-001)");
     },
   },
 ];

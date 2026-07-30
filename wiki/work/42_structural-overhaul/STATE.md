@@ -11,6 +11,26 @@ doc: state
 
 ## Progress
 
+- **2026-07-30 (seventh pass): the LAST launcher verbs onto the seam — every
+  serve verb in the CLI is a registered Command now.** `graph:serve` (probe =
+  `mcpServeProbe`, the MCP identity/protocol/tool descriptors off the commands'
+  own frozen schemas; launch = the serveStdio loop), `work:ui` (probe =
+  `boardUiProbe`; launch = the board body, byte-identical announces/refusals —
+  proven by the stdio tools/list + SIGTERM smokes), `assets:ui` (probe = ports +
+  editor URL; launch = the setup-UI body including the `--no-serve`/`--dry-run`
+  not-started print and the DEV-ONLY vite re-exec, moved whole — still through
+  assetBase, so acd-sea-safe-asset-base needed no edit). The assets and graph
+  group ladders are unknown-verb shims only; cli.mjs 1,313 → 1,150 lines. Gate
+  deltas: work/graph bijection argsFor map the probe spawns; `work:ui` joins
+  route-coverage's BOARD_DEFERRED (the verb IS the door into the board);
+  `acd-launcher-seam` pins all five riders; `acd-work-ui-rename-complete`
+  reworked to the one-door form (board ladder | ui ladder | routed work:ui —
+  exactly one, board's forever banned). One new command-spine scenario pins all
+  three probes. Verified: full arch sweep 709/709, BDD integration 116/116,
+  probe + launch smokes byte-identical. d1's remaining tail is now ONLY the
+  low-priority CLI-only verbs + project provision's face copy, then the
+  parseOptions/helpText end-state.
+
 - **2026-07-30 (sixth pass): THE LAUNCHER SEAM designed + landed — d1 wave-3 tail
   part 2 COMPLETE; every registered mesh verb now rides the route table.** The
   blocked design question ("where does a long-lived foreground body live for a

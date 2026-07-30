@@ -75,6 +75,18 @@ Feature: Command spine — one route table, one face, one envelope
     And the JSON result field "scope" should be "global"
     And the JSON result field "relayConfigured" should be false
 
+  Scenario: every launcher family answers --json with its non-blocking probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `graph serve --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "mcp-stdio"
+    When I run `work ui --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "board"
+    When I run `assets ui --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "assets-ui"
+
   Scenario: the desktop verbs ride three-word routes with the one envelope
     Given a work stream with milestone "03" titled "Board"
     When I run `mesh desktop install --json`

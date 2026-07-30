@@ -74,6 +74,10 @@ async function buildFixture() {
 // no-graph) — which still parses as a single JSON document.
 function argsFor(verb) {
   switch (verb) {
+    // m42 wave (d) leg d1 (wave-3 tail) — graph:serve rides the launcher seam:
+    // --json is the NON-BLOCKING probe by FACE POLICY (--json never launches),
+    // so the spawn returns with the MCP surface document — never the stdio loop.
+    case "serve": return ["graph", "serve", "--json"];
     case "build": return ["graph", "build", ".", "--json"];
     case "query": return ["graph", "query", "what calls main", "--json"];
     case "triage": return ["graph", "triage", "--json"];

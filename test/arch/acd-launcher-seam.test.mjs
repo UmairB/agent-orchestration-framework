@@ -96,7 +96,7 @@ export const archTests = [
     run: async () => {
       const launchers = listCommands().filter((c) => typeof c.cli?.launch === "function");
       const ids = launchers.map((c) => c.id);
-      for (const id of ["mesh:ui", "mesh:serve"]) {
+      for (const id of ["mesh:ui", "mesh:serve", "graph:serve", "work:ui", "assets:ui"]) {
         assert.ok(ids.includes(id), `${id} declares cli.launch (the seam is armed, not vacuous)`);
       }
       for (const command of launchers) {
