@@ -20,7 +20,9 @@ doc: state
   editor URL; launch = the setup-UI body including the `--no-serve`/`--dry-run`
   not-started print and the DEV-ONLY vite re-exec, moved whole — still through
   assetBase, so acd-sea-safe-asset-base needed no edit). The assets and graph
-  group ladders are unknown-verb shims only; cli.mjs 1,313 → 1,150 lines. Gate
+  group ladders are unknown-verb shims only; cli.mjs 1,313 → 1,185 lines (the
+  commit message for 9d3a9b2 says 1,150 — written before measuring; this is the
+  measured figure). Gate
   deltas: work/graph bijection argsFor map the probe spawns; `work:ui` joins
   route-coverage's BOARD_DEFERRED (the verb IS the door into the board);
   `acd-launcher-seam` pins all five riders; `acd-work-ui-rename-complete`
