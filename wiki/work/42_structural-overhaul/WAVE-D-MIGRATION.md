@@ -583,9 +583,32 @@ a no-op). `acd-effects-ledger` lists the fourth seam. No BDD scenario: the share
 fixture scaffolds no `.aof/templates/work/**`, so an insert refuses `insert-template-missing`
 there — the end-to-end proof runs as a behavioural arch lane instead.
 
-**REMAINING — one port:**
+**REMAINING — one port, and it has a blocking decision (operator's, not the port's):**
 
 1. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
+   The mechanics are ready — the sidecar already records `lastStatus`/`lastContentHash` and
+   the projection already skips an unchanged item, so the dedup is reuse, not new code. Two
+   things must be settled FIRST, and both change what gets built:
+
+   **(a) Does a run completion WRITE TO NOTION on its own authority?** Today the sync is a
+   verb the operator runs (`aof work integrations notion sync-work <milestone>`). As a
+   reactor on `run.completed` it becomes automatic — an outward-facing write to a real
+   Notion workspace, fired by a cascade, on every completion. The conservative reading is
+   that the LEDGER REMEMBERS the owed sync (a deferred `integration:notion` step — which
+   today nothing records at all, so forgetting to sync is invisible) and the existing verb
+   DRAINS it when the operator runs it. That is strictly additive and reverses cleanly. The
+   automatic reading is the PRD's literal one. Not decided here: it is an outward-facing
+   behaviour change, and d4's other three ports were all wire-invisible.
+
+   **(b) The unreachable-locus leak.** `integration:notion` is in neither `LOCAL_LOCI` nor
+   `CONTROL_LOCI`, so its steps stay `deferred` — correct for a reachable-elsewhere locus
+   (d3's outbox rule: "an offline send is not an attempt"), but in a workspace with NO
+   Notion config the step is owed to nobody and accumulates in the journal on every run
+   completion, forever. Port 3 sidestepped this by proving its sidecar remap was a
+   `checkout` write; a real status sync cannot. The fix is probably an APPLICABILITY
+   predicate on the reactor (a consequence that can never apply to this workspace is not
+   owed, evaluated by the seam at append time) — new machinery in the table, and worth
+   designing rather than bolting on.
 
 ## d5 — unchanged from the ROADMAP, now with its substrate named
 
