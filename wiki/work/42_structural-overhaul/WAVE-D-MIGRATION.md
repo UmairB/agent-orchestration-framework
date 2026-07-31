@@ -305,9 +305,54 @@ edit. (`work memory` and `session` stay laddered by design — they delegate
 wholesale and carry no parseOptions.) cli.mjs: 921 → 647 lines (3,419 at the
 wave's start).
 
-Also owed in d1 (PRD): invert the four upward imports into `commands/`, break the
-`mesh-repo` ↔ `mesh-worker-execution` cycle, and confine `console.log` to the face
-(an arch gate per item, landed with the fix).
+### The last three d1 items (the PRD's layering + printing half): ✅ ALL PAID 2026-07-31
+
+With these, **leg d1 is COMPLETE** — every registered verb rides the route table, the
+flag vocabularies are per-command specs, and the module graph underneath is acyclic and
+one-directional.
+
+1. **The four upward imports INVERTED** — `commands/errors.mjs` → `src/command-error.mjs`
+   (the error contract is a contract, not a command: faces, commands AND cores share it,
+   33 sites repointed); `aofVersion()` **DELETED** (a try/catch wrapper around
+   `packageVersionString()`, which has degraded to `""` on its own since the SEA
+   asset-base seam — a second door to one fact; the four publishers now read it one way,
+   and run-start's import was dead); `assignWork`/`withdrawWork` → `src/mesh-assignment.mjs`
+   (the fleet UI server calls the core directly — routing it through the registry instead
+   would have made `mesh-ui-serve` ↔ `commands/mesh-ui` a NEW cycle), taking dead
+   `assignError` with it.
+2. **The cycle BROKEN** — `src/mesh-repo-marker.mjs` owns the `mesh.repo` config subtree:
+   the published-marker writer (+ git-remote detection, userinfo strip) and the clone-URL
+   shape rule. `mesh-worker-execution.mjs` imported the writer UP from
+   `commands/mesh-repo.mjs`, which imported the shape rule back DOWN — both facts are
+   about the same subtree and neither belongs to a command, so both former sides now
+   import downward. The command keeps the VERB.
+3. **`console.log` CONFINED** — the printing DEFAULTS are gone (9 sites, 5 modules: the
+   headroom pair, the delegation trio, the orchestrator pair, planning-init's two,
+   runMemory) — every routed caller already injected a collector, so the defaults were
+   dead in production and live only as a hazard; an un-injected core is now silent by
+   contract (`NO_PRINT`). `work-memory.mjs` gained the face/core split its module shape
+   was hiding: the ladder FACE injects `console.log` visibly, the core defaults to
+   NO_PRINT.
+
+Gates (registry-/source-derived, self-checked, registered in `scripts/test.mjs`):
+**`acd-command-layer-imports-downward`** — (a) no `src/*.mjs` statically imports
+`src/commands/*` (cli.mjs + command-core.mjs exempt: they ARE the layer's doors),
+(b) no dependency of a command reaches back into `commands/` (the direct no-cycle proof).
+Dynamic `import()` is deliberately not an edge — it defers past module init, which is what
+makes it the sanctioned escape hatch. **`acd-console-log-confined`** — the printer set is
+CLOSED, declared with a reason per row (the two faces, the four `cli.launch` bodies,
+prompt.mjs + terminal-ws.mjs, and the two deliberately-unrouted ladder doors), a RATCHET
+that may only shrink (a stale row is a failure — it would silently license a re-print), and
+a ban on `log = console.log` defaults in either retired shape.
+
+Two existing gates moved with the shape rather than being weakened:
+`acd-mesh-ui-no-core-import` and `acd-fleet-face-single-mutation-route` pinned
+`./commands/mesh-assign.mjs` as the ONE sanctioned write door — the door is now
+`./mesh-assignment.mjs` and their `commands/*` deny-lists have no carve-out left at all.
+
+No behaviour change. Verified: arch sweep **714/714 across 225 files**, focused suites
+210/210, BDD integration **124/124**, CLI byte smokes unchanged. (Standing red, pre-existing
+at HEAD and unrelated — `memory-integration`'s real-index count assertion, 381 ≠ 405.)
 
 ## d2 — the run-completion sweep: ✅ PORTED 2026-07-28 (live drill owed)
 

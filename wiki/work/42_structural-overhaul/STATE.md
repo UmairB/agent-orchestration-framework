@@ -11,6 +11,37 @@ doc: state
 
 ## Progress
 
+- **2026-07-31 (tenth pass): LEG d1 IS COMPLETE — the layering half paid.** The three
+  PRD items no verb migration could reach: (1) **the four upward imports inverted** —
+  `commands/errors.mjs` → `src/command-error.mjs` (the error contract is a contract, not
+  a command; 33 sites), `aofVersion()` **deleted** (a try/catch around
+  `packageVersionString()`, which has degraded to `""` on its own since the SEA
+  asset-base seam — a second door to one fact, and the one that dragged mesh-launcher
+  into `commands/`; run-start's import of it was dead), and the assign/withdraw cores →
+  `src/mesh-assignment.mjs` (the fleet UI server calls `assignWork` directly; routing it
+  through the registry instead would have made mesh-ui-serve ↔ commands/mesh-ui a NEW
+  cycle — so the core moved to its layer and the command kept its verb), taking dead
+  `assignError` with it. (2) **the one confirmed cycle broken** —
+  `src/mesh-repo-marker.mjs` owns the `mesh.repo` subtree: the published-marker writer
+  AND the clone-URL shape rule, which the worker path and the publish verb were reaching
+  through each other for. (3) **`console.log` confined** — the printing DEFAULTS are the
+  part that mattered (9 sites, 5 modules: headroom pair, delegation trio, orchestrator
+  pair, planning-init's two, runMemory): every routed caller already injects a collector,
+  so each default was a second printer waiting for the first caller that forgets.
+  `NO_PRINT` is the default now, and `work-memory.mjs` gained the face/core split its
+  module shape was hiding (the ladder face injects `console.log` visibly). Two new gates,
+  both self-checked: `acd-command-layer-imports-downward` (no src-root module imports
+  `commands/*`; no command's dependency reaches back — the direct no-cycle proof; dynamic
+  `import()` deliberately not an edge) and `acd-console-log-confined` (a CLOSED printer
+  set, each row carrying its reason, ratcheted so it may only shrink — a stale row FAILS,
+  because it would silently license a re-print). Two existing gates moved with the shape
+  rather than being weakened (`acd-mesh-ui-no-core-import`,
+  `acd-fleet-face-single-mutation-route`: their commands/* deny-lists now have no
+  carve-out at all). Verified: arch sweep 714/714 across 225 files, focused 210/210, BDD
+  124/124, byte smokes unchanged. **Standing red, pre-existing at HEAD (verified by
+  stash):** `memory-integration`'s "status agrees with the reindex it just built"
+  (381 ≠ 405) — a real-index data mismatch on this machine, unrelated to the spine.
+
 - **2026-07-30 (ninth pass): work:init / work:update onto the route table (the
   pure-outcome pair).** One module (commands/init-update.mjs) carries both; the
   retired reportNotInstallable becomes render LINES. The refusal decision: the
