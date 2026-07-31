@@ -648,11 +648,73 @@ redelivery; outbox/sweep containment with the step surviving both passes). BDD: 
 unconfigured fixture owing nothing), and the crash-sim step now appends through
 `applicableReactors` so a simulated crash owes exactly what a real one would.
 
-## d5 — unchanged from the ROADMAP, now with its substrate named
+## d5 — the fact/projection split: ✅ DONE 2026-07-31 (`76ffa35`)
 
-- **d5** — FACT/PROJECTION classification per store; `aof doctor --explain <event>` renders the
-  EFFECTS entry + journal state, `--converge` drains; the file-store reconciler scan closes the
-  write-vs-append crash window `run-transitions.mjs` documents.
+**The classification (`src/effects/stores.mjs`).** Every table in the shared per-node SQLite —
+plus the journal's own tables and the file stores the seams write — is declared
+`fact | projection | meta` in ONE executable registry, TOTAL over the real schema by gate (a
+two-way ratchet: an unclassified `CREATE TABLE` fails, and so does a stale registry row). The
+honest calls it records: the streamed mirrors (`work_item_docs`/`work_item_runs`/`node_logs`)
+are FACTS of this store even though their origin is remote — no local rebuild reconstructs
+them, which is exactly what the retired "MUST NEVER touch" comments were guarding; the
+descriptor/membership/node tables are PROJECTIONS of the descriptor files; `projection_metadata`
+is META (watermarks — the reindex dedup stamps live there).
+
+**Schema-level gating, not prose.** `publishWorkspaceSnapshot`'s sweeps route through the one
+`wholesaleDelete` guard, which refuses any table not classified projection (coded
+`fact-table-wholesale-delete`, thrown BEFORE the statement); no raw workspace-sweep DELETE
+survives in the module. SQL that mutates a fact table is gate-pinned to that table's declared
+writer module(s).
+
+**The ref-remap split (port 3's deferral paid).** The classification carries each ref-keyed
+table's remap locus, and `global-work-store`'s two remap halves derive their table lists from
+it: `remapWorkspaceProjectionRefs` (the mirrors, `local`, keeping the port-3 stamp key) and
+`remapWorkspaceFactRefs` (`global_assignments.item_ref` + `global_item_branches`,
+`control-store`, its OWN `lastReindexFactsEventId` watermark — the halves drain at different
+times and must not read each other's stamp). `stream.reindexed` declares both:
+`remap-projection@local` pays in the CLI's own drain; `remap-control-facts@control-store` is
+paid by the control daemon's converge tick in place, or ships over the d3 bridge for a
+worker-side insert — the generic fact door admits any (event, reactor) in the closed
+vocabulary, so no door change was needed; the payload grew `workspaceId` because a bridged
+step must never dereference `workspaceRoot` (a foreign checkout path on the applying node).
+The fact half is PREDICATED (mesh workspaces only — port 4's applicability machinery reused:
+a solo workspace owes no control-store step, the leak class stays closed).
+
+**The file-store reconciler (`src/effects/reconcile.mjs`).** The write-then-append crash
+window `run-transitions.mjs` documents is now scanned closed: a run record whose event a
+crash ate gets the event re-derived from the record itself (`runId` is the join key —
+`journal.hasEventForRun`, json_extract), appended through the SAME applicability resolution a
+transition would use, with `source: "reconciler"`. Two honest bounds, both gate-pinned:
+only each item's LATEST record (a superseded failure's late `run.completed` would roll back
+an item legitimately in progress on a newer run), and nothing stamped before the LEDGER'S
+BIRTH (the journal's oldest event, else the file's own birthtime — history is not news).
+Record-doc bullets carry no unique key, so their window is acknowledged as unreconcilable
+(cost: one missed publish, healed by the next); the reindex window was acknowledged in port 3.
+
+**The operator doors (`work:doctor`, mode flags — the PRD's `aof doctor` surface).**
+`--explain <event>` renders the declared cascade (reactors, loci, predicate markers) beside
+the journal's state for that event (owed steps + recent events with per-step status); an
+unknown event refuses naming the vocabulary. `--converge` runs the reconciler, then drains in
+bounded passes over the starvation-guarded fetch with `reachableLoci(workspace)`, then
+reports what is STILL owed elsewhere — each leftover with the hint naming whose job it is
+(`control-store` → the control daemon's tick; `integration:notion` → sync-work or autoSync).
+The findings lane is untouched (byte-identical, same `--strict` gate); the modes exit 0 —
+they report and pay, they do not gate.
+
+Gates: **`acd-fact-projection-split`** (6 lanes — totality ratchet; the wholesale guard with
+a planted-raw-delete self-check; fact-writer isolation; the split end-to-end through the real
+seam incl. the deferred-then-paid control drain, the independent dedup and the solo-workspace
+predicate; the crash-window heal through `invoke()` with the rollback landing; the
+reconciler's two bounds). `acd-stream-reindex-cascade` FOLLOWED the shape (four remaps; the
+fact half pinned control-store + predicated). `acd-effects-ledger`'s append allow-list admits
+`effects/reconcile.mjs` as the DELIBERATE second door (it appends only what a transition
+would have, bounded — not an amnesty). BDD: two `effects-ledger.feature` scenarios pin the
+doctor doors (the explain render; converge paying a crashed cascade end-to-end).
+
+Fixed en route (pre-existing at HEAD, verified by stash): `global-work-store`'s two schema
+pins still said 6 after the v7 bump; `doctor-command-core`'s hardcoded fixture date
+(2026-06-19) had aged past the stale window — the fixture now stamps relative to the clock,
+so the suite cannot rot red again by calendar.
 
 ## Standing risks / notes
 
