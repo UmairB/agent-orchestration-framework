@@ -1506,6 +1506,9 @@ import { archTests as acdEffectsLedgerTests } from "../test/arch/acd-effects-led
 // src-root module imports commands/*, and no dependency of a command reaches back
 // into commands/ (the mesh-worker-execution ↔ commands/mesh-repo cycle).
 import { archTests as acdCommandLayerImportsDownwardTests } from "../test/arch/acd-command-layer-imports-downward.test.mjs";
+// m42 wave (d) leg d1 (the PRD's "console.log confined to the face" item) — the
+// closed, ratcheted printer set; a core reports through an injected collector.
+import { archTests as acdConsoleLogConfinedTests } from "../test/arch/acd-console-log-confined.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2112,7 +2115,8 @@ export const tests = [
   // m42 wave (d) legs d1/d2 — command spine + effects ledger
   ...acdCommandRouteDerivedTests,
   ...acdEffectsLedgerTests,
-  ...acdCommandLayerImportsDownwardTests
+  ...acdCommandLayerImportsDownwardTests,
+  ...acdConsoleLogConfinedTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The
