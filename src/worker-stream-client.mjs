@@ -46,6 +46,10 @@ import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope, TERMINAL_INPUT_KI
 import { RECOVERY_PUSH_KIND, buildRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
+// m42 wave (d) leg d3 — the outbox's two frame kinds live in ONE home (the
+// WORKTREE_CONTENT_FRAME_KIND discipline): imported here and in the control
+// server, never re-spelled on either side of the wire.
+import { EFFECT_STEP_FRAME_KIND, EFFECT_ACK_FRAME_KIND } from "./effects/outbox.mjs";
 
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
@@ -251,6 +255,7 @@ export function createWorkerStreamClient({
   let recoveryPushHandler = null;
   // 2026-07-27 (the duplicate-run wall) — the withdraw DOWN-frame's one handler.
   let withdrawHandler = null;
+  let effectAckHandler = null;
   // m42 "interactive worker terminals" — the terminal-input DOWN-frame's handler
   // (mesh-worker-execution.mjs's createMeshWorkerTerminalInputHandler).
   let terminalInputHandler = null;
@@ -389,6 +394,14 @@ export function createWorkerStreamClient({
     // a crash), exactly like directive with no directiveHandler.
     if (frame?.kind === RECOVERY_PUSH_KIND) {
       recoveryPushHandler?.(frame);
+      return;
+    }
+    // m42 wave (d) leg d3 — the DURABLE RECEIPT for an outbox-delivered effect
+    // step. The control node has applied (or refused) the fact; this ack is what
+    // lets the worker stop redelivering it. Unregistered → dropped, like every
+    // other kind here (the step simply stays pending and redelivers).
+    if (frame?.kind === EFFECT_ACK_FRAME_KIND) {
+      effectAckHandler?.(frame);
       return;
     }
     if (frame?.kind === "clone-credential") {
@@ -537,6 +550,21 @@ export function createWorkerStreamClient({
   // recorder.
   async function sendAssignmentStatus(assignmentId, state, { runId, sessionId, code, branch } = {}) {
     return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, branch, now: resolveNow() }));
+  }
+
+  // sendEffectStep(envelope) — m42 wave (d) leg d3: one owed REMOTE-locus effect
+  // step, shipped as a fact over the bridge. Rides the SAME failure-isolated
+  // sendFrame seam as every other work-state up-frame, so an offline worker gets
+  // { sent:false } and the outbox simply keeps the step pending — the frame is a
+  // DELIVERY attempt, never the completion (that is the ack).
+  async function sendEffectStep(envelope) {
+    return sendFrame({ kind: EFFECT_STEP_FRAME_KIND, nodeId, ...envelope });
+  }
+
+  // onEffectAck(handler) — registers the ONE handler for the durable receipt,
+  // mirroring onDirective/onWithdraw exactly.
+  function onEffectAck(handler) {
+    effectAckHandler = typeof handler === "function" ? handler : null;
   }
 
   // sendTerminalFrame(sessionId, bytes) — milestone 38 / story 06 (ADR-014 AMENDMENT
@@ -856,6 +884,8 @@ export function createWorkerStreamClient({
     sendPresence,
     sendLogEntries,
     sendAssignmentStatus,
+    sendEffectStep,
+    onEffectAck,
     sendTerminalFrame,
     sendTerminalEnd,
     sendRecoveryPushResult,

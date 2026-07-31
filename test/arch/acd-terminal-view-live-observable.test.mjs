@@ -119,7 +119,12 @@ function liveSessionIdReportProblems({ workerSource, launcherSource }) {
   }
   // REGRESSION GUARD: the fix must ADD a live report, never remove the terminal-state
   // reports that already carry the id.
-  if (!/sendAssignmentStatus\?\.\([^)]*"done"[\s\S]{0,120}?sessionId/.test(workerSource)) {
+  // m42 wave (d) leg d3 — the terminal `done` report moved to the durable path
+  // (`reportSettled` → journal → outbox → ack), so the guard accepts either
+  // emitter. What it pins is unchanged and is the point: whatever carries the
+  // terminal report must still carry the session id, so the live report is
+  // ADDITIVE to it rather than a replacement.
+  if (!/(?:sendAssignmentStatus\?\.|reportSettled)\([^)]*"done"[\s\S]{0,120}?sessionId/.test(workerSource)) {
     problems.push("the `done` status frame no longer carries sessionId — the live report must be ADDITIVE to the terminal reports, never a replacement");
   }
   return problems;

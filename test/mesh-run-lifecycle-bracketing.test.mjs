@@ -26,6 +26,7 @@ function makeHandler(fx, ws, recorder, spawnOutcome, now) {
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
     spawnRuntime: scriptedSpawnRuntime(spawnOutcome),
     now: () => now,
     globalWorkStoreOptions: { env: fx.env },

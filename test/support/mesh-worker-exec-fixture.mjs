@@ -102,12 +102,43 @@ export async function seedNodeWorkspaceMembership({ home }, { nodeId, workspaceI
 // client's sendAssignmentStatus signature: records every call as
 // { assignmentId, state, options } in order, so tests assert the emitted sequence
 // without a real transport.
+// m42 wave (d) leg d3 — the worker now reports on TWO channels, and this double
+// records both into the same ordered list because it stands for one question:
+// "what did the worker report about this assignment?".
+//   - POSTURE (accepted / running / needs-input / resumed) rides
+//     sendAssignmentStatus, best-effort, exactly as before.
+//   - a TERMINAL report (done / failed) is a FACT: it is raised into the worker's
+//     journal and shipped as an `effect-step` envelope, so a dropped connection
+//     redelivers it instead of losing it. The envelope's payload carries the same
+//     { assignmentId, state, runId, sessionId, branch, code } evidence the status
+//     frame did, so a recorded entry is shape-identical either way and existing
+//     assertions read the same.
+// `frames` is both channels in order; `statusFrames` / `effectSteps` are there for
+// a test that needs to prove WHICH channel carried something.
 export function createStatusRecorder() {
   const frames = [];
+  const statusFrames = [];
+  const effectSteps = [];
   return {
     frames,
+    statusFrames,
+    effectSteps,
     async sendAssignmentStatus(assignmentId, state, options = {}) {
-      frames.push({ assignmentId, state, ...options });
+      const frame = { assignmentId, state, ...options };
+      frames.push(frame);
+      statusFrames.push(frame);
+      return { sent: true };
+    },
+    async sendEffectStep(envelope = {}) {
+      effectSteps.push(envelope);
+      const { assignmentId, state, runId, sessionId, branch, code } = envelope.payload ?? {};
+      // Drop the null placeholders the payload always carries so a recorded entry
+      // matches the sparse shape the status frame produced (a test asserting
+      // `f.code` must not see `code: null` where the old frame had no key).
+      const extras = Object.fromEntries(
+        Object.entries({ runId, sessionId, branch, code }).filter(([, value]) => value != null),
+      );
+      frames.push({ assignmentId, state, ...extras });
       return { sent: true };
     },
   };

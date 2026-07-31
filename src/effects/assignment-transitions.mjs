@@ -45,7 +45,8 @@
 import { updateAssignmentState, isActiveAssignmentState } from "../assignment-record.mjs";
 import { effectsFor } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
-import { drainEffects, runEffectsEphemeral, CONTROL_LOCI } from "./dispatch.mjs";
+import { drainEffects, runEffectsEphemeral, CONTROL_LOCI, LOCAL_LOCI } from "./dispatch.mjs";
+import { drainOutbox } from "./outbox.mjs";
 import { reportDegrade } from "../degrade.mjs";
 
 export const ASSIGNMENT_UNKNOWN = "assignment-status-unknown-assignment";
@@ -67,6 +68,63 @@ export function guardAssignmentTransition(existing, state, { byNode = null, code
     }
   }
   return { ok: true };
+}
+
+// reportAssignmentSettled({ assignmentId, state, … }, opts) — the WORKER's half of
+// the bridge (m42 wave (d) leg d3). A worker cannot write the control node's
+// store, so it raises the FACT into its own journal and lets the outbox carry it:
+//
+//   append `assignment.reported` -> its one step is control-store locus, which a
+//   worker cannot reach -> the step stays PENDING -> drainOutbox ships it on the
+//   already-open stream -> control applies it through the same transition seam
+//   and ACKs -> the step is paid.
+//
+// Latency is unchanged in the normal case (the drain runs right here, so a
+// connected worker delivers within the same call). What changes is the ABNORMAL
+// case, which is the whole point: a disconnected worker keeps the fact and
+// redelivers it, where before the frame simply died on the socket and the control
+// row read a stale `running` until a staleness reclaim eventually noticed.
+//
+//   opts.sendEffectStep — the transport (worker-stream-client's sendEffectStep).
+//                         Absent ⇒ the fact is enqueued and the next drain ships
+//                         it; nothing is lost either way.
+//   opts.fallbackSend    — the pre-ledger emitter (sendAssignmentStatus), used
+//                         ONLY when the journal itself cannot be opened, so
+//                         behaviour never gates on the ledger's health (the d2
+//                         rule).
+export async function reportAssignmentSettled(report = {}, opts = {}) {
+  const { assignmentId, state, runId = null, sessionId = null, branch = null, code = null, now } = report;
+  const { journalOptions = {}, sendEffectStep = null, fallbackSend = null } = opts;
+  const payload = { assignmentId, state, runId, sessionId, branch, code };
+  const reactors = effectsFor("assignment.reported") ?? [];
+
+  let journal = null;
+  try {
+    journal = await openEffectsJournal(journalOptions);
+  } catch (error) {
+    reportDegrade("effects-journal-open", error);
+  }
+
+  if (!journal) {
+    // No durable floor available — report the old way rather than not at all.
+    if (fallbackSend) await fallbackSend(assignmentId, state, { runId, sessionId, branch, code });
+    return { eventId: null, durable: false, delivered: [] };
+  }
+
+  try {
+    const { eventId } = appendEvent(journal, { name: "assignment.reported", payload, source: "assignment-report", now }, reactors);
+    // Scoped to THIS event: the report's own drain is the immediate delivery, so
+    // a connected worker's latency is unchanged. REDELIVERY of anything still
+    // owed is the periodic tick's job (mesh-launcher's stream tick), which is the
+    // right place for it — a report should not re-ship an unrelated backlog as a
+    // side effect of being raised.
+    const delivered = sendEffectStep
+      ? await drainOutbox({ journal, send: sendEffectStep, loci: LOCAL_LOCI, now, eventId })
+      : [];
+    return { eventId, durable: true, delivered };
+  } finally {
+    journal.close();
+  }
 }
 
 // transitionAssignmentState(store, assignmentId, state, edge, opts)

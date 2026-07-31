@@ -92,6 +92,48 @@ async function recordItemBranch(event, ctx = {}) {
   }
 }
 
+// assignment.reported / settle-assignment — the WORKER->CONTROL fact (m42 wave
+// (d) leg d3). A worker that has finished with an assignment must settle its row
+// on the CONTROL node's store, which is why this reactor's locus is
+// `control-store`: on a control-node process it runs in place; on a WORKER it is
+// unreachable, so it stays a pending step and travels by outbox (outbox.mjs) —
+// delivered at-least-once, acked by (eventId, reactorKey), redelivered after a
+// dropped connection. That is the structural cure for the measured fire-once
+// defect (a stranded worktree's `failed` report dying on a dead socket while the
+// control row read `running` for 35+ minutes).
+//
+// It settles through the SAME transition every other writer uses, so the holder
+// guard (this connection's authenticated node, via ctx.byNode) and the
+// terminal-never-regresses rule apply to a bridged fact exactly as they do to a
+// status frame — a worker cannot use this door to write something the other door
+// would refuse. Non-terminal states are refused here rather than silently
+// forwarded: posture (accepted/running/needs-input) is best-effort by design and
+// belongs on the status frame, not in a durable, redelivered fact.
+async function settleAssignment(event, ctx = {}) {
+  const { assignmentId, state, runId, branch, sessionId } = event.payload ?? {};
+  if (!assignmentId) return { skipped: true, reason: "no-assignment" };
+  if (state !== "done" && state !== "failed") return { skipped: true, reason: `state-not-terminal:${state}` };
+  // DYNAMIC IMPORT, deliberately: the transition seam resolves its own reactors
+  // through this table, so a static import here would close a module-init cycle.
+  // Deferring past init is exactly what the layering gate documents as the
+  // sanctioned escape hatch, and this is the one place that needs it.
+  const { transitionAssignmentState } = await import("./assignment-transitions.mjs");
+  const store = ctx.store ?? (await openGlobalWorkProjectionStore(ctx.globalWorkStoreOptions ?? {}));
+  try {
+    const result = await transitionAssignmentState(
+      store,
+      assignmentId,
+      state,
+      { byNode: ctx.byNode ?? null, now: ctx.now, runId, sessionId, branch },
+      { journalOptions: ctx.journalOptions ?? {} },
+    );
+    if (!result.applied) return { settled: false, code: result.code };
+    return { settled: true, state };
+  } finally {
+    if (!ctx.store) store.close?.();
+  }
+}
+
 // ------------------------------------------------------------- the ledger --
 
 // The CLOSED event vocabulary, like the tag set: appendEvent refuses a name not
@@ -108,6 +150,16 @@ export const EFFECTS = Object.freeze({
   // effects/assignment-transitions.mjs, which raises this. Its one declared
   // consequence today is the branch record the apply seam used to write inline;
   // the reclaim/publish cascades join it in d4.
+  // m42 wave (d) leg d3 — the WORKER'S REPORT that its assignment reached a
+  // terminal state. Raised by the worker at the moment it knows the final answer
+  // (after the push, for a done), which is why it is its own event rather than a
+  // reactor on run.completed: a run can complete `done` and still fail to push,
+  // and "a done means the push succeeded" is the contract control depends on.
+  // Its one reactor is control-locus, so on a worker the step stays pending and
+  // travels by outbox — the fire-once cure.
+  "assignment.reported": Object.freeze([
+    Object.freeze({ key: "settle-assignment", locus: "control-store", apply: settleAssignment }),
+  ]),
   "assignment.settled": Object.freeze([
     Object.freeze({ key: "record-item-branch", locus: "control-store", apply: recordItemBranch }),
   ]),

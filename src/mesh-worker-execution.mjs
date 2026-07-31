@@ -130,6 +130,9 @@ import { startRun, readRuns } from "./run-store.mjs";
 // remembered it. A crash between the fact and the drain leaves PENDING journal
 // steps the next drain (any face, any process) pays.
 import { transitionRunComplete } from "./effects/run-transitions.mjs";
+// m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
+// bridge (raise -> outbox -> ack), never a fire-once frame.
+import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
 import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
@@ -2029,6 +2032,12 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     loadWs = () => loadWorkspace(process.cwd()),
     nodeId,
     sendAssignmentStatus,
+    // m42 wave (d) leg d3 — the outbox transport. A TERMINAL report is a FACT and
+    // rides the durable path (raise → pending step → ship → ack → paid), so a
+    // dropped connection can no longer lose it. Posture frames
+    // (accepted/running/needs-input) stay on sendAssignmentStatus: they are
+    // best-effort by design and the next tick re-carries them.
+    sendEffectStep,
     spawnRuntime = defaultSpawnRuntime,
     now = () => new Date().toISOString(),
     exec,
@@ -2158,6 +2167,26 @@ export function createMeshWorkerExecutionHandler(options = {}) {
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
+  // reportSettled(assignmentId, state, extras) — m42 wave (d) leg d3: THE DURABLE
+  // TERMINAL REPORT. Every place this handler used to stream a terminal
+  // `sendAssignmentStatus` now raises `assignment.reported` into the worker's own
+  // journal and ships it through the outbox, so the fact survives the connection
+  // that was supposed to carry it (STATE 2026-07-27's measured fire-once defect: a
+  // stranded worktree's `failed` report died on a dead socket and the control row
+  // read `running` for 35+ minutes). In the connected case the drain runs right
+  // here, so latency is unchanged; disconnected, the step stays owed and the next
+  // drain redelivers it. sendAssignmentStatus remains the fallback for a journal
+  // that cannot be opened — behaviour never gates on the ledger's health.
+  const reportSettled = (assignmentId, state, extras = {}) =>
+    reportAssignmentSettled(
+      { assignmentId, state, ...extras, now: resolveNow() },
+      {
+        journalOptions: { env: globalWorkStoreOptions?.env },
+        sendEffectStep,
+        fallbackSend: sendAssignmentStatus,
+      },
+    );
+
   // reportAssignmentFailure — 2026-07-27 (the wrong-base retries): every coded
   // failure in this handler used to reach ONLY the daemon's stderr
   // (logAssignmentFailure's console.error — unreadable on a supervised daemon,
@@ -2205,7 +2234,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       ws = await loadWs();
     } catch (error) {
       reportAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
-      await sendAssignmentStatus?.(assignmentId, "failed", { code: "workspace-load-failed" });
+      await reportSettled(assignmentId, "failed", { code: "workspace-load-failed" });
       return;
     }
 
@@ -2272,7 +2301,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         } catch (error) {
           const code = error?.code ?? "assignment-repo-unavailable";
           reportAssignmentFailure(assignmentId, code, String(error?.message ?? error));
-          await sendAssignmentStatus?.(assignmentId, "failed", { code });
+          await reportSettled(assignmentId, "failed", { code });
           return;
         }
       }
@@ -2280,7 +2309,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
 
     if (!hasRepo) {
       reportAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
-      await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-repo-unavailable" });
+      await reportSettled(assignmentId, "failed", { code: "assignment-repo-unavailable" });
       return;
     }
 
@@ -2309,7 +2338,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });
       } catch (error) {
         reportAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
+        await reportSettled(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
         return;
       }
     }
@@ -2377,7 +2406,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         // task 03's retain-on-failed rule applies here too: the worktree stays for
         // inspection (never removed), the same as every other failed outcome below.
         reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-ref-unresolved" });
+        await reportSettled(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
@@ -2394,7 +2423,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
       if (item == null) {
         reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-ref-unresolved" });
+        await reportSettled(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
@@ -2596,17 +2625,17 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // pushed branch on the done frame so control records this item's active branch
           // (the next continue/verify reuses it). For a reused base branch this IS that
           // branch; for a refine it is the fresh per-assignment branch.
-          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId, branch });
+          await reportSettled(assignmentId, "done", { runId: runRecord.runId, sessionId, branch });
           await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
           onCleanup(assignmentId, "done", worktreePath);
         } catch (pushError) {
           const code = pushError?.code ?? "push-failed";
           reportAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
-          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
+          await reportSettled(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
           onCleanup(assignmentId, "failed", worktreePath);
         }
       } else {
-        await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId, sessionId });
+        await reportSettled(assignmentId, completed.state, { runId: runRecord.runId, sessionId });
         onCleanup(assignmentId, "failed", worktreePath);
       }
     } catch (error) {
@@ -2618,7 +2647,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // unhandled rejection, never a caught fault — swallow it after the coded
       // status is streamed).
       clearLivePtyRegistries(assignmentId); // never leak a kill/write past its bracket
-      await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId, code: error?.code ?? "assignment-execution-failed" });
+      await reportSettled(assignmentId, "failed", { runId: runRecord?.runId, code: error?.code ?? "assignment-execution-failed" });
       const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
       reportAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
     }

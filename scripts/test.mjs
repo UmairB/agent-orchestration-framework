@@ -1512,6 +1512,10 @@ import { archTests as acdConsoleLogConfinedTests } from "../test/arch/acd-consol
 // m42 wave (d) leg d3 — one transition seam in front of the assignment fact: the
 // holder + terminal-never-regresses guards, inherited by every writer.
 import { archTests as acdAssignmentTransitionSeamTests } from "../test/arch/acd-assignment-transition-seam.test.mjs";
+// m42 wave (d) leg d3 — facts over the bridge: the durable outbox (delivery is not
+// completion, an offline send loses nothing, the ack is the receipt) and the
+// guarded bridge door.
+import { meshEffectsOutboxTests } from "../test/mesh-effects-outbox.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2120,7 +2124,8 @@ export const tests = [
   ...acdEffectsLedgerTests,
   ...acdCommandLayerImportsDownwardTests,
   ...acdConsoleLogConfinedTests,
-  ...acdAssignmentTransitionSeamTests
+  ...acdAssignmentTransitionSeamTests,
+  ...meshEffectsOutboxTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

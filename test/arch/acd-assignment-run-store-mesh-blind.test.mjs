@@ -127,6 +127,7 @@ export const archTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: NODE_ID,
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         spawnRuntime: scriptedSpawnRuntime("done"),
         now: () => "2026-07-09T10:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },

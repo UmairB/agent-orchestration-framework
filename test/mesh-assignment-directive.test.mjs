@@ -295,13 +295,13 @@ export const meshAssignmentDirectiveTests = [
     run: async () => withIsolatedStore(async ({ store }) => {
       seedAssigned(store, { assignmentId: "asg-1", itemRef: "18", workspaceId: "ws-1", targetNodeId: "worker-a" });
       // wrong holder — nothing recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-b", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-x" }, { nodeId: "worker-b" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-b", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-x" }, { nodeId: "worker-b" });
       assert.equal(readItemBranch(store, "ws-1", "18"), null, "a non-holder never records the item branch");
       // non-done — nothing recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "running", branch: "aof/mesh/18-x" }, { nodeId: "worker-a" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "running", branch: "aof/mesh/18-x" }, { nodeId: "worker-a" });
       assert.equal(readItemBranch(store, "ws-1", "18"), null, "a non-done state records nothing (the push has not happened)");
       // holder + done + branch — recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-73ab17b2" }, { nodeId: "worker-a" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-73ab17b2" }, { nodeId: "worker-a" });
       assert.equal(readItemBranch(store, "ws-1", "18"), "aof/mesh/18-73ab17b2", "a holder's done records the pushed branch");
     }),
   },
@@ -339,6 +339,7 @@ export const meshAssignmentDirectiveTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: "worker-a",
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         spawnRuntime: async (brief) => { await writeFile(path.join(brief.worktreeCwd, "continue.md"), "# the continue output\n", "utf8"); return { outcome: "done" }; },
         now: () => "2026-07-25T10:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },

@@ -37,6 +37,13 @@ const APPEND_EVENT_ALLOWED = new Set([
   // event-raiser. The set is the LIST OF SEAMS, not an amnesty: a command or a
   // module appending its own event still trips.
   "src/effects/assignment-transitions.mjs",
+  // m42 wave (d) leg d3 — the BRIDGE fact door. A worker cannot write the control
+  // node's store, so it ships the owed step here and this handler appends it into
+  // CONTROL's own journal before executing it (the PRD's "apply-handlers reduce to
+  // guard + append into control's own journal"). It appends ONLY a reactor the
+  // closed vocabulary declares for the named event, and the work itself still runs
+  // through a transition seam.
+  "src/control-stream-server.mjs",
 ]);
 
 // The sanctioned completeRun CALLERS (m42 wave (d) leg d2, THE SWEEP): the store

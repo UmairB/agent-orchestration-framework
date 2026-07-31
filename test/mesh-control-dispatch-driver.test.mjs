@@ -155,8 +155,7 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined, "the daemon starts");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
 
         assert.equal(server.dispatched.length, 1, "a directive is dispatched for the connected-target assigned row");
         const directive = server.dispatched[0];
@@ -202,8 +201,7 @@ export const meshControlDispatchDriverTests = [
         assert.equal(handle.refused, undefined, "the second launcher starts");
         assert.equal(server.dispatched.length, 0, "no directive dispatched before any tick fires");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
 
         assert.equal(server.dispatched.length, 1, "a directive is dispatched for that assignment to worker-a on the tick");
         assert.equal(server.dispatched[0].to, "worker-a");
@@ -228,13 +226,11 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined);
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "the first tick dispatches once");
 
         // "asg-1" is still in state "assigned" (the worker has not yet reported accepted).
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "no further directive is dispatched for asg-1 on the second tick");
         handle.stop();
       } finally {
@@ -265,8 +261,7 @@ export const meshControlDispatchDriverTests = [
           }));
           assert.equal(handle.refused, undefined);
 
-          controlTicker.fire(controlTicker.handles[0]);
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          await controlTicker.fire(controlTicker.handles[0]);
 
           const label = `[state=${row.state} target=${row.target} connected=${row.connected.join(",")}]`;
           // Count DIRECTIVE frames only. The tick's second half (withdraw-notify,
@@ -315,12 +310,10 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined);
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "a dispatch attempt is made on the first tick");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 2, "a send that did not complete is retried on the next tick, not permanently marked dispatched");
         assert.equal(server.dispatched[1].assignmentId, "asg-1");
         handle.stop();

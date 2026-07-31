@@ -58,6 +58,7 @@ export const meshWorkerDriverInteractivePtyTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: NODE_ID,
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         now: () => "2026-07-18T09:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },
         // NOTE: spawnRuntime is deliberately NOT overridden here — this drives the

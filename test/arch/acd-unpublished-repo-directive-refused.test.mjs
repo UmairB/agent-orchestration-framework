@@ -31,6 +31,7 @@ async function drive(fx, ws, assignmentId) {
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
     spawnRuntime: scriptedSpawnRuntime("done"),
     now: () => NOW,
     globalWorkStoreOptions: { env: fx.env },

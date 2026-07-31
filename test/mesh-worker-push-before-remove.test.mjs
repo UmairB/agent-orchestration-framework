@@ -50,6 +50,7 @@ function driveAssignment(fx, ws, assignmentId, { exec, now = "2026-07-18T09:00:0
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
     spawnRuntime: scriptedSpawnRuntimeThatCommits(),
     now: () => now,
     globalWorkStoreOptions: { env: fx.env },

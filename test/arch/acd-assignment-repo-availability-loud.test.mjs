@@ -53,8 +53,13 @@ function assertStructural(code) {
   }
   // The miss branch must emit the code (not just define the string as dead text) —
   // require the literal to appear inside a sendAssignmentStatus(...) call.
-  if (!/sendAssignmentStatus\??\.\([^)]*code:\s*["']assignment-repo-unavailable["']/.test(code)) {
-    problems.push('the "assignment-repo-unavailable" code is not emitted via sendAssignmentStatus on the miss branch');
+  // m42 wave (d) leg d3 — a TERMINAL report is DURABLE now: raised into this
+  // node's journal and shipped by the outbox (`reportSettled`) rather than
+  // streamed as a fire-once status frame. The invariant is unchanged — the miss
+  // branch reports a stable code before it touches a worktree — so the detector
+  // accepts either emitter instead of pinning the retired transport.
+  if (!/(?:sendAssignmentStatus\??\.|reportSettled)\([^)]*code:\s*["']assignment-repo-unavailable["']/.test(code)) {
+    problems.push('the "assignment-repo-unavailable" code is not reported (sendAssignmentStatus / reportSettled) on the miss branch');
   }
   return problems;
 }
@@ -78,6 +83,7 @@ export const archTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: "worker-a",
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         spawnRuntime: scriptedSpawnRuntime("done"),
         now: () => "2026-07-09T10:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },

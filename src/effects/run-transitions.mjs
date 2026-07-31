@@ -29,7 +29,11 @@ import { reportDegrade } from "../degrade.mjs";
 //          illegal-transition — propagate untouched, and NOTHING is appended)
 //   opts — { workspace, journalOptions, drain = true }
 export async function transitionRunComplete(item, { runId, outcome, failureReason = null, now } = {}, opts = {}) {
-  const { workspace = null, journalOptions = {}, drain = true } = opts;
+  const {
+    workspace = null,
+    journalOptions = {},
+    drain = true,
+  } = opts;
 
   // (1) The FACT — the store's own guarded terminal transition. A refusal here
   // means no event: facts precede announcements.

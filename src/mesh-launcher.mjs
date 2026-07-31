@@ -98,6 +98,11 @@ import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
 import { resolveCloneCredentialProvider, resolveWriteCredentialProvider } from "./mesh-clone-credential-provider.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
+// m42 wave (d) leg d3 — the durable outbox: this node ships the remote-locus facts
+// it owes on every stream tick, and pays them off against the control's acks.
+import { openEffectsJournal } from "./effects/journal.mjs";
+import { drainOutbox, applyEffectAck } from "./effects/outbox.mjs";
+import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -1015,6 +1020,11 @@ export async function startLauncher(ws, options = {}) {
         loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
         nodeId,
         sendAssignmentStatus: (...args) => client.sendAssignmentStatus(...args),
+        // m42 wave (d) leg d3 — the outbox transport, a LITERAL key here (the F12
+        // discipline: a production seam supplied outside the test-injection spread
+        // so it genuinely exists on a real worker), closing over this worker's own
+        // stream client. Terminal reports ride it; posture frames do not.
+        sendEffectStep: (envelope) => client.sendEffectStep(envelope),
         // milestone 38 / story 01 task 05 (ADR-009, finding F12) — THE FIX: the
         // credential resolver, supplied as a LITERAL key HERE, outside the
         // workerExecutionOptions test-injection spread below, closing over this
@@ -1148,6 +1158,26 @@ export async function startLauncher(ws, options = {}) {
       });
       client.onWithdraw?.((frame) => {
         Promise.resolve(withdrawHandler(frame)).catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
+      });
+
+      // m42 wave (d) leg d3 — THE DURABLE RECEIPT. The control node's verdict for
+      // one shipped effect step, correlated by (eventId, reactorKey): `ok` pays
+      // the step, a coded refusal ends it (control has DECIDED — redelivering
+      // would loop forever against the same answer), a bare fault leaves it owed
+      // for the next drain. Registered beside the withdraw lane it mirrors; an
+      // unregistered ack simply means the step stays pending and redelivers, so
+      // nothing is ever lost by this handler being absent.
+      client.onEffectAck?.((frame) => {
+        (async () => {
+          const journal = await openEffectsJournal(options?.globalWorkStoreOptions ?? {});
+          try {
+            applyEffectAck(journal, frame, { now: resolveNow(options) });
+          } finally {
+            journal.close();
+          }
+        })().catch((error) => {
           reportDegrade("mesh-launcher", error);
         });
       });
@@ -1297,6 +1327,13 @@ export async function startLauncher(ws, options = {}) {
     // independently-defaulted store location.
     const storeOptions = options?.controlStreamServerOptions?.storeOptions ?? options?.globalWorkStoreOptions ?? {};
     controlTickHandle = controlDispatchReclaimTicker.start(controlTickSeconds, () => {
+      // RETURNS the settled promise (m42 wave (d) leg d3). A production ticker
+      // ignores it; an INJECTED one (tests) can await the tick's async body
+      // instead of guessing a sleep duration. The suite that drives this seam was
+      // timing-flaky on a fixed 25ms sleep, and the leg's own change — the shared
+      // transition opening the journal — made the race tighter. A tick that can
+      // be awaited is the fix; a longer sleep is a wish.
+      return Promise.all([
       runControlDispatchReclaimTick(ws, streamServer, {
         workspaceId,
         now: resolveNow(options),
@@ -1309,7 +1346,7 @@ export async function startLauncher(ws, options = {}) {
         onDispatchLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "mesh-dispatch", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null }, options);
-      });
+      }),
       // VERIFICATION (live soak 2026-07-25) — drain any operator-requested recovery
       // pushes on the SAME control tick: mint the write credential (the hoisted control
       // provider) and dispatch a recovery-push DOWN-frame to each requested assignment's
@@ -1321,7 +1358,8 @@ export async function startLauncher(ws, options = {}) {
         mintWriteCredential: controlMintWriteCredential,
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-recovery-push-tick-failed", message: error?.message ?? "The control recovery-push dispatch tick failed.", path: null }, options);
-      });
+      }),
+      ]);
     });
   }
 
@@ -1352,6 +1390,27 @@ export async function startLauncher(ws, options = {}) {
         await streamClient.sendPresence(presence);
       }
       await pushActiveWorktreeState(items);
+      // m42 wave (d) leg d3 — THE OUTBOX SWEEP. Every stream tick also ships
+      // whatever remote-locus facts this node still owes: the redelivery half of
+      // at-least-once. This is what turns a report into a fact — a settle raised
+      // while the control node was down is delivered by the first tick after the
+      // connection returns, rather than dying with the socket it was written to.
+      // Best-effort like every other tick body: a drain fault is a degrade, never
+      // a broken stream loop.
+      try {
+        const journal = await openEffectsJournal(options?.globalWorkStoreOptions ?? {});
+        try {
+          await drainOutbox({
+            journal,
+            send: (envelope) => streamClient.sendEffectStep(envelope),
+            now: resolveNow(options),
+          });
+        } finally {
+          journal.close();
+        }
+      } catch (error) {
+        reportDegrade("mesh-launcher-outbox", error);
+      }
     };
 
     // VERIFICATION (live worktree streaming, 2026-07-25) — THE FIX for "the control node
@@ -1458,7 +1517,24 @@ export async function startLauncher(ws, options = {}) {
           message: `reporting stranded worktree assignment ${entry.assignmentId} as failed (daemon restarted — its run cannot be alive)`,
           path: entry.worktreePath,
         }, options);
-        await streamClient.sendAssignmentStatus(entry.assignmentId, "failed", { code: "daemon-restarted" });
+        // m42 wave (d) leg d3 — THE MEASURED FIRE-ONCE DEFECT, cured. STATE
+        // 2026-07-27: "the Mac worker restarted in the ~3-min window while the
+        // control was ALSO down; its `failed/daemon-restarted` report for run
+        // 0017's stranded worktree died on the dead connection, and the control
+        // row read a stale `running` for 35+ min". This is precisely the moment a
+        // worker is LEAST likely to have a live connection — it just started — so
+        // the report goes through the durable outbox: raised into this node's own
+        // journal, shipped when a connection exists, redelivered until the control
+        // acks it. The control's terminal guard still refuses reports for rows
+        // already settled, so a redelivery can never regress one.
+        await reportAssignmentSettled(
+          { assignmentId: entry.assignmentId, state: "failed", code: "daemon-restarted", now: resolveNow(options) },
+          {
+            journalOptions: options?.globalWorkStoreOptions ?? {},
+            sendEffectStep: (envelope) => streamClient.sendEffectStep(envelope),
+            fallbackSend: (...args) => streamClient.sendAssignmentStatus(...args),
+          },
+        );
       }
       // 2026-07-27 (the ghost-record family, last member) — the report above flips
       // the ASSIGNMENT; this settles each stranded run's RECORD (failed/

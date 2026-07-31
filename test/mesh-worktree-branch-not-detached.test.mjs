@@ -30,6 +30,7 @@ async function materializeOnly(fx, ws, assignmentId, now) {
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
     spawnRuntime: scriptedSpawnRuntime("failed"),
     pushExec: scriptedPushExec(),
     now: () => now,

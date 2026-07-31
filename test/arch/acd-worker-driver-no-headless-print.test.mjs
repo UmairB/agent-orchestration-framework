@@ -112,7 +112,10 @@ function capturesSessionIdViaTranscriptWatch(rawCode, strippedCode) {
 // the done + needs-input frames already carry sessionId; F-38.05 was the CAPTURE, not the
 // SURFACING).
 function surfacesSessionIdOnStatusFrames(strippedCode) {
-  const onDone = /sendAssignmentStatus\?\.\(\s*assignmentId,\s*["']done["'],\s*\{[^}]*sessionId[^}]*\}\s*\)/.test(strippedCode);
+  // m42 wave (d) leg d3 — the terminal `done` report rides the DURABLE path
+  // (`reportSettled` → journal → outbox → ack); `needs-input` is posture and stays
+  // a best-effort status frame. Both must still carry the session id.
+  const onDone = /(?:sendAssignmentStatus\?\.|reportSettled)\(\s*assignmentId,\s*["']done["'],\s*\{[^}]*sessionId[^}]*\}\s*\)/.test(strippedCode);
   const onNeedsInput = /sendAssignmentStatus\?\.\(\s*assignmentId,\s*["']running["'],\s*\{[^}]*sessionId[^}]*code:\s*["']needs-input["'][^}]*\}\s*\)/.test(strippedCode);
   return onDone && onNeedsInput;
 }
@@ -276,8 +279,8 @@ export const archTests = [
       // the current shape (sessionId, then any trailing keys) and reverts to the
       // pre-story-05 discard shape to prove the detector trips.
       const plantedDiscard = stripped.replace(
-        /sendAssignmentStatus\?\.\(\s*assignmentId,\s*["']done["'],\s*\{\s*runId:\s*runRecord\.runId,\s*sessionId[^}]*\}\s*\)/,
-        'sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId })',
+        /(?:sendAssignmentStatus\?\.|reportSettled)\(\s*assignmentId,\s*["']done["'],\s*\{\s*runId:\s*runRecord\.runId,\s*sessionId[^}]*\}\s*\)/,
+        'reportSettled(assignmentId, "done", { runId: runRecord.runId })',
       );
       assert.notEqual(plantedDiscard, stripped, "the plant actually changed the source text");
       assert.equal(surfacesSessionIdOnStatusFrames(plantedDiscard), false, "a done status frame that discards sessionId trips the detector");

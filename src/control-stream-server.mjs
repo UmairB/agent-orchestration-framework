@@ -38,6 +38,12 @@ import { isActiveAssignmentState } from "./assignment-record.mjs";
 // regresses guards live in front of the write there, for every writer, and the
 // settle raises its declared cascade).
 import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
+// m42 wave (d) leg d3 — the bridge fact door: the closed vocabulary, the control
+// node's own journal, and the control-reachable drain.
+import { effectsFor } from "./effects/table.mjs";
+import { openEffectsJournal, appendEvent } from "./effects/journal.mjs";
+import { drainEffects, CONTROL_LOCI } from "./effects/dispatch.mjs";
+import { EFFECT_STEP_FRAME_KIND, EFFECT_ACK_FRAME_KIND } from "./effects/outbox.mjs";
 // milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER F-38.06) —
 // the NEW opaque `terminal-frame` kind the worker sends UP its stream client (the
 // cross-machine leg). This server BRANCHES it BEFORE applyStreamFrame into an injected
@@ -343,6 +349,109 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // the pre-d3 seam wrote nothing new in that case either (it refused it), and no
   // caller reads `idempotent`; it exists for the drill and the tests.
   return result;
+}
+
+// buildEffectAckFrame(to, { eventId, reactorKey, ok, code, at }) — the DURABLE
+// RECEIPT for one outbox-delivered effect step (m42 wave (d) leg d3). Correlated
+// by (eventId, reactorKey) — the async-RPC id the PRD asks for — and addressed
+// back to the delivering connection alone, never fanned out. `code` is present
+// ONLY on a refusal, the buildCloneCredentialFrame convention.
+function buildEffectAckFrame(to, { eventId, reactorKey, ok = false, code, at }) {
+  const frame = { kind: EFFECT_ACK_FRAME_KIND, to, eventId, reactorKey, ok, at };
+  if (typeof code === "string" && code.length > 0) frame.code = code;
+  return frame;
+}
+
+// applyEffectStepFrame(store, frame, options) — THE BRIDGE'S FACT DOOR (m42 wave
+// (d) leg d3). A worker ships an owed remote-locus effect step here; this handler
+// is deliberately thin, exactly the PRD's "apply-handlers reduce to guard +
+// append into control's OWN journal, whose tick drains the same effects table":
+//
+//   GUARD  — the frame must name a known event in THIS build's closed vocabulary
+//            and a reactor that event actually declares (vocabulary drift across
+//            a mixed-version fleet is refused loudly, never guessed at), and it
+//            must carry the connection's authenticated identity. Nothing about
+//            the fact itself is re-decided here: the reactor's own transition
+//            seam owns the holder and terminal guards, so a worker cannot use
+//            this door to write something the status-frame door would refuse.
+//   APPEND — the step is materialised in the CONTROL node's own journal, so the
+//            fact is durable here before it is executed. A crash between append
+//            and drain leaves a pending step the control tick pays.
+//   DRAIN  — the just-appended step runs with CONTROL_LOCI.
+//   ACK    — the outcome goes back as the receipt. Anything but a clean `done`
+//            keeps the worker's copy pending (a fault) or ends it (a coded
+//            refusal the control node has decided) — the worker's outbox owns
+//            that distinction; this side just reports honestly.
+export async function applyEffectStepFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const eventId = typeof frame?.eventId === "string" && frame.eventId.length > 0 ? frame.eventId : null;
+  const reactorKey = typeof frame?.reactorKey === "string" && frame.reactorKey.length > 0 ? frame.reactorKey : null;
+  const name = typeof frame?.name === "string" && frame.name.length > 0 ? frame.name : null;
+  const now = options.now ?? new Date().toISOString();
+  const directiveTargets = options.directiveTargets ?? null;
+
+  const reply = (ok, code) => {
+    if (connectionNodeId != null && directiveTargets != null) {
+      sendDirective(directiveTargets, connectionNodeId, buildEffectAckFrame(connectionNodeId, { eventId, reactorKey, ok, code, at: now }));
+    }
+    return ok ? { applied: true, eventId, reactorKey } : { applied: false, skipped: true, code };
+  };
+
+  if (connectionNodeId == null || eventId == null || reactorKey == null || name == null) {
+    return reply(false, "effect-step-frame-invalid");
+  }
+  const declared = effectsFor(name);
+  if (declared == null) return reply(false, "effect-step-unknown-event");
+  const reactor = declared.find((entry) => entry.key === reactorKey);
+  if (reactor == null) return reply(false, "effect-step-unknown-reactor");
+
+  let journal = null;
+  try {
+    journal = await openEffectsJournal(options.journalOptions ?? {});
+  } catch (error) {
+    // The control's ledger is unavailable: refuse with a RETRYABLE fault (no
+    // code), so the worker keeps the step pending and redelivers. Never a silent
+    // drop, and never a pretend-ack.
+    reportDegrade("effects-journal-open", error);
+    return reply(false, null);
+  }
+
+  try {
+    // The event is appended with ONLY the shipped reactor owed — the worker owns
+    // the rest of its own cascade (its checkout/local steps ran there).
+    const appended = appendEvent(
+      journal,
+      { name, payload: frame.payload ?? {}, source: `bridge:${connectionNodeId}`, now },
+      [reactor],
+    );
+    const outcomes = await drainEffects({
+      journal,
+      eventId: appended.eventId,
+      loci: CONTROL_LOCI,
+      now,
+      ctx: { store, now, byNode: connectionNodeId, journalOptions: options.journalOptions ?? {} },
+    });
+    // THE RECEIPT VOCABULARY, and the distinction that keeps redelivery finite:
+    //   ran cleanly, or consciously skipped -> ok. The fact is received and the
+    //     obligation is over (a skip IS a decision: "this state is not mine to
+    //     settle"), so the worker stops redelivering.
+    //   a DECIDED refusal (the transition's coded verdicts — not-holder,
+    //     already-terminal) -> that code. The worker ends the step too: retrying
+    //     against a decision returns the same decision forever.
+    //   anything else (a reactor fault, an unknown reactor) -> a bare failure.
+    //     The worker keeps it owed and tries again.
+    const outcome = outcomes[0] ?? null;
+    const decided = outcome?.detail?.code ?? null;
+    if (outcome?.status === "done") {
+      if (decided) return reply(false, decided);
+      return reply(true);
+    }
+    return reply(false, outcome?.status === "skipped" ? "effect-step-unknown-reactor" : null);
+  } finally {
+    journal.close();
+  }
 }
 
 // defaultMintCloneCredential(workspaceId, assignmentId) — milestone 38 / ADR-009: the
@@ -692,6 +801,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
   if (frame?.kind === "clone-url-request") return applyCloneUrlRequestFrame(store, frame, options);
   if (frame?.kind === "write-credential-request") return applyWriteCredentialRequestFrame(store, frame, options);
+  if (frame?.kind === EFFECT_STEP_FRAME_KIND) return applyEffectStepFrame(store, frame, options);
   if (frame?.kind === RECOVERY_PUSH_RESULT_KIND) return applyRecoveryPushResultFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
