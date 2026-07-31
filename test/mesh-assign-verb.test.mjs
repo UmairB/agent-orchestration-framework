@@ -3,7 +3,7 @@
 // Hermetic over AOF_GLOBAL_HOME opening a v3 store + an injected clock. Every target
 // is available here (the repo-availability gate itself is task 03's own suite).
 import assert from "node:assert/strict";
-import { assignWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork } from "../src/mesh-assignment.mjs";
 import { withMeshAssignFixture, seedTargetNode, seedAssignment, readAssignmentRows } from "./support/mesh-assign-fixture.mjs";
 
 const NOW = "2026-07-08T12:00:00.000Z";

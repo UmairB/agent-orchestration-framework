@@ -25,7 +25,7 @@ import { readJson, writeText } from "./fs.mjs";
 import { sidecarPathFor, readSidecar, sanitizeHostname, deriveNodeId, isDerivationOf } from "./node-identity.mjs";
 
 // Work errors carry `.code`/`.status` (the command error contract) so a face maps
-// them uniformly — matching src/commands/errors.mjs.
+// them uniformly — matching src/command-error.mjs.
 function workError(message, code, status = 400) {
   const error = new Error(message);
   error.code = code;

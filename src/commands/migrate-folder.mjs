@@ -35,7 +35,7 @@
 //     in-progress; fully delivered, clean → in-review (the honest ceiling).
 import path from "node:path";
 import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { resolveImportSource } from "../import/source.mjs";
 import { recoverMilestone, listRecoverableMilestones } from "../import/recovery.mjs";
 import { slugifySource } from "../import/store.mjs";

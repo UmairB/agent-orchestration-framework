@@ -11,7 +11,7 @@
 // store's coded rejections (not-retryable / attempts-exhausted / no-retryable-run)
 // unchanged. The result is the new running run record (records carry refs, not paths).
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { retryRun } from "../run-store.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
 

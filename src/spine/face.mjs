@@ -26,7 +26,7 @@
 // pending events, not lost cascades.
 import { existsSync } from "node:fs";
 import { invoke, listCommands, loadWorkspace } from "../command-core.mjs";
-import { commandError } from "../commands/errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { effectsJournalPath, openEffectsJournal } from "../effects/journal.mjs";
 import { drainEffects } from "../effects/dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";

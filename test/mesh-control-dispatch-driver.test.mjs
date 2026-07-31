@@ -21,7 +21,7 @@ import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { startLauncher } from "../src/mesh-launcher.mjs";
 import { openGlobalWorkProjectionStore, workspaceIdFor } from "../src/global-work-store.mjs";
-import { assignWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork } from "../src/mesh-assignment.mjs";
 import { seedTargetNode } from "./support/mesh-assign-fixture.mjs";
 
 const NODE_ID = "control-a";

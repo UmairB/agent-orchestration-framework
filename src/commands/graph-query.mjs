@@ -14,7 +14,7 @@
 // independent of whether the binary is even present, so it is deterministically
 // CI-checkable. The success spawn is @manual (needs the live binary).
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { runGraphifyQuery, graphJsonPath } from "../graphify.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 

@@ -1502,6 +1502,10 @@ import { workValidateStalenessTests } from "../test/work-validate-staleness.test
 // ledger gates (closed vocabulary, one event-raiser, the crash-window drain).
 import { archTests as acdCommandRouteDerivedTests } from "../test/arch/acd-command-route-derived.test.mjs";
 import { archTests as acdEffectsLedgerTests } from "../test/arch/acd-effects-ledger.test.mjs";
+// m42 wave (d) leg d1 (the PRD's layering item) — the command layer is a LEAF: no
+// src-root module imports commands/*, and no dependency of a command reaches back
+// into commands/ (the mesh-worker-execution ↔ commands/mesh-repo cycle).
+import { archTests as acdCommandLayerImportsDownwardTests } from "../test/arch/acd-command-layer-imports-downward.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2107,7 +2111,8 @@ export const tests = [
   ...workValidateStalenessTests,
   // m42 wave (d) legs d1/d2 — command spine + effects ledger
   ...acdCommandRouteDerivedTests,
-  ...acdEffectsLedgerTests
+  ...acdEffectsLedgerTests,
+  ...acdCommandLayerImportsDownwardTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

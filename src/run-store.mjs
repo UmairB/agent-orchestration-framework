@@ -40,7 +40,7 @@ import { reportDegrade } from "./degrade.mjs";
 // ----------------------------------------------------------- error helper ----
 
 // Run-store errors carry `.code` (and a `.status` for the future board face),
-// matching the command error contract (src/commands/errors.mjs) so a face maps
+// matching the command error contract (src/command-error.mjs) so a face maps
 // them uniformly. The state-machine illegal case throws code "illegal-transition";
 // the milestone-20 mint/retry guards throw "duplicate-run" / "not-retryable" /
 // "attempts-exhausted" / "no-retryable-run".

@@ -24,8 +24,8 @@
 // It does NOT spawn anything itself. A local continue returns the command for the
 // caller's own terminal to run (the board's dock, the CLI's session); a remote continue
 // mints the assignment and the worker's daemon picks it up. One decision, one place.
-import { commandError } from "./errors.mjs";
-import { assignWork } from "./mesh-assign.mjs";
+import { commandError } from "../command-error.mjs";
+import { assignWork } from "../mesh-assignment.mjs";
 import { resolveItem } from "./resolve.mjs";
 import { readExecutionOverlay, resolveScopedExecution, executionScopeRef } from "../board-mesh-execution.mjs";
 import { readStreamedItemRow } from "../board-worker-stream.mjs";

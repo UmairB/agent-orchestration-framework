@@ -7,7 +7,7 @@
 //     thrown from the argv adapter so the face's envelope discipline applies;
 //   - the read-miss split (a supplied ref resolving to null is a FACE-level
 //     node-not-found; the command's null return stays a command-level absent).
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 // `--workspace <path|id>` — the cwd-independent target selector (m42 wave (b)
 // item 4): a path loads that workspace; a bare id resolves its registered

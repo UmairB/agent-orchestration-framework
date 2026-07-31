@@ -19,7 +19,7 @@
 // <projectRoot>/graphify-out/graph.json is absent, `run` throws a build-first
 // "no-graph" error BEFORE any read — deterministically CI-checkable, no binary needed.
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { readGraph, normalizeGraph, graphJsonPath } from "../graph-normalize.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 

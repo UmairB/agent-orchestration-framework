@@ -17,7 +17,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveItem } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { WORK_ITEM_DOC_FILES } from "../global-work-store.mjs";
 import { readWorkerDoc, readStreamedItemRow } from "../board-worker-stream.mjs";
 

@@ -15,7 +15,7 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { assetBase } from "../asset-base.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 // The one shaping both doors share.
 function resolveSetupUiLaunchConfig(options) {

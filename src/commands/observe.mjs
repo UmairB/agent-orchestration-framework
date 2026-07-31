@@ -17,7 +17,7 @@
 import path from "node:path";
 import { observeMilestone, observabilityEnabled } from "../work-observe.mjs";
 import { loadWorkspace } from "../work.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 export const observeCommand = {
   id: "work:observe",

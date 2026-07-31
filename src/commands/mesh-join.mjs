@@ -23,7 +23,7 @@ import { globalWorkspacePaths } from "../workspace.mjs";
 import { resolvePeers } from "../mesh-fabric.mjs";
 import { assembleDescriptor } from "../node-identity.mjs";
 import { publishNodeRecord } from "../mesh-store.mjs";
-import { aofVersion } from "./mesh-identity.mjs";
+import { packageVersionString } from "../asset-base.mjs";
 import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "../degrade.mjs";
@@ -196,7 +196,7 @@ export const meshJoinCommand = {
       hostname: advertisedHost,
       platform: process.platform,
       runtimes: Array.isArray(config.runtimes) ? config.runtimes : [],
-      aofVersion: aofVersion(),
+      aofVersion: packageVersionString(),
     });
 
     // (2) PRESENT the code. An unreachable endpoint is an honest face error — admission

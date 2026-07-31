@@ -23,7 +23,7 @@
 // CLI face: `aof work integrations notion sync-work <milestone> [--json] [--dry-run]`
 // (the new `integrations` sub-noun on workCommand; ADR-002). Refs are not paths, so
 // `json` returns the envelope verbatim — no relativise step.
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { listItems, parseFrontmatter, recordDoc } from "../work.mjs";
 import { readMapping } from "../notion/mapping.mjs";
 import { projectMilestone } from "../notion/projection.mjs";

@@ -30,7 +30,7 @@ import {
   showDelegation,
 } from "../work-delegation.mjs";
 import { updateWork } from "../work-update.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 // The retired faces' shared targetDir resolution: --dir/--target win, else the
 // SECOND positional (the first is the model/state), else cwd.

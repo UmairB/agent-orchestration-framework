@@ -23,7 +23,7 @@ import {
   RECOVERY_PUSH_PUSHED,
   RECOVERY_PUSH_FAILED,
 } from "../mesh-recovery-push.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 const DEFAULT_POLL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 90000;

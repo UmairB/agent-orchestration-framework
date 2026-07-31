@@ -13,7 +13,7 @@
 // producer-fed PARITY, not a re-implemented refusal (STATE.md F1/F4).
 import assert from "node:assert/strict";
 import { loadWorkspace } from "../src/work.mjs";
-import { assignWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork } from "../src/mesh-assignment.mjs";
 import { withAssignRouteFixture, sameOriginAssign, seedTargetNode, readAssignmentRows } from "./support/mesh-ui-assign-fixture.mjs";
 
 async function directAssignCode({ root, globalStoreOptions }, ref, nodeId) {

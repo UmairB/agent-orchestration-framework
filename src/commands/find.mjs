@@ -10,7 +10,7 @@
 // `[]` (the machine face reports the empty set, the caller branches).
 import path from "node:path";
 import { findWork } from "../work.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 export const findCommand = {
   id: "work:find",

@@ -134,7 +134,7 @@ import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, 
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
-import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
+import { isWellFormedCloneUrl, writeRepoPublishedMarker } from "./mesh-repo-marker.mjs";
 // m42 wave (b) / item 4 — the clone-time identity pin writes through the ONE atomic
 // write seam (temp+rename, failure reclaims its temp).
 import { writeText } from "./fs.mjs";
@@ -259,7 +259,7 @@ export async function resolveRefInWorktree(projectRoot, workDir, worktreePath, i
 // -------------------------------------------------- the repo-availability guard ----
 
 // localMeshRepoPublished(ws, workspaceId) — the LOCAL half of the join: the
-// `mesh.repo.published` marker (`commands/mesh-repo.mjs:33-50` writes it;
+// `mesh.repo.published` marker (`mesh-repo-marker.mjs`'s writeRepoPublishedMarker writes it;
 // `ws.config.mesh.repo.published` is the SAME on-disk marker `loadWorkspace` already
 // hydrates), AND that this marker was written for THIS workspaceId.
 function localMeshRepoPublished(ws, workspaceId) {
@@ -324,33 +324,11 @@ export async function workerHasRepo(ws, workspaceId, nodeId, options = {}) {
 
 // -------------------------------------------------- task 00: clone SOURCE ----
 
-// isWellFormedCloneUrl(value) — a git-URL-SHAPE validator (NOT `new URL()` alone —
-// it rejects scp-style `git@host:path`, ADR-005/task 00). Accepts `scheme://host/...`
-// forms (https, ssh, git, …) with a non-empty host (and, for `file:`, a non-empty
-// path beyond the leading slash — `file:///` has none), and the scp-style
-// `user@host:path` shorthand. Rejects "", whitespace-only, non-strings, and anything
-// that parses to no host/no path.
-export function isWellFormedCloneUrl(value) {
-  if (typeof value !== "string") return false;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return false;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
-    let parsed;
-    try {
-      parsed = new URL(trimmed);
-    } catch {
-      return false;
-    }
-    if (parsed.protocol === "file:") {
-      // file:///<nothing> — no real path beyond the root slash.
-      return parsed.pathname.length > 1;
-    }
-    return parsed.hostname.length > 0;
-  }
-  // scp-style shorthand: user@host:path (git@git.example.com:acme/secret.git).
-  if (/^[\w.-]+@[\w.-]+:.+/.test(trimmed)) return true;
-  return false;
-}
+// The clone-URL SHAPE rule itself (`isWellFormedCloneUrl`) lives in
+// mesh-repo-marker.mjs and is imported above (m42 wave (d) leg d1): it is shared
+// with the published marker that validates against it, and keeping it here made
+// this module and commands/mesh-repo.mjs import each other — the tree's one
+// confirmed cycle. Every caller still reads the shape ONE way.
 
 // resolveCloneUrl(ws) — THE RAW OPTIONAL-CHAIN read (ADR-005, the m22 story-01
 // lesson): reads config.mesh.repo.cloneUrl directly, NEVER round-tripping through the

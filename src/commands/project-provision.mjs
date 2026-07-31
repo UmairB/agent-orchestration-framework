@@ -201,7 +201,7 @@ export const projectProvisionCommand = {
   },
 };
 
-// A structured command error (mirrors commands/errors.mjs commandError) — carries a
+// A structured command error (mirrors command-error.mjs commandError) — carries a
 // `code` so the CLI --json face emits a single { ok:false, error, code } envelope and
 // the non-json face propagates a clear message, never an opaque spawn failure.
 function provisionError(message, code) {

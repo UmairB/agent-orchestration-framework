@@ -30,7 +30,7 @@ import { globalMeshPaths } from "./workspace.mjs";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
-import { aofVersion } from "./commands/mesh-identity.mjs";
+import { packageVersionString } from "./asset-base.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
 import { listItems, loadWorkspace } from "./work.mjs";
 import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
@@ -505,7 +505,7 @@ async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsS
 
   // m42 wave (c) / item 1 — the build stamp rides the presence record (the sixth
   // additive key), so `aof mesh status` answers WHICH build a remote node runs.
-  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: aofVersion(), buildId: buildInfoString(readBuildInfo()) });
+  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: packageVersionString(), buildId: buildInfoString(readBuildInfo()) });
 }
 
 function configuredRelayUrl(config) {

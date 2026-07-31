@@ -12,7 +12,7 @@
 // build-first error (code "no-graph") BEFORE any spawn. The success spawn is
 // @manual (needs the live binary).
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { runGraphifyTriage, graphJsonPath } from "../graphify.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 

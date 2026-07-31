@@ -11,7 +11,7 @@ import path from "node:path";
 import { readFile, readdir } from "node:fs/promises";
 import { parseFeature } from "../feature-parse.mjs";
 import { resolveItem } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 // The streamed-existence rule (m42): an item the worker streams EXISTS — a local
 // resolve miss answers EMPTY tasks for it (the features live in the worker's
 // worktree and are not streamed yet), never ref-not-found for a listed item.

@@ -26,7 +26,7 @@ import { listItems, ITEM_RE, recordDoc, WORK_ITEM_SCHEMA_VERSION } from "../work
 import { countShiftedByInsert, reindexForInsert } from "../work-reindex.mjs";
 import { writeText } from "../fs.mjs";
 import { packageVersionString } from "../asset-base.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 // ADR-004: "the threshold ... resolved from config via the raw optional-chain
 // idiom (NOT the config-editor whitelist — the recurring lesson), with a named

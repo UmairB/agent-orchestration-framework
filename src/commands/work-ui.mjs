@@ -13,7 +13,7 @@
 //     bytes: announce lines, friendly refusals, SIGINT/SIGTERM shutdown).
 import path from "node:path";
 import { serveBoard, boardUiProbe } from "../board-serve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 // The one shaping both doors share: the probe (run) and the launch body resolve
 // port/projectDir identically, so the probe can never describe a different

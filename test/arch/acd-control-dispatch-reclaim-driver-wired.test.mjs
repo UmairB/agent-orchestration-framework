@@ -14,7 +14,7 @@
 //       injected-ticker seam whose body reaches BOTH dispatchDirective(...) (via the
 //       stream server handle) AND reclaimStaleAssignments(...); the tick is role-gated
 //       to "control" and options-gated.
-//   (b) STRUCTURAL — assign verb does NOT dispatch: commands/mesh-assign.mjs's
+//   (b) STRUCTURAL — assign verb does NOT dispatch: mesh-assignment.mjs's
 //       assignWork calls NO dispatchDirective/sendDirective/buildDirectiveFrame.
 //   (c) BEHAVIOURAL — one tick dispatches a connected-peer `assigned` row exactly once
 //       and reclaims a dual-stale row (over the launcher's injected control ticker + an
@@ -36,7 +36,7 @@ import { assembleAssignmentRecord, insertAssignment, readAssignment } from "../.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LAUNCHER_SOURCE = path.join(repoRoot, "src", "mesh-launcher.mjs");
 const RECLAIM_DRIVER_SOURCE = path.join(repoRoot, "src", "mesh-assignment-reclaim.mjs");
-const ASSIGN_SOURCE = path.join(repoRoot, "src", "commands", "mesh-assign.mjs");
+const ASSIGN_SOURCE = path.join(repoRoot, "src", "mesh-assignment.mjs");
 const TEST_SUITE = path.join(repoRoot, "scripts", "test.mjs");
 
 function stripComments(source) {
@@ -205,7 +205,7 @@ export const archTests = [
     },
   },
   {
-    name: "arch/35 ADR-008 (acd-control-dispatch-reclaim-driver-wired): commands/mesh-assign.mjs's assignWork calls NO dispatchDirective/sendDirective/buildDirectiveFrame — the assign verb is a pure store-writer, dispatch lives ONLY in the launcher tick (structural)",
+    name: "arch/35 ADR-008 (acd-control-dispatch-reclaim-driver-wired): mesh-assignment.mjs's assignWork calls NO dispatchDirective/sendDirective/buildDirectiveFrame — the assign verb is a pure store-writer, dispatch lives ONLY in the launcher tick (structural)",
     run: async () => {
       const code = stripComments(await readFile(ASSIGN_SOURCE, "utf8"));
       const problems = assertAssignVerbDoesNotDispatch(code);

@@ -7,7 +7,7 @@
 // store's ENOENT→[] discipline, ADR-002), never a thrown error. The result is
 // { ref, runs:[…] } — records carry refs, so there is no path projection.
 import { resolveItem } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { readRuns } from "../run-store.mjs";
 // schema v5 (TECH_DEBT item 6 — finish the board bridge): a ref whose runs live on
 // another machine's worktree answers from the worker-streamed projection — the RUNS

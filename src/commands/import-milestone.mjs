@@ -15,7 +15,7 @@
 // source ONLY read-only and constructs NO git write verb against `<repo>`
 // (ADR-002 — pinned by the story-03 arch-test acd-import-read-only-source).
 import path from "node:path";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { resolveImportSource } from "../import/source.mjs";
 import { recoverMilestone, listRecoverableMilestones, resolveCandidate } from "../import/recovery.mjs";
 import { writeColocatedDigest } from "../import/materialize.mjs";

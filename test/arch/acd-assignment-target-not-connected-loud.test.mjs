@@ -24,14 +24,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assignWork } from "../../src/commands/mesh-assign.mjs";
+import { assignWork } from "../../src/mesh-assignment.mjs";
 import { withMeshAssignFixture, readAssignmentRows } from "../support/mesh-assign-fixture.mjs";
 import { sendDirective, buildDirectiveFrame, ASSIGNMENT_TARGET_NOT_CONNECTED } from "../../src/control-stream-server.mjs";
 import { createDirectiveChannelFixture } from "../support/mesh-directive-channel-fixture.mjs";
 
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const assignSourcePath = path.join(repoRoot, "src", "commands", "mesh-assign.mjs");
+const assignSourcePath = path.join(repoRoot, "src", "mesh-assignment.mjs");
 const controlStreamServerSourcePath = path.join(repoRoot, "src", "control-stream-server.mjs");
 
 // Every `{ ok: false, ... }` object literal in the source must carry a `code` field on

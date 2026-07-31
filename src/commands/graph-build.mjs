@@ -14,7 +14,7 @@
 // never widens graphify's own egress (ADR-005). When the binary is absent, `run`
 // throws a structured graphify-missing error (ADR-002/004) BEFORE any spawn.
 import path from "node:path";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import {
   resolveGraphifyBinary,
   runGraphifyBuild,

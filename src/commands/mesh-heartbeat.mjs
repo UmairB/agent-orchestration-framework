@@ -24,7 +24,8 @@
 // of the run records — it mutates no run record.
 import os from "node:os";
 import { listItems } from "../work.mjs";
-import { aofVersion, resolveInstallSalt } from "./mesh-identity.mjs";
+import { resolveInstallSalt } from "./mesh-identity.mjs";
+import { packageVersionString } from "../asset-base.mjs";
 import { deriveNodeId, sidecarPathFor } from "../node-identity.mjs";
 import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import {
@@ -73,7 +74,7 @@ export const meshHeartbeatCommand = {
     const heartbeatAt = typeof input?.now === "string" && input.now.length > 0 ? input.now : new Date().toISOString();
 
     // Assemble the frozen-schema record.
-    const record = assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, aofVersion: aofVersion() });
+    const record = assemblePresenceRecord({ nodeId, heartbeatAt, activeRuns, aofVersion: packageVersionString() });
 
     // GIT, UNCONDITIONAL — the durable floor (story 00 / ADR-002). milestone 33 / story 01
     // (ADR-002.1) RETIRES the relay best-effort push that used to follow this write: the

@@ -23,7 +23,7 @@ import { readFile } from "node:fs/promises";
 import { INSERT_FLAGS, runInsertTopLevel } from "./insert-shared.mjs";
 import { listItems } from "../work.mjs";
 import { writeText } from "../fs.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 const DOD_HEADING_RE = /^##\s+Definition of Done\s*$/;
 const NOTES_HEADING_RE = /^##\s+Notes\s*$/;

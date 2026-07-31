@@ -6,11 +6,10 @@
 // the global mesh store for WebSocket/backstop propagation.
 import { readdir } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { startRun, retryRun, reclaimStaleRuns, readRuns, runsDir, shouldRetry } from "../run-store.mjs";
 import { rollbackItemStatus, listItems } from "../work.mjs";
 import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mesh-presence.mjs";
-import { aofVersion } from "./mesh-identity.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
 import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 

@@ -18,7 +18,7 @@
 // reports WHAT it dispatched and WHERE to watch; the worker's own log + the
 // terminal stream are the confirmation. Control-node only — an unconfigured
 // relay (not the control machine) is a loud coded refusal, never a silent no-op.
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import { openGlobalWorkProjectionStore } from "../global-work-store.mjs";
 import { globalMeshPaths } from "../workspace.mjs";

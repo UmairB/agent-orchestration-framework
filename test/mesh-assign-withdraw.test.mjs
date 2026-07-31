@@ -2,7 +2,7 @@
 // never a row delete (milestone 35 / story 00, ADR-001/003). Hermetic over
 // AOF_GLOBAL_HOME opening a v3 store + an injected clock.
 import assert from "node:assert/strict";
-import { assignWork, withdrawWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork, withdrawWork } from "../src/mesh-assignment.mjs";
 import { withMeshAssignFixture, seedTargetNode, seedAssignment, readAssignmentRows } from "./support/mesh-assign-fixture.mjs";
 
 const NOW = "2026-07-08T12:00:00.000Z";

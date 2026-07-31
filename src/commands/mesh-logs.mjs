@@ -7,7 +7,7 @@
 // An absent log is absent-NOT-error — `{ entries: [] }` with the path it WOULD be
 // at, so "no log yet" and "wrong machine/home" are distinguishable at a glance.
 // The remote-node read (`--node <id>`, over the fabric) is the deferred second leg.
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 import { readMeshLog, meshLogPath } from "../mesh-log.mjs";
 // m42 / item 2's REMOTE read — `--node <id>` answers from the control's node_logs

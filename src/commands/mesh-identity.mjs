@@ -54,19 +54,11 @@ import { resolvePeers } from "../mesh-fabric.mjs";
 // missing/torn/foreign registry degrades to empty boards, NEVER blinding the roster.
 import { readRegistry, isControlNode } from "../mesh-registry.mjs";
 
-// The publishing install's aof version (ADR-003 provenance) — read from the package
-// manifest via the import.meta.url idiom (same posture as bundleRoot()): src/ ->
-// package.json is one level up. Read lazily + tolerantly so a missing/unreadable
-// manifest degrades to "" rather than crashing the publish.
-// EXPORTED so mesh:heartbeat (milestone 23 / story 00) carries the SAME aofVersion
-// provenance the node record carries — read it ONE way, not a second package.json read.
-export function aofVersion() {
-  try {
-    return packageVersionString();
-  } catch {
-    return "";
-  }
-}
+// RETIRED (m42 wave (d) leg d1): `aofVersion()` — a try/catch wrapper around
+// `packageVersionString()`, which has degraded to "" on its own since the SEA
+// asset-base seam landed. A second door to one fact, and the one that dragged
+// mesh-launcher.mjs into an upward import of this module. Every publisher now
+// reads the provenance string ONE way: `packageVersionString()` from asset-base.
 
 // Resolve a STABLE per-install salt for the id-hash (the empty-stem fallback +
 // collision suffix). Read config.mesh.salt (post milestone-33/ADR-004, this is the
@@ -185,7 +177,7 @@ export const meshIdentityCommand = {
       hostname: advertisedHost,
       platform: process.platform,
       runtimes: Array.isArray(config.runtimes) ? config.runtimes : [],
-      aofVersion: aofVersion(),
+      aofVersion: packageVersionString(),
     });
     await publishNodeRecord(ws, nodeId, descriptor);
     return descriptor;

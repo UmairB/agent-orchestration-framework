@@ -15,7 +15,7 @@
 // A reactor failure is a failed journal step + degrade event (retried by later
 // drains), never a silent skip and never a lost completion.
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { transitionRunComplete } from "../effects/run-transitions.mjs";
 import { renderWithPropagationWarnings, appendPropagationWarning } from "../global-work-publisher.mjs";
 

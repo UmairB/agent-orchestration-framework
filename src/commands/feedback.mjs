@@ -13,7 +13,7 @@
 import path from "node:path";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
 
 // The verbatim feedback heading — must match templates/uat/STATE.md and

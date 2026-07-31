@@ -17,7 +17,7 @@
 //     over stdin/stdout until EOF.
 import { serveStdio, mcpServeProbe } from "../graph-mcp-server.mjs";
 import { loadWorkspace } from "../work.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 async function runGraphServe(options) {
   const workspace = await loadWorkspace(process.cwd(), options.config);

@@ -1,14 +1,14 @@
 // test/mesh-worker-clone-location-config.test.mjs — traceability for milestone 38 /
 // story 01 task 00 (00_clone-location-config.feature). Every @executable scenario +
-// Examples row wired to the real engine surface: resolveCloneUrl / isWellFormedCloneUrl
-// (src/mesh-worker-execution.mjs) and createMeshWorkerExecutionHandler's clone-on-miss
-// prefix.
+// Examples row wired to the real engine surface: resolveCloneUrl
+// (src/mesh-worker-execution.mjs) / isWellFormedCloneUrl (src/mesh-repo-marker.mjs)
+// and createMeshWorkerExecutionHandler's clone-on-miss prefix.
 import assert from "node:assert/strict";
 import {
   resolveCloneUrl,
-  isWellFormedCloneUrl,
   createMeshWorkerExecutionHandler,
 } from "../src/mesh-worker-execution.mjs";
+import { isWellFormedCloneUrl } from "../src/mesh-repo-marker.mjs";
 import {
   withMeshCloneFixture,
   createStatusRecorder,

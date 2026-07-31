@@ -20,7 +20,7 @@
 // CLI face: `aof work integrations notion associate <ref> --board <key> --parent <id|key|none> [--json]`
 // (a verb on the `integrations notion` namespace; 17/ADR-002). Refs are not paths, so
 // `json` returns the envelope verbatim — no relativise step.
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { listItems } from "../work.mjs";
 import {
   readRouting,
