@@ -1531,6 +1531,10 @@ import { archTests as acdReclaimOneEdgeTests } from "../test/arch/acd-reclaim-on
 // its own OLD -> NEW ref map, so the stores keyed by ref converge with the renumber
 // (the silent Notion page mis-binding dies).
 import { archTests as acdStreamReindexCascadeTests } from "../test/arch/acd-stream-reindex-cascade.test.mjs";
+// m42 wave (d) leg d4 (port 4) — the Notion status sync is a ledgered consequence
+// (one body, one door; autoSync decides who pays), and the applicability predicate
+// keeps a consequence that can never apply from being owed at all.
+import { archTests as acdNotionSyncLedgeredTests } from "../test/arch/acd-notion-sync-ledgered.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2144,7 +2148,8 @@ export const tests = [
   ...acdLockReadMergedTests,
   ...acdPublishOnMutateLedgeredTests,
   ...acdReclaimOneEdgeTests,
-  ...acdStreamReindexCascadeTests
+  ...acdStreamReindexCascadeTests,
+  ...acdNotionSyncLedgeredTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

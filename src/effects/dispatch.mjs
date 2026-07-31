@@ -21,6 +21,24 @@ export const LOCAL_LOCI = Object.freeze(["checkout", "local"]);
 // consequence owed to another node's store is DURABLE, not fire-and-forget.
 export const CONTROL_LOCI = Object.freeze(["checkout", "local", "control-store"]);
 
+// reachableLoci(workspace) — the loci a drain acting FOR this workspace may run
+// (m42 wave (d) leg d4, port 4). An `integration:<name>` locus is WORKSPACE-
+// scoped, not node-scoped: reachability is the workspace's own config (the
+// credentials reference lives there), and the operator decision that makes a
+// completion's own drain perform the external write is that integration's
+// `autoSync: true`. Without the opt-in the base set is returned unchanged and
+// the integration step stays deferred — owed to the integration's own verb
+// (notion: sync-work), which passes the locus explicitly when the operator runs
+// it. No workspace ⇒ the base set (the worker-site posture).
+export function reachableLoci(workspace, base = LOCAL_LOCI) {
+  const integrations = workspace?.config?.work?.integrations;
+  if (!integrations || typeof integrations !== "object") return base;
+  const extra = Object.entries(integrations)
+    .filter(([, config]) => config?.autoSync === true)
+    .map(([name]) => `integration:${name}`);
+  return extra.length > 0 ? [...base, ...extra] : base;
+}
+
 export const EFFECT_MAX_ATTEMPTS = 5;
 
 // drainEffects — execute what is owed. Scope with `eventId` for the
@@ -42,7 +60,13 @@ export async function drainEffects({
   // so a crash-recovery drain from any process behaves identically.
   ctx = {},
 } = {}) {
-  const steps = pendingSteps(journal, { eventId, maxAttempts, limit });
+  // The crash-recovery sweep (no eventId) fetches ONLY steps this drain can run:
+  // legitimately-deferred steps (a record-only integration:notion backlog) are
+  // oldest-first in the journal, so without the locus filter they would consume
+  // the whole limit window and starve every payable step behind them (m42 wave
+  // (d) leg d4, port 4). An eventId-scoped drain keeps the full fetch — its
+  // caller reads the `deferred` outcomes off the envelope (run-complete's wire).
+  const steps = pendingSteps(journal, { eventId, maxAttempts, limit, ...(eventId ? {} : { loci }) });
   const outcomes = [];
   for (const step of steps) {
     const base = { eventId: step.eventId, event: step.name, key: step.key, locus: step.locus };
@@ -76,10 +100,13 @@ export async function drainEffects({
 // runEffectsEphemeral — the journal-less fallback (sqlite unavailable / journal
 // open refused): the cascade still RUNS — behaviour is never gated on the
 // ledger's own health — it is just not durable, and says so via degrade at the
-// caller. Same outcome shape as drainEffects.
-export async function runEffectsEphemeral(name, payload, { effects = EFFECTS, loci = LOCAL_LOCI, ctx = {} } = {}) {
+// caller. Same outcome shape as drainEffects. `reactors` is the seam's OWN
+// applicability-filtered resolution (applicableReactors) so the ephemeral path
+// owes exactly what the journaled path would have appended; absent, the full
+// declared set runs (the pre-predicate behaviour).
+export async function runEffectsEphemeral(name, payload, { effects = EFFECTS, reactors = null, loci = LOCAL_LOCI, ctx = {} } = {}) {
   const outcomes = [];
-  for (const reactor of effects[name] ?? []) {
+  for (const reactor of reactors ?? effects[name] ?? []) {
     const base = { eventId: null, event: name, key: reactor.key, locus: reactor.locus };
     if (!lociReach(loci, reactor.locus)) {
       outcomes.push({ ...base, status: "deferred" });

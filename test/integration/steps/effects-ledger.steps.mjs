@@ -8,6 +8,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { createStepRegistry } from "../support/step-registry.mjs";
 import { registerCommonSteps } from "../support/common-steps.mjs";
+import { readFile as readTextFile, writeFile } from "node:fs/promises";
 import {
   openEffectsJournal,
   effectsJournalPath,
@@ -16,7 +17,7 @@ import {
   readEvents,
   readEventSteps,
 } from "../../../src/effects/journal.mjs";
-import { effectsFor } from "../../../src/effects/table.mjs";
+import { applicableReactors } from "../../../src/effects/table.mjs";
 
 const registry = createStepRegistry();
 registerCommonSteps(registry);
@@ -34,34 +35,55 @@ async function withJournal(context, fn) {
   }
 }
 
+// Opt the fixture workspace into Notion sync (m42 wave (d) leg d4, port 4) —
+// record-only (no autoSync), so the scenario needs ZERO egress: the point is the
+// owed step, not the sync. Merges the block into the fixture's real config.
+registry.define("the workspace config enables Notion sync", async (context) => {
+  const configPath = path.join(context.projectDir, ".aof", "aof.config.json");
+  const config = JSON.parse(await readTextFile(configPath, "utf8"));
+  config.work = {
+    ...(config.work ?? {}),
+    integrations: {
+      notion: {
+        dataSourceId: "ds-bdd",
+        tokenEnv: "AOF_BDD_NOTION_TOKEN",
+        statusProperty: "Status",
+        statusMap: {
+          "not-started": "Not started",
+          "in-progress": "In progress",
+          "in-review": "In review",
+          done: "Done",
+        },
+        relationProperty: "Sub-tasks",
+      },
+    },
+  };
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+});
+
 // The crash simulation: the fact happened and the event was journaled, but the
 // process died BEFORE draining — exactly the window the ledger exists to close.
-// Written with the real appendEvent against the context's own journal.
+// Written with the real appendEvent against the context's own journal, through
+// the SAME append-time applicability resolution the seams use (port 4) — so the
+// simulated crash owes exactly what a real one would have.
 registry.define(
   /^a journaled "([^"]+)" event with pending steps for a failed run on "([^"]+)"$/,
   async (context, name, ref) => {
     const item = context.items.get(ref);
     assert.ok(item, `fixture item "${ref}" exists`);
-    const reactors = effectsFor(name);
-    assert.ok(reactors, `"${name}" is a declared event`);
+    const payload = {
+      ref,
+      runId: "20260101T000000000Z-0000",
+      outcome: "failed",
+      failureReason: "timeout",
+      itemDir: item.dir,
+      itemType: item.type,
+      workspaceRoot: context.projectDir,
+    };
+    const reactors = await applicableReactors(name, payload);
+    assert.ok(reactors.length > 0, `"${name}" is a declared event with applicable reactors`);
     await withJournal(context, (journal) => {
-      appendEvent(
-        journal,
-        {
-          name,
-          source: "bdd-crash-simulation",
-          payload: {
-            ref,
-            runId: "20260101T000000000Z-0000",
-            outcome: "failed",
-            failureReason: "timeout",
-            itemDir: item.dir,
-            itemType: item.type,
-            workspaceRoot: context.projectDir,
-          },
-        },
-        reactors,
-      );
+      appendEvent(journal, { name, source: "bdd-crash-simulation", payload }, reactors);
     });
   },
 );
@@ -112,6 +134,20 @@ registry.define(
       const step = readEventSteps(journal, context.lastEventId).find((row) => row.key === key);
       assert.ok(step, `the event materialised a "${key}" step`);
       assert.equal(step.status, status, `step "${key}" is "${status}" (got "${step.status}")`);
+    });
+  },
+);
+
+// The applicability predicate's negative half (port 4): an event that owes a
+// step it can never pay would be the permanent-leak class — assert it was never
+// materialised at all.
+registry.define(
+  /^the journaled event should not materialise a "([^"]+)" step$/,
+  async (context, key) => {
+    assert.ok(context.lastEventId, "a journaled event was located first");
+    await withJournal(context, (journal) => {
+      const step = readEventSteps(journal, context.lastEventId).find((row) => row.key === key);
+      assert.equal(step, undefined, `the event materialised no "${key}" step`);
     });
   },
 );

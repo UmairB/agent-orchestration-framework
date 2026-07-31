@@ -43,7 +43,7 @@
 // synchronously so the cascade keeps its before-return behaviour. The control
 // tick's sweep pays anything a crash left pending.
 import { updateAssignmentState, isActiveAssignmentState } from "../assignment-record.mjs";
-import { effectsFor } from "./table.mjs";
+import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral, CONTROL_LOCI, LOCAL_LOCI } from "./dispatch.mjs";
 import { drainOutbox } from "./outbox.mjs";
@@ -96,7 +96,9 @@ export async function reportAssignmentSettled(report = {}, opts = {}) {
   const { assignmentId, state, runId = null, sessionId = null, branch = null, code = null, now } = report;
   const { journalOptions = {}, sendEffectStep = null, fallbackSend = null } = opts;
   const payload = { assignmentId, state, runId, sessionId, branch, code };
-  const reactors = effectsFor("assignment.reported") ?? [];
+  // Append-time applicability (m42 wave (d) leg d4, port 4): the uniform seam
+  // rule, a pass-through while this event's reactors declare no predicate.
+  const reactors = await applicableReactors("assignment.reported", payload);
 
   let journal = null;
   try {
@@ -172,11 +174,11 @@ export async function transitionAssignmentState(store, assignmentId, state, edge
     sessionId: updated.sessionId ?? null,
     branch: typeof branch === "string" && branch.length > 0 ? branch : null,
   };
-  const reactors = effectsFor("assignment.settled") ?? [];
   // The reactor context: this process already holds the open store and the edge's
   // clock, so a control-store reactor need not re-open either. A reactor still
   // works without it (crash-recovery drains supply neither).
   const reactorCtx = { store, now };
+  const reactors = await applicableReactors("assignment.settled", payload, reactorCtx);
 
   let journal = null;
   try {
@@ -187,7 +189,7 @@ export async function transitionAssignmentState(store, assignmentId, state, edge
   }
 
   if (!journal) {
-    const effects = drain ? await runEffectsEphemeral("assignment.settled", payload, { loci, ctx: reactorCtx }) : [];
+    const effects = drain ? await runEffectsEphemeral("assignment.settled", payload, { reactors, loci, ctx: reactorCtx }) : [];
     return { applied: true, assignment: updated, eventId: null, effects };
   }
 

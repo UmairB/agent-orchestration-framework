@@ -60,6 +60,26 @@ Feature: Effects ledger — consequences are declared, not remembered
     And the journaled step "publish-projection" should be "done"
     And every journaled step of that event should be terminal
 
+  Scenario: a completion in a Notion-configured workspace leaves the owed sync durable in the ledger
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI" with status "in-progress"
+    And the workspace config enables Notion sync
+    And a running run on "03/01"
+    When I run `work run-complete 03/01 --outcome done --json`
+    Then the command should succeed
+    And the reactor "notion-status-sync" should report "deferred"
+    And the journal should hold a "run.completed" event
+    And the journaled step "notion-status-sync" should be "pending"
+
+  Scenario: a completion in an unconfigured workspace owes no Notion step
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI" with status "in-progress"
+    And a running run on "03/01"
+    When I run `work run-complete 03/01 --outcome done --json`
+    Then the command should succeed
+    And the journal should hold a "run.completed" event
+    And the journaled event should not materialise a "notion-status-sync" step
+
   Scenario: a crashed cascade is paid by the next CLI invocation
     Given a work stream with milestone "03" titled "Board"
     And story "03/01" titled "Board UI" with status "in-progress"

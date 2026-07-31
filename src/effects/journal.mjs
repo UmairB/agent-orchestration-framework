@@ -156,14 +156,21 @@ export function appendEvent(journal, { name, payload = {}, source = null, now } 
 // The drainable work-list: pending steps (plus retryable failed ones under the
 // attempts ceiling), each joined to its event's evidence. Oldest first — a
 // cascade's declared order is its array order at append time (insertion order
-// within one event is preserved by the rowid tiebreak).
-export function pendingSteps(journal, { eventId = null, includeFailed = true, maxAttempts = 5, limit = 100 } = {}) {
+// within one event is preserved by the rowid tiebreak). `loci` narrows the fetch
+// to steps at those loci (m42 wave (d) leg d4, port 4 — the unscoped sweep asks
+// only for what it can run, so a deferred integration backlog cannot starve the
+// limit window); absent, every locus is returned.
+export function pendingSteps(journal, { eventId = null, includeFailed = true, maxAttempts = 5, limit = 100, loci = null } = {}) {
   const statuses = includeFailed ? ["pending", "failed"] : ["pending"];
   const clauses = [`s.status IN (${statuses.map(() => "?").join(", ")})`, "s.attempts < ?"];
   const params = [...statuses, maxAttempts];
   if (eventId) {
     clauses.push("s.event_id = ?");
     params.push(eventId);
+  }
+  if (Array.isArray(loci) && loci.length > 0) {
+    clauses.push(`s.locus IN (${loci.map(() => "?").join(", ")})`);
+    params.push(...loci);
   }
   const rows = journal.db.prepare(`
     SELECT s.event_id AS eventId, e.name AS name, e.payload AS payload, e.source AS source,

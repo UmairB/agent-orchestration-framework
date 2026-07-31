@@ -41,9 +41,16 @@ export const EFFECT_ACK_FRAME_KIND = "effect-ack";
 
 // remoteSteps(journal, { loci, limit }) — the outbox's work-list: owed steps this
 // process cannot run itself. The complement of what drainEffects will execute, so
-// a step is never both drained locally and shipped.
+// a step is never both drained locally and shipped. `integration:*` is EXCLUDED
+// from the complement (m42 wave (d) leg d4, port 4): an integration step is
+// WORKSPACE-scoped — it drains where its workspace's config and credentials are
+// (autoSync's completion drain, or the integration's own verb) — never at the
+// control node's store; shipping one would burn it into the bridge door's
+// vocabulary refusal.
 export function remoteSteps(journal, { loci = LOCAL_LOCI, limit = 100, maxAttempts = 5, eventId = null } = {}) {
-  return pendingSteps(journal, { limit, maxAttempts, eventId }).filter((step) => !loci.includes(step.locus));
+  return pendingSteps(journal, { limit, maxAttempts, eventId }).filter(
+    (step) => !loci.includes(step.locus) && !String(step.locus).startsWith("integration:"),
+  );
 }
 
 // drainOutbox({ journal, send, loci, now }) — deliver what is owed elsewhere.

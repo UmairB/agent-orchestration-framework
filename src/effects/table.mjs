@@ -14,6 +14,14 @@
 //   - IDEMPOTENT or event-id-deduped: delivery is at-least-once by design
 //     (crash between write and drain, redelivery over the bridge in d3).
 //   - Mutates exactly ONE store — the one its locus names.
+//   - OPTIONAL `applies(payload, ctx)` — the APPLICABILITY PREDICATE (m42 wave
+//     (d) leg d4, port 4): a consequence that can NEVER apply to this event's
+//     workspace is not owed at all. Evaluated ONCE, by the transition seam at
+//     append time (applicableReactors below) — never by the drain, because a
+//     step that reached the journal IS owed and stays owed until terminal.
+//     Absent ⇒ always applicable. Without this, a locus no process drains
+//     (integration:* in a workspace with no such integration configured) would
+//     accumulate pending steps owed to nobody, forever.
 //
 // Loci (where the mutated store's one writer can run):
 //   checkout            — the repo folder holding the item (frontmatter, runs/)
@@ -26,7 +34,9 @@ import { openGlobalWorkProjectionStore, remapWorkspaceRefs, workspaceIdFor } fro
 import { setItemBranch } from "../mesh-assignment-directive.mjs";
 import { rewriteRunItemRef } from "../run-store.mjs";
 import { remapMappingRefs } from "../notion/mapping.mjs";
+import { syncMilestoneWork } from "../notion/sync-work.mjs";
 import { resolveWorkspaceId } from "../workspace-identity.mjs";
+import { reportDegrade } from "../degrade.mjs";
 
 export const KNOWN_LOCI = Object.freeze(["checkout", "control-store", "local"]);
 
@@ -85,6 +95,68 @@ async function publishItemProjection(event, ctx = {}) {
   if (publish.warning) return { published: false, warning: publish.warning };
   if (publish.skipped) return { published: false, skipped: true, code: publish.code };
   return { published: publish.published === true };
+}
+
+// run.completed / notion-status-sync — the Notion status sync as a LEDGERED
+// consequence (m42 wave (d) leg d4, port 4). Today's defect: forgetting to run
+// `aof work integrations notion sync-work` is INVISIBLE — nothing records that a
+// completed run's status never reached the board. Now a completion in a
+// Notion-configured workspace owes a durable `integration:notion` step. Who pays
+// it is the port's recorded operator decision (2026-07-31): with
+// `work.integrations.notion.autoSync: true` the completion's own drain reaches
+// the integration locus (dispatch.reachableLoci) and the sync happens in place;
+// WITHOUT autoSync the step stays deferred until the sync-work verb — the
+// operator's "do Notion egress now" door — drains it.
+//
+// IDEMPOTENT BY THE SIDECAR, not event-id-deduped: the core re-projects from
+// local facts and the sidecar's lastStatus/lastContentHash decide noop for an
+// already-covered item, so an at-least-once redelivery issues ZERO egress. The
+// sync scope is the completed item's MILESTONE (the sync-work unit — a story's
+// status ride shares the board write with its milestone's routing).
+//
+// ctx.publisherOptions is the command's own ctx passed through by the transition
+// seam (the table's established injection convention) — its `notionSpawn` is the
+// same spy seam the verb honours, so a test drives the reactor without egress. A
+// crash-recovery drain supplies none and the core builds the real
+// provisioned-CLI spawn from the workspace's own config.
+async function syncNotionStatus(event, ctx = {}) {
+  const { workspaceRoot, ref } = event.payload ?? {};
+  if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
+  const milestone = typeof ref === "string" && ref.length > 0 ? ref.split("/")[0] : null;
+  if (!milestone) return { skipped: true, reason: "no-milestone-ref" };
+  const workspace = await loadWorkspace(workspaceRoot);
+  try {
+    const result = await syncMilestoneWork(workspace, {
+      milestone,
+      notionSpawn: ctx.publisherOptions?.notionSpawn ?? null,
+    });
+    // Config removed between append and drain: the consequence can no longer
+    // apply, and ending the step honestly beats retrying it forever (the d3
+    // "a DECIDED refusal ends the step" rule).
+    if (!result.configured) return { skipped: true, reason: "not-configured" };
+    return {
+      synced: true,
+      milestone,
+      items: result.items.map(({ ref: itemRef, action }) => ({ ref: itemRef, action })),
+    };
+  } catch (error) {
+    // An item outside any milestone (adhoc) has no board home — nothing owed.
+    if (error?.code === "milestone-not-found") return { skipped: true, reason: "milestone-not-found" };
+    throw error;
+  }
+}
+
+// The applicability predicate: a workspace with NO `work.integrations.notion`
+// block can never sync, so its completions owe no step (the port-4 leak fix —
+// without this, every completion in every unconfigured workspace would append a
+// step no process ever drains). The worker's no-workspace mint/settle sites
+// (payload workspaceRoot null) are not applicable by the same reading.
+async function notionSyncApplies(payload, ctx = {}) {
+  const root = payload?.workspaceRoot;
+  if (!root) return false;
+  const config =
+    ctx.workspace?.projectRoot === root ? ctx.workspace.config : (await loadWorkspace(root)).config;
+  return config?.work?.integrations?.notion != null;
 }
 
 // assignment.settled / record-item-branch — the cascade that lived inline in
@@ -245,9 +317,19 @@ export const EFFECTS = Object.freeze({
   "run.started": Object.freeze([
     Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
   ]),
+  // Array order is cascade order: rollback lands FIRST, so both the published
+  // snapshot and the Notion sync (m42 wave (d) leg d4 port 4 — appended only
+  // when its applicability predicate says the workspace is Notion-configured)
+  // read the rolled-back status, never the pre-rollback lie.
   "run.completed": Object.freeze([
     Object.freeze({ key: "rollback-status", locus: "checkout", apply: rollbackStatusIfFailed }),
     Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
+    Object.freeze({
+      key: "notion-status-sync",
+      locus: "integration:notion",
+      apply: syncNotionStatus,
+      applies: notionSyncApplies,
+    }),
   ]),
   // m42 wave (d) leg d4 port 1 — the record-doc mutation (a bullet under the
   // verbatim `## Feedback (for retro)` heading), raised by the doc transition
@@ -288,6 +370,32 @@ export const EFFECTS = Object.freeze({
 
 export function effectsFor(name) {
   return EFFECTS[name] ?? null;
+}
+
+// applicableReactors(name, payload, ctx) — the append-time resolution every
+// transition seam uses (m42 wave (d) leg d4, port 4): the declared reactors,
+// minus any whose applicability predicate says this consequence can never apply
+// to this event's workspace. Evaluated ONCE, before the append — a step that
+// reaches the journal is owed, and the drain never re-litigates it. An
+// unanswerable predicate (the config read threw) resolves NOT OWED, loudly: the
+// alternative — owing a step in a workspace that may never drain its locus — is
+// the permanent-leak class this machinery exists to close, while a wrongly
+// skipped optional sync is recoverable by running the verb.
+export async function applicableReactors(name, payload, ctx = {}, effects = EFFECTS) {
+  const declared = effects[name] ?? [];
+  const owed = [];
+  for (const reactor of declared) {
+    if (typeof reactor.applies !== "function") {
+      owed.push(reactor);
+      continue;
+    }
+    try {
+      if (await reactor.applies(payload, ctx)) owed.push(reactor);
+    } catch (error) {
+      reportDegrade("effect-applies", error, { path: `${name}/${reactor.key}` });
+    }
+  }
+  return owed;
 }
 
 export function knownEvents() {

@@ -19,7 +19,7 @@
 // engine BEFORE its renames (work-reindex.mjs's buildRefRemap) — after them the old
 // refs exist nowhere to be derived from, so the event must carry them.
 import { reindexForInsert } from "../work-reindex.mjs";
-import { effectsFor } from "./table.mjs";
+import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";
@@ -60,8 +60,10 @@ export async function transitionStreamReindexed(workspace, { at, space, parent }
     remap: result.remap,
   };
   const name = "stream.reindexed";
-  const reactors = effectsFor(name) ?? [];
+  // Append-time applicability (m42 wave (d) leg d4, port 4): the uniform seam
+  // rule, a pass-through while this event's reactors declare no predicate.
   const reactorCtx = publisherOptions ? { publisherOptions } : {};
+  const reactors = await applicableReactors(name, payload, reactorCtx);
 
   let journal = null;
   try {
@@ -72,7 +74,7 @@ export async function transitionStreamReindexed(workspace, { at, space, parent }
   }
 
   if (!journal) {
-    const effects = drain ? await runEffectsEphemeral(name, payload, { ctx: reactorCtx }) : [];
+    const effects = drain ? await runEffectsEphemeral(name, payload, { reactors, ctx: reactorCtx }) : [];
     return { ...result, eventId: null, effects };
   }
 

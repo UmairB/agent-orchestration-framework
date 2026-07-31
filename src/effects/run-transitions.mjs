@@ -13,9 +13,9 @@
 // the scan re-derives it. A crash after the append leaves PENDING steps any
 // later drain pays out — the property the whole arc exists for.
 import { completeRun, startRun, retryRun, reclaimRun, staleRunningRuns } from "../run-store.mjs";
-import { effectsFor } from "./table.mjs";
+import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
-import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
+import { drainEffects, runEffectsEphemeral, reachableLoci } from "./dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";
 
 // transitionRunStart(item, edge, opts) — mint a run and raise `run.started`
@@ -58,7 +58,7 @@ export async function transitionRunStart(item, edge = {}, opts = {}) {
     itemType: item.type ?? null,
     workspaceRoot: workspace?.projectRoot ?? null,
   };
-  return await raise("run.started", payload, record, { publisherOptions, journalOptions, drain, now });
+  return await raise("run.started", payload, record, { workspace, publisherOptions, journalOptions, drain, now });
 }
 
 // transitionRunComplete(item, edge, opts) — complete the run fact, append
@@ -95,7 +95,7 @@ export async function transitionRunComplete(item, { runId, outcome, failureReaso
     itemType: item.type ?? null,
     workspaceRoot: workspace?.projectRoot ?? null,
   };
-  return await raise("run.completed", payload, record, { publisherOptions, journalOptions, drain, now });
+  return await raise("run.completed", payload, record, { workspace, publisherOptions, journalOptions, drain, now });
 }
 
 // transitionRunReclaimed(item, edge, opts) — THE reclaim edge, shared by both
@@ -134,7 +134,7 @@ export async function transitionRunReclaimed(item, { runId, now } = {}, opts = {
     itemType: item.type ?? null,
     workspaceRoot: workspace?.projectRoot ?? null,
   };
-  return await raise("run.completed", payload, record, { publisherOptions, journalOptions, drain, now });
+  return await raise("run.completed", payload, record, { workspace, publisherOptions, journalOptions, drain, now });
 }
 
 // transitionStaleRunsReclaimed(items, edge, opts) — the RESTART-SCAN half over the
@@ -157,9 +157,20 @@ export async function transitionStaleRunsReclaimed(items, { now, stalenessThresh
 // "the ledger's own health never gates the cascade" rule (a journal that will not
 // open runs the consequences EPHEMERALLY and says so, loudly) and for the
 // reactor context the local-locus publish reactor reads.
-async function raise(name, payload, record, { publisherOptions, journalOptions, drain, now }) {
-  const reactors = effectsFor(name) ?? [];
-  const reactorCtx = publisherOptions ? { publisherOptions } : {};
+//
+// Two port-4 responsibilities live here (m42 wave (d) leg d4): the reactors are
+// resolved through applicableReactors — the APPEND-TIME applicability evaluation,
+// so a consequence that can never apply to this workspace is not owed — and the
+// drain's loci come from reachableLoci(workspace), which is what lets a
+// completion in an `autoSync: true` workspace pay its own integration step in
+// place while every other posture leaves it deferred for the integration's verb.
+async function raise(name, payload, record, { workspace, publisherOptions, journalOptions, drain, now }) {
+  const reactorCtx = {
+    ...(publisherOptions ? { publisherOptions } : {}),
+    ...(workspace ? { workspace } : {}),
+  };
+  const reactors = await applicableReactors(name, payload, reactorCtx);
+  const loci = reachableLoci(workspace);
 
   let journal = null;
   try {
@@ -169,13 +180,13 @@ async function raise(name, payload, record, { publisherOptions, journalOptions, 
   }
 
   if (!journal) {
-    const effects = drain ? await runEffectsEphemeral(name, payload, { ctx: reactorCtx }) : [];
+    const effects = drain ? await runEffectsEphemeral(name, payload, { reactors, loci, ctx: reactorCtx }) : [];
     return { record, eventId: null, effects };
   }
 
   try {
     const { eventId } = appendEvent(journal, { name, payload, source: "run-transition", now }, reactors);
-    const effects = drain ? await drainEffects({ journal, eventId, now, ctx: reactorCtx }) : [];
+    const effects = drain ? await drainEffects({ journal, eventId, loci, now, ctx: reactorCtx }) : [];
     return { record, eventId, effects };
   } finally {
     journal.close();

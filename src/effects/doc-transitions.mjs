@@ -17,7 +17,7 @@
 // reconciler scan closing the window between them.
 import path from "node:path";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
-import { effectsFor } from "./table.mjs";
+import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";
@@ -53,8 +53,11 @@ export async function transitionFeedbackAppended(item, { bullet, now } = {}, opt
     workspaceRoot: workspace?.projectRoot ?? null,
   };
   const name = "feedback.recorded";
-  const reactors = effectsFor(name) ?? [];
+  // Append-time applicability (m42 wave (d) leg d4, port 4): the seam owes only
+  // what can ever apply to this workspace — the uniform rule for every seam,
+  // even while this event's reactors declare no predicate.
   const reactorCtx = publisherOptions ? { publisherOptions } : {};
+  const reactors = await applicableReactors(name, payload, reactorCtx);
 
   let journal = null;
   try {
@@ -65,7 +68,7 @@ export async function transitionFeedbackAppended(item, { bullet, now } = {}, opt
   }
 
   if (!journal) {
-    const effects = drain ? await runEffectsEphemeral(name, payload, { ctx: reactorCtx }) : [];
+    const effects = drain ? await runEffectsEphemeral(name, payload, { reactors, ctx: reactorCtx }) : [];
     return { bullet, eventId: null, effects };
   }
 
