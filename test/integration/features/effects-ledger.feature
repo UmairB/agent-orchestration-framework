@@ -88,3 +88,20 @@ Feature: Effects ledger — consequences are declared, not remembered
     Then the command should succeed
     And the journal should hold no pending steps
     And item "03/01" should list with status "not-started"
+
+  Scenario: the doctor explains a declared cascade with its loci
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work doctor --explain run.completed`
+    Then the command should succeed
+    And stdout should contain `rollback-status @ checkout`
+    And stdout should contain `notion-status-sync @ integration:notion (predicated`
+
+  Scenario: the doctor converges a crashed cascade on demand
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI" with status "in-progress"
+    And a journaled "run.completed" event with pending steps for a failed run on "03/01"
+    When I run `work doctor --converge`
+    Then the command should succeed
+    And stdout should contain `Drained 2 step(s)`
+    And the journal should hold no pending steps
+    And item "03/01" should list with status "not-started"

@@ -50,6 +50,13 @@ const APPEND_EVENT_ALLOWED = new Set([
   // closed vocabulary declares for the named event, and the work itself still runs
   // through a transition seam.
   "src/control-stream-server.mjs",
+  // m42 wave (d) leg d5 — the FILE-STORE RECONCILER: the deliberate second door
+  // for a fact whose event a crash ate (write-then-append's documented window).
+  // It appends only what a transition WOULD have appended — the record's own
+  // evidence, through the same applicability resolution — bounded to each item's
+  // latest record at/after the ledger's birth. Not an amnesty: a command
+  // appending its own event still trips.
+  "src/effects/reconcile.mjs",
 ]);
 
 // The sanctioned completeRun CALLERS (m42 wave (d) leg d2, THE SWEEP): the store

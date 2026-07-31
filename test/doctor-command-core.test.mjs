@@ -54,7 +54,12 @@ function frontmatter(fields) {
 // The recorded `updated` for every fixture item; folder file mtimes are pinned to
 // it (below) so the freshness group's mtime-ahead-of-updated check stays inert on a
 // fixture meant to be clean — independent of the real wall clock at write time.
-const FIXTURE_DATE = "2026-06-19";
+// RELATIVE to the real clock, deliberately (fixed en route in m42 wave (d) d5;
+// pre-existing at HEAD, verified by stash): the command reads Date.now() at its
+// impure edge, so a HARDCODED fixture date ages past the stale window and turns
+// every "clean stream" lane red ~a month after it is written. Three days back
+// keeps the freshness group inert while staying inside any sane stale window.
+const FIXTURE_DATE = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const FIXTURE_MTIME = new Date(Date.parse(FIXTURE_DATE + "T00:00:00Z"));
 
 // Pin every file directly in `dir` back to FIXTURE_MTIME so the snapshot's

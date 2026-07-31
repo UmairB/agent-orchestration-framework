@@ -19,6 +19,7 @@
 // engine BEFORE its renames (work-reindex.mjs's buildRefRemap) — after them the old
 // refs exist nowhere to be derived from, so the event must carry them.
 import { reindexForInsert } from "../work-reindex.mjs";
+import { resolveWorkspaceId } from "../workspace-identity.mjs";
 import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
@@ -50,9 +51,14 @@ export async function transitionStreamReindexed(workspace, { at, space, parent }
     return { ...result, eventId: null, effects: [] };
   }
 
-  // (2) The EVENT — past tense, carrying the remap as its own evidence.
+  // (2) The EVENT — past tense, carrying the remap as its own evidence. It also
+  // carries the workspace's RESOLVED id (m42 wave (d) leg d5): the control-facts
+  // remap may be applied on a machine where workspaceRoot names a checkout that
+  // does not exist (a worker-side insert arriving over the d3 bridge), so the id
+  // must ride the payload rather than be re-derived from a path.
   const payload = {
     workspaceRoot: workspace.projectRoot ?? null,
+    workspaceId: resolveWorkspaceId(workspace) ?? null,
     at: result.at,
     space: result.space,
     parent: result.parent,
@@ -60,9 +66,12 @@ export async function transitionStreamReindexed(workspace, { at, space, parent }
     remap: result.remap,
   };
   const name = "stream.reindexed";
-  // Append-time applicability (m42 wave (d) leg d4, port 4): the uniform seam
-  // rule, a pass-through while this event's reactors declare no predicate.
-  const reactorCtx = publisherOptions ? { publisherOptions } : {};
+  // Append-time applicability (m42 wave (d) leg d4, port 4): the seam owes only
+  // what can apply — here the mesh predicate on the control-facts remap.
+  const reactorCtx = {
+    ...(publisherOptions ? { publisherOptions } : {}),
+    workspace,
+  };
   const reactors = await applicableReactors(name, payload, reactorCtx);
 
   let journal = null;

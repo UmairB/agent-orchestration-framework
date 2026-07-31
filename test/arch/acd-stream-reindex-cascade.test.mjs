@@ -128,14 +128,24 @@ export const archTests = [
       assert.ok(Array.isArray(reactors), "stream.reindexed is a declared event");
       assert.deepEqual(
         reactors.map((reactor) => reactor.key),
-        ["remap-run-refs", "remap-notion-map", "remap-projection"],
-        "all three remaps are declared, in cascade order",
+        ["remap-run-refs", "remap-notion-map", "remap-projection", "remap-control-facts"],
+        "all four remaps are declared, in cascade order (the fact half split out by leg d5)",
       );
       // The sidecar remap is a LOCAL file rewrite, so it must NOT be declared at the
       // integration locus: a plain CLI process reaches checkout + local only, and an
       // integration-locus step would sit deferred forever — leaving the very
-      // mis-binding this port exists to kill in place.
+      // mis-binding this port exists to kill in place. The node-local three keep
+      // that pin; the DISPATCH-FACT half (m42 wave (d) leg d5) is deliberately
+      // control-store — the authoritative mesh store's writer pays it (the control
+      // tick, or the d3 bridge) — and MUST carry the applicability predicate, or
+      // every solo workspace's insert would owe a step no drain on that machine
+      // ever reaches (the port-4 leak class).
       for (const reactor of reactors) {
+        if (reactor.key === "remap-control-facts") {
+          assert.equal(reactor.locus, "control-store", "the fact remap belongs to the authoritative store's writer");
+          assert.equal(typeof reactor.applies, "function", "the fact remap is predicated (mesh workspaces only)");
+          continue;
+        }
         assert.ok(
           LOCAL_LOCI.includes(reactor.locus),
           `${reactor.key} is at a locus an ordinary CLI process drains (got "${reactor.locus}")`,

@@ -1535,6 +1535,11 @@ import { archTests as acdStreamReindexCascadeTests } from "../test/arch/acd-stre
 // (one body, one door; autoSync decides who pays), and the applicability predicate
 // keeps a consequence that can never apply from being owed at all.
 import { archTests as acdNotionSyncLedgeredTests } from "../test/arch/acd-notion-sync-ledgered.test.mjs";
+// m42 wave (d) leg d5 — the fact/projection split made executable: the store
+// classification is total and gates wholesale deletes + fact writers; the
+// ref-remap splits across loci; the reconciler + doctor --explain/--converge
+// close the write-vs-append crash window.
+import { archTests as acdFactProjectionSplitTests } from "../test/arch/acd-fact-projection-split.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2149,7 +2154,8 @@ export const tests = [
   ...acdPublishOnMutateLedgeredTests,
   ...acdReclaimOneEdgeTests,
   ...acdStreamReindexCascadeTests,
-  ...acdNotionSyncLedgeredTests
+  ...acdNotionSyncLedgeredTests,
+  ...acdFactProjectionSplitTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

@@ -30,7 +30,7 @@
 //   integration:<name>  — an external system + credentials (d4 wires Notion)
 import { loadWorkspace, rollbackItemStatus, listItems } from "../work.mjs";
 import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
-import { openGlobalWorkProjectionStore, remapWorkspaceRefs, workspaceIdFor } from "../global-work-store.mjs";
+import { openGlobalWorkProjectionStore, remapWorkspaceProjectionRefs, remapWorkspaceFactRefs, workspaceIdFor } from "../global-work-store.mjs";
 import { setItemBranch } from "../mesh-assignment-directive.mjs";
 import { rewriteRunItemRef } from "../run-store.mjs";
 import { remapMappingRefs } from "../notion/mapping.mjs";
@@ -279,23 +279,59 @@ async function remapNotionSidecar(event) {
   return await remapMappingRefs(workspaceRoot, remap, { eventId: event.eventId });
 }
 
-// stream.reindexed / remap-projection — this node's own ref-keyed rows (streamed doc
-// + run projections, assignment rows, item branches). `work_items` is NOT among them
-// by design: it is rebuilt wholesale by the publish reactor declared below on the
-// same event, which is also what finally makes an insert propagate at all.
+// stream.reindexed / remap-projection — this node's own STREAMED-MIRROR rows
+// (work_item_docs / work_item_runs — the `local`-locus half of the d5 split; the
+// table list derives from the store classification). `work_items` is NOT among
+// them by design: it is rebuilt wholesale by the publish reactor declared below
+// on the same event, which is also what finally makes an insert propagate at all.
+// The payload's own workspaceId is preferred; the derivation survives as the
+// fallback for a pre-d5 journaled event redelivered across an upgrade.
 async function remapProjectionRefs(event, ctx = {}) {
   const { workspaceRoot, remap } = event.payload ?? {};
   if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
   if (!Array.isArray(remap) || remap.length === 0) return { skipped: true, reason: "empty-remap" };
-  const workspace = await loadWorkspace(workspaceRoot);
-  const workspaceId = resolveWorkspaceId(workspace);
+  const workspaceId = event.payload?.workspaceId ?? resolveWorkspaceId(await loadWorkspace(workspaceRoot));
   if (!workspaceId) return { skipped: true, reason: "workspace-unidentified" };
   const store = ctx.store ?? (await openGlobalWorkProjectionStore(ctx.globalWorkStoreOptions ?? {}));
   try {
-    return remapWorkspaceRefs(store, workspaceId, remap, { eventId: event.eventId, now: ctx.now });
+    return remapWorkspaceProjectionRefs(store, workspaceId, remap, { eventId: event.eventId, now: ctx.now });
   } finally {
     if (!ctx.store) store.close?.();
   }
+}
+
+// stream.reindexed / remap-control-facts — the DISPATCH-FACT rows
+// (global_assignments.item_ref, global_item_branches — the `control-store` half
+// of the d5 split, which port 3 deferred). These rows belong to the
+// authoritative mesh store's writer, so the step defers past an ordinary CLI
+// drain and is paid by the control daemon's converge tick — or arrives over the
+// d3 bridge when the reindex ran on a worker machine, which is why it keys by
+// the payload's OWN workspaceId and never dereferences workspaceRoot (a foreign
+// checkout path on the applying node). Event-id-deduped on its own watermark
+// (`lastReindexFactsEventId`) — the two halves drain at different times and must
+// not read each other's stamp.
+async function remapControlFactRefs(event, ctx = {}) {
+  const { workspaceId, remap } = event.payload ?? {};
+  if (!workspaceId) return { skipped: true, reason: "no-workspace-id" };
+  if (!Array.isArray(remap) || remap.length === 0) return { skipped: true, reason: "empty-remap" };
+  const store = ctx.store ?? (await openGlobalWorkProjectionStore(ctx.globalWorkStoreOptions ?? {}));
+  try {
+    return remapWorkspaceFactRefs(store, workspaceId, remap, { eventId: event.eventId, now: ctx.now });
+  } finally {
+    if (!ctx.store) store.close?.();
+  }
+}
+
+// Applicability (the port-4 machinery, reused): dispatch facts exist only for a
+// MESH workspace — a solo workspace's reindex owes no control-store rewrite, and
+// without this predicate every insert in every non-mesh workspace would append a
+// step no drain on that machine ever reaches.
+async function meshFactsApply(payload, ctx = {}) {
+  const root = payload?.workspaceRoot;
+  if (!root) return false;
+  const config =
+    ctx.workspace?.projectRoot === root ? ctx.workspace.config : (await loadWorkspace(root)).config;
+  return config?.mesh?.enabled === true;
 }
 
 // ------------------------------------------------------------- the ledger --
@@ -348,6 +384,16 @@ export const EFFECTS = Object.freeze({
     Object.freeze({ key: "remap-run-refs", locus: "checkout", apply: remapRunRecordRefs }),
     Object.freeze({ key: "remap-notion-map", locus: "checkout", apply: remapNotionSidecar }),
     Object.freeze({ key: "remap-projection", locus: "local", apply: remapProjectionRefs }),
+    // m42 wave (d) leg d5 — the fact half of the ref-remap, split from the
+    // mirror half by the store classification; owed only by mesh workspaces
+    // (the applicability predicate) and drained where the authoritative store's
+    // writer runs (the control tick, or the d3 bridge for a worker-side insert).
+    Object.freeze({
+      key: "remap-control-facts",
+      locus: "control-store",
+      apply: remapControlFactRefs,
+      applies: meshFactsApply,
+    }),
   ]),
   // m42 wave (d) leg d3 — every assignment state change flows through
   // effects/assignment-transitions.mjs, which raises this. Its one declared
