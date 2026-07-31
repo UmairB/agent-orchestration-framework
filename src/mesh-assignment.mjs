@@ -30,14 +30,16 @@ import {
   insertAssignment,
   isActiveAssignmentState,
   listAssignmentsForItem,
-  updateAssignmentState,
 } from "./assignment-record.mjs";
 // VERIFICATION (UI phase selection, 2026-07-25) — the operator-chosen lifecycle phase
 // (refine/continue/verify) rides an additive side-table keyed by assignmentId; it cannot
 // live on the FROZEN assignment record. Written here right after the mint, within the
 // SAME open store.
 import { isAssignmentPhase, setAssignmentPhase, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
-
+// m42 wave (d) leg d3 — the SHARED assignment transition. Withdraw used to call
+// the guard-free store writer directly and re-derive a weaker version of the
+// terminal rule inline; the rule now lives in front of every write.
+import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
 
 async function openStore(ctx) {
   const storeOptions = ctx.globalWorkStoreOptions ?? {};
@@ -194,10 +196,34 @@ export async function withdrawWork(workspace, ref, ctx = {}) {
       // benign null, fabricates/rewrites nothing.
       return { ok: true, assignment: null };
     }
+    if (latest.state === "withdrawn") {
+      // Already withdrawn: the no-op-shaped SUCCESS this verb has always
+      // promised, now honestly a no-op. m42 wave (d) leg d3 moved the
+      // terminal-never-regresses rule in front of every assignment write
+      // (effects/assignment-transitions.mjs), and a settled row re-asserted at
+      // its own state is exactly what that rule refuses — so withdraw answers
+      // the repeat by RETURNING the settled row instead of asking for a write
+      // it does not need. (The only observable difference from the pre-d3 path:
+      // `updatedAt` no longer restamps on a repeat withdraw, which is the truth
+      // — nothing changed.)
+      return { ok: true, assignment: latest };
+    }
 
     const now = ctx.now ?? new Date().toISOString();
-    const updated = updateAssignmentState(store, latest.assignmentId, "withdrawn", { now });
-    return { ok: true, assignment: updated };
+    // THE SHARED TRANSITION — no `byNode`: control is the ISSUER here, not the
+    // holder, so the holder guard does not apply to an operator withdrawal. The
+    // terminal guard does, and this call site no longer re-derives it.
+    const result = await transitionAssignmentState(
+      store,
+      latest.assignmentId,
+      "withdrawn",
+      { now },
+      { journalOptions: ctx.globalWorkStoreOptions ?? {} },
+    );
+    if (!result.applied) {
+      return { ok: false, error: `The assignment for "${item.ref}" could not be withdrawn.`, code: result.code };
+    }
+    return { ok: true, assignment: result.assignment };
   } finally {
     store.close?.();
   }

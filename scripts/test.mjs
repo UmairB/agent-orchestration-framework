@@ -1509,6 +1509,9 @@ import { archTests as acdCommandLayerImportsDownwardTests } from "../test/arch/a
 // m42 wave (d) leg d1 (the PRD's "console.log confined to the face" item) — the
 // closed, ratcheted printer set; a core reports through an injected collector.
 import { archTests as acdConsoleLogConfinedTests } from "../test/arch/acd-console-log-confined.test.mjs";
+// m42 wave (d) leg d3 — one transition seam in front of the assignment fact: the
+// holder + terminal-never-regresses guards, inherited by every writer.
+import { archTests as acdAssignmentTransitionSeamTests } from "../test/arch/acd-assignment-transition-seam.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2116,7 +2119,8 @@ export const tests = [
   ...acdCommandRouteDerivedTests,
   ...acdEffectsLedgerTests,
   ...acdCommandLayerImportsDownwardTests,
-  ...acdConsoleLogConfinedTests
+  ...acdConsoleLogConfinedTests,
+  ...acdAssignmentTransitionSeamTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

@@ -11,9 +11,15 @@ import { pendingSteps, markStep } from "./journal.mjs";
 import { reportDegrade } from "../degrade.mjs";
 
 // The loci a plain CLI process on a checkout can reach: its own repo folder and
-// its own node-local projection/logs. control-store joins in d3 (the control
-// daemon's tick), integration:* in d4.
+// its own node-local projection/logs. integration:* joins in d4.
 export const LOCAL_LOCI = Object.freeze(["checkout", "local"]);
+
+// The loci a CONTROL-NODE process can reach (m42 wave (d) leg d3): everything a
+// local process can, PLUS the authoritative mesh store it is the writer for.
+// A worker process is NOT given this set — its `control-store` steps stay
+// pending and travel by outbox (outbox.mjs), which is the whole point: a
+// consequence owed to another node's store is DURABLE, not fire-and-forget.
+export const CONTROL_LOCI = Object.freeze(["checkout", "local", "control-store"]);
 
 export const EFFECT_MAX_ATTEMPTS = 5;
 
@@ -30,6 +36,11 @@ export async function drainEffects({
   limit = 100,
   maxAttempts = EFFECT_MAX_ATTEMPTS,
   now,
+  // Reactor context — handles this process already holds that a reactor would
+  // otherwise have to re-open (the control tick's open projection store is the
+  // driving case). A reactor MUST work without it (opening and closing its own),
+  // so a crash-recovery drain from any process behaves identically.
+  ctx = {},
 } = {}) {
   const steps = pendingSteps(journal, { eventId, maxAttempts, limit });
   const outcomes = [];
@@ -50,7 +61,7 @@ export async function drainEffects({
       continue;
     }
     try {
-      const detail = await reactor.apply({ eventId: step.eventId, name: step.name, payload: step.payload });
+      const detail = await reactor.apply({ eventId: step.eventId, name: step.name, payload: step.payload }, ctx);
       markStep(journal, step.eventId, step.key, { status: "done", now });
       outcomes.push({ ...base, status: "done", ...(detail !== undefined ? { detail } : {}) });
     } catch (error) {
@@ -66,7 +77,7 @@ export async function drainEffects({
 // open refused): the cascade still RUNS — behaviour is never gated on the
 // ledger's own health — it is just not durable, and says so via degrade at the
 // caller. Same outcome shape as drainEffects.
-export async function runEffectsEphemeral(name, payload, { effects = EFFECTS, loci = LOCAL_LOCI } = {}) {
+export async function runEffectsEphemeral(name, payload, { effects = EFFECTS, loci = LOCAL_LOCI, ctx = {} } = {}) {
   const outcomes = [];
   for (const reactor of effects[name] ?? []) {
     const base = { eventId: null, event: name, key: reactor.key, locus: reactor.locus };
@@ -75,7 +86,7 @@ export async function runEffectsEphemeral(name, payload, { effects = EFFECTS, lo
       continue;
     }
     try {
-      const detail = await reactor.apply({ eventId: null, name, payload });
+      const detail = await reactor.apply({ eventId: null, name, payload }, ctx);
       outcomes.push({ ...base, status: "done", ...(detail !== undefined ? { detail } : {}) });
     } catch (error) {
       reportDegrade("effect-failed", error, { path: `${name}/${reactor.key}` });

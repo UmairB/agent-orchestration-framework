@@ -22,6 +22,8 @@
 //   integration:<name>  — an external system + credentials (d4 wires Notion)
 import { loadWorkspace, rollbackItemStatus } from "../work.mjs";
 import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
+import { openGlobalWorkProjectionStore } from "../global-work-store.mjs";
+import { setItemBranch } from "../mesh-assignment-directive.mjs";
 
 export const KNOWN_LOCI = Object.freeze(["checkout", "control-store", "local"]);
 
@@ -65,6 +67,31 @@ async function publishItemProjection(event) {
   return { published: publish.published === true };
 }
 
+// assignment.settled / record-item-branch — the cascade that lived inline in
+// `applyAssignmentStatusFrame` (m42 wave (d) leg d3): a `done` means the worker's
+// push SUCCEEDED (it sends done only after pushing), so the branch it reported
+// becomes this item's active branch and the next continue/verify reuses it.
+// Keyed by the assignment ROW's OWN workspace/item — never a self-reported id
+// (the same T6 discipline the transition's holder guard keeps). Absent branch (a
+// pre-upgrade worker, or any non-done edge) is the sanctioned no-op.
+//
+// control-store locus: it writes the authoritative mesh SQLite. It takes the
+// open store from ctx when the caller has one (the transition and the control
+// tick both do) and opens its own otherwise, so a crash-recovery drain from any
+// control-node process behaves identically.
+async function recordItemBranch(event, ctx = {}) {
+  const { state, branch, workspaceId, itemRef } = event.payload ?? {};
+  if (state !== "done") return { skipped: true, reason: "state-not-done" };
+  if (!branch || !workspaceId || !itemRef) return { skipped: true, reason: "no-branch-reported" };
+  const store = ctx.store ?? (await openGlobalWorkProjectionStore(ctx.globalWorkStoreOptions ?? {}));
+  try {
+    setItemBranch(store, workspaceId, itemRef, branch, { now: ctx.now });
+    return { branch, itemRef };
+  } finally {
+    if (!ctx.store) store.close?.();
+  }
+}
+
 // ------------------------------------------------------------- the ledger --
 
 // The CLOSED event vocabulary, like the tag set: appendEvent refuses a name not
@@ -76,6 +103,13 @@ export const EFFECTS = Object.freeze({
   "run.completed": Object.freeze([
     Object.freeze({ key: "rollback-status", locus: "checkout", apply: rollbackStatusIfFailed }),
     Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
+  ]),
+  // m42 wave (d) leg d3 — every assignment state change flows through
+  // effects/assignment-transitions.mjs, which raises this. Its one declared
+  // consequence today is the branch record the apply seam used to write inline;
+  // the reclaim/publish cascades join it in d4.
+  "assignment.settled": Object.freeze([
+    Object.freeze({ key: "record-item-branch", locus: "control-store", apply: recordItemBranch }),
   ]),
 });
 

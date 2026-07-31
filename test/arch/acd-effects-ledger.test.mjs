@@ -6,7 +6,7 @@
 //       apply } with a KNOWN locus and an async apply — the table is executable,
 //       not prose.
 //   (2) ONE EVENT-RAISER: `appendEvent(` is called in src/ ONLY by the
-//       transition seam(s) (run-transitions.mjs) — no command or module may
+//       transition seam(s) (run-transitions.mjs, assignment-transitions.mjs) — no command or module may
 //       append events beside the fact-writer (the "no event append outside
 //       transition()" rule).
 //   (3) THE CRASH WINDOW CLOSES: a transition whose process dies before the
@@ -30,7 +30,14 @@ const SRC_DIR = path.join(repoRoot, "src");
 // The sanctioned appendEvent CALLERS (repo-relative, forward-slashed): the
 // journal module (the definition) and the transition seam(s) — nothing else in
 // src/ may append events.
-const APPEND_EVENT_ALLOWED = new Set(["src/effects/journal.mjs", "src/effects/run-transitions.mjs"]);
+const APPEND_EVENT_ALLOWED = new Set([
+  "src/effects/journal.mjs",
+  "src/effects/run-transitions.mjs",
+  // m42 wave (d) leg d3 — the assignment store's transition seam, the second
+  // event-raiser. The set is the LIST OF SEAMS, not an amnesty: a command or a
+  // module appending its own event still trips.
+  "src/effects/assignment-transitions.mjs",
+]);
 
 // The sanctioned completeRun CALLERS (m42 wave (d) leg d2, THE SWEEP): the store
 // itself (definition + its internal reclaim) and the transition seam. Every

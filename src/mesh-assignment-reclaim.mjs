@@ -20,7 +20,10 @@
 import { isNodeStale, readPresenceRecord, DEFAULT_PRESENCE_STALENESS_SECONDS } from "./mesh-presence.mjs";
 import { isStale, readRuns, applyTransition } from "./run-store.mjs";
 import { findWork } from "./work.mjs";
-import { updateAssignmentState, isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
+import { isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
+// m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal guards
+// in front of EVERY write; this tick previously had none of its own).
+import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
 // milestone 35 / ADR-008 — runControlDispatchReclaimTick (bottom of this file) is the
 // control-side driver's DATA-LAYER orchestrator: it owns the ONE store-open call for
 // BOTH halves (dispatch scan + reclaim), so mesh-launcher.mjs itself never imports
@@ -172,8 +175,20 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
       });
     }
 
-    const updated = updateAssignmentState(store, row.assignmentId, "reclaimed", { now, reclaimedAt: now });
-    if (updated) reclaimed.push(updated);
+    // THE SHARED TRANSITION (m42 wave (d) leg d3). This writer had NO transition
+    // guards at all — it called the guard-free store writer directly, so a race
+    // between a settling worker frame and this tick could reclaim a row that had
+    // just gone terminal. The rule now runs in front of the write for every
+    // writer: a settled row refuses the reclaim (coded, and the loop moves on),
+    // and no `byNode` is passed because control is the ISSUER, not the holder.
+    const result = await transitionAssignmentState(
+      store,
+      row.assignmentId,
+      "reclaimed",
+      { now, reclaimedAt: now },
+      { journalOptions: options.globalWorkStoreOptions ?? {} },
+    );
+    if (result.applied) reclaimed.push(result.assignment);
   }
 
   return reclaimed;

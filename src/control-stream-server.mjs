@@ -33,7 +33,11 @@ import {
 import { WORKTREE_CONTENT_FRAME_KIND, LOG_ENTRIES_FRAME_KIND } from "./worker-stream-client.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
-import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
+import { isActiveAssignmentState } from "./assignment-record.mjs";
+// m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal-never-
+// regresses guards live in front of the write there, for every writer, and the
+// settle raises its declared cascade).
+import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
 // milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER F-38.06) —
 // the NEW opaque `terminal-frame` kind the worker sends UP its stream client (the
 // cross-machine leg). This server BRANCHES it BEFORE applyStreamFrame into an injected
@@ -49,7 +53,7 @@ import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-
 // VERIFICATION (continue-on-existing-branch, 2026-07-25) — when a worker reports a `done`
 // carrying the branch it pushed, record it as the item's active mesh branch so the next
 // continue/verify dispatch reuses it (the work accumulates on ONE branch per item).
-import { setItemBranch } from "./mesh-assignment-directive.mjs";
+
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
 
@@ -294,40 +298,16 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
     return { applied: false, skipped: true, code: "assignment-status-frame-invalid" };
   }
 
-  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
-  if (!existing) {
-    return { applied: false, skipped: true, code: "assignment-status-unknown-assignment" };
-  }
-  // T6: the CONNECTION's authenticated nodeId must be the row's holder — a frame on
-  // worker-a's connection can never advance an assignment held by worker-b, no
-  // matter what the frame itself self-declares as `nodeId`.
-  if (existing.target_node_id !== connectionNodeId) {
-    return { applied: false, skipped: true, code: "assignment-status-not-holder" };
-  }
-
-  // m42 wave (b) / item 7 leg 2 — A TERMINAL ROW NEVER REGRESSES. A late/stale
-  // worker frame (a startup reclaim broadcast covering a retained worktree, a
-  // duplicate `failed` after a manual withdraw, a done echo arriving after a
-  // reclaim) must never flip a settled assignment back to another state:
-  // updateAssignmentState itself is guard-free by design (its callers own the
-  // transition rules), so THIS apply seam — the only door worker frames come
-  // through — is where the invariant lives. Refused, and reportable (the skip
-  // reaches onFrameSkipped like every other refusal).
-  //
-  // ONE sanctioned exception (m42 terminal-resume): the HOLDER reporting
-  // `running` with `code: "resumed"` revives a FAILED row — a control-dispatched
-  // resume is a run continuing, and the row must tell that truth. Exactly
-  // failed→running, exactly the resume code, still holder-only (T6 above):
-  // a stale startup-reclaim broadcast carries no resume code and stays refused;
-  // done/withdrawn/reclaimed rows stay terminal (done means done; a withdrawal
-  // was the operator's own decision).
-  if (!isActiveAssignmentState(existing.state)) {
-    const resumedRevival = existing.state === "failed" && state === "running" && frame?.code === "resumed";
-    if (!resumedRevival) {
-      return { applied: false, skipped: true, code: "assignment-status-already-terminal", workspaceId: existing.workspace_id };
-    }
-  }
-
+  // m42 wave (d) leg d3 — THE GUARDS MOVED. The T6 holder check and the
+  // terminal-never-regresses invariant (with its one sanctioned resume revival)
+  // used to be decided HERE, because this seam is the only door worker frames
+  // come through — which left the withdraw verb re-deriving a weaker version and
+  // the reclaim tick with none. They now live in front of the write, in
+  // effects/assignment-transitions.mjs, so EVERY writer inherits them; this
+  // handler keeps only what is genuinely frame-shaped (shape-guarding the frame,
+  // reading the connection's authenticated nodeId, deciding the absent-is-not-a-
+  // clear vs verbatim-per-frame discipline per key) and hands the edge over. The
+  // refusal codes are unchanged — they are the transition's vocabulary now.
   const now = options.now ?? new Date().toISOString();
   const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : undefined;
   // milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 invariant 3 +
@@ -346,17 +326,23 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // describes the CURRENT posture of the session (waiting on a human right now),
   // not a captured fact, so each frame's word is the whole truth.
   const code = typeof frame?.code === "string" && frame.code.length > 0 ? frame.code : null;
-  const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId, code });
-  // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a `done` means the worker's
-  // push succeeded (it sends done only AFTER the push); record the branch it reported as
-  // this item's active branch, keyed by the assignment ROW's OWN workspace/item (never a
-  // self-reported id — the SAME T6 discipline the holder check above keeps). The next
-  // continue/verify for this item reuses it. Absent branch (a pre-upgrade worker) is a
-  // no-op, byte-identical to before.
-  if (state === "done" && typeof frame?.branch === "string" && frame.branch.length > 0) {
-    setItemBranch(store, existing.workspace_id, existing.item_ref, frame.branch, { now });
-  }
-  return { applied: updated != null, assignment: updated };
+  // The branch a `done` frame reports rides the EDGE into the transition, whose
+  // `assignment.settled` event carries it as evidence to the `record-item-branch`
+  // reactor (control-store locus). The inline write that lived here is deleted:
+  // "a done means the push succeeded, so record the branch" is a declared
+  // consequence now, not a line every future writer must remember.
+  const branch = typeof frame?.branch === "string" && frame.branch.length > 0 ? frame.branch : null;
+  const result = await transitionAssignmentState(
+    store,
+    assignmentId,
+    state,
+    { byNode: connectionNodeId, now, runId, sessionId, code, branch },
+    { journalOptions: options.journalOptions ?? {} },
+  );
+  // An idempotent terminal repeat reports as applied:false with the settled row —
+  // the pre-d3 seam wrote nothing new in that case either (it refused it), and no
+  // caller reads `idempotent`; it exists for the drill and the tests.
+  return result;
 }
 
 // defaultMintCloneCredential(workspaceId, assignmentId) — milestone 38 / ADR-009: the
