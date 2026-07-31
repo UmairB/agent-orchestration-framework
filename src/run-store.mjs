@@ -571,6 +571,29 @@ export async function reclaimRun(item, runId, { now } = {}) {
   });
 }
 
+// rewriteRunItemRef(item, { from, to }) — follow an insert/reindex renumber with the
+// run records' own `itemRef` (m42 wave (d) leg d4, port 3). The records live INSIDE
+// the item's folder, so they travel with the rename — but the ref stamped in each
+// one is left saying what the item used to be called, and every reader that joins on
+// it (the board's run drill-down, the streamed projection, the reclaim scan) then
+// disagrees with the stream.
+//
+// Called with the item at its NEW ref and the ref it used to have, which is what
+// makes this safely re-runnable at-least-once: a record already carrying `to` does
+// not match `from`, so a redelivery rewrites nothing. Every write stays inside
+// runs/ through the store's own persist path (the write-scope guard); a record whose
+// itemRef is something else entirely is left byte-unchanged.
+export async function rewriteRunItemRef(item, { from, to } = {}) {
+  if (!from || !to || from === to) return { rewritten: 0 };
+  let rewritten = 0;
+  for (const record of await readRuns(item)) {
+    if (record.itemRef !== from) continue;
+    await persist(item, { ...record, itemRef: to });
+    rewritten += 1;
+  }
+  return { rewritten };
+}
+
 // Prune ONE run by deleting its file — file-by-file, not an aggregate rewrite (the
 // partition-ready payoff). A missing file is a clean no-op (swallow ENOENT): absence
 // is benign, the same discipline as the absent-runs/ read (19/ADR-002).

@@ -20,10 +20,13 @@
 //   control-store       — the authoritative mesh SQLite (d3 wires its reactors)
 //   local               — this node's own projection/logs
 //   integration:<name>  — an external system + credentials (d4 wires Notion)
-import { loadWorkspace, rollbackItemStatus } from "../work.mjs";
+import { loadWorkspace, rollbackItemStatus, listItems } from "../work.mjs";
 import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
-import { openGlobalWorkProjectionStore } from "../global-work-store.mjs";
+import { openGlobalWorkProjectionStore, remapWorkspaceRefs, workspaceIdFor } from "../global-work-store.mjs";
 import { setItemBranch } from "../mesh-assignment-directive.mjs";
+import { rewriteRunItemRef } from "../run-store.mjs";
+import { remapMappingRefs } from "../notion/mapping.mjs";
+import { resolveWorkspaceId } from "../workspace-identity.mjs";
 
 export const KNOWN_LOCI = Object.freeze(["checkout", "control-store", "local"]);
 
@@ -151,6 +154,78 @@ async function settleAssignment(event, ctx = {}) {
   }
 }
 
+// stream.reindexed — THE CASCADE AN INSERT NEVER HAD (m42 wave (d) leg d4, port 3).
+// `aof work insert-*` renumbers folders and rewrites depends/parent, and stops
+// there. But a REF is the join key of six stores, and the renumber told none of
+// them: run records keep saying `03` while the item is now `04`; the Notion sidecar
+// keeps `03 -> <pageId>`, so the next sync PATCHes that page with a DIFFERENT item's
+// content (the visible symptom, and the reason this port is in the arc); the
+// streamed doc/run rows, assignment rows and item branches all key on the old ref.
+//
+// The event carries the OLD → NEW list itself, in the collision-free order the
+// engine computed it (descending by the number that moved), because after the
+// renames the old refs exist nowhere to be re-derived from — the PRD's "never an
+// empty ping that forces reactors to re-read racing state" in its sharpest form.
+//
+// DELIBERATELY ABSENT: publish-projection. `work_items` is a pure projection that
+// any publish DELETES and rebuilds from disk, and it carries `parent` and
+// `source_path` beside `ref` — so remapping one column would leave the row
+// self-inconsistent, while publishing HERE would publish an intermediate stream (the
+// slot is open but the new item is not scaffolded until the caller's next step).
+// It keeps the eventual-consistency it already had; reconciling a projection rather
+// than patching it is exactly what leg d5 is for.
+
+// stream.reindexed / remap-run-refs — the checkout half: each renumbered item's own
+// run records. Resolved by the item's NEW ref against the CURRENT stream, so a
+// redelivery finds records that already say `to` and rewrites nothing.
+async function remapRunRecordRefs(event) {
+  const { workspaceRoot, remap } = event.payload ?? {};
+  if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
+  if (!Array.isArray(remap) || remap.length === 0) return { skipped: true, reason: "empty-remap" };
+  const workspace = await loadWorkspace(workspaceRoot);
+  const items = await listItems(workspace.workDir);
+  const byRef = new Map(items.map((item) => [item.ref, item]));
+  let rewritten = 0;
+  for (const { from, to } of remap) {
+    const item = byRef.get(to);
+    if (!item) continue; // the item moved again, or was removed — nothing owed here
+    rewritten += (await rewriteRunItemRef(item, { from, to })).rewritten;
+  }
+  return { rewritten };
+}
+
+// stream.reindexed / remap-notion-map — the sidecar's ref-keyed bindings. CHECKOUT
+// locus, deliberately NOT integration:notion: the sidecar is a plain JSON file in
+// this workspace's own `.aof/`, needing no credentials and reaching no external
+// system. Declaring it integration:notion would leave the step permanently deferred
+// on every ordinary CLI process (which reaches checkout + local only) and the
+// mis-binding would survive the very port that exists to kill it. Talking TO Notion
+// is the integration locus; rewriting our own map of it is not.
+async function remapNotionSidecar(event) {
+  const { workspaceRoot, remap } = event.payload ?? {};
+  if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
+  return await remapMappingRefs(workspaceRoot, remap, { eventId: event.eventId });
+}
+
+// stream.reindexed / remap-projection — this node's own ref-keyed rows (streamed doc
+// + run projections, assignment rows, item branches). `work_items` is NOT among them
+// by design: it is rebuilt wholesale by the publish reactor declared below on the
+// same event, which is also what finally makes an insert propagate at all.
+async function remapProjectionRefs(event, ctx = {}) {
+  const { workspaceRoot, remap } = event.payload ?? {};
+  if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
+  if (!Array.isArray(remap) || remap.length === 0) return { skipped: true, reason: "empty-remap" };
+  const workspace = await loadWorkspace(workspaceRoot);
+  const workspaceId = resolveWorkspaceId(workspace);
+  if (!workspaceId) return { skipped: true, reason: "workspace-unidentified" };
+  const store = ctx.store ?? (await openGlobalWorkProjectionStore(ctx.globalWorkStoreOptions ?? {}));
+  try {
+    return remapWorkspaceRefs(store, workspaceId, remap, { eventId: event.eventId, now: ctx.now });
+  } finally {
+    if (!ctx.store) store.close?.();
+  }
+}
+
 // ------------------------------------------------------------- the ledger --
 
 // The CLOSED event vocabulary, like the tag set: appendEvent refuses a name not
@@ -181,6 +256,16 @@ export const EFFECTS = Object.freeze({
   // it, because both reach the fact through the one seam.
   "feedback.recorded": Object.freeze([
     Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
+  ]),
+  // m42 wave (d) leg d4 port 3 — the insert/reindex cascade. Array order is
+  // cascade order: the two checkout remaps and the projection remap run over the
+  // OLD refs the payload names, and the publish LAST, rebuilding work_items from
+  // the renamed stream on disk (which is also the first time an insert has ever
+  // propagated at all).
+  "stream.reindexed": Object.freeze([
+    Object.freeze({ key: "remap-run-refs", locus: "checkout", apply: remapRunRecordRefs }),
+    Object.freeze({ key: "remap-notion-map", locus: "checkout", apply: remapNotionSidecar }),
+    Object.freeze({ key: "remap-projection", locus: "local", apply: remapProjectionRefs }),
   ]),
   // m42 wave (d) leg d3 — every assignment state change flows through
   // effects/assignment-transitions.mjs, which raises this. Its one declared

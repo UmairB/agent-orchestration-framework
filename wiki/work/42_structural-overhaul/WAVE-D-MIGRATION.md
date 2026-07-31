@@ -533,11 +533,59 @@ its rollback proof now asserts the command carries none and the table declares i
 `acd-run-reclaim-stale-only` (the scan force-fails via the named edge, which is itself the
 legal `applyTransition` edge — asserted, plus its `runtime_offline`/`reclaimedAt` shape).
 
-**REMAINING — two ports:**
+**PAID — port 3: insert/reindex raises `stream.reindexed`.** The renumber renames folders and
+rewrites the `depends`/`parent` values that name the moved numbers, and stops there — but a
+REF is the join key of six other stores and the renumber told none of them. Run records kept
+stamping the old ref; the Notion sidecar kept binding `03 → <pageId>` while `03` was now a
+DIFFERENT item, so the next sync PATCHed that page with another item's content (the measured
+symptom this port is named for); the streamed doc/run rows, assignment rows and item branches
+all kept refs that had moved.
 
-1. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
-   none; the Notion sidecar mis-binding is the visible symptom.
-2. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
+`effects/stream-transitions.mjs` is the FOURTH seam (`transitionStreamReindexed`), and the
+event carries the OLD → NEW map as its own evidence — it has to, because after the renames the
+old refs exist nowhere to be re-derived from. `work-reindex.mjs` computes it PRE-rename
+(`buildRefRemap`, additive on `reindexForInsert`'s result) including the **cascade** a
+call-site copy would have missed: a story's ref changes when its MILESTONE moves, though its
+own folder never does. It is ordered descending by the number that moved, so no entry ever
+writes onto a ref another has yet to vacate — the rename order rule (ADR-006) applied to refs.
+
+| Reactor | Locus | What it follows |
+|---|---|---|
+| `remap-run-refs` | checkout | each renumbered item's own run records (`rewriteRunItemRef`, the store's write) |
+| `remap-notion-map` | checkout | the sidecar's ref-keyed bindings across every board bucket |
+| `remap-projection` | local | `work_item_docs`, `work_item_runs`, `global_assignments.item_ref`, `global_item_branches` — one transaction |
+
+**Two deliberate deviations from the PRD's sketch, both recorded:**
+1. **The sidecar remap is `checkout`, not `integration:notion`.** The sidecar is a plain JSON
+   file in this workspace's own `.aof/` — no credentials, no external system. At
+   `integration:notion` the step would sit DEFERRED forever on every ordinary CLI process
+   (which reaches checkout + local only) and the mis-binding would outlive the port. Talking
+   TO Notion is the integration locus; rewriting our own map of it is not. Pinned by the gate.
+2. **`publish-projection` is NOT on this event.** `work_items` is a pure projection any
+   publish deletes and rebuilds, and it carries `parent`/`source_path` beside `ref` — so
+   remapping one column leaves the row self-inconsistent, while publishing here would publish
+   an INTERMEDIATE stream (the slot is open, the new item not yet scaffolded). It keeps the
+   eventual consistency it already had; reconciling a projection rather than patching it is
+   what d5 is for.
+
+**The permutation is EVENT-ID DEDUPED** — the reactor contract's other sanctioned option, and
+the first time this arc has needed it. A ref remap is not idempotent (`{03→04, 04→05}` applied
+twice shifts everything again), and at-least-once delivery is real: a crash between the write
+and the step being marked `done` redelivers. The sidecar stamps `lastReindexEventId`; the
+projection stamps `projection_metadata.lastReindexEventId` inside the same transaction. Both
+are pinned by a lane that redelivers the identical event and asserts nothing moves.
+
+Gate: **`acd-stream-reindex-cascade`** (4 proofs — the engine hands over the remap incl. the
+story cascade in collision-free order; `reindexForInsert` is reachable only from its module
+and the seam, and every declared remap sits at a locus an ordinary CLI process drains; the
+mis-binding dies end-to-end through the real seam, sidecar AND run records; the redelivery is
+a no-op). `acd-effects-ledger` lists the fourth seam. No BDD scenario: the shared integration
+fixture scaffolds no `.aof/templates/work/**`, so an insert refuses `insert-template-missing`
+there — the end-to-end proof runs as a behavioural arch lane instead.
+
+**REMAINING — one port:**
+
+1. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
 
 ## d5 — unchanged from the ROADMAP, now with its substrate named
 

@@ -23,7 +23,13 @@
 import path from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
 import { listItems, ITEM_RE, recordDoc, WORK_ITEM_SCHEMA_VERSION } from "../work.mjs";
-import { countShiftedByInsert, reindexForInsert } from "../work-reindex.mjs";
+import { countShiftedByInsert } from "../work-reindex.mjs";
+// m42 wave (d) leg d4 (port 3) — the slot-open rides the work stream's transition
+// seam, which raises `stream.reindexed` so the six stores keyed by REF converge with
+// the renumber instead of silently keeping the old refs (the Notion page mis-binding
+// is the visible symptom). The engine itself is untouched; this module just stopped
+// calling it directly.
+import { transitionStreamReindexed } from "../effects/stream-transitions.mjs";
 import { writeText } from "../fs.mjs";
 import { packageVersionString } from "../asset-base.mjs";
 import { commandError } from "../command-error.mjs";
@@ -265,7 +271,11 @@ export async function runInsertTopLevel(ctx, { type, slug: rawSlug, at: rawAt, y
   // BEFORE the first mutation — see preflightTopLevelScaffold above.
   const plan = await preflightTopLevelScaffold(ctx.workspace, { type, at, slug });
 
-  const reindexResult = await reindexForInsert(workDir, { at, space: "top-level" });
+  const reindexResult = await transitionStreamReindexed(
+    ctx.workspace,
+    { at, space: "top-level" },
+    { publisherOptions: ctx, journalOptions: ctx.effectsJournalOptions ?? {} },
+  );
 
   const created = await writeTopLevelScaffold(type, slug, today ?? new Date().toISOString().slice(0, 10), writtenDepends, plan);
 
@@ -586,7 +596,11 @@ export async function runInsertStory(ctx, { slug: rawSlug, at: rawAt, under: raw
   // BEFORE the first mutation — see preflightStoryScaffold above.
   const plan = await preflightStoryScaffold(ctx.workspace, { parentItem, at, slug });
 
-  const reindexResult = await reindexForInsert(workDir, { at, space: "nested", parent: under });
+  const reindexResult = await transitionStreamReindexed(
+    ctx.workspace,
+    { at, space: "nested", parent: under },
+    { publisherOptions: ctx, journalOptions: ctx.effectsJournalOptions ?? {} },
+  );
 
   const scaffolded = await writeStoryScaffold(parentItem, slug, today ?? new Date().toISOString().slice(0, 10), plan);
   const { paddedNumber, ...created } = scaffolded;

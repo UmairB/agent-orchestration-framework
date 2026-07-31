@@ -308,6 +308,74 @@ function migrateSchema(db, existingVersion) {
   }
 }
 
+// The ref-keyed tables an insert/reindex leaves pointing at the WRONG item, with the
+// column each keys by (m42 wave (d) leg d4, port 3). `work_items` is deliberately
+// ABSENT: it is a pure projection that publishWorkspaceSnapshot deletes and rebuilds
+// from disk, so the publish reactor declared on the same event heals it for free.
+// The rest are streamed or authored state that no re-publish reconstructs.
+//
+// Fact-vs-projection is NOT decided here — this is one node's own SQLite file and
+// the remap follows the rename for every ref-keyed row in it. Leg d5 is the leg that
+// classifies these tables and gates the fact ones from the derived ones; until then,
+// splitting them across loci here would be guessing.
+const REF_KEYED_TABLES = Object.freeze([
+  Object.freeze({ table: "work_item_docs", column: "ref" }),
+  Object.freeze({ table: "work_item_runs", column: "ref" }),
+  Object.freeze({ table: "global_assignments", column: "item_ref" }),
+  Object.freeze({ table: "global_item_branches", column: "item_ref" }),
+]);
+
+// remapWorkspaceRefs(store, workspaceId, remap, { eventId, now }) — follow an
+// insert/reindex with this node's own ref-keyed rows.
+//
+// A remap is a PERMUTATION (`{03→04, 04→05}`), so it is applied in the order the
+// engine hands it over — descending by the number that moved, so no update ever
+// writes onto a ref another entry has yet to vacate — inside ONE transaction, and
+// EVENT-ID DEDUPED (the reactor contract's sanctioned alternative to idempotence):
+// a redelivered event finds its id already stamped and does nothing, because
+// applying the permutation twice would shift every row a second time.
+export function remapWorkspaceRefs(store, workspaceId, remap = [], { eventId = null, now } = {}) {
+  if (!Array.isArray(remap) || remap.length === 0) return { remapped: 0, skipped: true, reason: "empty-remap" };
+  const db = store.db;
+  const stamp = now ?? new Date().toISOString();
+
+  const applied = db
+    .prepare("SELECT value FROM projection_metadata WHERE workspace_id = ? AND key = 'lastReindexEventId'")
+    .get(workspaceId);
+  if (eventId != null && applied?.value === eventId) {
+    return { remapped: 0, skipped: true, reason: "already-applied" };
+  }
+
+  let remapped = 0;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const present = new Set(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name),
+    );
+    for (const { table, column } of REF_KEYED_TABLES) {
+      // The side tables are created lazily by their own feature module (the
+      // self-contained `CREATE TABLE IF NOT EXISTS` idiom), so a store that has
+      // never seen a branch/assignment simply has nothing to remap there.
+      if (!present.has(table)) continue;
+      const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE workspace_id = ? AND ${column} = ?`);
+      for (const { from, to } of remap) {
+        remapped += update.run(to, workspaceId, from).changes ?? 0;
+      }
+    }
+    if (eventId != null) {
+      db.prepare(`
+        INSERT OR REPLACE INTO projection_metadata (workspace_id, key, value, updated_at)
+        VALUES (?, 'lastReindexEventId', ?, ?)
+      `).run(workspaceId, eventId, stamp);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { remapped };
+}
+
 export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
   const db = store.db;
   const now = options.now ?? new Date().toISOString();

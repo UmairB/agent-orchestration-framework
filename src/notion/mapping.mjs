@@ -159,6 +159,54 @@ export async function recordPageId(projectRoot, dataSourceId, aofRef, pageId, me
   return next;
 }
 
+// remapMappingRefs(projectRoot, remap, { eventId }) — follow an insert/reindex with
+// the sidecar's own keys (m42 wave (d) leg d4, port 3). The bindings are keyed by
+// AOF REF, so a renumber silently re-points every entry at a DIFFERENT item: the
+// next sync PATCHes the page that used to be `03` with the content of whatever is
+// `03` now. That is the mis-binding this port exists to kill, and it was invisible
+// because nothing told the sidecar the refs had moved.
+//
+// A ref remap is a PERMUTATION, not an idempotent write — applying `{03→04, 04→05}`
+// twice would shift everything a second time — so this is EVENT-ID DEDUPED (the
+// reactor contract's sanctioned alternative to idempotence): the applied event id is
+// stamped on the file and a repeat delivery is a no-op. The whole map is rebuilt in
+// memory and written ONCE, so a crash leaves the previous file intact.
+//
+// Every board's bucket is remapped (a ref means the same item on all of them), and
+// entries whose ref did not move are carried through byte-identical.
+export async function remapMappingRefs(projectRoot, remap = [], { eventId = null } = {}) {
+  if (!Array.isArray(remap) || remap.length === 0) return { remapped: 0, skipped: true, reason: "empty-remap" };
+
+  const parsed = await readRawFile(projectRoot);
+  if (parsed == null) return { remapped: 0, skipped: true, reason: "no-sidecar" };
+  if (eventId != null && parsed.lastReindexEventId === eventId) {
+    return { remapped: 0, skipped: true, reason: "already-applied" };
+  }
+
+  const boards = collectBoards(parsed);
+  const moves = new Map(remap.map(({ from, to }) => [from, to]));
+  let remapped = 0;
+  for (const [dsId, bucket] of Object.entries(boards)) {
+    const next = {};
+    for (const [ref, entry] of Object.entries(bucket.entries)) {
+      const to = moves.get(ref);
+      if (to != null) remapped += 1;
+      next[to ?? ref] = entry;
+    }
+    boards[dsId] = { entries: next };
+  }
+
+  const filePath = mapPath(projectRoot);
+  const { workspaceDir } = workspacePaths(projectRoot);
+  await mkdir(workspaceDir, { recursive: true });
+  await writeFile(
+    filePath,
+    `${JSON.stringify({ version: MAP_VERSION, boards, ...(eventId != null ? { lastReindexEventId: eventId } : {}) }, null, 2)}\n`,
+    "utf8",
+  );
+  return { remapped };
+}
+
 // Reduce a parsed sidecar (v2 OR v1 OR null) to the v2 `boards` map, carrying every
 // existing bucket forward NON-LOSSILY. A v2 file's buckets are kept as-is; a v1 file
 // becomes a single bucket keyed by its own dataSourceId (the migration); an

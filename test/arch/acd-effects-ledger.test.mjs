@@ -40,6 +40,9 @@ const APPEND_EVENT_ALLOWED = new Set([
   // m42 wave (d) leg d4 (port 1) — the RECORD-DOC store's transition seam, the
   // third. Same rule, not an amnesty: it owns the one fs write it raises for.
   "src/effects/doc-transitions.mjs",
+  // m42 wave (d) leg d4 (port 3) — the WORK STREAM's transition seam, the fourth:
+  // the slot-open renumber and the `stream.reindexed` that carries its ref remap.
+  "src/effects/stream-transitions.mjs",
   // m42 wave (d) leg d3 — the BRIDGE fact door. A worker cannot write the control
   // node's store, so it ships the owed step here and this handler appends it into
   // CONTROL's own journal before executing it (the PRD's "apply-handlers reduce to

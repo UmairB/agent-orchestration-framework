@@ -1527,6 +1527,10 @@ import { archTests as acdPublishOnMutateLedgeredTests } from "../test/arch/acd-p
 // run completion, so both raise it and both inherit the declared rollback (the
 // control tick never had one).
 import { archTests as acdReclaimOneEdgeTests } from "../test/arch/acd-reclaim-one-edge.test.mjs";
+// m42 wave (d) leg d4 (port 3) — insert/reindex raises `stream.reindexed` carrying
+// its own OLD -> NEW ref map, so the stores keyed by ref converge with the renumber
+// (the silent Notion page mis-binding dies).
+import { archTests as acdStreamReindexCascadeTests } from "../test/arch/acd-stream-reindex-cascade.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2139,7 +2143,8 @@ export const tests = [
   ...meshEffectsOutboxTests,
   ...acdLockReadMergedTests,
   ...acdPublishOnMutateLedgeredTests,
-  ...acdReclaimOneEdgeTests
+  ...acdReclaimOneEdgeTests,
+  ...acdStreamReindexCascadeTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

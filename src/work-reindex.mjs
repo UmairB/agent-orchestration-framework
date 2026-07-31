@@ -208,6 +208,62 @@ export async function countShiftedByInsert(workDir, { at, space, parent } = {}) 
   return selectAffected(items, { at, space, parent }).length;
 }
 
+// buildRefRemap(items, { shiftMap, space, parent }) — the OLD → NEW ref list for
+// the refs this reindex is about to change (m42 wave (d) leg d4, port 3). Computed
+// from the PRE-rename item list, because after the renames the old refs no longer
+// exist anywhere to be derived from.
+//
+// A ref is the join key of six stores that the rename tells nothing (run records,
+// the Notion sidecar, the streamed doc/run projections, assignment rows, item
+// branches) — so the `stream.reindexed` event has to carry the map itself rather
+// than a ping that makes every reactor re-derive it from state that has already
+// moved.
+//
+//   top-level: every shifted driver `NN` -> `NN+1`, PLUS the CASCADE — every story
+//              under a shifted milestone (`NN/SS` -> `(NN+1)/SS`), whose ref
+//              changes even though its own folder never moved.
+//   nested:    every shifted story `NN/SS` -> `NN/(SS+1)` (its milestone did not
+//              move — ADR-005's carve-out).
+//
+// Ordered DESCENDING by the number that changed, so a consumer applying the list
+// in order never writes onto a ref another entry has yet to vacate — the same
+// collision rule the folder renames obey (ADR-006).
+export function buildRefRemap(items, { shiftMap, space, parent } = {}) {
+  const padTo = (num, width) => String(num).padStart(width, "0");
+  const remap = [];
+
+  if (space === "nested") {
+    const parentNum = Number.parseInt(parent, 10);
+    for (const item of items) {
+      if (item.parent == null) continue;
+      if (Number.parseInt(item.parent, 10) !== parentNum) continue;
+      const oldNum = Number.parseInt(item.number, 10);
+      if (!shiftMap.has(oldNum)) continue;
+      const newNumStr = padTo(shiftMap.get(oldNum), item.number.length);
+      remap.push({ from: item.ref, to: `${item.parent}/${newNumStr}`, order: oldNum });
+    }
+  } else {
+    for (const item of items) {
+      if (item.parent == null) {
+        const oldNum = Number.parseInt(item.number, 10);
+        if (!shiftMap.has(oldNum)) continue;
+        const newNumStr = padTo(shiftMap.get(oldNum), item.number.length);
+        remap.push({ from: item.ref, to: newNumStr, order: oldNum });
+        continue;
+      }
+      // The CASCADE: a story's ref is `<milestone>/<own>`, so it changes when its
+      // MILESTONE shifts even though the story's own number never does.
+      const parentNum = Number.parseInt(item.parent, 10);
+      if (!shiftMap.has(parentNum)) continue;
+      const newParentStr = padTo(shiftMap.get(parentNum), item.parent.length);
+      remap.push({ from: item.ref, to: `${newParentStr}/${item.number}`, order: parentNum });
+    }
+  }
+
+  remap.sort((a, b) => b.order - a.order);
+  return remap.map(({ from, to }) => ({ from, to }));
+}
+
 // reindexForInsert(workDir, { at, space, parent }) — opens a slot at `at` in
 // the target number space (ADR-006 pinned signature):
 //   1. selects every item with `number >= at` in the space (the SAME
@@ -218,8 +274,12 @@ export async function countShiftedByInsert(workDir, { at, space, parent } = {}) 
 //   3. for `space === "top-level"` ONLY, rewrites every stored `depends`/
 //      nested-story `parent` value that pointed at a shifted item to its new
 //      number (ADR-003 Tier 1; ADR-005 — the nested axis touches neither).
-// Returns `{ shifted, at, space, parent }` — `shifted` is the exact count of
-// items renamed (== `countShiftedByInsert`'s answer for the same input).
+// Returns `{ shifted, at, space, parent, remap }` — `shifted` is the exact count
+// of items renamed (== `countShiftedByInsert`'s answer for the same input), and
+// `remap` (ADDITIVE, m42 wave (d) leg d4 port 3) is the OLD → NEW ref list this
+// call changed, computed BEFORE the renames because the old refs stop existing
+// once they land. It is the evidence `stream.reindexed` carries so the stores
+// keyed by ref can converge; the engine itself still tells no store anything.
 export async function reindexForInsert(workDir, { at, space, parent } = {}) {
   const items = await listItems(workDir);
   const affected = selectAffected(items, { at, space, parent });
@@ -235,6 +295,9 @@ export async function reindexForInsert(workDir, { at, space, parent } = {}) {
     const oldNum = Number.parseInt(item.number, 10);
     shiftMap.set(oldNum, oldNum + 1);
   }
+
+  // The ref remap, computed while the OLD refs still exist (see buildRefRemap).
+  const remap = buildRefRemap(items, { shiftMap, space, parent });
 
   for (const item of ordered) {
     const oldNum = Number.parseInt(item.number, 10);
@@ -284,5 +347,5 @@ export async function reindexForInsert(workDir, { at, space, parent } = {}) {
     await rewriteReferences(workDir, shiftMap);
   }
 
-  return { shifted: ordered.length, at, space, parent: parent ?? null };
+  return { shifted: ordered.length, at, space, parent: parent ?? null, remap };
 }
