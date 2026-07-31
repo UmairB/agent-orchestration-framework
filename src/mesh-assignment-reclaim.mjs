@@ -270,8 +270,15 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       // main. The predicate is the ONE HOME in mesh-assignment-directive.mjs — a
       // hand-spelled phase list HERE is exactly how the first `autonomous` dispatch
       // built milestone 18 off main with none of its refined stories (measured
-      // 2026-07-27). A refine (or an item with no prior push, readItemBranch → null)
-      // carries no baseBranch and the worker branches fresh.
+      // 2026-07-27).
+      //
+      // M42 (the brittleness cure) — DELIBERATELY CACHE-ONLY here, no derivation:
+      // sending a derived-but-never-pushed name would fail the worker's reuse door
+      // (no local branch, no origin/<branch> to track). A cache miss sends no
+      // baseBranch and the WORKER derives `aof/mesh/<ref>` itself — reusing the
+      // item's line when the checkout already holds it, branching fresh under that
+      // ONE name when it does not. The wrong-base disease dies worker-side: the
+      // fallback now converges instead of minting a per-assignment fork.
       const baseBranch = phaseRunsOnItemBranch(phase)
         ? readItemBranch(store, row.workspaceId, row.itemRef)
         : null;

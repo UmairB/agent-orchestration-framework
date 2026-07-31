@@ -1545,6 +1545,9 @@ import { archTests as acdNotionSyncLedgeredTests } from "../test/arch/acd-notion
 // ref-remap splits across loci; the reconciler + doctor --explain/--converge
 // close the write-vs-append crash window.
 import { archTests as acdFactProjectionSplitTests } from "../test/arch/acd-fact-projection-split.test.mjs";
+// m42 brittleness cure — one derivable branch per item (aof/mesh/<ref>); the
+// per-assignment mint retired, the side table demoted to a cache that wins on hit.
+import { archTests as acdItemBranchDerivableTests } from "../test/arch/acd-item-branch-derivable.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2161,7 +2164,8 @@ export const tests = [
   ...acdReclaimOneEdgeTests,
   ...acdStreamReindexCascadeTests,
   ...acdNotionSyncLedgeredTests,
-  ...acdFactProjectionSplitTests
+  ...acdFactProjectionSplitTests,
+  ...acdItemBranchDerivableTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

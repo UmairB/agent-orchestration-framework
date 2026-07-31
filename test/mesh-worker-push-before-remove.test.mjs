@@ -15,7 +15,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { createMeshWorkerExecutionHandler } from "../src/mesh-worker-execution.mjs";
-import { meshWorktreePath, meshWorkerBranchName } from "../src/mesh-worktree.mjs";
+import { meshWorktreePath, meshItemBranchName } from "../src/mesh-worktree.mjs";
 import { markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder } from "./support/mesh-worker-exec-fixture.mjs";
 import { withMeshWorkerPushFixture, createRecordingGitExec, makeOriginBranchDivergent, breakOriginUnreachable, installPreReceiveRefusal } from "./support/mesh-worker-push-fixture.mjs";
 import { spawnSyncHardened } from "./support/cli-spawn.mjs";
@@ -72,7 +72,7 @@ export const meshWorkerPushBeforeRemoveTests = [
       const ws = await readyFixture(fx);
       const assignmentId = "asg-1";
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
-      const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const branch = meshItemBranchName(fx.itemRef);
       const calls = [];
       const exec = createRecordingGitExec(calls, { worktreePath });
 
@@ -100,7 +100,7 @@ export const meshWorkerPushBeforeRemoveTests = [
       const ws = await readyFixture(fx);
       const assignmentId = "asg-2";
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
-      const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const branch = meshItemBranchName(fx.itemRef);
       const calls = [];
       const exec = createRecordingGitExec(calls, { worktreePath });
 
@@ -181,7 +181,7 @@ export const meshWorkerPushBeforeRemoveTests = [
           const ws = await readyFixture(fx);
           const assignmentId = "asg-fault";
           const worktreePath = meshWorktreePath(fx.root, assignmentId);
-          const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+          const branch = meshItemBranchName(fx.itemRef);
           await row.setup(fx, branch);
           const calls = [];
           const exec = createRecordingGitExec(calls, { worktreePath });

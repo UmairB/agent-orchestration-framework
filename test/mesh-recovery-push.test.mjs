@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { assembleAssignmentRecord, insertAssignment } from "../src/assignment-record.mjs";
-import { addWorktree, meshWorktreePath, meshWorkerBranchName } from "../src/mesh-worktree.mjs";
+import { addWorktree, meshWorktreePath, meshItemBranchName } from "../src/mesh-worktree.mjs";
 import { createMeshRecoveryPushHandler } from "../src/mesh-worker-execution.mjs";
 import { recoverPush } from "../src/commands/mesh-recover-push.mjs";
 import { withMeshWorkerPushFixture } from "./support/mesh-worker-push-fixture.mjs";
@@ -120,7 +120,7 @@ export const meshRecoveryPushTests = [
       assert.equal(frame.to, "worker-a");
       assert.equal(frame.assignmentId, "a1");
       assert.equal(frame.credential, "wtok-123", "the freshly minted credential rides the frame (one-shot, never persisted)");
-      assert.equal(frame.branch, meshWorkerBranchName("18/00", "a1"), "the frame names the assignment's real branch");
+      assert.equal(frame.branch, meshItemBranchName("18/00"), "the frame names the assignment's real branch");
       assert.equal(readRecoveryPush(store, "a1").state, "dispatched");
 
       // The token is NEVER written to the store — only the request + status.
@@ -193,7 +193,7 @@ export const meshRecoveryPushTests = [
     name: "recovery-push worker handler: the REAL handler commits an UNCOMMITTED worktree diff and pushes it to origin with the carried credential, then reports ok",
     run: async () => withMeshWorkerPushFixture(async (fx) => {
       const assignmentId = "asg-recover";
-      const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const branch = meshItemBranchName(fx.itemRef);
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
       // Materialize the assignment's worktree ON its real branch (as the driver would),
       // then leave an UNCOMMITTED file in it (the real stalled-worker shape).
@@ -236,7 +236,7 @@ export const meshRecoveryPushTests = [
         globalWorkStoreOptions: { env: fx.env },
       });
       const assignmentId = "asg-missing";
-      await handler({ kind: RECOVERY_PUSH_KIND, to: "worker-a", assignmentId, itemRef: fx.itemRef, workspaceId: fx.workspaceId, branch: meshWorkerBranchName(fx.itemRef, assignmentId), credential: null, at: "t" });
+      await handler({ kind: RECOVERY_PUSH_KIND, to: "worker-a", assignmentId, itemRef: fx.itemRef, workspaceId: fx.workspaceId, branch: meshItemBranchName(fx.itemRef), credential: null, at: "t" });
       assert.equal(results.length, 1);
       assert.equal(results[0].ok, false);
       assert.equal(results[0].code, "recovery-worktree-missing");

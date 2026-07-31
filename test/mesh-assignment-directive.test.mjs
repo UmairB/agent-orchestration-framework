@@ -18,7 +18,7 @@ import { runControlDispatchReclaimTick } from "../src/mesh-assignment-reclaim.mj
 import { buildDirectiveFrame, applyAssignmentStatusFrame } from "../src/control-stream-server.mjs";
 import { applyRecoveryPushResultFrame, buildRecoveryPushResultFrame } from "../src/mesh-recovery-push.mjs";
 import { createMeshWorkerExecutionHandler } from "../src/mesh-worker-execution.mjs";
-import { meshWorkerBranchName, meshWorktreePath } from "../src/mesh-worktree.mjs";
+import { meshItemBranchName, meshWorktreePath } from "../src/mesh-worktree.mjs";
 import { loadWorkspace } from "../src/work.mjs";
 import {
   ASSIGNMENT_PHASES,
@@ -322,8 +322,11 @@ export const meshAssignmentDirectiveTests = [
       const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
 
       // Simulate a prior refine: create the item's branch with a refine commit and push
-      // it to origin, WITHOUT leaving it checked out in the main worktree.
-      const baseBranch = meshWorkerBranchName(fx.itemRef, "refine-asg");
+      // it to origin, WITHOUT leaving it checked out in the main worktree. The seeded
+      // name is the PRE-CURE suffixed shape deliberately (m42): the cache-supplied
+      // baseBranch must keep winning for continuity — a pre-cure item's work lives
+      // under its old name, and the continue must land THERE, not on the derivation.
+      const baseBranch = `${meshItemBranchName(fx.itemRef)}-refine-asg`;
       const seedWt = path.join(fx.tmp, "seed-wt");
       assert.equal(realGitExec(["worktree", "add", "-b", baseBranch, seedWt, "HEAD"], { cwd: fx.root }).status, 0);
       await writeFile(path.join(seedWt, "refine.md"), "# the refine contract\n", "utf8");
@@ -360,10 +363,11 @@ export const meshAssignmentDirectiveTests = [
       const contShow = spawnSyncHardened("git", ["show", `${baseBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" });
       assert.equal(contShow.status, 0, "the continue output landed on the SAME branch — the work accumulated, never a fresh branch");
       assert.equal(contShow.stdout, "# the continue output\n");
-      // No fresh per-assignment branch was created for the continue.
-      const freshBranch = meshWorkerBranchName(fx.itemRef, continueAsg);
-      assert.notEqual(freshBranch, baseBranch);
-      assert.notEqual(spawnSyncHardened("git", ["show", `${freshBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" }).status, 0, "no fresh per-assignment branch was pushed — continue stayed on the item's branch");
+      // The cache-supplied base WON: the item's derived one-branch name was never
+      // created — the continue stayed on the pre-cure branch the cache remembered.
+      const derivedBranch = meshItemBranchName(fx.itemRef);
+      assert.notEqual(derivedBranch, baseBranch);
+      assert.notEqual(spawnSyncHardened("git", ["show", `${derivedBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" }).status, 0, "the derivation never fired while the cache had the answer — continue stayed on the item's cached branch");
       assert.equal(existsSync(meshWorktreePath(fx.root, continueAsg)), false, "the continue worktree is force-removed after a clean done+push");
     }),
   },

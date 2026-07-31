@@ -16,7 +16,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { createMeshWorkerExecutionHandler, commitWorktreeChanges } from "../src/mesh-worker-execution.mjs";
-import { meshWorktreePath, meshWorkerBranchName } from "../src/mesh-worktree.mjs";
+import { meshWorktreePath, meshItemBranchName } from "../src/mesh-worktree.mjs";
 import { markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder } from "./support/mesh-worker-exec-fixture.mjs";
 import { withMeshWorkerPushFixture } from "./support/mesh-worker-push-fixture.mjs";
 import { spawnSyncHardened } from "./support/cli-spawn.mjs";
@@ -81,7 +81,7 @@ export const meshWorkerCommitDiffTests = [
     run: async () => withMeshWorkerPushFixture(async (fx) => {
       const ws = await readyFixture(fx);
       const assignmentId = "asg-uncommitted";
-      const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const branch = meshItemBranchName(fx.itemRef);
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
 
       const recorder = await driveAssignment(fx, ws, assignmentId, {
@@ -109,7 +109,7 @@ export const meshWorkerCommitDiffTests = [
     run: async () => withMeshWorkerPushFixture(async (fx) => {
       const ws = await readyFixture(fx);
       const assignmentId = "asg-empty";
-      const branch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const branch = meshItemBranchName(fx.itemRef);
 
       const baseTip = spawnSyncHardened("git", ["rev-parse", "HEAD"], { cwd: fx.root, encoding: "utf8" }).stdout.trim();
       const recorder = await driveAssignment(fx, ws, assignmentId, {

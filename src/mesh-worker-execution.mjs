@@ -57,7 +57,7 @@
 // task-05 @manual soak.
 //
 // MILESTONE 38 / STORY 07 (durable-worker-pushback, ADR-015, tasks 00-02) — the
-// worker's output SURVIVES: a REAL branch (`meshWorkerBranchName`, mesh-worktree.mjs),
+// worker's output SURVIVES: a REAL branch (`meshItemBranchName`, mesh-worktree.mjs — one derivable branch per item since the m42 cure),
 // not a detached HEAD (task 00); on `done`, `git push origin <branch>` runs BEFORE the
 // worktree force-remove, reusing the SAME `buildAskpassShim` one-shot the clone uses
 // (ADR-009's PULL, pointed at a push instead) — the worktree is retained, never
@@ -133,7 +133,7 @@ import { transitionRunComplete, transitionRunStart } from "./effects/run-transit
 // m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
 // bridge (raise -> outbox -> ack), never a fire-once frame.
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
-import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
@@ -2350,23 +2350,29 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // checked out on, computed BEFORE addWorktree so both the checkout call and the
     // eventual push (below) name the SAME branch.
     //
-    // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify carries
-    // `directive.baseBranch` (the item's EXISTING active branch, resolved control-side): it
-    // runs ON that branch, so the work accumulates on ONE branch per item across refine →
-    // continue → verify (no fresh branch off main — a fresh worktree from main lacks the
-    // refine's contract). A refine (or an item with no prior push) has no baseBranch and
-    // gets its own per-assignment branch, byte-identical to before. The worktree PATH stays
+    // M42 (the brittleness cure) — ONE derivable branch per item. A continue/verify
+    // still carries `directive.baseBranch` (the control's cache-resolved answer,
+    // which wins for continuity: a pre-cure item's work lives on its old suffixed
+    // branch, a reindexed item's on its pre-rename name). A directive WITHOUT a
+    // baseBranch — a refine, an item never pushed, or an older control — derives
+    // the item's own `aof/mesh/<ref>`: the fallback now CONVERGES on the same line
+    // instead of minting a divergent per-assignment fork only a side table could
+    // remember (the 2026-07-27 wrong-base disease). The worktree PATH stays
     // assignmentId-keyed either way (SECURITY F4 untouched).
     const baseBranch = typeof directive.baseBranch === "string" && directive.baseBranch.length > 0 ? directive.baseBranch : null;
-    const branch = baseBranch ?? meshWorkerBranchName(itemRef, assignmentId);
+    const branch = baseBranch ?? meshItemBranchName(itemRef);
     try {
       // task 00 — materialize the dedicated worktree at the ONE seam, ON the REAL
       // branch above (ADR-015: HEAD lands on `branch`, never detached). A reused base
       // branch is checked out via reuseWorktreeOnBranch (release any holder + prune, then
       // check out the existing branch); a fresh branch is `-b <branch>` off the commitish.
+      // M42: with one branch per item the derived name can already EXIST locally (a
+      // re-refine after a prior run on the same item) — `-b` would refuse, so an
+      // existing branch takes the reuse door: the item's line continues, never forks.
       const commitish = directive.commit ?? "HEAD";
-      worktreePath = baseBranch != null
-        ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, baseBranch, { exec })
+      const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      worktreePath = baseBranch != null || branchExists
+        ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, branch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
       // 2026-07-27 (the wrong-base dispatch) — the worker's OWN half of the
       // decision record: which base this worktree was actually built from. Rides
@@ -2377,7 +2383,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         options.onLog?.({
           code: "worker-worktree-base",
           level: "info",
-          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : `fresh branch ${branch} off ${commitish}`}`,
+          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
         });
       } catch (error) {
         reportDegrade("mesh-worker-execution", error);
@@ -3105,7 +3111,7 @@ export function createMeshRecoveryPushHandler(options = {}) {
     const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
     const branch = typeof frame?.branch === "string" && frame.branch.length > 0
       ? frame.branch
-      : (itemRef != null && assignmentId != null ? meshWorkerBranchName(itemRef, assignmentId) : null);
+      : (itemRef != null ? meshItemBranchName(itemRef) : null);
     const credential = typeof frame?.credential === "string" && frame.credential.length > 0 ? frame.credential : null;
 
     if (assignmentId == null || branch == null) {

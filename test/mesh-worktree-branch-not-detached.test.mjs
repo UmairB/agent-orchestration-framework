@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { loadWorkspace } from "../src/work.mjs";
 import { createMeshWorkerExecutionHandler } from "../src/mesh-worker-execution.mjs";
-import { meshWorktreePath, meshWorkerBranchName, listWorktrees, removeWorktree } from "../src/mesh-worktree.mjs";
+import { meshWorktreePath, meshItemBranchName, listWorktrees, removeWorktree } from "../src/mesh-worktree.mjs";
 import { withMeshWorkerExecFixture, markRepoPublished, seedNodeWorkspaceMembership, createStatusRecorder, scriptedSpawnRuntime, scriptedPushExec } from "./support/mesh-worker-exec-fixture.mjs";
 import { spawnSyncHardened } from "./support/cli-spawn.mjs";
 
@@ -56,7 +56,7 @@ export const meshWorktreeBranchNotDetachedTests = [
       const assignmentId = "asg-1";
       await materializeOnly(fx, ws, assignmentId, NOW);
       const worktreePath = meshWorktreePath(fx.root, assignmentId);
-      const expectedBranch = meshWorkerBranchName(fx.itemRef, assignmentId);
+      const expectedBranch = meshItemBranchName(fx.itemRef);
 
       try {
         const symbolicRef = git(worktreePath, ["symbolic-ref", "--short", "HEAD"]);
@@ -83,61 +83,65 @@ export const meshWorktreeBranchNotDetachedTests = [
   },
 
   // ------------------------------------------------------------------
-  // Scenario: two assignments for the SAME item get DISTINCT branches, keyed by assignmentId
+  // Scenario (REWRITTEN by the m42 brittleness cure): two assignments for the SAME
+  // item CONVERGE on the item's ONE derivable branch — the m38 distinct-per-
+  // assignment convention is retired (its collision-freedom was exactly what only
+  // a side table could remember, the wrong-base disease's carrier). The second
+  // dispatch takes the REUSE door: the first assignment's worktree (its holder) is
+  // released and the item's line continues, never forks.
   // ------------------------------------------------------------------
   {
-    name: "task00/38-07 real-branch-not-detached: two assignments for the SAME item get DISTINCT branches, keyed by assignmentId",
+    name: "task00/38-07 real-branch-not-detached (m42 cure): two assignments for the SAME item converge on the ONE derivable branch — the second reuses the line, releasing the first holder",
     run: async () => withMeshWorkerExecFixture(async (fx) => {
       const ws = await readyFixture(fx);
       const NOW = "2026-07-18T09:00:00.000Z";
       await materializeOnly(fx, ws, "asg-1", NOW);
       await materializeOnly(fx, ws, "asg-2", NOW);
       try {
-        const branch1 = meshWorkerBranchName(fx.itemRef, "asg-1");
-        const branch2 = meshWorkerBranchName(fx.itemRef, "asg-2");
-        assert.notEqual(branch1, branch2, "the two branches are distinct");
-        assert.notEqual(meshWorktreePath(fx.root, "asg-1"), meshWorktreePath(fx.root, "asg-2"), "collision-free by the assignmentId key, mirroring meshWorktreePath");
-        const list = git(fx.root, ["branch", "--list"]);
-        assert.ok(list.stdout.includes(branch1), "branch for asg-1 exists");
-        assert.ok(list.stdout.includes(branch2), "branch for asg-2 exists");
+        const branch = meshItemBranchName(fx.itemRef);
+        assert.notEqual(meshWorktreePath(fx.root, "asg-1"), meshWorktreePath(fx.root, "asg-2"), "the worktree PATHS stay assignmentId-keyed (SECURITY F4)");
+        const list = git(fx.root, ["branch", "--list", "aof/mesh/*"]);
+        const branches = list.stdout.split(/\r?\n/).map((line) => line.replace(/^[*+ ]+/, "").trim()).filter(Boolean);
+        assert.deepEqual(branches, [branch], "exactly ONE aof/mesh/* branch exists for the item — no per-assignment fork");
+        const entries = await listWorktrees(fx.root);
+        assert.equal(entries.some((e) => e.path.includes("asg-1")), false, "the first assignment's worktree was released — the branch has ONE holder");
+        const holder = entries.find((e) => e.path.includes("asg-2"));
+        assert.ok(holder, "the second assignment's worktree holds the line");
+        assert.equal(holder.branch, `refs/heads/${branch}`, "…checked out ON the item's one branch");
       } finally {
-        await removeWorktree(fx.root, "asg-1", { force: true });
         await removeWorktree(fx.root, "asg-2", { force: true });
       }
     }),
   },
 
   // ------------------------------------------------------------------
-  // Scenario Outline: a ref-hostile itemRef/assignmentId sanitizes to a VALID git branch
+  // Scenario Outline: a ref-hostile itemRef sanitizes to a VALID git branch
+  // (the m42 one-arg mint keeps task 00's hostile-input invariant intact)
   // ------------------------------------------------------------------
   {
-    name: "task00/38-07 real-branch-not-detached: Examples — a ref-hostile itemRef/assignmentId sanitizes to a VALID git branch, prefixed aof/mesh/, distinct per assignment (12 rows)",
+    name: "task00/38-07 real-branch-not-detached: Examples — a ref-hostile itemRef sanitizes to a VALID git branch, prefixed aof/mesh/, stable per item (11 rows)",
     run: () => {
       const rows = [
-        { itemRef: "38-07-worker", assignmentId: "asg-1", note: "already clean — passes through valid" },
-        { itemRef: "38/07", assignmentId: "asg-1", note: "slash — valid path-component or collapsed" },
-        { itemRef: "feat 1", assignmentId: "asg-1", note: "space — forbidden, must sanitize" },
-        { itemRef: "feat~1", assignmentId: "asg-1", note: "tilde — forbidden" },
-        { itemRef: "a^b", assignmentId: "asg-1", note: "caret — forbidden" },
-        { itemRef: "ns:ref", assignmentId: "asg-1", note: "colon — forbidden" },
-        { itemRef: "v1..v2", assignmentId: "asg-1", note: "double-dot — forbidden" },
-        { itemRef: "head@{0}", assignmentId: "asg-1", note: "@{ sequence — forbidden" },
-        { itemRef: ".hidden", assignmentId: "asg-1", note: "leading dot on component — forbidden" },
-        { itemRef: "a\\b", assignmentId: "asg-1", note: "backslash — forbidden" },
-        { itemRef: "feat?x", assignmentId: "asg-1", note: "question mark — forbidden" },
-        { itemRef: "38-07", assignmentId: "asg/../x", note: "hostile assignmentId — must sanitize too" },
+        { itemRef: "38-07-worker", note: "already clean — passes through valid" },
+        { itemRef: "38/07", note: "slash — valid path-component or collapsed" },
+        { itemRef: "feat 1", note: "space — forbidden, must sanitize" },
+        { itemRef: "feat~1", note: "tilde — forbidden" },
+        { itemRef: "a^b", note: "caret — forbidden" },
+        { itemRef: "ns:ref", note: "colon — forbidden" },
+        { itemRef: "v1..v2", note: "double-dot — forbidden" },
+        { itemRef: "head@{0}", note: "@{ sequence — forbidden" },
+        { itemRef: ".hidden", note: "leading dot on component — forbidden" },
+        { itemRef: "a\\b", note: "backslash — forbidden" },
+        { itemRef: "feat?x", note: "question mark — forbidden" },
       ];
       for (const row of rows) {
-        const branch = meshWorkerBranchName(row.itemRef, row.assignmentId);
+        const branch = meshItemBranchName(row.itemRef);
         assert.ok(branch.startsWith("aof/mesh/"), `[${row.note}] the branch name starts with aof/mesh/ (got "${branch}")`);
         const checkRef = spawnSyncHardened("git", ["check-ref-format", `refs/heads/${branch}`], { encoding: "utf8" });
         assert.equal(checkRef.status, 0, `[${row.note}] "${branch}" passes git check-ref-format (a valid, checkout-able git ref)`);
-        // the branch embeds a slug of assignmentId — every SAFE (non-hostile)
-        // character of assignmentId survives verbatim in the branch's tail.
-        const assignmentSafeChars = String(row.assignmentId).replace(/[^A-Za-z0-9._-]/g, "");
-        if (assignmentSafeChars.length > 0) {
-          assert.ok(branch.includes(assignmentSafeChars.slice(0, 3)), `[${row.note}] the branch embeds a slug of "${row.assignmentId}" so it is distinct per assignment`);
-        }
+        // STABLE per item — the whole point of the cure: the same ref always
+        // derives the same branch, so no consumer needs a lookup to find it.
+        assert.equal(branch, meshItemBranchName(row.itemRef), `[${row.note}] the derivation is stable`);
       }
     },
   },

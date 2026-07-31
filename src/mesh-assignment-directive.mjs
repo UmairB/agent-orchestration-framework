@@ -109,22 +109,25 @@ export function readAssignmentPhase(store, assignmentId) {
   return row?.phase ?? null;
 }
 
-// ── the item → ACTIVE mesh branch map (VERIFICATION, continue-on-existing-branch
-// 2026-07-25) ────────────────────────────────────────────────────────────────
+// ── the item → ACTIVE mesh branch CACHE (VERIFICATION, continue-on-existing-branch
+// 2026-07-25; DEMOTED to a cache by the m42 brittleness cure, 2026-07-31) ─────
 //
-// A worker's refine runs in a dedicated worktree on a per-assignment branch
-// (`aof/mesh/<ref>-<assignmentId>`) and pushes it home — but that branch is NOT merged
-// to main, so a FRESH continue assignment (a new worktree from main HEAD) would build
-// against a base WITHOUT the refine's contract (measured: item 18's refine — 7 stories +
-// ADRs — stranded on `aof/mesh/18-73ab17b2…`, never on main). The operator's ask: a
-// continue must run ON THAT EXISTING branch, so the work accumulates on ONE branch per
-// item across refine → continue → verify (no new branch, no fresh-from-main worktree).
-//
-// This map is how the control resolves "that branch": whenever an assignment's push
-// SUCCEEDS (a `done` frame, or a recover-push), the pushed branch is recorded here keyed
-// by (workspace_id, item_ref). At continue/verify dispatch the tick reads it and carries
-// it to the worker as the directive's `baseBranch`. Additive, lazily created (same
-// discipline as the phase table above); never touched by publishWorkspaceSnapshot.
+// Under m38's convention a worker's work lived on a per-assignment branch
+// (`aof/mesh/<ref>-<assignmentId>`) that ONLY this table remembered — every consumer
+// had to remember the lookup, and forgetting it was the measured wrong-base dispatch
+// (item 18's refine — 7 stories + ADRs — stranded on `aof/mesh/18-73ab17b2…`, a fresh
+// continue building from main without them). The m42 cure makes the branch DERIVABLE
+// (`meshItemBranchName(ref)` → `aof/mesh/<ref>`, one branch per item), so this table
+// is now a CACHE, not the only memory:
+//   - a HIT wins (continuity): pre-cure items' work lives on the old suffixed names,
+//     and a reindexed item's on its pre-rename name (a renumber does not rename the
+//     origin branch) — the cache is what still knows that.
+//   - a MISS falls back to the derivation, which CONVERGES on the item's own line
+//     instead of forking a new per-assignment branch nobody records.
+// Whenever an assignment's push SUCCEEDS (a `done` frame, or a recover-push), the
+// pushed branch is recorded here keyed by (workspace_id, item_ref); the dispatch tick
+// reads it (cache-first) into the directive's `baseBranch`. Additive, lazily created
+// (same discipline as the phase table above); never touched by publishWorkspaceSnapshot.
 export function ensureItemBranchTable(store) {
   store.db.exec(`
     CREATE TABLE IF NOT EXISTS global_item_branches (
