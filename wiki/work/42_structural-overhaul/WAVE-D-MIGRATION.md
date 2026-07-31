@@ -423,7 +423,7 @@ halves (the door PASSES the identity, the seam COMPARES it) rather than being we
 to an older control gets no ack, so its steps stay pending (nothing is lost, but the row
 settles only once both sides are current).
 
-## d4 — the cascade sweep: 🟡 PARTIAL 2026-07-31
+## d4 — the cascade sweep: ✅ DONE 2026-07-31 (all four ports)
 
 **PAID — the `writeLock` bypasses.** `aof init` and `project migrate` wrote the WHOLE lock
 document, so either one run against a workspace that already had work or planning
@@ -583,32 +583,70 @@ a no-op). `acd-effects-ledger` lists the fourth seam. No BDD scenario: the share
 fixture scaffolds no `.aof/templates/work/**`, so an insert refuses `insert-template-missing`
 there — the end-to-end proof runs as a behavioural arch lane instead.
 
-**REMAINING — one port, and it has a blocking decision (operator's, not the port's):**
+**PAID — port 4: Notion status sync rides the ledger, gated by applicability.** The last
+port, landed 2026-07-31 (`4def8d0`). Forgetting to run `sync-work` after a completion was
+INVISIBLE — nothing anywhere recorded that the board no longer matches the stream. A run
+completion in a Notion-configured workspace now owes a durable `notion-status-sync` step at
+`integration:notion`, and both open decisions are settled:
 
-1. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
-   The mechanics are ready — the sidecar already records `lastStatus`/`lastContentHash` and
-   the projection already skips an unchanged item, so the dedup is reuse, not new code. Two
-   things must be settled FIRST, and both change what gets built:
+**(a) SETTLED — the operator's decision (2026-07-31): automatic IF the integration opts in.**
+`work.integrations.notion.autoSync: true` (new schema key, both arms, default false) makes
+the completion's own drain reach the integration locus — `reachableLoci(workspace)` in
+dispatch.mjs extends `LOCAL_LOCI` with `integration:<name>` for every configured integration
+carrying the opt-in — so the sync happens in place, on the completion's own authority.
+WITHOUT the opt-in the step stays **deferred**: durable, visible, owed to the `sync-work`
+verb (the operator's "do Notion egress now" door), which after its own milestone sync drains
+every owed step of THIS workspace through the ordinary dispatcher and reports what it paid
+(`drained` on the envelope, additive, only when non-empty; matching render lines). Either
+way the egress is SIDECAR-DEDUPED — the projection's `lastStatus`/`lastContentHash` decide
+noop — so redelivery, repeat completions and verb-then-drain overlaps all cost zero calls
+(measured in the gate: the drained reactor after the verb's own sync issues zero egress; a
+second completion over unchanged disk issues zero egress).
 
-   **(a) Does a run completion WRITE TO NOTION on its own authority?** Today the sync is a
-   verb the operator runs (`aof work integrations notion sync-work <milestone>`). As a
-   reactor on `run.completed` it becomes automatic — an outward-facing write to a real
-   Notion workspace, fired by a cascade, on every completion. The conservative reading is
-   that the LEDGER REMEMBERS the owed sync (a deferred `integration:notion` step — which
-   today nothing records at all, so forgetting to sync is invisible) and the existing verb
-   DRAINS it when the operator runs it. That is strictly additive and reverses cleanly. The
-   automatic reading is the PRD's literal one. Not decided here: it is an outward-facing
-   behaviour change, and d4's other three ports were all wire-invisible.
+**(b) SETTLED — the applicability predicate IS the new table machinery.** A reactor may
+declare `applies(payload, ctx)`, evaluated ONCE by EVERY transition seam at append time
+(`applicableReactors` in table.mjs — all four seams now resolve through it; `effectsFor`
+survives as the read face). A consequence that can never apply — no Notion config at all,
+or the worker's no-workspace sites — is NOT OWED, which closes the steps-owed-to-nobody
+leak. An unanswerable predicate (config read threw) resolves NOT owed, loudly (degrade):
+the leak is the worse failure, and a wrongly-skipped sync is recoverable by the verb. The
+drain never re-litigates applicability — a journaled step IS owed until terminal (config
+removed between append and drain is the reactor's own honest `skipped`/`not-configured`).
 
-   **(b) The unreachable-locus leak.** `integration:notion` is in neither `LOCAL_LOCI` nor
-   `CONTROL_LOCI`, so its steps stay `deferred` — correct for a reachable-elsewhere locus
-   (d3's outbox rule: "an offline send is not an attempt"), but in a workspace with NO
-   Notion config the step is owed to nobody and accumulates in the journal on every run
-   completion, forever. Port 3 sidestepped this by proving its sidecar remap was a
-   `checkout` write; a real status sync cannot. The fix is probably an APPLICABILITY
-   predicate on the reactor (a consequence that can never apply to this workspace is not
-   owed, evaluated by the seam at append time) — new machinery in the table, and worth
-   designing rather than bolting on.
+**One body, one door.** The whole sync (opt-in gate, traversal, routing, sidecar,
+projection, apply) moved from the command into `src/notion/sync-work.mjs`
+(`syncMilestoneWork`), shared by the verb and the reactor — the reactor could not import a
+command (the d1 layering gate) and a second copy would be m42's own disease. The command
+keeps the face + the drain; `NOTION_SETUP_HINT`/`defaultNotionSpawnFor` re-export for
+compat. The reactor syncs the completed item's MILESTONE (the sync-work unit), reads its
+spawn spy from `ctx.publisherOptions.notionSpawn` (the table's established
+command-ctx-through-the-seam convention), and maps `milestone-not-found` (adhoc items) to an
+honest skip.
+
+**Two containment fixes the port surfaced, both landed with it:**
+1. **`integration:*` never rides the outbox** (`remoteSteps` excludes it): an integration
+   step is WORKSPACE-scoped — it drains where the config and credentials are — never the
+   control bridge's business; shipping one would burn it into the door's vocabulary refusal
+   (the worker-that-is-also-a-workstation edge).
+2. **The unscoped crash-recovery sweep fetches only loci it can run** (`pendingSteps` grew a
+   `loci` filter; the face's sweep + any eventId-less drain use it): a deferred record-only
+   backlog sits oldest-first in the journal and would otherwise consume the sweep's whole
+   limit-25 window, starving every payable step behind it. An eventId-scoped drain keeps the
+   full fetch — its `deferred` outcomes are the completion envelope's wire.
+
+**Documented behaviour changes (port 4's own):** a configured workspace's
+`work run-complete --json` effects array now carries the `notion-status-sync` row
+(`deferred`, or `done` under autoSync) — unconfigured workspaces are byte-identical; the
+`sync-work` envelope/render grow the additive `drained` report; the new `autoSync` config
+key. Everything else is wire-invisible.
+
+Gate: **`acd-notion-sync-ledgered`** (5 lanes — one-door + uniform-seam structural proofs
+incl. rollback-before-sync cascade order; the predicate both ways through the REAL seam;
+record-only paid by the verb with the dedup measured; autoSync in-place sync + zero-egress
+redelivery; outbox/sweep containment with the step surviving both passes). BDD: two
+`effects-ledger.feature` scenarios (the owed-and-deferred step on a configured fixture; the
+unconfigured fixture owing nothing), and the crash-sim step now appends through
+`applicableReactors` so a simulated crash owes exactly what a real one would.
 
 ## d5 — unchanged from the ROADMAP, now with its substrate named
 
