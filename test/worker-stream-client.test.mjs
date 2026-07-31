@@ -16,6 +16,7 @@ import {
   createWorkerStreamClient,
   backoffDelaySeconds,
   WORKTREE_CONTENT_FRAME_KIND,
+  WITHDRAW_KIND,
 } from "../src/worker-stream-client.mjs";
 
 // A scriptable fake transport: connect()/send() resolve unless scripted to throw;
@@ -341,6 +342,39 @@ export const workerStreamClientTests = [
       // No override → the client's own (launch) workspaceId, like sendDelta.
       await client.sendWorktreeContent({ itemRef: "18", docs: [{ ref: "18", doc: "SPEC", body: "#\n" }], runs: [] });
       assert.equal(transport.frames.at(-1).workspaceId, "ws-launch");
+    },
+  },
+  {
+    // 2026-07-27 (the duplicate-run wall) — the OWED lane from m42's soak day
+    // (STATE.md §MISSING TESTS): onWithdraw registration + kind dispatch,
+    // mirroring the onDirective lane. A withdraw DOWN-frame reaches the ONE
+    // registered handler; every other kind routes to ITS lane (or is dropped);
+    // an unregistered handler is a silent drop, never a crash.
+    name: "worker-stream-client/withdraw a withdraw DOWN-frame dispatches to the registered onWithdraw handler; other kinds never reach it; unregistered is a silent drop",
+    async run() {
+      let deliver = null;
+      const transport = {
+        onMessage(fn) { deliver = fn; },
+        connect: async () => ({}),
+        send: async () => {},
+      };
+      const client = createWorkerStreamClient({ nodeId: "worker-a", workspaceId: "ws-1", transport, now: () => NOW });
+      assert.ok(deliver, "the client registered its receive listener");
+
+      // Unregistered: the frame is dropped silently (never a crash).
+      deliver(JSON.stringify({ kind: WITHDRAW_KIND, to: "worker-a", assignmentId: "asg-0", at: NOW }));
+
+      const received = [];
+      client.onWithdraw((frame) => received.push(frame));
+      deliver(JSON.stringify({ kind: WITHDRAW_KIND, to: "worker-a", assignmentId: "asg-1", runId: "run-1", itemRef: "35/00", workspaceId: "ws-1", at: NOW }));
+      assert.equal(received.length, 1, "the withdraw frame reaches the registered handler");
+      assert.equal(received[0].assignmentId, "asg-1");
+      assert.equal(received[0].runId, "run-1", "the frame arrives PARSED and whole (run/item fields intact)");
+
+      // A directive routes to ITS lane, not this one; a malformed payload drops.
+      deliver(JSON.stringify({ kind: "directive", to: "worker-a", assignmentId: "asg-2", itemRef: "35/00", workspaceId: "ws-1", at: NOW }));
+      deliver("{not json");
+      assert.equal(received.length, 1, "no other kind (and no malformed frame) ever reaches the withdraw handler");
     },
   },
 ];

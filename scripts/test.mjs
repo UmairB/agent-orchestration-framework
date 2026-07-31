@@ -147,6 +147,11 @@ import { meshWorkerCompletionDetectionTests } from "../test/mesh-worker-completi
 // m42 "interactive worker terminals" — the terminal-input behavioural lanes
 // (router, client dispatch, worker delivery, pending-question, code column).
 import { meshTerminalInputPathTests } from "../test/mesh-terminal-input-path.test.mjs";
+// m42 soak-day owed lanes (STATE §MISSING TESTS, paid 2026-07-31) — the
+// withdraw/settle family: the withdraw handler's three paths, the stranded-record
+// startup settle, the bracket's withdraw guards, onPtyLive registry lifecycle,
+// and the coded failure reporting.
+import { meshWorkerWithdrawSettleTests } from "../test/mesh-worker-withdraw-settle.test.mjs";
 import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
 import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
 import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
@@ -1929,6 +1934,7 @@ export const tests = [
   // milestone 38 / story 05 — terminal-driven-worker-execution (ADR-013, tasks 00-03
   // traceability modules + the acd-worker-driver-no-headless-print fitness function)
   ...meshWorkerDriverInteractivePtyTests,
+  ...meshWorkerWithdrawSettleTests,
   ...meshWorkerTrustWorktreeTests,
   ...meshWorkerCommandTimingTests,
   ...meshWorkerCompletionDetectionTests,

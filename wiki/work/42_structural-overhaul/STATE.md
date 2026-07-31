@@ -514,27 +514,45 @@ to main without explicit signoff).**
   handles keep working, so no corruption, but dispatch/reclaim ticks + board reads degrade in the
   window. Mac: `git pull` the branch + operator restart (its own store migrates then).
 
-### MISSING TESTS (write these before/while merging — today's code shipped under fire)
-- [ ] `createMeshWorkerWithdrawHandler` — all three paths: live-PTY kill (flag consumed by the
-      bracket → record `cancelled`), no-live-session direct settle (the measured case), and
-      idempotence (absent/terminal record = logged no-op). Fixture: temp checkout + item + running
-      run record with `brief.assignmentId`.
-- [ ] `settleStrandedRunRecords` — stranded dir → record settled `failed/runtime_offline`; absent
-      record no-op; one entry's fault never blocks the next.
-- [ ] The execution bracket's withdraw guards — pre-spawn (never spawn a withdrawn run) and
-      post-settle (record → cancelled, NO status frame sent).
-- [ ] Driver `onPtyLive` — registered on spawn, kill routes to `term.kill()`, registry cleared on
-      settle AND on the generic-catch path.
-- [ ] `reportAssignmentFailure` → `onLog` routing (level warn, code preserved) + the codes now on
-      previously code-less failed frames (`workspace-load-failed`, `assignment-ref-unresolved`,
-      `assignment-execution-failed`).
-- [ ] Control's `onAssignmentFailure` peek — a failed frame reaches the sink with its code; a
-      non-failed frame doesn't; a sink fault never crashes the accept loop.
-- [ ] Worker-stream-client `onWithdraw` registration + kind dispatch (mirror the onDirective lane).
-- [ ] `resolveDirectivePhase` STREAMED-row fallback branch (local branch covered in
-      board-mesh-execution.test.mjs; the streamed-type path is not).
-- [ ] Board UI: `serverGone` banner (3 silent failures / TypeError action) and the in-flight list
-      re-poll effect — no React harness exists; decide headless extraction vs a component test.
+### MISSING TESTS — ✅ PAID 2026-07-31 (eight of nine; the ninth resolved by decision)
+
+Landed with the wave-(d) close-out. The withdraw/settle family lives in
+`test/mesh-worker-withdraw-settle.test.mjs` (6 lanes over the SAME harness the
+terminal-input path established — the real execution handler, the scripted PTY with a
+captured exit lever, the two-channel status recorder); the rest extend their surface's
+existing suite.
+
+- [x] `createMeshWorkerWithdrawHandler` — all three paths (mesh-worker-withdraw-settle 1a/1b/1c):
+      the live-PTY kill settles CANCELLED with NO terminal frame; the no-live-session direct
+      settle rides the transition seam (journal-asserted); absent/terminal/field-less are logged
+      no-ops.
+- [x] `settleStrandedRunRecords` (lane 2) — failed/runtime_offline through the seam; a null-path
+      faulting entry is reported per-entry and the NEXT entry still settles; ghostless dir no-op.
+- [x] Bracket withdraw guards — post-settle proven behaviourally (cancelled, no frame); the
+      PRE-SPAWN consume pinned structurally (lane 3 — the mark exists only while a kill is
+      registered, so a single-bracket harness cannot produce the re-entry race it guards).
+- [x] Driver `onPtyLive` (lanes 1a + 5c) — kill routes to `term.kill()`; registries cleared on
+      settle AND on the generic-catch path (a late withdraw falls to the no-live-session lane
+      both times).
+- [x] `reportAssignmentFailure` → `onLog` (lane 5) — warn + code preserved, and the coded failed
+      frames for `workspace-load-failed` / `assignment-ref-unresolved` /
+      `assignment-execution-failed`.
+- [x] Control's `onAssignmentFailure` peek — end-to-end over the REAL accept loop on an ephemeral
+      port (control-stream-server.test.mjs): failed peeks with code + connection nodeId; running
+      never peeks; a throwing sink is swallowed and the loop keeps processing.
+- [x] Worker-stream-client `onWithdraw` — registration + kind dispatch mirroring the onDirective
+      lane (worker-stream-client.test.mjs): unregistered drop, parsed frame intact, other kinds
+      and malformed payloads never reach it.
+- [x] `resolveDirectivePhase` STREAMED-row fallback (board-mesh-execution.test.mjs): a
+      locally-absent milestone resolves `autonomous` through the worker-streamed row; a streamed
+      story stays single-phase; no row anywhere degrades to the single phase.
+- [~] Board UI `serverGone` banner + the in-flight re-poll effect — **resolved by DECISION
+      (2026-07-31), not code**: ui/ has NO test infrastructure at all (no vitest, no jsdom, no
+      testing-library), and extracting the 3-failure counter headlessly would pin the arithmetic
+      while missing the defect (the banner rendering and the blocked actions). A component
+      harness is the right vehicle for BOTH lanes and is worth standing up when the board next
+      grows behaviour that needs pinning — deferred to that touch, recorded here so it is a
+      decision and not a forgotten checkbox.
 - COVERED today (for the fresh session's orientation): completion tree-quiet + declared sentinel +
   pending-question lanes (mesh-worker-completion-detection), autonomous mapper/phase set + door
   type resolution + baseBranch-for-every-non-refine-phase + withdraw-notify tick once-guard

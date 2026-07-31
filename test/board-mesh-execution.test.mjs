@@ -344,4 +344,54 @@ export const boardMeshExecutionTests = [
       }
     },
   },
+  {
+    // The OWED lane from m42's soak day (STATE.md §MISSING TESTS): the STREAMED-row
+    // fallback. A control checkout often does not hold a worker's items locally —
+    // the type then comes from the worker-streamed `work_items` row (the SAME
+    // local-then-streamed order every read command uses), so a milestone continue
+    // dispatched from a control node that never checked the milestone out still
+    // resolves to the autonomous cascade.
+    name: "directive-phase: the STREAMED-row fallback — a locally-absent milestone resolves through the worker-streamed row; a streamed story stays single-phase",
+    run: async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-directive-phase-streamed-"));
+      try {
+        const workDir = path.join(home, "wiki", "work");
+        await mkdir(workDir, { recursive: true });
+        const workspace = { projectRoot: home, workDir, config: {} };
+        const env = { AOF_GLOBAL_HOME: home };
+
+        // Seed the worker-streamed rows for refs the local index has NEVER held.
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const { resolveWorkspaceId } = await import("../src/workspace-identity.mjs");
+          const workspaceId = resolveWorkspaceId(workspace);
+          const insert = store.db.prepare(
+            "INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          );
+          insert.run(workspaceId, "44", "milestone", "remote-ms", "in-progress", "Remote milestone", null, "streamed/44");
+          insert.run(workspaceId, "44/01", "story", "remote-story", "not-started", "Remote story", "44", "streamed/44-01");
+        } finally {
+          store.close();
+        }
+
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "44", { env }),
+          "autonomous",
+          "a milestone the local index misses resolves through the STREAMED row — the cascade still fires",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "44/01", { env }),
+          "continue",
+          "a streamed STORY keeps its single-phase directive",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "45", { env }),
+          "continue",
+          "no local item AND no streamed row degrades to the single phase",
+        );
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
 ];
