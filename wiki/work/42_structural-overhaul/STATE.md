@@ -11,6 +11,46 @@ doc: state
 
 ## Progress
 
+- **2026-07-31 (eleventh pass): LEG d3 IS COMPLETE + d4 opened.** Two landings.
+  **(1) The guard move.** `updateAssignmentState` is guard-free by design and had three
+  callers; exactly ONE owned any rules (the control stream's apply handler, which grew
+  the T6 holder check and terminal-never-regresses because worker frames come through
+  it). Withdraw re-derived a weaker copy inline; the reclaim tick had none, so a race
+  between a settling worker frame and the tick could reclaim a just-settled row. The
+  rules now run in front of EVERY write (`effects/assignment-transitions.mjs`) and the
+  store writer is gate-pinned. One recorded decision: no "same state is idempotent"
+  exception — at the frame door a repeat is indistinguishable from a stale broadcast, so
+  withdraw answers its own repeat by RETURNING the settled row rather than asking for a
+  write (the only observable change: `updatedAt` no longer restamps on a repeat
+  withdraw, which is the truth).
+  **(2) The outbox — the fire-once defect dies structurally.** A remote-locus step is
+  already a durable journal row, so the outbox is its delivery half, and the properties
+  are the cure: delivery is NOT completion (the step stays owed until the control node
+  acks `(eventId, reactorKey)`); an offline send is NOT an attempt (burning the retry
+  budget against nobody is exactly how the original fact was lost); a DECIDED refusal
+  ends the step; and the bridge door re-decides nothing — it guards the vocabulary,
+  appends into control's OWN journal, drains, and replies, with the fact settling through
+  the same transition, so a non-holder is refused identically at both doors. The split is
+  principled: a TERMINAL report is a FACT and goes durable (the nine worker sites + the
+  startup-reclaim broadcast this file measured as fire-once); POSTURE stays best-effort
+  because the next tick re-carries it. 8 outbox lanes, incl. the OFFLINE→online
+  redelivery written as an executable statement of the defect.
+  **(3) d4 opened — the `writeLock` bypasses PAID.** `aof init`/`project migrate` wrote
+  the whole lock document and silently deleted the `work`/`planning` sections of a
+  workspace that had them; `mergeLock` is the read-merge home, gated structurally +
+  behaviourally. Caught mid-change by the BDD lane (`mergeLock is not defined`, two
+  scenarios) — the unit gates could not have seen it.
+  Also fixed en route: the control tick now RETURNS its settled promise, so the
+  dispatch-driver suite awaits the tick instead of sleeping 25ms — it was flaky (~1 in 4)
+  and this leg's journal-open made the race tighter; 4/4 deterministic after. And its
+  Scenario Outline counted ALL frames through `dispatchDirective`, so the withdraw-notify
+  feature (2026-07-27) had left it red on every machine — it now counts directives and
+  asserts the withdrawn row's own notify, the pin that feature never landed.
+  Verified: arch 720/720 across 227 files, focused mesh/worker suites 62/62, BDD 124/124.
+  **d4's four remaining ports and the ONE design question they carry (publish-on-mutate's
+  warnings currently ride the command result) are enumerated in
+  [WAVE-D-MIGRATION.md](WAVE-D-MIGRATION.md) §d4.**
+
 - **2026-07-31 (tenth pass): LEG d1 IS COMPLETE — the layering half paid.** The three
   PRD items no verb migration could reach: (1) **the four upward imports inverted** —
   `commands/errors.mjs` → `src/command-error.mjs` (the error contract is a contract, not

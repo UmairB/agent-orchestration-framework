@@ -375,18 +375,83 @@ pinned-id path is universal. **What remains for d2: the exit drill on the live s
 worker between transition and settle → the settle lands on the next drain.** `run.started` joins
 the vocabulary only when a real reactor wants it, never speculatively.
 
-## d3 / d4 / d5 — unchanged from the ROADMAP, now with their substrate named
+## d3 — bridge facts and the durable outbox: ✅ DONE 2026-07-31
 
-- **d3** — the durable outbox drains remote-locus (`control-store`) steps over the existing
-  worker-stream cursor; `control-stream-server` apply-handlers → guard + append into control's
-  OWN journal; control's converge tick calls `drainEffects` with control-reachable loci; the
-  holder/terminal-never-regresses guards move inside the shared transition.
-- **d4** — the cascade sweep: `publish-on-mutate` becomes the `local` reactor everywhere (the 3
-  remaining `withGlobalWorkPropagation` importers — `run-start.mjs`, `feedback.mjs`, plus the
-  publisher itself — then the "no import outside effects" gate); the two reclaim halves unify on
-  one transition edge; insert/reindex raises `stream.reindexed` (run-record refs, Notion sidecar,
-  projection remap); the two `writeLock` bypasses (`aof init`, `project migrate`) adopt
-  read-merge; Notion sync becomes `integration:notion` reactors deduped by contentHash.
+Two landings, in order.
+
+**(1) The guard move (`src/effects/assignment-transitions.mjs`).** `updateAssignmentState`
+is guard-free by design — "its callers own the transition rules" — and had three
+callers, exactly one of which owned any: the control stream's apply handler, which grew
+the T6 holder check and terminal-never-regresses because worker frames come through it.
+The withdraw verb re-derived a weaker copy inline; the reclaim tick had none, so a race
+between a settling worker frame and the tick could reclaim a just-settled row. The rules
+now run ONCE, in front of the write, for every writer; the store writer is gate-pinned
+reachable only from its own module and the seam. Deliberately no "same state is
+idempotent" exception (at the frame door a repeat is indistinguishable from a stale
+broadcast — the status-uplink outline pins it); withdraw answers its own repeat by
+returning the settled row without asking for a write. The settle raises
+`assignment.settled`, whose first reactor is the `record-item-branch` write that used to
+be an inline line at the frame door.
+
+**(2) The outbox (`src/effects/outbox.mjs`).** No second queue: a remote-locus step is
+already a durable journal row, so the outbox is its delivery half.
+
+| Property | Why it is the cure |
+|---|---|
+| Delivery ≠ completion | The step stays owed until the control node ACKs `(eventId, reactorKey)` — the async-RPC receipt the PRD asks for. A frame lost in flight, or a control that died mid-apply, redelivers. |
+| An offline send is not an attempt | Being offline is the normal case. Burning the retry budget against nobody is exactly how the original defect lost the fact. |
+| A DECIDED refusal ends the step | Retrying against a decision (not-holder, already-terminal) returns the same decision forever. |
+| The bridge door re-decides nothing | It guards the vocabulary, appends into CONTROL's own journal (durable before executed), drains with `CONTROL_LOCI`, and replies. The fact settles through the same transition, so a non-holder is refused identically at both doors. |
+
+**What rides it:** a TERMINAL report (done/failed) is a FACT and goes durable — the nine
+report sites in `mesh-worker-execution.mjs` plus the startup-reclaim broadcast in
+`mesh-launcher.mjs`, which is the site STATE measured as fire-once. POSTURE
+(accepted/running/needs-input/resumed) stays a best-effort status frame: the next tick
+re-carries it and a lost one costs nothing. `assignment.reported` is its own event rather
+than a reactor on `run.completed` — a run can complete `done` and still fail to push, and
+"a done means the push succeeded" is the contract control depends on.
+
+Tests: `test/mesh-effects-outbox.test.mjs` (8 lanes — the deferral, the sent-but-owed
+step, the OFFLINE→online redelivery as an executable statement of the defect, the ack
+vocabulary incl. duplicate/unknown acks, end-to-end through the real bridge door, the
+door's three guarded refusals, and the same step running in place on a control node).
+Gates: `acd-assignment-transition-seam` (4 proofs incl. the guard exercised over the whole
+state matrix); `acd-assignment-status-authored-by-holder` reworked to prove T6 in its two
+halves (the door PASSES the identity, the seam COMPARES it) rather than being weakened.
+
+**Deploy note:** worker and control must move together — a worker on this build shipping
+to an older control gets no ack, so its steps stay pending (nothing is lost, but the row
+settles only once both sides are current).
+
+## d4 — the cascade sweep: 🟡 PARTIAL 2026-07-31
+
+**PAID — the `writeLock` bypasses.** `aof init` and `project migrate` wrote the WHOLE lock
+document, so either one run against a workspace that already had work or planning
+installed silently deleted the other's section. `mergeLock` (lock.mjs) is the read-merge
+home: read, overlay only the keys this caller owns, write the union; absent/torn reads as
+a fresh install rather than blocking one. Gate `acd-lock-read-merged` in two halves —
+structural (no raw-text lock write anywhere in `src/`) and behavioural (work + planning
+survive an init patch; absent and torn locks are fresh installs). Found mid-change by the
+BDD lane, which is the argument for that lane: the first cut left `project-migrate`
+without its import and two scenarios failed on `mergeLock is not defined`.
+
+**REMAINING — four ports, in the order they should land:**
+
+1. **publish-on-mutate → a `local`-locus reactor.** Three importers left
+   (`commands/run-start.mjs`, `commands/feedback.mjs`, the publisher itself). One real
+   design question to settle first: `withGlobalWorkPropagation` appends
+   `propagationWarnings` to the COMMAND RESULT, which renders/`--json` surface — as a
+   reactor the warning arrives in the effects outcomes instead, so the face must surface
+   it there (and the run-start/feedback `--json` contract changes shape unless it is
+   threaded back deliberately).
+2. **The two reclaim halves unify** on one transition edge + shared cascade
+   (`run-store.mjs`'s internal restart reclaim + `mesh-assignment-reclaim.mjs`).
+3. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
+   none; the Notion sidecar mis-binding is the visible symptom.
+4. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
+
+## d5 — unchanged from the ROADMAP, now with its substrate named
+
 - **d5** — FACT/PROJECTION classification per store; `aof doctor --explain <event>` renders the
   EFFECTS entry + journal state, `--converge` drains; the file-store reconciler scan closes the
   write-vs-append crash window `run-transitions.mjs` documents.
