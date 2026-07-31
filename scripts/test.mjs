@@ -1516,6 +1516,9 @@ import { archTests as acdAssignmentTransitionSeamTests } from "../test/arch/acd-
 // completion, an offline send loses nothing, the ack is the receipt) and the
 // guarded bridge door.
 import { meshEffectsOutboxTests } from "../test/mesh-effects-outbox.test.mjs";
+// m42 wave (d) leg d4 — the install lock has several writers and no owner: every
+// one of them read-merges, so an init/migrate can no longer delete work/planning.
+import { archTests as acdLockReadMergedTests } from "../test/arch/acd-lock-read-merged.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2125,7 +2128,8 @@ export const tests = [
   ...acdCommandLayerImportsDownwardTests,
   ...acdConsoleLogConfinedTests,
   ...acdAssignmentTransitionSeamTests,
-  ...meshEffectsOutboxTests
+  ...meshEffectsOutboxTests,
+  ...acdLockReadMergedTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

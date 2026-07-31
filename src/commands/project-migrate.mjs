@@ -2,13 +2,17 @@
 // .aof/aof.config.json) registered into the command core (m42 wave (d) leg d1).
 // Class-A migration of cli.mjs's inline `projectMigrateCommand` (renamed from
 // `migrateCommand` when story 29 reclaimed the top-level verb). Byte-identical
-// output. NOTE (recorded in the wave-(d) plan): this write bypasses writeLock's
-// read-merge — that defect is d4's writeLock cascade port, NOT smuggled into
-// this mechanical registration.
+// output.
+//
+// m42 wave (d) leg d4 (PAID): the lock write went through `writeText` and wiped
+// any work/planning sections wholesale. It is READ-MERGED now (mergeLock), so a
+// migrate over a workspace that already has work or planning installed keeps the
+// manifests it does not own — the one-writer-per-subtree rule.
 import path from "node:path";
 import { access } from "node:fs/promises";
 import { loadConfig } from "../dsl.mjs";
-import { readJson, writeText } from "../fs.mjs";
+import { readJson } from "../fs.mjs";
+import { mergeLock } from "../lock.mjs";
 import { workspacePaths, legacyConfigPath } from "../workspace.mjs";
 import { writeWorkspaceConfig } from "../workspace-writer.mjs";
 
@@ -57,7 +61,7 @@ export const projectMigrateCommand = {
       $schema: "https://aof.local/schemas/aof.schema.json",
       name: legacyConfig.name ?? resolved.name,
     });
-    await writeText(paths.lockPath, `${JSON.stringify({
+    await mergeLock(paths.lockPath, {
       version: 1,
       migratedAt: new Date().toISOString(),
       source: "aof.config.json",
@@ -68,7 +72,7 @@ export const projectMigrateCommand = {
         source: "legacy",
         runtimes: resource.runtimes,
       })),
-    }, null, 2)}\n`);
+    });
 
     return { dryRun: false, configPath: paths.configPath, lockPath: paths.lockPath };
   },

@@ -11,7 +11,7 @@
 // now coded; note the runtime prompt therefore fires BEFORE the guard on an
 // interactive re-init (the retired face refused first).
 //
-// NOTE (d4): init still writes the lock wholesale (writeInstallLock) — the
+// (d4, PAID): init writes the lock READ-MERGED (writeInstallLock -> mergeLock) — the
 // writeLock read-merge adoption is the d4 item, deliberately untouched here.
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -21,19 +21,26 @@ import { selectRuntimes } from "../prompt.mjs";
 import { isLegacyConfigOnlyProject, legacyConfigPath, workspacePaths } from "../workspace.mjs";
 import { RUNTIME_FLAGS, hasRuntimeOptions, parseRuntimes } from "../spine/flags.mjs";
 import { commandError } from "../command-error.mjs";
+import { mergeLock } from "../lock.mjs";
 
-// The retired writeInstallLock, verbatim: init seeds an empty items lock for
-// the selected runtimes (catalog remains null — the catalog era is over).
+// init seeds an empty items lock for the selected runtimes (catalog remains null
+// — the catalog era is over).
+//
+// m42 wave (d) leg d4 — THE READ-MERGE. This wrote the whole document, so an
+// `aof init` over a workspace that already had `work` or `planning` installed
+// silently deleted their lock sections: the manifests were gone and the next
+// `work update` had nothing to reconcile against. It now overlays only the keys
+// it owns (mergeLock), which is the same one-writer-per-subtree rule work init
+// and planning init already keep for theirs.
 async function writeInstallLock(targetDir, runtimes) {
   const lockPath = workspacePaths(targetDir).lockPath;
-  const lock = {
+  await mergeLock(lockPath, {
     version: 1,
     generatedAt: new Date().toISOString(),
     catalog: null,
     runtimes,
     items: [],
-  };
-  await writeText(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+  });
 }
 
 export const projectInitCommand = {
