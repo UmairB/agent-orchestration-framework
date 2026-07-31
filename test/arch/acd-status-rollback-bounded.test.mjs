@@ -175,27 +175,22 @@ export const archTests = [
           `${name} performs no write verb of its own (frontmatter is reached only via rollbackItemStatus)`,
         );
 
-        // The only frontmatter seam a command may touch is rollbackItemStatus.
-        // run-start (the restart-reclaim scan) still reaches it by direct call;
-        // run-complete reaches it through the EFFECTS LEDGER (m42 wave (d) leg
-        // d2): its run raises `run.completed` via transitionRunComplete and the
-        // ledger's checkout-locus reactor (src/effects/table.mjs) performs the one
-        // bounded rollback — declared, not remembered. The command itself must
-        // NOT call the writer directly any more (that would be a second door).
-        if (name === "run-start.mjs") {
+        // NO run-* command reaches the frontmatter writer directly any more. Both
+        // paths that roll a status back — a completion (m42 wave (d) leg d2) and a
+        // RECLAIM (leg d4, port 2) — raise `run.completed` through a transition
+        // seam, and the ledger's checkout-locus reactor (src/effects/table.mjs)
+        // performs the one bounded rollback: declared, not remembered. run-start's
+        // inline reclaim loop was the last direct caller and the reason the two
+        // reclaim halves disagreed (the control tick never had that loop at all).
+        assert.ok(
+          !/rollbackItemStatus\s*\(/.test(code),
+          `${name} does not call rollbackItemStatus directly — the run.completed reactor owns it`,
+        );
+        const seamFor = { "run-start.mjs": "transitionStaleRunsReclaimed", "run-complete.mjs": "transitionRunComplete" }[name];
+        if (seamFor) {
           assert.ok(
-            /rollbackItemStatus\s*\(/.test(code),
-            `${name} reaches item frontmatter by calling rollbackItemStatus`,
-          );
-        }
-        if (name === "run-complete.mjs") {
-          assert.ok(
-            /transitionRunComplete\s*\(/.test(code),
-            `${name} completes through the transition seam (transitionRunComplete)`,
-          );
-          assert.ok(
-            !/rollbackItemStatus\s*\(/.test(code),
-            `${name} no longer calls rollbackItemStatus directly — the run.completed reactor owns it`,
+            new RegExp(`${seamFor}\\s*\\(`).test(code),
+            `${name} reaches the run fact through the transition seam (${seamFor})`,
           );
           const effectsCode = stripComments(await readFile(new URL("../../src/effects/table.mjs", import.meta.url), "utf8"));
           assert.ok(

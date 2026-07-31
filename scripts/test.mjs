@@ -1523,6 +1523,10 @@ import { archTests as acdLockReadMergedTests } from "../test/arch/acd-lock-read-
 // per-command withGlobalWorkPropagation wrapper is retired, publishing has one
 // door, and the reactor's warning is threaded back onto the command result.
 import { archTests as acdPublishOnMutateLedgeredTests } from "../test/arch/acd-publish-on-mutate-ledgered.test.mjs";
+// m42 wave (d) leg d4 (port 2) — the two reclaim halves on ONE edge: a reclaim is a
+// run completion, so both raise it and both inherit the declared rollback (the
+// control tick never had one).
+import { archTests as acdReclaimOneEdgeTests } from "../test/arch/acd-reclaim-one-edge.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2134,7 +2138,8 @@ export const tests = [
   ...acdAssignmentTransitionSeamTests,
   ...meshEffectsOutboxTests,
   ...acdLockReadMergedTests,
-  ...acdPublishOnMutateLedgeredTests
+  ...acdPublishOnMutateLedgeredTests,
+  ...acdReclaimOneEdgeTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

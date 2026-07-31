@@ -12,7 +12,7 @@
 // §settled design). A crash after the write leaves a fact without its event;
 // the scan re-derives it. A crash after the append leaves PENDING steps any
 // later drain pays out — the property the whole arc exists for.
-import { completeRun, startRun, retryRun } from "../run-store.mjs";
+import { completeRun, startRun, retryRun, reclaimRun, staleRunningRuns } from "../run-store.mjs";
 import { effectsFor } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
@@ -96,6 +96,61 @@ export async function transitionRunComplete(item, { runId, outcome, failureReaso
     workspaceRoot: workspace?.projectRoot ?? null,
   };
   return await raise("run.completed", payload, record, { publisherOptions, journalOptions, drain, now });
+}
+
+// transitionRunReclaimed(item, edge, opts) — THE reclaim edge, shared by both
+// halves (m42 wave (d) leg d4, port 2).
+//
+// THE DEFECT THIS CLOSES. A reclaim is a run COMPLETION (failed/runtime_offline),
+// but neither reclaim path went through the completion seam, so neither raised
+// `run.completed` and the cascade was whatever each half remembered: the restart
+// scan's caller (commands/run-start.mjs) looped over the returned entries calling
+// `rollbackItemStatus` INLINE — a hand copy of the ledger's own rollback-status
+// reactor — while the CONTROL tick (mesh-assignment-reclaim.mjs) rolled nothing
+// back and published nothing at all. Two implementations of one consequence, one
+// of them silently missing. Both now settle here, so both inherit the SAME
+// declared cascade.
+//
+//   item — { ref, dir, type }
+//   edge — { runId, now }
+//   opts — { workspace, publisherOptions, journalOptions, drain = true }
+export async function transitionRunReclaimed(item, { runId, now } = {}, opts = {}) {
+  const { workspace = null, publisherOptions = null, journalOptions = {}, drain = true } = opts;
+
+  // (1) The FACT — the store's ONE reclaim edge.
+  const record = await reclaimRun(item, runId, { now });
+
+  // (2) The EVENT — a reclaim IS a completion, so it is `run.completed` rather
+  // than a parallel vocabulary; `reclaimed: true` marks how the run ended for any
+  // reactor that cares, and the outcome stays `failed` so rollback-status fires.
+  const payload = {
+    ref: record.itemRef,
+    runId: record.runId,
+    outcome: "failed",
+    failureReason: record.failureReason ?? null,
+    reclaimed: true,
+    node: record.node ?? null,
+    itemDir: item.dir,
+    itemType: item.type ?? null,
+    workspaceRoot: workspace?.projectRoot ?? null,
+  };
+  return await raise("run.completed", payload, record, { publisherOptions, journalOptions, drain, now });
+}
+
+// transitionStaleRunsReclaimed(items, edge, opts) — the RESTART-SCAN half over the
+// same edge: select the stale `running` runs (the store's own pure scan — the
+// staleness rule is never re-derived here), then settle each through
+// transitionRunReclaimed. Returns one { item, record, eventId, effects } per
+// reclaimed run, so the caller can report what it reclaimed without owning any
+// consequence of it.
+export async function transitionStaleRunsReclaimed(items, { now, stalenessThreshold } = {}, opts = {}) {
+  const nowIso = now ?? new Date().toISOString();
+  const settled = [];
+  for (const candidate of await staleRunningRuns(items, { now: nowIso, stalenessThreshold })) {
+    const { item } = candidate;
+    settled.push({ item, ...(await transitionRunReclaimed(item, { runId: candidate.runId, now: nowIso }, opts)) });
+  }
+  return settled;
 }
 
 // The append-and-drain half both run-store transitions share — one home for the

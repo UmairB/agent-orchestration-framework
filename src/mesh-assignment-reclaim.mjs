@@ -18,12 +18,17 @@
 // acd-assignment-reclaim-dual-staleness) — this module holds no parallel heartbeat
 // definition.
 import { isNodeStale, readPresenceRecord, DEFAULT_PRESENCE_STALENESS_SECONDS } from "./mesh-presence.mjs";
-import { isStale, readRuns, applyTransition } from "./run-store.mjs";
+import { isStale, readRuns } from "./run-store.mjs";
 import { findWork } from "./work.mjs";
 import { isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
 // m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal guards
 // in front of EVERY write; this tick previously had none of its own).
 import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
+// m42 wave (d) leg d4 (port 2) — the SHARED run-reclaim edge. This tick force-failed
+// the run with its own inline copy of the reclaim transition and then rolled nothing
+// back and published nothing; the restart scan did the opposite half inline at its
+// own call site. Both now settle here, so both inherit the declared cascade.
+import { transitionRunReclaimed } from "./effects/run-transitions.mjs";
 // milestone 35 / ADR-008 — runControlDispatchReclaimTick (bottom of this file) is the
 // control-side driver's DATA-LAYER orchestrator: it owns the ONE store-open call for
 // BOTH halves (dispatch scan + reclaim), so mesh-launcher.mjs itself never imports
@@ -161,18 +166,29 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
     );
     if (!shouldReclaim) continue;
 
-    // Force-fail the run runtime_offline, retryable (reusing the EXACT applyTransition
-    // edge reclaimStaleRuns itself uses — the single source of "how a run is
-    // reclaimed", never a second write path). LOCAL records only: a streamed record
+    // Force-fail the run runtime_offline, retryable — through the ONE reclaim edge
+    // the restart scan also uses (m42 wave (d) leg d4, port 2: the comment here used
+    // to CLAIM that and be a second copy of it). The run.completed it raises carries
+    // the declared cascade, so a control-side reclaim now rolls the item's status
+    // back and refreshes the projection exactly as the restart-time reclaim always
+    // did — the half this path silently lacked. LOCAL records only: a streamed record
     // is the worker's own disk state mirrored here — the control cannot transition a
     // file on another machine, and the assignment write below IS the control-side
     // fact the fleet/board read.
+    //
+    // NO `workspace` is passed, deliberately: that is the seam's established way of
+    // saying "this process is not the one that should publish here" (the worker's
+    // mint/settle sites and run-retry use it identically). The ROLLBACK — the
+    // consequence this path genuinely lacked — lands, while the projection refresh
+    // stays with the launcher's periodic propagation ticker, which already owns this
+    // workspace's publishing and is running in the same process holding this tick's
+    // open store handle.
     if (localRun != null && item != null) {
-      await applyTransition(item, localRun.runId, "failed", {
-        now,
-        failureReason: "runtime_offline",
-        reclaimedAt: now,
-      });
+      await transitionRunReclaimed(
+        item,
+        { runId: localRun.runId, now },
+        { journalOptions: options.globalWorkStoreOptions ?? {} },
+      );
     }
 
     // THE SHARED TRANSITION (m42 wave (d) leg d3). This writer had NO transition

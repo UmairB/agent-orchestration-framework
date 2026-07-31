@@ -487,13 +487,57 @@ BDD: two `effects-ledger.feature` scenarios (the mint's journaled event + its pu
 record-doc write beside its event), asserted at the journal rather than the result envelope
 because the wire did not change.
 
-**REMAINING — three ports, in the order they should land:**
+**PAID — port 2: the two reclaim halves unify on ONE transition edge.** A reclaim IS a run
+completion — the legal running → failed edge with `runtime_offline` and a `reclaimedAt`
+stamp — but neither path went through the completion seam, so neither raised
+`run.completed` and each carried whatever its own author remembered:
 
-1. **The two reclaim halves unify** on one transition edge + shared cascade
-   (`run-store.mjs`'s internal restart reclaim + `mesh-assignment-reclaim.mjs`).
-2. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
+| Half | What it did | What it forgot |
+|---|---|---|
+| RESTART scan (`reclaimStaleRuns`, called by `work:run-start`) | returned its reclaimed entries; the COMMAND looped `rollbackItemStatus` over them | nothing — but the loop was a hand copy of the ledger's own rollback-status reactor |
+| CONTROL tick (`mesh-assignment-reclaim.mjs`) | wrote its own inline copy of the reclaim edge, under a comment claiming it was "reusing the EXACT applyTransition edge" | **the rollback entirely** — a control-side reclaim left the item reading `in-progress` with no run behind it |
+
+`reclaimRun` (run-store) is the one edge, `transitionRunReclaimed` the one door to it, and
+the rollback is the DECLARED cascade of the `run.completed` it raises — so both halves
+inherit it and neither can drift again. `staleRunningRuns` splits the scan's pure half out
+so the seam selects candidates without re-deriving the staleness rule;
+`transitionStaleRunsReclaimed` is the restart half over the same edge. `reclaimStaleRuns`
+keeps its m20 items-as-argument signature and behaviour (the 26 → 20 seam, its gates and
+tests untouched) — it is now composed of the two.
+
+**Documented behaviour changes** (the only ones in d4 so far):
+1. **A control-side reclaim now rolls the item's status back.** Measured both ways with the
+   src stashed: at HEAD the item stayed `in-progress`; on this build it reads `not-started`.
+   That is the defect the port exists for, and it is pinned as its own behavioural lane.
+2. **A failing rollback no longer aborts `work:run-start`.** It was an inline `throw` on any
+   code but `rollback-not-applicable`; as a journaled step it degrades loudly and is retried
+   by a later drain, and the mint proceeds. A fact should not be lost because a consequence
+   faulted — the ledger's whole premise.
+3. The control tick passes NO `workspace`, so its reclaim does not publish: that is the
+   seam's established way of saying "not this process's publish" (the worker sites and
+   run-retry use it identically), and the launcher's periodic propagation ticker — running
+   in the same process that holds this tick's open store handle — already owns this
+   workspace's publishing.
+
+Gates: **`acd-reclaim-one-edge`** (3 proofs — the restart half pays the rollback through the
+cascade and journals exactly one completion marked `reclaimed`; the CONTROL half pays the
+same rollback, the behaviour it never had; and no second inline `runtime_offline` +
+`reclaimedAt` write survives anywhere in `src/`, with a non-vacuity plant).
+`acd-effects-ledger` grew the reclaim-reachability proof (`reclaimRun`/`reclaimStaleRuns`/
+`applyTransition` callable only from the store + the seam, and the reclaim door demonstrably
+raises `run.completed`). Three gates FOLLOWED the shape rather than being weakened:
+`acd-status-rollback-bounded` (no run-* command calls `rollbackItemStatus` at all now — both
+paths reach it through a seam; 20/ADR-005's ownership is unchanged),
+`acd-fleet-reclaim-guarded` (the prefilter-before-scan ordering re-anchored on the seam call;
+its rollback proof now asserts the command carries none and the table declares it), and
+`acd-run-reclaim-stale-only` (the scan force-fails via the named edge, which is itself the
+legal `applyTransition` edge — asserted, plus its `runtime_offline`/`reclaimedAt` shape).
+
+**REMAINING — two ports:**
+
+1. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
    none; the Notion sidecar mis-binding is the visible symptom.
-3. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
+2. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
 
 ## d5 — unchanged from the ROADMAP, now with its substrate named
 

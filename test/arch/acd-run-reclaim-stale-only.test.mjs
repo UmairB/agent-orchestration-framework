@@ -153,11 +153,20 @@ export const archTests = [
         /function\s+reclaimStaleRuns\s*\(\s*items\b/.test(source),
         "reclaimStaleRuns takes an item-LIST argument (items) — the 26 → 20 path-walk seam"
       );
-      // it iterates the supplied items and transitions via the legal-edge applyTransition
+      // it iterates the supplied items and force-fails through the ONE reclaim edge —
+      // m42 wave (d) leg d4 (port 2) named that edge `reclaimRun` so the control
+      // tick could stop keeping its own copy of it; `reclaimRun` is itself the legal
+      // 19/ADR-001 applyTransition edge, so the invariant is unchanged and followed
+      // the shape rather than being weakened.
       const body = functionBody(source, "reclaimStaleRuns");
       assert.ok(body.length > 0, "reclaimStaleRuns is defined");
       assert.ok(/for\s*\(.*\bof\s+items\b/.test(body), "the scan iterates the supplied item list by path");
-      assert.ok(/applyTransition\s*\(/.test(body), "the scan force-fails via applyTransition (a legal 19/ADR-001 edge), not a raw write");
+      assert.ok(/reclaimRun\s*\(/.test(body), "the scan force-fails via the shared reclaimRun edge, not a raw write");
+      const edge = functionBody(source, "reclaimRun");
+      assert.ok(edge.length > 0, "reclaimRun is defined");
+      assert.ok(/applyTransition\s*\(/.test(edge), "reclaimRun IS the legal 19/ADR-001 applyTransition edge");
+      assert.ok(/failureReason:\s*["']runtime_offline["']/.test(edge), "…force-failing runtime_offline (retryable per ADR-002)");
+      assert.ok(/reclaimedAt:/.test(edge), "…and stamping reclaimedAt");
     },
   },
 ];

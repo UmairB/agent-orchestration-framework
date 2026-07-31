@@ -23,6 +23,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const RUN_START = path.join(repoRoot, "src", "commands", "run-start.mjs");
 const RUN_STORE = path.join(repoRoot, "src", "run-store.mjs");
 const MESH_GATE = path.join(repoRoot, "src", "commands", "mesh-gate.mjs");
+// m42 wave (d) leg d4 (port 2) — the reclaim's status rollback is now DECLARED here
+// rather than looped at the command's call site.
+const EFFECTS_TABLE = path.join(repoRoot, "src", "effects", "table.mjs");
 const TEST_SUITE = path.join(repoRoot, "scripts", "test.mjs");
 
 function stripComments(source) {
@@ -106,12 +109,16 @@ export const archTests = [
       // The presence prefilter (isNodeStale) sits INSIDE a gated block…
       const prefilterGate = gates.find((b) => /\bisNodeStale\s*\(/.test(b.body));
       assert.ok(prefilterGate != null, "the isNodeStale presence prefilter sits INSIDE the mesh-configured branch");
-      // …and BEFORE the (single, shared) reclaimStaleRuns call.
-      const scanOffsets = offsetsOf(code, /\breclaimStaleRuns\s*\(/g);
-      assert.ok(scanOffsets.length >= 1, "run-start calls reclaimStaleRuns");
+      // …and BEFORE the (single, shared) reclaim scan call. m42 wave (d) leg d4
+      // (port 2) moved that call onto the transition seam — both reclaim halves now
+      // settle through one edge — so the ORDERING invariant this proof exists for is
+      // unchanged and follows the shape: the prefilter still decides the scan set
+      // before any run is force-failed.
+      const scanOffsets = offsetsOf(code, /\btransitionStaleRunsReclaimed\s*\(/g);
+      assert.ok(scanOffsets.length >= 1, "run-start reclaims through the transition seam");
       const prefilterOffset = prefilterGate.start + prefilterGate.body.search(/\bisNodeStale\s*\(/);
       for (const scanOffset of scanOffsets) {
-        assert.ok(prefilterOffset < scanOffset, "the presence prefilter runs BEFORE the reclaimStaleRuns scan call");
+        assert.ok(prefilterOffset < scanOffset, "the presence prefilter runs BEFORE the reclaim scan call");
       }
       // The fleet enumeration (every listItems CALL) sits inside the gate — the
       // unconfigured floor never walks the fleet.
@@ -138,7 +145,7 @@ export const archTests = [
     },
   },
   {
-    name: "arch/fleet-reclaim-guarded: the store's scan is unchanged (items-as-argument, mesh-blind) and status rollback still routes through rollbackItemStatus over the returned entries",
+    name: "arch/fleet-reclaim-guarded: the store's scan is unchanged (items-as-argument, mesh-blind) and status rollback still routes through rollbackItemStatus — now as the reclaim's DECLARED cascade, not an inline loop",
     async run() {
       // The store half: reclaimStaleRuns keeps the m20 items-list signature and the
       // store imports no mesh module (the fleet knowledge lives in the COMMAND layer).
@@ -151,11 +158,27 @@ export const archTests = [
         !/from\s+["'][^"']*mesh-[^"']*["']/.test(store),
         "run-store.mjs imports no mesh module — the store stays fleet-blind (the prefilter is orchestration)"
       );
-      // The rollback half: the command loops the scan's return through the work.mjs
-      // status writer — 20/ADR-005 ownership verbatim.
+      // The rollback half: 20/ADR-005 ownership is UNCHANGED — the reclaim's status
+      // rollback still routes through the work.mjs writer and nowhere else — but it
+      // is now the DECLARED consequence of the `run.completed` a reclaim raises
+      // (effects/table.mjs's rollback-status reactor) instead of a loop the command
+      // remembered. That is m42 wave (d) leg d4 port 2's whole point: the control
+      // tick's reclaim never had that loop, so the two halves disagreed. The command
+      // must therefore carry NO rollback of its own.
       const code = stripComments(await readFile(RUN_START, "utf8"));
-      assert.ok(/for\s*\(\s*const\s+entry\s+of\s+reclaimed\s*\)/.test(code), "the rollback loop iterates the scan's returned entries");
-      assert.ok(/rollbackItemStatus\s*\(\s*entry\.item\s*,\s*["']not-started["']\s*\)/.test(code), "status rollback routes through rollbackItemStatus(entry.item, 'not-started')");
+      assert.ok(
+        !/rollbackItemStatus\s*\(/.test(code),
+        "run-start owns no inline status rollback — the reclaim's cascade is declared, not remembered"
+      );
+      const table = stripComments(await readFile(EFFECTS_TABLE, "utf8"));
+      assert.ok(
+        /rollbackItemStatus\s*\(\s*\{[^}]*\}\s*,\s*["']not-started["']\s*\)/.test(table),
+        "the rollback-status reactor routes through rollbackItemStatus(…, 'not-started')"
+      );
+      assert.ok(
+        /key:\s*["']rollback-status["']/.test(table),
+        "…and it is declared as a reactor on the completion event a reclaim raises"
+      );
       // Self-check (non-vacuous): the signature detector fires on a rewritten scan.
       assert.ok(
         !/function\s+reclaimStaleRuns\s*\(\s*items\b/.test("async function reclaimStaleRuns(workspace, options) {}"),

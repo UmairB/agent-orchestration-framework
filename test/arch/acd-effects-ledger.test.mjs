@@ -64,6 +64,16 @@ const COMPLETE_RUN_ALLOWED = new Set(["src/run-store.mjs", "src/effects/run-tran
 // itself is exempt (definition + its internal reclaim/retry composition).
 const MINT_RUN_ALLOWED = new Set(["src/run-store.mjs", "src/effects/run-transitions.mjs"]);
 
+// The sanctioned RECLAIM callers (m42 wave (d) leg d4, port 2 — the two reclaim
+// halves unified). A reclaim IS a run completion (failed/runtime_offline), but
+// neither half went through the completion seam, so neither raised its event: the
+// restart scan's caller looped `rollbackItemStatus` inline, and the control tick
+// rolled nothing back at all. `reclaimRun` is now the one edge and
+// `transitionRunReclaimed` the one door to it, so both halves inherit the SAME
+// declared cascade. `reclaimStaleRuns` (the store's own scan over that edge) is
+// listed with it: reachable from the store and the seam, never a command.
+const RECLAIM_RUN_ALLOWED = new Set(["src/run-store.mjs", "src/effects/run-transitions.mjs"]);
+
 function stripComments(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
@@ -162,6 +172,31 @@ export const archTests = [
         if (/(?<![A-Za-z])(startRun|retryRun)\s*\(/.test(code)) offenders.push(rel);
       }
       assert.deepEqual(offenders, [], `startRun/retryRun are called only by the store + the transition seam (offenders: ${offenders.join(", ")})`);
+    },
+  },
+  {
+    name: "arch/m42-d4-port2: both reclaim halves reach the run fact only through the shared edge + the transition seam",
+    run: async () => {
+      const files = await listSourceFiles(SRC_DIR);
+      const offenders = [];
+      for (const file of files) {
+        const rel = path.relative(repoRoot, file).replaceAll("\\", "/");
+        if (RECLAIM_RUN_ALLOWED.has(rel)) continue;
+        const code = stripComments(await readFile(file, "utf8"));
+        if (/(?<![A-Za-z])(reclaimRun|reclaimStaleRuns|applyTransition)\s*\(/.test(code)) offenders.push(rel);
+      }
+      assert.deepEqual(
+        offenders,
+        [],
+        `no caller force-fails a run outside the shared edge (offenders: ${offenders.join(", ")})`,
+      );
+      // …and the edge the seam settles on raises a completion, so the reclaim
+      // inherits the declared cascade rather than a per-call-site copy of it.
+      const seam = stripComments(await readFile(path.join(SRC_DIR, "effects", "run-transitions.mjs"), "utf8"));
+      const reclaimDoor = seam.slice(seam.indexOf("export async function transitionRunReclaimed"));
+      assert.ok(reclaimDoor.length > 0, "transitionRunReclaimed is the reclaim door");
+      assert.ok(/reclaimRun\s*\(/.test(reclaimDoor.slice(0, 2000)), "…writing the fact through the shared edge");
+      assert.ok(/raise\s*\(\s*"run\.completed"/.test(reclaimDoor.slice(0, 2000)), "…and raising run.completed for it");
     },
   },
   {
