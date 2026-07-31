@@ -17,7 +17,7 @@
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionRunComplete } from "../effects/run-transitions.mjs";
-import { renderWithPropagationWarnings, appendPropagationWarning } from "../global-work-publisher.mjs";
+import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
 const VALID_OUTCOMES = new Set(["done", "failed", "cancelled"]);
@@ -68,14 +68,15 @@ export const runCompleteCommand = {
     const { record, eventId, effects } = await transitionRunComplete(
       item,
       { runId: input.runId, outcome, failureReason: reason, now: input.now },
-      { workspace: ctx.workspace, journalOptions: ctx.effectsJournalOptions ?? {} },
+      { workspace: ctx.workspace, publisherOptions: ctx, journalOptions: ctx.effectsJournalOptions ?? {} },
     );
 
     // The result envelope: the run record (today's wire, byte-compatible) plus
     // the ADDITIVE per-reactor outcomes (PRD: outcomes ride the envelope). The
     // publish reactor's warning keeps riding the established propagationWarnings
-    // key so existing renderers/consumers see exactly what they used to.
-    let result = {
+    // key so existing renderers/consumers see exactly what they used to — through
+    // the ONE threading home (d4 port 1), never a local copy of the lookup.
+    const result = {
       ...record,
       effects: effects.map(({ event, key, locus, status, error }) => ({
         event,
@@ -86,11 +87,7 @@ export const runCompleteCommand = {
       })),
       ...(eventId ? { eventId } : {}),
     };
-    const publish = effects.find((outcome_) => outcome_.key === "publish-projection");
-    if (publish?.detail?.warning) {
-      result = appendPropagationWarning(result, publish.detail.warning);
-    }
-    return result;
+    return threadPropagationWarnings(result, effects);
   },
 
   cli: {

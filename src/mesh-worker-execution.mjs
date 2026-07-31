@@ -120,7 +120,7 @@ import { findWork, listItems, loadWorkspace } from "./work.mjs";
 // resolves EXACTLY the directory a real interactive `claude` session (cwd =
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
-import { startRun, readRuns } from "./run-store.mjs";
+import { readRuns } from "./run-store.mjs";
 // m42 wave (d) leg d2 (the sweep) — every terminal settle on this worker goes
 // through the run store's ONE event-raiser: fact write + durable `run.completed`
 // event + sync drain of its checkout/local reactors. This module can no longer
@@ -129,7 +129,7 @@ import { startRun, readRuns } from "./run-store.mjs";
 // from the LEDGER (src/effects/table.mjs), not from whichever call site
 // remembered it. A crash between the fact and the drain leaves PENDING journal
 // steps the next drain (any face, any process) pays.
-import { transitionRunComplete } from "./effects/run-transitions.mjs";
+import { transitionRunComplete, transitionRunStart } from "./effects/run-transitions.mjs";
 // m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
 // bridge (raise -> outbox -> ack), never a fire-once frame.
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
@@ -2429,7 +2429,17 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       }
 
       const nowIso = resolveNow();
-      runRecord = await startRun(item, { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } });
+      // The mint rides the transition seam (m42 wave (d) leg d4, port 1 — the
+      // sweep's second half, matching d2's completeRun sweep): `run.started` is
+      // journaled beside the fact. NO `workspace` is passed, exactly as the
+      // worker's completion sites pass none — worker-side projection publishing
+      // stays d3's settle-assignment territory, so the publish reactor skips on a
+      // null workspaceRoot and worker behaviour is byte-unchanged.
+      ({ record: runRecord } = await transitionRunStart(
+        item,
+        { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      ));
 
       // running — the worktree is materialized, the run is minted; the assignment's
       // runId is this run's id (the ADR-004 link the frame carries).
@@ -2916,7 +2926,15 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
         log("warn", `session ${sessionId}: item ${itemRef} already has a running record (${priorRunning.runId}) held by assignment ${priorRunning.brief?.assignmentId ?? "?"} — resume refused`);
         return;
       }
-      runRecord = priorRunning ?? await startRun(item, { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } });
+      // A CONTINUED run mints nothing (and so raises nothing — no fact, no
+      // event); a fresh one rides the transition seam like every other mint.
+      runRecord =
+        priorRunning
+        ?? (await transitionRunStart(
+          item,
+          { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        )).record;
       if (priorRunning != null) {
         log("info", `session ${sessionId}: continuing PAUSED run ${priorRunning.runId} (a needs-input park is the same run resuming, never a second record)`);
       }

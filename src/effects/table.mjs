@@ -52,16 +52,33 @@ async function rollbackStatusIfFailed(event) {
   }
 }
 
-// run.completed / publish-projection — publish-on-mutate as a LOCAL-locus
-// reactor (the per-command withGlobalWorkPropagation import decision, retired
-// here for this cascade; d4 sweeps the rest). Naturally idempotent — the
-// snapshot publish upserts the workspace's current truth. A publish warning is
-// data, not a throw (the publisher already degrades loudly internally).
-async function publishItemProjection(event) {
+// publish-projection — publish-on-mutate as a LOCAL-locus reactor. This ONE
+// function is now the whole of publish-on-mutate for the command layer (m42 wave
+// (d) leg d4, port 1): `withGlobalWorkPropagation` — the per-command import
+// decision that let each mutation verb choose whether its workspace propagated —
+// is DELETED, and the three events below declare the consequence instead. A verb
+// can no longer forget to publish, and a new mutation opts in by adding a row to
+// EFFECTS rather than by remembering an import.
+//
+// Naturally idempotent — the snapshot publish upserts the workspace's current
+// truth, so an at-least-once redelivery is a re-publish of the same facts. A
+// publish warning is DATA, not a throw (the publisher degrades loudly internally
+// and never rejects), so the step completes `done` carrying the warning in its
+// detail; the transition's caller threads it back onto the command result
+// (global-work-publisher.mjs's threadPropagationWarnings — the ONE home for that
+// threading, so `propagationWarnings` reaches renders/--json exactly as it did
+// before this port).
+//
+// ctx.publisherOptions is the command's own ctx passed through by the transition
+// seam — the publisher's established injection seam (globalPublisher,
+// globalWorkStoreOptions, now, fabricPeers…), which is what the retired wrapper
+// forwarded. A crash-recovery drain supplies none and the reactor opens its own,
+// exactly as the reactor contract requires.
+async function publishItemProjection(event, ctx = {}) {
   const { workspaceRoot } = event.payload ?? {};
   if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
   const workspace = await loadWorkspace(workspaceRoot);
-  const publish = await publishGlobalWorkSnapshot(workspace, {});
+  const publish = await publishGlobalWorkSnapshot(workspace, ctx.publisherOptions ?? {});
   if (publish.warning) return { published: false, warning: publish.warning };
   if (publish.skipped) return { published: false, skipped: true, code: publish.code };
   return { published: publish.published === true };
@@ -142,8 +159,27 @@ async function settleAssignment(event, ctx = {}) {
 // projection publishes, so the published snapshot carries the rolled-back
 // status (the inline ordering run-complete.mjs relied on, now structural).
 export const EFFECTS = Object.freeze({
+  // m42 wave (d) leg d4 port 1 — the run MINT, raised by transitionRunStart for
+  // every mint site (work:run-start, work:run-retry, the worker's two). It joins
+  // the vocabulary now because a real reactor wants it: publish-on-mutate, which
+  // work:run-start used to remember as its own `withGlobalWorkPropagation` import.
+  // The mint sites that never propagated still don't — they pass no workspace, so
+  // the payload's workspaceRoot is null and the reactor skips (the d2 precedent
+  // for the worker's completeRun sites, kept verbatim: worker-side publishing is
+  // its own decision, not a side effect of this port).
+  "run.started": Object.freeze([
+    Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
+  ]),
   "run.completed": Object.freeze([
     Object.freeze({ key: "rollback-status", locus: "checkout", apply: rollbackStatusIfFailed }),
+    Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
+  ]),
+  // m42 wave (d) leg d4 port 1 — the record-doc mutation (a bullet under the
+  // verbatim `## Feedback (for retro)` heading), raised by the doc transition
+  // seam. Its one consequence is the same publish work:feedback used to import
+  // for itself. Both faces (CLI + the board's POST /api/work/feedback) inherit
+  // it, because both reach the fact through the one seam.
+  "feedback.recorded": Object.freeze([
     Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
   ]),
   // m42 wave (d) leg d3 — every assignment state change flows through

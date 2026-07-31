@@ -37,6 +37,29 @@ Feature: Effects ledger — consequences are declared, not remembered
     And the journal should hold a "run.completed" event
     And every journaled step of that event should be terminal
 
+  Scenario: minting a run raises its declared event — publishing is no longer the verb's own import
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI" with status "in-progress"
+    When I run `work run-start 03/01 --json`
+    Then the command should succeed
+    And the JSON result field "state" should be "running"
+    And the journal should hold a "run.started" event
+    And the journaled event should carry "ref" as "03/01"
+    And the journaled step "publish-projection" should be "done"
+    And every journaled step of that event should be terminal
+
+  Scenario: recording feedback raises its declared event beside the record-doc write
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI" with status "in-progress"
+    When I run `work feedback 03/01 --note "the dock lost its scrollback" --actor qa --json`
+    Then the command should succeed
+    And the JSON result field "ok" should be true
+    And item "03/01" STATE.md should contain "the dock lost its scrollback"
+    And the journal should hold a "feedback.recorded" event
+    And the journaled event should carry "ref" as "03/01"
+    And the journaled step "publish-projection" should be "done"
+    And every journaled step of that event should be terminal
+
   Scenario: a crashed cascade is paid by the next CLI invocation
     Given a work stream with milestone "03" titled "Board"
     And story "03/01" titled "Board UI" with status "in-progress"

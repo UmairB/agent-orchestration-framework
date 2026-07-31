@@ -7,11 +7,12 @@
 import { readdir } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
-import { startRun, retryRun, reclaimStaleRuns, readRuns, runsDir, shouldRetry } from "../run-store.mjs";
+import { reclaimStaleRuns, readRuns, runsDir, shouldRetry } from "../run-store.mjs";
 import { rollbackItemStatus, listItems } from "../work.mjs";
 import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mesh-presence.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
-import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
+import { transitionRunStart } from "../effects/run-transitions.mjs";
+import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
 
 // The documented default staleness threshold for the restart-time reclaim scan
 // (20/ADR-004 — the "missing-after-N" semantics): a `running` run idle this long with
@@ -141,9 +142,27 @@ export const runStartCommand = {
     // Mesh no longer uses the retired git-bus lease/sync path. A mesh-configured node
     // still stamps its run record with the machine node id; visibility and convergence
     // ride the global work projection plus the WebSocket stream/backstop.
+    //
+    // THE MINT rides the run store's transition seam (m42 wave (d) leg d4, port
+    // 1): the fact is written, `run.started` is appended to the per-node journal,
+    // and its declared local-locus cascade — publish-projection, which this
+    // command used to remember as its own `withGlobalWorkPropagation` import —
+    // drains synchronously before we return. `workspace` in the opts is what
+    // makes the publish reactor reachable for THIS mint (the mint sites that
+    // never propagated pass none); `publisherOptions` carries the command ctx's
+    // established publisher injection seam through to the reactor.
+    const seamOpts = {
+      workspace: ws,
+      publisherOptions: ctx,
+      journalOptions: ctx.effectsJournalOptions ?? {},
+    };
     if (!meshNodeId) {
-      const record = await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: input.now });
-      return await withGlobalWorkPropagation(record, ws, ctx);
+      const { record, effects } = await transitionRunStart(
+        item,
+        { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: input.now },
+        seamOpts,
+      );
+      return threadPropagationWarnings(record, effects);
     }
 
     const runs = await readRuns(item);
@@ -153,12 +172,14 @@ export const runStartCommand = {
         ? latest
         : null;
     const maxAttempts = config.work?.autonomous?.maxAttempts ?? 3;
-    const record =
+    const edge =
       reclaimedPrior != null && shouldRetry(reclaimedPrior, maxAttempts)
-        ? await retryRun(item, { runId: reclaimedPrior.runId, maxAttempts, brief: input.brief, now: nowIso, node: meshNodeId, sessionId: input.sessionId ?? null })
-        : await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: nowIso, node: meshNodeId });
+        ? { mode: "retry", runId: reclaimedPrior.runId, maxAttempts, brief: input.brief, now: nowIso, node: meshNodeId, sessionId: input.sessionId ?? null }
+        : { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: nowIso, node: meshNodeId };
 
-    return await withGlobalWorkPropagation(record, ws, ctx);  },
+    const { record, effects } = await transitionRunStart(item, edge, seamOpts);
+    return threadPropagationWarnings(record, effects);
+  },
 
   cli: {
     // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +

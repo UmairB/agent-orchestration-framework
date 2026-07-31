@@ -10,15 +10,16 @@
 // Exactly one canonical bullet is appended under the verbatim
 // `## Feedback (for retro)` heading (created verbatim if absent; prior bullets
 // never disturbed). The result is { ok:true, bullet }.
-import path from "node:path";
-import { readFile, writeFile, appendFile } from "node:fs/promises";
+//
+// m42 wave (d) leg d4, port 1 — the WRITE ITSELF now lives in the record-doc
+// transition seam (effects/doc-transitions.mjs), which appends the bullet AND
+// raises `feedback.recorded`. This command composes the canonical bullet and
+// guards the input; it no longer decides whether the workspace propagates
+// afterwards (the retired `withGlobalWorkPropagation` import) — the ledger does.
 import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
-import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
-
-// The verbatim feedback heading — must match templates/uat/STATE.md and
-// src/bundle/commands/feedback.md byte-for-byte (ADR-003 / 02_add-feedback.feature).
-const FEEDBACK_HEADING = "## Feedback (for retro)";
+import { transitionFeedbackAppended } from "../effects/doc-transitions.mjs";
+import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
 
 export const feedbackCommand = {
   id: "work:feedback",
@@ -58,8 +59,12 @@ export const feedbackCommand = {
       ? `- ${note} — Raised by: ${actor}   Refs: ${refs}`
       : `- ${note} — Raised by: ${actor}`;
 
-    await appendFeedbackBullet(path.join(item.dir, "STATE.md"), bullet);
-    return await withGlobalWorkPropagation({ ok: true, bullet }, ctx.workspace, ctx);
+    const { effects } = await transitionFeedbackAppended(item, { bullet }, {
+      workspace: ctx.workspace,
+      publisherOptions: ctx,
+      journalOptions: ctx.effectsJournalOptions ?? {},
+    });
+    return threadPropagationWarnings({ ok: true, bullet }, effects);
   },
 
   cli: {
@@ -90,56 +95,3 @@ export const feedbackCommand = {
     json: (result) => result,
   },
 };
-
-// The command core's ONLY filesystem write: ensure the verbatim heading exists
-// (creating it if absent), then append exactly one bullet beneath the existing
-// entries — never disturbing prior content (ADR-003).
-async function appendFeedbackBullet(statePath, bullet) {
-  let original;
-  try {
-    original = await readFile(statePath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    original = null;
-  }
-
-  if (original === null) {
-    // No STATE.md at all: create it with the heading and the one bullet.
-    await writeFile(statePath, `${FEEDBACK_HEADING}\n\n${bullet}\n`, "utf8");
-    return;
-  }
-
-  if (!original.includes(FEEDBACK_HEADING)) {
-    // Heading absent: append it verbatim, then the bullet, beneath existing body.
-    const prefix = original.length === 0 || original.endsWith("\n") ? "" : "\n";
-    const gap = original.length === 0 ? "" : "\n";
-    await appendFile(statePath, `${prefix}${gap}${FEEDBACK_HEADING}\n\n${bullet}\n`, "utf8");
-    return;
-  }
-
-  // Heading present: insert the bullet at the end of the heading's section,
-  // beneath any existing bullets, without rewriting them.
-  const lines = original.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => line.trim() === FEEDBACK_HEADING);
-  // Find where this section ends (the next heading, or end of file).
-  let sectionEnd = lines.length;
-  for (let i = headingIndex + 1; i < lines.length; i += 1) {
-    if (/^#{1,6}\s/.test(lines[i])) {
-      sectionEnd = i;
-      break;
-    }
-  }
-  // Walk back over trailing blank lines so the new bullet sits with the others.
-  let insertAt = sectionEnd;
-  while (insertAt > headingIndex + 1 && lines[insertAt - 1].trim() === "") {
-    insertAt -= 1;
-  }
-  // If the section has no bullet yet, leave a blank line after the heading.
-  if (insertAt === headingIndex + 1) {
-    lines.splice(insertAt, 0, "", bullet);
-  } else {
-    lines.splice(insertAt, 0, bullet);
-  }
-  const newline = original.includes("\r\n") ? "\r\n" : "\n";
-  await writeFile(statePath, lines.join(newline), "utf8");
-}

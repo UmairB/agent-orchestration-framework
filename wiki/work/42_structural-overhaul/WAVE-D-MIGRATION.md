@@ -435,20 +435,65 @@ survive an init patch; absent and torn locks are fresh installs). Found mid-chan
 BDD lane, which is the argument for that lane: the first cut left `project-migrate`
 without its import and two scenarios failed on `mergeLock is not defined`.
 
-**REMAINING — four ports, in the order they should land:**
+**PAID — port 1: publish-on-mutate is a `local`-locus reactor.** `withGlobalWorkPropagation`
+is DELETED. Whether a mutation propagated its workspace used to be decided by whether that
+command's author remembered to import the wrapper — three verbs did, every other mutation
+did not, and nothing said so. `publish-projection` is now one reactor in `effects/table.mjs`
+hung off three declared events, and a command can neither forget it nor opt itself out.
 
-1. **publish-on-mutate → a `local`-locus reactor.** Three importers left
-   (`commands/run-start.mjs`, `commands/feedback.mjs`, the publisher itself). One real
-   design question to settle first: `withGlobalWorkPropagation` appends
-   `propagationWarnings` to the COMMAND RESULT, which renders/`--json` surface — as a
-   reactor the warning arrives in the effects outcomes instead, so the face must surface
-   it there (and the run-start/feedback `--json` contract changes shape unless it is
-   threaded back deliberately).
-2. **The two reclaim halves unify** on one transition edge + shared cascade
+*The blocking design question, settled: **the face threads the warnings back.*** As a reactor
+the publish warning arrives in the effects OUTCOMES, so the choice was to surface it there
+(changing two verbs' `--json` shape) or thread it back onto the result. Threading wins on
+three counts: d2's `work:run-complete` port ALREADY does exactly this, so the alternative
+would have created a second convention for one fact — m42's own disease; `propagationWarnings`
+is the established contract of all three verbs and a warning about a command's own consequence
+belongs on its result; and the house rule is no behaviour change without a reason to document
+one. The threading itself is a shared function — `threadPropagationWarnings(result, effects)`
+in `global-work-publisher.mjs`, the ONE home — and run-complete's inline `.find()` copy died
+into it. **The port is invisible on the wire:** run-start/feedback deliberately did NOT grow
+an `effects` key (their cascade is asserted in the journal instead), and the CLI byte smoke
+(both verbs, human + `--json`, mesh-off AND mesh-on, plus run-complete/run-retry) is
+byte-identical against HEAD.
+
+The seams that raise the events, since a fact must not be reachable without its consequence:
+
+| Event | Seam | Mint/write sites routed through it |
+|---|---|---|
+| `run.started` | `effects/run-transitions.mjs` — `transitionRunStart` (wraps startRun/retryRun) | `work:run-start` (×2 edges), `work:run-retry`, the worker's two (`mesh-worker-execution.mjs`) |
+| `feedback.recorded` | `effects/doc-transitions.mjs` — `transitionFeedbackAppended`, the THIRD seam (the record-doc store), which `appendFeedbackBullet` moved into | `work:feedback` — and with it the board's `POST /api/work/feedback`, which reaches the fact through the same door |
+| `run.completed` | unchanged (d2) | unchanged |
+
+`run.started` joins the vocabulary now because a real reactor wants it (the rule d2 set), and
+ALL FOUR mint sites route through the seam — the d2 completeRun sweep's precedent — so the
+event never lies about a mint that raised nothing. The three mint sites that never published
+still don't: they pass no `workspace`, so `workspaceRoot` is null and the reactor skips
+(deliberately verbatim from d2's worker sites; worker-side publishing stays d3's territory).
+Whether a RETRY should propagate is a real open question and is deliberately not smuggled into
+a mechanical port. The reactor reads its publisher injection seam from `ctx.publisherOptions`
+(the command ctx the transition passes through) — what the retired wrapper forwarded; a
+crash-recovery drain supplies none and opens its own, as the reactor contract requires.
+
+Gates: **`acd-publish-on-mutate-ledgered`** (4 proofs — the wrapper is gone from `src/` as a
+ratchet; `publishGlobalWorkSnapshot` is reachable only from the reactor plus the two sanctioned
+NON-cascade publishers, `mesh repo publish` and the launcher's propagation tick; every
+propagating event carries the publish reactor at `local` locus and it is ONE function for all
+of them; and the threading contract proven end-to-end through `invoke()` with the publish
+injected to fail). `acd-effects-ledger` grew the mint-reachability proof (`startRun`/`retryRun`
+callable only from the store + the seam — completeRun's shape) and lists the new seam as an
+event-raiser. `acd-board-write-isolation` FOLLOWED the writer to the seam and got stronger:
+board-ui.mjs *and* commands/feedback.mjs now both write nothing at all.
+`acd-assignment-run-store-mesh-blind`'s node-as-DATA proof accepts the seam spelling.
+BDD: two `effects-ledger.feature` scenarios (the mint's journaled event + its publish step; the
+record-doc write beside its event), asserted at the journal rather than the result envelope
+because the wire did not change.
+
+**REMAINING — three ports, in the order they should land:**
+
+1. **The two reclaim halves unify** on one transition edge + shared cascade
    (`run-store.mjs`'s internal restart reclaim + `mesh-assignment-reclaim.mjs`).
-3. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
+2. **`stream.reindexed`** — insert/reindex mutates refs that key six stores and tells
    none; the Notion sidecar mis-binding is the visible symptom.
-4. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
+3. **Notion status sync → an `integration:notion` reactor**, deduped by contentHash.
 
 ## d5 — unchanged from the ROADMAP, now with its substrate named
 
@@ -458,6 +503,10 @@ without its import and two scenarios failed on `mergeLock is not defined`.
 
 ## Standing risks / notes
 
+- **Pre-existing red on this control node** (verified by stash at HEAD, unrelated to wave (d)):
+  `memory-integration`'s real-index count (381 ≠ 405); `mesh-worker-driver-session-id`'s two
+  absent-session lanes (`undefined` where `null` is asserted); `mesh-reclaim-scheduler`'s two
+  tick lanes (EBUSY unlinking `projection.sqlite` in Windows teardown).
 - ~~`acd-bundle-manifest-hashes` RED~~ FIXED 2026-07-28: manifest regenerated
   (`scripts/generate-bundle-manifest.mjs`, 81 entries) at the operator's direction; gate green.
 - The face's post-invoke sweep announces drained steps on stderr; stdout stays one document.

@@ -1519,6 +1519,10 @@ import { meshEffectsOutboxTests } from "../test/mesh-effects-outbox.test.mjs";
 // m42 wave (d) leg d4 — the install lock has several writers and no owner: every
 // one of them read-merges, so an init/migrate can no longer delete work/planning.
 import { archTests as acdLockReadMergedTests } from "../test/arch/acd-lock-read-merged.test.mjs";
+// m42 wave (d) leg d4 (port 1) — publish-on-mutate is a LEDGERED consequence: the
+// per-command withGlobalWorkPropagation wrapper is retired, publishing has one
+// door, and the reactor's warning is threaded back onto the command result.
+import { archTests as acdPublishOnMutateLedgeredTests } from "../test/arch/acd-publish-on-mutate-ledgered.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2129,7 +2133,8 @@ export const tests = [
   ...acdConsoleLogConfinedTests,
   ...acdAssignmentTransitionSeamTests,
   ...meshEffectsOutboxTests,
-  ...acdLockReadMergedTests
+  ...acdLockReadMergedTests,
+  ...acdPublishOnMutateLedgeredTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

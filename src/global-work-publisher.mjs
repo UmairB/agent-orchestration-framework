@@ -114,10 +114,27 @@ export async function publishGlobalWorkSnapshot(workspace, ctx = {}) {
   }
 }
 
-export async function withGlobalWorkPropagation(result, workspace, ctx = {}) {
-  const propagation = await publishGlobalWorkSnapshot(workspace, ctx);
-  if (!propagation.warning) return result;
-  return appendPropagationWarning(result, propagation.warning);
+// threadPropagationWarnings(result, effects) — the ONE home for putting the
+// publish reactor's warning back on a command result (m42 wave (d) leg d4, port
+// 1, replacing `withGlobalWorkPropagation`).
+//
+// THE DECISION THIS ENCODES. Publish-on-mutate is now a `local`-locus reactor, so
+// its warning arrives in the effects OUTCOMES rather than from a wrapper around
+// the command's own return value. The face threads it back — deliberately —
+// rather than letting the two ported verbs' `--json` change shape: the
+// `propagationWarnings` key is the established contract of `work:run-start` /
+// `work:feedback` / `work:run-complete`, and a warning about THIS command's own
+// consequence belongs on its result. The threading is a shared function, not a
+// re-remembered `.find()` at each call site, because that copy-per-caller is the
+// very disease the port cures.
+export function threadPropagationWarnings(result, effects = []) {
+  let threaded = result;
+  for (const outcome of effects) {
+    if (outcome?.key !== "publish-projection") continue;
+    const warning = outcome.detail?.warning;
+    if (warning) threaded = appendPropagationWarning(threaded, warning);
+  }
+  return threaded;
 }
 
 export function appendPropagationWarning(result, warning) {

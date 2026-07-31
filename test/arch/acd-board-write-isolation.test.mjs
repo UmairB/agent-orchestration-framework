@@ -22,6 +22,15 @@ import { serveSetupUi } from "../../src/setup-ui.mjs";
 
 const BOARD_UI = new URL("../../src/board-ui.mjs", import.meta.url);
 const FEEDBACK_COMMAND = new URL("../../src/commands/feedback.mjs", import.meta.url);
+// m42 wave (d) leg d4 (port 1): the sole feedback write moved AGAIN — out of the
+// command and into the record-doc TRANSITION SEAM, which appends the bullet and
+// raises `feedback.recorded` so publish-on-mutate is the ledger's decision rather
+// than a per-command import. The write-isolation guarantee is unchanged and has
+// only followed the code (the same move milestone 08 made from board-ui.mjs into
+// the command); the lens below now points at the seam, and the command itself
+// joins board-ui.mjs in the "writes nothing at all" set — strictly stronger than
+// what this gate asserted before.
+const FEEDBACK_WRITER = new URL("../../src/effects/doc-transitions.mjs", import.meta.url);
 // Milestone 21 EXTENDS this guard to the run/rerun surface (ADR-003 — the explicit
 // EXTEND-not-sibling decision): the board face's run READ route + the rerun
 // affordance's UI wiring. The rerun's launch is the m03 ADR-006 typed-PTY-input
@@ -54,31 +63,41 @@ function diffSnapshots(before, after) {
 
 export const archTests = [
   {
-    name: "arch/board-write-isolation: the sole feedback-write helper lives in the work:feedback command and targets STATE.md / the verbatim heading",
+    name: "arch/board-write-isolation: the sole feedback-write helper lives in the record-doc transition seam and targets STATE.md / the verbatim heading",
     async run() {
-      // Milestone 08 re-homed the write: board-ui.mjs itself performs NO fs write
-      // (the face only invokes the command), so the "sole writer" lens now points
-      // at src/commands/feedback.mjs — the command core's ONLY mutation.
+      // Milestone 08 re-homed the write out of board-ui.mjs; m42 wave (d) leg d4
+      // re-homed it again, out of the command and into the transition seam. NEITHER
+      // the board face NOR the command performs an fs write now — the "sole writer"
+      // lens points at src/effects/doc-transitions.mjs.
       const board = await readFile(BOARD_UI, "utf8");
-      for (const verb of ["writeFile", "appendFile"]) {
-        assert.ok(
-          !new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(board)),
-          `board-ui.mjs performs no ${verb}( — the write moved into the work:feedback command`
-        );
+      const command = await readFile(FEEDBACK_COMMAND, "utf8");
+      for (const [label, text] of [["board-ui.mjs", board], ["commands/feedback.mjs", command]]) {
+        for (const verb of ["writeFile", "appendFile"]) {
+          assert.ok(
+            !new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(text)),
+            `${label} performs no ${verb}( — the write lives in the record-doc transition seam`
+          );
+        }
       }
+      // The command reaches the fact ONLY through the seam, so it cannot append the
+      // bullet without raising the event the ledger hangs its cascade on.
+      assert.ok(
+        /from\s+["']\.\.\/effects\/doc-transitions\.mjs["']/.test(command),
+        "the work:feedback command writes through the record-doc transition seam"
+      );
 
-      const source = await readFile(FEEDBACK_COMMAND, "utf8");
+      const source = await readFile(FEEDBACK_WRITER, "utf8");
       // Structural: there is exactly one feedback-write helper and it is the only
       // function in the command that performs an fs write.
       const helperStart = source.indexOf("async function appendFeedbackBullet");
-      assert.ok(helperStart !== -1, "the sole feedback-write helper appendFeedbackBullet exists in the command");
+      assert.ok(helperStart !== -1, "the sole feedback-write helper appendFeedbackBullet exists in the seam");
       const helperEnd = nextTopLevelFn(source, helperStart);
       const helperBody = source.slice(helperStart, helperEnd);
       const outsideHelper = source.slice(0, helperStart) + source.slice(helperEnd);
       for (const verb of ["writeFile", "appendFile"]) {
         assert.ok(
           !new RegExp(`\\b${verb}\\s*\\(`).test(stripComments(outsideHelper)),
-          `${verb} appears only inside appendFeedbackBullet, never elsewhere in the feedback command`
+          `${verb} appears only inside appendFeedbackBullet, never elsewhere in the record-doc seam`
         );
       }
       // The helper writes the STATE.md target and the verbatim heading.
@@ -96,9 +115,10 @@ export const archTests = [
     async run() {
       const board = await readFile(BOARD_UI, "utf8");
       const command = await readFile(FEEDBACK_COMMAND, "utf8");
-      // No record-doc (SPEC/STORY/SESSION) is ever written by either the face or
-      // the sole writer — status/frontmatter is derived, never written.
-      for (const [label, source] of [["board-ui.mjs", board], ["commands/feedback.mjs", command]]) {
+      const writer = await readFile(FEEDBACK_WRITER, "utf8");
+      // No record-doc (SPEC/STORY/SESSION) is ever written by the face, the
+      // command, or the sole writer — status/frontmatter is derived, never written.
+      for (const [label, source] of [["board-ui.mjs", board], ["commands/feedback.mjs", command], ["effects/doc-transitions.mjs", writer]]) {
         for (const doc of ["SPEC.md", "STORY.md", "SESSION.md"]) {
           assert.ok(!writesTo(source, doc), `${label} never writes ${doc} (status/frontmatter is derived, not written)`);
         }

@@ -37,6 +37,9 @@ const APPEND_EVENT_ALLOWED = new Set([
   // event-raiser. The set is the LIST OF SEAMS, not an amnesty: a command or a
   // module appending its own event still trips.
   "src/effects/assignment-transitions.mjs",
+  // m42 wave (d) leg d4 (port 1) — the RECORD-DOC store's transition seam, the
+  // third. Same rule, not an amnesty: it owns the one fs write it raises for.
+  "src/effects/doc-transitions.mjs",
   // m42 wave (d) leg d3 — the BRIDGE fact door. A worker cannot write the control
   // node's store, so it ships the owed step here and this handler appends it into
   // CONTROL's own journal before executing it (the PRD's "apply-handlers reduce to
@@ -52,6 +55,14 @@ const APPEND_EVENT_ALLOWED = new Set([
 // mesh-worker-execution.mjs — now settles through transitionRunComplete, so the
 // fact can never again land without its event.
 const COMPLETE_RUN_ALLOWED = new Set(["src/run-store.mjs", "src/effects/run-transitions.mjs"]);
+
+// The sanctioned run-MINT callers (m42 wave (d) leg d4, port 1 — the same
+// discipline applied to the second run-store fact). `startRun`/`retryRun` were
+// called from four places, and whether the mint propagated its workspace was a
+// per-call-site import decision; now every mint goes through transitionRunStart,
+// which raises `run.started` and lets the ledger own the consequence. The store
+// itself is exempt (definition + its internal reclaim/retry composition).
+const MINT_RUN_ALLOWED = new Set(["src/run-store.mjs", "src/effects/run-transitions.mjs"]);
 
 function stripComments(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -135,6 +146,22 @@ export const archTests = [
         }
       }
       assert.deepEqual(offenders, [], `completeRun is called only by the store + the transition seam (offenders: ${offenders.join(", ")})`);
+    },
+  },
+  {
+    name: "arch/m42-d4-port1: the run MINT is reachable only through the store + the transition seam (no mint without its event)",
+    run: async () => {
+      const files = await listSourceFiles(SRC_DIR);
+      const offenders = [];
+      for (const file of files) {
+        const rel = path.relative(repoRoot, file).replaceAll("\\", "/");
+        if (MINT_RUN_ALLOWED.has(rel)) continue;
+        const code = stripComments(await readFile(file, "utf8"));
+        // The bare store calls — transitionRunStart is the sanctioned door. The
+        // negative lookbehind keeps `transitionRunStart(` from matching itself.
+        if (/(?<![A-Za-z])(startRun|retryRun)\s*\(/.test(code)) offenders.push(rel);
+      }
+      assert.deepEqual(offenders, [], `startRun/retryRun are called only by the store + the transition seam (offenders: ${offenders.join(", ")})`);
     },
   },
   {

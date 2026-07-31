@@ -12,11 +12,54 @@
 // §settled design). A crash after the write leaves a fact without its event;
 // the scan re-derives it. A crash after the append leaves PENDING steps any
 // later drain pays out — the property the whole arc exists for.
-import { completeRun } from "../run-store.mjs";
+import { completeRun, startRun, retryRun } from "../run-store.mjs";
 import { effectsFor } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";
+
+// transitionRunStart(item, edge, opts) — mint a run and raise `run.started`
+// (m42 wave (d) leg d4, port 1). The MINT is the second run-store fact to get a
+// seam, for the same reason completeRun did: its consequence (publish-on-mutate)
+// was a per-call-site import decision, so three of the four mint sites silently
+// had none. Now the ledger decides, and no mint can reach the store without the
+// event.
+//
+//   item — { ref, dir, type } (resolveItemExact's shape)
+//   edge — { mode, runId, sessionId, brief, now, node, maxAttempts }
+//          mode "retry" resumes a failed run's lineage (retryRun's own contract,
+//          its coded rejections — no-retryable-run / not-retryable /
+//          attempts-exhausted / duplicate-run — propagating untouched, nothing
+//          appended); anything else is the fresh mint (startRun, whose
+//          duplicate-run rejection propagates the same way).
+//   opts — { workspace, publisherOptions, journalOptions, drain = true }
+//          `workspace` ABSENT ⇒ payload workspaceRoot null ⇒ the publish reactor
+//          skips. That is how the mint sites that never propagated (run-retry,
+//          the worker's two) keep their behaviour while still riding the ledger.
+export async function transitionRunStart(item, edge = {}, opts = {}) {
+  const { mode = "start", runId, sessionId, brief, now, node = null, maxAttempts } = edge;
+  const { workspace = null, publisherOptions = null, journalOptions = {}, drain = true } = opts;
+
+  // (1) The FACT — the store's own guarded mint. A refusal here means no event.
+  const record =
+    mode === "retry"
+      ? await retryRun(item, { runId, maxAttempts, brief, now, node, sessionId })
+      : await startRun(item, { sessionId: sessionId ?? null, brief: brief ?? {}, now, node });
+
+  // (2) The EVENT — past tense, carrying its own evidence.
+  const payload = {
+    ref: record.itemRef,
+    runId: record.runId,
+    mode,
+    attempt: record.attempt ?? null,
+    retryOf: record.retryOf ?? null,
+    node: record.node ?? null,
+    itemDir: item.dir,
+    itemType: item.type ?? null,
+    workspaceRoot: workspace?.projectRoot ?? null,
+  };
+  return await raise("run.started", payload, record, { publisherOptions, journalOptions, drain, now });
+}
 
 // transitionRunComplete(item, edge, opts) — complete the run fact, append
 // `run.completed` to the per-node journal, and (by default) drain the event's
@@ -31,6 +74,7 @@ import { reportDegrade } from "../degrade.mjs";
 export async function transitionRunComplete(item, { runId, outcome, failureReason = null, now } = {}, opts = {}) {
   const {
     workspace = null,
+    publisherOptions = null,
     journalOptions = {},
     drain = true,
   } = opts;
@@ -51,25 +95,32 @@ export async function transitionRunComplete(item, { runId, outcome, failureReaso
     itemType: item.type ?? null,
     workspaceRoot: workspace?.projectRoot ?? null,
   };
-  const reactors = effectsFor("run.completed") ?? [];
+  return await raise("run.completed", payload, record, { publisherOptions, journalOptions, drain, now });
+}
+
+// The append-and-drain half both run-store transitions share — one home for the
+// "the ledger's own health never gates the cascade" rule (a journal that will not
+// open runs the consequences EPHEMERALLY and says so, loudly) and for the
+// reactor context the local-locus publish reactor reads.
+async function raise(name, payload, record, { publisherOptions, journalOptions, drain, now }) {
+  const reactors = effectsFor(name) ?? [];
+  const reactorCtx = publisherOptions ? { publisherOptions } : {};
 
   let journal = null;
   try {
     journal = await openEffectsJournal(journalOptions);
   } catch (error) {
-    // The ledger's own health never gates the cascade: run it ephemerally (the
-    // consequences still happen, just not durably) and say so, loudly.
     reportDegrade("effects-journal-open", error);
   }
 
   if (!journal) {
-    const effects = drain ? await runEffectsEphemeral("run.completed", payload) : [];
+    const effects = drain ? await runEffectsEphemeral(name, payload, { ctx: reactorCtx }) : [];
     return { record, eventId: null, effects };
   }
 
   try {
-    const { eventId } = appendEvent(journal, { name: "run.completed", payload, source: "run-transition", now }, reactors);
-    const effects = drain ? await drainEffects({ journal, eventId, now }) : [];
+    const { eventId } = appendEvent(journal, { name, payload, source: "run-transition", now }, reactors);
+    const effects = drain ? await drainEffects({ journal, eventId, now, ctx: reactorCtx }) : [];
     return { record, eventId, effects };
   } finally {
     journal.close();

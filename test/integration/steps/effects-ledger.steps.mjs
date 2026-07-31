@@ -4,6 +4,8 @@
 // journal.sqlite under the context's isolated AOF_GLOBAL_HOME), because "the
 // cascade is durable" is a claim about the store, not about stdout.
 import assert from "node:assert/strict";
+import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { createStepRegistry } from "../support/step-registry.mjs";
 import { registerCommonSteps } from "../support/common-steps.mjs";
 import {
@@ -71,6 +73,48 @@ registry.define(/^the journal should hold a "([^"]+)" event$/, async (context, n
     context.lastEventId = events[0].eventId;
   });
 });
+
+// The event's own EVIDENCE (m42 wave (d) leg d4, port 1): an event is a past-tense
+// fact carrying what its reactors need, never a ping that forces a racing re-read.
+// Reading it out of the real journal is the same grey-box seam as the steps above.
+registry.define(
+  /^the journaled event should carry "([^"]+)" as "([^"]*)"$/,
+  async (context, field, expected) => {
+    assert.ok(context.lastEventId, "a journaled event was located first");
+    await withJournal(context, (journal) => {
+      const event = readEvents(journal, { limit: 200 }).find((row) => row.eventId === context.lastEventId);
+      assert.ok(event, "the located event is readable");
+      assert.equal(String(event.payload?.[field] ?? ""), expected, `payload.${field}`);
+    });
+  },
+);
+
+// The record-doc fact itself — the bullet the seam appended, read off disk.
+registry.define(
+  /^item "([^"]+)" STATE\.md should contain "([^"]+)"$/,
+  async (context, ref, text) => {
+    const item = context.items.get(ref);
+    assert.ok(item, `fixture item "${ref}" exists`);
+    const body = await readFile(path.join(item.dir, "STATE.md"), "utf8");
+    assert.ok(body.includes(text), `STATE.md contains "${text}"`);
+  },
+);
+
+// The per-reactor outcome read from the JOURNAL rather than the result envelope.
+// The verbs ported in m42 wave (d) leg d4 (port 1) deliberately did NOT grow an
+// `effects` key — the port is invisible on their wire — so their cascade is
+// asserted where it is actually recorded.
+registry.define(
+  /^the journaled step "([^"]+)" should be "([^"]+)"$/,
+  async (context, key, status) => {
+    assert.ok(context.lastEventId, "a journaled event was located first");
+    await withJournal(context, (journal) => {
+      const step = readEventSteps(journal, context.lastEventId).find((row) => row.key === key);
+      assert.ok(step, `the event materialised a "${key}" step`);
+      assert.equal(step.status, status, `step "${key}" is "${status}" (got "${step.status}")`);
+    });
+  },
+);
 
 registry.define("every journaled step of that event should be terminal", async (context) => {
   assert.ok(context.lastEventId, "a journaled event was located first");

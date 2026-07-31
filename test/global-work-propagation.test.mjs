@@ -8,7 +8,7 @@ import {
   meshGlobalPropagationDecision,
   publishGlobalWorkSnapshot,
   renderWithPropagationWarnings,
-  withGlobalWorkPropagation,
+  threadPropagationWarnings,
 } from "../src/global-work-publisher.mjs";
 import { startLauncher } from "../src/mesh-launcher.mjs";
 
@@ -135,18 +135,25 @@ export const globalWorkPropagationTests = [
     },
   },
   {
-    name: "global-work-propagation/02 publisher failures are returned as propagationWarnings without changing the command result",
+    // m42 wave (d) leg d4 (port 1): the same contract, now reached the ledgered
+    // way. Publishing is a `local`-locus reactor, so a failure arrives as the
+    // publish step's DETAIL rather than from a wrapper around the return value —
+    // and threadPropagationWarnings is the ONE place that puts it back on the
+    // result, so renders and --json see exactly what they saw before.
+    name: "global-work-propagation/02 publisher failures are threaded from the effect outcome as propagationWarnings without changing the command result",
     async run() {
       const repo = await makeWorkRepo({ mesh: { enabled: true } });
       try {
         const ws = await loadWorkspace(repo);
         const error = new Error("sqlite unavailable");
         error.code = "sqlite-unavailable";
-        const result = await withGlobalWorkPropagation(
-          { ok: true },
-          ws,
-          { globalPublisher: async () => { throw error; } },
-        );
+        // What the drain hands back for a failed publish: the step is `done` (the
+        // publisher degrades internally and never throws) carrying the warning.
+        const publish = await publishGlobalWorkSnapshot(ws, { globalPublisher: async () => { throw error; } });
+        assert.equal(publish.published, false, "the publish did not land");
+        const effects = [{ event: "run.started", key: "publish-projection", locus: "local", status: "done", detail: { published: false, warning: publish.warning } }];
+
+        const result = threadPropagationWarnings({ ok: true }, effects);
         assert.equal(result.ok, true, "the original result remains present");
         assert.equal(result.propagationWarnings.length, 1);
         assert.equal(result.propagationWarnings[0].code, "sqlite-unavailable");
@@ -154,6 +161,12 @@ export const globalWorkPropagationTests = [
         const rendered = renderWithPropagationWarnings("Succeeded.", result);
         assert.match(rendered, /^Succeeded\./);
         assert.match(rendered, /warning: global work propagation sqlite-unavailable/);
+
+        // A clean cascade threads nothing — the result is returned untouched.
+        const clean = threadPropagationWarnings({ ok: true }, [
+          { key: "publish-projection", status: "done", detail: { published: true } },
+        ]);
+        assert.equal(clean.propagationWarnings, undefined, "a successful publish adds no warning key");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
