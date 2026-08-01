@@ -1,0 +1,191 @@
+Feature: Command spine — one route table, one face, one envelope
+  The registry is the single source of truth for every verb (m42 wave (d) leg d1):
+  a command carrying cli.route dispatches through the registry-derived route table
+  into the ONE generic face, with its flag vocabulary declared on itself, one
+  structured error envelope under --json, and one exit-code policy. These
+  scenarios are the CONTRACT every migrated verb inherits — a new migration gets
+  covered by adding a scenario here, not by hand-rolling a face.
+
+  Scenario: a registry-routed work verb dispatches through the generic face
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work doc 03 SPEC --json`
+    Then the command should succeed
+    And the JSON result field "present" should be true
+    And the JSON result field "doc" should be "SPEC"
+
+  Scenario: a migrated group verb keeps its human rendering byte-for-byte
+    Given a work stream with milestone "03" titled "Board"
+    When I run `assets list`
+    Then the command should succeed
+    And stdout should contain `resources: 0`
+
+  Scenario: a migrated verb answers --json with the command result verbatim
+    Given a work stream with milestone "03" titled "Board"
+    When I run `project show --json`
+    Then the command should succeed
+    And the JSON result field "name" should be "fixture"
+
+  Scenario: an undeclared flag is refused loudly, never silently absorbed
+    Given a work stream with milestone "03" titled "Board"
+    When I run `assets list --bogus`
+    Then the command should fail
+    And stderr should contain `Unknown flag "--bogus"`
+
+  Scenario: a command failure under --json is one structured envelope on stdout
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work run-complete 99 --outcome done --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "ref-not-found"
+
+  Scenario: input-contract failures are coded and precede any write
+    Given a work stream with milestone "03" titled "Board"
+    And story "03/01" titled "Board UI"
+    When I run `work run-complete 03/01 --outcome bogus --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-outcome"
+
+  Scenario: a non-json failure propagates to stderr with a non-zero exit
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work doc 03 NONSENSE`
+    Then the command should fail
+    And stderr should contain `Unknown document "NONSENSE"`
+
+  Scenario: a routed nested mesh verb refuses bad input with the one envelope
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh assign --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
+  Scenario: a three-word route dispatches through the same face
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh repo publish --json`
+    Then the command should succeed
+    And the JSON result field "ok" should be true
+
+  Scenario: a launcher verb's --json is the non-blocking probe, never the daemon
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh serve --serve --json`
+    Then the command should succeed
+    And the JSON result field "launcherRunning" should be false
+
+  Scenario: a launcher verb registered on the seam answers --json with its probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh ui --json`
+    Then the command should succeed
+    And the JSON result field "scope" should be "global"
+    And the JSON result field "relayConfigured" should be false
+
+  Scenario: every launcher family answers --json with its non-blocking probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `graph serve --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "mcp-stdio"
+    When I run `work ui --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "board"
+    When I run `assets ui --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "assets-ui"
+
+  Scenario: the desktop verbs ride three-word routes with the one envelope
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh desktop install --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "app-artifact-missing"
+
+  Scenario: the desktop no-verb shim still owns the refusal a route cannot express
+    Given a work stream with milestone "03" titled "Board"
+    When I run `mesh desktop --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
+  Scenario: a routed read keeps its bare-array --json document and read-miss exit split
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work find 03 --json`
+    Then the command should succeed
+    And stdout should contain `"ref": "03"`
+    When I run `work find nothing-matches --json`
+    Then the command should succeed
+    And stdout should contain `[]`
+    When I run `work find nothing-matches`
+    Then the command should fail
+    And stdout should contain `No work item matches "nothing-matches".`
+
+  Scenario: a CLI-only config verb rides the route table with one json document
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work use-headroom --json`
+    Then the command should succeed
+    And stdout should contain `configPath`
+
+  Scenario: a write verb's refusal ends the stdout document and keeps its retired json shape
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work update --dry-run`
+    Then the command should fail
+    And stdout should contain `No ACD install found`
+    When I run `work update --dry-run --json`
+    Then the command should fail
+    And the JSON result field "notInitialized" should be true
+
+  Scenario: a class-B face copy retires onto its route (provision)
+    Given a work stream with milestone "03" titled "Board"
+    When I run `project provision graphify --dry-run --json`
+    Then the command should succeed
+    And the JSON result field "tool" should be "graphify"
+
+  Scenario: the model-config trio rides the route table with --show as the read probe
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work delegation --show --json`
+    Then the command should succeed
+    And the JSON result field "state" should be "off"
+    And the JSON result field "model" should be "gpt-5.6-sol"
+    When I run `work delegation --show`
+    Then the command should succeed
+    And stdout should contain `Codex delegation: off (default)`
+    When I run `work orchestrator --show --json`
+    Then the command should succeed
+    And the JSON result field "mode" should be "show"
+    When I run `work delegation-model --show --json`
+    Then the command should succeed
+    And the JSON result field "model" should be "gpt-5.6-sol"
+
+  Scenario: a bad orchestrator model is refused in the face, before any write
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work orchestrator sonnet --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "invalid-input"
+
+  Scenario: planning init previews through the route table with one json document
+    Given a work stream with milestone "03" titled "Board"
+    When I run `planning init --dry-run --json`
+    Then the command should succeed
+    And the JSON result field "dryRun" should be true
+    And the JSON result field "sha" should be "<sha>"
+    When I run `planning init --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: the following runtime commands would be run (nothing run, nothing written):`
+
+  Scenario: top-level init rides the one-word route — coded guard, dry-run plan
+    Given a work stream with milestone "03" titled "Board"
+    When I run `init --claude --json`
+    Then the command should fail
+    And the JSON error envelope should carry code "config-exists"
+    When I run `init --claude --force --dry-run`
+    Then the command should succeed
+    And stdout should contain `dry-run: no files written`
+    When I run `init --items x --claude`
+    Then the command should fail
+    And stderr should contain `Catalog-backed init items are not available yet`
+
+  Scenario: work doctor's advisory gate — warns pass bare, fail under --strict, same findings
+    Given a work stream with milestone "03" titled "Board"
+    When I run `work doctor --json`
+    Then the command should succeed
+    And the JSON result field "healthy" should be true
+    And the JSON result field "errors" should be 0
+    And stdout should contain `milestone-no-stories`
+    When I run `work doctor --strict --json`
+    Then the command should fail
+    And the JSON result field "healthy" should be false
+    And the JSON result field "strict" should be true
+    And the JSON result field "errors" should be 0
+    And stdout should contain `milestone-no-stories`

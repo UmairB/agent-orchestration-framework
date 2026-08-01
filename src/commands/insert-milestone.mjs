@@ -3,7 +3,7 @@
 // insert-shared.mjs's runInsertTopLevel, mirroring commands/validate.mjs's
 // thin-over-engine shape. Carries NO depends-framing concept (ADR-006 — framing
 // parity with add-milestone, which authors no depends either).
-import { runInsertTopLevel } from "./insert-shared.mjs";
+import { INSERT_FLAGS, runInsertTopLevel } from "./insert-shared.mjs";
 
 export const insertMilestoneCommand = {
   id: "work:insert-milestone",
@@ -30,6 +30,15 @@ export const insertMilestoneCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face (whose --json error envelope carries the confirm
+    // refusal's `shifted` count); the cli.mjs workInsertCli branch is deleted.
+    route: ["work", "insert-milestone"],
+    spec: {
+      usage: "aof work insert-milestone <slug> --at <P> [--yes] [--json]",
+      flags: INSERT_FLAGS,
+    },
+
     // `aof work insert-milestone <slug> --at <P> [--yes|--force] [--json]`.
     argv: (positionals, options) => ({
       slug: positionals[0],

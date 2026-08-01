@@ -29,6 +29,7 @@ import { startSession } from "../src/mesh-session.mjs";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { publishGlobalRegistryDescriptorsToStore } from "../src/global-node-registry.mjs";
 import { publishNodeRecord } from "../src/mesh-store.mjs";
+import { meshCheckoutPath } from "../src/mesh-worker-execution.mjs";
 
 const NODE_ID = "node-a";
 const NOW = "2026-07-12T09:00:00.000Z";
@@ -324,6 +325,63 @@ export const meshWorkspaceWorkdirAbsoluteTests = [
         assert.ok(handle.record.sessions.some((s) => s.workspaceId === "ws-beta"), "B's live session surfaces");
         const overall = handle.record.activeRuns.length > 0 || handle.record.sessions.length > 0 ? "working" : "idle";
         assert.equal(overall, "working", "the node reads working — never idle — while a registered (non-launch-cwd) workspace is genuinely worked on");
+      });
+    },
+  },
+
+  // ══ Scenario: a WORKER-side membership row with NO descriptor resolves through its mesh checkout ══
+  //
+  // Measured 2026-07-26: the Mac worker's membership row for the assignment-cloned
+  // let-shield repo could NEVER resolve — the workspace descriptor lives only in the
+  // CONTROL's store — so every 5s presence tick warned workspace-workdir-unresolvable,
+  // flooding the remote log ring (259 of its 260 entries) and hiding every real line.
+  // On a worker, the workspace IS its mesh checkout: the launcher now recovers a
+  // `no-descriptor` skip through meshCheckoutPath before warning.
+  {
+    name: "mesh-workspace-workdir-absolute/no-descriptor membership resolves through the MESH CHECKOUT — it aggregates like any workspace and emits NO unresolvable warning; a membership with no checkout still warns",
+    async run() {
+      await withTemp(async (tmp) => {
+        const home = path.join(tmp, "home");
+        const env = { AOF_GLOBAL_HOME: home };
+
+        // The launch-cwd workspace (published normally, its own descriptor).
+        const alpha = await makeRealRepo(path.join(tmp, "alpha"), { workspaceId: "ws-alpha" });
+        const wsAlpha = await loadWorkspace(alpha.root, undefined, { env });
+
+        // A real repo AT the mesh checkout path for ws-checkout — exactly what the
+        // worker's clone-on-assignment leaves behind (config pinned to the id).
+        const checkoutRoot = meshCheckoutPath("ws-checkout", { env });
+        const checkout = await makeRealRepo(checkoutRoot, { workspaceId: "ws-checkout" });
+        await seedRunningRun(checkout.workDir, "18_milestone_checkout", "run-checkout");
+
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          await publishRealDescriptor(store, wsAlpha);
+          // Membership rows ONLY — no descriptor (the worker's exact live state):
+          // one workspace whose checkout exists, one ghost with nothing behind it.
+          store.db.prepare("INSERT OR REPLACE INTO global_node_workspaces (node_id, workspace_id) VALUES (?, ?)").run(NODE_ID, "ws-checkout");
+          store.db.prepare("INSERT OR REPLACE INTO global_node_workspaces (node_id, workspace_id) VALUES (?, ?)").run(NODE_ID, "ws-ghost");
+        } finally {
+          store.close();
+        }
+
+        const foreignDir = path.join(tmp, "install-dir");
+        await mkdir(foreignDir, { recursive: true });
+        const handle = await withCwd(foreignDir, () => startLauncherOnce(wsAlpha, env));
+
+        assert.ok(
+          handle.record.activeRuns.includes("run-checkout"),
+          "the checkout-backed workspace joins the aggregation — its run surfaces despite the absent descriptor",
+        );
+        const unresolvable = handle.warnings.filter((w) => w.code === "workspace-workdir-unresolvable");
+        assert.ok(
+          !unresolvable.some((w) => w.message.includes("ws-checkout")),
+          "the recovered workspace emits NO unresolvable warning — the every-5s false alarm is dead",
+        );
+        assert.ok(
+          unresolvable.some((w) => w.message.includes("ws-ghost")),
+          "a membership with NO checkout behind it still warns loudly — the genuine diagnostic survives",
+        );
       });
     },
   },

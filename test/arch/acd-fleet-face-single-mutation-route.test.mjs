@@ -118,14 +118,14 @@ function readOnlyPostureProblems(source) {
   if (serverCount !== 1) problems.push(`http.createServer( appears ${serverCount} times, expected exactly 1`);
   if (/["']\/ws\/terminal["']/.test(source)) problems.push("a /ws/terminal path is declared — the face must serve no terminal upgrade");
   if (!/socket\.destroy\s*\(\s*\)/.test(source)) problems.push("no socket.destroy() — an upgrade is not unconditionally refused");
-  // deny-list of low-level mesh-core writers, carving out the ONE sanctioned
-  // ./commands/mesh-assign.mjs door (ADR-012) and the pre-existing
-  // ./global-mesh-query.mjs read door (ADR-006).
+  // deny-list of low-level mesh-core writers. The ONE sanctioned write door
+  // (ADR-012) is `./mesh-assignment.mjs` — m42 wave (d) leg d1 moved the assign
+  // cores DOWN out of `commands/`, so the commands/* deny-list below needs no
+  // carve-out any more. The ./global-mesh-query.mjs read door (ADR-006) stands.
   const denyPattern = /from\s*["']\.\/(mesh-(store|presence|registry|sync)|global-(work-store|node-registry))\.mjs["']/;
   if (denyPattern.test(source)) problems.push("imports a low-level mesh-core writer module directly");
   const commandsImports = [...source.matchAll(/from\s*["'](\.\/commands\/[a-zA-Z0-9._-]+)["']/g)].map((m) => m[1]);
-  const otherCommands = commandsImports.filter((spec) => spec !== "./commands/mesh-assign.mjs");
-  if (otherCommands.length > 0) problems.push(`imports a commands/* module OTHER than the sanctioned door: ${otherCommands.join(", ")}`);
+  if (commandsImports.length > 0) problems.push(`imports a commands/* module (the face's one write door is ./mesh-assignment.mjs): ${commandsImports.join(", ")}`);
   return problems;
 }
 
@@ -251,17 +251,17 @@ export const archTests = [
       const source = await realSource();
       assert.deepEqual(readOnlyPostureProblems(source), [], "the real source keeps exactly one server, no /ws/terminal, no low-level writer import beyond the sanctioned door");
 
-      const clean = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./commands/mesh-assign.mjs";\nsocket.destroy();';
-      const plantedSecondServer = 'const server = http.createServer(async (request, response) => {});\nconst mirror = http.createServer(async (request, response) => {});\nimport { assignWork } from "./commands/mesh-assign.mjs";\nsocket.destroy();';
+      const clean = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./mesh-assignment.mjs";\nsocket.destroy();';
+      const plantedSecondServer = 'const server = http.createServer(async (request, response) => {});\nconst mirror = http.createServer(async (request, response) => {});\nimport { assignWork } from "./mesh-assignment.mjs";\nsocket.destroy();';
       assert.notEqual(plantedSecondServer, clean, "the plant actually differs from the clean synthesized shape");
       assert.deepEqual(readOnlyPostureProblems(clean), [], "the clean synthesized shape stays quiet");
       assert.ok(readOnlyPostureProblems(plantedSecondServer).length > 0, "self-check: a planted SECOND http.createServer( trips the detector");
 
-      const plantedTerminal = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./commands/mesh-assign.mjs";\nif (pathname === "/ws/terminal") { attachTerminalWebSocket(request, socket); }\nsocket.destroy();';
+      const plantedTerminal = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./mesh-assignment.mjs";\nif (pathname === "/ws/terminal") { attachTerminalWebSocket(request, socket); }\nsocket.destroy();';
       assert.notEqual(plantedTerminal, clean, "the plant actually differs from the clean synthesized shape");
       assert.ok(readOnlyPostureProblems(plantedTerminal).length > 0, "self-check: a planted /ws/terminal path trips the detector");
 
-      const plantedWriterImport = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./commands/mesh-assign.mjs";\nimport { insertAssignment } from "./assignment-record.mjs";\nimport { deleteWorkItem } from "./commands/mesh-issue.mjs";\nsocket.destroy();';
+      const plantedWriterImport = 'const server = http.createServer(async (request, response) => {});\nimport { assignWork } from "./mesh-assignment.mjs";\nimport { insertAssignment } from "./assignment-record.mjs";\nimport { deleteWorkItem } from "./commands/mesh-issue.mjs";\nsocket.destroy();';
       assert.notEqual(plantedWriterImport, clean, "the plant actually differs from the clean synthesized shape");
       assert.ok(readOnlyPostureProblems(plantedWriterImport).length > 0, "self-check: a planted second commands/* import trips the detector");
     },

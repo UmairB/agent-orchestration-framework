@@ -26,7 +26,7 @@
 // <projectRoot>/graphify-out/graph.json is absent, `run` throws a build-first
 // "no-graph" error BEFORE any read — deterministically CI-checkable, no binary needed.
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 // graphArtifactBuiltAt is the SHARED derivation graph:build reports too, so the
 // freshness this command prints is the same instant that build printed — a call-time
 // `new Date()` here would be the very dishonesty that family of fixes removed.
@@ -118,6 +118,14 @@ export const graphImpactCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "impact"],
+    spec: {
+      usage: "aof graph impact <path> [<path> ...] [--json]",
+      flags: {},
+    },
+
     // `aof graph impact <path> [<path> ...]`.
     argv: (positionals) => ({ paths: positionals }),
 

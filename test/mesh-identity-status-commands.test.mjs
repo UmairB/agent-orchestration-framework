@@ -21,7 +21,9 @@ import { loadWorkspace } from "../src/work.mjs";
 import { getCommand, invoke } from "../src/command-core.mjs";
 import { meshDir, nodeRecordPath, publishNodeRecord } from "../src/mesh-store.mjs";
 
-const FROZEN_KEYS = ["nodeId", "host", "os", "runtimes", "skills", "aofVersion", "publishedAt"];
+// 34/story 02 (operator directive): `skills` is REMOVED from the descriptor
+// (see assembleDescriptor) — the frozen schema is six keys.
+const FROZEN_KEYS = ["nodeId", "host", "os", "runtimes", "aofVersion", "publishedAt"];
 
 async function makeRepo() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-meshcmd-"));
@@ -33,10 +35,18 @@ async function makeRepo() {
     `${JSON.stringify({ name: "fixture", runtimes: ["claude", "codex"], work: { dir: "./wiki/work" } }, null, 2)}\n`,
     "utf8"
   );
-  return { repo, workDir };
+  // A PER-FIXTURE global home: node records live in the MACHINE-global mesh root
+  // (AOF_GLOBAL_HOME), so every test sharing one process-level home leaks its
+  // seeds/publishes into the next test's roster (pre-existing at HEAD, verified
+  // by stash 2026-07-30 — the file predates the m34 workspace-local → global
+  // store move). Each fixture repo now carries its own isolated home, the
+  // mesh-ui-global-scope idiom.
+  const home = await mkdtemp(path.join(os.tmpdir(), "aof-meshcmd-home-"));
+  const env = { ...process.env, AOF_GLOBAL_HOME: home };
+  return { repo, workDir, env };
 }
 
-const ctxFor = async (repo) => ({ workspace: await loadWorkspace(repo) });
+const ctxFor = async (repo, env) => ({ workspace: await loadWorkspace(repo, undefined, { env }) });
 
 // Seed a peer node record directly through the store seam (a peer that synced into the
 // tree). The record is opaque/as-is, exactly as the store persists.
@@ -77,9 +87,9 @@ export const meshIdentityStatusCommandsTests = [
   {
     name: "mesh-identity-status-commands/01 mesh:identity publishes this node's record and returns it",
     async run() {
-      const { repo, workDir } = await makeRepo();
+      const { repo, workDir, env } = await makeRepo();
       try {
-        const ctx = await ctxFor(repo);
+        const ctx = await ctxFor(repo, env);
         const record = await invoke("mesh:identity", {}, ctx);
         // The returned record carries the complete frozen schema.
         assert.deepEqual(Object.keys(record), FROZEN_KEYS, "complete frozen schema, in order");
@@ -99,9 +109,9 @@ export const meshIdentityStatusCommandsTests = [
   {
     name: "mesh-identity-status-commands/01 republishing through mesh:identity bumps publishedAt, keeps the id stable, and leaves peers untouched",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, env } = await makeRepo();
       try {
-        const ctx = await ctxFor(repo);
+        const ctx = await ctxFor(repo, env);
         const first = await invoke("mesh:identity", {}, ctx);
         // A peer record exists in the tree; record its on-disk bytes.
         await seedPeer(ctx.workspace, "umair-mbp");
@@ -109,7 +119,7 @@ export const meshIdentityStatusCommandsTests = [
         const peerBefore = await readFile(peerPath, "utf8");
         await new Promise((resolve) => setTimeout(resolve, 2));
         // Republish this node (config now carries the persisted id → stable).
-        const ctx2 = await ctxFor(repo);
+        const ctx2 = await ctxFor(repo, env);
         const second = await invoke("mesh:identity", {}, ctx2);
         assert.equal(second.nodeId, first.nodeId, "the node id is unchanged");
         assert.ok(Date.parse(second.publishedAt) >= Date.parse(first.publishedAt), "publishedAt at or after the previous publish");
@@ -129,9 +139,9 @@ export const meshIdentityStatusCommandsTests = [
   {
     name: "mesh-identity-status-commands/01 mesh:identity reads a node's record back by id",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, env } = await makeRepo();
       try {
-        const ctx = await ctxFor(repo);
+        const ctx = await ctxFor(repo, env);
         const peer = await seedPeer(ctx.workspace, "umair-mbp");
         const before = await snapshotTree(ctx.workspace);
         // Read the peer back.
@@ -158,9 +168,9 @@ export const meshIdentityStatusCommandsTests = [
   {
     name: "mesh-identity-status-commands/01 mesh:status lists every node record in the synced tree",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, env } = await makeRepo();
       try {
-        const ctx = await ctxFor(repo);
+        const ctx = await ctxFor(repo, env);
         await seedPeer(ctx.workspace, "umair-desktop");
         await seedPeer(ctx.workspace, "umair-mbp");
         await seedPeer(ctx.workspace, "build-server");
@@ -187,9 +197,9 @@ export const meshIdentityStatusCommandsTests = [
   {
     name: "mesh-identity-status-commands/01 mesh:status on an empty roster returns an empty list, not an error",
     async run() {
-      const { repo } = await makeRepo();
+      const { repo, env } = await makeRepo();
       try {
-        const ctx = await ctxFor(repo);
+        const ctx = await ctxFor(repo, env);
         let result, threw = false;
         try {
           result = await invoke("mesh:status", {}, ctx);

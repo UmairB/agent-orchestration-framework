@@ -21,7 +21,7 @@
 // (ADR-008).
 import { listItems, recordDoc, readItemSchema, applyItemFrontmatter, WORK_ITEM_SCHEMA_VERSION } from "./work.mjs";
 import { packageVersionString } from "./asset-base.mjs";
-import { commandError } from "./commands/errors.mjs";
+import { commandError } from "./command-error.mjs";
 
 // ------------------------------------------------- the 0 -> 1 stamp transform
 //

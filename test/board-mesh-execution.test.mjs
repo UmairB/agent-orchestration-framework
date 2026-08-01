@@ -8,14 +8,14 @@
 // overlay answers the operator's three steps: (1) is it executing, (2) show THAT, (3) else
 // fall back to local.
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
 import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } from "../src/assignment-record.mjs";
 import { setItemBranch } from "../src/mesh-assignment-directive.mjs";
 import { readExecutionOverlay, applyExecutionOverlay, resolveScopedExecution } from "../src/board-mesh-execution.mjs";
-import { resolveContinueDecision } from "../src/commands/continue.mjs";
+import { resolveContinueDecision, resolveDirectivePhase } from "../src/commands/continue.mjs";
 import { mergeWorkerItems } from "../src/board-worker-stream.mjs";
 import { listCommand } from "../src/commands/list.mjs";
 
@@ -294,6 +294,104 @@ export const boardMeshExecutionTests = [
       assert.equal(explicit.where, "remote");
       assert.equal(explicit.dispatchRef, "18", "an explicit remote target still dispatches at the scope ref");
       assert.equal(explicit.resolvedBy, "requested");
+    },
+  },
+
+  // ── the DIRECTIVE phase (operator, 2026-07-26: "continue xy should be a continuation
+  // of the entire milestone. All stories. Why is it not CONTINUING UNTIL COMPLETION") ──
+  //
+  // WHAT continuing an item means: a MILESTONE continue resolves to the `autonomous`
+  // cascade (drive every story refine → build → verify until the milestone is done);
+  // a story/task continue and every refine/verify keep their single-phase directive.
+  {
+    name: "directive-phase: a MILESTONE continue resolves to the autonomous cascade; a story continue stays single-phase",
+    run: async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-directive-phase-"));
+      try {
+        const workDir = path.join(home, "wiki", "work");
+        const msDir = path.join(workDir, "18_milestone_homedata");
+        await mkdir(path.join(msDir, "stories", "02_story_tenants", "tasks"), { recursive: true });
+        await writeFile(path.join(msDir, "SPEC.md"), `---\ntype: milestone\nnumber: "18"\nslug: homedata\nstatus: in-progress\n---\n# 18\n`, "utf8");
+        await writeFile(
+          path.join(msDir, "stories", "02_story_tenants", "STORY.md"),
+          `---\ntype: story\nnumber: "02"\nslug: tenants\nstatus: not-started\nparent: "18"\n---\n# 18/02\n`,
+          "utf8",
+        );
+        const workspace = { projectRoot: home, workDir, config: {} };
+
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "18", { env: { AOF_GLOBAL_HOME: home } }),
+          "autonomous",
+          "continuing a milestone means continuing the WHOLE milestone — the cascade, never one slice",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "18/02", { env: { AOF_GLOBAL_HOME: home } }),
+          "continue",
+          "a single story continue keeps its single-phase directive",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "verify", "18", { env: { AOF_GLOBAL_HOME: home } }),
+          "verify",
+          "refine/verify are never rewritten — only what CONTINUE means changes with the item type",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "99", { env: { AOF_GLOBAL_HOME: home } }),
+          "continue",
+          "an unresolvable ref degrades to the single phase — the act is never blocked by a type lookup",
+        );
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The OWED lane from m42's soak day (STATE.md §MISSING TESTS): the STREAMED-row
+    // fallback. A control checkout often does not hold a worker's items locally —
+    // the type then comes from the worker-streamed `work_items` row (the SAME
+    // local-then-streamed order every read command uses), so a milestone continue
+    // dispatched from a control node that never checked the milestone out still
+    // resolves to the autonomous cascade.
+    name: "directive-phase: the STREAMED-row fallback — a locally-absent milestone resolves through the worker-streamed row; a streamed story stays single-phase",
+    run: async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), "aof-directive-phase-streamed-"));
+      try {
+        const workDir = path.join(home, "wiki", "work");
+        await mkdir(workDir, { recursive: true });
+        const workspace = { projectRoot: home, workDir, config: {} };
+        const env = { AOF_GLOBAL_HOME: home };
+
+        // Seed the worker-streamed rows for refs the local index has NEVER held.
+        const store = await openGlobalWorkProjectionStore({ env });
+        try {
+          const { resolveWorkspaceId } = await import("../src/workspace-identity.mjs");
+          const workspaceId = resolveWorkspaceId(workspace);
+          const insert = store.db.prepare(
+            "INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          );
+          insert.run(workspaceId, "44", "milestone", "remote-ms", "in-progress", "Remote milestone", null, "streamed/44");
+          insert.run(workspaceId, "44/01", "story", "remote-story", "not-started", "Remote story", "44", "streamed/44-01");
+        } finally {
+          store.close();
+        }
+
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "44", { env }),
+          "autonomous",
+          "a milestone the local index misses resolves through the STREAMED row — the cascade still fires",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "44/01", { env }),
+          "continue",
+          "a streamed STORY keeps its single-phase directive",
+        );
+        assert.equal(
+          await resolveDirectivePhase(workspace, "continue", "45", { env }),
+          "continue",
+          "no local item AND no streamed row degrades to the single phase",
+        );
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
     },
   },
 ];

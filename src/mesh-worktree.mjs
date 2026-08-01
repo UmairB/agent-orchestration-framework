@@ -26,13 +26,24 @@
 // `sweepRetainedWorktrees` removes anything past it.
 //
 // MILESTONE 38 / STORY 07 (ADR-015, task 00) — a REAL branch, not always detached.
-// `meshWorkerBranchName(itemRef, assignmentId)` below computes the DOCUMENTED DEFAULT
-// `aof/mesh/<itemRef>-<assignmentId>` convention (itemRef sanitized to a
-// `git check-ref-format`-valid slug); `addWorktree` checks out ON that branch when the
-// caller passes `options.branch` (mesh-worker-execution.mjs does, on every dispatch),
-// contrasting the STILL-DEFAULT `--detach` form every other caller keeps unchanged.
+// `addWorktree` checks out ON a branch when the caller passes `options.branch`
+// (mesh-worker-execution.mjs does, on every dispatch), contrasting the STILL-DEFAULT
+// `--detach` form every other caller keeps unchanged.
+//
+// M42 (the brittleness cure, 2026-07-31) — ONE DERIVABLE BRANCH PER ITEM.
+// `meshItemBranchName(itemRef)` computes `aof/mesh/<itemRef>` — derivable from the
+// ref alone, so NO consumer has to remember a lookup to find where an item's work
+// lives. The m38 convention (`aof/mesh/<itemRef>-<assignmentId>`, a distinct branch
+// per assignment) is RETIRED: it made the `global_item_branches` side table the only
+// memory of where work went, and every consumer that forgot to consult it dispatched
+// from the wrong base (the 2026-07-27 measured defect). The side table survives as a
+// CACHE that wins when present — it carries the old suffixed names for pre-cure
+// items and the pre-rename names for reindexed items (a renumber does not rename the
+// origin branch) — and the derivation is the always-available default beneath it.
 import path from "node:path";
 import { execFile } from "node:child_process";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The documented retention ceiling for a RETAINED (failed) worktree, in milliseconds
 // (ADR-004 "bounded by an explicit retention default … a documented constant, not
@@ -89,20 +100,76 @@ function sanitizeRefSlug(value, fallback) {
   return slug.length > 0 ? slug : fallback;
 }
 
-// meshWorkerBranchName(itemRef, assignmentId) — the ADR-015 DOCUMENTED DEFAULT branch
-// convention `aof/mesh/<itemRef>-<assignmentId>`, itemRef sanitized to a git-ref-safe
-// slug, keyed by assignmentId for collision-freedom (mirroring meshWorktreePath's OWN
-// assignmentId key immediately above). Both halves are sanitized — a ref-hostile
-// assignmentId (task 00's Examples row 12) must sanitize too, never only the itemRef
-// half. The exact sanitized text is an implementation mechanic (Three Amigos); the
-// INVARIANT every caller relies on is "a `git check-ref-format`-valid ref, prefixed
-// `aof/mesh/`, distinct per assignmentId" — task 00's own Scenario Outline is the
-// litmus, not a pinned literal mapping (except the one DOCUMENTED example, an
-// already-clean itemRef, which passes through byte-identical).
-export function meshWorkerBranchName(itemRef, assignmentId) {
+// meshItemBranchName(itemRef) — THE derivable branch (m42 brittleness cure):
+// `aof/mesh/<itemRef>`, itemRef sanitized to a git-ref-safe slug. ONE branch per
+// item, derivable from the ref alone — a consumer that never consults the
+// `global_item_branches` cache still lands on the item's own line (converging,
+// never a divergent per-assignment fork). The sanitizing keeps task 00's hostile-
+// input invariant: always a `git check-ref-format`-valid ref, prefixed `aof/mesh/`.
+// The m38 two-arg form (`meshWorkerBranchName`, distinct per assignmentId) is
+// RETIRED — its collision-freedom was the disease's carrier: distinct branches per
+// assignment are exactly what only a side table could remember.
+export function meshItemBranchName(itemRef) {
   const itemSlug = sanitizeRefSlug(itemRef, "item");
-  const assignmentSlug = sanitizeRefSlug(assignmentId, "asg");
-  return `${MESH_BRANCH_PREFIX}${itemSlug}-${assignmentSlug}`;
+  return `${MESH_BRANCH_PREFIX}${itemSlug}`;
+}
+
+// headCommit(projectRoot, options) — the checkout's current HEAD hash, or null when
+// the path is not a usable git repo. The CONTROL side stamps this onto every
+// directive it dispatches (the m42 base-commit pin): the assignment is made
+// against a KNOWN state of the stream, and the worker builds from exactly that
+// commit instead of whatever its own clone's stale HEAD happens to be.
+export async function headCommit(projectRoot, options = {}) {
+  const exec = resolveExec(options);
+  try {
+    const result = await exec(["rev-parse", "HEAD"], { cwd: projectRoot });
+    const hash = result.stdout.trim();
+    return result.status === 0 && /^[0-9a-f]{7,64}$/i.test(hash) ? hash : null;
+  } catch (error) {
+    // Not-a-repo / no-git degrades to "no pin" (the caller sends no commit and
+    // the worker keeps its HEAD fallback) — reported, never silent (m42 item 3).
+    reportDegrade("mesh-worktree", error);
+    return null;
+  }
+}
+
+// ensureCommitAvailable(projectRoot, commit, options) — is the dispatched base
+// commit present in this checkout, fetching origin once on a miss (the worker's
+// clone is never otherwise refreshed, so the control's newest commit routinely
+// is not here yet)? False after the fetch means the commit genuinely cannot be
+// built from (an unpushed control checkout, a typo'd hash) — the caller fails
+// LOUDLY instead of silently building from a stale base, which is the wrong-base
+// disease this pin exists to kill.
+export async function ensureCommitAvailable(projectRoot, commit, options = {}) {
+  const exec = resolveExec(options);
+  const present = async () => {
+    try {
+      return (await exec(["cat-file", "-e", `${commit}^{commit}`], { cwd: projectRoot })).status === 0;
+    } catch (error) {
+      reportDegrade("mesh-worktree", error);
+      return false;
+    }
+  };
+  if (await present()) return true;
+  try {
+    await exec(["fetch", "origin"], { cwd: projectRoot });
+  } catch (error) {
+    // An unreachable origin leaves the local answer to decide — the caller's
+    // coded refusal is the loud half; the fetch fault itself is still reported.
+    reportDegrade("mesh-worktree", error);
+  }
+  return await present();
+}
+
+// localBranchExists(projectRoot, branch, options) — does the checkout already hold
+// this branch? The m42 one-branch-per-item cure needs it at dispatch time: a
+// re-refine of an item whose derived branch exists must take the REUSE door (`-b`
+// would refuse), so the item's line continues instead of forking. Same injected
+// exec seam as every other git call here.
+export async function localBranchExists(projectRoot, branch, options = {}) {
+  const exec = resolveExec(options);
+  const result = await exec(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: projectRoot });
+  return result.status === 0;
 }
 
 // isUnderMeshWorktreesRoot(projectRoot, candidatePath) — the structural/behavioural
@@ -153,7 +220,7 @@ function gitError(message, code, extra = {}) {
 // UNLESS `options.branch` names a real branch (milestone 38 / story 07, ADR-015
 // decision 1), in which case the worktree is checked out ON that branch (`git
 // worktree add -b <branch> <path> <commitish>`), HEAD on it, never detached. The
-// caller (mesh-worker-execution.mjs) computes the branch via `meshWorkerBranchName`
+// caller (mesh-worker-execution.mjs) computes the branch via `meshItemBranchName`
 // above and passes it here — this function stays agnostic of itemRef/assignmentId
 // naming, only "was a branch requested". Every EXISTING detached call site (no
 // `options.branch`) is byte-unchanged. Returns the materialized path. A non-zero exit

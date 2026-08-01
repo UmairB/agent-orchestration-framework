@@ -9,7 +9,7 @@ Feature: AOF CLI lifecycle
     And stdout should contain `aof init [dir] [--claude] [--codex] [--runtime claude,codex]`
     And stdout should contain `aof project show`
     And stdout should contain `aof project validate`
-    And stdout should contain `aof assets add skill|command|rule|agent [id]`
+    And stdout should contain `aof assets add [--global] <kind> <id>`
     And stdout should contain `aof assets apply`
     And stdout should contain `aof project migrate`
     And stdout should not contain `aof add [kind id]`

@@ -35,7 +35,7 @@
 //     in-progress; fully delivered, clean → in-review (the honest ceiling).
 import path from "node:path";
 import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { resolveImportSource } from "../import/source.mjs";
 import { recoverMilestone, listRecoverableMilestones } from "../import/recovery.mjs";
 import { slugifySource } from "../import/store.mjs";
@@ -242,6 +242,16 @@ export const migrateFolderCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs migrateCommand copy is deleted.
+    route: ["migrate"],
+    spec: {
+      usage: "aof migrate <folder> [--dry-run] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "preview the conversion without writing" },
+      },
+    },
+
     // `aof migrate <folder> [--dry-run] [--json]`.
     argv: (positionals, options = {}) => {
       const input = { folder: positionals[0] };

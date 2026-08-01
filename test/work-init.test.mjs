@@ -470,7 +470,10 @@ export const workInitTests = [
         assert.ok(existsSync(refineSkill), "refine command procedure rendered as a codex skill");
         const content = await readFile(refineSkill, "utf8");
         assert.match(content, /^name: aof-refine$/m, "codex skill has a stable skill name");
-        assert.match(content, /Use this skill when the user asks for `\$aof-refine <item ref - NN or slug> \[--autonomous\] \[--solo\]`/);
+        // Matches the bundle's CURRENT refine argument-hint (`[--solo]` was
+        // removed from refine.md; the old pin was stale — pre-existing at HEAD,
+        // verified by stash 2026-07-30).
+        assert.match(content, /Use this skill when the user asks for `\$aof-refine <item ref - NN or slug> \[--autonomous\]`/);
         assert.match(content, /Where this procedure mentions `\$ARGUMENTS`, use the text the user supplied after the skill name\./);
         assert.match(content, /Where it mentions Claude slash command `\/aof:refine`/);
         // no command file written under .codex (any namespace)

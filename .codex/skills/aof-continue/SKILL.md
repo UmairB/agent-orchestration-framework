@@ -1,6 +1,6 @@
 ---
 name: aof-continue
-description: Execute/resume a work item — build its tasks to green, then structural + behavioural review. For a milestone, fans out its independent stories.
+description: Execute/resume a work item — build its tasks to green, then structural + behavioural review. For a milestone, runs the full autonomous cascade to completion.
 ---
 
 <!-- aof-generated: true; aof-runtime: codex -->
@@ -12,7 +12,8 @@ Where it mentions Claude slash command `/aof:continue`, treat that as this Codex
 
 <objective>
 Build a work item's tasks until every `@executable` scenario is green, then review — keeping status
-current as you go. For a milestone, fan out its independent stories in parallel.
+current as you go. Continuing a MILESTONE means continuing the whole milestone: every story, driven
+to done — never one slice.
 </objective>
 
 <config>
@@ -24,8 +25,12 @@ index). Items nest by scope: `milestone/ → stories/<story>/ → tasks/<task>.f
 <process>
 Dispatch on the item's `type`:
 
-- **milestone** — fan out: spawn one `aof-developer` per **independent** story (worktree-isolate when
-  they touch shared files); serialise only where a real dependency forces it. Run the story flow for each.
+- **milestone** — the whole milestone, to completion: run `/aof:autonomous <NN>` (the SlashCommand
+  tool) and stop when it hands back. The autonomous loop is the ONE implementation of
+  "drive an item refine → build → verify until done" (it fans out independent stories, gates each on
+  `aof work validate`, and stops only for a genuine human gate or blocker) — never re-implement a
+  partial fan-out here: a milestone continue that builds one slice and parks is the exact defect this
+  delegation removes (operator, 2026-07-26).
 - **story** — Build → Review:
   1. Read the milestone's ADRs/DESIGN + the story's task features. If tasks are thin/untagged, stop and
      send the user to `aof:refine <ref>`.

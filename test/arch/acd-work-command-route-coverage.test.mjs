@@ -73,6 +73,31 @@ const BOARD_DEFERRED = new Set([
   "insert-chore",
   "promote-gap",
   "upgrade",
+  // m42 wave (d) leg d1 (wave-3 tail) — work:ui is the BOARD LAUNCHER itself
+  // (a launcher-seam command: probe run + cli.launch serve body). A board
+  // serving a "launch the board" route makes no sense — the verb is the door
+  // INTO the board, so it is CLI-only by nature, not a deferred affordance.
+  "ui",
+  // m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch) — operator/diagnostic
+  // CLI verbs with no board affordance asked for: find (the board has its own
+  // list/resolve reads), observe (a transcript-mining diagnostic), the headroom
+  // toggle pair (machine-level plugin config, an operator CLI action).
+  "find",
+  "observe",
+  "use-headroom",
+  "unuse-headroom",
+  // init/update render the ACD bundle into a repo — machine-level install
+  // actions an operator runs from the CLI; the board has no install affordance
+  // asked for.
+  "init",
+  "update",
+  // m42 wave (d) leg d1 (the CLI-only batch, closing half) — the model-config
+  // trio (the aof:delegate skill's surface): operator CLI decisions over
+  // .aof/aof.config.json (interactive pickers in their argv adapters); no
+  // board affordance asked for.
+  "orchestrator",
+  "delegation",
+  "delegation-model",
 ]);
 
 // The op set DERIVED from the registry — every work:* command's op segment, minus

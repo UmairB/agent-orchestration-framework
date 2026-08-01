@@ -22,6 +22,13 @@ import { existsSync } from "node:fs";
 import { readJson, writeText } from "./fs.mjs";
 import { findProjectConfig } from "./workspace.mjs";
 
+// A core never prints: it REPORTS through the collector its caller injects, and the
+// face turns the collected lines into the one stdout document (m42 wave (d) leg d1,
+// the confine-console.log item). This no-op is the default so an un-injected call is
+// silent-by-contract rather than a second printer.
+const NO_PRINT = () => {};
+
+
 export const DELEGATION_STATES = ["off", "on"];
 export const DEFAULT_DELEGATION = "off";
 
@@ -135,7 +142,7 @@ export function setDelegationModel(config, model) {
 
 // `aof work delegation [on|off]` — flip the toggle (config-only; never the lock).
 // opts: { targetDir, state, log? }. Returns { configPath, config, state, previous, changed }.
-export async function setDelegationCommand({ targetDir = process.cwd(), state, log = console.log } = {}) {
+export async function setDelegationCommand({ targetDir = process.cwd(), state, log = NO_PRINT } = {}) {
   const resolved = resolveDelegation(state);
   if (!resolved) {
     throw new Error(`"${state ?? ""}" is not a valid delegation state. Use one of: ${DELEGATION_STATES.join(", ")}.`);
@@ -161,7 +168,7 @@ export async function setDelegationCommand({ targetDir = process.cwd(), state, l
 // `aof work delegation-model <id>` — set the Codex delegation model (config-only;
 // never the lock). opts: { targetDir, model, log? }. Returns
 // { configPath, config, model, previous, changed }.
-export async function setDelegationModelCommand({ targetDir = process.cwd(), model, log = console.log } = {}) {
+export async function setDelegationModelCommand({ targetDir = process.cwd(), model, log = NO_PRINT } = {}) {
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error(`"${model ?? ""}" is not a valid delegation model. Pass a non-empty model id, e.g. gpt-5.6-sol.`);
   }
@@ -179,7 +186,7 @@ export async function setDelegationModelCommand({ targetDir = process.cwd(), mod
 }
 
 // `aof work delegation --show` — report the current state (and model) without mutating.
-export async function showDelegation({ targetDir = process.cwd(), log = console.log } = {}) {
+export async function showDelegation({ targetDir = process.cwd(), log = NO_PRINT } = {}) {
   const { configPath, config } = await readConfig(targetDir);
   const state = readDelegation(config);
   const model = readDelegationModel(config);

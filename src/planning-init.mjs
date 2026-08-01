@@ -61,6 +61,13 @@ import { spawnSync } from "node:child_process";
 import { readLock, writeLock } from "./lock.mjs";
 import { workspacePaths } from "./workspace.mjs";
 
+// A core never prints: it REPORTS through the collector its caller injects, and the
+// face turns the collected lines into the one stdout document (m42 wave (d) leg d1,
+// the confine-console.log item). This no-op is the default so an un-injected call is
+// silent-by-contract rather than a second printer.
+const NO_PRINT = () => {};
+
+
 // ADR-009: provenance lives in the `planning` section of the single unified project
 // lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There is no
 // separate per-vertical provenance file. The acd-planning-lock-isolation fitness
@@ -250,7 +257,7 @@ export function isFullSha(value) {
 // simulation seam (options.simulateInstall / AOF_PLANNING_SIMULATE / a spawn
 // injection) lets unit tests run no real process. Returns recorded attempts.
 export function executePlanningPlan(plan, options = {}) {
-  const log = options.log ?? ((line) => console.log(line));
+  const log = options.log ?? NO_PRINT;
   const simulate = isSimulated(options);
   const spawn = options.spawn ?? spawnSync;
   const attempts = [];
@@ -334,7 +341,7 @@ export async function initPlanning(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const force = Boolean(options.force);
   const withOptional = Boolean(options.withOptional);
-  const log = options.log ?? ((line) => console.log(line));
+  const log = options.log ?? NO_PRINT;
   const lockPath = planningLockPath(targetDir);
 
   // Re-run guard (ADR-006 → ADR-009): key off the PRESENCE of the `planning`

@@ -144,6 +144,14 @@ import { meshWorkerDriverInteractivePtyTests } from "../test/mesh-worker-driver-
 import { meshWorkerTrustWorktreeTests } from "../test/mesh-worker-trust-worktree.test.mjs";
 import { meshWorkerCommandTimingTests } from "../test/mesh-worker-command-timing.test.mjs";
 import { meshWorkerCompletionDetectionTests } from "../test/mesh-worker-completion-detection.test.mjs";
+// m42 "interactive worker terminals" — the terminal-input behavioural lanes
+// (router, client dispatch, worker delivery, pending-question, code column).
+import { meshTerminalInputPathTests } from "../test/mesh-terminal-input-path.test.mjs";
+// m42 soak-day owed lanes (STATE §MISSING TESTS, paid 2026-07-31) — the
+// withdraw/settle family: the withdraw handler's three paths, the stranded-record
+// startup settle, the bracket's withdraw guards, onPtyLive registry lifecycle,
+// and the coded failure reporting.
+import { meshWorkerWithdrawSettleTests } from "../test/mesh-worker-withdraw-settle.test.mjs";
 import { meshWorkerDriverDirectiveCommandTests } from "../test/mesh-worker-driver-directive-command.test.mjs";
 import { meshWorkerDriverNeedsInputTests } from "../test/mesh-worker-driver-needs-input.test.mjs";
 import { meshWorkerDriverSessionIdTests } from "../test/mesh-worker-driver-session-id.test.mjs";
@@ -158,7 +166,7 @@ import { archTests as acdWorkerDriverNoHeadlessPrintTests } from "../test/arch/a
 // aof:verify 38 — no test file here.
 import { meshTerminalRelayBridgeTests } from "../test/mesh-terminal-relay-bridge.test.mjs";
 import { meshFleetTerminalViewMirrorTests } from "../test/mesh-fleet-terminal-view-mirror.test.mjs";
-import { archTests as acdFleetTerminalMirrorReadOnlyTests } from "../test/arch/acd-fleet-terminal-mirror-read-only.test.mjs";
+import { archTests as acdFleetTerminalInputConstrainedTests } from "../test/arch/acd-fleet-terminal-input-constrained.test.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER F-38.06):
 // the transport is a HYBRID (an option-(a) draft was falsified at source — serveRelay
 // binds LOOPBACK ONLY, so a worker cannot reach it off-host). Each leg on the bind it
@@ -372,7 +380,7 @@ import { archTests as acdDesktopNoMeshLogicTests } from "../test/arch/acd-deskto
 import { archTests as acdDesktopSingleDataPathTests } from "../test/arch/acd-desktop-single-data-path.test.mjs";
 import { archTests as acdDesktopReadOnlyFleetTests } from "../test/arch/acd-desktop-read-only-fleet.test.mjs";
 import { archTests as acdDesktopTrustedSpawnTests } from "../test/arch/acd-desktop-trusted-spawn.test.mjs";
-import { archTests as acdDesktopVerbsOutsideBijectionTests } from "../test/arch/acd-desktop-verbs-outside-bijection.test.mjs";
+import { archTests as acdLauncherSeamTests } from "../test/arch/acd-launcher-seam.test.mjs";
 // milestone 36 / story 03 — the `aof mesh desktop install|run` CLI-only nested verbs (ADR-003):
 // verb dispatch + --json single-envelope + no mesh:* id (task 00); the staged-then-swap idempotent
 // install into $HOME/.aof/bin + WebView2 bootstrapper placed file + friendly-refusal matrix (task 01);
@@ -941,6 +949,7 @@ import { archTests as acdFabricSingleSeamTests } from "../test/arch/acd-fabric-s
 // Online-≠-dialable handled outcomes (resolvePeerReachability, an injected dial closure),
 // the presence record assembly/read staying byte-unchanged, the unconfigured-mesh floor.
 import { meshFabricSeamTests } from "../test/mesh-fabric-seam.test.mjs";
+import { meshDirectFabricTests } from "../test/mesh-direct-fabric.test.mjs";
 import { meshFabricLivenessCutoverTests } from "../test/mesh-fabric-liveness-cutover.test.mjs";
 // milestone 33 (story 01) — fabric-native transport + coordination launcher: task 02
 // (02_broker-retirement.feature, dedicated behavioural coverage, review Fix 5) — a
@@ -1493,6 +1502,57 @@ import { workUpgradeChangelogTests } from "../test/work-upgrade-changelog.test.m
 // naming aof upgrade as the remedy, while an at-current item and an
 // up-to-date stream stay clean.
 import { workValidateStalenessTests } from "../test/work-validate-staleness.test.mjs";
+// m42 wave (d) legs d1/d2 (PRD-command-spine-effects-ledger) — the command-spine
+// route-table gates (registry-derived, never a ladder grep) and the effects-
+// ledger gates (closed vocabulary, one event-raiser, the crash-window drain).
+import { archTests as acdCommandRouteDerivedTests } from "../test/arch/acd-command-route-derived.test.mjs";
+import { archTests as acdEffectsLedgerTests } from "../test/arch/acd-effects-ledger.test.mjs";
+// m42 wave (d) leg d1 (the PRD's layering item) — the command layer is a LEAF: no
+// src-root module imports commands/*, and no dependency of a command reaches back
+// into commands/ (the mesh-worker-execution ↔ commands/mesh-repo cycle).
+import { archTests as acdCommandLayerImportsDownwardTests } from "../test/arch/acd-command-layer-imports-downward.test.mjs";
+// m42 wave (d) leg d1 (the PRD's "console.log confined to the face" item) — the
+// closed, ratcheted printer set; a core reports through an injected collector.
+import { archTests as acdConsoleLogConfinedTests } from "../test/arch/acd-console-log-confined.test.mjs";
+// m42 wave (d) leg d3 — one transition seam in front of the assignment fact: the
+// holder + terminal-never-regresses guards, inherited by every writer.
+import { archTests as acdAssignmentTransitionSeamTests } from "../test/arch/acd-assignment-transition-seam.test.mjs";
+// m42 wave (d) leg d3 — facts over the bridge: the durable outbox (delivery is not
+// completion, an offline send loses nothing, the ack is the receipt) and the
+// guarded bridge door.
+import { meshEffectsOutboxTests } from "../test/mesh-effects-outbox.test.mjs";
+// m42 wave (d) leg d4 — the install lock has several writers and no owner: every
+// one of them read-merges, so an init/migrate can no longer delete work/planning.
+import { archTests as acdLockReadMergedTests } from "../test/arch/acd-lock-read-merged.test.mjs";
+// m42 wave (d) leg d4 (port 1) — publish-on-mutate is a LEDGERED consequence: the
+// per-command withGlobalWorkPropagation wrapper is retired, publishing has one
+// door, and the reactor's warning is threaded back onto the command result.
+import { archTests as acdPublishOnMutateLedgeredTests } from "../test/arch/acd-publish-on-mutate-ledgered.test.mjs";
+// m42 wave (d) leg d4 (port 2) — the two reclaim halves on ONE edge: a reclaim is a
+// run completion, so both raise it and both inherit the declared rollback (the
+// control tick never had one).
+import { archTests as acdReclaimOneEdgeTests } from "../test/arch/acd-reclaim-one-edge.test.mjs";
+// m42 wave (d) leg d4 (port 3) — insert/reindex raises `stream.reindexed` carrying
+// its own OLD -> NEW ref map, so the stores keyed by ref converge with the renumber
+// (the silent Notion page mis-binding dies).
+import { archTests as acdStreamReindexCascadeTests } from "../test/arch/acd-stream-reindex-cascade.test.mjs";
+// m42 wave (d) leg d4 (port 4) — the Notion status sync is a ledgered consequence
+// (one body, one door; autoSync decides who pays), and the applicability predicate
+// keeps a consequence that can never apply from being owed at all.
+import { archTests as acdNotionSyncLedgeredTests } from "../test/arch/acd-notion-sync-ledgered.test.mjs";
+// m42 wave (d) leg d5 — the fact/projection split made executable: the store
+// classification is total and gates wholesale deletes + fact writers; the
+// ref-remap splits across loci; the reconciler + doctor --explain/--converge
+// close the write-vs-append crash window.
+import { archTests as acdFactProjectionSplitTests } from "../test/arch/acd-fact-projection-split.test.mjs";
+// m42 brittleness cure — one derivable branch per item (aof/mesh/<ref>); the
+// per-assignment mint retired, the side table demoted to a cache that wins on hit.
+import { archTests as acdItemBranchDerivableTests } from "../test/arch/acd-item-branch-derivable.test.mjs";
+// m42 — the shared-store concurrency pragmas (STATE's measured "database is
+// locked every ~5s" residual): every multi-process SQLite store opens with
+// busy_timeout, the projection with WAL, proven by a cross-process collision
+// against a pre-fix control.
+import { archTests as acdSharedStoreConcurrencyTests } from "../test/arch/acd-shared-store-concurrency.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -1750,6 +1810,7 @@ export const tests = [
   ...acdFabricSingleSeamTests,
   // milestone 33 (story 01) — fabric-native transport + coordination launcher: tasks 00–04
   ...meshFabricSeamTests,
+  ...meshDirectFabricTests,
   ...meshFabricLivenessCutoverTests,
   ...meshBrokerRetirementTests,
   // milestone 24 — device-code group-enrollment (story 00/01/02): imported since
@@ -1881,6 +1942,7 @@ export const tests = [
   // milestone 38 / story 05 — terminal-driven-worker-execution (ADR-013, tasks 00-03
   // traceability modules + the acd-worker-driver-no-headless-print fitness function)
   ...meshWorkerDriverInteractivePtyTests,
+  ...meshWorkerWithdrawSettleTests,
   ...meshWorkerTrustWorktreeTests,
   ...meshWorkerCommandTimingTests,
   ...meshWorkerCompletionDetectionTests,
@@ -1889,10 +1951,13 @@ export const tests = [
   ...meshWorkerDriverSessionIdTests,
   ...acdWorkerDriverNoHeadlessPrintTests,
   // milestone 38 / story 06 — worker-terminal-streaming (ADR-014, tasks 00-02
-  // traceability modules + the acd-fleet-terminal-mirror-read-only fitness function)
+  // traceability modules), plus m42's interactive-terminal-input lanes and the
+  // acd-fleet-terminal-input-constrained fitness (the operator-overridden rewrite
+  // of acd-fleet-terminal-mirror-read-only).
   ...meshTerminalRelayBridgeTests,
   ...meshFleetTerminalViewMirrorTests,
-  ...acdFleetTerminalMirrorReadOnlyTests,
+  ...meshTerminalInputPathTests,
+  ...acdFleetTerminalInputConstrainedTests,
   ...acdTerminalStreamTransportWiredTests,
   ...meshTerminalStreamRelayTransportWiredTests,
   ...meshWorkerDriverOutputChunkTests,
@@ -1988,7 +2053,7 @@ export const tests = [
   ...acdDesktopSingleDataPathTests,
   ...acdDesktopReadOnlyFleetTests,
   ...acdDesktopTrustedSpawnTests,
-  ...acdDesktopVerbsOutsideBijectionTests,
+  ...acdLauncherSeamTests,
   ...acdGlobalMeshPathsHomeTests,
   ...acdGlobalStoreNoNativeDepTests,
   ...acdGlobalPropagationSinglePredicateTests,
@@ -2091,7 +2156,22 @@ export const tests = [
   // milestone 40 / story 04 — the generated changelog task traceability
   ...workUpgradeChangelogTests,
   // milestone 40 / story 03 — staleness in validate task traceability
-  ...workValidateStalenessTests
+  ...workValidateStalenessTests,
+  // m42 wave (d) legs d1/d2 — command spine + effects ledger
+  ...acdCommandRouteDerivedTests,
+  ...acdEffectsLedgerTests,
+  ...acdCommandLayerImportsDownwardTests,
+  ...acdConsoleLogConfinedTests,
+  ...acdAssignmentTransitionSeamTests,
+  ...meshEffectsOutboxTests,
+  ...acdLockReadMergedTests,
+  ...acdPublishOnMutateLedgeredTests,
+  ...acdReclaimOneEdgeTests,
+  ...acdStreamReindexCascadeTests,
+  ...acdNotionSyncLedgeredTests,
+  ...acdFactProjectionSplitTests,
+  ...acdItemBranchDerivableTests,
+  ...acdSharedStoreConcurrencyTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

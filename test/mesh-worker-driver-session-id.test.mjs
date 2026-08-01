@@ -53,6 +53,7 @@ function driveViaRealDriver(fx, ws, assignmentId, recorder, onWrite, watchTransc
     loadWs: () => Promise.resolve(ws),
     nodeId: NODE_ID,
     sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
     now: () => now,
     globalWorkStoreOptions: { env: fx.env },
     ptySpawn: spawn,

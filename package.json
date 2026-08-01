@@ -13,7 +13,6 @@
     "test": "node ./scripts/test.mjs",
     "test:unit": "node ./scripts/test-unit.mjs",
     "test:integration": "node ./test/integration/cli.mjs",
-    "test:integration:ps": "powershell -NoProfile -ExecutionPolicy Bypass -File ./test/integration/cli.ps1",
     "test:smoke:cli": "node ./test/integration/cli-child-process.test.mjs",
     "test:all": "node ./scripts/test.mjs",
     "security:supply-chain": "node ./scripts/supply-chain-audit.mjs",

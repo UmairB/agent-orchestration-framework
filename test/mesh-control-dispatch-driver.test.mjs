@@ -21,7 +21,7 @@ import path from "node:path";
 import { loadWorkspace } from "../src/work.mjs";
 import { startLauncher } from "../src/mesh-launcher.mjs";
 import { openGlobalWorkProjectionStore, workspaceIdFor } from "../src/global-work-store.mjs";
-import { assignWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork } from "../src/mesh-assignment.mjs";
 import { seedTargetNode } from "./support/mesh-assign-fixture.mjs";
 
 const NODE_ID = "control-a";
@@ -155,8 +155,7 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined, "the daemon starts");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
 
         assert.equal(server.dispatched.length, 1, "a directive is dispatched for the connected-target assigned row");
         const directive = server.dispatched[0];
@@ -202,8 +201,7 @@ export const meshControlDispatchDriverTests = [
         assert.equal(handle.refused, undefined, "the second launcher starts");
         assert.equal(server.dispatched.length, 0, "no directive dispatched before any tick fires");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
 
         assert.equal(server.dispatched.length, 1, "a directive is dispatched for that assignment to worker-a on the tick");
         assert.equal(server.dispatched[0].to, "worker-a");
@@ -228,13 +226,11 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined);
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "the first tick dispatches once");
 
         // "asg-1" is still in state "assigned" (the worker has not yet reported accepted).
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "no further directive is dispatched for asg-1 on the second tick");
         handle.stop();
       } finally {
@@ -265,15 +261,29 @@ export const meshControlDispatchDriverTests = [
           }));
           assert.equal(handle.refused, undefined);
 
-          controlTicker.fire(controlTicker.handles[0]);
-          await new Promise((resolve) => setTimeout(resolve, 25));
+          await controlTicker.fire(controlTicker.handles[0]);
 
           const label = `[state=${row.state} target=${row.target} connected=${row.connected.join(",")}]`;
+          // Count DIRECTIVE frames only. The tick's second half (withdraw-notify,
+          // 2026-07-27 — "a withdrawal used to be a control-side row flip the holder
+          // never learned about") pushes a `kind: "withdraw"` frame down the SAME
+          // dispatchDirective seam, so a bare length check on the withdrawn row
+          // counts a frame this scenario was never about. Repaired 2026-07-31 (m42
+          // wave (d) leg d3): the feature landed under fire and left this lane red on
+          // every machine — the withdrawn row's OWN notify is asserted below, where
+          // it belongs.
+          const directives = server.dispatched.filter((frame) => frame?.kind === "directive");
           if (row.dispatched) {
-            assert.equal(server.dispatched.length, 1, `${label} a directive is dispatched`);
+            assert.equal(directives.length, 1, `${label} a directive is dispatched`);
           } else {
-            assert.equal(server.dispatched.length, 0, `${label} no directive is dispatched`);
+            assert.equal(directives.length, 0, `${label} no directive is dispatched`);
           }
+          const withdrawNotifies = server.dispatched.filter((frame) => frame?.kind === "withdraw");
+          assert.equal(
+            withdrawNotifies.length,
+            row.state === "withdrawn" ? 1 : 0,
+            `${label} a withdrawn row is notified to its holder exactly once, and no other state is`,
+          );
           const stored = await readRows(repo, workspaceIdFor(path.resolve(repo)), "35/01");
           assert.equal(stored[0].state, row.state, `${label} the row's state is byte-unchanged by the tick (dispatch never mutates state)`);
           handle.stop();
@@ -300,12 +310,10 @@ export const meshControlDispatchDriverTests = [
         }));
         assert.equal(handle.refused, undefined);
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 1, "a dispatch attempt is made on the first tick");
 
-        controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        await controlTicker.fire(controlTicker.handles[0]);
         assert.equal(server.dispatched.length, 2, "a send that did not complete is retried on the next tick, not permanently marked dispatched");
         assert.equal(server.dispatched[1].assignmentId, "asg-1");
         handle.stop();

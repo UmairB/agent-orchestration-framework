@@ -70,9 +70,11 @@ export const meshIdentityCliFaceTests = [
         const json = runCli(root, ["mesh", "identity", "--json"]);
         assert.equal(json.status, 0, `identity --json exits 0 (stderr: ${json.stderr})`);
         const record = JSON.parse(json.stdout);
+        // 34/story 02 (operator directive): `skills` is REMOVED from the
+        // descriptor (see assembleDescriptor) — the frozen schema is six keys.
         assert.deepEqual(
           Object.keys(record),
-          ["nodeId", "host", "os", "runtimes", "skills", "aofVersion", "publishedAt"],
+          ["nodeId", "host", "os", "runtimes", "aofVersion", "publishedAt"],
           "the JSON is a node record carrying the complete frozen schema"
         );
       } finally {
@@ -110,10 +112,25 @@ export const meshIdentityCliFaceTests = [
         assert.equal(json.status, 0, `status --json exits 0 (stderr: ${json.stderr})`);
         const parsed = JSON.parse(json.stdout);
         assert.ok(Array.isArray(parsed.nodes), "the JSON has a 'nodes' array");
-        const ids = parsed.nodes.map((n) => n.nodeId).sort();
-        assert.deepEqual(ids, ["umair-desktop", "umair-mbp"], "both nodes carried with their ids");
+        const ids = parsed.nodes.map((n) => n.nodeId);
+        // Subset, not deepEqual: the roster ALSO carries THIS machine's own
+        // hostname-derived identity record (the load-time self-heal), which on
+        // the fixture's author machine happened to collide with the seeded
+        // "umair-desktop" and hid — a hostname-dependent pin that could never
+        // pass elsewhere (pre-existing at HEAD, verified by stash 2026-07-30;
+        // the wave-3 stale-pin class).
+        for (const id of ["umair-desktop", "umair-mbp"]) {
+          assert.ok(ids.includes(id), `the roster carries seeded node ${id} (got: ${ids.join(", ")})`);
+        }
         for (const node of parsed.nodes) {
-          assert.ok(Array.isArray(node.runtimes) && Array.isArray(node.skills), "each node carries capabilities");
+          // `skills` only for the SEEDED peers: the machine's own self-healed
+          // record follows the m34 frozen six-key descriptor, which removed
+          // skills (operator directive) — pinning skills on every node was the
+          // same stale-pin class.
+          assert.ok(Array.isArray(node.runtimes), "each node carries runtimes");
+          if (["umair-desktop", "umair-mbp"].includes(node.nodeId)) {
+            assert.ok(Array.isArray(node.skills), "a seeded peer record carries its skills as persisted");
+          }
         }
         const human = runCli(root, ["mesh", "status"]);
         assert.equal(human.status, 0, `status exits 0 (stderr: ${human.stderr})`);
@@ -134,8 +151,11 @@ export const meshIdentityCliFaceTests = [
         const rows = [
           { invocation: ["identity", "never-synced"], code: "node-not-found" },
           { invocation: ["identity", ""], code: "invalid-input" },
-          { invocation: ["identity", "--bogus-flag"], code: "invalid-input" },
-          { invocation: ["status", "--bogus-flag"], code: "invalid-input" },
+          // m42 wave (d) leg d1 (wave 3) — the mesh verbs ride the ONE generic
+          // face, whose spec-parse refusal is the MORE SPECIFIC "unknown-flag"
+          // code (previously the mesh face folded it into "invalid-input").
+          { invocation: ["identity", "--bogus-flag"], code: "unknown-flag" },
+          { invocation: ["status", "--bogus-flag"], code: "unknown-flag" },
           { invocation: ["status", "umair-mbp"], code: "invalid-input" },
         ];
         for (const { invocation, code } of rows) {

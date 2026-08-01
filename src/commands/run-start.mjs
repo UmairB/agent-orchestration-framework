@@ -6,13 +6,13 @@
 // the global mesh store for WebSocket/backstop propagation.
 import { readdir } from "node:fs/promises";
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
-import { startRun, retryRun, reclaimStaleRuns, readRuns, runsDir, shouldRetry } from "../run-store.mjs";
-import { rollbackItemStatus, listItems } from "../work.mjs";
+import { commandError } from "../command-error.mjs";
+import { readRuns, runsDir, shouldRetry } from "../run-store.mjs";
+import { listItems } from "../work.mjs";
 import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mesh-presence.mjs";
-import { aofVersion } from "./mesh-identity.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
-import { renderWithPropagationWarnings, withGlobalWorkPropagation } from "../global-work-publisher.mjs";
+import { transitionRunStart, transitionStaleRunsReclaimed } from "../effects/run-transitions.mjs";
+import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
 
 // The documented default staleness threshold for the restart-time reclaim scan
 // (20/ADR-004 — the "missing-after-N" semantics): a `running` run idle this long with
@@ -58,9 +58,11 @@ export const runStartCommand = {
     // (0) Restart-time reclaim (20/ADR-004), fleet-widened under mesh (26/ADR-006): a
     // run orphaned by a crash leaves a stale `running` record that would wedge a
     // restart (dedup would refuse the new mint) — and on a fleet, a CRASHED PEER's
-    // orphan would wedge its item for everyone. Build the scan set, force-fail the
-    // stale runs (runtime_offline — retryable), then roll each reclaimed item's
-    // status back so the stream is honest (best-effort, 20/ADR-005 verbatim).
+    // orphan would wedge its item for everyone. Build the scan set, then settle each
+    // stale run through the ONE reclaim edge. The status rollback that used to be an
+    // inline loop HERE (a hand copy of the ledger's rollback-status reactor, and the
+    // half the control tick never had) is now the declared cascade of the
+    // `run.completed` a reclaim raises — m42 wave (d) leg d4, port 2.
     const stalenessThreshold = config.work?.autonomous?.heartbeatStaleMs ?? DEFAULT_HEARTBEAT_STALE_MS;
     const scanSet = [];
     if (meshNodeId) {
@@ -130,21 +132,33 @@ export const runStartCommand = {
       // Unconfigured mesh ⇒ today's local [item] scan — the WHOLE of it (ADR-006.1).
       scanSet.push(item);
     }
-    const reclaimed = await reclaimStaleRuns(scanSet, { now: nowIso, stalenessThreshold });
-    for (const entry of reclaimed) {
-      try {
-        await rollbackItemStatus(entry.item, "not-started");
-      } catch (error) {
-        if (error.code !== "rollback-not-applicable") throw error;
-      }
-    }
+    // The transition-seam options both of this command's edges use. `workspace` is
+    // what makes the publish reactor reachable for this workspace's cascades (the
+    // seam's callers that never propagated pass none); `publisherOptions` carries
+    // the command ctx's established publisher injection seam to the reactor.
+    const seamOpts = {
+      workspace: ws,
+      publisherOptions: ctx,
+      journalOptions: ctx.effectsJournalOptions ?? {},
+    };
+    await transitionStaleRunsReclaimed(scanSet, { now: nowIso, stalenessThreshold }, seamOpts);
 
     // Mesh no longer uses the retired git-bus lease/sync path. A mesh-configured node
     // still stamps its run record with the machine node id; visibility and convergence
     // ride the global work projection plus the WebSocket stream/backstop.
+    //
+    // THE MINT rides the run store's transition seam (m42 wave (d) leg d4, port
+    // 1): the fact is written, `run.started` is appended to the per-node journal,
+    // and its declared local-locus cascade — publish-projection, which this
+    // command used to remember as its own `withGlobalWorkPropagation` import —
+    // drains synchronously before we return.
     if (!meshNodeId) {
-      const record = await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: input.now });
-      return await withGlobalWorkPropagation(record, ws, ctx);
+      const { record, effects } = await transitionRunStart(
+        item,
+        { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: input.now },
+        seamOpts,
+      );
+      return threadPropagationWarnings(record, effects);
     }
 
     const runs = await readRuns(item);
@@ -154,14 +168,28 @@ export const runStartCommand = {
         ? latest
         : null;
     const maxAttempts = config.work?.autonomous?.maxAttempts ?? 3;
-    const record =
+    const edge =
       reclaimedPrior != null && shouldRetry(reclaimedPrior, maxAttempts)
-        ? await retryRun(item, { runId: reclaimedPrior.runId, maxAttempts, brief: input.brief, now: nowIso, node: meshNodeId, sessionId: input.sessionId ?? null })
-        : await startRun(item, { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: nowIso, node: meshNodeId });
+        ? { mode: "retry", runId: reclaimedPrior.runId, maxAttempts, brief: input.brief, now: nowIso, node: meshNodeId, sessionId: input.sessionId ?? null }
+        : { sessionId: input.sessionId ?? null, brief: input.brief ?? {}, now: nowIso, node: meshNodeId };
 
-    return await withGlobalWorkPropagation(record, ws, ctx);  },
+    const { record, effects } = await transitionRunStart(item, edge, seamOpts);
+    return threadPropagationWarnings(record, effects);
+  },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face (whose --json single-envelope discipline IS the retired
+    // runVerbCli's); the cli.mjs face copy is deleted.
+    route: ["work", "run-start"],
+    spec: {
+      usage: "aof work run-start <ref> [--session <id>] [--brief '<json>'] [--json]",
+      flags: {
+        session: { type: "string", description: "the initiating session id" },
+        brief: { type: "string", description: "opaque JSON brief persisted on the run" },
+      },
+    },
+
     // `aof work run-start <ref> [--session …] [--brief '<json>']`. The brief arrives
     // as a JSON STRING on the CLI; the argv adapter parses it (undefined stays
     // undefined — an omitted --brief defaults to {} in run). `now` is a white-box

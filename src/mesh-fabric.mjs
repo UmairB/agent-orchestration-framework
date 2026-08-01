@@ -24,11 +24,39 @@
 // BackendState. A --json that will not parse ⇒ degraded (tolerant parse, RESEARCH
 // §2 "format subject to change" — never a throw).
 //
-// A config.mesh.fabric OTHER than "tailscale" is a CLEAN structured refusal
+// A config.mesh.fabric OTHER than a SUPPORTED name is a CLEAN structured refusal
 // (fabric-unsupported), never a crash, never a hidden fallback (06/ADR-002
 // designed-not-shipped). An ABSENT config.mesh.fabric is fabric-undeclared,
 // distinct from an unsupported named fabric.
+//
+// ------------------------------------------------ THE SECOND FABRIC: "direct" ----
+// (2026-07-27) "tailscale" is no longer the only supported value. `direct` is the
+// NO-OVERLAY fabric: there is no mesh VPN, no fabric CLI, and nothing to spawn — a
+// peer is a NAME (or a literal address) and the ORDINARY KERNEL RESOLVER says where
+// it is. It exists because the overlay conflated two separate questions:
+//
+//   1. "where do I dial?"  — answered by config (mesh.relay.url) + getaddrinfo.
+//   2. "who is this connection?" — answered on tailscale by joining the socket's
+//      remoteAddress to a nodeId through the fabric's own peer table.
+//
+// On `direct` there IS no address oracle for (2), so identity moves to where it
+// always belonged: the enrollment credential (mesh-registry.mjs's verifyCredential —
+// constant-time, revocation-aware). This module therefore answers (1) ONLY; the
+// address rows it returns are for DIALLING and DISPLAY, never for admission.
+//
+// Consequences that make `direct` cheap rather than a second overlay:
+//   - probeFabric never spawns. The only thing that can genuinely be wrong is "this
+//     node has no address to bind", so that is the only degrade it reports.
+//   - resolvePeers reads the SAME node roster the caller already hands in and pushes
+//     each record's declared host through an INJECTED lookup (default
+//     dns.promises.lookup) — the identical injected-seam idiom as `exec` above.
+//   - a `direct` peer's `online` is NOT a liveness reading. Nothing on this fabric
+//     can answer "is that host up" without dialling it; presence records
+//     (mesh-presence.mjs) remain the real liveness source. A row means "this peer's
+//     host RESOLVED", never "this peer is reachable".
 import { execFile } from "node:child_process";
+import dns from "node:dns";
+import os from "node:os";
 
 // The documented default spawn timeout (ADR-001.consequence — "fire-and-parse,
 // never a blocking daemon call", RESEARCH §4). A missing/malformed config value
@@ -161,6 +189,105 @@ function declaredFabric(config) {
   return typeof raw === "string" && raw.length > 0 ? raw : null;
 }
 
+// --------------------------------------------------- the "direct" fabric ----
+// The no-overlay fabric (see the header). Every function below is PURE over an
+// injected seam — `options.interfaces` (default os.networkInterfaces()) and
+// `options.lookup` (default dns.promises.lookup) — mirroring the `options.exec`
+// discipline the tailscale branch keeps, so none of it needs a real machine to test.
+export const DIRECT_FABRIC = "direct";
+
+// The fabric names this build implements. Anything else stays a clean
+// fabric-unsupported refusal (never a crash, never a silent fallback).
+const SUPPORTED_FABRICS = new Set(["tailscale", DIRECT_FABRIC]);
+
+// An operator-declared address for THIS node (config.mesh.address) — the escape
+// hatch for a multi-homed box where the auto-derived first non-internal IPv4 is the
+// wrong interface. Declared wins verbatim; it is never validated against the live
+// interface list (an operator who names an address they cannot bind gets the bind
+// error, which is a better diagnostic than a silent substitution).
+function declaredAddress(config) {
+  const raw = config?.mesh?.address;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+// The first NON-INTERNAL IPv4 this machine owns — the auto-derived bind/dial address
+// when config.mesh.address is absent. IPv4 only, deliberately: WSL2's NAT (and most
+// container/VM switches) carry no usable IPv6 path to the host, so an IPv6-first
+// choice would resolve to an address peers cannot reach (measured 2026-07-27 — a
+// guest reached every host IPv4 and no host IPv6). `internal` (loopback) is skipped
+// so this never returns 127.0.0.1 as a peer-facing address.
+function firstLocalIPv4(interfaces) {
+  for (const entries of Object.values(interfaces ?? {})) {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const family = entry?.family;
+      const isV4 = family === "IPv4" || family === 4;
+      if (isV4 && entry?.internal !== true && typeof entry.address === "string" && entry.address.length > 0) {
+        return entry.address;
+      }
+    }
+  }
+  return null;
+}
+
+// This node's `direct` address: declared wins, else the first non-internal IPv4,
+// else null (the ONE genuine degrade this fabric has — a node with no address cannot
+// bind a reachable listener).
+function directSelfAddress(config, options) {
+  const declared = declaredAddress(config);
+  if (declared != null) return declared;
+  const interfaces = options?.interfaces ?? os.networkInterfaces();
+  return firstLocalIPv4(interfaces);
+}
+
+// The injected host->address resolver, defaulting to the real kernel resolver
+// (dns.promises.lookup with { all: true } — getaddrinfo, so /etc/hosts, the Windows
+// hosts file, mDNS and DNS all participate exactly as they do for every other program
+// on the box). A literal IP passes straight through getaddrinfo unchanged, so a
+// roster host may be either a name or an address with no branching here.
+function resolveLookup(options) {
+  if (typeof options?.lookup === "function") return options.lookup;
+  return (host) => dns.promises.lookup(host, { all: true });
+}
+
+// resolvePeers' `direct` branch: the roster IS the peer list (there is no fabric to
+// enumerate), each record's declared host pushed through the kernel resolver. Rows
+// are emitted per RESOLVED ADDRESS, so a dual-homed peer surfaces every address it
+// answers on. THIS node is excluded (a roster contains its own record; a tailscale
+// Peer map never lists Self — the two branches agree on "peers means others").
+// A host that will not resolve is DROPPED, never a throw and never a null-address
+// row: an unresolvable peer is indistinguishable from an absent one for dialling.
+async function resolveDirectPeers(config, options) {
+  const roster = Array.isArray(options?.roster) ? options.roster : [];
+  const lookup = resolveLookup(options);
+  const selfNodeId = typeof config?.mesh?.nodeId === "string" ? config.mesh.nodeId : null;
+
+  const peers = [];
+  for (const entry of roster) {
+    const nodeId = typeof entry?.nodeId === "string" && entry.nodeId.length > 0 ? entry.nodeId : null;
+    if (nodeId == null || nodeId === selfNodeId) continue;
+    const host = typeof entry?.host === "string" && entry.host.trim().length > 0 ? entry.host.trim() : null;
+    if (host == null) continue;
+
+    let addresses;
+    try {
+      addresses = await lookup(host);
+    } catch {
+      // Unresolvable — the kernel has no answer for this name today. Dropped, exactly
+      // as an offline tailscale peer contributes no dial address.
+      continue;
+    }
+    const rows = Array.isArray(addresses) ? addresses : [addresses];
+    for (const row of rows) {
+      const dialAddress = typeof row === "string" ? row : typeof row?.address === "string" ? row.address : null;
+      if (dialAddress == null || dialAddress.length === 0) continue;
+      // `online: true` means RESOLVED, not reachable — this fabric has no liveness
+      // oracle (header note). Presence records remain the real liveness source.
+      peers.push({ nodeId, dialAddress, online: true, host });
+    }
+  }
+  return peers;
+}
+
 // probeFabric(config, options) → { fabric, state, healthy, reason }. The two-stage
 // liveness probe (ADR-001.2). `options.exec` is the injected fabric-exec closure
 // (defaults to the real execFile); `options.platform` is the injected platform
@@ -173,8 +300,18 @@ export async function probeFabric(config, options = {}) {
   if (fabric == null) {
     return { fabric: null, state: null, healthy: false, reason: "fabric-undeclared" };
   }
-  if (fabric !== "tailscale") {
+  if (!SUPPORTED_FABRICS.has(fabric)) {
     return { fabric, state: null, healthy: false, reason: "fabric-unsupported" };
+  }
+
+  // `direct` — nothing to spawn and no daemon to be down, so the ONLY honest degrade
+  // is "this node has no address to bind/advertise". Reported as a distinct reason
+  // (never the generic `degraded`) so the guidance can name the actual fix.
+  if (fabric === DIRECT_FABRIC) {
+    const address = directSelfAddress(config, options);
+    return address == null
+      ? { fabric, state: null, healthy: false, reason: "no-local-address" }
+      : { fabric, state: "direct", healthy: true, reason: null };
   }
 
   const exec = resolveExec(options);
@@ -206,6 +343,8 @@ export async function probeFabric(config, options = {}) {
 // or null on a degraded fabric (never a crash, ADR-001.3).
 export async function selfAddress(config, options = {}) {
   const fabric = declaredFabric(config);
+  // `direct` — the declared address, else the first non-internal IPv4. No spawn.
+  if (fabric === DIRECT_FABRIC) return directSelfAddress(config, options);
   if (fabric !== "tailscale") return null;
 
   const exec = resolveExec(options);
@@ -230,6 +369,9 @@ export async function selfAddress(config, options = {}) {
 // resolves to [] — a peer list is never partially populated from a crash.
 export async function resolvePeers(config, options = {}) {
   const fabric = declaredFabric(config);
+  // `direct` — the injected roster resolved through the kernel resolver (no spawn,
+  // no peer map). Returns [] for an absent roster, exactly like the tailscale branch.
+  if (fabric === DIRECT_FABRIC) return await resolveDirectPeers(config, options);
   if (fabric !== "tailscale") return [];
 
   const exec = resolveExec(options);
@@ -296,8 +438,10 @@ const REMEDIATION_BY_REASON = {
   stopped: "the tailscale daemon isn't running",
   "needs-machine-auth": "waiting on tailnet admin approval",
   degraded: "the fabric probe could not be parsed — check tailscale",
-  "fabric-unsupported": "this build targets tailscale — that fabric is not yet supported",
-  "fabric-undeclared": 'declare config.mesh.fabric = "tailscale" to enable the mesh',
+  "fabric-unsupported": 'this build supports "tailscale" and "direct" — that fabric is not implemented',
+  "fabric-undeclared": 'declare config.mesh.fabric ("direct" for no overlay, or "tailscale") to enable the mesh',
+  // `direct`'s ONE degrade: no bindable/advertisable address on this machine.
+  "no-local-address": 'no non-internal IPv4 on this machine — declare config.mesh.address explicitly',
 };
 
 // The RESEARCH §5 reachability guidance lines a healthy preflight prints alongside the
@@ -306,6 +450,15 @@ const REMEDIATION_BY_REASON = {
 export const SAME_TAILNET_GUIDANCE = "both nodes must be on the same tailnet";
 export const PEER_ONLINE_GUIDANCE = "ensure `tailscale status` shows the peer Online";
 export const SHIELDS_UP_GUIDANCE = "if a dial is refused, check `--shields-up`/ACLs";
+
+// The `direct` equivalents — the silent failure modes of a NO-OVERLAY fabric, which
+// are different in kind from the tailnet's. There is no ACL and no coordination
+// server; what bites instead is a peer whose advertised host resolves to the WRONG
+// interface (the WSL hostname-collision class: a guest inheriting its host's name
+// resolves to the HOST, not the guest) and a host firewall on the dial port.
+export const DIRECT_RESOLVE_GUIDANCE = "each peer's advertised host must resolve, from THIS machine, to that peer — not to itself";
+export const DIRECT_OVERRIDE_GUIDANCE = "a peer whose hostname collides must advertise an explicit address (`aof mesh identity --name <id> --address <ip>`)";
+export const DIRECT_FIREWALL_GUIDANCE = "if a dial is refused, check the host firewall on the control port";
 
 // remediationForReason(reason) → the ONE actionable RESEARCH §4 message for a degraded
 // probeFabric reason, or null for a healthy (reason:null) probe. Never throws.
@@ -326,7 +479,13 @@ export function fabricGuidance(probeResult, { selfAddress: address = null } = {}
     if (typeof address === "string" && address.length > 0) {
       lines.push(`self-address: ${address}`);
     }
-    lines.push(SAME_TAILNET_GUIDANCE, PEER_ONLINE_GUIDANCE, SHIELDS_UP_GUIDANCE);
+    // Per-fabric reachability guidance — the failure modes differ in KIND, so a
+    // `direct` node is never told to check a tailnet it does not have.
+    if (probeResult?.fabric === DIRECT_FABRIC) {
+      lines.push(DIRECT_RESOLVE_GUIDANCE, DIRECT_OVERRIDE_GUIDANCE, DIRECT_FIREWALL_GUIDANCE);
+    } else {
+      lines.push(SAME_TAILNET_GUIDANCE, PEER_ONLINE_GUIDANCE, SHIELDS_UP_GUIDANCE);
+    }
     return { healthy: true, lines };
   }
   return { healthy: false, lines: [remediationForReason(probeResult?.reason ?? null)] };

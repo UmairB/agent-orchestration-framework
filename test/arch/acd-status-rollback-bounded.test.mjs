@@ -175,12 +175,27 @@ export const archTests = [
           `${name} performs no write verb of its own (frontmatter is reached only via rollbackItemStatus)`,
         );
 
-        // The only frontmatter seam a command may touch is rollbackItemStatus — and the
-        // two modules that roll back (run-start, run-complete) reach it by that call.
-        if (name === "run-start.mjs" || name === "run-complete.mjs") {
+        // NO run-* command reaches the frontmatter writer directly any more. Both
+        // paths that roll a status back — a completion (m42 wave (d) leg d2) and a
+        // RECLAIM (leg d4, port 2) — raise `run.completed` through a transition
+        // seam, and the ledger's checkout-locus reactor (src/effects/table.mjs)
+        // performs the one bounded rollback: declared, not remembered. run-start's
+        // inline reclaim loop was the last direct caller and the reason the two
+        // reclaim halves disagreed (the control tick never had that loop at all).
+        assert.ok(
+          !/rollbackItemStatus\s*\(/.test(code),
+          `${name} does not call rollbackItemStatus directly — the run.completed reactor owns it`,
+        );
+        const seamFor = { "run-start.mjs": "transitionStaleRunsReclaimed", "run-complete.mjs": "transitionRunComplete" }[name];
+        if (seamFor) {
           assert.ok(
-            /rollbackItemStatus\s*\(/.test(code),
-            `${name} reaches item frontmatter by calling rollbackItemStatus`,
+            new RegExp(`${seamFor}\\s*\\(`).test(code),
+            `${name} reaches the run fact through the transition seam (${seamFor})`,
+          );
+          const effectsCode = stripComments(await readFile(new URL("../../src/effects/table.mjs", import.meta.url), "utf8"));
+          assert.ok(
+            /rollbackItemStatus\s*\(/.test(effectsCode),
+            "src/effects/table.mjs's run.completed cascade calls rollbackItemStatus (the declared rollback reactor)",
           );
         }
       }

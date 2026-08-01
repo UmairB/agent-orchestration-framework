@@ -7,7 +7,7 @@
 // store's ENOENT→[] discipline, ADR-002), never a thrown error. The result is
 // { ref, runs:[…] } — records carry refs, so there is no path projection.
 import { resolveItem } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { readRuns } from "../run-store.mjs";
 // schema v5 (TECH_DEBT item 6 — finish the board bridge): a ref whose runs live on
 // another machine's worktree answers from the worker-streamed projection — the RUNS
@@ -63,6 +63,14 @@ export const runStatusCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "run-status"],
+    spec: {
+      usage: "aof work run-status <ref> [--json]",
+      flags: {},
+    },
+
     // `aof work run-status <ref>` — one positional maps onto the input.
     argv: (positionals) => ({ ref: positionals[0] }),
 

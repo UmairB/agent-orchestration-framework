@@ -5,7 +5,7 @@
 // scaffold seam, never a bespoke writer (39/ADR-001, feasibility flag 4). A chore
 // is a top-level DRIVER (milestone 37): it groups no stories and carries no
 // depends-framing concept, exactly like insert-milestone.
-import { runInsertTopLevel } from "./insert-shared.mjs";
+import { INSERT_FLAGS, runInsertTopLevel } from "./insert-shared.mjs";
 
 export const insertChoreCommand = {
   id: "work:insert-chore",
@@ -32,6 +32,13 @@ export const insertChoreCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs workInsertCli branch is deleted.
+    route: ["work", "insert-chore"],
+    spec: {
+      usage: "aof work insert-chore <slug> --at <P> [--yes] [--json]",
+      flags: INSERT_FLAGS,
+    },
     // `aof work insert-chore <slug> --at <P> [--yes|--force] [--json]`.
     argv: (positionals, options) => ({
       slug: positionals[0],

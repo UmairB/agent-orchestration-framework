@@ -12,7 +12,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setSeaSentinelForTest, setSidecarAnchorForTest } from "../src/asset-base.mjs";
-import { runtimeMode, readBuildInfo, buildInfoString, BUILD_ID_FILENAME } from "../src/build-info.mjs";
+import { runtimeMode, readBuildInfo, buildInfoString, setSourceBuildIdForTest, BUILD_ID_FILENAME } from "../src/build-info.mjs";
 
 async function withPackagedAnchor(fn) {
   const anchor = await mkdtemp(path.join(os.tmpdir(), "aof-build-info-"));
@@ -29,17 +29,48 @@ async function withPackagedAnchor(fn) {
 
 export const buildInfoTests = [
   {
-    name: "build-info/item-1 outside a SEA the mode is source and env stamps are ignored",
+    name: "build-info/item-1 outside a SEA the mode is source and env stamps are ignored; source carries the repo's own GIT HASH as its build id",
     async run() {
       setSeaSentinelForTest(false);
       try {
         assert.equal(runtimeMode({ env: {} }), "source");
         assert.equal(runtimeMode({ env: { AOF_RUNTIME_MODE: "payload" } }), "source", "a stray env stamp never makes a repo run claim to be an install");
+
+        // The git resolver injected (the setSeaSentinelForTest idiom): source mode
+        // stamps the working tree's OWN hash — the blind spot that hid a
+        // 74-minute-stale worker (2026-07-26: `build source` said nothing about
+        // WHICH commit the daemon actually loaded).
+        setSourceBuildIdForTest("f623a6a+dirty");
         const info = readBuildInfo({ env: {} });
-        assert.deepEqual(info, { mode: "source", buildId: null, installedAt: null });
-        assert.equal(buildInfoString(info), "source");
+        assert.deepEqual(info, { mode: "source", buildId: "f623a6a+dirty", installedAt: null });
+        assert.equal(buildInfoString(info), "source f623a6a+dirty");
+
+        // No git (a tarball run) degrades to the bare "source" — never a throw.
+        setSourceBuildIdForTest(null);
+        const bare = readBuildInfo({ env: {} });
+        assert.deepEqual(bare, { mode: "source", buildId: null, installedAt: null });
+        assert.equal(buildInfoString(bare), "source");
       } finally {
         setSeaSentinelForTest(undefined);
+        setSourceBuildIdForTest(undefined);
+      }
+    },
+  },
+  {
+    name: "build-info/item-1 the REAL source resolver answers this very repo's HEAD (short hash shape, cached) — un-injected",
+    async run() {
+      setSeaSentinelForTest(false);
+      setSourceBuildIdForTest(undefined);
+      try {
+        const info = readBuildInfo({ env: {} });
+        assert.equal(info.mode, "source");
+        // This test runs inside the aof repo, so git MUST resolve — a null here
+        // means the resolver broke, not that git is absent.
+        assert.match(info.buildId ?? "", /^[0-9a-f]{4,40}(\+dirty)?$/, "the source build id is the repo's short HEAD hash, optionally +dirty");
+        assert.equal(readBuildInfo({ env: {} }).buildId, info.buildId, "resolved once per process — the cached answer is stable");
+      } finally {
+        setSeaSentinelForTest(undefined);
+        setSourceBuildIdForTest(undefined);
       }
     },
   },

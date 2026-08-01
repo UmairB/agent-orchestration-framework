@@ -37,9 +37,11 @@
 //      a serveRelay()/relayMode() broker, and binds it to a KNOWN port — never an
 //      ephemeral `?? 0` (test isolation is via options.relay===false, not a random
 //      production bind).
-//   7. FLEET CONSUMER SUBSCRIBES OVER LOOPBACK — cli.mjs's `aof mesh ui` production
-//      serveMeshUi({...}) call site supplies `startTerminalRelaySubscriber` as a
-//      LITERAL key and the CLI references createTerminalMirrorSubscriberTransport.
+//   7. FLEET CONSUMER SUBSCRIBES OVER LOOPBACK — the `aof mesh ui` production
+//      serveMeshUi({...}) call site (commands/mesh-ui.mjs since the m42 wave-(d)
+//      launcher-seam migration; formerly cli.mjs's meshUiCommand) supplies
+//      `startTerminalRelaySubscriber` as a LITERAL key and the verb module
+//      references createTerminalMirrorSubscriberTransport.
 //
 // RED-UNTIL-WIRED BY DESIGN. The fabric-send (inv.5) and control-bridge (inv.6)
 // real-source gates FAIL on the inert option-(a) tree the F-38.06 draft shipped, and
@@ -59,7 +61,10 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LAUNCHER = path.join(repoRoot, "src", "mesh-launcher.mjs");
-const CLI = path.join(repoRoot, "src", "cli.mjs");
+// m42 wave (d) leg d1 (wave-3 tail) — the `aof mesh ui` verb moved onto the
+// launcher seam: the production serveMeshUi call site lives in the registered
+// command's module now, and the gate moved with the shape.
+const CLI = path.join(repoRoot, "src", "commands", "mesh-ui.mjs");
 const CONTROL = path.join(repoRoot, "src", "control-stream-server.mjs");
 const WSCLIENT = path.join(repoRoot, "src", "worker-stream-client.mjs");
 const BRIDGE = path.join(repoRoot, "src", "mesh-terminal-relay-bridge.mjs");
@@ -267,14 +272,14 @@ function fleetConsumerProblems(cliSource) {
   const problems = [];
   const keys = callSiteKeys(code, "serveMeshUi");
   if (keys == null) {
-    problems.push("could not locate the production serveMeshUi({...}) call site in cli.mjs");
+    problems.push("could not locate the production serveMeshUi({...}) call site in commands/mesh-ui.mjs");
     return problems;
   }
   if (!keys.includes("startTerminalRelaySubscriber")) {
-    problems.push("cli.mjs's `aof mesh ui` production serveMeshUi({...}) call site does NOT supply `startTerminalRelaySubscriber` as a literal key — the fleet mirror is never fed (F-38.06); a revert to serveMeshUi({ projectDir, port, scope }) trips here");
+    problems.push("commands/mesh-ui.mjs's `aof mesh ui` production serveMeshUi({...}) call site does NOT supply `startTerminalRelaySubscriber` as a literal key — the fleet mirror is never fed (F-38.06); a revert to serveMeshUi({ projectDir, port, scope }) trips here");
   }
   if (!/\bcreateTerminalMirrorSubscriberTransport\b/.test(code)) {
-    problems.push("cli.mjs does not reference createTerminalMirrorSubscriberTransport — the fleet subscriber is not wired to the loopback relay (a no-op consumer)");
+    problems.push("commands/mesh-ui.mjs does not reference createTerminalMirrorSubscriberTransport — the fleet subscriber is not wired to the loopback relay (a no-op consumer)");
   }
   return problems;
 }

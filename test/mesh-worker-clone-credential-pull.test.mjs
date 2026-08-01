@@ -149,7 +149,7 @@ async function withStore({ env }, fn) {
 // facts directly (bypassing a clone) so workerHasRepo() is TRUE and the clone-miss
 // branch never runs — the precondition for the "already HAS the repo" scenario.
 async function markRepoAlreadyPresent({ workspace, workspaceId, env, nodeId = "worker-a" }) {
-  const { writeRepoPublishedMarker } = await import("../src/commands/mesh-repo.mjs");
+  const { writeRepoPublishedMarker } = await import("../src/mesh-repo-marker.mjs");
   const configPath = path.join(workspace.projectRoot, ".aof", "aof.config.json");
   await writeRepoPublishedMarker({ configPath, workspaceId, now: NOW });
   await withStore({ env }, async (store) => {

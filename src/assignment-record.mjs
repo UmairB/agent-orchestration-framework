@@ -111,6 +111,9 @@ function mapAssignmentRow(row) {
     updatedAt: row.updated_at,
     reclaimedAt: row.reclaimed_at,
     sessionId: row.session_id ?? null,
+    // m42 interactive worker terminals — the status-refinement code (needs-input),
+    // absent on pre-v7 rows.
+    code: row.code ?? null,
   };
 }
 
@@ -174,12 +177,16 @@ export function updateAssignmentState(store, assignmentId, state, options = {}) 
   const runId = options.runId !== undefined ? options.runId : existing.run_id;
   const reclaimedAt = options.reclaimedAt !== undefined ? options.reclaimedAt : existing.reclaimed_at;
   const sessionId = options.sessionId !== undefined ? options.sessionId : existing.session_id;
+  // m42 interactive worker terminals — the status-refinement code (needs-input).
+  // Same omitted-preserves discipline for direct callers; the status-frame apply
+  // seam passes it EXPLICITLY on every frame (null clears — verbatim-per-frame).
+  const code = options.code !== undefined ? options.code : existing.code;
 
   store.db.prepare(`
     UPDATE global_assignments
-    SET state = ?, run_id = ?, updated_at = ?, reclaimed_at = ?, session_id = ?
+    SET state = ?, run_id = ?, updated_at = ?, reclaimed_at = ?, session_id = ?, code = ?
     WHERE assignment_id = ?
-  `).run(state, runId ?? null, now, reclaimedAt ?? null, sessionId ?? null, assignmentId);
+  `).run(state, runId ?? null, now, reclaimedAt ?? null, sessionId ?? null, code ?? null, assignmentId);
 
   return mapAssignmentRow(store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId));
 }

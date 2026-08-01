@@ -18,6 +18,37 @@ export async function readLock(lockPath) {
   }
 }
 
+// mergeLock(lockPath, patch) — THE READ-MERGE LOCK WRITE (m42 wave (d) leg d4;
+// PRD §Cascades have no home: "Two `aof init`/`project migrate` sites bypass
+// `writeLock`'s read-merge and wipe the `work`/`planning` lock sections
+// wholesale").
+//
+// The install lock is not one subsystem's file. `aof init` and `project migrate`
+// author the ITEMS/runtimes half; `work init` writes `lock.work`; `planning init`
+// writes `lock.planning`. Both of the first two wrote the whole document, so
+// running either against a workspace that already had work or planning installed
+// silently deleted the other subtree — the manifests were gone and the next
+// `work update` had nothing to reconcile against.
+//
+// The cure is the same one-writer-per-subtree discipline the mesh sidecar keeps
+// (writeSidecarPatch): read what is there, overlay THIS caller's keys, write the
+// union. Absent/torn lock reads as `{}` — a fresh install, never a crash. Keys
+// the patch does not name survive byte-equivalent.
+export async function mergeLock(lockPath, patch) {
+  let existing = null;
+  try {
+    existing = await readLock(lockPath);
+  } catch {
+    // A torn/unparseable lock must not block an install: treat it as absent. The
+    // patch below is authoritative for its own keys either way.
+    existing = null;
+  }
+  const base = existing != null && typeof existing === "object" && !Array.isArray(existing) ? existing : {};
+  const merged = { ...base, ...patch };
+  await writeLock(lockPath, merged);
+  return merged;
+}
+
 export async function writeLock(lockPath, manifest) {
   const content = `${JSON.stringify(manifest, null, 2)}\n`;
   await mkdir(path.dirname(lockPath), { recursive: true });

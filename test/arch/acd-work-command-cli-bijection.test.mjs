@@ -23,6 +23,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+// m42 wave (d) leg d1 — a work:* command may now dispatch through the
+// registry-DERIVED route table (cli.route + the one generic face) instead of a
+// hand-kept `subcommand === "…"` ladder branch; the gate accepts EITHER door
+// and re-derives the routed set from the registry, never from grepping.
+import { deriveRouteTable } from "../../src/spine/face.mjs";
 import { startRun } from "../../src/run-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -138,6 +143,32 @@ async function buildFixture() {
 // feedback writes to the milestone/story STATE.md with a real note.
 function argsFor(sub) {
   switch (sub) {
+    // m42 wave (d) leg d1 (wave-3 tail) — work:ui rides the launcher seam:
+    // --json is the NON-BLOCKING probe by FACE POLICY (--json never launches),
+    // so the spawn returns with the would-serve document — exit 0 + parseable.
+    case "ui": return ["work", "ui", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch). find: the fixture's
+    // milestone 03 resolves — the bare-array rows document, exit 0. observe: no
+    // Claude transcripts exist for the fixture — found:false, exit 0. The
+    // headroom pair: config-only read-merge-write into the fixture's own
+    // .aof/aof.config.json — { configPath, notes }, exit 0.
+    // init: a dry-run render plan into the fixture — exit 0. update: the bare
+    // fixture carries no install manifest, so the run reports the retired
+    // { notInitialized: true, … } document — exit 1 + parseable (the gate
+    // accepts [0,1]).
+    case "init": return ["work", "init", "--dry-run", "--json"];
+    case "update": return ["work", "update", "--dry-run", "--json"];
+    case "find": return ["work", "find", "03", "--json"];
+    case "observe": return ["work", "observe", "03", "--json"];
+    case "use-headroom": return ["work", "use-headroom", "--json"];
+    case "unuse-headroom": return ["work", "unuse-headroom", "--json"];
+    // m42 wave (d) leg d1 (the CLI-only batch, closing half) — the model-config
+    // trio probes with --show: the read face (config-only, mutates nothing on
+    // the fixture) — the set faces would prompt (orchestrator/delegation) or
+    // write config, neither of which belongs in a spawn probe.
+    case "orchestrator": return ["work", "orchestrator", "--show", "--json"];
+    case "delegation": return ["work", "delegation", "--show", "--json"];
+    case "delegation-model": return ["work", "delegation-model", "--show", "--json"];
     case "list": return ["work", "list", "--json"];
     case "doc": return ["work", "doc", "03", "SPEC", "--json"];
     case "tasks": return ["work", "tasks", "03/01", "--json"];
@@ -223,14 +254,19 @@ export const archTests = [
     },
   },
   {
-    name: "arch/15 ADR-005: workCommand in cli.mjs has a reachable dispatch branch per registry-derived work:* subcommand",
+    name: "arch/15 ADR-005: every registry-derived work:* subcommand is CLI-reachable — a route-table entry or a workCommand dispatch branch",
     run: async () => {
       const body = workCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
       assert.ok(body.length > 0, "workCommand is defined in cli.mjs");
+      // m42 wave (d) leg d1: the route table is derived from the registry, so a
+      // migrated verb's reachability is a registry fact, not a source grep.
+      const routes = deriveRouteTable(listCommands());
       for (const sub of subcommands()) {
+        const routed = routes.has(`work ${sub}`);
+        const laddered = new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body);
         assert.ok(
-          new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body),
-          `workCommand dispatches \`subcommand === "${sub}"\` (no command the CLI cannot run)`
+          routed || laddered,
+          `work:${sub} is CLI-reachable — via cli.route ["work","${sub}"] or a workCommand dispatch branch (no command the CLI cannot run)`
         );
       }
     },
@@ -244,9 +280,13 @@ export const archTests = [
           const result = runCli(root, argsFor(sub));
           // `validate` and `doctor` are the reads that DESIGN to exit 1 when
           // findings exist (validate on any finding; doctor on an error or a
-          // warn-under-strict) — both 0 and 1 are clean runs for them; every other
-          // op exits 0. None may crash (>1 or a null status from a thrown error).
-          const acceptable = sub === "validate" || sub === "doctor" ? [0, 1] : [0];
+          // warn-under-strict); `update` on the bare fixture reports the coded
+          // { notInitialized: true, … } refusal document at exit 1 (m42 wave (d)
+          // — the mesh-bijection precedent: a coded refusal that still emits ONE
+          // parseable document is a clean probe). Both 0 and 1 are clean runs
+          // for those; every other op exits 0. None may crash (>1 or a null
+          // status from a thrown error).
+          const acceptable = ["validate", "doctor", "update"].includes(sub) ? [0, 1] : [0];
           assert.ok(
             acceptable.includes(result.status),
             `aof ${argsFor(sub).join(" ")} exits ${acceptable.join("/")} (got ${result.status}; stderr: ${result.stderr})`

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { workApi } from "./api";
 import type { WorkItem } from "./api";
 import { deriveBoard, milestoneOfGate } from "./model";
@@ -44,6 +44,13 @@ export function Board() {
   // (DESIGN surface 2b). Probed read-only from /api/work/run-status, scoped to the
   // focused board so the active runs are visible from the board itself.
   const [runningRefs, setRunningRefs] = useState<Set<string>>(() => new Set());
+  // 2026-07-27 (measured): the board server lives on an EPHEMERAL port and dies
+  // with every daemon restart — an open tab then points at a dead port and every
+  // action silently does nothing (the operator clicked Continue into the void).
+  // Consecutive silent-load failures flip this; the banner says so honestly and
+  // links the fleet (its port is FIXED), where a fresh board link lives.
+  const [serverGone, setServerGone] = useState(false);
+  const silentFailures = useRef(0);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     // A SILENT refresh (the top-bar ⟳ sync) updates the stream IN PLACE — it must
@@ -56,8 +63,15 @@ export function Board() {
     }
     try {
       setItems(await workApi.list());
+      silentFailures.current = 0;
+      setServerGone(false);
     } catch (e) {
-      if (!silent) setError(e instanceof Error ? e.message : "Failed to load");
+      if (silent) {
+        silentFailures.current += 1;
+        if (silentFailures.current >= 3) setServerGone(true);
+      } else {
+        setError(e instanceof Error ? e.message : "Failed to load");
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -157,6 +171,22 @@ export function Board() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, focus, items]);
 
+  // While ANY item is executing (a mesh assignment is active, or a local run is
+  // live), the list itself re-fetches silently on the same observability cadence.
+  // The execution overlay — node, state, and the SESSION ID the "View terminal"
+  // mirror needs — rides /api/work/list, so a sync-gated list froze the primary
+  // action at page-load state: a session captured seconds after dispatch never
+  // reached an open board, and the operator had to hard-refresh to be OFFERED the
+  // terminal (measured live, 2026-07-27). A quiet board stays sync-gated — this
+  // poll arms only while work is genuinely in flight, and load({silent}) updates
+  // in place (never the loading branch, so the dock is never torn down).
+  useEffect(() => {
+    const executing = items.some((item) => item.execution?.active === true) || runningRefs.size > 0;
+    if (!executing) return;
+    const poll = setInterval(() => void load({ silent: true }), RUNNING_PROBE_MS);
+    return () => clearInterval(poll);
+  }, [items, runningRefs, load]);
+
   const selectedItem = useMemo(
     () => items.find((item) => item.ref === selectedRef) ?? null,
     [items, selectedRef]
@@ -226,6 +256,11 @@ export function Board() {
         // unreachable, repo unavailable) must say so — silence here reads as "nothing
         // happened" when something was actively refused.
         setDispatch({ ref, message: error instanceof Error ? error.message : String(error), error: true });
+        // A NETWORK-level failure on loopback means the board server itself is gone
+        // (fetch rejects with TypeError) — raise the dead-server banner immediately
+        // rather than waiting for the silent poll to notice (2026-07-27: the
+        // operator clicked Continue into a dead port and saw "nothing").
+        if (error instanceof TypeError) setServerGone(true);
       }
     },
     [load, runAgent, select]
@@ -287,6 +322,19 @@ export function Board() {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      {serverGone ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive" role="alert">
+          <span aria-hidden="true">⚠</span>
+          <span>
+            This board&apos;s server is gone (the daemon restarted — board ports are per-session). Buttons on this tab do
+            nothing. Reopen the board from{" "}
+            <a className="underline" href="http://127.0.0.1:4181/?mode=fleet">
+              the fleet
+            </a>
+            .
+          </span>
+        </div>
+      ) : null}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
         <span className="flex items-center gap-2">
           <span className="text-lg text-primary" aria-hidden="true">

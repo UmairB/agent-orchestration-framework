@@ -28,6 +28,13 @@ import { existsSync } from "node:fs";
 import { readJson, writeText } from "./fs.mjs";
 import { findProjectConfig } from "./workspace.mjs";
 
+// A core never prints: it REPORTS through the collector its caller injects, and the
+// face turns the collected lines into the one stdout document (m42 wave (d) leg d1,
+// the confine-console.log item). This no-op is the default so an un-injected call is
+// silent-by-contract rather than a second printer.
+const NO_PRINT = () => {};
+
+
 // The two orchestrator choices. `id` is the model alias written to the config
 // (family aliases, consistent with the agent frontmatter `opus`/`sonnet` style);
 // `label` is the human name; `note` is the one-line trade-off shown at the prompt.
@@ -104,7 +111,10 @@ export function resolveOrchestratorModel(requested) {
 
 // Interactive picker. Test seam: AOF_ORCHESTRATOR_INPUT short-circuits the TTY
 // prompt (mirrors prompt.mjs's AOF_TEST_* stubs) so the flow is exercised in CI.
-async function promptOrchestratorModel() {
+// EXPORTED for the work:orchestrator / work:delegation cli.argv adapters (m42
+// wave (d) leg d1): prompting is a FACE concern — the argv adapter completes a
+// missing model interactively, so run() stays headless for every other face.
+export async function promptOrchestratorModel() {
   if (process.env.AOF_ORCHESTRATOR_INPUT !== undefined) {
     const resolved = resolveOrchestratorModel(process.env.AOF_ORCHESTRATOR_INPUT);
     if (!resolved) {
@@ -136,7 +146,7 @@ async function promptOrchestratorModel() {
 // `.aof/aof.config.json` (config-only; never the lock). When `model` is absent
 // the user is prompted to choose Fable 5 or Opus 4.8. opts:
 //   { targetDir, model?, log? }. Returns { configPath, config, model, previous, changed }.
-export async function selectOrchestratorModel({ targetDir = process.cwd(), model, log = console.log } = {}) {
+export async function selectOrchestratorModel({ targetDir = process.cwd(), model, log = NO_PRINT } = {}) {
   let chosen;
   if (model !== undefined && model !== null && String(model).trim() !== "") {
     chosen = resolveOrchestratorModel(model);
@@ -163,7 +173,7 @@ export async function selectOrchestratorModel({ targetDir = process.cwd(), model
 
 // `aof work orchestrator --show` — report the current orchestrator model without
 // mutating anything. opts: { targetDir, log? }.
-export async function showOrchestratorModel({ targetDir = process.cwd(), log = console.log } = {}) {
+export async function showOrchestratorModel({ targetDir = process.cwd(), log = NO_PRINT } = {}) {
   const { configPath, config } = await readConfig(targetDir);
   const current = readOrchestratorModel(config);
   if (current) {

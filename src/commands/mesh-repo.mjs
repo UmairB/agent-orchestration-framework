@@ -29,111 +29,16 @@
 // remote, a malformed URL) is silent and non-fatal — the publish still succeeds with no
 // `cloneUrl`, exactly today's behaviour when nobody configures one; a later clone-miss
 // still fails loud and coded (`assignment-repo-unavailable`), per ADR-005.
-import { execFile } from "node:child_process";
-import { readJson, writeText } from "../fs.mjs";
 import { publishGlobalWorkSnapshot } from "../global-work-publisher.mjs";
 import { resolveWorkspaceId } from "../workspace-identity.mjs";
-import { isWellFormedCloneUrl } from "../mesh-worker-execution.mjs";
+import { isPlainObject, writeRepoPublishedMarker } from "../mesh-repo-marker.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals } from "./mesh-face-shared.mjs";
 
-function isPlainObject(value) {
-  return value != null && typeof value === "object" && !Array.isArray(value);
-}
-
-// defaultGitRemoteExec(args, { cwd }) — mirrors mesh-worker-execution.mjs's clone-exec
-// idiom: argv-form via execFile, NEVER a shell string. Resolves to the trimmed stdout,
-// or `null` on ANY failure (no git installed, not a repo, no such remote) — the caller
-// treats `null` as "nothing to auto-detect", never a thrown fault. `@executable` tests
-// inject a fake that returns a scripted URL (or `null`) — no real git process, no real
-// repo.
-function defaultGitRemoteExec(args, { cwd } = {}) {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, timeout: 5000, windowsHide: true }, (error, stdout) => {
-      resolve(error ? null : String(stdout ?? "").trim());
-    });
-  });
-}
-
-// stripUrlUserinfo(url) — a personal `origin` remote commonly carries the operator's
-// OWN identity embedded as `scheme://user[:pass]@host/...` (e.g. a GitHub CLI-authored
-// remote). `git clone` uses `cloneUrl` VERBATIM (mesh-worker-execution.mjs's clone-exec
-// call), so a leftover personal username would fight the askpass shim's ADR-010
-// prompt-aware answer (`x-access-token` on the Username prompt) — git skips that
-// prompt entirely when the URL already carries a username, silently substituting the
-// wrong one. Stripped for the `scheme://...` form ONLY. The scp-style shorthand
-// (`git@host:owner/repo`) is left untouched — that `git` user is the SSH service
-// account convention, not a personal credential, and isWellFormedCloneUrl's own
-// shorthand branch has no separate host/userinfo to split apart.
-function stripUrlUserinfo(url) {
-  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) return url;
-  try {
-    const parsed = new URL(url);
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-// detectCloneUrlFromGitRemote(projectRoot, gitRemoteExec) — `git remote get-url
-// origin` in the repo's own directory, validated through the SAME `isWellFormedCloneUrl`
-// gate every other cloneUrl source is held to (never a bespoke second validator), with
-// any personal userinfo stripped before it is ever persisted.
-async function detectCloneUrlFromGitRemote(projectRoot, gitRemoteExec) {
-  if (!projectRoot) return null;
-  let stdout;
-  try {
-    stdout = await gitRemoteExec(["remote", "get-url", "origin"], { cwd: projectRoot });
-  } catch {
-    return null;
-  }
-  if (!isWellFormedCloneUrl(stdout)) return null;
-  return stripUrlUserinfo(stdout.trim());
-}
-
-// Read-merge-write the local per-repo published marker. Only mesh.repo is set; every
-// other key — mesh.nodeId/salt/relay, the non-mesh top level — survives byte-equivalent
-// (the mesh-join.mjs writeGlobalMeshConfig precedent, aimed at the LOCAL config path).
-// Returns { configPath, cloneUrl } — `cloneUrl` is the value now on disk (pre-existing
-// or freshly detected), or `null` if neither was available.
-export async function writeRepoPublishedMarker({
-  configPath,
-  workspaceId,
-  now,
-  projectRoot = null,
-  gitRemoteExec = defaultGitRemoteExec,
-}) {
-  let onDisk = {};
-  try {
-    onDisk = await readJson(configPath);
-  } catch {
-    onDisk = {};
-  }
-  if (!isPlainObject(onDisk)) onDisk = {};
-
-  const existingMesh = isPlainObject(onDisk.mesh) ? onDisk.mesh : {};
-  const existingRepo = isPlainObject(existingMesh.repo) ? existingMesh.repo : {};
-
-  // Check first — an already-configured cloneUrl is never replaced by a git-remote
-  // guess, however different the two might be.
-  let cloneUrl = isWellFormedCloneUrl(existingRepo.cloneUrl) ? existingRepo.cloneUrl.trim() : null;
-  if (cloneUrl == null) {
-    cloneUrl = await detectCloneUrlFromGitRemote(projectRoot, gitRemoteExec);
-  }
-
-  onDisk.mesh = {
-    ...existingMesh,
-    repo: {
-      ...existingRepo,
-      ...(cloneUrl != null ? { cloneUrl } : {}),
-      published: true,
-      publishedAt: now,
-      workspaceId,
-    },
-  };
-  await writeText(configPath, `${JSON.stringify(onDisk, null, 2)}\n`);
-  return { configPath, cloneUrl };
-}
+// The marker WRITER (`writeRepoPublishedMarker` + its git-remote detection and the
+// clone-URL shape rule) moved to mesh-repo-marker.mjs (m42 wave (d) leg d1) — the
+// worker's checkout path writes the same marker, and reaching UP into this command
+// module for it was the tree's one confirmed import cycle. This file keeps the
+// VERB: marker + immediate snapshot, and its face.
 
 // Overlay the published marker onto a loaded workspace's IN-MEMORY config so the
 // immediate publishGlobalWorkSnapshot sees mesh.repo.published === true (the ADR-010
@@ -190,3 +95,56 @@ export async function publishRepoToMesh(ws, ctx = {}) {
     warning: propagation.warning ?? null,
   };
 }
+
+// mesh:repo-publish — the registered Command over the core above (m42 wave (d)
+// leg d1, wave-3 tail): `aof mesh repo publish` rides its THREE-WORD route
+// through the route table + the ONE generic face (the four-word notion routes
+// precedent); cli.mjs's meshRepoCommand face copy is deleted, leaving only the
+// no-verb/unknown-verb shim the route table cannot express. A failed snapshot
+// stays a non-fatal warning line (the marker still lands); only a real fault
+// is a thrown, coded error the face envelopes.
+export const meshRepoPublishCommand = {
+  id: "mesh:repo-publish",
+  input: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+
+  async run(_input, ctx) {
+    return await publishRepoToMesh(ctx.workspace, {});
+  },
+
+  cli: {
+    route: ["mesh", "repo", "publish"],
+    spec: {
+      usage: "aof mesh repo publish [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
+    argv: (positionals) => {
+      guardMeshPositionals("repo publish", positionals);
+      return {};
+    },
+
+    render(result) {
+      const lines = [
+        `Published ${result.projectRoot} into the mesh as workspace ${result.workspaceId}.`,
+        `Marked as a mesh repo in ${result.configPath}.`,
+      ];
+      lines.push(
+        result.cloneUrl
+          ? `Clone URL: ${result.cloneUrl}`
+          : "Clone URL: none configured and none detected from `git remote get-url origin` — a worker clone-miss for this workspace will fail loud (assignment-repo-unavailable) until one is set.",
+      );
+      if (!result.published && result.warning) {
+        lines.push(`warning: the snapshot did not land (${result.warning.code}): ${result.warning.message}`);
+      } else {
+        lines.push("Snapshot written to the global mesh store.");
+      }
+      return lines.join("\n");
+    },
+
+    json: (result) => ({ ok: true, ...result }),
+  },
+};

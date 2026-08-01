@@ -1,14 +1,18 @@
 // Shared fixture builder for the milestone 35 / story 00 assign/withdraw/repo-gate
 // test suites — a hermetic AOF_GLOBAL_HOME v3 store + a resolvable work item + a
 // seeded node registry (the m34 global-store/global-node-registry test convention).
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { openGlobalWorkProjectionStore, workspaceIdFor } from "../../src/global-work-store.mjs";
 import { loadWorkspace } from "../../src/work.mjs";
 
 export async function withMeshAssignFixture(fn, { seedItems = ["00"] } = {}) {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-mesh-assign-"));
+  // realpath the root: macOS's os.tmpdir() is a symlink (/var → /private/var),
+  // and a SPAWNED CLI's process.cwd() is the REAL path — a raw mkdtemp root
+  // would make the fixture's path-derived workspaceId disagree with the id the
+  // spawned CLI derives, so cross-process scenarios could never match rows.
+  const tmp = await realpath(await mkdtemp(path.join(os.tmpdir(), "aof-mesh-assign-")));
   const home = path.join(tmp, "home");
   const root = path.join(tmp, "repo");
   try {

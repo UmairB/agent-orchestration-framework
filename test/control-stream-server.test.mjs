@@ -474,4 +474,68 @@ export const controlStreamServerTests = [
       });
     },
   },
+  {
+    // 2026-07-27 (the wrong-base retries) — the OWED lane from m42's soak day
+    // (STATE.md §MISSING TESTS): the control's onAssignmentFailure PEEK. A
+    // worker's FAILED status frame reaches the injected sink with its code and
+    // the connection's nodeId; a non-failed frame never does; a sink fault never
+    // crashes the accept loop (the next frame still peeks). End-to-end over the
+    // REAL accept loop on an ephemeral loopback port.
+    name: "control-stream-server/soak-day a failed status frame PEEKS to onAssignmentFailure (code + connection nodeId); a non-failed frame does not; a sink fault never crashes the accept loop",
+    async run() {
+      await withGlobalHome(async ({ env }) => {
+        const peeks = [];
+        let throwNext = false;
+        const server = await startControlStreamServer({
+          peerNodeIds: ["worker-a"],
+          resolveOrigin: (request) => ({ nodeId: request.headers["x-aof-node-id"] ?? null }),
+          storeOptions: { env },
+          onAssignmentFailure: (frame, { nodeId }) => {
+            if (throwNext) {
+              throwNext = false;
+              throw new Error("sink blew up");
+            }
+            peeks.push({ code: frame.code ?? null, assignmentId: frame.assignmentId, nodeId });
+          },
+        });
+        try {
+          const port = server.server.address().port;
+          const ws = new WebSocket(`ws://127.0.0.1:${port}/`, { headers: { "x-aof-node-id": "worker-a" } });
+          const outcome = await waitForOpenOrClose(ws);
+          assert.equal(outcome.opened, true, "the peer is admitted");
+          const send = (frame) => ws.send(JSON.stringify(frame));
+          const waitFor = async (condition, label) => {
+            const start = Date.now();
+            while (!condition()) {
+              if (Date.now() - start > 5000) throw new Error(`timed out waiting for ${label}`);
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          };
+
+          // A failed frame peeks — code preserved, attribution is the CONNECTION.
+          send({ kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "failed", code: "assignment-repo-unavailable", at: NOW });
+          await waitFor(() => peeks.length === 1, "the first peek");
+          assert.deepEqual(peeks[0], { code: "assignment-repo-unavailable", assignmentId: "asg-1", nodeId: "worker-a" });
+
+          // A non-failed frame never peeks; a LATER failed frame proves the loop
+          // processed it (ordered frames on one socket).
+          send({ kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "running", at: NOW });
+          send({ kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-2", state: "failed", code: "push-failed", at: NOW });
+          await waitFor(() => peeks.length === 2, "the second peek");
+          assert.equal(peeks[1].assignmentId, "asg-2", "the running frame between the two failed ones never reached the sink");
+
+          // A THROWING sink is swallowed: the connection lives on and the next
+          // failed frame still peeks.
+          throwNext = true;
+          send({ kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-3", state: "failed", code: "boom-1", at: NOW });
+          send({ kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-4", state: "failed", code: "boom-2", at: NOW });
+          await waitFor(() => peeks.some((peek) => peek.assignmentId === "asg-4"), "the post-fault peek");
+          assert.equal(ws.readyState, WebSocket.OPEN, "the accept loop survived the sink fault — the connection is still open");
+          ws.close();
+        } finally {
+          server.stop();
+        }
+      });
+    },
+  },
 ];

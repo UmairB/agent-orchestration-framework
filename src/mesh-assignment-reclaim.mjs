@@ -18,9 +18,17 @@
 // acd-assignment-reclaim-dual-staleness) — this module holds no parallel heartbeat
 // definition.
 import { isNodeStale, readPresenceRecord, DEFAULT_PRESENCE_STALENESS_SECONDS } from "./mesh-presence.mjs";
-import { isStale, readRuns, applyTransition } from "./run-store.mjs";
+import { isStale, readRuns } from "./run-store.mjs";
 import { findWork } from "./work.mjs";
-import { updateAssignmentState, isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
+import { isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
+// m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal guards
+// in front of EVERY write; this tick previously had none of its own).
+import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
+// m42 wave (d) leg d4 (port 2) — the SHARED run-reclaim edge. This tick force-failed
+// the run with its own inline copy of the reclaim transition and then rolled nothing
+// back and published nothing; the restart scan did the opposite half inline at its
+// own call site. Both now settle here, so both inherit the declared cascade.
+import { transitionRunReclaimed } from "./effects/run-transitions.mjs";
 // milestone 35 / ADR-008 — runControlDispatchReclaimTick (bottom of this file) is the
 // control-side driver's DATA-LAYER orchestrator: it owns the ONE store-open call for
 // BOTH halves (dispatch scan + reclaim), so mesh-launcher.mjs itself never imports
@@ -32,7 +40,11 @@ import { openGlobalWorkProjectionStore, readWorkItemRuns } from "./global-work-s
 // (which lifecycle command the worker runs). The dispatch call site below reads the
 // operator-chosen phase from the additive side-table and maps it to the command string;
 // the refine default above delegates to the SAME mapper.
-import { readAssignmentPhase, assignmentDirectiveCommand, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
+import { readAssignmentPhase, assignmentDirectiveCommand, phaseRunsOnItemBranch, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
+import { headCommit } from "./mesh-worktree.mjs";
+import { existsSync } from "node:fs";
+// m42 item 3 — a log-channel fault is reported, never thrown into the tick.
+import { reportDegrade } from "./degrade.mjs";
 
 // The PRODUCTION row source: every assignment row for `workspaceId`, off the SAME
 // bulk reader story 03's status shape already uses (no second query surface).
@@ -156,22 +168,45 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
     );
     if (!shouldReclaim) continue;
 
-    // Force-fail the run runtime_offline, retryable (reusing the EXACT applyTransition
-    // edge reclaimStaleRuns itself uses — the single source of "how a run is
-    // reclaimed", never a second write path). LOCAL records only: a streamed record
+    // Force-fail the run runtime_offline, retryable — through the ONE reclaim edge
+    // the restart scan also uses (m42 wave (d) leg d4, port 2: the comment here used
+    // to CLAIM that and be a second copy of it). The run.completed it raises carries
+    // the declared cascade, so a control-side reclaim now rolls the item's status
+    // back and refreshes the projection exactly as the restart-time reclaim always
+    // did — the half this path silently lacked. LOCAL records only: a streamed record
     // is the worker's own disk state mirrored here — the control cannot transition a
     // file on another machine, and the assignment write below IS the control-side
     // fact the fleet/board read.
+    //
+    // NO `workspace` is passed, deliberately: that is the seam's established way of
+    // saying "this process is not the one that should publish here" (the worker's
+    // mint/settle sites and run-retry use it identically). The ROLLBACK — the
+    // consequence this path genuinely lacked — lands, while the projection refresh
+    // stays with the launcher's periodic propagation ticker, which already owns this
+    // workspace's publishing and is running in the same process holding this tick's
+    // open store handle.
     if (localRun != null && item != null) {
-      await applyTransition(item, localRun.runId, "failed", {
-        now,
-        failureReason: "runtime_offline",
-        reclaimedAt: now,
-      });
+      await transitionRunReclaimed(
+        item,
+        { runId: localRun.runId, now },
+        { journalOptions: options.globalWorkStoreOptions ?? {} },
+      );
     }
 
-    const updated = updateAssignmentState(store, row.assignmentId, "reclaimed", { now, reclaimedAt: now });
-    if (updated) reclaimed.push(updated);
+    // THE SHARED TRANSITION (m42 wave (d) leg d3). This writer had NO transition
+    // guards at all — it called the guard-free store writer directly, so a race
+    // between a settling worker frame and this tick could reclaim a row that had
+    // just gone terminal. The rule now runs in front of the write for every
+    // writer: a settled row refuses the reclaim (coded, and the loop moves on),
+    // and no `byNode` is passed because control is the ISSUER, not the holder.
+    const result = await transitionAssignmentState(
+      store,
+      row.assignmentId,
+      "reclaimed",
+      { now, reclaimedAt: now },
+      { journalOptions: options.globalWorkStoreOptions ?? {} },
+    );
+    if (result.applied) reclaimed.push(result.assignment);
   }
 
   return reclaimed;
@@ -206,6 +241,25 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
 
   const store = await openStore(storeOptions);
   try {
+    // The default base-commit resolver (injectable for tests): the launcher's own
+    // workspace when the row is ours, else the descriptor's project_root when
+    // that checkout lives on this machine; anything unresolvable sends null.
+    const resolveDispatchCommit =
+      options.resolveDispatchCommit ??
+      (async (row) => {
+        try {
+          const root =
+            row.workspaceId === workspaceId && typeof ws?.projectRoot === "string"
+              ? ws.projectRoot
+              : (store.db
+                  .prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?")
+                  .get(row.workspaceId)?.project_root ?? null);
+          if (typeof root !== "string" || root.length === 0 || !existsSync(root)) return null;
+          return await headCommit(root);
+        } catch {
+          return null;
+        }
+      });
     const rows = await listAllAssignments(store);
     for (const row of rows) {
       if (row.state !== "assigned") continue;
@@ -231,13 +285,33 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       const command = phase != null
         ? assignmentDirectiveCommand(phase, row.itemRef)
         : defaultAssignmentDirectiveCommand(row.itemRef);
-      // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify runs on
-      // the item's EXISTING active branch (the refine's), so its commits accumulate there
-      // rather than on a fresh branch off main. A refine (or an item with no prior push,
-      // readItemBranch → null) carries no baseBranch and the worker branches fresh.
-      const baseBranch = phase === "continue" || phase === "verify"
+      // VERIFICATION (continue-on-existing-branch, 2026-07-25; REVISED 2026-07-27) —
+      // every non-refine phase runs on the item's EXISTING active branch (the
+      // refine's), so its commits accumulate there rather than on a fresh branch off
+      // main. The predicate is the ONE HOME in mesh-assignment-directive.mjs — a
+      // hand-spelled phase list HERE is exactly how the first `autonomous` dispatch
+      // built milestone 18 off main with none of its refined stories (measured
+      // 2026-07-27).
+      //
+      // M42 (the brittleness cure) — DELIBERATELY CACHE-ONLY here, no derivation:
+      // sending a derived-but-never-pushed name would fail the worker's reuse door
+      // (no local branch, no origin/<branch> to track). A cache miss sends no
+      // baseBranch and the WORKER derives `aof/mesh/<ref>` itself — reusing the
+      // item's line when the checkout already holds it, branching fresh under that
+      // ONE name when it does not. The wrong-base disease dies worker-side: the
+      // fallback now converges instead of minting a per-assignment fork.
+      const baseBranch = phaseRunsOnItemBranch(phase)
         ? readItemBranch(store, row.workspaceId, row.itemRef)
         : null;
+      // M42 base-commit pin (operator, 2026-08-01): stamp the state this
+      // assignment is being made against — the workspace checkout's HEAD on THIS
+      // control node — so a fresh worker worktree builds from exactly that
+      // commit. Resolved from the launcher's own workspace when the row is ours,
+      // else from the descriptor's project_root when that checkout lives on this
+      // machine. Unresolvable (a foreign path, not a repo) sends no commit and
+      // the worker keeps its HEAD fallback — degraded, and said so in the
+      // decision log below.
+      const commit = await resolveDispatchCommit(row);
       const result = streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
         assignmentId: row.assignmentId,
         itemRef: row.itemRef,
@@ -245,12 +319,66 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
         at: now,
         command,
         baseBranch,
+        commit,
       }));
       if (result?.sent) {
         dispatchedIds.add(row.assignmentId);
         console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: directive sent`);
+        // 2026-07-27 (the wrong-base dispatch) — the DECISION, durably. The line
+        // above goes to stderr only and names neither the command nor the base
+        // branch, so the one fact that mattered ("what did the tick actually send")
+        // was unrecoverable after the fact. This entry rides the launcher's log
+        // channel into the durable sink; a sink fault never blocks the dispatch.
+        try {
+          options.onDispatchLog?.({
+            code: "mesh-dispatch",
+            level: "info",
+            message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: ${command}${baseBranch != null ? ` on ${baseBranch}` : " (no base branch — worker converges on the item's derived branch)"}${commit != null ? ` from ${commit.slice(0, 12)}` : " (no base commit resolved — worker builds from its own HEAD)"}`,
+          });
+        } catch (error) {
+          reportDegrade("mesh-assignment-reclaim", error);
+        }
       } else {
         console.error(`[mesh-dispatch] assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: send did not complete (${result?.code ?? "unknown"}); will retry next tick`);
+      }
+    }
+
+    // 2026-07-27 (the duplicate-run wall) — WITHDRAW NOTIFY. A withdrawal used to
+    // be a control-side row flip the holder never learned about: its session kept
+    // running and its run record stayed `running`, walling every future run for
+    // the item behind the duplicate-run guard. Each withdrawn row is now notified
+    // to its target node exactly once per launcher lifetime (the caller-held
+    // `withdrawNotifiedIds` Set, the dispatchedIds discipline); the worker's
+    // handler is idempotent, so a post-restart re-notify of an old row is a
+    // logged no-op there, never a second effect. Feature-gated on the caller
+    // passing the Set — every existing caller/test that doesn't is byte-identical.
+    const withdrawNotifiedIds = options.withdrawNotifiedIds;
+    if (withdrawNotifiedIds != null) {
+      for (const row of rows) {
+        if (row.state !== "withdrawn") continue;
+        if (withdrawNotifiedIds.has(row.assignmentId)) continue;
+        if (streamServer?.directiveTargets?.get?.(row.targetNodeId) == null) continue; // retried once the worker connects
+        const result = streamServer.dispatchDirective({
+          kind: "withdraw",
+          to: row.targetNodeId,
+          assignmentId: row.assignmentId,
+          itemRef: row.itemRef,
+          workspaceId: row.workspaceId,
+          runId: row.runId ?? null,
+          at: now,
+        });
+        if (result?.sent) {
+          withdrawNotifiedIds.add(row.assignmentId);
+          try {
+            options.onDispatchLog?.({
+              code: "mesh-withdraw-notify",
+              level: "info",
+              message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: withdraw notified (run ${row.runId ?? "none"})`,
+            });
+          } catch (error) {
+            reportDegrade("mesh-assignment-reclaim", error);
+          }
+        }
       }
     }
 

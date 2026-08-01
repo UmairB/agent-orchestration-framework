@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assignWork } from "../src/commands/mesh-assign.mjs";
+import { assignWork } from "../src/mesh-assignment.mjs";
 import { withMeshAssignFixture, seedTargetNode, seedAssignment, readAssignmentRows } from "./support/mesh-assign-fixture.mjs";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
 

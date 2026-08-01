@@ -20,10 +20,10 @@
 // scheduled as closed work.
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { runInsertTopLevel } from "./insert-shared.mjs";
+import { INSERT_FLAGS, runInsertTopLevel } from "./insert-shared.mjs";
 import { listItems } from "../work.mjs";
 import { writeText } from "../fs.mjs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 
 const DOD_HEADING_RE = /^##\s+Definition of Done\s*$/;
 const NOTES_HEADING_RE = /^##\s+Notes\s*$/;
@@ -176,6 +176,17 @@ export const promoteGapToChoreCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs workInsertCli branch is deleted.
+    route: ["work", "promote-gap"],
+    spec: {
+      usage: 'aof work promote-gap "<title>" --discharge "…" [--status open] [--at <P>] [--yes] [--json]',
+      flags: {
+        ...INSERT_FLAGS,
+        discharge: { type: "string", description: "the discharge condition the chore must satisfy" },
+        status: { type: "string", description: "the gap's recorded status (default open)" },
+      },
+    },
     // `aof work promote-gap "<gap title>" --discharge "<condition>" [--status open|discharged] [--at P] [--yes] [--json]`.
     argv: (positionals, options) => ({
       title: positionals[0],

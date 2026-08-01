@@ -12,7 +12,7 @@
 // build-first error (code "no-graph") BEFORE any spawn. The success spawn is
 // @manual (needs the live binary).
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { runGraphifyTriage, graphJsonPath } from "../graphify.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 
@@ -52,6 +52,17 @@ export const graphTriageCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "triage"],
+    spec: {
+      usage: "aof graph triage [--mode triage|conflicts] [--pr N] [--json]",
+      flags: {
+        mode: { type: "string", description: "triage mode (triage|conflicts)" },
+        pr: { type: "string", description: "pull-request number to triage" },
+      },
+    },
+
     // `aof graph triage [--mode triage|conflicts] [--pr N]`.
     argv: (positionals, options = {}) => {
       const input = {};

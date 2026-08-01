@@ -98,15 +98,66 @@ export const meshWorkerCompletionDetectionTests = [
         // `idleMs: 0` in these lanes: the QUIET-WINDOW rule has its own lanes below (the
         // premature-done regression); here the outcome MAPPING is what is under test, so
         // the window is collapsed rather than waited out.
-        const settle = (sessionId, extra = {}) => defaultWatchTranscriptCompletion({ cwd, env, sessionId, pollMs: 15, idleMs: 0, ...extra });
+        const settle = (sessionId, extra = {}) => defaultWatchTranscriptCompletion({ cwd, env, sessionId, pollMs: 15, idleMs: 0, declaredIdleMs: 0, ...extra });
 
-        // end_turn (after some tool_use turns), trailing system record -> done
+        // end_turn (after some tool_use turns), trailing system record -> done, UNDECLARED
+        // (no sentinel — the model never explicitly said it finished).
         await write("done-1", [asst("tool_use", "editing files"), asst("end_turn", "Refine is complete. Both suites green."), { type: "system" }]);
-        assert.deepEqual(await settle("done-1"), { outcome: "done" });
+        assert.deepEqual(await settle("done-1"), { outcome: "done", declared: false });
 
-        // the finished turn carries the NEEDS_INPUT sentinel on its own line -> needs-input
+        // the finished turn carries the NEEDS_INPUT sentinel on its own line -> needs-input,
+        // DECLARED (the model explicitly stopped for a human).
         await write("ni-1", [asst("end_turn", "I hit a blocking decision.\nNEEDS_INPUT")]);
-        assert.deepEqual(await settle("ni-1"), { outcome: "needs-input" });
+        assert.deepEqual(await settle("ni-1"), { outcome: "needs-input", declared: true });
+
+        // the finished turn carries the DIRECTIVE_COMPLETE sentinel -> done, DECLARED.
+        await write("dc-1", [asst("end_turn", "All stories built and reviewed.\nAOF_DIRECTIVE_COMPLETE")]);
+        assert.deepEqual(await settle("dc-1"), { outcome: "done", declared: true });
+
+        // ── the INVISIBLE STOP (measured live 2026-07-27, /aof:autonomous 18) ──
+        // The session asked its scope question through the interactive
+        // AskUserQuestion widget instead of printing NEEDS_INPUT and ending its
+        // turn — a pending question is a tool_use turn, so the pre-fix detector
+        // read "still working" and the assignment showed `running` for 28+
+        // minutes while the session sat waiting on a human.
+        const askPending = {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            stop_reason: "tool_use",
+            content: [
+              { type: "text", text: "I need a decision on the scope split." },
+              { type: "tool_use", id: "tu-1", name: "AskUserQuestion", input: { questions: [] } },
+            ],
+          },
+        };
+        await write("ask-1", [asst("tool_use", "working"), askPending]);
+        // m42 interactive worker terminals: the pending flag marks this as a LIVE
+        // question (answerable through the terminal) — the watch reports it
+        // immediately but parks it only after the LONG window.
+        assert.deepEqual(await settle("ask-1"), { outcome: "needs-input", declared: true, pending: true }, "an UNANSWERED AskUserQuestion is a session waiting on a human — needs-input, declared, and PENDING (live)");
+
+        // The SAME question WITH its answer behind it is a live session again —
+        // never settles (the next assistant turn is coming).
+        const askAnswered = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu-1", content: "Do the split" }] } };
+        await write("ask-2", [asst("tool_use", "working"), askPending, askAnswered]);
+        const ac3 = new AbortController();
+        const answeredP = settle("ask-2", { signal: ac3.signal });
+        await new Promise((r) => setTimeout(r, 60));
+        ac3.abort();
+        assert.equal(await answeredP, null, "an ANSWERED question is a working session — nothing settles");
+
+        // An ordinary pending tool (Bash mid-run) is genuinely still working.
+        const bashPending = {
+          type: "assistant",
+          message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "tu-2", name: "Bash", input: { command: "npm test" } }] },
+        };
+        await write("ask-3", [bashPending]);
+        const ac4 = new AbortController();
+        const bashP = settle("ask-3", { signal: ac4.signal });
+        await new Promise((r) => setTimeout(r, 60));
+        ac4.abort();
+        assert.equal(await bashP, null, "a pending ORDINARY tool call never reads as needs-input");
 
         // a transcript whose last turn is tool_use is STILL WORKING — it never settles.
         await write("work-1", [asst("tool_use", "still editing")]);
@@ -187,7 +238,104 @@ export const meshWorkerCompletionDetectionTests = [
         await write([asst("tool_use", "build green"), asst("end_turn", "All three agents finished. Milestone complete.")]);
         await new Promise((r) => setTimeout(r, 30));
         clockMs += IDLE + 1;
-        assert.deepEqual(await watch, { outcome: "done" }, "a fully-quiet idle window after a real end_turn settles done");
+        assert.deepEqual(await watch, { outcome: "done", declared: false }, "a fully-quiet idle window after a real end_turn settles done");
+        ac.abort();
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    },
+  },
+
+  // ── the SESSION-TREE quiet clock (operator-verified truncation #2, 2026-07-26) ──
+  //
+  // The 5-minute parent-file window truncated `/aof:continue 18` AGAIN: the parent
+  // ended its turn ("waiting for 3 background agents"), its OWN transcript went quiet,
+  // and the real work streamed into `<sessionId>/subagents/*.jsonl` — files the watch
+  // never looked at. The quiet clock now reads the whole session tree.
+  {
+    name: "session-tree: an end_turn parent over a STILL-WRITING subagent transcript is never quiet — only tree-wide silence settles",
+    run: async () => {
+      const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-completion-tree-"));
+      try {
+        const env = { CLAUDE_CONFIG_DIR: path.join(tmp, "cfg") };
+        const cwd = path.join(tmp, "wt");
+        const dir = claudeProjectsDir({ cwd, env });
+        const subDir = path.join(dir, "tree-1", "subagents");
+        await mkdir(subDir, { recursive: true });
+        const asst = (stop, text) => ({ type: "assistant", message: { role: "assistant", stop_reason: stop, content: [{ type: "text", text }] } });
+        await writeFile(
+          path.join(dir, "tree-1.jsonl"),
+          `${JSON.stringify(asst("end_turn", "Waiting for 3 background agents to finish."))}\n`,
+          "utf8",
+        );
+
+        let clockMs = 2_000_000;
+        const now = () => clockMs;
+        const IDLE = 15 * 60 * 1000;
+        const ac = new AbortController();
+        const watch = defaultWatchTranscriptCompletion({ cwd, env, sessionId: "tree-1", pollMs: 5, idleMs: IDLE, declaredIdleMs: 10_000, now, signal: ac.signal });
+
+        // The parent transcript NEVER changes again. A background developer keeps
+        // writing its own transcript — under the pre-fix parent-only clock the parent
+        // has been "quiet" for the whole window right here, and the run was killed.
+        clockMs += IDLE + 1;
+        await writeFile(path.join(subDir, "dev-a.jsonl"), `{"progress":1}\n`, "utf8");
+        await new Promise((r) => setTimeout(r, 60));
+        clockMs += IDLE + 1;
+        await writeFile(path.join(subDir, "dev-a.jsonl"), `{"progress":1}\n{"progress":2}\n`, "utf8");
+        await new Promise((r) => setTimeout(r, 60));
+        assert.equal(
+          await Promise.race([watch, Promise.resolve("STILL-WATCHING")]),
+          "STILL-WATCHING",
+          "a subagent still writing its transcript IS session activity — the parked parent must never read as quiet",
+        );
+
+        // The whole tree goes quiet for the full window -> the undeclared end_turn settles.
+        await new Promise((r) => setTimeout(r, 30));
+        clockMs += IDLE + 1;
+        assert.deepEqual(await watch, { outcome: "done", declared: false }, "tree-wide silence for the whole window settles the undeclared outcome");
+        ac.abort();
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "declared completion: the DIRECTIVE_COMPLETE sentinel settles after the SHORT confirmation window, not the long fallback",
+    run: async () => {
+      const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-completion-declared-"));
+      try {
+        const env = { CLAUDE_CONFIG_DIR: path.join(tmp, "cfg") };
+        const cwd = path.join(tmp, "wt");
+        const dir = claudeProjectsDir({ cwd, env });
+        await mkdir(dir, { recursive: true });
+        const asst = (stop, text) => ({ type: "assistant", message: { role: "assistant", stop_reason: stop, content: [{ type: "text", text }] } });
+        await writeFile(
+          path.join(dir, "decl-1.jsonl"),
+          `${JSON.stringify(asst("end_turn", "Milestone 18 complete: 7/7 stories done.\nAOF_DIRECTIVE_COMPLETE"))}\n`,
+          "utf8",
+        );
+
+        let clockMs = 3_000_000;
+        const now = () => clockMs;
+        const IDLE = 15 * 60 * 1000;
+        const DECLARED = 10_000;
+        const ac = new AbortController();
+        const watch = defaultWatchTranscriptCompletion({ cwd, env, sessionId: "decl-1", pollMs: 5, idleMs: IDLE, declaredIdleMs: DECLARED, now, signal: ac.signal });
+
+        // Let the first ticks anchor the quiet stretch, then advance just under the
+        // short window — still confirming (a declared outcome is not instant-settled).
+        await new Promise((r) => setTimeout(r, 40));
+        clockMs += DECLARED - 1;
+        await new Promise((r) => setTimeout(r, 40));
+        assert.equal(
+          await Promise.race([watch, Promise.resolve("STILL-WATCHING")]),
+          "STILL-WATCHING",
+          "under the short confirmation window a declared outcome has not settled yet",
+        );
+        // Past the short window (nowhere near the long one) — the declaration settles.
+        clockMs += 2;
+        assert.deepEqual(await watch, { outcome: "done", declared: true }, "a declared completion needs only the short confirmation window");
         ac.abort();
       } finally {
         await rm(tmp, { recursive: true, force: true });

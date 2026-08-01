@@ -131,6 +131,58 @@ export function createLockManifest({ actions, desiredOutputs, previousLock, conf
   };
 }
 
+// The one-line human form of a plan/clean action. Moved here from cli.mjs
+// (m42 wave (d) leg d1 — command logic leaves the face file; shared by the
+// assets:clean and assets:apply registry commands).
+export function formatApplyAction(item) {
+  const parts = [
+    `${item.action}: ${item.path}`,
+    item.runtime ? `runtime=${item.runtime}` : null,
+    item.resource ? `source=${item.resource.kind}:${item.resource.id}` : null,
+    item.reason ? `reason=${item.reason}` : null
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+// The friendly (non---verbose) action line + its display helpers. Moved here
+// from cli.mjs with the assets:apply migration (m42 wave (d) leg d1); still
+// imported by the remaining inline work-init/work-update/planning-init faces.
+export function formatFriendlyApplyAction(item, options = {}) {
+  const displayPath = relativeDisplayPath(item.path, options.targetDir);
+  if (options.dryRun) {
+    const verbs = {
+      create: "Would create",
+      update: "Would update",
+      delete: "Would remove",
+      skip: "Would keep",
+      "drift-warning": "Warning"
+    };
+    const verb = verbs[item.action] ?? item.action;
+    if (item.action === "drift-warning") return `drift-warning: ${displayPath} was modified; not overwriting`;
+    return `${verb} ${displayPath}`;
+  }
+
+  const verbs = {
+    create: "Created",
+    update: "Updated",
+    delete: "Removed",
+    skip: "Kept",
+    "drift-warning": "Warning"
+  };
+  if (item.action === "drift-warning") return `drift-warning: ${displayPath} was modified; not overwriting`;
+  return `${successMarker()} ${verbs[item.action] ?? item.action} ${displayPath}`;
+}
+
+export function successMarker() {
+  if (process.stdout.isTTY) return "\u001b[32m\u2713\u001b[0m";
+  return "\u2713";
+}
+
+export function relativeDisplayPath(filePath, targetDir = process.cwd()) {
+  const relativePath = path.isAbsolute(filePath) ? path.relative(targetDir, filePath) : filePath;
+  return relativePath.replaceAll("\\", "/");
+}
+
 export function summarizeLockManifest(manifest) {
   return {
     files: manifest.files.length,

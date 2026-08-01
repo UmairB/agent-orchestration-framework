@@ -20,27 +20,50 @@
 // row is absent (a CLI `aof mesh assign` with no phase is byte-identical to before).
 
 // The closed set of dispatchable phases (the ACD lifecycle verbs a worker can be told
-// to run). Mirrors ui/src/board/action.mjs's own primaryAction kinds (refine → continue
-// → verify) — the SAME three lifecycle verbs, here on the control/dispatch side.
-export const ASSIGNMENT_PHASES = ["refine", "continue", "verify"];
+// to run). The three lifecycle verbs mirror ui/src/board/action.mjs's own primaryAction
+// kinds (refine → continue → verify); `autonomous` is the CASCADE directive (operator,
+// 2026-07-26: "continue xy should be a continuation of the entire milestone. All
+// stories") — the continue door resolves a MILESTONE continue to it, so the worker
+// drives refine → build → verify across the whole item instead of one slice.
+export const ASSIGNMENT_PHASES = ["refine", "continue", "verify", "autonomous"];
 export const DEFAULT_ASSIGNMENT_PHASE = "refine";
 
 export function isAssignmentPhase(value) {
   return typeof value === "string" && ASSIGNMENT_PHASES.includes(value);
 }
 
+// phaseRunsOnItemBranch(phase) — THE ONE HOME for "does this phase run on the
+// item's EXISTING mesh branch". Every phase except `refine` accumulates on the
+// branch the refine created (continue-on-existing-branch, 2026-07-25): a refine
+// mints the branch, everything after builds on it. MEASURED (2026-07-27, the
+// first autonomous dispatch): the dispatch tick hand-spelled
+// `phase === "continue" || phase === "verify"` at its own call site, so the new
+// `autonomous` phase silently fell to the no-baseBranch default — the worker
+// built milestone 18 in a FRESH worktree off main, where none of the refine's
+// stories exist, and the session reasoned from a wrong-base checkout. A phase
+// list spelled anywhere but here is that defect waiting to recur; an unknown
+// phase answers false (the mapper's own refine degrade carries no branch).
+export function phaseRunsOnItemBranch(phase) {
+  return isAssignmentPhase(phase) && phase !== "refine";
+}
+
 // assignmentDirectiveCommand(phase, itemRef) — the phase → whole-command-string mapper
 // the worker types into its interactive `claude` PTY. `refine` carries `--autonomous`
 // (the headless-worker cascade — a worker has no human to stop at each sub-step, exactly
 // the pre-existing default); `continue`/`verify` do NOT (neither command's argument-hint
-// accepts `--autonomous` — src/bundle/commands/{continue,verify}.md). An unknown phase
-// degrades to the refine default (never a blank/garbage command typed into a live PTY).
+// accepts `--autonomous` — src/bundle/commands/{continue,verify}.md). `autonomous` is
+// the whole-item cascade (`/aof:autonomous <ref>` — src/bundle/commands/autonomous.md
+// takes a single NN range): drive the item refine → build → verify until done, stopping
+// only for a genuine human gate. An unknown phase degrades to the refine default (never
+// a blank/garbage command typed into a live PTY).
 export function assignmentDirectiveCommand(phase, itemRef) {
   switch (phase) {
     case "continue":
       return `/aof:continue ${itemRef}`;
     case "verify":
       return `/aof:verify ${itemRef}`;
+    case "autonomous":
+      return `/aof:autonomous ${itemRef}`;
     case "refine":
     default:
       return `/aof:refine ${itemRef} --autonomous`;
@@ -86,22 +109,25 @@ export function readAssignmentPhase(store, assignmentId) {
   return row?.phase ?? null;
 }
 
-// ── the item → ACTIVE mesh branch map (VERIFICATION, continue-on-existing-branch
-// 2026-07-25) ────────────────────────────────────────────────────────────────
+// ── the item → ACTIVE mesh branch CACHE (VERIFICATION, continue-on-existing-branch
+// 2026-07-25; DEMOTED to a cache by the m42 brittleness cure, 2026-07-31) ─────
 //
-// A worker's refine runs in a dedicated worktree on a per-assignment branch
-// (`aof/mesh/<ref>-<assignmentId>`) and pushes it home — but that branch is NOT merged
-// to main, so a FRESH continue assignment (a new worktree from main HEAD) would build
-// against a base WITHOUT the refine's contract (measured: item 18's refine — 7 stories +
-// ADRs — stranded on `aof/mesh/18-73ab17b2…`, never on main). The operator's ask: a
-// continue must run ON THAT EXISTING branch, so the work accumulates on ONE branch per
-// item across refine → continue → verify (no new branch, no fresh-from-main worktree).
-//
-// This map is how the control resolves "that branch": whenever an assignment's push
-// SUCCEEDS (a `done` frame, or a recover-push), the pushed branch is recorded here keyed
-// by (workspace_id, item_ref). At continue/verify dispatch the tick reads it and carries
-// it to the worker as the directive's `baseBranch`. Additive, lazily created (same
-// discipline as the phase table above); never touched by publishWorkspaceSnapshot.
+// Under m38's convention a worker's work lived on a per-assignment branch
+// (`aof/mesh/<ref>-<assignmentId>`) that ONLY this table remembered — every consumer
+// had to remember the lookup, and forgetting it was the measured wrong-base dispatch
+// (item 18's refine — 7 stories + ADRs — stranded on `aof/mesh/18-73ab17b2…`, a fresh
+// continue building from main without them). The m42 cure makes the branch DERIVABLE
+// (`meshItemBranchName(ref)` → `aof/mesh/<ref>`, one branch per item), so this table
+// is now a CACHE, not the only memory:
+//   - a HIT wins (continuity): pre-cure items' work lives on the old suffixed names,
+//     and a reindexed item's on its pre-rename name (a renumber does not rename the
+//     origin branch) — the cache is what still knows that.
+//   - a MISS falls back to the derivation, which CONVERGES on the item's own line
+//     instead of forking a new per-assignment branch nobody records.
+// Whenever an assignment's push SUCCEEDS (a `done` frame, or a recover-push), the
+// pushed branch is recorded here keyed by (workspace_id, item_ref); the dispatch tick
+// reads it (cache-first) into the directive's `baseBranch`. Additive, lazily created
+// (same discipline as the phase table above); never touched by publishWorkspaceSnapshot.
 export function ensureItemBranchTable(store) {
   store.db.exec(`
     CREATE TABLE IF NOT EXISTS global_item_branches (

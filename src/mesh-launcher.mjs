@@ -25,11 +25,12 @@
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { globalMeshPaths } from "./workspace.mjs";
 import { probeFabric, selfAddress, resolvePeers, fabricGuidance } from "./mesh-fabric.mjs";
 import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
-import { aofVersion } from "./commands/mesh-identity.mjs";
+import { packageVersionString } from "./asset-base.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
 import { listItems, loadWorkspace } from "./work.mjs";
 import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
@@ -41,13 +42,20 @@ import { createWorkerStreamClient, createWorkerWsTransport } from "./worker-stre
 import { startControlStreamServer, buildDirectiveFrame, DEFAULT_HEARTBEAT_WINDOW_SECONDS } from "./control-stream-server.mjs";
 // milestone 35 / story 02 (ADR-004) — the accepted-directive execution handler
 // client.onDirective(...) registers below.
-import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
+import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, createMeshWorkerWithdrawHandler, createMeshWorkerTerminalInputHandler, createMeshWorkerTerminalResumeHandler, settleStrandedRunRecords, listActiveWorktrees, listStrandedWorktreeAssignments, checkoutRootForWorktree, meshCheckoutPath, resolveCloneUrl, ensureWorktreeTrusted, INTERACTIVE_COMMAND_READY_DELAY_MS } from "./mesh-worker-execution.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. The control
 // tick drains recovery requests, mints the write credential, and dispatches a
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
 // commit+push handler on the SAME client (createMeshRecoveryPushHandler, above).
 import { runRecoveryPushDispatchTick } from "./mesh-recovery-push.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
+// (2026-07-27, the `direct` fabric cutover) — CONNECTION IDENTITY BY CREDENTIAL. The
+// control stream server deliberately does not import this surface itself (its own
+// header: the credential/roster/enrollment surface is a heavier boundary than the
+// server's admission gate warrants), so THIS launcher — which already owns config,
+// the workspace handle and every other injected provider — builds the resolver and
+// hands it down through the server's existing `resolveOrigin` seam.
+import { readRegistry, verifyCredential } from "./mesh-registry.mjs";
 import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, `aof:continue 38/06`
 // closing BLOCKER F-38.06 — the HYBRID transport). An option-(a) draft (push the
@@ -67,6 +75,12 @@ import { readMeshLauncherLockStatus } from "./mesh-launcher-lock.mjs";
 // `createTerminalRelayPushTransport` is used ONLY on the CONTROL side (the loopback
 // push into the broker) — never on the worker side.
 import { createTerminalRelayPushTransport } from "./mesh-terminal-relay-bridge.mjs";
+// m42 "interactive worker terminals" — the INPUT direction (T14 operator-overridden).
+// The serve process SELF-SUBSCRIBES to its own loopback broker (the same subscriber
+// machinery the fleet mirror uses) and hands inbound frames to the input router,
+// which routes a valid terminal-input down the worker's admitted stream connection.
+import { createTerminalMirrorSubscriberTransport, startTerminalMirrorSubscriber } from "./mesh-terminal-mirror.mjs";
+import { createTerminalInputRouter } from "./mesh-terminal-input.mjs";
 // milestone 35 / ADR-008 — the control-side dispatch/reclaim driver's DATA-LAYER
 // orchestrator (owns the ONE store-open for both the dispatch scan AND the ADR-005
 // reclaim call — this launcher module itself imports NO SQLite-store module
@@ -84,6 +98,11 @@ import { runControlDispatchReclaimTick } from "./mesh-assignment-reclaim.mjs";
 import { resolveCloneCredentialProvider, resolveWriteCredentialProvider } from "./mesh-clone-credential-provider.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
+// m42 wave (d) leg d3 — the durable outbox: this node ships the remote-locus facts
+// it owes on every stream tick, and pays them off against the control's acks.
+import { openEffectsJournal } from "./effects/journal.mjs";
+import { drainOutbox, applyEffectAck } from "./effects/outbox.mjs";
+import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
 
 const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
@@ -399,16 +418,66 @@ function emitWarning(sink, warning, options) {
   }
 }
 
+// recoverSkippedViaMeshCheckout(skipped, options) — the WORKER-side descriptor
+// fallback (m42 follow-up; measured 2026-07-26: the Mac's remote log ring was 259/260
+// copies of `workspace-workdir-unresolvable` for `no-descriptor`, drowning every
+// other line — the workspace descriptor lives in the CONTROL's store, so a worker's
+// membership row for an assignment-cloned repo can NEVER resolve through its own
+// descriptor table). On a worker, the workspace IS its mesh checkout: a
+// `no-descriptor` skip whose `meshCheckoutPath(workspaceId)` exists resolves to that
+// checkout's own configured work dir (loadWorkspace — the launcher's existing
+// config-precedence seam, never a re-parse) and joins the aggregation like any
+// registered workspace. Only a skip with NO checkout (or one whose work dir is
+// genuinely absent) stays a loud warning — the diagnostic survives; the every-5s
+// false alarm dies.
+async function recoverSkippedViaMeshCheckout(skipped, options) {
+  const recovered = [];
+  const remaining = [];
+  for (const skip of skipped) {
+    if (skip.reason !== "no-descriptor") {
+      remaining.push(skip);
+      continue;
+    }
+    try {
+      const checkoutPath = meshCheckoutPath(skip.workspaceId, options?.globalWorkStoreOptions ?? {});
+      if (!(await stat(checkoutPath)).isDirectory()) {
+        remaining.push(skip);
+        continue;
+      }
+      const checkoutWs = await loadWorkspace(checkoutPath, undefined, { env: options?.globalWorkStoreOptions?.env });
+      const workDir = typeof checkoutWs?.workDir === "string" && checkoutWs.workDir.length > 0 ? checkoutWs.workDir : null;
+      if (workDir == null || !(await stat(workDir)).isDirectory()) {
+        remaining.push(skip);
+        continue;
+      }
+      recovered.push({ workspaceId: skip.workspaceId, workDir, projectRoot: checkoutPath });
+    } catch (error) {
+      // No checkout on this machine is the EXPECTED miss (ENOENT) — the skip stands
+      // and the warning below reports it; a second degrade event would just re-flood
+      // the sink this fallback exists to quiet. Any OTHER fault is a real event.
+      if (error?.code !== "ENOENT") reportDegrade("mesh-launcher", error);
+      remaining.push(skip);
+    }
+  }
+  return { recovered, remaining };
+}
+
 // `warningsSink` (default a scratch array — production always passes the real
 // `launcherWarnings` accumulator) is where FINDING F11's LOUD-skip diagnostics land:
 // a workspace resolveNodeWorkspaces skipped (its resolved absolute work dir
 // genuinely doesn't exist) is surfaced HERE as a coded warning — never a silent
 // `continue` that lets a zero/short aggregation masquerade as healthy. The frozen
 // presence record itself (ADR-001's five keys) carries NONE of this — warnings are
-// a launcher-facing diagnostic, never a wire-shape change.
+// a launcher-facing diagnostic, never a wire-shape change. A `no-descriptor` skip is
+// first offered the mesh-checkout fallback above; only the genuinely unresolvable
+// remainder warns.
 async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsSink = []) {
   const registryResult = await resolveNodeWorkspaces(nodeId, options);
-  for (const skip of registryResult.skipped ?? []) {
+  const { recovered, remaining } = await recoverSkippedViaMeshCheckout(registryResult.skipped ?? [], options);
+  if (registryResult.ok && recovered.length > 0) {
+    registryResult.workspaces.push(...recovered);
+  }
+  for (const skip of remaining) {
     emitWarning(warningsSink, {
       code: "workspace-workdir-unresolvable",
       message: `Workspace ${skip.workspaceId} work dir could not be resolved (${skip.reason})${skip.workDir ? `: ${skip.workDir}` : ""}.`,
@@ -441,7 +510,7 @@ async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsS
 
   // m42 wave (c) / item 1 — the build stamp rides the presence record (the sixth
   // additive key), so `aof mesh status` answers WHICH build a remote node runs.
-  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: aofVersion(), buildId: buildInfoString(readBuildInfo()) });
+  return assemblePresenceRecord({ nodeId, heartbeatAt: resolveNow(options), activeRuns, sessions, aofVersion: packageVersionString(), buildId: buildInfoString(readBuildInfo()) });
 }
 
 function configuredRelayUrl(config) {
@@ -492,6 +561,42 @@ function peerNodeIdsFrom(peers) {
   return (Array.isArray(peers) ? peers : [])
     .map((peer) => peer?.nodeId)
     .filter((id) => typeof id === "string" && id.length > 0);
+}
+
+// readPresentedCredential(request) — the presented relayAuth token off the ws upgrade's
+// `Authorization` header, tolerant of an optional `Bearer ` prefix. Byte-identical in
+// behaviour to mesh-relay.mjs's own reader (the enrollment surface's auth gate), so the
+// two admission surfaces agree on how a credential is carried. A missing/blank header
+// is an ABSENT credential (null), which the caller turns into a refusal.
+function readPresentedCredential(request) {
+  const header = request?.headers?.authorization;
+  if (typeof header !== "string") return null;
+  const value = header.replace(/^Bearer\s+/i, "").trim();
+  return value.length > 0 ? value : null;
+}
+
+// createCredentialOriginResolver(ws) — the control server's `resolveOrigin`, resolving a
+// connection's identity from the ENROLLMENT CREDENTIAL it presents rather than from its
+// remote address (2026-07-27). Returns { nodeId, authoritative: true } — `authoritative`
+// tells the server this decision already subsumes its roster gate (verifyCredential
+// checks BOTH roster membership and the revocation list), which is what lets a node be
+// admitted on a fabric that has no peer table to be in.
+//
+// A failed verification returns { nodeId: null, authoritative: true } — still
+// authoritative, deliberately: a bad credential must be a REFUSAL, never a silent
+// fall-through to the address join (that would let an un-credentialed peer in by
+// virtue of its IP, re-opening exactly the hole this closes).
+//
+// SECURITY T2 — the registry is re-read PER CONNECTION (never a serve-start snapshot),
+// so a node revoked after its credential was issued is denied on its very next connect.
+function createCredentialOriginResolver(ws) {
+  return async (request) => {
+    const presented = readPresentedCredential(request);
+    if (presented == null) return { nodeId: null, authoritative: true };
+    const registry = await readRegistry(ws);
+    const verdict = verifyCredential(registry, presented);
+    return { nodeId: verdict?.ok === true ? verdict.nodeId : null, authoritative: true };
+  };
 }
 
 // defaultConnectWorkerStreamClient(client, ws) — review fix P1.7b: push an INITIAL
@@ -667,6 +772,9 @@ export async function startLauncher(ws, options = {}) {
   // needs no launcher-held handle — it rides the existing stream client.)
   let relayBroker = null;
   let controlTerminalPush = null;
+  // m42 "interactive worker terminals" — the serve process's SELF-subscription to its
+  // own loopback broker (the input direction's inbound leg). Disposed in stop().
+  let terminalInputSubscriber = null;
   // VERIFICATION (2026-07-26) — the per-(node, workspace, code) throttle clock for the
   // control server's refused-frame reports (wired below). Held on the launcher, not the
   // server, so it lives exactly as long as this daemon does.
@@ -736,6 +844,13 @@ export async function startLauncher(ws, options = {}) {
       ...(servicePort != null ? { port: servicePort } : {}),
       peerNodeIds: peerNodeIdsFrom(peers),
       peersByAddress: peers,
+      // CONNECTION IDENTITY BY CREDENTIAL (2026-07-27) — a LITERAL key at the
+      // production call site, BEFORE the controlStreamServerOptions test spread, so a
+      // resolver reachable only through that spread can never leave production on the
+      // address join (the F12/F-38.05 discipline). Applies on EVERY fabric: enrollment
+      // issues a credential regardless of fabric, so this is not a `direct`-only path —
+      // it is simply the correct answer to "who is this connection".
+      resolveOrigin: createCredentialOriginResolver(ws),
       httpHandler: createEnrollmentHttpHandler({ config, workspace: ws, now: options?.now ?? null }),
       mintCloneCredential: resolvedMintCloneCredential,
       mintWriteCredential: resolvedMintWriteCredential,
@@ -775,6 +890,14 @@ export async function startLauncher(ws, options = {}) {
           path: null,
         }, options);
       },
+      // 2026-07-27 (the wrong-base retries) — a worker's FAILED frame lands in the
+      // control's durable log WITH its code, so a 2-second deterministic failure
+      // names itself in one `aof mesh logs` read instead of an SSH inspection.
+      onAssignmentFailure: (frame, { nodeId: fromNode } = {}) => emitWarning(launcherWarnings, {
+        code: `assignment-failed:${frame?.code ?? "no-code"}`,
+        message: `worker ${fromNode ?? "?"}: assignment ${frame?.assignmentId ?? "?"} failed${frame?.code ? ` (${frame.code})` : " (the frame carried NO code)"}${frame?.runId ? ` — run ${frame.runId}` : ""}`,
+        path: null,
+      }, options),
       ...(options?.controlStreamServerOptions ?? {}),
     });
 
@@ -799,6 +922,33 @@ export async function startLauncher(ws, options = {}) {
       } catch (error) {
         emitWarning(launcherWarnings, { code: error?.code ?? "relay-broker-start-failed", message: error?.message ?? "The mesh-relay broker failed to start.", path: null }, options);
         relayBroker = null;
+      }
+      // m42 "interactive worker terminals" — the INPUT direction's inbound leg, a
+      // LITERAL production wiring (the F12 discipline): the serve process subscribes
+      // to its OWN broker (the fan-out is broadcast-to-others, so this socket — a
+      // different client than controlTerminalPush's — receives what the mesh-ui
+      // process pushes) and hands every frame to the input router, which is
+      // kind-blind to everything but terminal-input and routes a valid frame down
+      // the worker's admitted stream connection via the SAME dispatchDirective seam
+      // the withdraw notify uses. Reuses the mirror's subscriber machinery whole
+      // (parse + backoff + reconnect) — the router deliberately keeps the mirror's
+      // own `apply` contract so no second transport path exists. A start fault is a
+      // degraded input lane, never a dead daemon.
+      if (relayBroker != null && streamServer != null) {
+        const inputRouter = createTerminalInputRouter({
+          dispatchDirective: (directive) => streamServer.dispatchDirective(directive),
+          now: () => resolveNow(options),
+          onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-input", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        });
+        try {
+          terminalInputSubscriber = await startTerminalMirrorSubscriber({
+            transport: createTerminalMirrorSubscriberTransport(config),
+            mirror: inputRouter,
+          });
+        } catch (error) {
+          emitWarning(launcherWarnings, { code: "terminal-input-subscriber-failed", message: error?.message ?? "The terminal-input relay subscriber failed to start.", path: null }, options);
+          terminalInputSubscriber = null;
+        }
       }
     }
   } else if (role === "worker" && options?.streamClient !== false) {
@@ -829,7 +979,15 @@ export async function startLauncher(ws, options = {}) {
       // the one existing "print it live in production, no-op under test" seam.
       emitWarning(launcherWarnings, { code: "worker-stream-dial-target", message: `resolving worker stream to ${dialUrl}`, path: null }, options);
       const createTransport = options?.createWorkerWsTransport ?? createWorkerWsTransport;
-      transport = createTransport(dialUrl, options?.workerWsTransportOptions ?? {});
+      // The enrollment credential rides the ws upgrade (2026-07-27) — it is how the
+      // control node identifies this connection on a fabric with no address oracle.
+      // A LITERAL key here, BEFORE the workerWsTransportOptions test spread, so the
+      // production path can never be credential-less by virtue of a test seam (the
+      // F12 discipline this launcher keeps for every injected provider).
+      transport = createTransport(dialUrl, {
+        credential: config?.mesh?.credential?.relayAuth ?? null,
+        ...(options?.workerWsTransportOptions ?? {}),
+      });
     } else if (resolved.message) {
       emitWarning(launcherWarnings, { code: "worker-stream-target-unresolved", message: resolved.message, path: null }, options);
     }
@@ -862,6 +1020,11 @@ export async function startLauncher(ws, options = {}) {
         loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
         nodeId,
         sendAssignmentStatus: (...args) => client.sendAssignmentStatus(...args),
+        // m42 wave (d) leg d3 — the outbox transport, a LITERAL key here (the F12
+        // discipline: a production seam supplied outside the test-injection spread
+        // so it genuinely exists on a real worker), closing over this worker's own
+        // stream client. Terminal reports ride it; posture frames do not.
+        sendEffectStep: (envelope) => client.sendEffectStep(envelope),
         // milestone 38 / story 01 task 05 (ADR-009, finding F12) — THE FIX: the
         // credential resolver, supplied as a LITERAL key HERE, outside the
         // workerExecutionOptions test-injection spread below, closing over this
@@ -884,6 +1047,11 @@ export async function startLauncher(ws, options = {}) {
         // stream-client.mjs). Called ONLY at the push seam
         // (pushWorktreeBranch/mesh-worker-execution.mjs), never speculatively.
         requestWriteCredential: (request) => client.requestWriteCredential(request),
+        // 2026-07-27 (the wrong-base dispatch) — the worker's worktree-base
+        // decision record, wired to the SAME launcher log channel every other
+        // warning rides (durable sink + the stream forward into the control's
+        // node_logs ring). A literal key, the F12 discipline.
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "worker-execution", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
         // milestone 38 / story 06 — ADR-014 AMENDMENT (2026-07-19, closing BLOCKER
         // F-38.06 — the HYBRID transport): THE FIX — the worker terminal-bridge
         // PRODUCER, a LITERAL key HERE (never reachable only through the
@@ -975,6 +1143,86 @@ export async function startLauncher(ws, options = {}) {
         ...(options?.workerExecutionOptions ?? {}),
       });
       client.onRecoveryPush(recoveryHandler);
+
+      // 2026-07-27 (the duplicate-run wall) — the control-driven WITHDRAW handler,
+      // registered on the SAME client beside onDirective/onRecoveryPush: kill any
+      // live session for a withdrawn assignment and settle its run record as
+      // cancelled, so the duplicate-run guard never walls the item's future runs
+      // behind a ghost `running` record. Same literal-key discipline; the log
+      // channel is the SAME emitWarning wiring the execution handler's onLog uses.
+      const withdrawHandler = createMeshWorkerWithdrawHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "withdraw-notify", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        now: nowFn,
+      });
+      client.onWithdraw?.((frame) => {
+        Promise.resolve(withdrawHandler(frame)).catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
+      });
+
+      // m42 wave (d) leg d3 — THE DURABLE RECEIPT. The control node's verdict for
+      // one shipped effect step, correlated by (eventId, reactorKey): `ok` pays
+      // the step, a coded refusal ends it (control has DECIDED — redelivering
+      // would loop forever against the same answer), a bare fault leaves it owed
+      // for the next drain. Registered beside the withdraw lane it mirrors; an
+      // unregistered ack simply means the step stays pending and redelivers, so
+      // nothing is ever lost by this handler being absent.
+      client.onEffectAck?.((frame) => {
+        (async () => {
+          const journal = await openEffectsJournal(options?.globalWorkStoreOptions ?? {});
+          try {
+            applyEffectAck(journal, frame, { now: resolveNow(options) });
+          } finally {
+            journal.close();
+          }
+        })().catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
+      });
+
+      // m42 "interactive worker terminals" — the terminal-input DOWN-frame's
+      // handler, registered beside the withdraw lane it mirrors: write ONLY the
+      // live PTY whose captured session id matches the frame's. Same literal-key
+      // discipline, same log channel.
+      const terminalInputHandler = createMeshWorkerTerminalInputHandler({
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-input", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+      });
+      client.onTerminalInput?.((frame) => {
+        try {
+          terminalInputHandler(frame);
+        } catch (error) {
+          reportDegrade("mesh-launcher", error);
+        }
+      });
+
+      // m42 quick-fix — the control-driven RESUME of a parked/killed session
+      // (`aof mesh terminal-resume`): spawn `claude --resume` in the assignment's
+      // retained worktree, stream its PTY UP under the RESUMED session id (the
+      // fleet's existing tuple revives), and bind the input registry so the
+      // interactive terminal types into it. Same literal-key + log-channel
+      // discipline as every handler above.
+      const terminalResumeHandler = createMeshWorkerTerminalResumeHandler({
+        loadWs: options?.workerExecutionLoadWs ?? (() => Promise.resolve(ws)),
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        nodeId,
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "terminal-resume", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+        onOutputChunk: (chunk, sessionId) => client.sendTerminalFrame(sessionId, String(chunk)),
+        onSessionEnd: (sessionId) => client.sendTerminalEnd(sessionId),
+        // The resume is a REAL run: its lifecycle frames ride the same status
+        // seam every bracket outcome does (running/code resumed → captured
+        // session id → done/failed/needs-input).
+        sendAssignmentStatus: (...args) => client.sendAssignmentStatus(...args),
+        now: () => resolveNow(options),
+        commandDelayMs: INTERACTIVE_COMMAND_READY_DELAY_MS,
+        ...(options?.workerExecutionOptions ?? {}),
+      });
+      client.onTerminalResume?.((frame) => {
+        Promise.resolve(terminalResumeHandler(frame)).catch((error) => {
+          reportDegrade("mesh-launcher", error);
+        });
+      });
     }
 
     if (transport != null) {
@@ -1053,6 +1301,10 @@ export async function startLauncher(ws, options = {}) {
   // tick is caught here (the .catch below) and the next tick simply re-attempts —
   // never a daemon crash.
   const dispatchedAssignmentIds = new Set();
+  // 2026-07-27 (the duplicate-run wall) — the withdraw-notify once-guard, the same
+  // caller-held-Set discipline as dispatchedAssignmentIds (best-effort; the
+  // worker's handler is idempotent, so a post-restart re-notify is a no-op there).
+  const withdrawNotifiedAssignmentIds = new Set();
   let controlTickHandle = null;
   let controlDispatchReclaimTicker = null;
   // The driver requires a REAL stream-server handle (a genuine directiveTargets
@@ -1075,15 +1327,26 @@ export async function startLauncher(ws, options = {}) {
     // independently-defaulted store location.
     const storeOptions = options?.controlStreamServerOptions?.storeOptions ?? options?.globalWorkStoreOptions ?? {};
     controlTickHandle = controlDispatchReclaimTicker.start(controlTickSeconds, () => {
+      // RETURNS the settled promise (m42 wave (d) leg d3). A production ticker
+      // ignores it; an INJECTED one (tests) can await the tick's async body
+      // instead of guessing a sleep duration. The suite that drives this seam was
+      // timing-flaky on a fixed 25ms sleep, and the leg's own change — the shared
+      // transition opening the journal — made the race tighter. A tick that can
+      // be awaited is the fix; a longer sleep is a wish.
+      return Promise.all([
       runControlDispatchReclaimTick(ws, streamServer, {
         workspaceId,
         now: resolveNow(options),
         storeOptions,
         buildDirectiveFrame,
         dispatchedIds: dispatchedAssignmentIds,
+        withdrawNotifiedIds: withdrawNotifiedAssignmentIds,
+        // 2026-07-27 — the dispatch DECISION (command + baseBranch) lands in the
+        // durable log channel; level rides the entry (info, not warn).
+        onDispatchLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "mesh-dispatch", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-dispatch-reclaim-tick-failed", message: error?.message ?? "The control dispatch/reclaim tick failed.", path: null }, options);
-      });
+      }),
       // VERIFICATION (live soak 2026-07-25) — drain any operator-requested recovery
       // pushes on the SAME control tick: mint the write credential (the hoisted control
       // provider) and dispatch a recovery-push DOWN-frame to each requested assignment's
@@ -1095,7 +1358,8 @@ export async function startLauncher(ws, options = {}) {
         mintWriteCredential: controlMintWriteCredential,
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-recovery-push-tick-failed", message: error?.message ?? "The control recovery-push dispatch tick failed.", path: null }, options);
-      });
+      }),
+      ]);
     });
   }
 
@@ -1126,6 +1390,27 @@ export async function startLauncher(ws, options = {}) {
         await streamClient.sendPresence(presence);
       }
       await pushActiveWorktreeState(items);
+      // m42 wave (d) leg d3 — THE OUTBOX SWEEP. Every stream tick also ships
+      // whatever remote-locus facts this node still owes: the redelivery half of
+      // at-least-once. This is what turns a report into a fact — a settle raised
+      // while the control node was down is delivered by the first tick after the
+      // connection returns, rather than dying with the socket it was written to.
+      // Best-effort like every other tick body: a drain fault is a degrade, never
+      // a broken stream loop.
+      try {
+        const journal = await openEffectsJournal(options?.globalWorkStoreOptions ?? {});
+        try {
+          await drainOutbox({
+            journal,
+            send: (envelope) => streamClient.sendEffectStep(envelope),
+            now: resolveNow(options),
+          });
+        } finally {
+          journal.close();
+        }
+      } catch (error) {
+        reportDegrade("mesh-launcher-outbox", error);
+      }
     };
 
     // VERIFICATION (live worktree streaming, 2026-07-25) — THE FIX for "the control node
@@ -1232,8 +1517,38 @@ export async function startLauncher(ws, options = {}) {
           message: `reporting stranded worktree assignment ${entry.assignmentId} as failed (daemon restarted — its run cannot be alive)`,
           path: entry.worktreePath,
         }, options);
-        await streamClient.sendAssignmentStatus(entry.assignmentId, "failed", { code: "daemon-restarted" });
+        // m42 wave (d) leg d3 — THE MEASURED FIRE-ONCE DEFECT, cured. STATE
+        // 2026-07-27: "the Mac worker restarted in the ~3-min window while the
+        // control was ALSO down; its `failed/daemon-restarted` report for run
+        // 0017's stranded worktree died on the dead connection, and the control
+        // row read a stale `running` for 35+ min". This is precisely the moment a
+        // worker is LEAST likely to have a live connection — it just started — so
+        // the report goes through the durable outbox: raised into this node's own
+        // journal, shipped when a connection exists, redelivered until the control
+        // acks it. The control's terminal guard still refuses reports for rows
+        // already settled, so a redelivery can never regress one.
+        await reportAssignmentSettled(
+          { assignmentId: entry.assignmentId, state: "failed", code: "daemon-restarted", now: resolveNow(options) },
+          {
+            journalOptions: options?.globalWorkStoreOptions ?? {},
+            sendEffectStep: (envelope) => streamClient.sendEffectStep(envelope),
+            fallbackSend: (...args) => streamClient.sendAssignmentStatus(...args),
+          },
+        );
       }
+      // 2026-07-27 (the ghost-record family, last member) — the report above flips
+      // the ASSIGNMENT; this settles each stranded run's RECORD (failed/
+      // runtime_offline), so the duplicate-run guard never walls the item behind a
+      // record whose process died with the previous daemon.
+      await settleStrandedRunRecords(stranded, {
+        globalWorkStoreOptions: options?.globalWorkStoreOptions,
+        // NOT `nowFn` — that const lives in the worker-branch block ABOVE, out of
+        // scope here: referencing it threw `nowFn is not defined` on EVERY worker
+        // restart (measured on the Mac 2026-07-27 13:49Z), so the ghost-record
+        // settle this block exists for never once ran in production.
+        now: () => resolveNow(options),
+        onLog: (entry) => emitWarning(launcherWarnings, { code: entry.code ?? "startup-reclaim", message: entry.message ?? "", path: null, level: entry.level ?? "info" }, options),
+      });
     })().catch((error) => {
       emitWarning(launcherWarnings, { code: "startup-reclaim-failed", message: error?.message ?? String(error), path: null }, options);
     });
@@ -1255,6 +1570,7 @@ export async function startLauncher(ws, options = {}) {
     streamClient?.stop?.();
     relayBroker?.stop?.();
     controlTerminalPush?.close?.();
+    terminalInputSubscriber?.stop?.();
   };
 
   return {

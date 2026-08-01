@@ -27,14 +27,21 @@ export function primaryAction(item, ctx) {
   // "view" here would open an empty dock and look like it did something. Disabled and
   // labelled with the node — the honest answer is "this is running over there".
   if (item.execution?.active === true) {
-    // With a captured session, running work is WATCHABLE — the dock opens the
-    // fleet's read-only mirror of the worker's live session (m42 item 6: one
-    // terminal surface; a remote session is a SOURCE of the dock, never a second
-    // widget). Without one (the pre-session window), the honest disabled state.
+    // With a captured session, running work is WATCHABLE — and, since m42's
+    // terminal-input path, ANSWERABLE: the dock opens the worker's live session
+    // over the tuple-bound terminal-view socket (one terminal surface; a remote
+    // session is a SOURCE of the dock, never a second widget). A session the
+    // worker reports as WAITING ON A HUMAN (code: needs-input) leads with that —
+    // the affordance is the answer's door, not just a viewport. Without a
+    // captured session (the pre-session window), the honest disabled state.
     if (item.execution.sessionId && item.execution.nodeId) {
+      const needsInput = item.execution.code === "needs-input";
       return {
         kind: "mirror",
-        label: `View terminal — ${item.execution.nodeId}`,
+        label: needsInput
+          ? `Answer on ${item.execution.nodeId}`
+          : `Open terminal — ${item.execution.nodeId}`,
+        needsInput,
         nodeId: item.execution.nodeId,
         sessionId: item.execution.sessionId,
       };

@@ -86,10 +86,16 @@ function assertRunStoreMeshBlind(code) {
   return problems;
 }
 
+// The MINT DOOR the worker uses. m42 wave (d) leg d4 (port 1) moved it from the
+// bare store call to the run store's transition seam (transitionRunStart, which
+// wraps startRun and raises `run.started`) — so the invariant this proof exists
+// for is unchanged and follows the shape: the node id still arrives as DATA in
+// the mint's option bag, never read from config by the store. Either spelling
+// satisfies it; what would fail is the node id ceasing to be an option.
 function assertNodeAsData(code) {
   const problems = [];
-  if (!/startRun\s*\(\s*item\s*,\s*\{[^}]*node\s*:\s*nodeId/.test(code)) {
-    problems.push("startRun is not called with node: nodeId as an option");
+  if (!/(?:startRun|transitionRunStart)\s*\(\s*item\s*,\s*\{[^}]*node\s*:\s*nodeId/.test(code)) {
+    problems.push("the run mint is not called with node: nodeId as an option");
   }
   return problems;
 }
@@ -127,6 +133,7 @@ export const archTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: NODE_ID,
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         spawnRuntime: scriptedSpawnRuntime("done"),
         now: () => "2026-07-09T10:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },

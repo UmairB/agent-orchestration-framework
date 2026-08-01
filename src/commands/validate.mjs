@@ -28,15 +28,25 @@ export const validateCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted. The findings gate
+    // (any finding → exit 1, --json included) rides the cli.exit adapter.
+    route: ["work", "validate"],
+    spec: {
+      usage: "aof work validate [scope] [--json]",
+      flags: {},
+    },
+
     // `aof work validate [scope]` — an optional positional maps onto the input.
     argv: (positionals) => (positionals[0] ? { scope: positionals[0] } : {}),
 
     // Reproduces today's `aof work validate` human output byte-for-byte: the PASS
-    // line (scope-aware via faceCtx) on a clean stream; otherwise the numbered
+    // line (scope-aware) on a clean stream; otherwise the numbered
     // issue list with cwd-relative paths and the trailing test-traceability note.
     render(result, faceCtx = {}) {
+      const scope = faceCtx.positionals?.[0];
       if (result.findings.length === 0) {
-        return `PASS — ${faceCtx.scope ? `${faceCtx.scope} is` : "work stream is"} well-formed.`;
+        return `PASS — ${scope ? `${scope} is` : "work stream is"} well-formed.`;
       }
       const lines = result.findings.map(
         (finding) => `  ${path.relative(process.cwd(), finding.path)} — ${finding.problem}`
@@ -55,6 +65,10 @@ export const validateCommand = {
         path: path.relative(process.cwd(), finding.path),
         problem: finding.problem,
       })),
+
+    // A non-empty findings list is a non-zero exit — today's CLI behaviour,
+    // --json included.
+    exit: (result) => (result.findings.length > 0 ? 1 : 0),
   },
 };
 

@@ -3,7 +3,7 @@
 // lease read."
 //
 // Proofs:
-//  1. Structural — the assign write path (mesh-assign.mjs) enforces "at most one
+//  1. Structural — the assign write path (mesh-assignment.mjs) enforces "at most one
 //     ACTIVE assignment per (workspaceId, itemRef)" by querying global_assignments for
 //     an active row (state IN (assigned, accepted, running)) and refusing
 //     (assignment-already-active); grep asserts the uniqueness query/refusal exists
@@ -17,11 +17,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assignWork } from "../../src/commands/mesh-assign.mjs";
+import { assignWork } from "../../src/mesh-assignment.mjs";
 import { withMeshAssignFixture, seedTargetNode, seedAssignment, readAssignmentRows } from "../support/mesh-assign-fixture.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const assignSourcePath = path.join(repoRoot, "src", "commands", "mesh-assign.mjs");
+const assignSourcePath = path.join(repoRoot, "src", "mesh-assignment.mjs");
 const recordSourcePath = path.join(repoRoot, "src", "assignment-record.mjs");
 
 function assertStructural(source) {

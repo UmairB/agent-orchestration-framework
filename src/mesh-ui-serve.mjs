@@ -75,7 +75,7 @@ import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-
 // here, and no OTHER commands module, mesh-store/presence/registry/sync module, or
 // global-work-store/global-node-registry module is imported (ADR-012 inv.2/4).
 import { loadWorkspace } from "./work.mjs";
-import { assignWork } from "./commands/mesh-assign.mjs";
+import { assignWork } from "./mesh-assignment.mjs";
 // VERIFICATION (UI phase selection, 2026-07-25) — the closed-set validator for the
 // optional `phase` on POST /api/mesh/assign (refine/continue/verify).
 import { isAssignmentPhase } from "./mesh-assignment-directive.mjs";
@@ -89,6 +89,12 @@ import { isAssignmentPhase } from "./mesh-assignment-directive.mjs";
 // genuinely stands up a mirror even before any relay subscriber is wired to it.
 import { WebSocketServer } from "ws";
 import { createTerminalMirror } from "./mesh-terminal-mirror.mjs";
+// m42 "interactive worker terminals" — the INPUT direction's envelope builder. The
+// terminal-view socket is tuple-bound at upgrade time; a browser message is wrapped
+// with THE SOCKET'S OWN (nodeId, sessionId) — never anything read out of the
+// message — so a client can only ever type into the exact session its socket was
+// opened for (no cross-session injection by construction).
+import { buildTerminalInputEnvelope } from "./mesh-terminal-relay-bridge.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
 
@@ -104,6 +110,36 @@ export function meshUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
 
+// m42 wave (d) leg d1 (wave-3 tail) — the NON-BLOCKING probe behind the registered
+// mesh:ui command's run (the launcher seam's probe rule: --json never launches). A
+// pure read of "what WOULD serve": the resolved port/scope/projectDir, whether the
+// built fleet bundle is present (the ui-build-missing precheck), and whether a
+// relay is configured for the terminal-mirror legs (best-effort config read — a
+// non-workspace cwd degrades to relayConfigured:false, the launch path's own
+// posture). Lives HERE so the dist resolution keeps one home — the probe and
+// serveMeshUi can never disagree about where the bundle is.
+export async function meshUiProbe({ projectDir = process.cwd(), port = DEFAULT_MESH_UI_PORT, repoRoot, scope = "global", configPath } = {}) {
+  const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
+  const resolvedProjectDir = path.resolve(projectDir);
+  let relayConfigured = false;
+  try {
+    const { config } = await loadWorkspace(resolvedProjectDir, configPath);
+    relayConfigured = typeof config?.mesh?.relay?.url === "string" && config.mesh.relay.url.length > 0;
+  } catch {
+    relayConfigured = false;
+  }
+  return {
+    mode: "fleet",
+    scope,
+    port,
+    projectDir: resolvedProjectDir,
+    uiDist: dist,
+    uiBuildPresent: existsSync(path.join(dist, "index.html")),
+    relayConfigured,
+    fleetUrl: `http://127.0.0.1:${port}/?mode=fleet&scope=${scope}`,
+  };
+}
+
 // milestone 34 / story 03 (ADR-006) — `scope` selects the default `/api/mesh/status`
 // data source: both "global" (the default) and "local" read the machine-wide
 // projection via queryGlobalMeshStatus; local scope narrows work items to the
@@ -111,6 +147,13 @@ export function meshUiDist(repoRoot) {
 // request (task 01) — the STARTED scope only decides the DEFAULT when the query
 // string is silent.
 const VALID_SCOPES = new Set(["global", "local"]);
+
+// The per-message ceiling for the terminal INPUT lane (m42 interactive worker
+// terminals): human keystrokes and pasted answers, never bulk transfer. Anything
+// over this is dropped (reported, never forwarded) — well under the relay's own
+// DEFAULT_MAX_FRAME_BYTES so a legal input frame can never be the thing that
+// trips the broker's frame limit.
+export const MAX_TERMINAL_INPUT_BYTES = 32 * 1024;
 
 export async function serveMeshUi({
   projectDir = process.cwd(),
@@ -132,6 +175,13 @@ export async function serveMeshUi({
   // other relay collaborator in this codebase keeps).
   terminalMirror,
   startTerminalRelaySubscriber,
+  // m42 "interactive worker terminals" — the INPUT direction's loopback push
+  // ({ push(envelope), close?() } | null). Wired by the CLI verb through
+  // createTerminalRelayPushTransport(config); absent/null (no relay configured, or
+  // a pre-feature caller) keeps the terminal-view route OUTPUT-ONLY — a browser
+  // message is then simply dropped, the exact clean-degrade posture every other
+  // relay collaborator keeps.
+  terminalInputPush = null,
 } = {}) {
   const dist = repoRoot ? meshUiDist(path.resolve(repoRoot)) : assetPath("ui", "dist");
   const boardServers = new Map();
@@ -561,18 +611,59 @@ export async function serveMeshUi({
       });
       ws.on("close", unsubscribe);
       ws.on("error", unsubscribe);
-      // SECURITY T14 / ADR-014 invariant 1 — DELIBERATELY no `ws.on("message", ...)`
-      // handler here: this WebSocket is server->browser ONLY. There is no sink
-      // that could ever forward a browser-typed keystroke toward a worker's PTY
-      // (the structural absence the fitness acd-fleet-terminal-mirror-read-only,
-      // task 02, arms against a planted input-forwarding path).
+      // m42 "interactive worker terminals" — SECURITY T14's original read-only
+      // decision is OPERATOR-OVERRIDDEN: this socket now carries the INPUT
+      // direction too, under the constrained shape the rewritten fitness
+      // (acd-fleet-terminal-input-constrained) pins:
+      //   - TUPLE-BOUND: the envelope's routing facts are THE SOCKET'S OWN
+      //     (nodeId, sessionId), closed over from the upgrade query above — the
+      //     message body contributes ONLY the opaque bytes, so a client cannot
+      //     address any session but the one its socket was opened for.
+      //   - CONTENT-BLIND: the bytes are never parsed, sniffed, or branched on
+      //     (a pasted JSON answer must arrive as typed text).
+      //   - BOUNDED: an over-limit message is dropped and reported, never
+      //     truncated-and-forwarded.
+      //   - CLEAN-DEGRADE: no configured push (terminalInputPush == null) means
+      //     the route stays output-only — the message is dropped silently-but-
+      //     reportably, exactly like every other unconfigured relay collaborator.
+      ws.on("message", (data) => {
+        if (terminalInputPush == null) return;
+        let bytes;
+        try {
+          bytes = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+        } catch (error) {
+          reportDegrade("mesh-ui-terminal-input", error);
+          return;
+        }
+        if (bytes.length === 0) return;
+        if (Buffer.byteLength(bytes) > MAX_TERMINAL_INPUT_BYTES) {
+          reportDegrade("mesh-ui-terminal-input-oversize", new Error(`terminal input dropped: ${Buffer.byteLength(bytes)} bytes exceeds the ${MAX_TERMINAL_INPUT_BYTES}-byte input ceiling`));
+          return;
+        }
+        try {
+          const result = terminalInputPush.push(buildTerminalInputEnvelope(nodeId, sessionId, bytes));
+          if (result && typeof result.catch === "function") {
+            result.catch((error) => {
+              // a relay push fault loses THIS keystroke, never the socket.
+              reportDegrade("mesh-ui-terminal-input", error);
+            });
+          }
+        } catch (error) {
+          reportDegrade("mesh-ui-terminal-input", error);
+        }
+      });
     });
   });
 
   const originalClose = server.close.bind(server);
   server.close = function closeWithBoardServers(callback) {
     return originalClose((error) => {
-      Promise.all([closeBoardServers(boardServers), Promise.resolve(terminalSubscriberHandle?.stop?.())]).finally(() => {
+      Promise.all([
+        closeBoardServers(boardServers),
+        Promise.resolve(terminalSubscriberHandle?.stop?.()),
+        // the input push holds a lazily-opened loopback socket — dispose it with the server.
+        Promise.resolve().then(() => terminalInputPush?.close?.()).catch((error) => reportDegrade("mesh-ui-terminal-input", error)),
+      ]).finally(() => {
         if (typeof callback === "function") callback(error);
       });
     });

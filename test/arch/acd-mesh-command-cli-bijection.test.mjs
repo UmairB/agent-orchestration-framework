@@ -9,8 +9,11 @@
 //
 // Three proofs, over the registry-derived mesh:* sub set:
 //   (a) each mesh:* command's `cli` adapter is present with argv/render functions;
-//   (b) source-grep meshCommand in cli.mjs for a `subcommand === "<sub>"` branch per
-//       derived sub (comments discounted, isolated to the meshCommand body);
+//   (b) each sub is CLI-reachable through EITHER door (m42 wave (d) leg d1, wave 3):
+//       a registry-derived route-table entry (`cli.route` — the migrated form) OR a
+//       `subcommand === "<sub>"` branch isolated to the meshCommand body (the ladder
+//       form mesh:serve keeps — its bare probe delegates through runCommandFace while
+//       `--serve` reaches the daemon branch the route table cannot express);
 //   (c) CLI spawn-and-parse: `aof mesh <sub> --json` over a fixture exits 0 + parseable.
 //
 // With ZERO mesh:* commands today (story 00 is the spine + face SKELETON; the verbs
@@ -24,6 +27,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+import { deriveRouteTable } from "../../src/spine/face.mjs";
 import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -145,6 +149,33 @@ function argsFor(sub) {
     // m42 wave (a) — mesh:logs, the durable-log reader: an absent log is
     // absent-not-error, so the bare fixture run exits 0 with { entries: [] }.
     case "logs": return ["mesh", "logs", "--json"];
+    // m42 quick-fix — mesh:terminal-resume. The bare fixture's store holds no
+    // assignment carrying any session id, so the run refuses with ONE structured
+    // { ok:false, code:"session-unknown" } envelope — exit 1 + parseable (the
+    // gate accepts [0,1]), proving the single-envelope --json discipline
+    // without a live mesh or relay.
+    case "terminal-resume": return ["mesh", "terminal-resume", "sess-nope", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail) — the previously CLI-only nested verbs.
+    // assign: the fixture's 03/01 resolves but "node-x" is not in the hermetic
+    // registry, so the run refuses { ok:false, code:"assignment-target-unknown" }
+    // — exit 1 + parseable. recover-push: an unknown assignmentId returns the
+    // coded { ok:false, code:"recovery-unknown-assignment" } result VERBATIM at
+    // exit 0 (the retired face's json contract, carried over). repo-publish:
+    // publishes into the hermetic global home — exit 0 + { ok:true, … }.
+    case "assign": return ["mesh", "assign", "03/01", "--to", "node-x", "--json"];
+    case "recover-push": return ["mesh", "recover-push", "assign-nope", "--json"];
+    case "repo-publish": return ["mesh", "repo", "publish", "--json"];
+    // m42 wave (d) leg d1 (wave-3 tail, part 2) — the launcher seam + the desktop
+    // three-word routes. ui: --json is the NON-BLOCKING probe by FACE POLICY (the
+    // seam's probe rule — --json never launches), so the spawn returns with the
+    // would-serve document — exit 0 + parseable. desktop-install: no artifacts
+    // supplied ⇒ { ok:false, code:"app-artifact-missing" } — exit 1 + parseable.
+    // desktop-run: nothing installed in the hermetic AOF_GLOBAL_HOME's bin ⇒
+    // { ok:false, code:"desktop-not-installed" } — exit 1 + parseable; no real
+    // app is ever launched by this probe.
+    case "ui": return ["mesh", "ui", "--json"];
+    case "desktop-install": return ["mesh", "desktop", "install", "--json"];
+    case "desktop-run": return ["mesh", "desktop", "run", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }
@@ -178,16 +209,24 @@ export const archTests = [
     },
   },
   {
-    name: "arch/mesh-bijection: meshCommand in cli.mjs is defined and has a reachable dispatch branch per registry-derived mesh:* subcommand",
+    name: "arch/mesh-bijection: every registry-derived mesh:* subcommand is CLI-reachable — a route-table entry OR a meshCommand dispatch branch",
     run: async () => {
       const body = meshCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
-      // The SKELETON itself is gated: meshCommand must be defined (story 00 ships it).
+      // The SKELETON itself is gated: meshCommand must be defined (the CLI-only
+      // launcher verbs ui/desktop + serve --serve + the repo shim live there).
       assert.ok(body.length > 0, "meshCommand is defined in cli.mjs (the face skeleton)");
-      // Vacuously true with zero mesh:* commands; each derived sub must have a branch.
-      for (const sub of subcommands()) {
+      // The route door is the command's OWN declared cli.route (mesh:repo-publish
+      // rides the three-word ["mesh","repo","publish"] — never inferred from the
+      // id's op segment), resolved through the derived table to itself.
+      const routes = deriveRouteTable(listCommands());
+      for (const command of listCommands().filter((entry) => entry.id.startsWith("mesh:"))) {
+        const sub = command.id.slice("mesh:".length);
+        const route = command.cli?.route;
+        const routed = Array.isArray(route) && route.length > 0 && routes.get(route.join(" ")) === command;
+        const laddered = new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body);
         assert.ok(
-          new RegExp(`subcommand\\s*===\\s*["']${sub}["']`).test(body),
-          `meshCommand dispatches \`subcommand === "${sub}"\` (no mesh command the CLI cannot run)`
+          routed || laddered,
+          `${command.id} is reachable via its declared route or a meshCommand branch (no mesh command the CLI cannot run)`
         );
       }
     },

@@ -91,7 +91,12 @@ export const globalWorkStoreTests = [
         // v4 -> v5 (TECH_DEBT item 6 — finish the board bridge): the additive
         // work_item_docs + work_item_runs content tables (their own fixtures live
         // in the /05 tests below); again the pinned-version/table-presence re-arm.
-        assert.equal(store.schemaVersion, 6);
+        // v5 -> v6 (m42 wave (a), TECH_DEBT item 2 remote read): node_logs; v6 -> v7
+        // (m42 interactive worker terminals): global_assignments.code — the same
+        // pinned-version re-arm as every bump above. (This pin had been left at 6
+        // after the v7 bump — pre-existing red, fixed en route in m42 wave (d) d5,
+        // verified by stash at HEAD.)
+        assert.equal(store.schemaVersion, 7);
         const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("aof_schema"));
         assert.ok(tables.includes("workspaces"));
@@ -113,7 +118,7 @@ export const globalWorkStoreTests = [
       try {
         const versions = reopened.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").all();
         assert.equal(versions.length, 1);
-        assert.equal(versions[0].value, 6);
+        assert.equal(versions[0].value, 7);
       } finally {
         reopened.close();
       }

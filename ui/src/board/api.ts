@@ -26,6 +26,10 @@ export type WorkItem = {
     state: string;
     nodeId: string;
     sessionId: string | null;
+    // The status-refinement code the worker last reported (m42 interactive worker
+    // terminals): "needs-input" = the session is waiting on a human — the terminal
+    // affordance is where the answer is typed.
+    code?: string | null;
     updatedAt: string | null;
     branch: string | null;
   };

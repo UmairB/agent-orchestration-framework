@@ -32,6 +32,13 @@ import { readJson, writeText } from "./fs.mjs";
 import { findProjectConfig } from "./workspace.mjs";
 import { resolveHeadroomBinary } from "./headroom.mjs";
 
+// A core never prints: it REPORTS through the collector its caller injects, and the
+// face turns the collected lines into the one stdout document (m42 wave (d) leg d1,
+// the confine-console.log item). This no-op is the default so an un-injected call is
+// silent-by-contract rather than a second printer.
+const NO_PRINT = () => {};
+
+
 // The default providers a fresh enable fronts (ADR-001). Independent of `--runtime` —
 // the resolver intersects with the routable set at runtime.
 const DEFAULT_PROVIDERS = ["claude", "codex"];
@@ -91,9 +98,10 @@ export function setHeadroomEnabled(config) {
 
 // `aof work use-headroom` — enable the plugin (config-only). opts:
 //   { targetDir, which?, log? }. `which` defaults to the real PATH probe; `log` to
-//   console.log. PATH-checks headroom and prints a one-line install hint when absent —
-//   but ALWAYS writes the config (intent is honoured) and NEVER installs.
-export async function useHeadroom({ targetDir = process.cwd(), which, log = console.log, env = process.env } = {}) {
+//   NO_PRINT (the face injects a collector). PATH-checks headroom and REPORTS a
+//   one-line install hint when absent — but ALWAYS writes the config (intent is
+//   honoured) and NEVER installs.
+export async function useHeadroom({ targetDir = process.cwd(), which, log = NO_PRINT, env = process.env } = {}) {
   const { configPath, config } = await readConfig(targetDir);
   setHeadroomEnabled(config);
   await writeConfig(configPath, config);
@@ -115,7 +123,7 @@ export async function useHeadroom({ targetDir = process.cwd(), which, log = cons
 // choice survives — deletion is rejected by ADR-004). On a project that never had a
 // block, writes an explicit { enabled: false } (the honest, reversible off-state).
 // Never touches the lock. opts: { targetDir, log? }.
-export async function unuseHeadroom({ targetDir = process.cwd(), log = console.log } = {}) {
+export async function unuseHeadroom({ targetDir = process.cwd(), log = NO_PRINT } = {}) {
   const { configPath, config } = await readConfig(targetDir);
   if (!config.work || typeof config.work !== "object") {
     config.work = {};

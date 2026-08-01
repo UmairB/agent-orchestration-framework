@@ -57,7 +57,7 @@
 // task-05 @manual soak.
 //
 // MILESTONE 38 / STORY 07 (durable-worker-pushback, ADR-015, tasks 00-02) — the
-// worker's output SURVIVES: a REAL branch (`meshWorkerBranchName`, mesh-worktree.mjs),
+// worker's output SURVIVES: a REAL branch (`meshItemBranchName`, mesh-worktree.mjs — one derivable branch per item since the m42 cure),
 // not a detached HEAD (task 00); on `done`, `git push origin <branch>` runs BEFORE the
 // worktree force-remove, reusing the SAME `buildAskpassShim` one-shot the clone uses
 // (ADR-009's PULL, pointed at a push instead) — the worktree is retained, never
@@ -113,19 +113,31 @@ import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile, readFile, rename, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { findWork, loadWorkspace } from "./work.mjs";
+import { findWork, listItems, loadWorkspace } from "./work.mjs";
 // milestone 38 / story 05 (ADR-013 AMENDMENT, F-38.05) — `claudeProjectsDir` is the
 // EXISTING slug/projects-dir seam (work-observe.mjs, milestone observability): reused
 // VERBATIM (never re-implemented) so the session_id transcript-dir watch below
 // resolves EXACTLY the directory a real interactive `claude` session (cwd =
 // worktreeCwd) writes its own transcript into.
 import { claudeProjectsDir } from "./work-observe.mjs";
-import { startRun, completeRun } from "./run-store.mjs";
-import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshWorkerBranchName } from "./mesh-worktree.mjs";
+import { readRuns } from "./run-store.mjs";
+// m42 wave (d) leg d2 (the sweep) — every terminal settle on this worker goes
+// through the run store's ONE event-raiser: fact write + durable `run.completed`
+// event + sync drain of its checkout/local reactors. This module can no longer
+// call completeRun directly (acd-effects-ledger pins it): the cascade — status
+// rollback on failed, projection publish where a workspace is passed — comes
+// from the LEDGER (src/effects/table.mjs), not from whichever call site
+// remembered it. A crash between the fact and the drain leaves PENDING journal
+// steps the next drain (any face, any process) pays.
+import { transitionRunComplete, transitionRunStart } from "./effects/run-transitions.mjs";
+// m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
+// bridge (raise -> outbox -> ack), never a fire-once frame.
+import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, ensureCommitAvailable } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
-import { writeRepoPublishedMarker } from "./commands/mesh-repo.mjs";
+import { isWellFormedCloneUrl, writeRepoPublishedMarker } from "./mesh-repo-marker.mjs";
 // m42 wave (b) / item 4 — the clone-time identity pin writes through the ONE atomic
 // write seam (temp+rename, failure reclaims its temp).
 import { writeText } from "./fs.mjs";
@@ -250,7 +262,7 @@ export async function resolveRefInWorktree(projectRoot, workDir, worktreePath, i
 // -------------------------------------------------- the repo-availability guard ----
 
 // localMeshRepoPublished(ws, workspaceId) — the LOCAL half of the join: the
-// `mesh.repo.published` marker (`commands/mesh-repo.mjs:33-50` writes it;
+// `mesh.repo.published` marker (`mesh-repo-marker.mjs`'s writeRepoPublishedMarker writes it;
 // `ws.config.mesh.repo.published` is the SAME on-disk marker `loadWorkspace` already
 // hydrates), AND that this marker was written for THIS workspaceId.
 function localMeshRepoPublished(ws, workspaceId) {
@@ -315,33 +327,11 @@ export async function workerHasRepo(ws, workspaceId, nodeId, options = {}) {
 
 // -------------------------------------------------- task 00: clone SOURCE ----
 
-// isWellFormedCloneUrl(value) — a git-URL-SHAPE validator (NOT `new URL()` alone —
-// it rejects scp-style `git@host:path`, ADR-005/task 00). Accepts `scheme://host/...`
-// forms (https, ssh, git, …) with a non-empty host (and, for `file:`, a non-empty
-// path beyond the leading slash — `file:///` has none), and the scp-style
-// `user@host:path` shorthand. Rejects "", whitespace-only, non-strings, and anything
-// that parses to no host/no path.
-export function isWellFormedCloneUrl(value) {
-  if (typeof value !== "string") return false;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return false;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
-    let parsed;
-    try {
-      parsed = new URL(trimmed);
-    } catch {
-      return false;
-    }
-    if (parsed.protocol === "file:") {
-      // file:///<nothing> — no real path beyond the root slash.
-      return parsed.pathname.length > 1;
-    }
-    return parsed.hostname.length > 0;
-  }
-  // scp-style shorthand: user@host:path (git@git.example.com:acme/secret.git).
-  if (/^[\w.-]+@[\w.-]+:.+/.test(trimmed)) return true;
-  return false;
-}
+// The clone-URL SHAPE rule itself (`isWellFormedCloneUrl`) lives in
+// mesh-repo-marker.mjs and is imported above (m42 wave (d) leg d1): it is shared
+// with the published marker that validates against it, and keeping it here made
+// this module and commands/mesh-repo.mjs import each other — the tree's one
+// confirmed cycle. Every caller still reads the shape ONE way.
 
 // resolveCloneUrl(ws) — THE RAW OPTIONAL-CHAIN read (ADR-005, the m22 story-01
 // lesson): reads config.mesh.repo.cloneUrl directly, NEVER round-tripping through the
@@ -939,6 +929,34 @@ line ${NEEDS_INPUT_SENTINEL} on its own line, with nothing else on that line, th
 stop. Only use this for a real, blocking judgment call; keep working through every
 task you can complete confidently without it.`;
 
+// DIRECTIVE_COMPLETE — the DECLARED-completion sentinel pair (m42 follow-up,
+// operator-verified truncation 2026-07-26). "end_turn + transcript silence" is a
+// GUESS about completion, and every guess so far has truncated a live run (the ~3s
+// window killed `/aof:continue 18` at 14.7 min mid-build; the 5-minute window killed
+// the SAME milestone's next run the following day — background developer agents are
+// routinely quiet for longer than any fixed window). The honest signal is the model
+// DECLARING completion, exactly like NEEDS_INPUT already declares a blocking
+// question: a producer instruction on the worker launch, a detector on the
+// transcript's final turn. A declared outcome settles fast; an UNDECLARED end_turn
+// is only a fallback, and has to out-wait the long idle window below. Same
+// no-`comment-sequence` constraint as NEEDS_INPUT_INSTRUCTION (the
+// acd-worker-driver-no-headless-print comment-stripper).
+export const DIRECTIVE_COMPLETE_SENTINEL = "AOF_DIRECTIVE_COMPLETE";
+
+export const DIRECTIVE_COMPLETE_INSTRUCTION = `When the directive you were given is FULLY complete — every agent you spawned has
+finished and reported back, statuses are updated and the work is recorded — end your
+final message with the exact line ${DIRECTIVE_COMPLETE_SENTINEL} on its own line,
+with nothing else on that line. Print it only when nothing remains in flight: never
+while a spawned agent is still working, and never as a progress update. If you stop
+for a blocking question instead, use ${NEEDS_INPUT_SENTINEL} as instructed and do
+not print ${DIRECTIVE_COMPLETE_SENTINEL}.`;
+
+// The ONE worker-session system-prompt payload: both producers, appended as a single
+// `--append-system-prompt` (two flags would override each other in claude's CLI).
+export const WORKER_SESSION_INSTRUCTION = `${NEEDS_INPUT_INSTRUCTION}
+
+${DIRECTIVE_COMPLETE_INSTRUCTION}`;
+
 // defaultWatchTranscriptSessionId({ cwd, env, signal, maxWaitMs }) => Promise<string|null>
 // — the REAL production transcript-dir watch (ADR-013 amendment). Registers its
 // `signal`-abort listener SYNCHRONOUSLY, before any async fs call ever runs, so a
@@ -1051,39 +1069,93 @@ function containsNeedsInputSentinel(buffer) {
 // omits it or injects a double and no test run reads a real transcript.
 const COMPLETION_POLL_MS = 1500;
 
-// COMPLETION_IDLE_MS — VERIFICATION (premature-done, live soak 2026-07-25). `end_turn`
-// means "the MODEL finished speaking", NOT "the WORK is finished". This watch originally
-// settled after the outcome was seen on two consecutive stable-mtime ticks — ~3 SECONDS of
-// transcript silence — which is far below the quiet period a real autonomous run produces.
-// MEASURED: a `/aof:continue 18` whose agent had just said "Waiting for 3 background agents
-// to finish" ended its turn, went quiet while those agents worked, and was declared `done`
-// at 14.7 min — the PTY killed and a PARTIAL diff committed and pushed mid-flight.
+// COMPLETION_IDLE_MS — VERIFICATION (premature-done, live soak 2026-07-25; REVISED
+// 2026-07-26 after the SAME truncation recurred at 5 minutes). `end_turn` means "the
+// MODEL finished speaking", NOT "the WORK is finished". The ~3s window truncated
+// `/aof:continue 18` at 14.7 min (measured); the 5-minute window truncated the same
+// milestone's next run a day later — a background story build is routinely quiet for
+// longer than ANY comfortable fixed window, so the window is not the fix. Two
+// structural changes replace the constant-tuning:
 //
-// A finished turn that is merely WAITING resumes the moment its background work reports
-// back, so the transcript moves again. The distinguishing signal is therefore the LENGTH of
-// the silence, and it must be far longer than a background build's quiet stretch. A settled
-// outcome must now hold with an UNCHANGED transcript mtime for this whole window before the
-// session is called finished. This trades a few minutes of latency on a genuinely-complete
-// run for never truncating a live one — the correct direction (a premature `done` destroys
-// work and reports success; a late `done` only costs time). Injectable, so a test drives it
-// on a controllable clock rather than a wall-clock wait.
-export const COMPLETION_IDLE_MS = 5 * 60 * 1000;
+//   1. The idle clock now reads the WHOLE SESSION TREE — the parent transcript AND
+//      every file under `<projectsDir>/<sessionId>/` (work-observe.mjs's own
+//      subagents layout) — so a parked parent whose background agents are still
+//      writing THEIR transcripts is never "quiet" at all.
+//   2. A DECLARED completion (the DIRECTIVE_COMPLETE sentinel above, mirrored on
+//      NEEDS_INPUT's producer/detector pair) settles after the SHORT confirmation
+//      window below — the model said it finished; waiting minutes adds nothing.
+//
+// This long window remains ONLY as the undeclared-outcome fallback (a session that
+// finished but forgot the sentinel), aligned with the system's standing 15-minute
+// staleness constant (DEFAULT_ASSIGNMENT_HEARTBEAT_STALE_MS). A late `done` costs
+// time; a premature `done` destroys work and reports success. Injectable clock, so
+// tests never wall-wait.
+export const COMPLETION_IDLE_MS = 15 * 60 * 1000;
 
-// readTranscriptTerminalOutcome(file) => { outcome } | null — the transcript's SETTLED
-// outcome, or null while the session is still working. Scans the jsonl from the end for
-// the last assistant record: `stop_reason: "end_turn"` means the turn is DONE (the
-// autonomous session has nothing left and is waiting) — `needs-input` if that turn's
-// own text carries the sentinel, else `done`. Any other stop_reason (`tool_use`, or a
-// not-yet-terminated streaming turn) is "still working" -> null. NEVER throws (an
-// absent or half-written file is simply "nothing settled yet").
-async function readTranscriptTerminalOutcome(file) {
+// The declared-outcome confirmation window: long enough to survive a transcript
+// flush mid-write, nowhere near a wait a human would notice.
+export const DECLARED_COMPLETION_IDLE_MS = 10 * 1000;
+
+// HUMAN_INPUT_TOOL_NAMES — the closed set of tools whose PENDING call means the
+// session is, definitionally, waiting on a human (measured live 2026-07-27,
+// `/aof:autonomous 18`: instead of printing the NEEDS_INPUT line and ending its
+// turn, the session asked its scope question through the interactive
+// AskUserQuestion widget. A pending question is a `tool_use` turn, so BOTH
+// detectors read "still working" — the assignment showed a healthy `running` for
+// 28+ minutes while the session sat waiting, and the operator only discovered it
+// by opening the read-only mirror). An ORDINARY pending tool (Bash, Edit, a
+// subagent Task) is genuinely "still working" and must never match here.
+export const HUMAN_INPUT_TOOL_NAMES = ["AskUserQuestion"];
+
+function pendingHumanInputTool(message) {
+  const content = message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => block?.type === "tool_use" && HUMAN_INPUT_TOOL_NAMES.includes(block?.name));
+}
+
+// readTranscriptTerminalOutcome(file) => { outcome, declared } | null — the
+// transcript's SETTLED outcome, or null while the session is still working. Scans the
+// jsonl from the end for the last assistant record: `stop_reason: "end_turn"` means
+// the turn is DONE (the autonomous session has nothing left and is waiting) —
+// `needs-input` if that turn's own text carries the sentinel, else `done`. `declared`
+// is true when the finished turn EXPLICITLY declared its outcome (either sentinel) —
+// the watch settles a declared outcome fast, and makes an undeclared one out-wait the
+// long idle window. A `tool_use` turn whose UNANSWERED call is a human-input tool
+// (HUMAN_INPUT_TOOL_NAMES above) is `needs-input`, declared — the session is waiting
+// on a person, not working; any user/tool_result record AFTER it means it was
+// answered and the session is live again. Every other pending stop_reason is "still
+// working" -> null. NEVER throws (an absent or half-written file is simply "nothing
+// settled yet").
+async function readTranscriptTerminalOutcome(file, sinceOffset = 0) {
   let text;
   try {
     text = await readFile(file, "utf8");
   } catch {
     return null;
   }
+  // RESUME baseline (m42 terminal-resume, measured 2026-07-27 14:37Z): a resumed
+  // session's transcript already ENDS in a settled outcome — the very state it
+  // parked with — and reading it as the verdict killed the fresh PTY ~12s after
+  // every resume ("resume it again to continue", forever). Records at or before
+  // `sinceOffset` (the file's size at spawn) are PRE-resume history: only what
+  // the resumed process writes AFTER it counts. The slice may start mid-line —
+  // drop the partial first line (its record is pre-baseline anyway).
+  if (sinceOffset > 0) {
+    // Drop a PARTIAL first line only when the baseline cut mid-record (the byte
+    // before the offset is not a newline) — a baseline that ends exactly on a
+    // record boundary must keep the very next line (it is the first POST-resume
+    // record, and dropping it would blind the watch to a fast outcome).
+    const cutMidLine = sinceOffset <= text.length && sinceOffset > 0 && text[sinceOffset - 1] !== "\n";
+    text = text.slice(sinceOffset);
+    if (cutMidLine) {
+      const firstNewline = text.indexOf("\n");
+      text = firstNewline === -1 ? "" : text.slice(firstNewline + 1);
+    }
+  }
   const lines = text.split("\n");
+  // True once any record LATER than the last assistant record is a `user` record —
+  // i.e. the assistant's pending tool call already has its answer in the stream.
+  let answeredAfterAssistant = false;
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i].trim();
     if (line.length === 0) continue;
@@ -1093,11 +1165,28 @@ async function readTranscriptTerminalOutcome(file) {
     } catch {
       continue;
     }
+    if (record?.type === "user") {
+      answeredAfterAssistant = true;
+      continue;
+    }
     const message = record?.message;
     if (record?.type === "assistant" && message && typeof message === "object") {
       const stop = message.stop_reason;
       if (stop == null) return null;
-      if (stop !== "end_turn") return null;
+      if (stop !== "end_turn") {
+        // A pending HUMAN-INPUT tool call with no answer behind it is a session
+        // waiting on a person — the invisible-stop defect. Declared: the model
+        // explicitly asked; the watch needs only the short confirmation window.
+        if (stop === "tool_use" && !answeredAfterAssistant && pendingHumanInputTool(message)) {
+          // `pending: true` — the question is LIVE (mid-turn, an interactive
+          // widget waiting at a live PTY), unlike the sentinel case below where
+          // the turn already ENDED. m42 interactive worker terminals: a live
+          // question is answerable through the terminal-input path, so the watch
+          // reports it immediately but parks it only after the LONG window.
+          return { outcome: "needs-input", declared: true, pending: true };
+        }
+        return null;
+      }
       let body = "";
       const content = message.content;
       if (Array.isArray(content)) {
@@ -1107,29 +1196,95 @@ async function readTranscriptTerminalOutcome(file) {
       } else if (typeof content === "string") {
         body = content;
       }
-      const needsInput = body.split("\n").some((l) => l.trim() === NEEDS_INPUT_SENTINEL);
-      return { outcome: needsInput ? "needs-input" : "done" };
+      const lines2 = body.split("\n").map((l) => l.trim());
+      const needsInput = lines2.some((l) => l === NEEDS_INPUT_SENTINEL);
+      if (needsInput) return { outcome: "needs-input", declared: true };
+      const declaredComplete = lines2.some((l) => l === DIRECTIVE_COMPLETE_SENTINEL);
+      return { outcome: "done", declared: declaredComplete };
     }
   }
   return null;
 }
 
-// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs, idleMs, now }) =>
-// Promise<{ outcome }|null> — polls the session's transcript for the settled outcome
-// above and fires ONLY once that outcome has held with an UNCHANGED transcript mtime for
-// the WHOLE `idleMs` window (COMPLETION_IDLE_MS — see its note: a turn that merely ended
-// while waiting on background work resumes and moves the file again, so the length of the
-// silence is the signal; the pre-fix ~3s confirmation truncated a live run mid-flight).
-// Resolves null on abort (the driver's finish() aborts it via the SAME watchController the
-// session-id watch uses, the moment any outcome is known first) — never throws.
+// latestSessionActivityMtimeMs(projectsDir, sessionId) — the newest mtime across the
+// session's WHOLE transcript tree: the parent `<sessionId>.jsonl` plus every file
+// under `<projectsDir>/<sessionId>/` (recursively — work-observe.mjs reads subagent
+// transcripts from `<sessionId>/subagents/*.jsonl`, and this must never re-guess
+// that layout narrowly: any file claude writes under the session's own directory is
+// session activity). Returns -1 when nothing exists. NEVER throws — an absent file
+// or directory is simply "no activity there".
+async function latestSessionActivityMtimeMs(projectsDir, sessionId) {
+  const mtimeOf = async (p) => {
+    try {
+      return (await stat(p)).mtimeMs;
+    } catch {
+      return -1;
+    }
+  };
+  let latest = await mtimeOf(path.join(projectsDir, `${sessionId}.jsonl`));
+  const walk = async (dir) => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // absent dir — a session with no subagents yet
+    }
+    for (const entry of entries) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(p);
+      } else {
+        const m = await mtimeOf(p);
+        if (m > latest) latest = m;
+      }
+    }
+  };
+  await walk(path.join(projectsDir, sessionId));
+  return latest;
+}
+
+// defaultWatchTranscriptCompletion({ cwd, env, sessionId, signal, pollMs, idleMs,
+// declaredIdleMs, now }) => Promise<{ outcome, declared }|null> — polls the session's
+// transcript for the settled outcome above and fires only once that outcome has held
+// across a quiet stretch of the WHOLE SESSION TREE (latestSessionActivityMtimeMs —
+// parent transcript + subagent transcripts; a parked parent over live background
+// agents is NOT quiet). The stretch a settled outcome must hold for depends on how it
+// settled: a DECLARED outcome (either sentinel in the finished turn) confirms after
+// the short `declaredIdleMs`; an undeclared `end_turn` is a guess and must out-wait
+// the long `idleMs` fallback window (see COMPLETION_IDLE_MS's note for the two live
+// truncations that shaped this). Resolves null on abort (the driver's finish() aborts
+// it via the SAME watchController the session-id watch uses, the moment any outcome
+// is known first) — never throws.
 export async function defaultWatchTranscriptCompletion({
   cwd, env, sessionId, signal,
   pollMs = COMPLETION_POLL_MS,
   idleMs = COMPLETION_IDLE_MS,
+  declaredIdleMs = DECLARED_COMPLETION_IDLE_MS,
   now = () => Date.now(),
+  // The resume baseline (see readTranscriptTerminalOutcome): only records
+  // written AFTER this byte offset count as an outcome. 0 = a fresh session.
+  sinceOffset = 0,
+  // m42 "interactive worker terminals" — the LIVE-QUESTION report pair, both
+  // optional and fire-and-forget. A PENDING human-input outcome (a live
+  // AskUserQuestion at a live PTY) used to settle after the short declared window
+  // — killing the very session the operator could now answer through the
+  // interactive terminal, ~10s after the question rendered. Instead:
+  //   - onPendingInput() fires ONCE the moment a pending question is detected
+  //     (the caller reports `code: needs-input` up while the session stays LIVE);
+  //   - onPendingInputCleared() fires ONCE when the question is answered (the
+  //     transcript shows a user record behind it — the outcome reads null again
+  //     and the session is working; the caller clears the code);
+  //   - a pending question that stays unanswered must out-wait the LONG idleMs
+  //     window before it settles needs-input (the park -> resume-later fallback,
+  //     unchanged in meaning, now a last resort instead of the only path).
+  // The SENTINEL needs-input (the turn deliberately ENDED on the protocol line)
+  // keeps the short declared window — that turn is over; parking is correct.
+  onPendingInput,
+  onPendingInputCleared,
 } = {}) {
   if (typeof sessionId !== "string" || sessionId.length === 0) return null;
-  const file = path.join(claudeProjectsDir({ cwd, env }), `${sessionId}.jsonl`);
+  const projectsDir = claudeProjectsDir({ cwd, env });
+  const file = path.join(projectsDir, `${sessionId}.jsonl`);
   return new Promise((resolve) => {
     let settled = false;
     let timer = null;
@@ -1153,25 +1308,52 @@ export async function defaultWatchTranscriptCompletion({
     try { signal?.addEventListener?.("abort", onAbort, { once: true }); } catch (error) { /* no signal */
       reportDegrade("mesh-worker-execution", error); }
 
+    // The live-question latch: true while a pending human-input outcome has been
+    // reported and not yet answered — flips the report pair exactly once per episode.
+    let pendingReported = false;
+    const firePending = (fn) => {
+      try {
+        const result = fn?.();
+        if (result && typeof result.catch === "function") {
+          result.catch((error) => reportDegrade("mesh-worker-execution", error));
+        }
+      } catch (error) {
+        // a report fault never disturbs the watch itself.
+        reportDegrade("mesh-worker-execution", error);
+      }
+    };
     const tick = async () => {
       if (settled) return;
-      let mtimeMs = -1;
-      try {
-        mtimeMs = (await stat(file)).mtimeMs;
-      } catch {
-        mtimeMs = -1;
-      }
-      const outcome = await readTranscriptTerminalOutcome(file);
-      // ANY movement in the transcript restarts the quiet stretch — the session is alive
-      // (a background agent reported back, a new turn began, a tool ran).
+      // The quiet-stretch clock reads the WHOLE session tree, never just the parent
+      // file — a parked parent whose background agents are still writing THEIR
+      // transcripts is a session mid-work, not a quiet one (the exact truncation
+      // measured live on `/aof:continue 18`, twice).
+      const mtimeMs = await latestSessionActivityMtimeMs(projectsDir, sessionId);
+      const outcome = await readTranscriptTerminalOutcome(file, sinceOffset);
+      // ANY movement anywhere in the tree restarts the quiet stretch — the session is
+      // alive (a background agent wrote, a new turn began, a tool ran).
       if (mtimeMs !== lastMtimeMs) {
         lastMtimeMs = mtimeMs;
         stableSince = now();
       }
-      // Fire only once a settled outcome has held across a FULLY QUIET `idleMs` window —
-      // proof the session is finished, not merely between turns or waiting on background
-      // work (the premature-done defect this window exists to close).
-      if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= idleMs) {
+      // m42 interactive worker terminals — the live-question report pair (see the
+      // parameter note above): detected → report once; answered → clear once.
+      const pendingNow = outcome?.pending === true;
+      if (pendingNow && !pendingReported) {
+        pendingReported = true;
+        firePending(onPendingInput);
+      } else if (!pendingNow && pendingReported) {
+        pendingReported = false;
+        firePending(onPendingInputCleared);
+      }
+      // A DECLARED outcome (the model printed its sentinel) confirms after the short
+      // window; an undeclared `end_turn` is a guess and must out-wait the long
+      // fallback window (the premature-done defect both windows exist to close). A
+      // PENDING live question also out-waits the LONG window — it is answerable
+      // through the interactive terminal, so parking it fast would kill the very
+      // session the operator is about to type into.
+      const requiredIdleMs = outcome?.declared === true && !pendingNow ? declaredIdleMs : idleMs;
+      if (outcome != null && mtimeMs >= 0 && stableSince != null && now() - stableSince >= requiredIdleMs) {
         settleWatch(outcome);
         return;
       }
@@ -1227,8 +1409,29 @@ export function resolveInteractiveDriverLaunch(driver, options = {}) {
   // from the one-time folder-TRUST dialog (cleared pre-spawn by ensureWorktreeTrusted
   // below) — trust fires BEFORE the system prompt is read, so no in-session mode can
   // catch it.
-  const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", NEEDS_INPUT_INSTRUCTION];
+  const args = [...provider.buildArgs(), "--permission-mode", "auto", "--append-system-prompt", WORKER_SESSION_INSTRUCTION];
+  // m42 terminal-resume — the ONE additive launch variation: re-attach to a
+  // persisted conversation instead of starting fresh. Everything else about the
+  // launch (permission mode, worker instruction, env) is deliberately identical.
+  if (typeof options.resumeSessionId === "string" && options.resumeSessionId.length > 0) {
+    args.push("--resume", options.resumeSessionId);
+  }
   const sessionEnv = provider.buildEnv(options.terminalSessionId ?? randomUUID(), env);
+  // A WORKER session must NEVER attach to a human's IDE (measured live
+  // 2026-07-27: the daemon was started from a VS Code terminal, so every
+  // spawned claude inherited CLAUDE_CODE_SSE_PORT + TERM_PROGRAM=vscode +
+  // VSCODE_* and silently attached itself to the operator's OWN VS Code — the
+  // session footer read "In <file>" from the human's editor, and the pty's
+  // stdin went DEAD to typed input while the IDE channel held the session.
+  // That is both the interactive-terminal input killer AND a wrong-surface
+  // routing hazard (permission prompts to an editor nobody is watching). The
+  // worker launch env is scrubbed of the IDE-attachment vector; everything
+  // else rides through untouched.
+  for (const key of Object.keys(sessionEnv)) {
+    if (key.startsWith("VSCODE_") || key === "CLAUDE_CODE_SSE_PORT" || key === "TERM_PROGRAM" || key === "TERM_PROGRAM_VERSION") {
+      delete sessionEnv[key];
+    }
+  }
   return { bin, args, env: sessionEnv, providerId };
 }
 
@@ -1289,6 +1492,53 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     });
   } catch {
     return { outcome: "failed", failureReason: "agent_error", sessionId: null };
+  }
+
+  // 2026-07-27 (withdraw notify) — hand the caller a kill for THIS live PTY the
+  // moment it exists, so a control-side withdrawal can end the run instead of
+  // leaving it grinding with a run record stuck `running`. The kill routes through
+  // the SAME term.kill() every settle path uses; the caller's registry (not this
+  // driver) decides when it may be called. Optional and guarded — every caller
+  // that never passes it is byte-identical.
+  try {
+    options.onPtyLive?.(
+      () => {
+        try {
+          term.kill();
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+      },
+      // m42 "interactive worker terminals" — the ADDITIVE second argument: a write
+      // into THIS live PTY, the input direction's one seam (the same term.write the
+      // driver itself types the directive command through). The caller's registry —
+      // never this driver — decides which frames may reach it; a caller that reads
+      // only the first argument is byte-identical to before.
+      //
+      // The write REPORTS the target pid (`{ pid }`) so the caller's delivery
+      // breadcrumb can name WHICH pty it fed — the correlation handle for the
+      // still-open input finding (STATE §OPEN FINDING: bytes provably reach the
+      // correct pty, claude does not react). Passive and content-free; it stays
+      // until that finding resolves, because resuming the investigation needs it.
+      //
+      // RETIRED 2026-08-01 — the post-write SIGWINCH resize jiggle (80→81→80,
+      // 500ms after every write). It was never instrumentation but an
+      // INTERVENTION testing the hypothesis that a forced repaint would prove
+      // attachment, and STATE records that hypothesis FALSIFIED ("ignores typed
+      // bytes AND SIGWINCH resize jiggles — no repaint, ever"). It bought nothing
+      // and mutated terminal geometry on every keystroke of every live session.
+      (bytes) => {
+        try {
+          term.write(String(bytes));
+          return { pid: term.pid ?? null };
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+          return { pid: null };
+        }
+      },
+    );
+  } catch (error) {
+    reportDegrade("mesh-worker-execution", error);
   }
 
   // ADR-013 AMENDMENT — the transcript-dir watch is kicked off ALONGSIDE the spawned
@@ -1492,10 +1742,35 @@ export async function driveInteractiveClaudeSession(brief, options = {}) {
     // uses the real watch, tests omit or inject it (no real transcript is ever read).
     const watchTranscriptCompletion = options.watchTranscriptCompletion ?? defaultWatchTranscriptCompletion;
     watchPromise
-      .then((sid) => {
+      .then(async (sid) => {
         if (settled || typeof sid !== "string" || sid.length === 0) return;
+        // RESUME baseline: the transcript already ends in the outcome the session
+        // PARKED with — snapshot its size so the completion watch only settles on
+        // records the resumed process writes from here on (measured 2026-07-27:
+        // without this, the stale sentinel killed every resume ~12s in).
+        let sinceOffset = 0;
+        if (typeof options.resumeSessionId === "string" && options.resumeSessionId.length > 0) {
+          try {
+            sinceOffset = (await stat(path.join(claudeProjectsDir({ cwd: brief.worktreeCwd, env: launch.env ?? process.env }), `${sid}.jsonl`))).size;
+          } catch {
+            sinceOffset = 0; // no pre-existing transcript — a fresh baseline
+          }
+        }
         return Promise.resolve(
-          watchTranscriptCompletion({ cwd: brief.worktreeCwd, env: launch.env ?? process.env, sessionId: sid, signal: watchController.signal }),
+          watchTranscriptCompletion({
+            cwd: brief.worktreeCwd,
+            env: launch.env ?? process.env,
+            sessionId: sid,
+            signal: watchController.signal,
+            sinceOffset,
+            // m42 interactive worker terminals — the live-question report pair,
+            // bridged to the caller's ONE seam (`options.onNeedsInputPending`):
+            // true = a live question is waiting (report needs-input, session stays
+            // up, answerable through the terminal); false = it was answered
+            // (clear the report). Optional + guarded like every other seam here.
+            onPendingInput: () => options.onNeedsInputPending?.(true),
+            onPendingInputCleared: () => options.onNeedsInputPending?.(false),
+          }),
         ).then((result) => {
           if (settled || result == null) return;
           try { term.kill(); } catch (error) { /* already-exited guard (win32) */
@@ -1595,6 +1870,53 @@ function assignmentError(code, message, extra = {}) {
 // (nothing at all) could say why.
 function logAssignmentFailure(assignmentId, code, detail) {
   console.error(`[mesh-worker] assignment ${assignmentId} failed (${code}): ${detail}`);
+}
+
+// ── control-driven WITHDRAWAL (2026-07-27, the duplicate-run wall) ────────────
+//
+// Measured live: `aof mesh assign 18 --withdraw` flipped the control-side row and
+// NOTHING ELSE — the worker's session kept running and its run record stayed
+// `running`, so the run store's duplicate-run guard refused every future run for
+// the item, deterministically, until an operator settled the record by hand. The
+// control's dispatch tick now sends a withdraw DOWN-frame to the holder; these two
+// module-scoped structures are how the frame reaches the live run:
+//   - livePtyKills: assignmentId → a kill for the CURRENTLY live PTY (registered
+//     by the execution bracket around its spawn, removed when the spawn settles);
+//   - withdrawnByControl: assignmentIds whose withdrawal arrived — consumed by the
+//     bracket (before spawn: never spawn; after settle: settle the run record as
+//     cancelled and send no frame — the row is already terminal).
+const livePtyKills = new Map();
+const withdrawnByControl = new Set();
+
+// ── interactive worker terminals (m42; SECURITY T14 operator-overridden) ──────
+//
+// The INPUT direction's registries, beside the kill registry they mirror:
+//   - livePtyWrites: assignmentId → a write into the CURRENTLY live PTY
+//     (registered by the bracket beside its kill, removed with it);
+//   - liveSessionInputs: captured sessionId → that SAME write, bound the moment
+//     the transcript watch resolves the session id. The browser routes on the
+//     (nodeId, sessionId) tuple, so the session id — never the assignment id —
+//     is the input frame's join key; a session whose id was never captured is
+//     simply unreachable for input (exactly as it is unreachable for the mirror).
+// Both cleared by clearLivePtyRegistries the moment the spawn settles — input
+// can never reach a PTY whose bracket has moved on.
+const livePtyWrites = new Map();
+const liveSessionInputs = new Map();
+
+// clearLivePtyRegistries(assignmentId) — the ONE settle-side sweep for every
+// per-PTY registry (kill + write + any session binding pointing at that write).
+// Value-identity scan for the session binding: the bracket knows its assignment
+// id at settle, not necessarily its captured session id, and the registries are
+// bounded by the handful of concurrently-live PTYs on one worker.
+function clearLivePtyRegistries(assignmentId) {
+  livePtyKills.delete(assignmentId);
+  const write = livePtyWrites.get(assignmentId);
+  livePtyWrites.delete(assignmentId);
+  if (write != null) {
+    for (const [sessionId, bound] of liveSessionInputs) {
+      if (bound === write) liveSessionInputs.delete(sessionId);
+    }
+  }
 }
 
 // createMeshWorkerExecutionHandler(options) → handler(directive) — the function
@@ -1705,6 +2027,12 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     loadWs = () => loadWorkspace(process.cwd()),
     nodeId,
     sendAssignmentStatus,
+    // m42 wave (d) leg d3 — the outbox transport. A TERMINAL report is a FACT and
+    // rides the durable path (raise → pending step → ship → ack → paid), so a
+    // dropped connection can no longer lose it. Posture frames
+    // (accepted/running/needs-input) stay on sendAssignmentStatus: they are
+    // best-effort by design and the next tick re-carries them.
+    sendEffectStep,
     spawnRuntime = defaultSpawnRuntime,
     now = () => new Date().toISOString(),
     exec,
@@ -1834,6 +2162,41 @@ export function createMeshWorkerExecutionHandler(options = {}) {
 
   const resolveNow = () => (typeof now === "function" ? now() : now);
 
+  // reportSettled(assignmentId, state, extras) — m42 wave (d) leg d3: THE DURABLE
+  // TERMINAL REPORT. Every place this handler used to stream a terminal
+  // `sendAssignmentStatus` now raises `assignment.reported` into the worker's own
+  // journal and ships it through the outbox, so the fact survives the connection
+  // that was supposed to carry it (STATE 2026-07-27's measured fire-once defect: a
+  // stranded worktree's `failed` report died on a dead socket and the control row
+  // read `running` for 35+ minutes). In the connected case the drain runs right
+  // here, so latency is unchanged; disconnected, the step stays owed and the next
+  // drain redelivers it. sendAssignmentStatus remains the fallback for a journal
+  // that cannot be opened — behaviour never gates on the ledger's health.
+  const reportSettled = (assignmentId, state, extras = {}) =>
+    reportAssignmentSettled(
+      { assignmentId, state, ...extras, now: resolveNow() },
+      {
+        journalOptions: { env: globalWorkStoreOptions?.env },
+        sendEffectStep,
+        fallbackSend: sendAssignmentStatus,
+      },
+    );
+
+  // reportAssignmentFailure — 2026-07-27 (the wrong-base retries): every coded
+  // failure in this handler used to reach ONLY the daemon's stderr
+  // (logAssignmentFailure's console.error — unreadable on a supervised daemon,
+  // gone with a closed terminal), so a deterministic 2-second failure took an SSH
+  // inspection to name. The SAME line now also rides the launcher's log channel
+  // (durable sink + the stream forward into the control's node_logs ring).
+  const reportAssignmentFailure = (assignmentId, code, detail) => {
+    logAssignmentFailure(assignmentId, code, detail);
+    try {
+      options.onLog?.({ code, level: "warn", message: `assignment ${assignmentId} failed (${code}): ${detail}` });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+
   // milestone 35 / ADR-008 — the AUTHORITATIVE dispatch-once guard. The launcher's
   // in-memory "already dispatched" Set (mesh-launcher.mjs) is best-effort ONLY
   // (rebuilt empty on a control-node restart); THIS Set is what the system rests
@@ -1865,8 +2228,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     try {
       ws = await loadWs();
     } catch (error) {
-      logAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
-      await sendAssignmentStatus?.(assignmentId, "failed", {});
+      reportAssignmentFailure(assignmentId, "workspace-load-failed", String(error?.message ?? error));
+      await reportSettled(assignmentId, "failed", { code: "workspace-load-failed" });
       return;
     }
 
@@ -1906,7 +2269,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         try {
           pulledCloneUrl = await requestCloneUrl({ assignmentId, workspaceId });
         } catch (error) {
-          logAssignmentFailure(assignmentId, error?.code ?? "clone-url-request-failed", `clone-url PULL to control failed, falling through to local registry: ${String(error?.message ?? error)}`);
+          reportAssignmentFailure(assignmentId, error?.code ?? "clone-url-request-failed", `clone-url PULL to control failed, falling through to local registry: ${String(error?.message ?? error)}`);
         }
       }
       resolvedCloneUrl = resolveCloneUrl(ws)
@@ -1932,16 +2295,16 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           hasRepo = await workerHasRepo(ws, workspaceId, nodeId, { openStore, globalWorkStoreOptions });
         } catch (error) {
           const code = error?.code ?? "assignment-repo-unavailable";
-          logAssignmentFailure(assignmentId, code, String(error?.message ?? error));
-          await sendAssignmentStatus?.(assignmentId, "failed", { code });
+          reportAssignmentFailure(assignmentId, code, String(error?.message ?? error));
+          await reportSettled(assignmentId, "failed", { code });
           return;
         }
       }
     }
 
     if (!hasRepo) {
-      logAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
-      await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-repo-unavailable" });
+      reportAssignmentFailure(assignmentId, "assignment-repo-unavailable", `workerHasRepo still false for workspace ${workspaceId} after clone-on-miss (cloneUrl ${resolvedCloneUrl != null ? `"${resolvedCloneUrl}" resolved but did not result in a usable repo` : "unresolved — neither this worker's own config.mesh.repo.cloneUrl nor the synced registry's clone_url is set for this workspace"})`);
+      await reportSettled(assignmentId, "failed", { code: "assignment-repo-unavailable" });
       return;
     }
 
@@ -1969,8 +2332,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       try {
         ws = await loadWorkspace(checkoutPath, undefined, { env: globalWorkStoreOptions?.env });
       } catch (error) {
-        logAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
+        reportAssignmentFailure(assignmentId, "assignment-checkout-unresolved", `the scoped checkout for foreign workspace ${workspaceId} at ${checkoutPath} could not be loaded: ${String(error?.message ?? error)}`);
+        await reportSettled(assignmentId, "failed", { code: "assignment-checkout-unresolved" });
         return;
       }
     }
@@ -1982,24 +2345,63 @@ export function createMeshWorkerExecutionHandler(options = {}) {
     // checked out on, computed BEFORE addWorktree so both the checkout call and the
     // eventual push (below) name the SAME branch.
     //
-    // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a continue/verify carries
-    // `directive.baseBranch` (the item's EXISTING active branch, resolved control-side): it
-    // runs ON that branch, so the work accumulates on ONE branch per item across refine →
-    // continue → verify (no fresh branch off main — a fresh worktree from main lacks the
-    // refine's contract). A refine (or an item with no prior push) has no baseBranch and
-    // gets its own per-assignment branch, byte-identical to before. The worktree PATH stays
+    // M42 (the brittleness cure) — ONE derivable branch per item. A continue/verify
+    // still carries `directive.baseBranch` (the control's cache-resolved answer,
+    // which wins for continuity: a pre-cure item's work lives on its old suffixed
+    // branch, a reindexed item's on its pre-rename name). A directive WITHOUT a
+    // baseBranch — a refine, an item never pushed, or an older control — derives
+    // the item's own `aof/mesh/<ref>`: the fallback now CONVERGES on the same line
+    // instead of minting a divergent per-assignment fork only a side table could
+    // remember (the 2026-07-27 wrong-base disease). The worktree PATH stays
     // assignmentId-keyed either way (SECURITY F4 untouched).
     const baseBranch = typeof directive.baseBranch === "string" && directive.baseBranch.length > 0 ? directive.baseBranch : null;
-    const branch = baseBranch ?? meshWorkerBranchName(itemRef, assignmentId);
+    const branch = baseBranch ?? meshItemBranchName(itemRef);
     try {
       // task 00 — materialize the dedicated worktree at the ONE seam, ON the REAL
       // branch above (ADR-015: HEAD lands on `branch`, never detached). A reused base
       // branch is checked out via reuseWorktreeOnBranch (release any holder + prune, then
       // check out the existing branch); a fresh branch is `-b <branch>` off the commitish.
+      // M42: with one branch per item the derived name can already EXIST locally (a
+      // re-refine after a prior run on the same item) — `-b` would refuse, so an
+      // existing branch takes the reuse door: the item's line continues, never forks.
       const commitish = directive.commit ?? "HEAD";
-      worktreePath = baseBranch != null
-        ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, baseBranch, { exec })
+      const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      // M42 base-commit pin (operator, 2026-08-01): a fresh worktree builds from
+      // the EXACT commit the control assigned against — the directive carries the
+      // control checkout's HEAD, and a clone that does not have it yet fetches
+      // once. Unavailable after the fetch is a LOUD coded failure, never a silent
+      // build from this clone's stale HEAD (the other half of the wrong-base
+      // disease). The reuse doors ignore it by design: an existing line continues
+      // from where it is.
+      if (baseBranch == null && !branchExists && directive.commit != null) {
+        const available = await ensureCommitAvailable(ws.projectRoot, directive.commit, { exec });
+        if (!available) {
+          reportAssignmentFailure(
+            assignmentId,
+            "assignment-base-commit-unavailable",
+            `the dispatched base commit ${directive.commit} is not reachable in this worker's checkout (fetched origin once) — an unpushed control checkout, or a stale clone that cannot see it`,
+          );
+          await reportSettled(assignmentId, "failed", { code: "assignment-base-commit-unavailable" });
+          return;
+        }
+      }
+      worktreePath = baseBranch != null || branchExists
+        ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, branch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
+      // 2026-07-27 (the wrong-base dispatch) — the worker's OWN half of the
+      // decision record: which base this worktree was actually built from. Rides
+      // the launcher's log channel (durable sink + the control's node_logs ring),
+      // so "did it run on the item's branch or fresh off main" is one
+      // `aof mesh logs --node` read, never an SSH inspection. Never blocks the run.
+      try {
+        options.onLog?.({
+          code: "worker-worktree-base",
+          level: "info",
+          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
+        });
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
 
       // VERIFICATION (live worktree streaming, 2026-07-25) — from HERE the agent's output
       // lands in this worktree, so from here the worker streams it. Registered the moment
@@ -2023,8 +2425,8 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         // A structural miss (an unresolvable/traversal ref) is a `failed` terminal —
         // task 03's retain-on-failed rule applies here too: the worktree stays for
         // inspection (never removed), the same as every other failed outcome below.
-        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", {});
+        reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve inside the worktree at ${worktreePath}`);
+        await reportSettled(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
@@ -2040,18 +2442,45 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // applied to the primary tree, never a second path-construction strategy.
       item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
       if (item == null) {
-        logAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
-        await sendAssignmentStatus?.(assignmentId, "failed", {});
+        reportAssignmentFailure(assignmentId, "assignment-ref-unresolved", `itemRef "${itemRef}" did not resolve in the primary checkout at ${ws.workDir}`);
+        await reportSettled(assignmentId, "failed", { code: "assignment-ref-unresolved" });
         onCleanup(assignmentId, "failed", worktreePath);
         return;
       }
 
       const nowIso = resolveNow();
-      runRecord = await startRun(item, { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } });
+      // The mint rides the transition seam (m42 wave (d) leg d4, port 1 — the
+      // sweep's second half, matching d2's completeRun sweep): `run.started` is
+      // journaled beside the fact. NO `workspace` is passed, exactly as the
+      // worker's completion sites pass none — worker-side projection publishing
+      // stays d3's settle-assignment territory, so the publish reactor skips on a
+      // null workspaceRoot and worker behaviour is byte-unchanged.
+      ({ record: runRecord } = await transitionRunStart(
+        item,
+        { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      ));
 
       // running — the worktree is materialized, the run is minted; the assignment's
       // runId is this run's id (the ADR-004 link the frame carries).
       await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId });
+
+      // 2026-07-27 (withdraw notify) — a withdrawal that arrived BEFORE the spawn:
+      // never spawn a session for a run the operator already withdrew; settle the
+      // just-minted record as cancelled and retain the worktree.
+      if (withdrawnByControl.delete(assignmentId)) {
+        try {
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+        onCleanup(assignmentId, "failed", worktreePath);
+        return;
+      }
 
       // Drive the ref to a terminal state via the driver (the INJECTED spawn seam) —
       // milestone 38 / story 05, ADR-013: the directive's WHOLE command string
@@ -2072,6 +2501,17 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           onOutputChunk,
           watchTranscriptSessionId,
           watchTranscriptCompletion,
+          // 2026-07-27 (withdraw notify) — the driver hands back a kill for its
+          // live PTY the moment it spawns; the withdraw handler uses it to end a
+          // withdrawn run instead of leaving it grinding. Registered here (the one
+          // place assignmentId is in scope) and removed the moment the spawn
+          // settles below.
+          onPtyLive: (kill, write) => {
+            livePtyKills.set(assignmentId, kill);
+            // m42 interactive worker terminals — the write registers beside its
+            // kill; the session binding waits for the captured id below.
+            if (typeof write === "function") livePtyWrites.set(assignmentId, write);
+          },
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06d; ADR-013 AMENDMENT
           // 2026-07-23, structural invariant 7) — REPORT THE JOIN KEY WHILE THE RUN
           // IS LIVE. The driver calls this the instant its transcript watch resolves
@@ -2080,12 +2520,33 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // THIS is the only place the per-directive context the report needs
           // (`assignmentId`, and the runId minted just above) is in scope, so the
           // handler-level seam above is bound to it here.
-          onSessionIdCaptured: (sessionId) => onSessionIdCaptured?.(sessionId, { assignmentId, runId: runRecord.runId }),
+          onSessionIdCaptured: (sessionId) => {
+            // m42 interactive worker terminals — the captured id is the input
+            // frame's join key: bind it to this bracket's live-PTY write so a
+            // routed keystroke can reach EXACTLY this session (and nothing else).
+            const write = livePtyWrites.get(assignmentId);
+            if (write != null && typeof sessionId === "string" && sessionId.length > 0) {
+              liveSessionInputs.set(sessionId, write);
+            }
+            return onSessionIdCaptured?.(sessionId, { assignmentId, runId: runRecord.runId });
+          },
           // milestone 38 / story 06 / task 04 (BLOCKER F-38.06e; ADR-014 AMENDMENT
           // 2026-07-23, structural invariant 8) — forwarded VERBATIM (no per-
           // directive context is needed: the end frame routes on the (nodeId,
           // sessionId) tuple the bytes already rode, never on the assignment).
           onSessionEnd,
+          // m42 interactive worker terminals — a LIVE question reports needs-input
+          // WITHOUT ending the run: the assignment row gains the code while the
+          // session stays up (answerable through the terminal); an answered
+          // question clears it (a code-less running frame nulls the column — the
+          // apply seam's code semantics are verbatim-per-frame). The park path
+          // (below, outcome === "needs-input") still reports the same code at
+          // settle, so a session that out-waited the long window reads identically.
+          onNeedsInputPending: (pending) => {
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, ...(pending ? { code: "needs-input" } : {}) }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
         },
       );
       // task 03 (ADR-013 amendment) — the session_id the driver resolved via its
@@ -2093,6 +2554,27 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // marker). A run whose transcript never appears (or whose watch was aborted
       // before one did) degrades to null here, never a crash.
       const sessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
+
+      // 2026-07-27 (withdraw notify) — the spawn settled: its kill (and, m42, its
+      // input write + session binding) are dead weight.
+      clearLivePtyRegistries(assignmentId);
+      // A withdrawal that arrived DURING the run (the handler killed the PTY):
+      // settle the record as cancelled — never `failed` — and send NO status frame
+      // (the row is already terminal; the control's terminal-guard would refuse
+      // it). The worktree takes the retain branch, same as failed.
+      if (withdrawnByControl.delete(assignmentId)) {
+        try {
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "cancelled", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+        onCleanup(assignmentId, "failed", worktreePath);
+        return;
+      }
 
       // task 02 (ADR-013 invariant 4) — a `needs-input` outcome branches out BEFORE
       // completeRun is ever called: run-store's OWN closed transition table (19/
@@ -2115,12 +2597,20 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         return;
       }
 
-      const completed = await completeRun(item, {
-        runId: runRecord.runId,
-        outcome: outcome.outcome,
-        failureReason: outcome.failureReason ?? null,
-        now: resolveNow(),
-      });
+      // The bracket's settle — through the transition seam, so a FAILED outcome
+      // rolls the primary checkout's item back to not-started via the declared
+      // reactor (the "8 call sites, exactly 1 does the rollback" disease dies
+      // here) and the event survives a crash between fact and cascade.
+      const { record: completed } = await transitionRunComplete(
+        item,
+        {
+          runId: runRecord.runId,
+          outcome: outcome.outcome,
+          failureReason: outcome.failureReason ?? null,
+          now: resolveNow(),
+        },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      );
 
       // task 03/07 — cleanup on done, retain on failed; on a `done` AGENT outcome,
       // story 07 (ADR-015) inserts a PUSH before that cleanup can ever run. `force:true`
@@ -2165,17 +2655,17 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // pushed branch on the done frame so control records this item's active branch
           // (the next continue/verify reuses it). For a reused base branch this IS that
           // branch; for a refine it is the fresh per-assignment branch.
-          await sendAssignmentStatus?.(assignmentId, "done", { runId: runRecord.runId, sessionId, branch });
+          await reportSettled(assignmentId, "done", { runId: runRecord.runId, sessionId, branch });
           await removeWorktree(ws.projectRoot, assignmentId, { exec, force: true });
           onCleanup(assignmentId, "done", worktreePath);
         } catch (pushError) {
           const code = pushError?.code ?? "push-failed";
-          logAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
-          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
+          reportAssignmentFailure(assignmentId, code, `push of branch "${branch}" failed for assignment ${assignmentId}: ${String(pushError?.message ?? pushError)}`);
+          await reportSettled(assignmentId, "failed", { runId: runRecord.runId, code, sessionId });
           onCleanup(assignmentId, "failed", worktreePath);
         }
       } else {
-        await sendAssignmentStatus?.(assignmentId, completed.state, { runId: runRecord.runId, sessionId });
+        await reportSettled(assignmentId, completed.state, { runId: runRecord.runId, sessionId });
         onCleanup(assignmentId, "failed", worktreePath);
       }
     } catch (error) {
@@ -2186,9 +2676,414 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // worker-stream-client.mjs:133, so a rethrow here would surface only as an
       // unhandled rejection, never a caught fault — swallow it after the coded
       // status is streamed).
-      await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord?.runId });
+      clearLivePtyRegistries(assignmentId); // never leak a kill/write past its bracket
+      await reportSettled(assignmentId, "failed", { runId: runRecord?.runId, code: error?.code ?? "assignment-execution-failed" });
       const constructed = assignmentError("assignment-execution-failed", String(error?.message ?? error));
-      logAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
+      reportAssignmentFailure(assignmentId, constructed.code, `${constructed.message}${error?.stack ? `\n${error.stack}` : ""}`);
+    }
+  };
+}
+
+// settleStrandedRunRecords(stranded, options) — 2026-07-27, the ghost-record
+// family's LAST member (measured the same day, on the first daemon restart after
+// the withdraw fix shipped): the startup reclaim reported a stranded assignment
+// `failed/daemon-restarted` and left its run record `running` — the duplicate-run
+// guard then walls the item exactly as the withdraw case did. Run-record
+// settlement is part of EVERY terminal path, and this is the startup path's
+// settle: for each stranded worktree, resolve its checkout, find the running run
+// record minted for that assignmentId (the bracket stamps brief.assignmentId),
+// and complete it failed/runtime_offline — the retryable infra classification, the
+// same one the autonomous loop's own reclaim uses for a crashed host. Idempotent
+// (an absent or already-terminal record is a logged no-op) and NEVER throws — a
+// settle fault is reported per entry and the next entry still settles.
+export async function settleStrandedRunRecords(stranded, options = {}) {
+  const { globalWorkStoreOptions, now, onLog } = options;
+  const resolveNow = () => (typeof now === "function" ? now() : now ?? new Date().toISOString());
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "startup-reclaim", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  for (const entry of Array.isArray(stranded) ? stranded : []) {
+    const assignmentId = entry?.assignmentId;
+    if (typeof assignmentId !== "string" || assignmentId.length === 0) continue;
+    try {
+      const checkoutRoot = checkoutRootForWorktree(entry.worktreePath);
+      const ws = await loadWorkspace(checkoutRoot, undefined, { env: globalWorkStoreOptions?.env });
+      const items = await listItems(ws.workDir);
+      let settled = false;
+      for (const item of items) {
+        const ghost = (await readRuns(item)).find(
+          (run) => run.state === "running" && run?.brief?.assignmentId === assignmentId,
+        ) ?? null;
+        if (ghost == null) continue;
+        await transitionRunComplete(
+          item,
+          { runId: ghost.runId, outcome: "failed", failureReason: "runtime_offline", now: resolveNow() },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        );
+        log("info", `stranded assignment ${assignmentId}: run ${ghost.runId} settled failed/runtime_offline (daemon restarted) — the duplicate-run guard is clear`);
+        settled = true;
+        break;
+      }
+      if (!settled) log("info", `stranded assignment ${assignmentId}: no running run record to settle`);
+    } catch (error) {
+      log("warn", `stranded assignment ${assignmentId}: settling its run record failed: ${String(error?.message ?? error)}`);
+    }
+  }
+}
+
+// createMeshWorkerWithdrawHandler(options) → handler(frame) — the function
+// `client.onWithdraw(handler)` registers (worker-stream-client.mjs). 2026-07-27,
+// the duplicate-run wall: a control-side withdrawal must reach the HOLDER — kill
+// any live session for the assignment and settle its run record as `cancelled`
+// (running>cancelled is a legal transition), so the run store's duplicate-run
+// guard never walls the item's future runs behind a ghost. Two cases:
+//   - a LIVE session on this daemon: mark withdrawnByControl + kill the PTY; the
+//     execution bracket (which owns the run record) consumes the mark and settles
+//     cancelled itself — one owner per record, no race.
+//   - NO live session (a parked pre-restart run, or the record simply left
+//     behind): settle the record directly, resolving the workspace through the
+//     SAME launch-or-scoped-checkout repoint the execution handler uses.
+// Idempotent and never-throwing: an unknown assignment, an absent record, or an
+// already-terminal record is a logged no-op.
+export function createMeshWorkerWithdrawHandler(options = {}) {
+  const { loadWs, globalWorkStoreOptions, onLog, now } = options;
+  const resolveNow = () => (typeof now === "function" ? now() : now ?? new Date().toISOString());
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "withdraw-notify", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  return async function handleWithdraw(frame) {
+    const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+    if (assignmentId == null) return;
+    const kill = livePtyKills.get(assignmentId);
+    if (kill != null) {
+      withdrawnByControl.add(assignmentId);
+      try {
+        kill();
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
+      log("info", `assignment ${assignmentId}: live session killed (withdrawn by control); its bracket settles the run record as cancelled`);
+      return;
+    }
+    const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : null;
+    const itemRef = typeof frame?.itemRef === "string" && frame.itemRef.length > 0 ? frame.itemRef : null;
+    const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+    if (runId == null || itemRef == null || workspaceId == null) {
+      log("info", `assignment ${assignmentId}: withdrawn — no run/item on the frame, nothing to settle here`);
+      return;
+    }
+    try {
+      let ws = await loadWs();
+      if (workspaceId !== resolveWorkspaceId(ws)) {
+        ws = await loadWorkspace(meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {}), undefined, { env: globalWorkStoreOptions?.env });
+      }
+      const item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
+      if (item == null) {
+        log("warn", `assignment ${assignmentId}: itemRef "${itemRef}" does not resolve here — run ${runId} not settled`);
+        return;
+      }
+      const run = (await readRuns(item)).find((record) => record.runId === runId) ?? null;
+      if (run == null) {
+        log("info", `assignment ${assignmentId}: run ${runId} has no record on this worker — nothing to settle`);
+        return;
+      }
+      if (run.state !== "running" && run.state !== "queued") {
+        log("info", `assignment ${assignmentId}: run ${runId} is already ${run.state} — nothing to settle`);
+        return;
+      }
+      await transitionRunComplete(
+        item,
+        { runId, outcome: "cancelled", now: resolveNow() },
+        { journalOptions: { env: globalWorkStoreOptions?.env } },
+      );
+      log("info", `assignment ${assignmentId}: run ${runId} settled cancelled (withdrawn by control) — the duplicate-run guard is clear`);
+    } catch (error) {
+      log("warn", `assignment ${assignmentId}: settling run ${runId} failed: ${String(error?.message ?? error)}`);
+    }
+  };
+}
+
+// createMeshWorkerTerminalInputHandler(options) → handler(frame) — the function
+// `client.onTerminalInput(handler)` registers (worker-stream-client.mjs). m42
+// "interactive worker terminals": an operator keystroke arrives as a
+// terminal-input DOWN-frame ({ sessionId, bytes }) and may write EXACTLY ONE
+// thing — the live PTY whose CAPTURED session id equals the frame's sessionId
+// (liveSessionInputs, bound at session-id capture, cleared at settle). Everything
+// else is a drop:
+//   - no live PTY bound to that session (a parked needs-input session, a settled
+//     run, a foreign/garbled id) → dropped, logged ONCE per session id (a human
+//     typing at a dead session would otherwise log every keystroke);
+//   - a malformed frame → dropped silently (the same shape-guard posture every
+//     frame handler here keeps).
+// Never throws; never logs the CONTENT of the bytes (an operator's answer may be
+// sensitive — codes and session ids only).
+export function createMeshWorkerTerminalInputHandler(options = {}) {
+  const { onLog } = options;
+  const reportedMisses = new Set();
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "terminal-input", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  return function handleTerminalInput(frame) {
+    const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : null;
+    const bytes = typeof frame?.bytes === "string" && frame.bytes.length > 0 ? frame.bytes : null;
+    if (sessionId == null || bytes == null) return;
+    const write = liveSessionInputs.get(sessionId);
+    if (write == null) {
+      if (!reportedMisses.has(sessionId)) {
+        reportedMisses.add(sessionId);
+        log("info", `terminal input for session ${sessionId}: no live PTY with that captured session on this worker — dropped (a parked needs-input session is resumed with \`claude --resume\`, not typed into)`);
+      }
+      return;
+    }
+    reportedMisses.delete(sessionId);
+    try {
+      const delivered = write(bytes);
+      // DELIVERY BREADCRUMB (2026-07-27 live debug, retained): the one unwitnessed
+      // hop — every verified layer said "delivered" while the TUI never reacted, so
+      // the write itself testifies, INCLUDING which pty pid it fed (the cycle-12
+      // discriminator). Content is NEVER logged (an answer may be sensitive); byte
+      // count + session + pid only. Retire this with STATE's OPEN FINDING, not
+      // before — it is the correlation handle a resumed investigation needs.
+      log("info", `delivered ${Buffer.byteLength(String(bytes))} byte(s) to session ${sessionId}'s live PTY (pid ${delivered?.pid ?? "?"})`);
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+}
+
+// createMeshWorkerTerminalResumeHandler(options) → handler(frame) — the function
+// `client.onTerminalResume(handler)` registers (worker-stream-client.mjs). m42
+// terminal-resume, REWORKED the same day it shipped (operator: the first cut was
+// a side-channel PTY re-attach that left the WHOLE system lying — row `failed`,
+// board offering Continue beside a live session, no run record, presence idle).
+//
+// A resume is a RUN CONTINUING, so it flows through the ONE lifecycle everything
+// else already reads:
+//   - a run record is MINTED (startRun — the duplicate-run guard therefore walls
+//     a concurrent Continue, exactly as it should);
+//   - the assignment row comes back via a worker-reported `running` frame with
+//     `code: "resumed"` — the ONE sanctioned revival of a `failed` row (the
+//     apply seam legalizes exactly that transition; every other terminal-row
+//     frame is still refused);
+//   - the session is DRIVEN by the SAME driver as any run
+//     (driveInteractiveClaudeSession + `resumeSessionId`): `claude --resume`
+//     KEEPS the session id (measured — it appends the SAME transcript), so the
+//     identity is known at spawn and injected, never derived; the board / fleet /
+//     mirror / input registry are all on the one live tuple from the first byte;
+//     the needs-input lanes (live question + sentinel) work exactly as on a
+//     first run; completion settles the run record AND the row (done/failed),
+//     or parks needs-input with the code visible.
+// The worktree is always RETAINED (this bracket does not push; a resumed
+// session's committed work goes home via `aof mesh recover-push` — one door per
+// act). Idempotent: an assignment with a live PTY on this daemon is a logged
+// no-op, never a second session.
+export function createMeshWorkerTerminalResumeHandler(options = {}) {
+  const { loadWs, globalWorkStoreOptions, nodeId, onLog, onOutputChunk, onSessionEnd, sendAssignmentStatus } = options;
+  const spawnRuntime = options.spawnRuntime ?? driveInteractiveClaudeSession;
+  const resolveNow = () => (typeof options.now === "function" ? options.now() : options.now ?? new Date().toISOString());
+  const log = (level, message) => {
+    try {
+      onLog?.({ code: "terminal-resume", level, message });
+    } catch (error) {
+      reportDegrade("mesh-worker-execution", error);
+    }
+  };
+  return async function handleTerminalResume(frame) {
+    const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : null;
+    const assignmentId = typeof frame?.assignmentId === "string" && frame.assignmentId.length > 0 ? frame.assignmentId : null;
+    const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
+    const itemRef = typeof frame?.itemRef === "string" && frame.itemRef.length > 0 ? frame.itemRef : null;
+    if (sessionId == null || assignmentId == null || workspaceId == null || itemRef == null) {
+      log("warn", "terminal-resume frame dropped: missing sessionId/assignmentId/workspaceId/itemRef");
+      return;
+    }
+    if (livePtyKills.has(assignmentId)) {
+      log("info", `assignment ${assignmentId} already has a live session on this worker — resume is a no-op`);
+      return;
+    }
+    let runRecord = null;
+    let item = null;
+    try {
+      // Repoint to the assignment's OWN checkout — the recovery-push handler's
+      // exact resolution, so resume and recovery never drift on where "here" is.
+      let ws = await loadWs();
+      if (workspaceId !== resolveWorkspaceId(ws)) {
+        ws = await loadWorkspace(meshCheckoutPath(workspaceId, globalWorkStoreOptions ?? {}), undefined, { env: globalWorkStoreOptions?.env });
+      }
+      const worktreePath = meshWorktreePath(ws.projectRoot, assignmentId);
+      let worktreeExists = false;
+      try { worktreeExists = (await stat(worktreePath)).isDirectory(); } catch { worktreeExists = false; }
+      if (!worktreeExists) {
+        log("warn", `session ${sessionId}: assignment ${assignmentId}'s worktree is gone (${worktreePath}) — nothing to resume in (a cleanly-done run removes its worktree)`);
+        return;
+      }
+      item = await findWork(ws.workDir, itemRef).then((matches) => matches.find((row) => row.ref === itemRef) ?? matches[0] ?? null);
+      if (item == null) {
+        log("warn", `session ${sessionId}: itemRef "${itemRef}" does not resolve in ${ws.workDir} — resume refused`);
+        return;
+      }
+
+      // The RUN. A resume that previously parked needs-input left ITS record
+      // `running` — the run PAUSED, it never ended — so a resume of the SAME
+      // assignment CONTINUES that run (same runId; completion settles the same
+      // record) instead of minting a second one straight into the duplicate-run
+      // wall. A running record held by a DIFFERENT assignment is genuine
+      // concurrent work and refuses the resume. Otherwise: minted like any run —
+      // the store tells the truth, and the guard walls a parallel start.
+      const priorRunning = (await readRuns(item)).find((record) => record.state === "running") ?? null;
+      if (priorRunning != null && priorRunning.brief?.assignmentId !== assignmentId) {
+        log("warn", `session ${sessionId}: item ${itemRef} already has a running record (${priorRunning.runId}) held by assignment ${priorRunning.brief?.assignmentId ?? "?"} — resume refused`);
+        return;
+      }
+      // A CONTINUED run mints nothing (and so raises nothing — no fact, no
+      // event); a fresh one rides the transition seam like every other mint.
+      runRecord =
+        priorRunning
+        ?? (await transitionRunStart(
+          item,
+          { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        )).record;
+      if (priorRunning != null) {
+        log("info", `session ${sessionId}: continuing PAUSED run ${priorRunning.runId} (a needs-input park is the same run resuming, never a second record)`);
+      }
+      // The row revives: worker-reported running with the resume code (the one
+      // transition the apply seam sanctions out of `failed`). The board flips to
+      // "running on <node>" and the Open-terminal affordance re-arms from here.
+      await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, code: "resumed" });
+
+      log("info", `session ${sessionId} RESUMING (assignment ${assignmentId}, item ${itemRef}, run ${runRecord.runId}): claude --resume in ${worktreePath}`);
+
+      // IN-DAEMON PTY SELF-TEST (2026-07-27, cycle 13 — temporary): pty WRITES
+      // deliver in a fresh process on this same machine/node/lib but vanish
+      // inside the daemon (reads flow; writes + resize ioctls die silently, no
+      // error). This spawns a THROWAWAY `cat` pty inside THIS daemon process,
+      // writes to it, and logs echo-or-silence — discriminating "pty input is
+      // dead daemon-process-wide" from "only the claude term is affected".
+      // Removed once the input path is live-proven.
+      if (process.platform !== "win32") {
+        (async () => {
+          try {
+            const probeSpawn = options.ptySpawn ?? defaultPtySpawn;
+            const probe = await probeSpawn("/bin/cat", [], { name: "xterm-256color", cols: 80, rows: 24, cwd: worktreePath, env: process.env });
+            let echoed = "";
+            const sub = probe.onData?.((d) => { echoed += String(d); });
+            setTimeout(() => { try { probe.write("pty-selftest\r"); } catch (error) { reportDegrade("mesh-worker-execution", error); } }, 500);
+            setTimeout(() => {
+              log("info", `pty-selftest: in-daemon cat echo ${echoed.includes("pty-selftest") ? "OK" : `SILENT (got ${echoed.length} bytes)`}`);
+              try { sub?.dispose?.(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
+              try { probe.kill(); } catch (error) { reportDegrade("mesh-worker-execution", error); }
+            }, 3000).unref?.();
+          } catch (error) {
+            log("warn", `pty-selftest: spawn failed: ${String(error?.message ?? error)}`);
+          }
+        })();
+      }
+      const outcome = await spawnRuntime(
+        // command: null — a resume re-attaches to the conversation; there is no
+        // directive to type (the driver's command write is already null-guarded).
+        { itemRef, worktreeCwd: worktreePath, task: item?.title ?? itemRef, command: null },
+        {
+          ptySpawn: options.ptySpawn,
+          which: options.which,
+          resumeSessionId: sessionId,
+          commandDelayMs: options.commandDelayMs,
+          livenessIntervalMs: options.livenessIntervalMs,
+          onOutputChunk,
+          // The session id is KNOWN AT SPAWN — `claude --resume` keeps the SAME
+          // session id and appends the SAME transcript (measured on the Mac
+          // 2026-07-27 15:26Z: 89d1f151….jsonl growing under the resumed
+          // process). The default watch looks for a NEW transcript file, which
+          // never appears on a resume — capturedSessionId stayed null, every
+          // output frame was dropped unroutable, and input never bound: a live
+          // session, fully invisible. A KNOWN fact is not derived (m42): resolve
+          // instantly with the resumed id — frames stamp from the first byte,
+          // input binds at once, and the completion watch reads the RIGHT file.
+          watchTranscriptSessionId: async () => sessionId,
+          watchTranscriptCompletion: options.watchTranscriptCompletion,
+          onPtyLive: (kill, write) => {
+            livePtyKills.set(assignmentId, kill);
+            if (typeof write === "function") livePtyWrites.set(assignmentId, write);
+          },
+          // Fires immediately with the RESUMED id (injected above) — bind input
+          // and re-affirm the id on the row's running frame.
+          onSessionIdCaptured: (sid) => {
+            const write = livePtyWrites.get(assignmentId);
+            if (write != null && typeof sid === "string" && sid.length > 0) {
+              liveSessionInputs.set(sid, write);
+            }
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId: sid, code: "resumed" }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
+          // The live-question lane works on a resumed session exactly as on a
+          // first run: report while alive, clear on answer (back to the resumed
+          // code, never a bare clear — the row still says WHY it is running).
+          onNeedsInputPending: (pending) => {
+            Promise.resolve(
+              sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, code: pending ? "needs-input" : "resumed" }),
+            ).catch((error) => reportDegrade("mesh-worker-execution", error));
+          },
+          onSessionEnd,
+        },
+      );
+      clearLivePtyRegistries(assignmentId);
+      const forkedSessionId = typeof outcome?.sessionId === "string" && outcome.sessionId.length > 0 ? outcome.sessionId : null;
+
+      if (outcome.outcome === "needs-input") {
+        await sendAssignmentStatus?.(assignmentId, "running", { runId: runRecord.runId, sessionId: forkedSessionId, code: "needs-input" });
+        log("info", `session ${sessionId}: resumed session parked needs-input (run ${runRecord.runId} stays running; resume it again to continue)`);
+        return;
+      }
+      const settledOutcome = outcome.outcome === "done" ? "done" : "failed";
+      try {
+        await transitionRunComplete(
+          item,
+          { runId: runRecord.runId, outcome: settledOutcome, now: resolveNow() },
+          { journalOptions: { env: globalWorkStoreOptions?.env } },
+        );
+      } catch (error) {
+        reportDegrade("mesh-worker-execution", error);
+      }
+      // done WITHOUT a branch fact: this bracket does not push (recover-push is
+      // the push door), so it never claims the work went anywhere it didn't.
+      await sendAssignmentStatus?.(assignmentId, settledOutcome, {
+        runId: runRecord.runId,
+        sessionId: forkedSessionId,
+        ...(settledOutcome === "failed" && outcome.failureReason ? { code: outcome.failureReason } : {}),
+      });
+      log("info", `session ${sessionId}: resumed run ${runRecord.runId} settled ${settledOutcome} — worktree retained (push home via aof mesh recover-push if it produced commits)`);
+    } catch (error) {
+      clearLivePtyRegistries(assignmentId);
+      log("warn", `session ${sessionId}: resume failed: ${String(error?.message ?? error)}`);
+      if (runRecord != null && item != null) {
+        try {
+          await transitionRunComplete(
+            item,
+            { runId: runRecord.runId, outcome: "failed", now: resolveNow() },
+            { journalOptions: { env: globalWorkStoreOptions?.env } },
+          );
+        } catch (settleError) {
+          reportDegrade("mesh-worker-execution", settleError);
+        }
+        try {
+          await sendAssignmentStatus?.(assignmentId, "failed", { runId: runRecord.runId, code: "terminal-resume-failed" });
+        } catch (statusError) {
+          reportDegrade("mesh-worker-execution", statusError);
+        }
+      }
     }
   };
 }
@@ -2231,7 +3126,7 @@ export function createMeshRecoveryPushHandler(options = {}) {
     const workspaceId = typeof frame?.workspaceId === "string" && frame.workspaceId.length > 0 ? frame.workspaceId : null;
     const branch = typeof frame?.branch === "string" && frame.branch.length > 0
       ? frame.branch
-      : (itemRef != null && assignmentId != null ? meshWorkerBranchName(itemRef, assignmentId) : null);
+      : (itemRef != null ? meshItemBranchName(itemRef) : null);
     const credential = typeof frame?.credential === "string" && frame.credential.length > 0 ? frame.credential : null;
 
     if (assignmentId == null || branch == null) {

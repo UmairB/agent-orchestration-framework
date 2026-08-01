@@ -14,7 +14,7 @@
 // independent of whether the binary is even present, so it is deterministically
 // CI-checkable. The success spawn is @manual (needs the live binary).
 import { existsSync } from "node:fs";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { runGraphifyQuery, graphJsonPath } from "../graphify.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 
@@ -60,6 +60,17 @@ export const graphQueryCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; graphVerbCommand's cli.mjs ladder branch is deleted.
+    route: ["graph", "query"],
+    spec: {
+      usage: 'aof graph query "<question>" [--strategy dfs|bfs] [--budget N] [--json]',
+      flags: {
+        strategy: { type: "string", description: "traversal strategy (dfs|bfs)" },
+        budget: { type: "string", description: "node budget for the traversal" },
+      },
+    },
+
     // `aof graph query "<question>" [--strategy dfs|bfs] [--budget N]`.
     argv: (positionals, options = {}) => {
       const input = { question: positionals[0] };

@@ -9,10 +9,10 @@
 // the graph surface:
 //   (a) import the registry; assert each of the three graph:* commands is present
 //       and carries a `cli` adapter with `argv`/`render` functions;
-//   (b) source-grep `graphCommand` in cli.mjs for a reachable dispatch branch per
-//       verb (`subcommand === "<verb>"`, comments/strings discounted, and
-//       isolated to the graphCommand body so an unrelated dispatcher cannot
-//       satisfy it);
+//   (b) each verb is CLI-reachable through EITHER door (m42 wave (d) leg d1,
+//       wave 3): a registry-derived route-table entry (`cli.route` — the
+//       migrated form) OR a `subcommand === "<verb>"` dispatch branch isolated
+//       to the graphCommand body (the legacy ladder form);
 //   (c) CLI spawn-and-parse: run `aof graph {build,query,triage} --json` against a
 //       temp fixture repo (no graphify binary, no built graph) and assert each
 //       emits a SINGLE parseable JSON envelope — a success projection OR the
@@ -24,6 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listCommands } from "../../src/command-core.mjs";
+import { deriveRouteTable } from "../../src/spine/face.mjs";
 import { spawnCliSync } from "../support/cli-spawn.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -73,6 +74,10 @@ async function buildFixture() {
 // no-graph) — which still parses as a single JSON document.
 function argsFor(verb) {
   switch (verb) {
+    // m42 wave (d) leg d1 (wave-3 tail) — graph:serve rides the launcher seam:
+    // --json is the NON-BLOCKING probe by FACE POLICY (--json never launches),
+    // so the spawn returns with the MCP surface document — never the stdio loop.
+    case "serve": return ["graph", "serve", "--json"];
     case "build": return ["graph", "build", ".", "--json"];
     case "query": return ["graph", "query", "what calls main", "--json"];
     case "triage": return ["graph", "triage", "--json"];
@@ -110,14 +115,17 @@ export const archTests = [
     },
   },
   {
-    name: "arch/ADR-006 inv.1: graphCommand in cli.mjs has a reachable dispatch branch per graph verb",
+    name: "arch/ADR-006 inv.1: every graph verb is CLI-reachable — a route-table entry OR a graphCommand dispatch branch",
     run: async () => {
       const body = graphCommandBody(stripComments(await readFile(CLI_MJS, "utf8")));
-      assert.ok(body.length > 0, "graphCommand is defined in cli.mjs");
+      assert.ok(body.length > 0, "graphCommand is defined in cli.mjs (serve + the unknown-verb shim)");
+      const routes = deriveRouteTable(listCommands());
       for (const verb of GRAPH_VERBS) {
+        const routed = routes.has(`graph ${verb}`);
+        const laddered = new RegExp(`subcommand\\s*===\\s*["']${verb}["']`).test(body);
         assert.ok(
-          new RegExp(`subcommand\\s*===\\s*["']${verb}["']`).test(body),
-          `graphCommand dispatches \`subcommand === "${verb}"\` (no graph command the CLI cannot run)`
+          routed || laddered,
+          `graph ${verb} is reachable via the route table or a graphCommand branch (no graph command the CLI cannot run)`
         );
       }
     },

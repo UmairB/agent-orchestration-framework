@@ -33,7 +33,17 @@ import {
 import { WORKTREE_CONTENT_FRAME_KIND, LOG_ENTRIES_FRAME_KIND } from "./worker-stream-client.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
-import { updateAssignmentState, isActiveAssignmentState } from "./assignment-record.mjs";
+import { isActiveAssignmentState } from "./assignment-record.mjs";
+// m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal-never-
+// regresses guards live in front of the write there, for every writer, and the
+// settle raises its declared cascade).
+import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
+// m42 wave (d) leg d3 — the bridge fact door: the closed vocabulary, the control
+// node's own journal, and the control-reachable drain.
+import { effectsFor } from "./effects/table.mjs";
+import { openEffectsJournal, appendEvent } from "./effects/journal.mjs";
+import { drainEffects, CONTROL_LOCI } from "./effects/dispatch.mjs";
+import { EFFECT_STEP_FRAME_KIND, EFFECT_ACK_FRAME_KIND } from "./effects/outbox.mjs";
 // milestone 38 / story 06 (ADR-014 AMENDMENT 2026-07-19, closing BLOCKER F-38.06) —
 // the NEW opaque `terminal-frame` kind the worker sends UP its stream client (the
 // cross-machine leg). This server BRANCHES it BEFORE applyStreamFrame into an injected
@@ -49,7 +59,7 @@ import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-
 // VERIFICATION (continue-on-existing-branch, 2026-07-25) — when a worker reports a `done`
 // carrying the branch it pushed, record it as the item's active mesh branch so the next
 // continue/verify dispatch reuses it (the work accumulates on ONE branch per item).
-import { setItemBranch } from "./mesh-assignment-directive.mjs";
+
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
 
@@ -294,29 +304,16 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
     return { applied: false, skipped: true, code: "assignment-status-frame-invalid" };
   }
 
-  const existing = store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId);
-  if (!existing) {
-    return { applied: false, skipped: true, code: "assignment-status-unknown-assignment" };
-  }
-  // T6: the CONNECTION's authenticated nodeId must be the row's holder — a frame on
-  // worker-a's connection can never advance an assignment held by worker-b, no
-  // matter what the frame itself self-declares as `nodeId`.
-  if (existing.target_node_id !== connectionNodeId) {
-    return { applied: false, skipped: true, code: "assignment-status-not-holder" };
-  }
-
-  // m42 wave (b) / item 7 leg 2 — A TERMINAL ROW NEVER REGRESSES. A late/stale
-  // worker frame (a startup reclaim broadcast covering a retained worktree, a
-  // duplicate `failed` after a manual withdraw, a done echo arriving after a
-  // reclaim) must never flip a settled assignment back to another state:
-  // updateAssignmentState itself is guard-free by design (its callers own the
-  // transition rules), so THIS apply seam — the only door worker frames come
-  // through — is where the invariant lives. Refused, and reportable (the skip
-  // reaches onFrameSkipped like every other refusal).
-  if (!isActiveAssignmentState(existing.state)) {
-    return { applied: false, skipped: true, code: "assignment-status-already-terminal", workspaceId: existing.workspace_id };
-  }
-
+  // m42 wave (d) leg d3 — THE GUARDS MOVED. The T6 holder check and the
+  // terminal-never-regresses invariant (with its one sanctioned resume revival)
+  // used to be decided HERE, because this seam is the only door worker frames
+  // come through — which left the withdraw verb re-deriving a weaker version and
+  // the reclaim tick with none. They now live in front of the write, in
+  // effects/assignment-transitions.mjs, so EVERY writer inherits them; this
+  // handler keeps only what is genuinely frame-shaped (shape-guarding the frame,
+  // reading the connection's authenticated nodeId, deciding the absent-is-not-a-
+  // clear vs verbatim-per-frame discipline per key) and hands the edge over. The
+  // refusal codes are unchanged — they are the transition's vocabulary now.
   const now = options.now ?? new Date().toISOString();
   const runId = typeof frame?.runId === "string" && frame.runId.length > 0 ? frame.runId : undefined;
   // milestone 38 / story 06 / task 04 (BLOCKER F-38.06c; ADR-013 invariant 3 +
@@ -329,17 +326,132 @@ export async function applyAssignmentStatusFrame(store, frame, options = {}) {
   // `runId`: `undefined` (no session id on this frame) leaves any
   // previously-captured value intact in updateAssignmentState.
   const sessionId = typeof frame?.sessionId === "string" && frame.sessionId.length > 0 ? frame.sessionId : undefined;
-  const updated = updateAssignmentState(store, assignmentId, state, { now, runId, sessionId });
-  // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a `done` means the worker's
-  // push succeeded (it sends done only AFTER the push); record the branch it reported as
-  // this item's active branch, keyed by the assignment ROW's OWN workspace/item (never a
-  // self-reported id — the SAME T6 discipline the holder check above keeps). The next
-  // continue/verify for this item reuses it. Absent branch (a pre-upgrade worker) is a
-  // no-op, byte-identical to before.
-  if (state === "done" && typeof frame?.branch === "string" && frame.branch.length > 0) {
-    setItemBranch(store, existing.workspace_id, existing.item_ref, frame.branch, { now });
+  // m42 interactive worker terminals — the status-refinement `code` (e.g.
+  // `needs-input`) is persisted VERBATIM PER FRAME (a code-less frame CLEARS it),
+  // deliberately unlike runId/sessionId's absent-is-not-a-clear: the code
+  // describes the CURRENT posture of the session (waiting on a human right now),
+  // not a captured fact, so each frame's word is the whole truth.
+  const code = typeof frame?.code === "string" && frame.code.length > 0 ? frame.code : null;
+  // The branch a `done` frame reports rides the EDGE into the transition, whose
+  // `assignment.settled` event carries it as evidence to the `record-item-branch`
+  // reactor (control-store locus). The inline write that lived here is deleted:
+  // "a done means the push succeeded, so record the branch" is a declared
+  // consequence now, not a line every future writer must remember.
+  const branch = typeof frame?.branch === "string" && frame.branch.length > 0 ? frame.branch : null;
+  const result = await transitionAssignmentState(
+    store,
+    assignmentId,
+    state,
+    { byNode: connectionNodeId, now, runId, sessionId, code, branch },
+    { journalOptions: options.journalOptions ?? {} },
+  );
+  // An idempotent terminal repeat reports as applied:false with the settled row —
+  // the pre-d3 seam wrote nothing new in that case either (it refused it), and no
+  // caller reads `idempotent`; it exists for the drill and the tests.
+  return result;
+}
+
+// buildEffectAckFrame(to, { eventId, reactorKey, ok, code, at }) — the DURABLE
+// RECEIPT for one outbox-delivered effect step (m42 wave (d) leg d3). Correlated
+// by (eventId, reactorKey) — the async-RPC id the PRD asks for — and addressed
+// back to the delivering connection alone, never fanned out. `code` is present
+// ONLY on a refusal, the buildCloneCredentialFrame convention.
+function buildEffectAckFrame(to, { eventId, reactorKey, ok = false, code, at }) {
+  const frame = { kind: EFFECT_ACK_FRAME_KIND, to, eventId, reactorKey, ok, at };
+  if (typeof code === "string" && code.length > 0) frame.code = code;
+  return frame;
+}
+
+// applyEffectStepFrame(store, frame, options) — THE BRIDGE'S FACT DOOR (m42 wave
+// (d) leg d3). A worker ships an owed remote-locus effect step here; this handler
+// is deliberately thin, exactly the PRD's "apply-handlers reduce to guard +
+// append into control's OWN journal, whose tick drains the same effects table":
+//
+//   GUARD  — the frame must name a known event in THIS build's closed vocabulary
+//            and a reactor that event actually declares (vocabulary drift across
+//            a mixed-version fleet is refused loudly, never guessed at), and it
+//            must carry the connection's authenticated identity. Nothing about
+//            the fact itself is re-decided here: the reactor's own transition
+//            seam owns the holder and terminal guards, so a worker cannot use
+//            this door to write something the status-frame door would refuse.
+//   APPEND — the step is materialised in the CONTROL node's own journal, so the
+//            fact is durable here before it is executed. A crash between append
+//            and drain leaves a pending step the control tick pays.
+//   DRAIN  — the just-appended step runs with CONTROL_LOCI.
+//   ACK    — the outcome goes back as the receipt. Anything but a clean `done`
+//            keeps the worker's copy pending (a fault) or ends it (a coded
+//            refusal the control node has decided) — the worker's outbox owns
+//            that distinction; this side just reports honestly.
+export async function applyEffectStepFrame(store, frame, options = {}) {
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  const eventId = typeof frame?.eventId === "string" && frame.eventId.length > 0 ? frame.eventId : null;
+  const reactorKey = typeof frame?.reactorKey === "string" && frame.reactorKey.length > 0 ? frame.reactorKey : null;
+  const name = typeof frame?.name === "string" && frame.name.length > 0 ? frame.name : null;
+  const now = options.now ?? new Date().toISOString();
+  const directiveTargets = options.directiveTargets ?? null;
+
+  const reply = (ok, code) => {
+    if (connectionNodeId != null && directiveTargets != null) {
+      sendDirective(directiveTargets, connectionNodeId, buildEffectAckFrame(connectionNodeId, { eventId, reactorKey, ok, code, at: now }));
+    }
+    return ok ? { applied: true, eventId, reactorKey } : { applied: false, skipped: true, code };
+  };
+
+  if (connectionNodeId == null || eventId == null || reactorKey == null || name == null) {
+    return reply(false, "effect-step-frame-invalid");
   }
-  return { applied: updated != null, assignment: updated };
+  const declared = effectsFor(name);
+  if (declared == null) return reply(false, "effect-step-unknown-event");
+  const reactor = declared.find((entry) => entry.key === reactorKey);
+  if (reactor == null) return reply(false, "effect-step-unknown-reactor");
+
+  let journal = null;
+  try {
+    journal = await openEffectsJournal(options.journalOptions ?? {});
+  } catch (error) {
+    // The control's ledger is unavailable: refuse with a RETRYABLE fault (no
+    // code), so the worker keeps the step pending and redelivers. Never a silent
+    // drop, and never a pretend-ack.
+    reportDegrade("effects-journal-open", error);
+    return reply(false, null);
+  }
+
+  try {
+    // The event is appended with ONLY the shipped reactor owed — the worker owns
+    // the rest of its own cascade (its checkout/local steps ran there).
+    const appended = appendEvent(
+      journal,
+      { name, payload: frame.payload ?? {}, source: `bridge:${connectionNodeId}`, now },
+      [reactor],
+    );
+    const outcomes = await drainEffects({
+      journal,
+      eventId: appended.eventId,
+      loci: CONTROL_LOCI,
+      now,
+      ctx: { store, now, byNode: connectionNodeId, journalOptions: options.journalOptions ?? {} },
+    });
+    // THE RECEIPT VOCABULARY, and the distinction that keeps redelivery finite:
+    //   ran cleanly, or consciously skipped -> ok. The fact is received and the
+    //     obligation is over (a skip IS a decision: "this state is not mine to
+    //     settle"), so the worker stops redelivering.
+    //   a DECIDED refusal (the transition's coded verdicts — not-holder,
+    //     already-terminal) -> that code. The worker ends the step too: retrying
+    //     against a decision returns the same decision forever.
+    //   anything else (a reactor fault, an unknown reactor) -> a bare failure.
+    //     The worker keeps it owed and tries again.
+    const outcome = outcomes[0] ?? null;
+    const decided = outcome?.detail?.code ?? null;
+    if (outcome?.status === "done") {
+      if (decided) return reply(false, decided);
+      return reply(true);
+    }
+    return reply(false, outcome?.status === "skipped" ? "effect-step-unknown-reactor" : null);
+  } finally {
+    journal.close();
+  }
 }
 
 // defaultMintCloneCredential(workspaceId, assignmentId) — milestone 38 / ADR-009: the
@@ -689,6 +801,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "clone-credential-request") return applyCloneCredentialRequestFrame(store, frame, options);
   if (frame?.kind === "clone-url-request") return applyCloneUrlRequestFrame(store, frame, options);
   if (frame?.kind === "write-credential-request") return applyWriteCredentialRequestFrame(store, frame, options);
+  if (frame?.kind === EFFECT_STEP_FRAME_KIND) return applyEffectStepFrame(store, frame, options);
   if (frame?.kind === RECOVERY_PUSH_RESULT_KIND) return applyRecoveryPushResultFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
@@ -740,10 +853,16 @@ export function freshnessLabel({ connected, everConnected, lastHeartbeatAt, now,
 // into the assignment's worktree instead of branching a fresh one from HEAD, so the work
 // accumulates on ONE branch per item. Absent (a refine, or an item with no prior push) ⇒
 // the worker's own fresh-branch default, byte-identical to before.
-export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command, baseBranch }) {
+export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command, baseBranch, commit }) {
   const frame = { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
   if (typeof command === "string" && command.length > 0) frame.command = command;
   if (typeof baseBranch === "string" && baseBranch.length > 0) frame.baseBranch = baseBranch;
+  // M42 base-commit pin (operator, 2026-08-01): the control checkout's HEAD at
+  // dispatch time — the state this assignment was made against. A fresh worker
+  // worktree builds from exactly this commit (fetching it if the clone is
+  // stale), never from the clone's own stale HEAD. Absent (an unresolvable
+  // checkout, an older control) the worker keeps its HEAD fallback.
+  if (typeof commit === "string" && commit.length > 0) frame.commit = commit;
   return frame;
 }
 
@@ -950,6 +1069,12 @@ export async function startControlStreamServer({
   // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs wires
   // the daemon's own warning channel.
   onFrameSkipped = () => {},
+  // onAssignmentFailure(frame, { nodeId }) — 2026-07-27 (the wrong-base retries):
+  // the non-destructive peek at a worker's FAILED status frame, so its code
+  // reaches the control's durable log instead of dying on the worker's stderr.
+  // Default no-op keeps every existing caller byte-identical; mesh-launcher.mjs
+  // wires the daemon's warning channel.
+  onAssignmentFailure = () => {},
 } = {}) {
   const registry = createStreamRegistry();
   const directiveTargets = createDirectiveTargetRegistry();
@@ -982,9 +1107,38 @@ export async function startControlStreamServer({
   });
   const wss = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (request, socket, head) => {
-    const origin = resolve(request);
-    if (!isTailnetPeer(origin, { peerNodeIds: roster })) {
+  // ASYNC gate (2026-07-27): a credential resolver must re-read the LIVE registry per
+  // decision (SECURITY T2 — never a serve-start snapshot, so a node revoked after its
+  // credential was issued is denied on its NEXT connect), and that read is async. The
+  // handler therefore awaits `resolve`; a resolver that is synchronous (the default
+  // address join, and every existing test double) is unaffected — `await` on a plain
+  // value is the value. ANY throw out of the resolver destroys the socket: an
+  // un-resolvable connection is never admitted (fail-closed, the same direction the
+  // null-nodeId path already took).
+  server.on("upgrade", async (request, socket, head) => {
+    let origin = null;
+    try {
+      origin = await resolve(request);
+    } catch (error) {
+      reportDegrade("control-stream-server", error);
+      socket.destroy();
+      return;
+    }
+    // ADMISSION (2026-07-27, the `direct` fabric cutover). The resolver may declare
+    // itself AUTHORITATIVE — it resolved this connection's identity from a presented
+    // ENROLLMENT CREDENTIAL rather than from the socket's remote address. That check
+    // (mesh-registry.mjs's verifyCredential, wired by mesh-launcher.mjs) already
+    // proves BOTH halves the roster gate below stands for: the token hashes to an
+    // admitted roster entry, AND that entry is not revoked. Re-checking it against
+    // the FABRIC peer list would be wrong, not merely redundant — on a no-overlay
+    // fabric there is no peer table to be in.
+    //
+    // Fail-closed is preserved on both paths: an authoritative resolver returns a
+    // null nodeId when verification FAILS, and a null nodeId is never admitted.
+    const admitted = origin?.authoritative === true
+      ? typeof origin.nodeId === "string" && origin.nodeId.length > 0
+      : isTailnetPeer(origin, { peerNodeIds: roster });
+    if (!admitted) {
       // A refused connection writes NOTHING to the global store — destroyed upstream
       // of the ws accept, before any frame can ever be read.
       socket.destroy();
@@ -1003,6 +1157,26 @@ export async function startControlStreamServer({
     // this SAME socket's close/error below — never a stale route past a dropped
     // connection.
     directiveTargets.set(nodeId, ws);
+
+    // HALF-OPEN DETECTION, server side (2026-07-27 — the same measured zombie
+    // class as the worker transport's keepalive): a worker whose peer vanished
+    // silently stays in directiveTargets, and every dispatch to it "succeeds"
+    // into the void with no refusal and no trace. Ping every 30s; a missed pong
+    // terminates the socket, which fires the close handler below — the target is
+    // cleared and future dispatches refuse LOUDLY (assignment-target-not-connected)
+    // until the worker's own reconnect re-admits it.
+    let pongSeen = true;
+    ws.on("pong", () => { pongSeen = true; });
+    const keepaliveTimer = setInterval(() => {
+      if (ws.readyState !== ws.OPEN) return;
+      if (!pongSeen) {
+        try { ws.terminate(); } catch (error) { reportDegrade("control-stream-server", error); }
+        return;
+      }
+      pongSeen = false;
+      try { ws.ping(); } catch (error) { reportDegrade("control-stream-server", error); }
+    }, 30_000);
+    keepaliveTimer.unref?.();
 
     ws.on("message", (data) => {
       let frame = null;
@@ -1034,6 +1208,18 @@ export async function startControlStreamServer({
       reportDegrade("control-stream-server", error); }
         return;
       }
+      // 2026-07-27 (the wrong-base retries) — a worker's FAILED status frame
+      // carries its code, and the control used to apply the state and throw the
+      // code away: a deterministic 2-second failure took an SSH inspection to
+      // name. A non-destructive PEEK to the injected sink (the frame still
+      // store-applies below, unchanged); a sink fault never crashes the loop.
+      if (frame?.kind === "assignment-status" && frame?.state === "failed") {
+        try {
+          onAssignmentFailure(frame, { nodeId });
+        } catch (error) {
+          reportDegrade("control-stream-server", error);
+        }
+      }
       const receivedAt = now();
       registry.markHeartbeat(nodeId, receivedAt);
       applyStreamFrame(store, frame, {
@@ -1064,10 +1250,12 @@ export async function startControlStreamServer({
     });
 
     ws.on("close", () => {
+      clearInterval(keepaliveTimer);
       registry.markDisconnected(nodeId);
       directiveTargets.deleteIfCurrent(nodeId, ws);
     });
     ws.on("error", () => {
+      clearInterval(keepaliveTimer);
       registry.markDisconnected(nodeId);
       directiveTargets.deleteIfCurrent(nodeId, ws);
     });

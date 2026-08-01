@@ -8,7 +8,7 @@ import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 // run-store.mjs imports no store/mesh module — no cycle.
 import { readRuns } from "./run-store.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 6;
+export const GLOBAL_WORK_SCHEMA_VERSION = 7;
 
 // The record docs a board/CLI face may request by NAME (work:doc's input contract)
 // and therefore exactly the doc bodies a worker streams for its active worktree —
@@ -36,7 +36,56 @@ export function globalStoreError(message, code, status = 500, extra = {}) {
 import { workspaceIdFromPath, resolveWorkspaceId } from "./workspace-identity.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
+// m42 wave (d) leg d5 — the store classification (fact | projection | meta) is
+// executable data, not a warning comment: the wholesale-delete guard below and
+// the ref-remap table derivation both read it.
+import { tableClass, refRemapTables } from "./effects/stores.mjs";
 export const workspaceIdFor = workspaceIdFromPath;
+
+// wholesaleDelete(db, table, workspaceId) — the ONLY sanctioned way this module
+// sweeps a workspace's rows from a table (m42 wave (d) leg d5). A wholesale
+// DELETE is a projection-rebuild move: on a fact table it would destroy
+// unrecoverable dispatch/streamed state (the exact accident the old "MUST NEVER
+// touch" comments warned about), so a misclassified call throws BEFORE the
+// statement runs — schema-level gating, not prose.
+function wholesaleDelete(db, table, workspaceId) {
+  const cls = tableClass(table);
+  if (cls !== "projection") {
+    throw globalStoreError(
+      `Refusing wholesale delete of ${table} — classified "${cls}" (only projection tables are rebuilt by sweep).`,
+      "fact-table-wholesale-delete",
+      500,
+    );
+  }
+  db.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
+}
+
+// applyConcurrencyPragmas(db) — m42, the measured `database is locked` residual
+// (STATE 2026-07-27: CONTINUOUS, every ~5s post-restart). This store is opened by
+// several processes at once — the desktop's status poll, the board's in-flight
+// re-poll, the serve daemon's write ticks and every CLI invocation — and it was
+// opened with NO pragmas at all: `journal_mode: delete`, where one writer locks
+// out every reader and a colliding tick fails IMMEDIATELY rather than waiting.
+// Write ticks retried on the next cycle so nothing was lost, but any tick could
+// silently skip a beat.
+//
+// Two pragmas, addressing the two halves:
+//   WAL          — readers no longer block the writer and the writer no longer
+//                  blocks readers, which is the collision itself. Persistent in
+//                  the file header (an older aof build opening it reads WAL fine),
+//                  and this database is always on a local filesystem — the mesh
+//                  root under AOF_GLOBAL_HOME — which is WAL's one requirement.
+//   busy_timeout — the residual case WAL cannot remove (two WRITERS). 2s of
+//                  waiting instead of an instant throw; the effects journal
+//                  (effects/journal.mjs) has had exactly this from birth, and the
+//                  projection it sits beside never did.
+//
+// Deliberately NOT hoisted into a shared helper with the journal's: the value is
+// a per-store tuning decision, not one fact with two homes.
+function applyConcurrencyPragmas(db) {
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 2000");
+}
 
 export async function openGlobalWorkProjectionStore(options = {}) {
   const paths = options.paths ?? globalMeshPaths(options);
@@ -45,6 +94,7 @@ export async function openGlobalWorkProjectionStore(options = {}) {
   await mkdir(paths.workRoot, { recursive: true });
   const db = new sqlite.DatabaseSync(paths.databasePath);
   try {
+    applyConcurrencyPragmas(db);
     const existing = readSchemaVersion(db);
     if (existing != null && existing > GLOBAL_WORK_SCHEMA_VERSION) {
       throw globalStoreError(
@@ -202,7 +252,8 @@ function migrateSchema(db, existingVersion) {
         assigned_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         reclaimed_at TEXT,
-        session_id TEXT
+        session_id TEXT,
+        code TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_global_assignments_item ON global_assignments(workspace_id, item_ref);
       -- schema v5 (TECH_DEBT item 6 — finish the board bridge). Worker-STREAMED
@@ -278,10 +329,18 @@ function migrateSchema(db, existingVersion) {
     // table. The migration is IN PLACE — the table is never dropped, recreated,
     // or wiped, so a live fleet's dispatch history survives the upgrade (an
     // assignment row is operator/worker-CREATED state, unrecoverable if lost).
-    const hasSessionIdColumn = db.prepare("PRAGMA table_info(global_assignments)").all()
-      .some((column) => column.name === "session_id");
+    const assignmentColumns = db.prepare("PRAGMA table_info(global_assignments)").all();
+    const hasSessionIdColumn = assignmentColumns.some((column) => column.name === "session_id");
     if (!hasSessionIdColumn) {
       db.exec("ALTER TABLE global_assignments ADD COLUMN session_id TEXT");
+    }
+    // schema v7 (m42 interactive worker terminals) — the status-refinement `code`
+    // a worker's assignment-status frame carries (today: `needs-input`), persisted
+    // so the board/fleet can RENDER a session waiting on a human (the code used to
+    // ride the frame and die there). Same in-place ALTER discipline as session_id.
+    const hasCodeColumn = assignmentColumns.some((column) => column.name === "code");
+    if (!hasCodeColumn) {
+      db.exec("ALTER TABLE global_assignments ADD COLUMN code TEXT");
     }
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {
@@ -297,6 +356,81 @@ function migrateSchema(db, existingVersion) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+// The insert/reindex ref-remap, SPLIT BY LOCUS (m42 wave (d) leg d5 — the split
+// port 3 deferred). The table lists derive from the store classification
+// (effects/stores.mjs `refRemap` rows — the ONE home): the worker-streamed
+// mirrors (`work_item_docs`/`work_item_runs`) are this node's own rows and
+// rewrite at `local`; the dispatch facts (`global_assignments`/
+// `global_item_branches`) belong to the authoritative mesh store's writer and
+// rewrite at `control-store` — paid by the control daemon's converge tick in
+// place, or arriving over the d3 bridge when the reindex ran on another machine
+// (which is why that reactor keys by the payload's own workspaceId, never a
+// path this machine may not have). `work_items` is deliberately in NEITHER
+// list: a pure projection is rebuilt by the publish reactor, not patched.
+//
+// A remap is a PERMUTATION (`{03→04, 04→05}`), so it is applied in the order the
+// engine hands it over — descending by the number that moved, so no update ever
+// writes onto a ref another entry has yet to vacate — inside ONE transaction, and
+// EVENT-ID DEDUPED (the reactor contract's sanctioned alternative to idempotence):
+// a redelivered event finds its id already stamped and does nothing, because
+// applying the permutation twice would shift every row a second time. The two
+// halves stamp SEPARATE watermarks (`lastReindexEventId` / the facts key below)
+// because they drain independently — a control tick paying the facts hours after
+// the CLI paid the mirrors must not see the other half's stamp and skip.
+function remapRefKeyedTables(store, workspaceId, remap, tables, stampKey, { eventId = null, now } = {}) {
+  if (!Array.isArray(remap) || remap.length === 0) return { remapped: 0, skipped: true, reason: "empty-remap" };
+  const db = store.db;
+  const stamp = now ?? new Date().toISOString();
+
+  const applied = db
+    .prepare("SELECT value FROM projection_metadata WHERE workspace_id = ? AND key = ?")
+    .get(workspaceId, stampKey);
+  if (eventId != null && applied?.value === eventId) {
+    return { remapped: 0, skipped: true, reason: "already-applied" };
+  }
+
+  let remapped = 0;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const present = new Set(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name),
+    );
+    for (const { table, column } of tables) {
+      // The side tables are created lazily by their own feature module (the
+      // self-contained `CREATE TABLE IF NOT EXISTS` idiom), so a store that has
+      // never seen a branch/assignment simply has nothing to remap there.
+      if (!present.has(table)) continue;
+      const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE workspace_id = ? AND ${column} = ?`);
+      for (const { from, to } of remap) {
+        remapped += update.run(to, workspaceId, from).changes ?? 0;
+      }
+    }
+    if (eventId != null) {
+      db.prepare(`
+        INSERT OR REPLACE INTO projection_metadata (workspace_id, key, value, updated_at)
+        VALUES (?, ?, ?, ?)
+      `).run(workspaceId, stampKey, eventId, stamp);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { remapped };
+}
+
+// The local half: the streamed-mirror rows of this node's own file. Keeps the
+// port-3 stamp key, so a store that already applied a pre-split remap does not
+// re-apply its mirror half on redelivery after an upgrade.
+export function remapWorkspaceProjectionRefs(store, workspaceId, remap = [], options = {}) {
+  return remapRefKeyedTables(store, workspaceId, remap, refRemapTables("local"), "lastReindexEventId", options);
+}
+
+// The control-store half: the dispatch facts of the authoritative mesh store.
+export function remapWorkspaceFactRefs(store, workspaceId, remap = [], options = {}) {
+  return remapRefKeyedTables(store, workspaceId, remap, refRemapTables("control-store"), "lastReindexFactsEventId", options);
 }
 
 export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
@@ -322,8 +456,8 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
         last_published_at = excluded.last_published_at
     `).run(workspaceId, projectRoot, workDir, workspace.config?.name ?? null, now);
 
-    db.prepare("DELETE FROM work_items WHERE workspace_id = ?").run(workspaceId);
-    db.prepare("DELETE FROM projection_errors WHERE workspace_id = ?").run(workspaceId);
+    wholesaleDelete(db, "work_items", workspaceId);
+    wholesaleDelete(db, "projection_errors", workspaceId);
 
     const insertItem = db.prepare(`
       INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path)

@@ -50,16 +50,25 @@ export const listCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "list"],
+    spec: {
+      usage: "aof work list [scope] [--json]",
+      flags: {},
+    },
+
     // No positionals/options map onto list's input — it takes none.
     argv: () => ({}),
 
     // The human render reproduces today's `aof work list` listing byte-for-byte —
     // depth-indented `ref · type · status · title`, optionally narrowed to a scope
     // subtree. The scope filter is a human-view affordance (the `--json` form below
-    // always emits the WHOLE stream); the CLI face passes `faceCtx.scope`. `dir` is
-    // already forward-slashed, so no path projection is needed for the human view.
+    // always emits the WHOLE stream); the generic face passes the raw positionals,
+    // so the scope is `positionals[0]`. `dir` is already forward-slashed, so no
+    // path projection is needed for the human view.
     render(rows, faceCtx = {}) {
-      const scope = faceCtx.scope;
+      const scope = faceCtx.positionals?.[0];
       const listed = rows.filter((row) => inScope(row, scope));
       if (listed.length === 0) return `Nothing in scope${scope ? ` for "${scope}"` : ""}.`;
       return listed

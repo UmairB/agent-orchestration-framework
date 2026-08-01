@@ -23,6 +23,7 @@ import {
   RECOVERY_PUSH_PUSHED,
   RECOVERY_PUSH_FAILED,
 } from "../mesh-recovery-push.mjs";
+import { commandError } from "../command-error.mjs";
 
 const DEFAULT_POLL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 90000;
@@ -108,3 +109,64 @@ export async function recoverPush(assignmentId, ctx = {}) {
     store.close?.();
   }
 }
+
+// mesh:recover-push — the registered Command over the core above (m42 wave (d)
+// leg d1, wave-3 tail): `aof mesh recover-push <assignmentId>` rides the route
+// table + the ONE generic face; cli.mjs's meshRecoverPushCommand face copy is
+// deleted. Two contracts carried over verbatim: the run RETURNS coded outcomes
+// (ok:false included) rather than throwing, and the `--json` face prints that
+// result VERBATIM at exit 0 — the retired face's shape, deliberately (a caller
+// reads `ok`/`code` off the document). The non-json face turns ok:false into
+// the coded stderr refusal (thrown from render — the read-miss idiom).
+// `spec.workspace: false` — the verb is global-store oriented and runs from
+// anywhere (the retired face never called loadWorkspace).
+export const meshRecoverPushCommand = {
+  id: "mesh:recover-push",
+  input: {
+    type: "object",
+    properties: { assignmentId: { type: "string" } },
+    required: ["assignmentId"],
+    additionalProperties: false,
+  },
+
+  async run(input) {
+    return await recoverPush(input.assignmentId, {});
+  },
+
+  cli: {
+    route: ["mesh", "recover-push"],
+    spec: {
+      usage: "aof mesh recover-push <assignmentId> [--json]",
+      workspace: false,
+      flags: {},
+    },
+
+    // The refusal matrix the retired cli.mjs face owned, byte-identical text.
+    argv: (positionals) => {
+      const assignmentId = positionals[0];
+      if (typeof assignmentId !== "string" || assignmentId.length === 0) {
+        throw commandError(
+          "`aof mesh recover-push` needs an assignmentId.\n\nUsage:\n  aof mesh recover-push <assignmentId>   commit + push a stalled assignment's stranded worktree home",
+          "invalid-input",
+          400,
+        );
+      }
+      if (positionals.length > 1) {
+        throw commandError(`"mesh recover-push" takes exactly one positional assignmentId (got "${positionals[1]}").`, "invalid-input", 400);
+      }
+      return { assignmentId };
+    },
+
+    render(result) {
+      if (!result.ok) {
+        throw commandError(
+          result.error ?? `Recovery push ${result.code}${result.detail ? ` (${result.detail})` : ""}.`,
+          result.code,
+        );
+      }
+      return `Pushed "${result.itemRef}" home from "${result.targetNodeId}" (assignment ${result.assignmentId}${result.detail ? `, ${result.detail}` : ""}).`;
+    },
+
+    json: (result) => result,
+  },
+};

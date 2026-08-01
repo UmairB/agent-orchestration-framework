@@ -23,7 +23,8 @@
 import os from "node:os";
 import crypto from "node:crypto";
 import { publishNodeRecord, readNodeRecord, readNodeRecords } from "../mesh-store.mjs";
-import { deriveNodeId, assembleDescriptor, sidecarPathFor, writeSidecarPatch } from "../node-identity.mjs";
+import { MESH_WORKSPACE_FLAG, guardMeshPositionals, refuseReadMiss } from "./mesh-face-shared.mjs";
+import { deriveNodeId, assembleDescriptor, sidecarPathFor, writeSidecarPatch, sanitizeHostname } from "../node-identity.mjs";
 // milestone 28 / story 00 (ADR-003): the version read routes through the ONE
 // SEA-safe asset-base seam instead of joining a path off a bare
 // import.meta.url — dev behaviour is byte-for-byte unchanged.
@@ -53,19 +54,11 @@ import { resolvePeers } from "../mesh-fabric.mjs";
 // missing/torn/foreign registry degrades to empty boards, NEVER blinding the roster.
 import { readRegistry, isControlNode } from "../mesh-registry.mjs";
 
-// The publishing install's aof version (ADR-003 provenance) — read from the package
-// manifest via the import.meta.url idiom (same posture as bundleRoot()): src/ ->
-// package.json is one level up. Read lazily + tolerantly so a missing/unreadable
-// manifest degrades to "" rather than crashing the publish.
-// EXPORTED so mesh:heartbeat (milestone 23 / story 00) carries the SAME aofVersion
-// provenance the node record carries — read it ONE way, not a second package.json read.
-export function aofVersion() {
-  try {
-    return packageVersionString();
-  } catch {
-    return "";
-  }
-}
+// RETIRED (m42 wave (d) leg d1): `aofVersion()` — a try/catch wrapper around
+// `packageVersionString()`, which has degraded to "" on its own since the SEA
+// asset-base seam landed. A second door to one fact, and the one that dragged
+// mesh-launcher.mjs into an upward import of this module. Every publisher now
+// reads the provenance string ONE way: `packageVersionString()` from asset-base.
 
 // Resolve a STABLE per-install salt for the id-hash (the empty-stem fallback +
 // collision suffix). Read config.mesh.salt (post milestone-33/ADR-004, this is the
@@ -86,11 +79,22 @@ export async function resolveInstallSalt(sidecarPath, config) {
   return salt;
 }
 
+// A structured command error the mesh face renders as ONE { ok:false, error, code }
+// envelope (the mesh-join.mjs faceError shape — the property is assigned, not an
+// object-literal field).
+function faceError(message, token) {
+  const error = new Error(message);
+  error.code = token;
+  return error;
+}
+
 export const meshIdentityCommand = {
   id: "mesh:identity",
   input: {
     type: "object",
-    properties: { ref: { type: "string" } },
+    // `name` / `address` (2026-07-27) — the REGISTRATION OVERRIDES. Both are optional
+    // and only meaningful on a publish (no ref); a read ignores them.
+    properties: { ref: { type: "string" }, name: { type: "string" }, address: { type: "string" } },
     additionalProperties: false,
   },
 
@@ -108,44 +112,112 @@ export const meshIdentityCommand = {
     // assemble the descriptor, publish it through the store, and return the record.
     // Both the salt + the id persist to the git-ignored PER-INSTALL SIDECAR
     // (ADR-004.2, F-3203) — never the committed config.
-    const config = ws.config ?? {};
+    // `let`: the registration overrides below re-bind it with the pinned id/address so
+    // the SAME publish sees them (deriveNodeId reads config.mesh.nodeId).
+    let config = ws.config ?? {};
     // Mint the machine-wide identity to the GLOBAL home (34/story 00) — ws.identityPath,
     // resolved by loadWorkspace from AOF_GLOBAL_HOME; a synthetic workspace (tests) with
     // no identityPath falls back to the legacy per-workspace sidecar.
     const sidecarPath = ws.identityPath ?? sidecarPathFor(ws.aofDir);
     const salt = await resolveInstallSalt(sidecarPath, config);
     const hostname = os.hostname();
+
+    // ------------------------------------------ the registration overrides ----
+    // (2026-07-27) A node cannot always derive a usable identity from its own machine.
+    // The driving case is a guest that INHERITS its host's hostname — a WSL2 distro
+    // answers with the Windows machine name, so the derived nodeId COLLIDES with the
+    // host's and the advertised host RESOLVES TO THE HOST, not the guest. Neither is
+    // recoverable by derivation, because the machine is genuinely lying about itself.
+    //
+    //   --name <id>       pin the nodeId, PINNED so the load-time self-heal
+    //                     (work.mjs's healIdentitySidecar) never churns it back to the
+    //                     colliding hostname-derived value. Sanitized through the SAME
+    //                     sanitizeHostname the derivation uses, so an operator-supplied
+    //                     name can never produce an id shape derivation could not.
+    //   --address <ip>    the address peers should DIAL, published as the descriptor's
+    //                     `host` and read back by mesh-fabric's selfAddress via the
+    //                     config.mesh.address hydration — ONE stored value, both readers.
+    //
+    // Both persist to the per-install sidecar (never the committed config — ADR-004.2),
+    // through the SAME writeSidecarPatch every other sidecar writer uses.
+    const requestedName = typeof input?.name === "string" ? input.name.trim() : "";
+    const requestedAddress = typeof input?.address === "string" ? input.address.trim() : "";
+    if (requestedName.length > 0) {
+      const pinnedId = sanitizeHostname(requestedName);
+      if (pinnedId.length === 0) {
+        throw faceError(
+          `mesh:identity --name "${requestedName}" sanitizes to an empty id — use [a-z0-9-] characters.`,
+          "invalid-node-name",
+        );
+      }
+      // `pinned: true` + clearing `derivedFrom` is exactly the discriminator
+      // healIdentitySidecar reads to leave an operator-set id alone forever.
+      await writeSidecarPatch(sidecarPath, { nodeId: pinnedId, pinned: true, derivedFrom: undefined });
+      config = { ...config, mesh: { ...(config.mesh ?? {}), nodeId: pinnedId } };
+    }
+    if (requestedAddress.length > 0) {
+      await writeSidecarPatch(sidecarPath, { address: requestedAddress });
+      config = { ...config, mesh: { ...(config.mesh ?? {}), address: requestedAddress } };
+    }
+
     const nodeId = await deriveNodeId({
       config,
       hostname,
       salt,
       sidecarPath,
     });
+    // The ADVERTISED host: the override when set (this publish's, or one pinned by an
+    // earlier publish and hydrated onto config.mesh.address), else the real hostname.
+    // This is the value peers resolve on a `direct` fabric.
+    const advertisedHost = typeof config?.mesh?.address === "string" && config.mesh.address.length > 0
+      ? config.mesh.address
+      : hostname;
     const descriptor = assembleDescriptor({
       nodeId,
-      hostname,
+      hostname: advertisedHost,
       platform: process.platform,
       runtimes: Array.isArray(config.runtimes) ? config.runtimes : [],
-      aofVersion: aofVersion(),
+      aofVersion: packageVersionString(),
     });
     await publishNodeRecord(ws, nodeId, descriptor);
     return descriptor;
   },
 
   cli: {
-    // `aof mesh identity [<id>]` — an optional positional is the read ref.
-    argv: (positionals) => ({ ref: positionals[0] }),
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "identity"],
+    spec: {
+      usage: "aof mesh identity [<id>] [--name <id>] [--address <ip-or-host>] [--workspace <path|id>] [--json]",
+      flags: {
+        name: { type: "string", description: "registration override: the node id to publish as" },
+        address: { type: "string", description: "registration override: the address to advertise" },
+        ...MESH_WORKSPACE_FLAG,
+      },
+    },
 
-    // Publish confirmation names the node id; a read renders the node line. (A
-    // null read never reaches here — meshVerbCli surfaces node-not-found first.)
-    render(result) {
+    // `aof mesh identity [<id>] [--name <id>] [--address <ip-or-host>]` — an optional
+    // positional is the read ref; the two options are the publish-side registration
+    // overrides (the hostname-collision escape hatch).
+    argv: (positionals, options = {}) => {
+      guardMeshPositionals("identity", positionals, { max: 1 });
+      return { ref: positionals[0], name: options.name, address: options.address };
+    },
+
+    // Publish confirmation names the node id; a read renders the node line. A
+    // null READ (a ref was supplied, no record) is the face-level node-not-found.
+    render(result, faceCtx = {}) {
+      refuseReadMiss(result, faceCtx);
       if (result == null) return "No node record.";
       const caps = describeCaps(result);
       return `Node ${result.nodeId} — ${caps}`;
     },
 
     // The --json face is the bare node record (publish OR read), per the feature.
-    json: (result) => result,
+    json(result, faceCtx = {}) {
+      refuseReadMiss(result, faceCtx);
+      return result;
+    },
   },
 };
 
@@ -292,9 +364,20 @@ export const meshStatusCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 3) — routed through the registry-derived table +
+    // the ONE generic face; meshVerbCli's cli.mjs ladder branch is deleted.
+    route: ["mesh", "status"],
+    spec: {
+      usage: "aof mesh status [--workspace <path|id>] [--json]",
+      flags: { ...MESH_WORKSPACE_FLAG },
+    },
+
     // `aof mesh status` — no positional; an injected now is a white-box test input, not
     // a CLI flag, so the live face renders against wall-clock.
-    argv: () => ({}),
+    argv: (positionals) => {
+      guardMeshPositionals("status", positionals);
+      return {};
+    },
 
     // The human render is composed of a NODES half + a BOARDS section (milestone 25 /
     // story 01, task 01). The NODES half is BYTE-IDENTICAL to m23: one line per node

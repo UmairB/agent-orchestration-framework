@@ -17,6 +17,12 @@
 
 import noneBackend from "./memory/none-backend.mjs";
 
+// A core never prints: it REPORTS through the collector its caller injects, and the
+// face turns the collected lines into output (m42 wave (d) leg d1, the
+// confine-console.log item). This no-op is the default so an un-injected call is
+// silent-by-contract rather than a second printer.
+const NO_PRINT = () => {};
+
 // The verb spine the seam exposes (ADR-003). `brief`/`ingest` are conveniences
 // composed over the spine, not interface methods.
 export const MEMORY_VERBS = ["recall", "brief", "ingest", "reindex", "status"];
@@ -308,7 +314,7 @@ export function memoryUsage() {
 //   ingest  -> backend.reindex(only, ctx)  ALIAS (no `ingest` interface method)
 //   status  -> backend.status(ctx)
 //   unknown / missing verb -> print usage, exit non-zero, invoke NO backend method.
-export async function runMemory(argv, { config, resolveBackend, render = defaultRender, log = console.log, ctx = {} } = {}) {
+export async function runMemory(argv, { config, resolveBackend, render = defaultRender, log = NO_PRINT, ctx = {} } = {}) {
   // --help/-h is a GUARD that prints usage and returns WITHOUT resolving or reaching a
   // backend. Checked FIRST, before parsing/verb-gating: ingest/reindex start the record
   // rebuild AND spawn the graph build the instant they route, so `... memory ingest
@@ -374,6 +380,12 @@ export async function workMemoryCommand(argv, { loadWorkspace } = {}) {
   const outcome = await runMemory(stripConfigFlag(argv), {
     config,
     resolveBackend: (cfg) => resolveConfiguredBackend(cfg),
+    // THIS is the printer. `work memory` is a declared LADDER FACE (WAVE-D-MIGRATION
+    // d1 wave 2: it delegates wholesale and carries no route), so the FACE half of
+    // this module injects console.log explicitly rather than the core defaulting to
+    // it — runMemory stays silent-by-contract for every other caller (m42 wave (d)
+    // leg d1, the confine-console.log item).
+    log: (line) => console.log(line),
     ctx
   });
 

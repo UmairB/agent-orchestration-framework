@@ -158,6 +158,57 @@ import { meshServeCommand } from "./commands/mesh-serve.mjs";
 // (TECH_DEBT item 2). Additive — one import + one COMMANDS entry; takes the
 // `mesh:` prefix so the mesh bijection gate covers it with no edit.
 import { meshLogsCommand } from "./commands/mesh-logs.mjs";
+// m42 quick-fix — mesh:terminal-resume, the control-driven re-attach of a
+// parked/killed worker session (`claude --resume` in the retained worktree).
+// Additive — one import + one COMMANDS entry; takes the `mesh:` prefix so the
+// mesh bijection gate covers it with no edit.
+import { meshTerminalResumeCommand } from "./commands/mesh-terminal-resume.mjs";
+// m42 wave (d) leg d1 (wave-3 tail) — the previously CLI-only nested mesh verbs
+// as registered Commands riding the route table: mesh:assign (--to/--withdraw,
+// + the --workspace residual closed), mesh:recover-push (global-store oriented,
+// workspace-free), mesh:repo-publish (the three-word route). Their cores stay
+// in the same modules for the white-box tests; cli.mjs's face copies +
+// emitMeshError are deleted. (The old acd-desktop-verbs-outside-bijection gate
+// that governed this boundary is acd-launcher-seam now — ui/serve ride the
+// launcher seam below; repo/desktop keep only their unknown-verb shims.)
+import { meshAssignCommand } from "./commands/mesh-assign.mjs";
+import { meshRecoverPushCommand } from "./commands/mesh-recover-push.mjs";
+import { meshRepoPublishCommand } from "./commands/mesh-repo.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, part 2) — the launcher seam's first riders:
+// mesh:ui (probe run + cli.launch fleet-server body; the retired cli.mjs
+// meshUiCommand/MESH_UI_FLAGS face) and the desktop verbs as plain three-word
+// routes (mesh:desktop-install / mesh:desktop-run — one-shot, NOT launcher
+// verbs; the no-verb/unknown-verb shim stays in cli.mjs's meshCommand).
+// mesh:serve (above) gained its route + cli.launch daemon body in the same
+// change — the route table now carries every registered mesh verb.
+import { meshUiCommand } from "./commands/mesh-ui.mjs";
+import { meshDesktopInstallCommand, meshDesktopRunCommand } from "./commands/mesh-desktop.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, part 2 continued) — the remaining launcher
+// verbs onto the SAME seam: graph:serve (the stdio MCP server), work:ui (the
+// board), assets:ui (the setup-UI editor + its dev-only vite re-exec). Each is a
+// probe run + a cli.launch body; their cli.mjs ladder branches are deleted.
+import { graphServeCommand } from "./commands/graph-serve.mjs";
+import { workUiCommand } from "./commands/work-ui.mjs";
+import { assetsUiCommand } from "./commands/assets-ui.mjs";
+// m42 wave (d) leg d1 (wave-3 tail, the CLI-only batch) — the low-priority
+// CLI-only work verbs join the registry as routed Commands: work:find (the
+// resolver read), work:observe (the transcript miner), the headroom toggle
+// pair. Their cli.mjs faces are deleted; project:provision (below, m12) gained
+// its route in the same change (class B — its face copy is deleted too).
+import { findCommand } from "./commands/find.mjs";
+import { observeCommand } from "./commands/observe.mjs";
+import { useHeadroomCommand, unuseHeadroomCommand } from "./commands/headroom.mjs";
+import { workInitCommand, workUpdateCommand } from "./commands/init-update.mjs";
+// m42 wave (d) leg d1 (the CLI-only batch, closing half) — the last
+// prompting/printing faces off parseOptions: the model-config trio
+// (work:orchestrator / work:delegation / work:delegation-model — prompts moved
+// into async argv adapters, prints into collector-fed renders), planning:init
+// (the pm-skills installer over its printing core), and project:init (the
+// top-level `aof init`, interactive selectRuntimes in the async argv — the
+// assets:add precedent — on the one-word route, the migrate:folder precedent).
+import { workOrchestratorCommand, workDelegationCommand, workDelegationModelCommand } from "./commands/orchestrator-delegation.mjs";
+import { planningInitCommand } from "./commands/planning-init.mjs";
+import { projectInitCommand } from "./commands/project-init.mjs";
 // milestone 41 / story 02 (insert-top-level, ADR-002/004/005/006) — work:insert-
 // milestone / work:insert-uat register into the SAME core. Each is a THIN wrapper
 // (src/commands/insert-shared.mjs) over story 01's re-index engine
@@ -194,6 +245,37 @@ import { promoteGapToChoreCommand } from "./commands/promote-gap-to-chore.mjs";
 // CLI-only by design (no board affordance requested — the same BOARD_DEFERRED
 // carve-out `insert-milestone`/`insert-chore`/etc already use).
 import { upgradeCommand } from "./commands/upgrade.mjs";
+// m42 wave (d) leg d1 (PRD-command-spine-effects-ledger) — the first three
+// class-A migrations off cli.mjs's inline ladder: previously UNREGISTERED verbs
+// (assets/packages/project family — self-contained, no cascade surface) become
+// registry Commands carrying `cli.route` + `cli.spec`, dispatched by the
+// registry-derived route table through the ONE generic face
+// (src/spine/face.mjs). The remaining ~40 inline verbs follow the wave-(d)
+// migration plan (wiki/work/42_structural-overhaul/WAVE-D-MIGRATION.md).
+import { assetsListCommand } from "./commands/assets-list.mjs";
+import { packagesListCommand } from "./commands/packages-list.mjs";
+import { projectShowCommand } from "./commands/project-show.mjs";
+// m42 wave (d) leg d1, WAVE 1 COMPLETION (2026-07-28) — the rest of the
+// assets/packages/project families off the inline ladder: reads and writers
+// alike are registry Commands on the route table, including the two big flows
+// (assets:apply, packages:install — the wave-1 tail). Still inline by design:
+// assets ui (launcher idiom) and init (shares apply's machinery + the d4
+// writeLock item).
+import { assetsShowCommand } from "./commands/assets-show.mjs";
+import { assetsAddCommand } from "./commands/assets-add.mjs";
+import { assetsRemoveCommand } from "./commands/assets-remove.mjs";
+import { assetsUseCommand, assetsUnuseCommand } from "./commands/assets-refs.mjs";
+import { assetsCleanCommand } from "./commands/assets-clean.mjs";
+import { assetsValidateCommand } from "./commands/assets-validate.mjs";
+import { assetsApplyCommand } from "./commands/assets-apply.mjs";
+import { packagesShowCommand } from "./commands/packages-show.mjs";
+import { packagesAddCommand } from "./commands/packages-add.mjs";
+import { packagesRemoveCommand } from "./commands/packages-remove.mjs";
+import { packagesValidateCommand } from "./commands/packages-validate.mjs";
+import { packagesInstallCommand } from "./commands/packages-install.mjs";
+import { projectValidateCommand } from "./commands/project-validate.mjs";
+import { projectDoctorCommand } from "./commands/project-doctor.mjs";
+import { projectMigrateCommand } from "./commands/project-migrate.mjs";
 
 // The registry is the ONLY door (ADR-004 inv. 3): the faces obtain the
 // `ctx.workspace` they pass to `invoke` THROUGH the registry, never by importing
@@ -234,6 +316,29 @@ const COMMANDS = [
   meshRevokeCommand,
   meshServeCommand,
   meshLogsCommand,
+  meshTerminalResumeCommand,
+  // m42 wave (d) leg d1 (wave-3 tail) — the nested verbs join the registry.
+  meshAssignCommand,
+  meshRecoverPushCommand,
+  meshRepoPublishCommand,
+  meshUiCommand,
+  meshDesktopInstallCommand,
+  meshDesktopRunCommand,
+  graphServeCommand,
+  workUiCommand,
+  assetsUiCommand,
+  findCommand,
+  observeCommand,
+  useHeadroomCommand,
+  unuseHeadroomCommand,
+  workInitCommand,
+  workUpdateCommand,
+  // m42 wave (d) leg d1 (the CLI-only batch, closing half) — see the import note.
+  workOrchestratorCommand,
+  workDelegationCommand,
+  workDelegationModelCommand,
+  planningInitCommand,
+  projectInitCommand,
   insertMilestoneCommand,
   insertUatCommand,
   insertStoryCommand,
@@ -248,6 +353,27 @@ const COMMANDS = [
   // door (one factory, one decision, one scope rule) with their own lifecycle phase.
   refineDoorCommand,
   verifyDoorCommand,
+  // m42 wave (d) leg d1 — the first route-table commands (see the import note).
+  assetsListCommand,
+  packagesListCommand,
+  projectShowCommand,
+  // m42 wave (d) leg d1, wave-1 completion — the families in full.
+  assetsShowCommand,
+  assetsAddCommand,
+  assetsRemoveCommand,
+  assetsUseCommand,
+  assetsUnuseCommand,
+  assetsCleanCommand,
+  assetsValidateCommand,
+  assetsApplyCommand,
+  packagesShowCommand,
+  packagesAddCommand,
+  packagesRemoveCommand,
+  packagesValidateCommand,
+  packagesInstallCommand,
+  projectValidateCommand,
+  projectDoctorCommand,
+  projectMigrateCommand,
 ];
 
 // Keyed by id for O(1) lookup; insertion order preserved for listCommands().

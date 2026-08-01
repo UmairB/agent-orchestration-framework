@@ -479,7 +479,8 @@
                 "relationProperty": { "type": "string", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The board's self-relation property name." },
                 "parents": { "type": "object", "description": "(Flat-arm key — authoritative shape in `oneOf[0]`.) The optional milestone→parent map.", "additionalProperties": { "type": "string" } },
                 "default": { "type": "string", "description": "(Registry-arm key — authoritative shape in `oneOf[1]`.) The STRING key naming the default board." },
-                "boards": { "type": "object", "description": "(Registry-arm key — authoritative shape in `oneOf[1]`.) The per-board registry." }
+                "boards": { "type": "object", "description": "(Registry-arm key — authoritative shape in `oneOf[1]`.) The per-board registry." },
+                "autoSync": { "type": "boolean", "default": false, "description": "(Both arms — a sync POLICY, not board routing; m42 wave (d) d4 port 4.) true ⇒ a run completion in this workspace performs the Notion status sync in place (the completion's own effects drain reaches the integration:notion locus). false/absent ⇒ the completion only RECORDS the owed sync in the effects journal, and `aof work integrations notion sync-work` pays it when the operator runs it. Either way the debt is durable and deduped by the sidecar's lastStatus/lastContentHash." }
               },
               "additionalProperties": false,
               "oneOf": [
@@ -509,7 +510,8 @@
                       "type": "object",
                       "description": "OPTIONAL milestone→parent map (milestone 18, ADR-001). Each entry maps a human-readable parent KEY (the value of a descriptor's `notion.parent`) to an EXISTING Notion parent page id aof binds by id (never creates — 17/ADR-003). The key is authored intent; the page id is the operator-supplied binding (ADR-006 — no name resolution).",
                       "additionalProperties": { "type": "string" }
-                    }
+                    },
+                    "autoSync": { "type": "boolean", "default": false, "description": "OPTIONAL sync policy (m42 wave (d) d4 port 4): true ⇒ run completions sync their milestone's status to Notion in place; false/absent ⇒ completions record the owed sync for `sync-work` to pay." }
                   },
                   "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
                   "additionalProperties": false
@@ -554,7 +556,8 @@
                         "required": ["dataSourceId", "statusProperty", "statusMap", "relationProperty"],
                         "additionalProperties": false
                       }
-                    }
+                    },
+                    "autoSync": { "type": "boolean", "default": false, "description": "OPTIONAL sync policy (m42 wave (d) d4 port 4), workspace-wide across every board in the registry: true ⇒ run completions sync in place; false/absent ⇒ completions record the owed sync for `sync-work` to pay." }
                   },
                   "required": ["default", "boards"],
                   "additionalProperties": false

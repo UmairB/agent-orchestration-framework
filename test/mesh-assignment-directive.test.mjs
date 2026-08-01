@@ -13,15 +13,16 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { openGlobalWorkProjectionStore } from "../src/global-work-store.mjs";
-import { assembleAssignmentRecord, insertAssignment } from "../src/assignment-record.mjs";
+import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } from "../src/assignment-record.mjs";
 import { runControlDispatchReclaimTick } from "../src/mesh-assignment-reclaim.mjs";
 import { buildDirectiveFrame, applyAssignmentStatusFrame } from "../src/control-stream-server.mjs";
 import { applyRecoveryPushResultFrame, buildRecoveryPushResultFrame } from "../src/mesh-recovery-push.mjs";
 import { createMeshWorkerExecutionHandler } from "../src/mesh-worker-execution.mjs";
-import { meshWorkerBranchName, meshWorktreePath } from "../src/mesh-worktree.mjs";
+import { meshItemBranchName, meshWorktreePath } from "../src/mesh-worktree.mjs";
 import { loadWorkspace } from "../src/work.mjs";
 import {
   ASSIGNMENT_PHASES,
+  phaseRunsOnItemBranch,
   DEFAULT_ASSIGNMENT_PHASE,
   isAssignmentPhase,
   assignmentDirectiveCommand,
@@ -90,17 +91,18 @@ export const meshAssignmentDirectiveTests = [
       assert.equal(assignmentDirectiveCommand("refine", "18"), "/aof:refine 18 --autonomous");
       assert.equal(assignmentDirectiveCommand("continue", "18"), "/aof:continue 18");
       assert.equal(assignmentDirectiveCommand("verify", "18"), "/aof:verify 18");
+      assert.equal(assignmentDirectiveCommand("autonomous", "18"), "/aof:autonomous 18");
       // An unknown/garbage phase never becomes arbitrary PTY text — it maps to the refine default.
       assert.equal(assignmentDirectiveCommand("rm -rf", "18"), "/aof:refine 18 --autonomous");
       assert.equal(assignmentDirectiveCommand(undefined, "18"), "/aof:refine 18 --autonomous");
-      assert.deepEqual([...ASSIGNMENT_PHASES], ["refine", "continue", "verify"]);
+      assert.deepEqual([...ASSIGNMENT_PHASES], ["refine", "continue", "verify", "autonomous"]);
       assert.equal(DEFAULT_ASSIGNMENT_PHASE, "refine");
     },
   },
   {
     name: "assignment-directive: isAssignmentPhase accepts only the closed set",
     run: async () => {
-      for (const p of ["refine", "continue", "verify"]) assert.equal(isAssignmentPhase(p), true, p);
+      for (const p of ["refine", "continue", "verify", "autonomous"]) assert.equal(isAssignmentPhase(p), true, p);
       for (const p of ["", "Refine", "build", "continue ", null, undefined, 3]) assert.equal(isAssignmentPhase(p), false, String(p));
     },
   },
@@ -218,17 +220,119 @@ export const meshAssignmentDirectiveTests = [
     }),
   },
   {
+    // M42 base-commit pin (operator, 2026-08-01): the dispatch stamps the state the
+    // assignment was made against — the control checkout's HEAD — onto the frame,
+    // so a fresh worker worktree builds from exactly that commit. Unresolvable
+    // (the default resolver over a non-repo path) sends none, and the worker keeps
+    // its own-HEAD fallback.
+    name: "dispatch: the directive carries the assigning checkout's HEAD as `commit` (the base-commit pin); an unresolvable checkout sends none",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-pin", itemRef: "22", targetNodeId: "worker-a" });
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      const dispatchedIds = new Set();
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-25T09:00:05.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds,
+        resolveDispatchCommit: async () => "abc123def4567890abc123def4567890abc123de",
+      });
+      const pinned = streamServer.dispatched.find((f) => f.assignmentId === "asg-pin");
+      assert.equal(pinned?.commit, "abc123def4567890abc123def4567890abc123de", "the frame carries the resolved assigning commit");
+
+      // The DEFAULT resolver over an unresolvable root (a /tmp/none workspace,
+      // no descriptor row): no commit key at all — never a fabricated hash.
+      seedAssigned(store, { assignmentId: "asg-nopin", itemRef: "23", targetNodeId: "worker-a" });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-25T09:00:06.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds,
+      });
+      const unpinned = streamServer.dispatched.find((f) => f.assignmentId === "asg-nopin");
+      assert.ok(unpinned, "the second dispatch went out");
+      assert.equal("commit" in unpinned, false, "an unresolvable checkout sends NO commit — the worker keeps its own-HEAD fallback");
+    }),
+  },
+  {
+    // 2026-07-27 (the duplicate-run wall): a withdrawal was a control-side row flip
+    // the holder never learned about — its run record stayed `running` and the
+    // duplicate-run guard refused every future run for the item. The tick now
+    // notifies the target node once per launcher lifetime; feature-gated on the
+    // caller passing the Set (an absent Set = byte-identical legacy behaviour).
+    name: "dispatch: a WITHDRAWN row is notified to its holder exactly once (kind:withdraw, carrying runId); no Set passed → no withdraw frames at all",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-w1", itemRef: "18", targetNodeId: "worker-a" });
+      updateAssignmentState(store, "asg-w1", "running", { now: "2026-07-27T10:00:00.000Z" });
+      updateAssignmentState(store, "asg-w1", "withdrawn", { now: "2026-07-27T10:01:00.000Z" });
+
+      const notified = new Set();
+      const tickOptions = {
+        workspaceId: "ws-1", now: "2026-07-27T10:02:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+        withdrawNotifiedIds: notified,
+      };
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, tickOptions);
+
+      const withdraws = streamServer.dispatched.filter((f) => f.kind === "withdraw");
+      assert.equal(withdraws.length, 1, "the withdrawn row's holder is notified");
+      assert.equal(withdraws[0].assignmentId, "asg-w1");
+      assert.equal(withdraws[0].to, "worker-a");
+      assert.equal(withdraws[0].itemRef, "18");
+      assert.ok(notified.has("asg-w1"), "the once-guard records the notify");
+
+      // Second tick: the once-guard holds — no re-send.
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, tickOptions);
+      assert.equal(streamServer.dispatched.filter((f) => f.kind === "withdraw").length, 1, "notified exactly once per launcher lifetime");
+
+      // No Set passed (a legacy caller / every pre-existing test): zero withdraw frames.
+      const legacyServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, legacyServer, {
+        workspaceId: "ws-1", now: "2026-07-27T10:03:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+      });
+      assert.equal(legacyServer.dispatched.filter((f) => f.kind === "withdraw").length, 0, "feature-gated: an absent Set sends nothing");
+    }),
+  },
+  {
+    // MEASURED 2026-07-27 (the first autonomous dispatch, milestone 18 live): the
+    // tick hand-spelled `phase === "continue" || phase === "verify"` at its call
+    // site, so `autonomous` fell to the no-baseBranch default and the worker built
+    // the milestone in a FRESH worktree off main — none of the refine's stories
+    // existed there. The predicate now lives in ONE home (phaseRunsOnItemBranch):
+    // every non-refine phase carries the recorded branch.
+    name: "dispatch: an AUTONOMOUS assignment carries the item's recorded branch too — every non-refine phase accumulates on the ONE branch (the 2026-07-27 wrong-base defect)",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-auto", itemRef: "18", targetNodeId: "worker-a" });
+      seedAssigned(store, { assignmentId: "asg-verify", itemRef: "22", targetNodeId: "worker-a" });
+      setAssignmentPhase(store, "asg-auto", "autonomous");
+      setAssignmentPhase(store, "asg-verify", "verify");
+      setItemBranch(store, "ws-1", "18", "aof/mesh/18-73ab17b2");
+      setItemBranch(store, "ws-1", "22", "aof/mesh/22-feedface");
+
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-27T10:00:00.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds: new Set(),
+      });
+
+      const byId = new Map(streamServer.dispatched.map((f) => [f.assignmentId, f]));
+      assert.equal(byId.get("asg-auto")?.command, "/aof:autonomous 18", "the autonomous phase dispatches the cascade");
+      assert.equal(byId.get("asg-auto")?.baseBranch, "aof/mesh/18-73ab17b2", "…ON the item's recorded branch — the refined stories are THERE, never a fresh worktree off main");
+      assert.equal(byId.get("asg-verify")?.baseBranch, "aof/mesh/22-feedface", "verify still carries the branch (the one-home predicate covers every non-refine phase)");
+      assert.equal(phaseRunsOnItemBranch("refine"), false, "refine mints the branch — it never carries one");
+      assert.equal(phaseRunsOnItemBranch("nonsense"), false, "an unknown phase degrades branchless, matching the mapper's refine degrade");
+    }),
+  },
+  {
     name: "record on done: a holder's `done` frame carrying the pushed branch records the item's active branch; a non-holder frame and a non-done state record nothing",
     run: async () => withIsolatedStore(async ({ store }) => {
       seedAssigned(store, { assignmentId: "asg-1", itemRef: "18", workspaceId: "ws-1", targetNodeId: "worker-a" });
       // wrong holder — nothing recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-b", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-x" }, { nodeId: "worker-b" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-b", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-x" }, { nodeId: "worker-b" });
       assert.equal(readItemBranch(store, "ws-1", "18"), null, "a non-holder never records the item branch");
       // non-done — nothing recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "running", branch: "aof/mesh/18-x" }, { nodeId: "worker-a" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "running", branch: "aof/mesh/18-x" }, { nodeId: "worker-a" });
       assert.equal(readItemBranch(store, "ws-1", "18"), null, "a non-done state records nothing (the push has not happened)");
       // holder + done + branch — recorded
-      applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-73ab17b2" }, { nodeId: "worker-a" });
+      await applyAssignmentStatusFrame(store, { kind: "assignment-status", nodeId: "worker-a", assignmentId: "asg-1", state: "done", branch: "aof/mesh/18-73ab17b2" }, { nodeId: "worker-a" });
       assert.equal(readItemBranch(store, "ws-1", "18"), "aof/mesh/18-73ab17b2", "a holder's done records the pushed branch");
     }),
   },
@@ -249,8 +353,11 @@ export const meshAssignmentDirectiveTests = [
       const ws = await loadWorkspace(fx.root, undefined, { env: fx.env });
 
       // Simulate a prior refine: create the item's branch with a refine commit and push
-      // it to origin, WITHOUT leaving it checked out in the main worktree.
-      const baseBranch = meshWorkerBranchName(fx.itemRef, "refine-asg");
+      // it to origin, WITHOUT leaving it checked out in the main worktree. The seeded
+      // name is the PRE-CURE suffixed shape deliberately (m42): the cache-supplied
+      // baseBranch must keep winning for continuity — a pre-cure item's work lives
+      // under its old name, and the continue must land THERE, not on the derivation.
+      const baseBranch = `${meshItemBranchName(fx.itemRef)}-refine-asg`;
       const seedWt = path.join(fx.tmp, "seed-wt");
       assert.equal(realGitExec(["worktree", "add", "-b", baseBranch, seedWt, "HEAD"], { cwd: fx.root }).status, 0);
       await writeFile(path.join(seedWt, "refine.md"), "# the refine contract\n", "utf8");
@@ -266,6 +373,7 @@ export const meshAssignmentDirectiveTests = [
         loadWs: () => Promise.resolve(ws),
         nodeId: "worker-a",
         sendAssignmentStatus: recorder.sendAssignmentStatus,
+    sendEffectStep: recorder.sendEffectStep,
         spawnRuntime: async (brief) => { await writeFile(path.join(brief.worktreeCwd, "continue.md"), "# the continue output\n", "utf8"); return { outcome: "done" }; },
         now: () => "2026-07-25T10:00:00.000Z",
         globalWorkStoreOptions: { env: fx.env },
@@ -286,10 +394,11 @@ export const meshAssignmentDirectiveTests = [
       const contShow = spawnSyncHardened("git", ["show", `${baseBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" });
       assert.equal(contShow.status, 0, "the continue output landed on the SAME branch — the work accumulated, never a fresh branch");
       assert.equal(contShow.stdout, "# the continue output\n");
-      // No fresh per-assignment branch was created for the continue.
-      const freshBranch = meshWorkerBranchName(fx.itemRef, continueAsg);
-      assert.notEqual(freshBranch, baseBranch);
-      assert.notEqual(spawnSyncHardened("git", ["show", `${freshBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" }).status, 0, "no fresh per-assignment branch was pushed — continue stayed on the item's branch");
+      // The cache-supplied base WON: the item's derived one-branch name was never
+      // created — the continue stayed on the pre-cure branch the cache remembered.
+      const derivedBranch = meshItemBranchName(fx.itemRef);
+      assert.notEqual(derivedBranch, baseBranch);
+      assert.notEqual(spawnSyncHardened("git", ["show", `${derivedBranch}:continue.md`], { cwd: fx.bareOrigin, encoding: "utf8" }).status, 0, "the derivation never fired while the cache had the answer — continue stayed on the item's cached branch");
       assert.equal(existsSync(meshWorktreePath(fx.root, continueAsg)), false, "the continue worktree is force-removed after a clean done+push");
     }),
   },

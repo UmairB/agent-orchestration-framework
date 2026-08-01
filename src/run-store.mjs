@@ -40,7 +40,7 @@ import { reportDegrade } from "./degrade.mjs";
 // ----------------------------------------------------------- error helper ----
 
 // Run-store errors carry `.code` (and a `.status` for the future board face),
-// matching the command error contract (src/commands/errors.mjs) so a face maps
+// matching the command error contract (src/command-error.mjs) so a face maps
 // them uniformly. The state-machine illegal case throws code "illegal-transition";
 // the milestone-20 mint/retry guards throw "duplicate-run" / "not-retryable" /
 // "attempts-exhausted" / "no-retryable-run".
@@ -526,22 +526,72 @@ export function isStale(run, nowMs, stalenessThreshold) {
 // (ADR-005 — the scan ORCHESTRATES, work.mjs WRITES; the store never writes frontmatter).
 export async function reclaimStaleRuns(items, { now, stalenessThreshold = Infinity } = {}) {
   const nowIso = now ?? new Date().toISOString();
-  const nowMs = Date.parse(nowIso);
   const reclaimed = [];
   for (const item of items) {
-    const runs = await readRuns(item);
-    for (const run of runs) {
-      if (run.state !== "running") continue;
-      if (!isStale(run, nowMs, stalenessThreshold)) continue;
-      const failed = await applyTransition(item, run.runId, "failed", {
-        now: nowIso,
-        failureReason: "runtime_offline",
-        reclaimedAt: nowIso,
-      });
-      reclaimed.push({ item, run: failed });
+    for (const run of await staleRunningRuns([item], { now: nowIso, stalenessThreshold })) {
+      reclaimed.push({ item, run: await reclaimRun(item, run.runId, { now: nowIso }) });
     }
   }
   return reclaimed;
+}
+
+// staleRunningRuns(items, …) — the scan's PURE half (m42 wave (d) leg d4, port 2):
+// which runs a reclaim WOULD force-fail, deciding nothing else and writing nothing.
+// Split out so the transition seam can select candidates and settle each through the
+// ledger without re-deriving the staleness rule, and so `reclaimStaleRuns` above is
+// visibly scan-then-write rather than one interleaved loop.
+export async function staleRunningRuns(items, { now, stalenessThreshold = Infinity } = {}) {
+  const nowMs = Date.parse(now ?? new Date().toISOString());
+  const candidates = [];
+  for (const item of items) {
+    for (const run of await readRuns(item)) {
+      if (run.state !== "running") continue;
+      if (!isStale(run, nowMs, stalenessThreshold)) continue;
+      candidates.push({ ...run, item });
+    }
+  }
+  return candidates;
+}
+
+// reclaimRun(item, runId, …) — THE ONE reclaim edge (m42 wave (d) leg d4, port 2).
+// "How a run is reclaimed" — the legal running → failed transition with
+// failureReason `runtime_offline` (a crashed host is infra, so the run stays
+// RETRYABLE per ADR-002) and reclaimedAt stamped (distinguishing a reclaimed failure
+// from an operator-reported one) — was written out twice: here in the restart scan
+// and again inline in mesh-assignment-reclaim.mjs's control tick, whose comment
+// claimed to be "reusing the EXACT applyTransition edge" while in fact being a second
+// copy of it. One home now, and the transition seam is the door both reclaim halves
+// reach it through.
+export async function reclaimRun(item, runId, { now } = {}) {
+  const nowIso = now ?? new Date().toISOString();
+  return await applyTransition(item, runId, "failed", {
+    now: nowIso,
+    failureReason: "runtime_offline",
+    reclaimedAt: nowIso,
+  });
+}
+
+// rewriteRunItemRef(item, { from, to }) — follow an insert/reindex renumber with the
+// run records' own `itemRef` (m42 wave (d) leg d4, port 3). The records live INSIDE
+// the item's folder, so they travel with the rename — but the ref stamped in each
+// one is left saying what the item used to be called, and every reader that joins on
+// it (the board's run drill-down, the streamed projection, the reclaim scan) then
+// disagrees with the stream.
+//
+// Called with the item at its NEW ref and the ref it used to have, which is what
+// makes this safely re-runnable at-least-once: a record already carrying `to` does
+// not match `from`, so a redelivery rewrites nothing. Every write stays inside
+// runs/ through the store's own persist path (the write-scope guard); a record whose
+// itemRef is something else entirely is left byte-unchanged.
+export async function rewriteRunItemRef(item, { from, to } = {}) {
+  if (!from || !to || from === to) return { rewritten: 0 };
+  let rewritten = 0;
+  for (const record of await readRuns(item)) {
+    if (record.itemRef !== from) continue;
+    await persist(item, { ...record, itemRef: to });
+    rewritten += 1;
+  }
+  return { rewritten };
 }
 
 // Prune ONE run by deleting its file — file-by-file, not an aggregate rewrite (the

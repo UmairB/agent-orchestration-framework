@@ -38,16 +38,16 @@
 // keeps the feature self-contained and needs no schema-version bump (the table is a
 // pure add; every accessor ensures it first).
 //
-// This module's ONLY top-level import is meshWorkerBranchName (a pure string helper) —
+// This module's ONLY top-level import is meshItemBranchName (a pure string helper) —
 // the heavier global-work-store is pulled in LAZILY inside the dispatch tick's default
 // openStore, so worker-stream-client.mjs can import the wire-kind literals + the result
 // frame builder from here (the ONE contract home) without dragging sqlite into the
 // transport leaf.
-import { meshWorkerBranchName } from "./mesh-worktree.mjs";
+import { meshItemBranchName } from "./mesh-worktree.mjs";
 // VERIFICATION (continue-on-existing-branch, 2026-07-25) — a successful recovery push is
 // also a successful push: record the pushed branch as the item's active branch so a later
 // continue/verify reuses it.
-import { setItemBranch } from "./mesh-assignment-directive.mjs";
+import { setItemBranch, readItemBranch } from "./mesh-assignment-directive.mjs";
 
 // THE DOWN- and UP-frame kinds (the single source of both literals — imported by
 // worker-stream-client.mjs's receive branch and control-stream-server.mjs's dispatch,
@@ -218,11 +218,12 @@ export function applyRecoveryPushResultFrame(store, frame, options = {}) {
   const updated = markRecoveryPushState(store, assignmentId, state, { now, detail });
   // A successful recovery push landed a real branch home — record it as the item's active
   // branch (keyed by the assignment ROW's own workspace/item), so the next continue/verify
-  // reuses it. The branch is derived when the worker did not echo one (an older worker).
+  // reuses it. The branch is derived (the m42 one-branch-per-item name) only when the
+  // worker did not echo one (an older worker).
   if (frame?.ok === true) {
     const branch = typeof frame?.branch === "string" && frame.branch.length > 0
       ? frame.branch
-      : meshWorkerBranchName(assignment.item_ref, assignmentId);
+      : meshItemBranchName(assignment.item_ref);
     setItemBranch(store, assignment.workspace_id, assignment.item_ref, branch, { now });
   }
   return { applied: updated != null, state, assignmentId };
@@ -279,7 +280,12 @@ export async function runRecoveryPushDispatchTick(streamServer, options = {}) {
         continue;
       }
 
-      const branch = meshWorkerBranchName(request.itemRef, request.assignmentId);
+      // M42 (the brittleness cure): CACHE-FIRST, derive as the fallback. A pre-cure
+      // assignment's stranded worktree sits on its old suffixed branch — only the
+      // `global_item_branches` cache remembers that name, so deriving blindly would
+      // push the wrong ref. A cache miss derives the item's own one-branch name,
+      // which is what every post-cure worktree is on.
+      const branch = readItemBranch(store, request.workspaceId, request.itemRef) ?? meshItemBranchName(request.itemRef);
       const frame = buildRecoveryPushFrame(request.targetNodeId, {
         assignmentId: request.assignmentId,
         itemRef: request.itemRef,

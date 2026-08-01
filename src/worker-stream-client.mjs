@@ -36,7 +36,7 @@
 // mesh-relay broker binds loopback only, so a worker cannot reach it from another
 // machine). The frozen envelope is built by the bridge module (the single source of
 // the `terminal-frame` kind + shape).
-import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-terminal-relay-bridge.mjs";
+import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope, TERMINAL_INPUT_KIND, TERMINAL_RESUME_KIND } from "./mesh-terminal-relay-bridge.mjs";
 // VERIFICATION (live soak 2026-07-25) — the control-driven recovery push. This client
 // RECEIVES the `recovery-push` DOWN-frame (dispatched by the control daemon, carrying a
 // one-shot write credential) and REPLIES with a `recovery-push-result` UP-frame. The
@@ -46,6 +46,10 @@ import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope } from "./mesh-ter
 import { RECOVERY_PUSH_KIND, buildRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
+// m42 wave (d) leg d3 — the outbox's two frame kinds live in ONE home (the
+// WORKTREE_CONTENT_FRAME_KIND discipline): imported here and in the control
+// server, never re-spelled on either side of the wire.
+import { EFFECT_STEP_FRAME_KIND, EFFECT_ACK_FRAME_KIND } from "./effects/outbox.mjs";
 
 export function backoffDelaySeconds(attempt) {
   const n = Number.isInteger(attempt) && attempt > 0 ? attempt : 1;
@@ -77,6 +81,13 @@ export const WORKTREE_CONTENT_FRAME_KIND = "worktree-content";
 // `aof mesh logs --node <id>` answers from the store — no SSH archaeology. One
 // home for the literal, like every other kind.
 export const LOG_ENTRIES_FRAME_KIND = "log-entries";
+
+// The withdraw DOWN-frame kind (2026-07-27, the duplicate-run wall): the control's
+// dispatch tick notifies an assignment's holder that the operator withdrew it, so
+// the worker can kill the live session and settle its run record — a withdrawal
+// used to be a control-side row flip the worker never learned about. One home for
+// the literal; the frame carries { assignmentId, itemRef, workspaceId, runId }.
+export const WITHDRAW_KIND = "withdraw";
 
 export function buildLogEntriesFrame(nodeId, entries, now) {
   return { kind: LOG_ENTRIES_FRAME_KIND, nodeId, entries: Array.isArray(entries) ? [...entries] : [], at: now };
@@ -242,6 +253,15 @@ export function createWorkerStreamClient({
   // handler, a clean additive sibling to directiveHandler above. Registered via
   // onRecoveryPush(handler); invoked with the PARSED recovery-push DOWN-frame (below).
   let recoveryPushHandler = null;
+  // 2026-07-27 (the duplicate-run wall) — the withdraw DOWN-frame's one handler.
+  let withdrawHandler = null;
+  let effectAckHandler = null;
+  // m42 "interactive worker terminals" — the terminal-input DOWN-frame's handler
+  // (mesh-worker-execution.mjs's createMeshWorkerTerminalInputHandler).
+  let terminalInputHandler = null;
+  // m42 quick-fix — the terminal-resume DOWN-frame's handler
+  // (mesh-worker-execution.mjs's createMeshWorkerTerminalResumeHandler).
+  let terminalResumeHandler = null;
   // milestone 38 / ADR-009 — pending clone-credential-request correlation, keyed by
   // assignmentId (per-clone, per-assignment: at most ONE clone-miss is ever in flight
   // for a given assignment). A bounded wait backstops a request that is refused,
@@ -339,6 +359,34 @@ export function createWorkerStreamClient({
       directiveHandler?.(frame);
       return;
     }
+    // 2026-07-27 (the duplicate-run wall) — a control-side WITHDRAWAL was a pure
+    // row flip the worker never learned about: its session kept running and its
+    // run record stayed `running` forever, walling every future run for the item
+    // behind the duplicate-run guard. The control's dispatch tick now notifies the
+    // holder; this dispatches the frame to the registered withdraw handler
+    // (mesh-worker-execution.mjs's createMeshWorkerWithdrawHandler), which kills
+    // any live session and settles the run record as cancelled. Unregistered →
+    // dropped, exactly like a directive with no directiveHandler.
+    if (frame?.kind === WITHDRAW_KIND) {
+      withdrawHandler?.(frame);
+      return;
+    }
+    // m42 "interactive worker terminals" — an operator keystroke routed down from
+    // the control (tuple-bound at the fleet face, validated by the control's input
+    // router). Dispatched to the registered handler, which writes ONLY the live
+    // PTY whose captured sessionId matches exactly. Unregistered → dropped, like
+    // every other kind here.
+    if (frame?.kind === TERMINAL_INPUT_KIND) {
+      terminalInputHandler?.(frame);
+      return;
+    }
+    // m42 quick-fix — a control-driven resume of a parked/killed session:
+    // dispatched to the registered handler, which spawns `claude --resume` in the
+    // assignment's retained worktree. Unregistered → dropped, like every kind here.
+    if (frame?.kind === TERMINAL_RESUME_KIND) {
+      terminalResumeHandler?.(frame);
+      return;
+    }
     // VERIFICATION (live soak 2026-07-25) — the control-driven recovery-push DOWN-frame:
     // dispatched to THIS worker to commit + push a stranded worktree with the carried
     // one-shot write credential. Handed to the registered recoveryPushHandler (which
@@ -346,6 +394,14 @@ export function createWorkerStreamClient({
     // a crash), exactly like directive with no directiveHandler.
     if (frame?.kind === RECOVERY_PUSH_KIND) {
       recoveryPushHandler?.(frame);
+      return;
+    }
+    // m42 wave (d) leg d3 — the DURABLE RECEIPT for an outbox-delivered effect
+    // step. The control node has applied (or refused) the fact; this ack is what
+    // lets the worker stop redelivering it. Unregistered → dropped, like every
+    // other kind here (the step simply stays pending and redelivers).
+    if (frame?.kind === EFFECT_ACK_FRAME_KIND) {
+      effectAckHandler?.(frame);
       return;
     }
     if (frame?.kind === "clone-credential") {
@@ -494,6 +550,21 @@ export function createWorkerStreamClient({
   // recorder.
   async function sendAssignmentStatus(assignmentId, state, { runId, sessionId, code, branch } = {}) {
     return sendFrame(buildAssignmentStatusFrame(nodeId, assignmentId, state, { runId, sessionId, code, branch, now: resolveNow() }));
+  }
+
+  // sendEffectStep(envelope) — m42 wave (d) leg d3: one owed REMOTE-locus effect
+  // step, shipped as a fact over the bridge. Rides the SAME failure-isolated
+  // sendFrame seam as every other work-state up-frame, so an offline worker gets
+  // { sent:false } and the outbox simply keeps the step pending — the frame is a
+  // DELIVERY attempt, never the completion (that is the ack).
+  async function sendEffectStep(envelope) {
+    return sendFrame({ kind: EFFECT_STEP_FRAME_KIND, nodeId, ...envelope });
+  }
+
+  // onEffectAck(handler) — registers the ONE handler for the durable receipt,
+  // mirroring onDirective/onWithdraw exactly.
+  function onEffectAck(handler) {
+    effectAckHandler = typeof handler === "function" ? handler : null;
   }
 
   // sendTerminalFrame(sessionId, bytes) — milestone 38 / story 06 (ADR-014 AMENDMENT
@@ -745,6 +816,26 @@ export function createWorkerStreamClient({
     directiveHandler = typeof handler === "function" ? handler : null;
   }
 
+  // onWithdraw(handler) — 2026-07-27 (the duplicate-run wall): registers the ONE
+  // handler invoked with a PARSED withdraw DOWN-frame, mirroring onDirective /
+  // onRecoveryPush exactly. Additive — unregistered drops withdraw frames.
+  function onWithdraw(handler) {
+    withdrawHandler = typeof handler === "function" ? handler : null;
+  }
+
+  // onTerminalInput(handler) — m42 "interactive worker terminals": registers the
+  // ONE handler invoked with a PARSED terminal-input DOWN-frame, mirroring the
+  // onDirective/onWithdraw lane exactly. Additive — unregistered drops input.
+  function onTerminalInput(handler) {
+    terminalInputHandler = typeof handler === "function" ? handler : null;
+  }
+
+  // onTerminalResume(handler) — m42 quick-fix: registers the ONE handler invoked
+  // with a PARSED terminal-resume DOWN-frame. Additive — unregistered drops it.
+  function onTerminalResume(handler) {
+    terminalResumeHandler = typeof handler === "function" ? handler : null;
+  }
+
   // notifyDrop() — an explicit signal the connection dropped (production wires this
   // from the transport's own onDrop/close event); schedules a backoff reconnect over
   // the injected ticker. The reconnect itself does not resend a frame on its own — a
@@ -760,10 +851,18 @@ export function createWorkerStreamClient({
       ticker.stop(reconnectHandle);
       reconnectHandle = null;
       // The reconnect attempt itself: connect now, so a subsequent send finds the
-      // transport already up. A fault here is caught by ensureConnected/markDropped
-      // and simply re-schedules on the NEXT explicit notifyDrop() (production calls
-      // notifyDrop again from the transport's error/close handler).
-      ensureConnected().catch((error) => { reportDegrade("worker-stream-client", error); });
+      // transport already up. A FAILED attempt RE-ARMS the loop itself (2026-07-27,
+      // measured three times in one day: ensureConnected returns false — it never
+      // throws — and a failed CONNECT opens no socket, so the transport's onDrop
+      // can never fire again; the old "re-schedules on the NEXT notifyDrop" was a
+      // dead loop, and a worker that lost the race with a control restart stayed
+      // stream-dead FOREVER while fabric liveness said the machine was fine).
+      ensureConnected().then((ok) => {
+        if (!ok) notifyDrop();
+      }).catch((error) => {
+        reportDegrade("worker-stream-client", error);
+        notifyDrop();
+      });
     });
     return { scheduledDelaySeconds: delaySeconds };
   }
@@ -785,6 +884,8 @@ export function createWorkerStreamClient({
     sendPresence,
     sendLogEntries,
     sendAssignmentStatus,
+    sendEffectStep,
+    onEffectAck,
     sendTerminalFrame,
     sendTerminalEnd,
     sendRecoveryPushResult,
@@ -793,6 +894,9 @@ export function createWorkerStreamClient({
     requestWriteCredential,
     onDirective,
     onRecoveryPush,
+    onWithdraw,
+    onTerminalInput,
+    onTerminalResume,
     notifyDrop,
     stop,
     get connected() { return connected; },
@@ -816,20 +920,55 @@ export function createWorkerStreamClient({
 // closes/errors post-open (a pre-open error is already reported through connect()'s
 // own rejection, never double-reported here). Additive — a caller that never calls
 // onDrop gets byte-identical connect/send/close behaviour.
-export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
+// `credential` (2026-07-27, the `direct` fabric cutover) — this node's enrollment
+// relayAuth token (config.mesh.credential.relayAuth). When present it rides the ws
+// UPGRADE in an `Authorization: Bearer …` header, which is how the control node
+// resolves WHO this connection is on a fabric that has no address oracle. The header
+// name/prefix matches the relay broker's own auth gate (mesh-relay.mjs's
+// readPresentedCredential) so both surfaces read the credential identically.
+// ABSENT is not an error here — a node that never enrolled simply connects without
+// one and is refused at the gate, which is the honest outcome.
+export function createWorkerWsTransport(url, { WebSocketImpl, credential = null } = {}) {
   let dropHandler = null;
   let messageHandler = null;
   let currentSocket = null;
+  const connectOptions = typeof credential === "string" && credential.length > 0
+    ? { headers: { Authorization: `Bearer ${credential}` } }
+    : undefined;
   return {
     async connect() {
       const { WebSocket } = WebSocketImpl ? { WebSocket: WebSocketImpl } : await import("ws");
       return new Promise((resolve, reject) => {
-        const ws = new WebSocket(url);
+        const ws = connectOptions ? new WebSocket(url, connectOptions) : new WebSocket(url);
         let settled = false;
+        // HALF-OPEN DETECTION (2026-07-27, measured three stream deaths in one
+        // day): a TCP connection that silently loses its peer keeps ACCEPTING
+        // writes locally — the worker believed it was connected while the control
+        // heard nothing for 30+ minutes, input/status frames vanished into the
+        // void, and NOTHING ever fired close/error to trigger a reconnect. A
+        // ws-level ping every 15s with a 45s pong deadline turns a zombie into a
+        // hard close (terminate()), which the close handler below bridges to
+        // onDrop -> the client's backoff reconnect.
+        let lastPong = 0;
+        let keepaliveTimer = null;
+        const armKeepalive = () => {
+          lastPong = Date.now();
+          keepaliveTimer = setInterval(() => {
+            if (ws.readyState !== ws.OPEN) return;
+            if (Date.now() - lastPong > 45_000) {
+              try { ws.terminate(); } catch (error) { reportDegrade("worker-stream-client", error); }
+              return;
+            }
+            try { ws.ping(); } catch (error) { reportDegrade("worker-stream-client", error); }
+          }, 15_000);
+          keepaliveTimer.unref?.();
+        };
+        ws.on("pong", () => { lastPong = Date.now(); });
         ws.on("open", () => {
           if (!settled) {
             settled = true;
             currentSocket = ws;
+            armKeepalive();
             resolve(ws);
           }
         });
@@ -852,6 +991,7 @@ export function createWorkerWsTransport(url, { WebSocketImpl } = {}) {
           }
         });
         ws.on("close", () => {
+          if (keepaliveTimer != null) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
           if (!settled) return; // a pre-open close is surfaced via the error branch above
           if (currentSocket === ws) {
             currentSocket = null;

@@ -62,9 +62,10 @@ const VISIBLE_PROVIDERS: ProviderId[] = ["claude"];
 
 // The dock's ONE session descriptor (m42 item 6, reworked at the operator's
 // insistence): the board has exactly ONE terminal surface — this dock — and a
-// session is either LOCAL (a pty this server spawns, read-write) or REMOTE (the
-// fleet's read-only mirror of a worker's live session). A remote session is a
-// SOURCE of the same surface, never a second widget.
+// session is either LOCAL (a pty this server spawns) or REMOTE (a worker's live
+// session over the fleet's tuple-bound terminal-view socket — INTERACTIVE since
+// m42's terminal-input path). A remote session is a SOURCE of the same surface,
+// never a second widget.
 export type DockSession =
   | { kind: "local"; ref: string; command: string | null }
   | { kind: "remote"; ref: string; nodeId: string; sessionId: string };
@@ -146,10 +147,12 @@ export function TerminalDock({
 
     const term = new Terminal({
       convertEol: true,
-      // REMOTE = the fleet mirror: read-only IN FACT (stdin disabled — no
-      // keystroke can become input), no blinking cursor inviting one.
-      cursorBlink: remote == null,
-      disableStdin: remote != null,
+      // REMOTE sessions are INTERACTIVE too (m42 interactive worker terminals —
+      // SECURITY T14's read-only decision operator-overridden): a keystroke rides
+      // the tuple-bound terminal-view socket to the worker's live PTY, so stdin
+      // stays enabled and the cursor blinks in both modes.
+      cursorBlink: true,
+      disableStdin: false,
       fontSize: 13,
       fontFamily: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
       theme: { background: "#0b0f14", foreground: "#d7dde3" },
@@ -195,7 +198,8 @@ export function TerminalDock({
     };
 
     const sendResize = () => {
-      // The mirror is server→browser ONLY: no resize frames, no fit (fixed 80×24).
+      // The remote lane carries NO control frames: no resize, no fit — the worker
+      // PTY is fixed 80×24 (keystrokes are the ONLY thing that travels up it).
       if (remote != null) return;
       if (socket.readyState !== WebSocket.OPEN) return;
       try {
@@ -248,13 +252,15 @@ export function TerminalDock({
       );
     };
 
-    // term → WS: raw input frames — LOCAL sessions only. Nothing this browser
-    // originates ever travels up a mirror socket (the read-only contract).
-    const dataSub = remote == null
-      ? term.onData((input) => {
-          if (socket.readyState === WebSocket.OPEN) socket.send(input);
-        })
-      : { dispose() {} };
+    // term → WS: raw input frames, BOTH modes (m42 interactive worker terminals).
+    // A local keystroke feeds this board's own PTY; a remote keystroke rides the
+    // tuple-bound terminal-view socket — the fleet face wraps it with THE SOCKET'S
+    // OWN (nodeId, sessionId), so this dock can only ever type into the exact
+    // session it mirrors. Raw bytes only — the remote lane carries NO control
+    // frames (no resize — the worker PTY is fixed 80×24).
+    const dataSub = term.onData((input) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(input);
+    });
 
     // Reflow on container resize → a single resize per fit.
     const resizeObserver = new ResizeObserver(() => sendResize());
@@ -302,11 +308,12 @@ export function TerminalDock({
           <span aria-hidden="true">▣</span> TERMINAL
         </span>
 
-        {/* REMOTE session: the read-only badge replaces the provider picker (there
-            is nothing to pick — the session already exists, on another machine). */}
+        {/* REMOTE session: the remote badge replaces the provider picker (there
+            is nothing to pick — the session already exists, on another machine).
+            Interactive since m42: keystrokes reach the worker's live PTY. */}
         {remote != null ? (
           <span className="mono rounded bg-[#1e2a44] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-300">
-            read-only · {remote.nodeId}
+            remote · {remote.nodeId}
           </span>
         ) : null}
 

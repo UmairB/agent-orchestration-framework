@@ -11,8 +11,8 @@
 // store's coded rejections (not-retryable / attempts-exhausted / no-retryable-run)
 // unchanged. The result is the new running run record (records carry refs, not paths).
 import { resolveItemExact } from "./resolve.mjs";
-import { commandError } from "./errors.mjs";
-import { retryRun } from "../run-store.mjs";
+import { commandError } from "../command-error.mjs";
+import { transitionRunStart } from "../effects/run-transitions.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
 
 export const runRetryCommand = {
@@ -56,12 +56,34 @@ export const runRetryCommand = {
     // The store resolves the prior run, consults shouldRetry, and mints the
     // lineage-linked run — letting its no-retryable-run / not-retryable /
     // attempts-exhausted / duplicate-run errors (each carrying .code) propagate.
-    return await retryRun(item, { runId: input.runId, maxAttempts, now: input.now, node: meshNodeId });
+    // The mint rides the run store's transition seam (m42 wave (d) leg d4, port
+    // 1) so `run.started` is raised here as it is at every other mint site. NO
+    // `workspace` is passed — this verb never published on mutate, so the
+    // ledger's publish reactor skips on a null workspaceRoot and the behaviour is
+    // byte-unchanged. (Whether a retry SHOULD propagate is a real question; it is
+    // a behaviour change and is deliberately not smuggled into a mechanical port.)
+    const { record } = await transitionRunStart(
+      item,
+      { mode: "retry", runId: input.runId, maxAttempts, now: input.now, node: meshNodeId },
+      { journalOptions: ctx.effectsJournalOptions ?? {} },
+    );
+    return record;
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs face copy is deleted.
+    route: ["work", "run-retry"],
+    spec: {
+      usage: "aof work run-retry <ref> [--run <runId>] [--max-attempts N] [--json]",
+      flags: {
+        run: { type: "string", description: "the prior runId to resume (defaults to the latest retryable)" },
+        maxAttempts: { type: "string", description: "override the retry attempt ceiling" },
+      },
+    },
+
     // `aof work run-retry <ref> [--run <runId>] [--max-attempts N] [--json]`.
-    // parseOptions camelCases kebab flags, so --max-attempts arrives as maxAttempts.
+    // The spec camelCases kebab flags, so --max-attempts arrives as maxAttempts.
     argv: (positionals, options) => ({
       ref: positionals[0],
       runId: options.run,

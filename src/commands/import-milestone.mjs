@@ -15,7 +15,7 @@
 // source ONLY read-only and constructs NO git write verb against `<repo>`
 // (ADR-002 — pinned by the story-03 arch-test acd-import-read-only-source).
 import path from "node:path";
-import { commandError } from "./errors.mjs";
+import { commandError } from "../command-error.mjs";
 import { resolveImportSource } from "../import/source.mjs";
 import { recoverMilestone, listRecoverableMilestones, resolveCandidate } from "../import/recovery.mjs";
 import { writeColocatedDigest } from "../import/materialize.mjs";
@@ -182,6 +182,17 @@ export const importMilestoneCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave 2) — routed through the registry-derived table +
+    // the ONE generic face; the cli.mjs importMilestoneCommandCli copy is
+    // deleted (the `aof import` ladder keeps only its unknown-unit shim).
+    route: ["import", "milestone"],
+    spec: {
+      usage: "aof import milestone <repo> [selector] [--dry-run] [--json]",
+      flags: {
+        dryRun: { type: "boolean", description: "preview the import without writing" },
+      },
+    },
+
     // `aof import milestone <repo> [selector] [--dry-run] [--json]`.
     argv: (positionals, options = {}) => {
       const input = { repo: positionals[0] };

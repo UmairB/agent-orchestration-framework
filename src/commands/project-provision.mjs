@@ -154,6 +154,23 @@ export const projectProvisionCommand = {
   },
 
   cli: {
+    // m42 wave (d) leg d1 (wave-3 tail) — routed (class B): the cli.mjs face
+    // copy (projectProvisionCli) is deleted; the generic face is the one door.
+    // spec.workspace: false — provision is GLOBAL-STORE oriented and reads no
+    // project files (its run never touches ctx.workspace; the retired face's
+    // best-effort loadWorkspace was belt-and-braces with no consumer).
+    route: ["project", "provision"],
+    spec: {
+      usage: "aof project provision <tool> [--version V] [--force] [--uninstall] [--dry-run] [--json]",
+      workspace: false,
+      flags: {
+        version: { type: "string", description: "pin a specific version dir" },
+        force: { type: "boolean", description: "re-run the provision even when present" },
+        uninstall: { type: "boolean", description: "remove exactly this tool version dir" },
+        dryRun: { type: "boolean", description: "report the plan without executing" },
+      },
+    },
+
     // `aof project provision <tool> [--version V] [--force] [--uninstall]
     //  [--dry-run] [--json]`. Only present fields are set (so the input stays the
     // minimal shape the schema validates).
@@ -184,7 +201,7 @@ export const projectProvisionCommand = {
   },
 };
 
-// A structured command error (mirrors commands/errors.mjs commandError) — carries a
+// A structured command error (mirrors command-error.mjs commandError) — carries a
 // `code` so the CLI --json face emits a single { ok:false, error, code } envelope and
 // the non-json face propagates a clear message, never an opaque spawn failure.
 function provisionError(message, code) {

@@ -54,14 +54,27 @@ function extractFunctionBody(source, name) {
   return null;
 }
 
-// detectHolderAuthoredApply(body) — the ownerNode ?? frameNode precedence shape
-// (connection nodeId wins) AND a target_node_id/holder comparison against that
-// resolved connection identity BEFORE any write — never a bare `frame.nodeId` used
-// as the write's authorship key on its own.
-function detectHolderAuthoredApply(body) {
+// detectHolderAuthoredApply(body, seamSource) — the ownerNode ?? frameNode
+// precedence shape (connection nodeId wins) AND a target_node_id/holder comparison
+// against that resolved connection identity BEFORE any write — never a bare
+// `frame.nodeId` used as the write's authorship key on its own.
+//
+// m42 wave (d) leg d3 — THE COMPARISON MOVED, and this detector moved with it
+// rather than being weakened. The apply handler still resolves the CONNECTION's
+// identity (that is genuinely frame-shaped knowledge, and only this door has it),
+// but it now hands that identity to the shared transition as `byNode`, which is
+// where the comparison happens for EVERY writer. So T6 is proven in two halves:
+// the door must pass the connection identity (never omit it, never pass the
+// self-declared frame field), and the seam must compare it against the row's
+// holder. `seamSource` is optional so the self-check can exercise the pre-d3
+// inline form on its own.
+function detectHolderAuthoredApply(body, seamSource = null) {
   const hasPrecedence = /ownerNode\s*\?\?\s*frameNode/.test(body);
-  const comparesHolder = /target_node_id\s*!==\s*connectionNodeId|connectionNodeId\s*!==\s*existing\.target_node_id/.test(body);
-  return hasPrecedence && comparesHolder;
+  const comparesInline = /target_node_id\s*!==\s*connectionNodeId|connectionNodeId\s*!==\s*existing\.target_node_id/.test(body);
+  const handsToSeam = /byNode\s*:\s*connectionNodeId/.test(body);
+  const seamCompares = seamSource != null
+    && /existing\.target_node_id\s*!==\s*byNode|byNode\s*!==\s*existing\.target_node_id/.test(seamSource);
+  return hasPrecedence && (comparesInline || (handsToSeam && seamCompares));
 }
 
 async function withStore({ home }, fn) {
@@ -80,7 +93,15 @@ export const archTests = [
       const source = await readFile(sourcePath, "utf8");
       const body = extractFunctionBody(source, "applyAssignmentStatusFrame");
       assert.ok(body, "applyAssignmentStatusFrame is defined");
-      assert.equal(detectHolderAuthoredApply(body), true, "the connection-nodeId-wins precedence and a holder comparison are both present");
+      const seamSource = await readFile(
+        path.join(path.dirname(sourcePath), "effects", "assignment-transitions.mjs"),
+        "utf8",
+      );
+      assert.equal(
+        detectHolderAuthoredApply(body, seamSource),
+        true,
+        "the connection-nodeId-wins precedence is at the door and the holder comparison is in front of the write (inline pre-d3, in the transition seam since)",
+      );
     },
   },
   {
@@ -140,7 +161,44 @@ function applyAssignmentStatusFrame(store, frame, options = {}) {
   return { applied: true };
 }
 `;
-      assert.equal(detectHolderAuthoredApply(checkingForm), true, "the real checking form (connection-nodeId-wins + holder comparison) passes");
+      assert.equal(detectHolderAuthoredApply(checkingForm), true, "the pre-d3 inline checking form (connection-nodeId-wins + holder comparison) passes");
+
+      // The d3 SEAM form: the door passes the connection identity, the seam
+      // compares it. Accepted only when BOTH halves are present — a door that
+      // hands over nothing, or a seam that never compares, still trips.
+      const seamDoorForm = `
+function applyAssignmentStatusFrame(store, frame, options = {}) {
+  const ownerNode = options?.nodeId ?? null;
+  const frameNode = frame?.nodeId ?? null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  return await transitionAssignmentState(store, frame.assignmentId, frame.state, { byNode: connectionNodeId });
+}
+`;
+      const seamForm = `
+export function guardAssignmentTransition(existing, state, { byNode = null } = {}) {
+  if (byNode != null && existing.target_node_id !== byNode) return { ok: false, code: "assignment-status-not-holder" };
+  return { ok: true };
+}
+`;
+      assert.equal(detectHolderAuthoredApply(seamDoorForm, seamForm), true, "the d3 door+seam pair passes");
+      assert.equal(
+        detectHolderAuthoredApply(seamDoorForm, "function guard() { return { ok: true }; }"),
+        false,
+        "self-check: a seam that never compares the holder trips the detector even with a well-formed door",
+      );
+      assert.equal(
+        detectHolderAuthoredApply(
+          `function applyAssignmentStatusFrame(store, frame, options = {}) {
+  const ownerNode = options?.nodeId ?? null;
+  const frameNode = frame?.nodeId ?? null;
+  const connectionNodeId = ownerNode ?? frameNode;
+  return await transitionAssignmentState(store, frame.assignmentId, frame.state, {});
+}`,
+          seamForm,
+        ),
+        false,
+        "self-check: a door that resolves the identity and then DROPS it trips the detector",
+      );
     },
   },
 ];
