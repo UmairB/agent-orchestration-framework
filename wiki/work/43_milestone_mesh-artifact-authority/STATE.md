@@ -11,13 +11,19 @@ doc: state
 
 ## Progress
 
-- [ ] `43_story_item-lock` — not started
-- [ ] `43_story_artifact-sync-on-write` — not started
-- [ ] `43_story_cache-read-surface` — not started
-- [ ] `43_story_staleness-and-resync` — not started
-- [ ] `43_story_gate-propagation` — not started
+**Refined 2026-08-01** (`aof:refine 43 --autonomous`) — the milestone is fully broken down and every
+story carries its authored contract. Nothing is built yet.
 
-Stories are named in the SPEC but **not yet scaffolded** — the break-down runs at refine.
+- [ ] `01_story_item-lock` — refined, not started (wave 1)
+- [ ] `02_story_cache-authority` — refined, not started (wave 1)
+- [ ] `03_story_artifact-sync-on-write` — refined, not started (wave 2)
+- [ ] `04_story_staleness-and-resync` — refined, not started (wave 2)
+- [ ] `05_story_gate-propagation` — refined, not started (wave 2)
+- [ ] `06_story_cache-read-surface` — refined, not started (wave 3)
+
+Produced at refine: `RESEARCH.md`, `DESIGN.md`, `ARCHITECTURE.md` (ADR-001…ADR-010), `FEASIBILITY.md`,
+six scaffolded stories, **42 task features / 277 scenarios** (240 `@executable`, 19 `@manual`,
+18 `@uat`), and **eight fitness-function files / 31 proofs, all green**.
 
 ## Notes & decisions in flight
 
@@ -162,9 +168,73 @@ be migrated.
    and that is not the mint door. The check belongs in front of `transitionRunStart`, the one seam
    all four mint sites route through since m42 leg d4.
 
+### 2026-08-01 — the refine, and the four things it changed about the plan
+
+`aof:refine 43 --autonomous`. The Decide stage produced `RESEARCH.md` and `DESIGN.md`; the architect
+produced `ARCHITECTURE.md` (ADR-001…ADR-009) plus eight fitness-function files; six QA amigos authored the
+contracts in parallel; the architect then ruled their findings into **ADR-010 (refine-time
+reconciliation)**; and the developer amigo produced `FEASIBILITY.md`. Four things came out of it that the
+scoping above did not anticipate:
+
+1. **The break-down is SIX stories, not five.** `cache-read-surface` split along the authority cut vs. the
+   reader migration — the write-side change is ~3 modules and high-risk, the read-side is 17 sites across
+   12 modules and mechanical. Together they made the critical path as long as the widest sweep and made
+   the risky change unreviewable inside a 13-module diff.
+2. **The sync trigger stayed a `command` hook, but the alternative was real.** RESEARCH measured a fourth
+   hook type — `http` — that POSTs the identical payload with **zero process spawn** against ~23ms for a
+   node spawn. ADR-001 rejected it as primary anyway: it needs a new inbound listening surface on every
+   agent node, requires writing the security-relevant `allowedHttpHookUrls` key into a hand-authored file,
+   needs a dynamic port known at settings-write time, and **fails silently** when the allowlist is
+   restrictive — reintroducing the forget-class failure one layer down, for 23ms. Recorded as
+   supersedable if the worker daemon ever grows a loopback listener for another reason.
+3. **Two ordering defects were found and fixed before any code was written.** (a) ADR-004's
+   author-retraction predicate reads `work_items.node_id`, a column ADR-009 had landing *after* the story
+   that needs it — schema v8's `ALTER` and write-side stamping moved to `43/02`, with `43/04` keeping
+   everything read-side. (b) ADR-004's "outside a lock, last-write-wins by `syncedAt`" would, after
+   settle, let the control's tick re-win with a fresher timestamp from stale disk — reverting the item,
+   i.e. the disease. **Authority is now by authorship and door, never by timestamp**; `syncedAt` is
+   provenance for display and staleness only.
+4. **The milestone's real critical path is the UI story's missing substrate, not the cache cut.** Story 04
+   must first build a board-side headless mount harness (~1.5–2.5 days — nothing in the repo mounts
+   `Board.tsx`), the `work:resync` transport (~2 days — nothing carries a node→node "push me your state"
+   request; `mesh-recovery-push.mjs` is the precedent), and a `Board.tsx`-root 1s clock. ~4 days sitting
+   under 79 scenarios. Start them during wave 1.
+
+### 2026-08-01 — a latent defect this milestone now closes before it arms
+
+`planApplyActions` (`src/render-plan.mjs:12-49`) gates drift protection on a **prior lock entry**, and
+falls through at `:48` to an ungated *"existing file will be overwritten"* for any file without one — which
+describes this repo's hand-authored `.claude/settings.json` exactly, since the bundle has never written it.
+The content that would be written is built entirely from `config.hooks` + `config.settings`, so the moment
+this milestone adds a `claude` hook to `.aof/aof.config.json`, the next `work init` / `work update` /
+`assets apply` would silently delete the operator's `SessionStart`/`UserPromptSubmit`/`SessionEnd`/
+`PreToolUse` hooks, `permissions.deny`, `sandbox.filesystem`, `enabledPlugins` and `extraKnownMarketplaces`.
+**This is m42 leg d4's `writeLock` defect verbatim, third instance.** ADR-002 closes this file's case (the
+file is CO-AUTHORED, so it gets a surgical merge and the whole-file render path is structurally closed);
+the repo-wide fix is TECH_DEBT **item 9**. ADR-010 additionally sharpened the fallback: absent ⇒ `{}`, but
+a **torn** file is a coded `claude-settings-unparseable` that writes nothing — the literal "torn ⇒ `{}`"
+would have answered one missing brace by replacing a ~140-key operator file with a three-line aof document.
+
+### Documented default decisions taken autonomously (no operator present)
+
+- **No mock was elicited for the UI surfaces**, because `--autonomous` means there is nobody to ask.
+  Per 07/ADR-003 the **binding checklists in `DESIGN.md` are therefore mandatory and ARE the conformance
+  source of truth** for all three surfaces; all three carry one. If a mock is produced later it belongs in
+  `wiki/work/43_milestone_mesh-artifact-authority/mocks/` as a committed, locally-readable file.
+- **18 `@uat` scenarios** were authored (14 of them in story 04) — a deliberate consequence of the no-mock
+  decision: with no image baseline, the perceptual judgement moves to a human gate at verify time.
+- The **staleness window value and the two Resync timeouts** were left unpinned as tuning constants;
+  DESIGN supplies defaults (10s request, 3 poll intervals) for the Three Amigos to fix at build time.
+
 ## Verification
 
 <!-- Pointers, not restatements. -->
 - [ ] `@executable` suite green
 - [ ] Fitness functions green
 - [ ] `@manual` signed off — see `UAT.md`
+
+## Feedback (for retro)
+
+- Record-doc citations decayed between authoring and this refine, three ways, and each cost a verification pass: (1) SPEC.md cited global-work-store.mjs:431/:417 for the wholesale rebuild; at HEAD it is :459-460 inside a function starting at :436. (2) STATE.md asserted '25 disk-read call sites across 18 modules'; a reproducible grep measures 33 across 21. (3) SPEC/STATE cite commits 50c2c82 and 87a7f39, neither of which resolves in this checkout (Mac worker, branch fix/worker-completion-and-milestone-cascade) — a cross-machine citation that reads as authoritative but cannot be verified where the refine actually runs. Durable lesson for the retro: a record doc should cite MODULE + FUNCTION NAME (stable across edits, greppable on any machine) and reserve line numbers for a same-session quote; a COUNT asserted in prose should carry the command that produced it, or it silently becomes folklore. RESEARCH.md this refine did exactly the right thing by re-measuring and flagging the deltas rather than inheriting them. — Raised by: architect
+- DEFECT (found at refine, 2026-08-01): `aof work insert-story <slug> --at P --under NN` rewrites PROSE tokens matching NN_story_* in the parent SPEC.md '## Stories' checklist as if they were top-level refs. Six nested inserts under milestone 43 rewrote the PO's hand-written labels '43_story_item-lock' etc. through 44,45,...,49 — one bump per insert. Nested inserts shift only the nested SS space (each reported shifted:0) and must never renumber the parent's own number. The checklist updater's rewrite is matching too broadly. Repro: scaffold 6 stories under a milestone whose SPEC '## Stories' section names them as NN_story_<slug> prose. — Raised by: product-owner
+- Three Amigos closure, doc-drift routed rather than fixed: src/effects/stores.mjs:27 lists 'work:doctor --explain: renders a store's class beside its cascade' among TABLE_CLASSIFICATION's consumers. Verified 2026-08-01 — work-doctor.mjs and its group modules have NO --explain handling at all, and TABLE_CLASSIFICATION is imported by exactly two files (stores.mjs itself and test/arch/acd-fact-projection-split.test.mjs). The comment documents a consumer that does not exist. This is TECH_DEBT item 0's fourth shape ('history kept in comments rather than in the design') in its subtlest form: not a stale scar narrating an old bug, but a forward-looking claim about a feature that was never built, which reads to the next author as an existing contract to preserve. Retro-worthy because the class is invisible to every gate we have — an arch-test can check that a claimed IMPORT exists, but not that a claimed COMMAND FLAG does. Cheapest durable cure: when a module header enumerates its consumers, each entry should be a module path (greppable, and acd-* can ratchet it) rather than a user-facing verb+flag. Left unfixed deliberately: it is a comment, not accrued structural cost, so it does not belong in TECH_DEBT. — Raised by: architect

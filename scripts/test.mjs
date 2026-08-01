@@ -1553,6 +1553,31 @@ import { archTests as acdItemBranchDerivableTests } from "../test/arch/acd-item-
 // busy_timeout, the projection with WAL, proven by a cross-process collision
 // against a pre-fix control.
 import { archTests as acdSharedStoreConcurrencyTests } from "../test/arch/acd-shared-store-concurrency.test.mjs";
+// ---- milestone 43 · mesh artifact authority (the cache is the read surface) ----
+// ADR-001 — the PostToolUse trigger's body DERIVES NOTHING (no src/ import, no store,
+// no workspace-identity derivation, exit 0 always) and resolves BOTH path fields
+// (file_path for Write/Edit, notebook_path for NotebookEdit — measured).
+import { archTests as acdArtifactSyncHookDerivationFreeTests } from "../test/arch/acd-artifact-sync-hook-derivation-free.test.mjs";
+// ADR-002 — .claude/settings.json is CO-AUTHORED: aof splices only its own entry, never
+// a whole-file render (m42 leg d4's writeLock defect class, one file over).
+import { archTests as acdClaudeSettingsCoAuthoredTests } from "../test/arch/acd-claude-settings-co-authored.test.mjs";
+// ADR-003 — one execution-scope rule, one lock door (inside transitionRunStart), and the
+// run store stays mesh-blind.
+import { archTests as acdItemLockSingleDoorTests } from "../test/arch/acd-item-lock-single-door.test.mjs";
+// ADR-004 — work_items has ONE writer module, and the effects/stores.mjs
+// reclassification to `fact` is what structurally ends the wholesale disk rebuild.
+import { archTests as acdWorkItemsSingleWriterTests } from "../test/arch/acd-work-items-single-writer.test.mjs";
+// ADR-005 — the reader migration's boundary in BOTH directions: the cache seam depends
+// on work.mjs (never the reverse), and the worker-side/structural readers stay on disk.
+import { archTests as acdCacheReadSurfaceBoundaryTests } from "../test/arch/acd-cache-read-surface-boundary.test.mjs";
+// ADR-006 — one staleness predicate (strict >), one threshold (on the wire), and the
+// settled never-evict rule: no DELETE against a cache table may be predicated on time.
+import { archTests as acdCacheStalenessSinglePredicateTests } from "../test/arch/acd-cache-staleness-single-predicate.test.mjs";
+// ADR-007 — the streamed set and the requestable set are ONE manifest, one home.
+import { archTests as acdWorkArtifactSetSingleHomeTests } from "../test/arch/acd-work-artifact-set-single-home.test.mjs";
+// ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
+// no force, no reset on the branch path; a conflicting merge aborts and refuses.
+import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2171,7 +2196,16 @@ export const tests = [
   ...acdNotionSyncLedgeredTests,
   ...acdFactProjectionSplitTests,
   ...acdItemBranchDerivableTests,
-  ...acdSharedStoreConcurrencyTests
+  ...acdSharedStoreConcurrencyTests,
+  // milestone 43 · mesh artifact authority — ADR-001..008
+  ...acdArtifactSyncHookDerivationFreeTests,
+  ...acdClaudeSettingsCoAuthoredTests,
+  ...acdItemLockSingleDoorTests,
+  ...acdWorkItemsSingleWriterTests,
+  ...acdCacheReadSurfaceBoundaryTests,
+  ...acdCacheStalenessSinglePredicateTests,
+  ...acdWorkArtifactSetSingleHomeTests,
+  ...acdGatePropagationNeverDiscardsTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

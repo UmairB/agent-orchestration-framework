@@ -335,3 +335,139 @@ drift-warnings that read as "protecting your edits" when there are none.
 (`.claude/** text eol=lf`, `.codex/** text eol=lf`, plus `.aof` templates) and renormalize once — or
 have the drift check hash newline-normalized content. Either way, drift must mean *content* drift.
 And one home for the drift message.
+
+---
+
+## 9. `planApplyActions` silently overwrites any CO-AUTHORED file it has no lock entry for
+
+**Status:** open (raised 2026-08-01 by the architect, during milestone 43's Decide stage; verified
+from source at `277ada5`). **Severity:** medium-high — it is item 8's sibling and m42 leg d4's
+`writeLock` defect a third time, and it is *silent*.
+
+**What's wrong.** `planApplyActions` (`src/render-plan.mjs:13-49`) gates every drift protection on a
+**prior lock entry**. For a file that exists on disk with **no** prior entry, each guard is skipped in
+turn and the code falls through to line 48:
+
+```js
+actions.push(action("update", output, prior ? "generated content changed" : "existing file will be overwritten"));
+```
+
+An **ungated `update`** — no `--force` required, no drift warning surfaced, straight through to
+`executeApplyActions` → `writeText`. Both `aof work init` (`src/work-init.mjs:30,91` — `previousLock =
+null`, so *every* existing unlocked file is treated as safe to overwrite) and `aof work update`
+(`src/work-update.mjs:27,100`) route through it. This is **worse than the drift-warning case**, not
+equivalent to it: item 8's CRLF bug at least *reported* that it was protecting something.
+
+**How it bites.** The live instance is `.claude/settings.json` — a genuinely hand-maintained file
+(hooks for four events, `permissions.deny`, `sandbox.filesystem`, `enabledPlugins`,
+`extraKnownMarketplaces`) that the aof lock has never recorded, because the 34-file bundle manifest
+carries zero entries for it. `claudeSettingsJson()` (`src/runtime-config.mjs:21-28`) builds the file's
+**entire** body from `config.hooks` + `config.settings` alone, so the moment a `claude`-runtime hook is
+added to `.aof/aof.config.json`, the next `work init`/`work update`/`assets apply` deletes every one of
+those sections without a word. It is **dormant, not absent**: this repo's config has no `hooks` key
+today. Milestone 43 adds one.
+
+The class is wider than that one file: *any* file with an author besides aof and no lock entry is
+overwritable this way.
+
+**The fix.** Two halves, and the first is not the interesting one.
+- **Narrow (milestone 43, `43_story_artifact-sync-on-write`, 43/ADR-002):** `.claude/settings.json`
+  stops being whole-file rendered at all — `renderRuntimeConfigOutputs` (`src/adapters.mjs:101-111`) no
+  longer emits it, and a merge writer splices only aof's own self-identifying hook entry (the
+  `mergeLock` / `writeSidecarPatch` pattern: read, overlay this caller's keys, write the union). Gated
+  by `test/arch/acd-claude-settings-co-authored.test.mjs`, which arms the moment a claude hook lands in
+  config.
+- **Wide (this item):** make the fall-through refuse instead of overwrite. A desired output whose target
+  exists on disk with **no prior lock entry** should be a `drift-warning`, not an `update` — i.e. the
+  same protection a *previously generated* file gets, since "aof has never written this" is strictly
+  stronger evidence of foreign authorship than "aof wrote it and someone changed it". Files aof
+  exclusively owns are unaffected because they either don't exist yet (`create`) or already match
+  (`skip`). Needs a pass over `work init`'s `previousLock = null` semantics, which currently *rely* on
+  the permissive branch.
+
+---
+
+## 10. `src/` has no interior structure: a 3,174-line god-file and 99 flat root modules
+
+**Status:** open (raised 2026-08-01 by the architect, during milestone 43's Decide stage). **Severity:**
+medium — nothing is broken, but every measurement in item 0's own table has moved the wrong way, and
+this is the shape item 0 named.
+
+**What's wrong.** Measured 2026-08-01 against item 0's 2026-07-26 baseline:
+
+| Signal | 2026-07-26 | 2026-08-01 | Trend |
+|---|---|---|---|
+| `src/` files | 147 | **202** | +37% |
+| `src/` lines | 41,348 | **50,744** | +23% |
+| `src/` **root-level** `.mjs` | — | **99** (of 202) | half the tree is one flat directory |
+| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | **+47%** — the largest file in the repo |
+
+`mesh-worker-execution.mjs` imports 17 modules and is imported by 3 (codebase graph, 2026-08-01: 1960
+nodes / 5754 edges). It is not a hub anyone depends on — it is a **sink** that keeps absorbing. Its 47%
+growth in five weeks is the single clearest instance of the accretion item 0 describes: each milestone
+adds its worker-side leg *inside* the file that already has one, because that is where the surrounding
+context lives.
+
+The flat root is the same disease at the directory level. There are real interior directories
+(`commands/`, `effects/`, `memory/`, `notion/`, `import/`, `spine/`, `bundle/`), and 99 modules that
+belong to none of them — mesh transport, worktree/git, stores, work-stream engines, UI servers and
+config machinery all as siblings. Nothing in a review ever says "this is the 100th".
+
+**How it bites.** Not as failures — as *review blindness*. A change to the worker's execution path
+lands in a 3,000-line file where nobody can see what else it touches; a new module lands in a directory
+whose membership means nothing, so no reviewer can tell whether it belongs. Both are how item 0's
+"no single seam for an act" reproduces itself one milestone at a time.
+
+**The fix.**
+- **Split `mesh-worker-execution.mjs` along its own seams.** It already has them, marked by its own
+  section comments: worktree materialisation + branch/base decisions, the PTY/agent driver, the
+  settle/push/cleanup path, and the directive handler that sequences them. Each is a module; the
+  handler keeps the sequencing and gets short. Milestone 43 deliberately does **not** attempt this —
+  its two stories that touch the file add a *call site* each (43/ADR-008 requires the branch-advance
+  logic to live in `mesh-worktree.mjs`, which already owns every git verb), so the file does not grow
+  by another block. That constraint is a stopgap, not the fix.
+- **Give `src/` interior directories and a ratchet.** Group the root by subject (`mesh/`, `git/`,
+  `store/`, `work/`), then a fitness function on root-level file count so the N+1th sibling fails CI
+  instead of needing a reviewer to notice. The ratchet is only honest *after* the grouping — a ceiling
+  imposed on today's 99 would fail every unrelated milestone for a debt none of them created.
+- **A file-size ratchet on the top-N files**, same shape: a measured ceiling per file, raised only
+  deliberately, so "it grew 47%" is a build failure rather than a retrospective observation.
+
+---
+
+## 11. `aof work validate <ref>` reports PASS for a ref that does not exist
+
+**Status:** open (found 2026-08-01 by the architect while checking a QA defect report during milestone
+43's Three Amigos closure; **measured**, on this repo's own stream). **Severity:** medium — it is a
+*silent green* on a gate command, which is the one failure mode a gate must not have.
+
+**What's wrong.** `validateWork`'s scope is a FILTER (`src/work.mjs:687-694`), and an unresolved scope
+filters to nothing. Nothing distinguishes "this ref has no problems" from "this ref does not exist", so
+`work:validate` returns `{ findings: [] }` and the CLI renders the PASS line
+(`src/commands/validate.mjs:48-50`):
+
+```
+PASS — 99 is well-formed.
+```
+
+Measured against `wiki/work` at `277ada5`: `validate 99` → 0 findings, `validate 43/07` → 0 findings,
+`validate nonexistent-slug` → 0 findings. The scope-as-filter semantics are deliberate and documented in
+`validate.mjs`'s own header ("An unresolved scope is a filter that matches nothing → empty findings, no
+error"); what is not deliberate is *rendering that as a pass*.
+
+**How it bites.** A typo'd ref, or a ref whose folder has not been scaffolded yet, reports the stream
+healthy. In an `--autonomous` cascade — which runs `validate` as a gate between steps and reads its exit
+code — a mistyped scope is indistinguishable from a green gate, and the run proceeds. It also exits 0,
+so CI cannot catch it either.
+
+**What is NOT wrong (checked in the same pass, recorded so it is not re-investigated).** A scoped
+validate DOES reach task features: `checkFeatureTags` sits after the `inScope` guard inside the same loop
+(`src/work.mjs:720`, `:786-790`), and `inScope` for a numeric ref matches `item.parent ?? item.number`,
+so a milestone's nested stories are in scope. Measured on a scratch stream carrying a bogus-tag feature:
+scopes `undefined`, `01`, `01/01` and `demo` each returned the identical findings.
+
+**The fix.** Distinguish "matched nothing" from "found nothing wrong". `validateWork` should report
+whether the scope resolved to at least one item; an unresolved scope becomes a coded error
+(`scope-not-found`) or a finding, never a PASS — matching the resolver behaviour the rest of the command
+surface already has (`work:tasks` throws `ref-not-found`; `work:doc` likewise). Keep the filter
+semantics; change only what an EMPTY match renders as.
