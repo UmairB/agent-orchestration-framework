@@ -1548,6 +1548,11 @@ import { archTests as acdFactProjectionSplitTests } from "../test/arch/acd-fact-
 // m42 brittleness cure — one derivable branch per item (aof/mesh/<ref>); the
 // per-assignment mint retired, the side table demoted to a cache that wins on hit.
 import { archTests as acdItemBranchDerivableTests } from "../test/arch/acd-item-branch-derivable.test.mjs";
+// m42 — the shared-store concurrency pragmas (STATE's measured "database is
+// locked every ~5s" residual): every multi-process SQLite store opens with
+// busy_timeout, the projection with WAL, proven by a cross-process collision
+// against a pre-fix control.
+import { archTests as acdSharedStoreConcurrencyTests } from "../test/arch/acd-shared-store-concurrency.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2165,7 +2170,8 @@ export const tests = [
   ...acdStreamReindexCascadeTests,
   ...acdNotionSyncLedgeredTests,
   ...acdFactProjectionSplitTests,
-  ...acdItemBranchDerivableTests
+  ...acdItemBranchDerivableTests,
+  ...acdSharedStoreConcurrencyTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

@@ -583,8 +583,20 @@ What is PROVEN (each with its instrument, all on the branch):
   a REAL hygiene/security fix, `4974c82`, but input stayed dead), load-window timing
   (FALSIFIED — probes at +3 and +5 minutes on run 0025: zero echo both times).
 
-Debug scaffolding still in the tree (remove once resolved): per-write delivery breadcrumbs
-with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
+Debug scaffolding — **triaged 2026-08-01**, because "remove once resolved" and this finding being
+FROZEN-not-resolved are not the same condition, and the three pieces were not the same kind of
+thing:
+
+- **in-daemon `cat` self-test at resume** — already gone from the tree (no callers remain).
+- **post-write SIGWINCH jiggle (80→81→80, 500ms after every write)** — **RETIRED.** It was never
+  instrumentation but an INTERVENTION testing the hypothesis that a forced repaint would prove
+  attachment, and this finding's own falsification list records that hypothesis dead ("ignores
+  typed bytes AND SIGWINCH resize jiggles — no repaint, ever"). It bought nothing and mutated
+  terminal geometry on every keystroke of every live session.
+- **per-write delivery breadcrumb with pid** — **RETAINED, deliberately.** Passive, log-only,
+  content-free (byte count + session + pid, never the answer), and it is the correlation handle a
+  resumed investigation needs. Removing instrumentation from a PAUSED investigation only means
+  re-adding it when the claude-side instrumented build arrives. It retires WITH this finding.
 
 ### Residual defects / deferred work (known, not yet built)
 - **THE structural debt (operator: "insanely brittle"; scoped, ~half-day):** work lives on
@@ -605,11 +617,22 @@ with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
 - A pre-deploy board tab cannot warn (old bundle) — inherent; only hurts once per UI deploy.
 - `stream-frame-refused` message template misnames non-descriptor refusals (says "no registered
   descriptor" for `assignment-status-already-terminal`).
-- ~~Transient~~ **CONTINUOUS** `ERR_SQLITE_ERROR: database is locked` warnings (measured
-  2026-07-27 post-restart: every ~5s) — the projection runs `journal_mode: delete` with NO
-  busy_timeout, and the desktop status poll + the board's in-flight list re-poll + the serve
-  daemon's write ticks now collide every cycle. Wants `PRAGMA busy_timeout` + WAL. Write ticks
-  retry next cycle so no data is lost, but any tick can silently skip a beat.
+- ~~~~Transient~~ **CONTINUOUS** `ERR_SQLITE_ERROR: database is locked` warnings~~ **FIXED
+  2026-08-01.** The projection opened with NO pragmas at all (`journal_mode: delete`, no
+  busy_timeout) while the desktop status poll, the board's in-flight re-poll and the serve
+  daemon's write ticks collided every cycle. `openGlobalWorkProjectionStore` now applies both:
+  **WAL** (readers stop blocking on the writer the polls collide with) and **`busy_timeout =
+  2000`** (the two-WRITER case WAL cannot remove — the effects journal has had exactly this
+  since birth and the projection beside it never did). Measured cross-process, which is the only
+  way this reproduces (`DatabaseSync` is synchronous, so an in-process holder can never release
+  while the waiter blocks the loop — two earlier in-process attempts asserted nothing): against
+  a child process holding a write transaction, the **pre-fix** pragmas fail in **1ms** (the
+  skipped beat) and the **post-fix** pragmas **wait 334ms and land the write**. Gate
+  `acd-shared-store-concurrency` (3 lanes: the structural ratchet over every shared-process
+  store, the real store's reported pragmas, and the cross-process collision with the pre-fix
+  control asserted to FAIL so the lane cannot pass vacuously on an uncontended machine).
+  *Note for the reclaim-scheduler's two standing EBUSY teardown lanes: unchanged in count and
+  identity, but WAL's `-shm` sidecar now joins the already-locked file one of them trips on.*
 - **Dead-tuple mirror reads `connecting…` forever** (measured 2026-07-27: the operator opened
   the terminal on a stale `running` row after both restarts): the terminal-view upgrade accepts
   any tuple, the in-memory mirror was wiped by the control restart, the session's PTY died with
@@ -617,7 +640,12 @@ with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
   OPERATOR REMEDY now exists (`aof mesh terminal-resume <sessionId>`, `97dde09` — the dead tuple
   revives in place); the UX half still wants an honest "no live stream for this session" answer
   (route-side grace-window close, or a board affordance that offers the resume directly).
-- **Worker startup-reclaim frames are fire-once** (measured 2026-07-27: the Mac worker restarted
+- ~~**Worker startup-reclaim frames are fire-once**~~ **CURED by wave (d) leg d3** (the outbox):
+  the startup-reclaim broadcast in `mesh-launcher.mjs` is named in d3's landing as one of the
+  sites that now reports durably — a report lost on a dead connection is a pending step that
+  redelivers on reconnect, which is the "re-armed on RECONNECT" this residual asked for, reached
+  structurally rather than by a second trigger. Original measurement kept below for the record.
+  (measured 2026-07-27: the Mac worker restarted
   in the ~3-min window while the control was ALSO down; its `failed/daemon-restarted` report for
   run 0017's stranded worktree died on the dead connection, and the control row read a stale
   `running` for 35+ min — the dual-staleness reclaim rightly refuses to fire while the node's
@@ -627,8 +655,10 @@ with pid, post-write SIGWINCH jiggle, in-daemon cat self-test at resume.
   `unknown-workspace` every reconnect — harmless noise, but noise.
 - let-shield's INSTALLED bundle still has the old continue.md (`aof work update` there pending);
   only affects hand-typed `/aof:continue` — the mesh dispatch types `/aof:autonomous` directly.
-- `aof mesh assign` lacks `--workspace` (cwd-derived; the withdraw this morning initially targeted
-  the WRONG workspace silently from the aof cwd).
+- ~~`aof mesh assign` lacks `--workspace`~~ **CLOSED by wave (d) leg d1 (wave-3 tail, part 1)** —
+  `mesh:assign` landed as a registered Command carrying the `--workspace` flag, resolved by the
+  generic face's `resolveWorkspaceRoot` (path-or-descriptor-id). The original: cwd-derived, and a
+  withdraw silently targeted the WRONG workspace from the aof cwd.
 
 ## Verification
 

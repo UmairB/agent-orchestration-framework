@@ -60,6 +60,33 @@ function wholesaleDelete(db, table, workspaceId) {
   db.prepare(`DELETE FROM ${table} WHERE workspace_id = ?`).run(workspaceId);
 }
 
+// applyConcurrencyPragmas(db) — m42, the measured `database is locked` residual
+// (STATE 2026-07-27: CONTINUOUS, every ~5s post-restart). This store is opened by
+// several processes at once — the desktop's status poll, the board's in-flight
+// re-poll, the serve daemon's write ticks and every CLI invocation — and it was
+// opened with NO pragmas at all: `journal_mode: delete`, where one writer locks
+// out every reader and a colliding tick fails IMMEDIATELY rather than waiting.
+// Write ticks retried on the next cycle so nothing was lost, but any tick could
+// silently skip a beat.
+//
+// Two pragmas, addressing the two halves:
+//   WAL          — readers no longer block the writer and the writer no longer
+//                  blocks readers, which is the collision itself. Persistent in
+//                  the file header (an older aof build opening it reads WAL fine),
+//                  and this database is always on a local filesystem — the mesh
+//                  root under AOF_GLOBAL_HOME — which is WAL's one requirement.
+//   busy_timeout — the residual case WAL cannot remove (two WRITERS). 2s of
+//                  waiting instead of an instant throw; the effects journal
+//                  (effects/journal.mjs) has had exactly this from birth, and the
+//                  projection it sits beside never did.
+//
+// Deliberately NOT hoisted into a shared helper with the journal's: the value is
+// a per-store tuning decision, not one fact with two homes.
+function applyConcurrencyPragmas(db) {
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA busy_timeout = 2000");
+}
+
 export async function openGlobalWorkProjectionStore(options = {}) {
   const paths = options.paths ?? globalMeshPaths(options);
   const sqlite = await resolveSqlite(options);
@@ -67,6 +94,7 @@ export async function openGlobalWorkProjectionStore(options = {}) {
   await mkdir(paths.workRoot, { recursive: true });
   const db = new sqlite.DatabaseSync(paths.databasePath);
   try {
+    applyConcurrencyPragmas(db);
     const existing = readSchemaVersion(db);
     if (existing != null && existing > GLOBAL_WORK_SCHEMA_VERSION) {
       throw globalStoreError(
