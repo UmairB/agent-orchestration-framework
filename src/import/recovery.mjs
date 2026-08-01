@@ -208,29 +208,54 @@ function sectionBody(bodyLines) {
   return out.join("\n").trim();
 }
 
-// Read the prose after a heading matched by `headingRe`, up to the next heading.
-// Improves on the stub's first-paragraph-only capture: it collects ALL prose lines
-// of the section (skipping HTML comments + blockquote callouts) so the recovered
-// Objective/Scope is the real section text, not a truncated first line. Returns ""
-// when the heading is absent.
+// Read the prose after a heading matched by `headingRe`, up to the NEXT HEADING —
+// the whole section, never a truncated first paragraph. Returns "" when the
+// heading is absent.
+//
+// FIXED 2026-08-01 (measured importing m42 into itself: the recovered `## Scope`
+// was the single line "In scope:" and nothing else). The previous rule broke at
+// the first blank line after any content, which made this first-paragraph-only
+// despite its comment claiming otherwise — and a Scope section is a LABEL followed
+// by a LIST, so the "first paragraph" is just the label. It was not milestone-
+// specific: aof's own milestone SPEC template writes `In scope:` + bullets, blank,
+// `Out of scope:` + bullets, so every aof-native SPEC lost its out-of-scope half
+// too. Absence is information (ADR-005) — a section silently truncated to its own
+// label is the opposite, a confident lie about what the source said.
+//
+// Structure is PRESERVED rather than flattened: consecutive prose lines join into
+// one paragraph (the old behaviour, which read well for an Objective), but a list
+// item keeps its own line and a blank line stays a paragraph break. Flattening a
+// bullet list into one run-on line would make a faithful Scope unreadable, and the
+// digest is written for recall.
 function proseAfter(body, headingRe) {
   const lines = body.split(/\r?\n/);
   const start = lines.findIndex((line) => headingRe.test(line));
   if (start < 0) return "";
   const out = [];
+  let pendingBreak = false;
+  const isListItem = (text) => /^(?:[-*+]\s|\d+[.)]\s|\|)/.test(text);
   for (let i = start + 1; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/^#{1,6}\s/.test(line)) break;
+    if (/^#{1,6}\s/.test(line)) break; // the next heading ends the section
     const trimmed = line.trim();
     if (trimmed.length === 0) {
-      if (out.length > 0) break; // first blank AFTER content ends the paragraph
+      if (out.length > 0) pendingBreak = true; // a paragraph break, NOT the end
       continue;
     }
     if (/^<!--/.test(trimmed) || /^-->/.test(trimmed)) continue; // HTML comment lines
     if (/^>/.test(trimmed)) continue; // blockquote callout (e.g. SPEC "> Inputs:")
-    out.push(trimmed);
+    if (out.length === 0) {
+      out.push(trimmed);
+    } else if (pendingBreak || isListItem(trimmed) || isListItem(out[out.length - 1])) {
+      // Keep the line break: across a blank line, and around list items (a bullet
+      // never continues the previous line, and prose never continues a bullet).
+      out.push(pendingBreak ? `\n\n${trimmed}` : `\n${trimmed}`);
+    } else {
+      out.push(` ${trimmed}`); // a wrapped prose line continues its paragraph
+    }
+    pendingBreak = false;
   }
-  return out.join(" ").replace(/\s+/g, " ").trim();
+  return out.join("").trim();
 }
 
 // ──────────────────────────────────────────────── aof-STRUCTURED recovery ──
