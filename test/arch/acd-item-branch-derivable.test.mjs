@@ -105,6 +105,32 @@ export const archTests = [
     },
   },
   {
+    name: "arch/m42-branch-cure: the base-commit pin — the dispatch stamps the assigning HEAD, the frame carries it, and the worker verifies availability BEFORE any worktree add",
+    run: async () => {
+      // The control side: the tick resolves the assigning checkout's HEAD (the
+      // injectable seam defaults to the real headCommit) and the frame builder
+      // carries it conditionally — never a fabricated value.
+      const reclaim = stripComments(await readFile(path.join(SRC_DIR, "mesh-assignment-reclaim.mjs"), "utf8"));
+      assert.ok(/resolveDispatchCommit/.test(reclaim), "the tick resolves the assigning commit through its injectable seam");
+      assert.ok(/headCommit\s*\(/.test(reclaim), "…defaulting to the checkout's real HEAD");
+      const server = stripComments(await readFile(path.join(SRC_DIR, "control-stream-server.mjs"), "utf8"));
+      assert.ok(
+        /if \(typeof commit === "string" && commit\.length > 0\) frame\.commit = commit;/.test(server),
+        "the directive frame carries the commit conditionally",
+      );
+
+      // The worker side: availability is verified (fetch-once-on-miss) BEFORE the
+      // worktree add, and the miss is the coded refusal — never a silent build
+      // from this clone's stale HEAD.
+      const worker = stripComments(await readFile(path.join(SRC_DIR, "mesh-worker-execution.mjs"), "utf8"));
+      const ensure = worker.indexOf("ensureCommitAvailable(ws.projectRoot, directive.commit");
+      const add = worker.indexOf("await addWorktree(ws.projectRoot, assignmentId");
+      assert.ok(ensure !== -1 && add !== -1, "the availability check and the add both exist");
+      assert.ok(ensure < add, "availability is decided BEFORE the worktree materializes");
+      assert.ok(/assignment-base-commit-unavailable/.test(worker), "an unbuildable base refuses with its own code");
+    },
+  },
+  {
     name: "arch/m42-branch-cure: the derivation is pure, stable, prefix-pinned, and carries no assignment identity",
     run: () => {
       assert.equal(meshItemBranchName("18/02"), "aof/mesh/18-02", "the documented example derives byte-stably");

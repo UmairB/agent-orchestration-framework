@@ -853,10 +853,16 @@ export function freshnessLabel({ connected, everConnected, lastHeartbeatAt, now,
 // into the assignment's worktree instead of branching a fresh one from HEAD, so the work
 // accumulates on ONE branch per item. Absent (a refine, or an item with no prior push) ⇒
 // the worker's own fresh-branch default, byte-identical to before.
-export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command, baseBranch }) {
+export function buildDirectiveFrame(to, { assignmentId, itemRef, workspaceId, at, command, baseBranch, commit }) {
   const frame = { kind: "directive", to, assignmentId, itemRef, workspaceId, at };
   if (typeof command === "string" && command.length > 0) frame.command = command;
   if (typeof baseBranch === "string" && baseBranch.length > 0) frame.baseBranch = baseBranch;
+  // M42 base-commit pin (operator, 2026-08-01): the control checkout's HEAD at
+  // dispatch time — the state this assignment was made against. A fresh worker
+  // worktree builds from exactly this commit (fetching it if the clone is
+  // stale), never from the clone's own stale HEAD. Absent (an unresolvable
+  // checkout, an older control) the worker keeps its HEAD fallback.
+  if (typeof commit === "string" && commit.length > 0) frame.commit = commit;
   return frame;
 }
 

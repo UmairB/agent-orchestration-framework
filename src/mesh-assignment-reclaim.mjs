@@ -41,6 +41,8 @@ import { openGlobalWorkProjectionStore, readWorkItemRuns } from "./global-work-s
 // operator-chosen phase from the additive side-table and maps it to the command string;
 // the refine default above delegates to the SAME mapper.
 import { readAssignmentPhase, assignmentDirectiveCommand, phaseRunsOnItemBranch, readItemBranch, DEFAULT_ASSIGNMENT_PHASE } from "./mesh-assignment-directive.mjs";
+import { headCommit } from "./mesh-worktree.mjs";
+import { existsSync } from "node:fs";
 // m42 item 3 — a log-channel fault is reported, never thrown into the tick.
 import { reportDegrade } from "./degrade.mjs";
 
@@ -239,6 +241,25 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
 
   const store = await openStore(storeOptions);
   try {
+    // The default base-commit resolver (injectable for tests): the launcher's own
+    // workspace when the row is ours, else the descriptor's project_root when
+    // that checkout lives on this machine; anything unresolvable sends null.
+    const resolveDispatchCommit =
+      options.resolveDispatchCommit ??
+      (async (row) => {
+        try {
+          const root =
+            row.workspaceId === workspaceId && typeof ws?.projectRoot === "string"
+              ? ws.projectRoot
+              : (store.db
+                  .prepare("SELECT project_root FROM global_workspace_descriptors WHERE workspace_id = ?")
+                  .get(row.workspaceId)?.project_root ?? null);
+          if (typeof root !== "string" || root.length === 0 || !existsSync(root)) return null;
+          return await headCommit(root);
+        } catch {
+          return null;
+        }
+      });
     const rows = await listAllAssignments(store);
     for (const row of rows) {
       if (row.state !== "assigned") continue;
@@ -282,6 +303,15 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
       const baseBranch = phaseRunsOnItemBranch(phase)
         ? readItemBranch(store, row.workspaceId, row.itemRef)
         : null;
+      // M42 base-commit pin (operator, 2026-08-01): stamp the state this
+      // assignment is being made against — the workspace checkout's HEAD on THIS
+      // control node — so a fresh worker worktree builds from exactly that
+      // commit. Resolved from the launcher's own workspace when the row is ours,
+      // else from the descriptor's project_root when that checkout lives on this
+      // machine. Unresolvable (a foreign path, not a repo) sends no commit and
+      // the worker keeps its HEAD fallback — degraded, and said so in the
+      // decision log below.
+      const commit = await resolveDispatchCommit(row);
       const result = streamServer.dispatchDirective(buildDirectiveFrame(row.targetNodeId, {
         assignmentId: row.assignmentId,
         itemRef: row.itemRef,
@@ -289,6 +319,7 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
         at: now,
         command,
         baseBranch,
+        commit,
       }));
       if (result?.sent) {
         dispatchedIds.add(row.assignmentId);
@@ -302,7 +333,7 @@ export async function runControlDispatchReclaimTick(ws, streamServer, options = 
           options.onDispatchLog?.({
             code: "mesh-dispatch",
             level: "info",
-            message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: ${command}${baseBranch != null ? ` on ${baseBranch}` : " (no base branch — worker branches fresh)"}`,
+            message: `assignment ${row.assignmentId} (${row.itemRef}) -> ${row.targetNodeId}: ${command}${baseBranch != null ? ` on ${baseBranch}` : " (no base branch — worker converges on the item's derived branch)"}${commit != null ? ` from ${commit.slice(0, 12)}` : " (no base commit resolved — worker builds from its own HEAD)"}`,
           });
         } catch (error) {
           reportDegrade("mesh-assignment-reclaim", error);

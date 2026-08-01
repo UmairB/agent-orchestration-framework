@@ -42,6 +42,8 @@
 // origin branch) — and the derivation is the always-available default beneath it.
 import path from "node:path";
 import { execFile } from "node:child_process";
+// m42 item 3 — every former silent catch reports a coded degrade event.
+import { reportDegrade } from "./degrade.mjs";
 
 // The documented retention ceiling for a RETAINED (failed) worktree, in milliseconds
 // (ADR-004 "bounded by an explicit retention default … a documented constant, not
@@ -110,6 +112,53 @@ function sanitizeRefSlug(value, fallback) {
 export function meshItemBranchName(itemRef) {
   const itemSlug = sanitizeRefSlug(itemRef, "item");
   return `${MESH_BRANCH_PREFIX}${itemSlug}`;
+}
+
+// headCommit(projectRoot, options) — the checkout's current HEAD hash, or null when
+// the path is not a usable git repo. The CONTROL side stamps this onto every
+// directive it dispatches (the m42 base-commit pin): the assignment is made
+// against a KNOWN state of the stream, and the worker builds from exactly that
+// commit instead of whatever its own clone's stale HEAD happens to be.
+export async function headCommit(projectRoot, options = {}) {
+  const exec = resolveExec(options);
+  try {
+    const result = await exec(["rev-parse", "HEAD"], { cwd: projectRoot });
+    const hash = result.stdout.trim();
+    return result.status === 0 && /^[0-9a-f]{7,64}$/i.test(hash) ? hash : null;
+  } catch (error) {
+    // Not-a-repo / no-git degrades to "no pin" (the caller sends no commit and
+    // the worker keeps its HEAD fallback) — reported, never silent (m42 item 3).
+    reportDegrade("mesh-worktree", error);
+    return null;
+  }
+}
+
+// ensureCommitAvailable(projectRoot, commit, options) — is the dispatched base
+// commit present in this checkout, fetching origin once on a miss (the worker's
+// clone is never otherwise refreshed, so the control's newest commit routinely
+// is not here yet)? False after the fetch means the commit genuinely cannot be
+// built from (an unpushed control checkout, a typo'd hash) — the caller fails
+// LOUDLY instead of silently building from a stale base, which is the wrong-base
+// disease this pin exists to kill.
+export async function ensureCommitAvailable(projectRoot, commit, options = {}) {
+  const exec = resolveExec(options);
+  const present = async () => {
+    try {
+      return (await exec(["cat-file", "-e", `${commit}^{commit}`], { cwd: projectRoot })).status === 0;
+    } catch (error) {
+      reportDegrade("mesh-worktree", error);
+      return false;
+    }
+  };
+  if (await present()) return true;
+  try {
+    await exec(["fetch", "origin"], { cwd: projectRoot });
+  } catch (error) {
+    // An unreachable origin leaves the local answer to decide — the caller's
+    // coded refusal is the loud half; the fetch fault itself is still reported.
+    reportDegrade("mesh-worktree", error);
+  }
+  return await present();
 }
 
 // localBranchExists(projectRoot, branch, options) — does the checkout already hold

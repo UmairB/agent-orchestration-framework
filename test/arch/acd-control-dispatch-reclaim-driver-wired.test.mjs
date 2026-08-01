@@ -260,7 +260,15 @@ export const archTests = [
         assert.equal(handle.refused, undefined, "the daemon starts");
 
         controlTicker.fire(controlTicker.handles[0]);
-        await new Promise((resolve) => setTimeout(resolve, 25));
+        // The tick's dispatch path now awaits the base-commit resolution (a real
+        // `git rev-parse` on the assigning checkout — the m42 pin), so the wait
+        // polls instead of guessing a fixed delay.
+        {
+          const start = Date.now();
+          while (server.dispatched.length < 1 && Date.now() - start < 5000) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
         assert.equal(server.dispatched.length, 1, "the connected-target assigned row is dispatched exactly once");
         assert.equal(server.dispatched[0].assignmentId, "asg-connected");
 

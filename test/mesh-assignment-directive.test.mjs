@@ -220,6 +220,37 @@ export const meshAssignmentDirectiveTests = [
     }),
   },
   {
+    // M42 base-commit pin (operator, 2026-08-01): the dispatch stamps the state the
+    // assignment was made against — the control checkout's HEAD — onto the frame,
+    // so a fresh worker worktree builds from exactly that commit. Unresolvable
+    // (the default resolver over a non-repo path) sends none, and the worker keeps
+    // its own-HEAD fallback.
+    name: "dispatch: the directive carries the assigning checkout's HEAD as `commit` (the base-commit pin); an unresolvable checkout sends none",
+    run: async () => withIsolatedStore(async ({ store }) => {
+      seedAssigned(store, { assignmentId: "asg-pin", itemRef: "22", targetNodeId: "worker-a" });
+      const streamServer = fakeStreamServer({ connected: ["worker-a"] });
+      const dispatchedIds = new Set();
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-25T09:00:05.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds,
+        resolveDispatchCommit: async () => "abc123def4567890abc123def4567890abc123de",
+      });
+      const pinned = streamServer.dispatched.find((f) => f.assignmentId === "asg-pin");
+      assert.equal(pinned?.commit, "abc123def4567890abc123def4567890abc123de", "the frame carries the resolved assigning commit");
+
+      // The DEFAULT resolver over an unresolvable root (a /tmp/none workspace,
+      // no descriptor row): no commit key at all — never a fabricated hash.
+      seedAssigned(store, { assignmentId: "asg-nopin", itemRef: "23", targetNodeId: "worker-a" });
+      await runControlDispatchReclaimTick({ workDir: "/tmp/none", projectRoot: "/tmp/none" }, streamServer, {
+        workspaceId: "ws-1", now: "2026-07-25T09:00:06.000Z",
+        openStore: async () => noClose(store), buildDirectiveFrame, dispatchedIds,
+      });
+      const unpinned = streamServer.dispatched.find((f) => f.assignmentId === "asg-nopin");
+      assert.ok(unpinned, "the second dispatch went out");
+      assert.equal("commit" in unpinned, false, "an unresolvable checkout sends NO commit — the worker keeps its own-HEAD fallback");
+    }),
+  },
+  {
     // 2026-07-27 (the duplicate-run wall): a withdrawal was a control-side row flip
     // the holder never learned about — its run record stayed `running` and the
     // duplicate-run guard refused every future run for the item. The tick now

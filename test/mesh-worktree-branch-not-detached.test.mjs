@@ -21,10 +21,11 @@ async function readyFixture(fx) {
   return loadWorkspace(fx.root, undefined, { env: fx.env });
 }
 
-// materializeOnly(fx, ws, assignmentId, now) — drives the handler with a `failed`
-// scripted outcome (never a real push attempt — task 00 cares about the CHECKOUT
-// shape only) + a stub pushExec (belt-and-braces, unreachable on this outcome).
-async function materializeOnly(fx, ws, assignmentId, now) {
+// materializeOnly(fx, ws, assignmentId, now, extraFrame) — drives the handler with a
+// `failed` scripted outcome (never a real push attempt — task 00 cares about the
+// CHECKOUT shape only) + a stub pushExec (belt-and-braces, unreachable on this
+// outcome). `extraFrame` rides the directive verbatim (the base-commit pin lanes).
+async function materializeOnly(fx, ws, assignmentId, now, extraFrame = {}) {
   const recorder = createStatusRecorder();
   const handler = createMeshWorkerExecutionHandler({
     loadWs: () => Promise.resolve(ws),
@@ -36,7 +37,7 @@ async function materializeOnly(fx, ws, assignmentId, now) {
     now: () => now,
     globalWorkStoreOptions: { env: fx.env },
   });
-  await handler({ kind: "directive", to: NODE_ID, assignmentId, itemRef: fx.itemRef, workspaceId: fx.workspaceId, at: now });
+  await handler({ kind: "directive", to: NODE_ID, assignmentId, itemRef: fx.itemRef, workspaceId: fx.workspaceId, at: now, ...extraFrame });
   return recorder;
 }
 
@@ -112,6 +113,91 @@ export const meshWorktreeBranchNotDetachedTests = [
         await removeWorktree(fx.root, "asg-2", { force: true });
       }
     }),
+  },
+
+  // ------------------------------------------------------------------
+  // Scenario (m42 base-commit pin, operator 2026-08-01): a fresh worktree builds
+  // from the commit the DIRECTIVE carries — the state the control assigned
+  // against — never from whatever this clone's HEAD has drifted to.
+  // ------------------------------------------------------------------
+  {
+    name: "task00/38-07 (m42 pin): a fresh worktree builds from the DISPATCHED commit, not the clone's HEAD; an unavailable commit is a coded loud failure, never a stale-base build",
+    run: async () => withMeshWorkerExecFixture(async (fx) => {
+      const ws = await readyFixture(fx);
+      const NOW = "2026-07-18T09:00:00.000Z";
+      const assignedAt = fx.headSha;
+      // The checkout moves ON past the assigning state (a later commit).
+      const { writeFile: writeFileFs } = await import("node:fs/promises");
+      const path = await import("node:path");
+      await writeFileFs(path.join(fx.root, "later.md"), "# drift\n", "utf8");
+      fx.git(["add", "-A"]);
+      fx.git(["commit", "-q", "-m", "later-commit"]);
+      const driftedHead = fx.git(["rev-parse", "HEAD"]).stdout.trim();
+      assert.notEqual(driftedHead, assignedAt, "the fixture genuinely drifted past the assigning commit");
+
+      await materializeOnly(fx, ws, "asg-pin", NOW, { commit: assignedAt });
+      const worktreePath = meshWorktreePath(fx.root, "asg-pin");
+      try {
+        const head = git(worktreePath, ["rev-parse", "HEAD"]);
+        assert.equal(head.stdout.trim(), assignedAt, "the worktree HEAD is the DISPATCHED commit — the state the assignment was made against");
+      } finally {
+        await removeWorktree(fx.root, "asg-pin", { force: true });
+        fx.git(["branch", "-D", meshItemBranchName(fx.itemRef)]);
+      }
+
+      // An unavailable commit (not local, no origin to fetch it from) is a CODED
+      // failure — the run never silently builds from this clone's stale HEAD.
+      const recorder = await materializeOnly(fx, ws, "asg-badpin", NOW, { commit: "0".repeat(40) });
+      const failed = recorder.frames.find((f) => f.assignmentId === "asg-badpin" && f.state === "failed");
+      assert.equal(failed?.code, "assignment-base-commit-unavailable", "the refusal is coded and loud");
+      const entries = await listWorktrees(fx.root);
+      assert.equal(entries.some((e) => e.path.includes("asg-badpin")), false, "no worktree was materialized for the unbuildable base");
+    }),
+  },
+
+  // ------------------------------------------------------------------
+  // Scenario (m42 base-commit pin): a commit the clone does not have yet is
+  // FETCHED from origin once — the never-refreshed-clone staleness dies here.
+  // ------------------------------------------------------------------
+  {
+    name: "task00/38-07 (m42 pin): ensureCommitAvailable fetches origin on a miss and answers honestly when the commit exists nowhere",
+    run: async () => {
+      const { mkdtemp, rm, writeFile: writeFileFs } = await import("node:fs/promises");
+      const os = await import("node:os");
+      const path = await import("node:path");
+      const { ensureCommitAvailable } = await import("../src/mesh-worktree.mjs");
+      const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-commit-avail-"));
+      try {
+        const seed = path.join(tmp, "seed");
+        const bare = path.join(tmp, "origin.git");
+        const clone = path.join(tmp, "clone");
+        const run = (cwd, args) => {
+          const result = spawnSyncHardened("git", args, { cwd, encoding: "utf8" });
+          assert.equal(result.status, 0, `git ${args.join(" ")} (${result.stderr})`);
+          return result;
+        };
+        run(tmp, ["init", "-q", seed]);
+        run(seed, ["config", "user.email", "fx@aof.local"]);
+        run(seed, ["config", "user.name", "fx"]);
+        run(seed, ["config", "commit.gpgsign", "false"]);
+        await writeFileFs(path.join(seed, "a.md"), "# a\n", "utf8");
+        run(seed, ["add", "-A"]);
+        run(seed, ["commit", "-q", "-m", "one"]);
+        run(tmp, ["clone", "-q", "--bare", seed, bare]);
+        run(tmp, ["clone", "-q", bare, clone]);
+        // The control moves on: a second commit lands at origin AFTER the clone.
+        await writeFileFs(path.join(seed, "b.md"), "# b\n", "utf8");
+        run(seed, ["add", "-A"]);
+        run(seed, ["commit", "-q", "-m", "two"]);
+        run(seed, ["push", "-q", bare, "HEAD:master"]);
+        const newest = run(seed, ["rev-parse", "HEAD"]).stdout.trim();
+
+        assert.equal(await ensureCommitAvailable(clone, newest), true, "the stale clone fetches origin once and finds the dispatched commit");
+        assert.equal(await ensureCommitAvailable(clone, "f".repeat(40)), false, "a commit that exists nowhere answers false — the caller fails loudly");
+      } finally {
+        await rm(tmp, { recursive: true, force: true });
+      }
+    },
   },
 
   // ------------------------------------------------------------------

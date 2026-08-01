@@ -133,7 +133,7 @@ import { transitionRunComplete, transitionRunStart } from "./effects/run-transit
 // m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
 // bridge (raise -> outbox -> ack), never a fire-once frame.
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
-import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists } from "./mesh-worktree.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, ensureCommitAvailable } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
@@ -2371,6 +2371,25 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // existing branch takes the reuse door: the item's line continues, never forks.
       const commitish = directive.commit ?? "HEAD";
       const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      // M42 base-commit pin (operator, 2026-08-01): a fresh worktree builds from
+      // the EXACT commit the control assigned against — the directive carries the
+      // control checkout's HEAD, and a clone that does not have it yet fetches
+      // once. Unavailable after the fetch is a LOUD coded failure, never a silent
+      // build from this clone's stale HEAD (the other half of the wrong-base
+      // disease). The reuse doors ignore it by design: an existing line continues
+      // from where it is.
+      if (baseBranch == null && !branchExists && directive.commit != null) {
+        const available = await ensureCommitAvailable(ws.projectRoot, directive.commit, { exec });
+        if (!available) {
+          reportAssignmentFailure(
+            assignmentId,
+            "assignment-base-commit-unavailable",
+            `the dispatched base commit ${directive.commit} is not reachable in this worker's checkout (fetched origin once) — an unpushed control checkout, or a stale clone that cannot see it`,
+          );
+          await reportSettled(assignmentId, "failed", { code: "assignment-base-commit-unavailable" });
+          return;
+        }
+      }
       worktreePath = baseBranch != null || branchExists
         ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, branch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
