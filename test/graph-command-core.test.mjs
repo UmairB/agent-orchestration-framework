@@ -15,6 +15,7 @@
 //        @executable rows; the query/triage SUCCESS rows are @manual)
 import assert from "node:assert/strict";
 import { spawnCliSync } from "./support/cli-spawn.mjs";
+import { statSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,10 +26,12 @@ import {
   normalizeGraph,
   graphifyBuildArgs,
   graphifySpawnOptions,
+  isCodeOnlyWholeRootBuild,
+  runGraphifyBuild,
   GRAPHIFY_TIMEOUT_ENV,
   DEFAULT_GRAPHIFY_TIMEOUT_MS,
 } from "../src/graphify.mjs";
-import { classifyEgress, isNetworkBackend } from "../src/commands/graph-build.mjs";
+import { classifyEgress, isNetworkBackend, readBuiltGraph } from "../src/commands/graph-build.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
@@ -138,10 +141,19 @@ export const graphCommandCoreTests = [
     async run() {
       const { repo } = await makeRepo();
       try {
-        // No graphify binary + no built graph in the fixture, so each verb emits
-        // its STRUCTURED-ERROR envelope ({ ok:false, error, code }) — that is the
-        // expected reachability proof (the verb IS dispatched and produces a single
-        // parseable JSON document).
+        // The invariant under test is REACHABILITY: each verb is dispatched and emits
+        // exactly ONE parseable JSON document — an error envelope
+        // ({ ok:false, error, code }) or a success projection, whichever the
+        // environment produces.
+        //
+        // It asserted `ok:false` unconditionally until 2026-07-30, which was never a
+        // property of the verb — it depended on the build failing. With no graphify
+        // binary (the CI reality) that is graphify-missing; with one installed it USED
+        // to be the missing-backend failure, because `graphify extract` refuses a
+        // corpus it cannot semantically extract. A no-backend build now runs
+        // `graphify update`, which honours the code-only contract — so in this fixture
+        // (a config JSON counts as an extractable file) it legitimately SUCCEEDS, and
+        // an unconditional ok:false would be asserting the defect.
         for (const verb of ["build", "query", "triage"]) {
           const args =
             verb === "build"
@@ -159,11 +171,20 @@ export const graphCommandCoreTests = [
           );
           assert.ok(parsed !== undefined && parsed !== null, `aof graph ${verb} --json produced a JSON value`);
           assert.equal(typeof parsed, "object", `aof graph ${verb} --json is a single envelope object`);
-          // The envelope is for THIS operation: a structured-error envelope here
-          // (no binary/graph), which is a parseable single-pass JSON object.
-          assert.equal(parsed.ok, false, `aof graph ${verb} --json emits the structured-error envelope (no binary/graph)`);
-          assert.equal(typeof parsed.error, "string", `the ${verb} envelope carries an error message`);
-          assert.equal(typeof parsed.code, "string", `the ${verb} envelope carries a code`);
+          // The envelope is for THIS operation. When it reports failure it must be the
+          // FULL structured-error shape (a bare ok:false with no code is what an opaque
+          // crash looks like); when it reports success it must not carry a false ok.
+          if ("ok" in parsed) {
+            assert.equal(parsed.ok, false, `an ${verb} envelope carrying \`ok\` is the structured-error shape`);
+            assert.equal(typeof parsed.error, "string", `the ${verb} envelope carries an error message`);
+            assert.equal(typeof parsed.code, "string", `the ${verb} envelope carries a code`);
+          } else {
+            assert.notEqual(
+              result.status,
+              null,
+              `aof graph ${verb} --json returned a success projection from a completed process, not a crash`
+            );
+          }
         }
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -296,6 +317,323 @@ export const graphCommandCoreTests = [
         projectRoot,
         "--out still pins the projectRoot when a backend is set"
       );
+    },
+  },
+
+  // ═══ 00 build-argv: the code-only build runs a verb that CAN be code-only ═══
+  // `graphify extract` refuses a corpus it cannot semantically extract: with a single
+  // doc/paper/image file and no backend it exits 1 ("no LLM API key found") and writes
+  // NOTHING, so "omit --backend for a code-only build" was a promise it could not keep
+  // on any repo with a README (measured against graphify 0.8.44, 2026-07-30). `graphify
+  // update` is the verb that keeps it — code files, no LLM, no key — so a no-backend
+  // whole-root build runs that instead. Asserted on the PURE argv helper, no live binary.
+  {
+    name: "graph-core/00 a code-only whole-root build runs `update`, and everything else stays on `extract`",
+    async run() {
+      const projectRoot = "/some/project/root";
+
+      // (a) the whole root, no backend → the code-only verb over that root. `.` and the
+      // absolute root are the same request and both resolve to it.
+      for (const target of [".", projectRoot, `${projectRoot}/`]) {
+        assert.deepEqual(
+          graphifyBuildArgs({ path: target }, projectRoot),
+          ["update", projectRoot],
+          `a no-backend build of ${JSON.stringify(target)} runs \`graphify update <root>\``
+        );
+      }
+
+      // Mutation proof: routing this back to `extract` reds here — and on a repo with
+      // one doc file that argv exits 1 having written nothing.
+      const codeOnly = graphifyBuildArgs({ path: "." }, projectRoot);
+      assert.ok(!codeOnly.includes("--backend"), "the code-only build passes NO --backend (egress=none)");
+      assert.ok(!codeOnly.includes("--out"), "`update` takes no --out — the target IS the artifact root");
+
+      // (b) a SUBTREE with no backend stays on extract: `update` writes
+      // <target>/graphify-out/, which would put the artifact where the read verbs
+      // (#756) cannot find it. Loud failure over a misplaced graph.
+      assert.deepEqual(
+        graphifyBuildArgs({ path: "packages/api" }, projectRoot).slice(0, 2),
+        ["extract", "packages/api"],
+        "a no-backend SUBTREE build stays on `extract` so --out still pins the artifact root"
+      );
+
+      // (c) a backend is a request for SEMANTIC extraction, which only `extract` does —
+      // even for the whole root.
+      const semantic = graphifyBuildArgs({ path: ".", backend: "claude" }, projectRoot);
+      assert.deepEqual(semantic.slice(0, 2), ["extract", "."], "a backend build stays on `extract`");
+      assert.equal(semantic[semantic.indexOf("--backend") + 1], "claude", "the requested backend is passed");
+
+      // (d) a tokenBudget is an LLM-extraction knob; `update` has no such flag, so
+      // honouring it means staying on extract rather than silently dropping it.
+      const budgeted = graphifyBuildArgs({ path: ".", tokenBudget: 4000 }, projectRoot);
+      assert.deepEqual(budgeted.slice(0, 2), ["extract", "."], "a tokenBudget build stays on `extract`");
+      assert.equal(budgeted[budgeted.indexOf("--token-budget") + 1], "4000", "the token budget is passed, never dropped");
+
+      // (e) the two-root case: a relative target resolves against the spawn cwd
+      // (projectRoot), and must equal the ARTIFACT root to be the code-only build. The
+      // memory backend's work-stream graph builds under its own root, so `.` there is a
+      // subtree of that root, not the root itself.
+      const workRoot = `${projectRoot}/.aof/memory-graph`;
+      assert.deepEqual(
+        graphifyBuildArgs({ path: "." }, workRoot, projectRoot).slice(0, 2),
+        ["extract", "."],
+        "a target that resolves to the projectRoot is NOT the whole-root build of a DIFFERENT artifact root"
+      );
+      assert.equal(
+        isCodeOnlyWholeRootBuild({ path: workRoot }, workRoot, projectRoot),
+        true,
+        "naming the artifact root itself IS the code-only whole-root build"
+      );
+    },
+  },
+
+  // ═══ 00 build: the artifact root is separable from the spawn cwd ═══
+  // graphify extraction REPLACES the one graph.json under the root it is given, and aof
+  // builds two unrelated graphs over a repo: the CODEBASE graph (`aof graph build`) and
+  // the memory backend's WORK-STREAM graph. Sharing one artifact meant whichever ran
+  // last evicted the other, so `graph impact` could answer over work-item nodes and
+  // report `present:false` — indistinguishable from "no coupling". outRoot separates them.
+  {
+    name: "graph-core/00 outRoot writes/reads/reports a build under its own root, leaving the projectRoot graph untouched",
+    async run() {
+      const { repo } = await makeRepo();
+      const outRoot = path.join(repo, ".aof", "memory-graph");
+      const codeGraphPath = path.join(repo, "graphify-out", "graph.json");
+      const workGraphPath = path.join(outRoot, "graphify-out", "graph.json");
+      const codeGraph = '{"nodes":[{"id":"src_auth"}],"links":[]}\n';
+      const artifactTime = new Date("2024-05-06T07:08:09.000Z");
+      try {
+        await mkdir(path.dirname(codeGraphPath), { recursive: true });
+        await writeFile(codeGraphPath, codeGraph, "utf8");
+        await mkdir(path.dirname(workGraphPath), { recursive: true });
+
+        const result = runGraphifyBuild(
+          { path: path.join(repo, "wiki", "work"), backend: "claude-cli" },
+          {
+            projectRoot: repo,
+            outRoot,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => {
+              writeFileSync(workGraphPath, '{"nodes":[{"id":"spec_m00"}],"links":[]}\n', "utf8");
+              utimesSync(workGraphPath, artifactTime, artifactTime);
+              return { status: 0, stdout: "wrote graph.json", stderr: "" };
+            },
+          }
+        );
+
+        // Mutation proof: resolving the artifact from projectRoot instead of outRoot
+        // makes the graphPath/builtAt assertions fail (the projectRoot artifact never
+        // moved), and the no-persist guard would fire on the unchanged code graph.
+        assert.equal(result.graphPath, workGraphPath, "the build reports the artifact under outRoot");
+        assert.equal(result.builtAt, artifactTime.toISOString(), "builtAt is the outRoot artifact's mtime");
+        assert.equal(
+          await readFile(codeGraphPath, "utf8"),
+          codeGraph,
+          "the projectRoot codebase graph is byte-identical — a build under another root cannot evict it"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+
+  {
+    name: "graph-core/00 a non-zero graphify build fails loudly instead of reading the stale graph",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
+
+        // Mutation proof: removing the status guard makes this return a successful
+        // stale BuildResult; this assertion then goes red.
+        const error = await assertRejectsWithCode(
+          () => runGraphifyBuild(
+            { path: "apps/portal/src" },
+            {
+              projectRoot: repo,
+              resolveBinary: () => ({ found: true, path: "graphify-test" }),
+              spawn: () => ({
+                status: 1,
+                stdout: "[graphify extract] scanned 412 code, 9 docs",
+                stderr: "error: no LLM API key found",
+              }),
+            }
+          ),
+          "graphify-build-failed"
+        );
+        assert.match(error.message, /no LLM API key found/, "the child stderr explains why no graph was written");
+        assert.match(await readFile(graphPath, "utf8"), /stale/, "the stale artifact remains identifiable as stale");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The CEILING of the no-persist guard, narrowed to what it can honestly claim: a
+    // zero exit that leaves NO artifact at all. There is nothing to read and nothing to
+    // answer over, whatever the process reported.
+    name: "graph-core/00 a zero exit that leaves NO artifact at all fails loudly",
+    async run() {
+      const { repo } = await makeRepo();
+      try {
+        // Mutation proof: dropping the `!after` guard makes this return a BuildResult
+        // over a graph that does not exist; the rejection assertion then goes red.
+        await assertRejectsWithCode(
+          () => runGraphifyBuild(
+            { path: "apps/portal/src" },
+            {
+              projectRoot: repo,
+              resolveBinary: () => ({ found: true, path: "graphify-test" }),
+              spawn: () => ({ status: 0, stdout: "scan complete", stderr: "" }),
+            }
+          ),
+          "graphify-no-persist"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The FLOOR the first version of this guard destroyed. graphify rewrites only on a
+    // TOPOLOGY change — a re-run over an unchanged corpus, and equally a run after an
+    // edit that adds no node or edge, exits 0 and leaves the artifact byte-identical
+    // (measured against 0.8.44). Treating that as `graphify-no-persist` meant a second
+    // consecutive build could never succeed on any repo whose graph was current, and
+    // the shipped guidance then told the agent to abandon that current graph.
+    name: "graph-core/00 an untouched artifact after a zero exit is a SUCCESS reporting unchanged, not a failure",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      const artifactTime = new Date("2024-07-08T09:10:11.000Z");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"current"}],"links":[]}\n', "utf8");
+        utimesSync(graphPath, artifactTime, artifactTime);
+
+        // Mutation proof: restoring `|| sameGraphArtifact(before, after)` to the throw
+        // makes this call reject, and every assertion below goes red.
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => ({
+              status: 0,
+              stdout: "[graphify watch] No code-graph topology changes detected; outputs left untouched.",
+              stderr: "",
+            }),
+          }
+        );
+
+        assert.equal(result.unchanged, true, "the untouched artifact is reported as unchanged");
+        assert.equal(result.graphPath, graphPath, "the build still reports the artifact it verified");
+        assert.equal(
+          result.builtAt,
+          artifactTime.toISOString(),
+          "builtAt still comes from the artifact, so the caller sees a real timestamp rather than a failure"
+        );
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The remaining ceiling, moved to where it can be checked honestly. The driver can
+    // only see THAT a file exists; graph:build reads it, so a zero exit over a
+    // truncated/corrupt artifact is a structured build failure rather than an escaping
+    // SyntaxError. This is what the over-eager unchanged-artifact guard was reaching for.
+    name: "graph-core/00 a zero exit over a CORRUPT artifact is a structured build failure, not a stack trace",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        // A half-written graph — exactly what a crash or a full disk leaves behind.
+        // Asserted on the exported read (a real spawn would overwrite the fixture, so
+        // this path is unreachable through `invoke`).
+        await writeFile(graphPath, '{"nodes":[{"id":"trunc', "utf8");
+
+        // Mutation proof: removing the try/catch in readBuiltGraph makes this throw an
+        // unstructured SyntaxError (code undefined), reddening the code assertion.
+        const error = await assertRejectsWithCode(
+          async () => readBuiltGraph(graphPath),
+          "graphify-no-persist"
+        );
+        assert.match(error.message, /not a readable graph/, "the failure says the artifact is unreadable");
+
+        // …and a VALID artifact still reads through untouched (the control: a guard
+        // that rejects everything would pass the assertion above on its own).
+        await writeFile(graphPath, '{"nodes":[{"id":"a"},{"id":"b"}],"links":[]}\n', "utf8");
+        assert.equal(readBuiltGraph(graphPath).nodes.length, 2, "a valid graph normalizes as before");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // A rewritten artifact is the OTHER success, and must be distinguishable from the
+    // one above — `unchanged` is a fact the caller reads, so it has to be right in both
+    // directions (a hardcoded `true` would pass the floor test alone).
+    name: "graph-core/00 a rewritten artifact reports unchanged:false",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"old"}],"links":[]}\n', "utf8");
+        utimesSync(graphPath, new Date("2024-01-01T00:00:00.000Z"), new Date("2024-01-01T00:00:00.000Z"));
+
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => {
+              writeFileSync(graphPath, '{"nodes":[{"id":"a"},{"id":"b"}],"links":[]}\n', "utf8");
+              return { status: 0, stdout: "[graphify watch] Rebuilt: 2 nodes, 1 edges", stderr: "" };
+            },
+          }
+        );
+
+        assert.equal(result.unchanged, false, "a rewritten artifact is NOT reported as unchanged");
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    name: "graph-core/00 a persisted build reports builtAt from the artifact mtime",
+    async run() {
+      const { repo } = await makeRepo();
+      const graphPath = path.join(repo, "graphify-out", "graph.json");
+      const artifactTime = new Date("2024-02-03T04:05:06.000Z");
+      try {
+        await mkdir(path.dirname(graphPath), { recursive: true });
+        await writeFile(graphPath, '{"nodes":[{"id":"stale"}],"links":[]}\n', "utf8");
+
+        const result = runGraphifyBuild(
+          { path: "." },
+          {
+            projectRoot: repo,
+            resolveBinary: () => ({ found: true, path: "graphify-test" }),
+            spawn: () => {
+              writeFileSync(graphPath, '{"nodes":[{"id":"fresh"},{"id":"second"}],"links":[]}\n', "utf8");
+              utimesSync(graphPath, artifactTime, artifactTime);
+              return { status: 0, stdout: "wrote graph.json", stderr: "" };
+            },
+          }
+        );
+
+        // Mutation proof: replacing the artifact mtime with the call-time clock
+        // makes this exact historical timestamp assertion fail.
+        assert.equal(result.builtAt, artifactTime.toISOString());
+        assert.equal(result.builtAt, statSync(graphPath).mtime.toISOString());
+      } finally {
+        await rm(repo, { recursive: true, force: true });
+      }
     },
   },
 

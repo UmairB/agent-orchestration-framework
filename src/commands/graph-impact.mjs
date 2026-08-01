@@ -7,7 +7,14 @@
 // straight from the graph EDGES, no LLM, no spawn, no fuzz.
 //
 //   input  { paths: string[] }            // the files the agent is reviewing/changing
-//   result ImpactResult { graphPath, files: [{ file, dependencies[], dependents[] }] }
+//   result ImpactResult { graphPath, builtAt,
+//                         files: [{ file, present, dependencies[], dependents[] }] }
+//
+// `builtAt` is the ARTIFACT's mtime, and `present` says whether the graph covers the
+// file at all — so a zero answer can be read for what it is. "Absent from the graph"
+// (a coverage gap) and "in the graph with no cross-file edges" (real isolation) are
+// distinct facts, and the human render states which one it is; conflating them let a
+// failed build be recorded as the architectural finding "these modules have no coupling".
 //
 // It reads the STRUCTURED graph.json via the pure `normalizeGraph` (09/ADR-001's
 // PERMITTED structured handle — the SAME read 10's memory backend uses), NOT the
@@ -20,7 +27,10 @@
 // "no-graph" error BEFORE any read — deterministically CI-checkable, no binary needed.
 import { existsSync } from "node:fs";
 import { commandError } from "../command-error.mjs";
-import { readGraph, normalizeGraph, graphJsonPath } from "../graph-normalize.mjs";
+// graphArtifactBuiltAt is the SHARED derivation graph:build reports too, so the
+// freshness this command prints is the same instant that build printed — a call-time
+// `new Date()` here would be the very dishonesty that family of fixes removed.
+import { readGraph, normalizeGraph, graphJsonPath, graphArtifactBuiltAt } from "../graph-normalize.mjs";
 import { relativiseGraphPath } from "./graph-shared.mjs";
 
 // Compute, for the given target file set, the cross-file dependencies (edges OUT of a
@@ -99,7 +109,12 @@ export const graphImpactCommand = {
     // markdown parse. The same read 10's backend uses.
     const graph = normalizeGraph(readGraph(graphPath));
     const files = computeImpact(graph, input.paths);
-    return { graphPath, files };
+    // The artifact's OWN mtime — the same honest freshness `graph:build` reports, at the
+    // point the answer is actually consumed. An agent grounding a boundary or a review
+    // rank reads the impact, not the build it may not have run; without this, a coupling
+    // answer over a month-old graph is presented exactly like one over a fresh graph.
+    // Never a wall-clock stamp (that is the defect this whole family closes).
+    return { graphPath, builtAt: graphArtifactBuiltAt(graphPath), files };
   },
 
   cli: {
@@ -115,12 +130,35 @@ export const graphImpactCommand = {
     argv: (positionals) => ({ paths: positionals }),
 
     // Human render: per file, the deterministic dependents (blast-radius) + deps.
+    //
+    // The two zero answers are DIFFERENT answers and are labelled as such. A file the
+    // graph does not cover (`present:false`) is a TOOLING gap — the build never reached
+    // it — and reads identically to real isolation unless it says so; the old
+    // "(not in graph — build over its folder?)" was quiet enough to be recorded as the
+    // architectural fact "this module has no coupling". A file the graph DOES cover with
+    // no cross-file edges is that fact, and gets to be stated as one. The artifact's
+    // freshness leads, because a confident answer over a stale graph is the failure mode
+    // this command sits downstream of.
     render(result) {
       const lines = [];
+      if (result.builtAt) lines.push(`graph built ${result.builtAt} (${result.graphPath})`);
+      else lines.push(`graph ${result.graphPath} (build time unknown)`);
       for (const f of result.files) {
-        lines.push(`# ${f.file}${f.present ? "" : "  (not in graph — build over its folder?)"}`);
+        const isolated = f.present && f.dependents.length === 0 && f.dependencies.length === 0;
+        const note = !f.present
+          ? "  (NOT COVERED BY THIS GRAPH — a coverage gap, not a no-coupling finding: rebuild with `aof graph build .`)"
+          : isolated
+            ? "  (in the graph, no cross-file edges — genuinely uncoupled)"
+            : "";
+        lines.push(`# ${f.file}${note}`);
         lines.push(`  imported/called by ← (${f.dependents.length}) ${f.dependents.join(", ") || "(none)"}`);
         lines.push(`  imports/calls      → (${f.dependencies.length}) ${f.dependencies.join(", ") || "(none)"}`);
+      }
+      const missing = result.files.filter((f) => !f.present).map((f) => f.file);
+      if (missing.length > 0) {
+        lines.push(
+          `\n${missing.length} of ${result.files.length} requested file(s) are absent from the graph — treat their coupling as UNKNOWN, not zero: ${missing.join(", ")}`
+        );
       }
       return lines.join("\n");
     },

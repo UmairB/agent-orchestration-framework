@@ -18,7 +18,7 @@
 //     normalizer must live in a spawn-free module both can reach.
 // One `links`-not-`edges` / hyperedge-separate implementation, two consumers.
 import path from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 // The on-disk graph artifact, relative to the project root (RESEARCH §D/§I).
 const GRAPH_OUT_DIR = "graphify-out";
@@ -28,6 +28,24 @@ const GRAPH_JSON = "graph.json";
 // every graph op reads. Raw absolute (basis-neutral, 08/ADR-002).
 export function graphJsonPath(projectRoot) {
   return path.join(projectRoot, GRAPH_OUT_DIR, GRAPH_JSON);
+}
+
+// graphArtifactBuiltAt(graphPath) — the artifact's own mtime, ISO. The ONE derivation
+// every `builtAt` in the system comes from, so a build and a later `graph:impact` over
+// the same untouched file always report the SAME instant.
+//
+// It must be one function because the two stat flavours disagree: `statSync(p)` derives
+// its Date from a float mtimeMs and ROUNDS, while `statSync(p, {bigint:true})` truncates
+// — 1785418756881.5962 renders as …:16.882Z one way and …:16.881Z the other. Two honest
+// reads of one file reporting different times is exactly the kind of small dishonesty
+// this field exists to remove. Truncation wins: it never claims an artifact is newer
+// than it is. An unstattable artifact answers null rather than guessing.
+export function graphArtifactBuiltAt(graphPath) {
+  try {
+    return statSync(graphPath, { bigint: true }).mtime.toISOString();
+  } catch {
+    return null;
+  }
 }
 
 // readGraph(graphPath) — parse the raw graph.json (NetworkX node_link_data). The
