@@ -92,7 +92,12 @@ export async function publishGlobalWorkSnapshot(workspace, ctx = {}) {
     const openStore = ctx.openGlobalWorkProjectionStore ?? openGlobalWorkProjectionStore;
     const store = await openStore({ ...storeOptions, paths });
     try {
-      const result = await publishWorkspaceSnapshot(store, workspace, { now: ctx.now });
+      // `diskDerived: true` — m43/ADR-011/A1. THIS is the path that reads the calling
+      // node's OWN local disk slice (the control's periodic tick and publish-on-mutate),
+      // and it is the only one entitled to step over the execution scopes an active
+      // assignment holds. The worker's frame doors write through the same row-writer
+      // and must never set it: their rows are the holder's own voice.
+      const result = await publishWorkspaceSnapshot(store, workspace, { now: ctx.now, diskDerived: true });
       const registry = await publishGlobalRegistryDescriptorsToStore(store, workspace, {
         now: ctx.now,
         fabricPeers: ctx.fabricPeers,

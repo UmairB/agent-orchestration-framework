@@ -14,6 +14,11 @@ import { resolveItemExact } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionRunStart } from "../effects/run-transitions.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
+// m43 / ADR-003 — the item-lock context. It rides `opts.lock`, NOT `opts.workspace`
+// (ADR-010/R1.3), precisely so this verb's never-published-on-mutate posture is
+// byte-unchanged: a lock check must not smuggle a propagation behaviour change into
+// the verb it now sits in front of.
+import { lockContextFor } from "../item-lock.mjs";
 
 export const runRetryCommand = {
   id: "work:run-retry",
@@ -65,7 +70,7 @@ export const runRetryCommand = {
     const { record } = await transitionRunStart(
       item,
       { mode: "retry", runId: input.runId, maxAttempts, now: input.now, node: meshNodeId },
-      { journalOptions: ctx.effectsJournalOptions ?? {} },
+      { lock: lockContextFor(ctx.workspace, ctx), journalOptions: ctx.effectsJournalOptions ?? {} },
     );
     return record;
   },

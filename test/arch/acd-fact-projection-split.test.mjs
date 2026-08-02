@@ -206,11 +206,19 @@ export const archTests = [
             store.db
               .prepare("INSERT INTO work_item_runs (workspace_id, ref, run_id, record_json, node_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
               .run(workspaceId, "02", "run-1", "{}", null, "2026-01-01T00:00:00Z");
+            // The row's STATE is incidental to this proof — the fact remap is a plain
+            // UPDATE by ref and never reads it — but it can no longer be an ACTIVE
+            // one: m43/ADR-003's item lock refuses a control-side insert that would
+            // renumber a ref whose execution scope an active assignment holds, which
+            // is exactly what this fixture would be doing. A settled (terminal) row is
+            // the same fixture at a gate, and every assertion below is unchanged.
+            // (m20/R1: a guard added to a shared spine seam invalidates the PRIOR
+            // milestone's tests of that seam — enumerated here rather than discovered.)
             store.db
               .prepare(
                 "INSERT INTO global_assignments (assignment_id, item_ref, workspace_id, target_node_id, issuer, state, assigned_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               )
-              .run("asg-1", "02", workspaceId, "node-a", "operator", "running", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+              .run("asg-1", "02", workspaceId, "node-a", "operator", "done", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
             setItemBranch(store, workspaceId, "02", "aof/mesh/02");
 
             // The seam, end-to-end: the CLI's own drain (LOCAL_LOCI) pays the

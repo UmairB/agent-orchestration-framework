@@ -1086,6 +1086,94 @@ cost, so it is feedback rather than a debt item.
 
 ---
 
+## ADR-011: Build-time reconciliation for story 01 — the automatic-vs-operator split is a property of the **caller**, so it is decided at the **disk-derived publish path**, never inside the shared row-writer; the assign door's gate ORDER is ruled; and ADR-009's "wave 1 touches disjoint modules" is corrected
+
+**Status:** Accepted
+**Date:** 2026-08-02
+
+**Context.** Structural review of `43/01`'s build (uncommitted at review time) found the implementation
+conformant on seven of eight ACs, and found that ADR-003 under-decided two things and mis-stated one.
+Each is ruled below in ADR-010's form — **SUPERSEDES** / **PINS** / **CLARIFIES** — and each was
+verified at source, not inferred.
+
+### A1 — CLARIFIES what ADR-003 meant by "the control's publish", and SUPERSEDES the implicit assumption that it is a distinct caller. **The held-scope carry belongs to the DISK-DERIVED publish path, not to `publishWorkspaceSnapshot`.**
+
+**The measurement.** `publishWorkspaceSnapshot` (`src/global-work-store.mjs:442`) is not the tick. It is
+the **shared row-writer with three callers**: `publishGlobalWorkSnapshot` (`global-work-publisher.mjs:95`
+— the control's periodic tick *and* publish-on-mutate), `applySnapshotFrame`
+(`control-stream-server.mjs:145`) and `applyDeltaFrame` (`control-stream-server.mjs:195`). The last two
+are the **worker's** authored write path into the control's cache.
+
+A held-scope skip placed inside that shared writer therefore fires for the worker's own frames. Measured
+end-to-end against the build under review: with an ACTIVE assignment for `42`, `applyDeltaFrame` reporting
+`42 → in-progress` returned `{ heldSkipped: 1, heldRefs: ["42"] }` and the row read back **`not-started`** —
+the worker's authored delta silently discarded, for the whole duration of the phase, by the mechanism meant
+to protect it. That is ADR-004/D1's cure inverted, and it is worse than the disease it replaces (the
+pre-lock alternation at least let the worker's row win some ticks).
+
+**Ruling.**
+- **The discriminator is not "automatic vs operator". It is "whose slice is being written".** A node
+  publishing **its own disk-derived slice** may be made to step over scopes it does not hold; a writer
+  applying **another node's reported slice** is the holder's own voice and may never be filtered by the
+  lock. ADR-003's operator-vs-automatic split still stands for the two *renderings of a refusal*; it was
+  never a licence to filter a foreign node's authored rows.
+- **The carry therefore lives on the disk-derived path** — `publishGlobalWorkSnapshot`, or gated inside
+  `publishWorkspaceSnapshot` by an explicit option that only that path sets. An `apply*Frame` caller,
+  which supplies `options.items` from a frame, must be byte-unaffected. `heldSkipped` / `heldRefs` stay
+  where ADR-010/D1a put them, on the publish result.
+- **The read must be inside the transaction.** The held-scope lookup and the carry `SELECT` run before
+  `BEGIN IMMEDIATE` in the build under review, so a frame committing in that window is read stale and then
+  re-written over. Both reads move inside the transaction.
+- **This is a regression the story OWES a test for**, because this story introduced the hazard: an active
+  assignment plus a worker frame for the held ref, asserting the worker's row lands. Placement scenarios
+  do not catch it; only a behavioural one does.
+- **ARMED for `43/02`:** once the upsert seam lands, `acd-item-lock-single-door` gains the clause
+  *"`src/global-work-store.mjs`'s publish path reads no `global_assignments` state"* — under ADR-004/D1
+  authority is a `node_id` **column on the row**, so the shared writer never needs the assignment table at
+  all, and the carry disappears rather than moving. It is not committed now because it would be red today.
+
+### A2 — PINS the assign door's gate ORDER, which ADR-003 left undecided
+
+`assignWork` now has five gates. ADR-003 named the lock without ordering it, and the story's task 02 pins
+only `ref-not-found` first (its rows 3 and 4 deliberately target an *unheld* milestone, so they constrain
+nothing about the lock's position). The build placed the scope lock **last**, behind
+`assignment-target-unknown` and `assignment-repo-unavailable`, and justified it by the m38 tests. The
+tests are evidence, not a rationale; here is the rationale, so the next gate has somewhere to be placed:
+
+- **Request-validity gates precede item-state gates.** "This ref does not resolve", "this node is not
+  registered", "this node does not hold the repo" say *your command is wrong*. The lock says *your command
+  is right, and refused for now*. Telling an operator to wait for a holder when their target was a typo
+  sends them to the wrong remedy.
+- **Among item-state gates, the more SPECIFIC answer wins.** The exact-ref duplicate
+  (`assignment-already-active`) precedes the scope lock (`item-locked-by-assignment`) for the same reason
+  ADR-010/R1.1 keeps both codes: "this exact item is already assigned" is strictly more informative than
+  "something in its scope is".
+
+**Order, pinned:** `ref-not-found` → `assignment-target-unknown` → `assignment-repo-unavailable` →
+`assignment-already-active` → `item-locked-by-assignment`. The build conforms.
+
+### A3 — CORRECTS ADR-009's "wave 1 (parallel, no shared file)". It is no longer true, and the hand-off must be explicit
+
+ADR-009 asserted `item-lock` ∥ `cache-authority` "touch disjoint modules", and ADR-003's own consequence
+list assumed the same. **AC7's automatic half lands in `src/global-work-store.mjs`, which ADR-009 assigns
+to `43/02`.** The two stories share one function. The wave order does not change and the parallelism is
+still worth having — the overlap is one block in one function — but it must be *named*, not discovered at
+merge:
+
+- `43/02` **REPLACES** this block; it does not extend it. The wholesale delete-and-rebuild goes away, and
+  with it the read-carry-reinsert dance, which exists only because the rebuild exists.
+- `43/02` inherits `43/01`'s task-05 scenarios as its own acceptance contract (task 05's FEASIBILITY note
+  already says so) and must keep `heldSkipped`/`heldRefs` on the result.
+- Whoever lands second rebases this function rather than merging it.
+
+**Consequences.**
+- The worker's authored rows are protected by the same decision that protects the holder's item, instead of
+  being destroyed by it.
+- The assign door has a stated ordering principle, so gate six does not need a fresh argument.
+- The one file two wave-1 stories share is written down before it becomes a merge surprise.
+
+---
+
 ## Fitness functions (the enforced invariants)
 
 Arch-tests live under `test/arch/acd-*.test.mjs` (node:test-style `archTests` arrays, registered in
@@ -1098,7 +1186,7 @@ unbuilt and bind the moment it lands. No file is committed RED.
 |---|---|---|
 | `acd-artifact-sync-hook-derivation-free` | 001 | green (2 live proofs) + armed |
 | `acd-claude-settings-co-authored` | 002 | green (canary on the operator's keys) + armed at the hazard |
-| `acd-item-lock-single-door` | 003 | green (single `executionScopeRef` definition) + armed — **amended by ADR-010/R1.1**: the armed clause now forbids a command module deciding the SCOPE lock (the scope predicate, or a hand-rolled active-state query), and no longer flags the sanctioned exact-ref `findActiveAssignment` |
+| `acd-item-lock-single-door` | 003 | green (single `executionScopeRef` definition; mint seam imports the lock module; no command re-derives the scope check) + armed — **amended by ADR-010/R1.1** (the armed clause forbids a command module deciding the SCOPE lock, and no longer flags the sanctioned exact-ref `findActiveAssignment`) and **by ADR-011/A1**: a further clause — *the publish path reads no `global_assignments` state* — is due at `43/02`, where authority becomes a `node_id` column and the assignment read disappears. Not committed now: it would be red against `43/01`'s interim carry. |
 | `acd-work-items-single-writer` | 004 | green (single DML module) + armed at the reclassification |
 | `acd-cache-read-surface-boundary` | 005 | green (worker/structural readers PINNED) + armed — **amended by ADR-010/R6.3**: `promote-gap-to-chore.mjs` moved from the control-side list into the positively-pinned STRUCTURAL list |
 | `acd-cache-staleness-single-predicate` | 006 | green (strict `>`, no time-predicated DELETE) + armed |
@@ -1138,12 +1226,17 @@ refine — NOT committed red now):
 Every structural review answers "is the tree this lands in still sound?" Measured 2026-08-01 against
 TECH_DEBT item 0's own 2026-07-26 baseline:
 
-| Signal | 2026-07-26 | 2026-08-01 | Trend |
-|---|---|---|---|
-| `src/` files | 147 | **202** | +37% |
-| `src/` lines | 41,348 | **50,744** | +23% |
-| `src/` **root-level** `.mjs` | — | **99** (of 202) | half the tree is one flat directory |
-| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | **+47%** — the largest file in the repo |
+| Signal | 2026-07-26 | 2026-08-01 | 43/01 review, 2026-08-02 | Trend |
+|---|---|---|---|---|
+| `src/` files | 147 | **202** | 203 | +37% |
+| `src/` lines | 41,348 | **50,744** | 51,378 | +23% |
+| `src/` **root-level** `.mjs` | — | **99** (of 202) | 100 | half the tree is one flat directory |
+| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | 3,187 (+13) | **+47%** — the largest file in the repo |
+
+**43/01's own contribution, measured 2026-08-02:** +1 root module (`item-lock.mjs`, 274 lines — the one
+this ADR set pre-authorised; graph: 6 dependents, 5 dependencies, a near-leaf as designed), +634 lines
+across `src/`, and **+13** lines into the god-file — the "a call site, not a 100-line block" requirement
+kept. No file crossed a size threshold and no new god-node appeared.
 
 Two findings, both routed:
 

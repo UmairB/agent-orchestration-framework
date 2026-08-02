@@ -13,6 +13,10 @@ import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mes
 import { meshNodeIdOf } from "./mesh-gate.mjs";
 import { transitionRunStart, transitionStaleRunsReclaimed } from "../effects/run-transitions.mjs";
 import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
+// m43 / ADR-003 — the item-lock CONTEXT this verb hands the mint seam. The seam owns
+// the refusal; this command owns only the two facts it already has (its resolved
+// workspace identity, and the fact that a hand-typed mint carries no assignment).
+import { lockContextFor } from "../item-lock.mjs";
 
 // The documented default staleness threshold for the restart-time reclaim scan
 // (20/ADR-004 — the "missing-after-N" semantics): a `running` run idle this long with
@@ -136,8 +140,16 @@ export const runStartCommand = {
     // what makes the publish reactor reachable for this workspace's cascades (the
     // seam's callers that never propagated pass none); `publisherOptions` carries
     // the command ctx's established publisher injection seam to the reactor.
+    //
+    // `lock` is m43/ADR-003's item-lock context and is a SEPARATE opt from
+    // `workspace` on purpose (ADR-010/R1.3). The workspaceId comes from this
+    // command's already-resolved workspace — never from `item.dir` (TECH_DEBT item 4).
+    // `byAssignment: null`: an operator's local mint carries no assignment identity,
+    // so it is refused whenever any active assignment covers the item's execution
+    // scope — there is no flag on this verb that could ever pass one.
     const seamOpts = {
       workspace: ws,
+      lock: lockContextFor(ws, ctx),
       publisherOptions: ctx,
       journalOptions: ctx.effectsJournalOptions ?? {},
     };

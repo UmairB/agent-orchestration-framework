@@ -2455,10 +2455,18 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // worker's completion sites pass none — worker-side projection publishing
       // stays d3's settle-assignment territory, so the publish reactor skips on a
       // null workspaceRoot and worker behaviour is byte-unchanged.
+      // m43 / ADR-003 — the mint names the assignment it is running UNDER, so the
+      // seam's item lock admits it BY IDENTITY (never by a "worker is exempt"
+      // branch): the assignment that holds this scope is the one minting. The id is
+      // already on the brief; `opts.lock` carries it plus the directive's own
+      // workspaceId — never a cwd-derived one (TECH_DEBT item 4).
       ({ record: runRecord } = await transitionRunStart(
         item,
         { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } },
-        { journalOptions: { env: globalWorkStoreOptions?.env } },
+        {
+          lock: { workspaceId, byAssignment: assignmentId, globalWorkStoreOptions: globalWorkStoreOptions ?? {} },
+          journalOptions: { env: globalWorkStoreOptions?.env },
+        },
       ));
 
       // running — the worktree is materialized, the run is minted; the assignment's
@@ -2954,7 +2962,12 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
         ?? (await transitionRunStart(
           item,
           { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } },
-          { journalOptions: { env: globalWorkStoreOptions?.env } },
+          {
+            // m43 / ADR-003 — the resume mints under the SAME assignment, so the item
+            // lock admits it by that identity exactly as the fresh dispatch above is.
+            lock: { workspaceId, byAssignment: assignmentId, globalWorkStoreOptions: globalWorkStoreOptions ?? {} },
+            journalOptions: { env: globalWorkStoreOptions?.env },
+          },
         )).record;
       if (priorRunning != null) {
         log("info", `session ${sessionId}: continuing PAUSED run ${priorRunning.runId} (a needs-input park is the same run resuming, never a second record)`);

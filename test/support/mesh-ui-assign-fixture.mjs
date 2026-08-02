@@ -77,6 +77,22 @@ export async function dropNodeFromRoster({ home }, nodeId) {
   }
 }
 
+// settleAssignmentsFor({ home }, workspaceId, itemRef) — flip every active row for an
+// item to `withdrawn`, the direct-SQL twin of dropNodeFromRoster above. It exists for
+// m43/ADR-003: the item lock is symmetric over the execution scope, so a probe that
+// needs a milestone's SCOPE free has to reach a gate first. Node-registry facts are
+// untouched by it — which is precisely why an eligibility probe can use it.
+export async function settleAssignmentsFor({ home }, workspaceId, itemRef) {
+  const store = await openGlobalWorkProjectionStore({ env: { AOF_GLOBAL_HOME: home } });
+  try {
+    store.db.prepare(
+      "UPDATE global_assignments SET state = 'withdrawn' WHERE workspace_id = ? AND item_ref = ? AND state IN ('assigned','accepted','running')",
+    ).run(workspaceId, itemRef);
+  } finally {
+    store.close();
+  }
+}
+
 async function writeDist(dir) {
   await mkdir(path.join(dir, "assets"), { recursive: true });
   await writeFile(

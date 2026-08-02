@@ -1578,6 +1578,21 @@ import { archTests as acdWorkArtifactSetSingleHomeTests } from "../test/arch/acd
 // ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
 // no force, no reset on the branch path; a conflicting merge aborts and refuses.
 import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
+// milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
+// R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
+// byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
+// 02: one coded refusal at every door (second assignment / local mint / retry /
+// control-side mutation), minting nothing and renaming nothing. Task 03: the holder is
+// admitted by IDENTITY, never by exemption. Task 04: `work next` skips-and-reports
+// through the SAME predicate. Task 05: an operator verb is refused loudly, the control's
+// periodic publish tick skips quietly and counts. Task 06 (the two-machine soak) is
+// `@manual` and deliberately has no test file here.
+import { itemLockScopeOneHomeTests } from "../test/item-lock-scope-one-home.test.mjs";
+import { itemLockSymmetricScopeTests } from "../test/item-lock-symmetric-scope.test.mjs";
+import { itemLockCodedRefusalTests } from "../test/item-lock-coded-refusal-every-door.test.mjs";
+import { itemLockHolderIdentityTests } from "../test/item-lock-holder-identity.test.mjs";
+import { itemLockNextSkipsHeldTests } from "../test/item-lock-next-skips-held.test.mjs";
+import { itemLockOperatorVsAutomaticTests } from "../test/item-lock-operator-vs-automatic.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2205,7 +2220,14 @@ export const tests = [
   ...acdCacheReadSurfaceBoundaryTests,
   ...acdCacheStalenessSinglePredicateTests,
   ...acdWorkArtifactSetSingleHomeTests,
-  ...acdGatePropagationNeverDiscardsTests
+  ...acdGatePropagationNeverDiscardsTests,
+  // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
+  ...itemLockScopeOneHomeTests,
+  ...itemLockSymmetricScopeTests,
+  ...itemLockCodedRefusalTests,
+  ...itemLockHolderIdentityTests,
+  ...itemLockNextSkipsHeldTests,
+  ...itemLockOperatorVsAutomaticTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

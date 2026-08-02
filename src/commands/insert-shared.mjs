@@ -261,7 +261,11 @@ export async function runInsertTopLevel(ctx, { type, slug: rawSlug, at: rawAt, y
       "insert-confirm-required",
       400,
     );
+    // `detail` is the ONE structured-refusal channel the `--json` face surfaces
+    // (src/spine/face.mjs); `shifted` stays on the error itself for the in-process
+    // callers that already read it there.
     error.shifted = shifted;
+    error.detail = { shifted };
     throw error;
   }
 
@@ -588,7 +592,9 @@ export async function runInsertStory(ctx, { slug: rawSlug, at: rawAt, under: raw
       "insert-confirm-required",
       400,
     );
+    // See the top-level twin above — one structured-refusal channel, `detail`.
     error.shifted = shifted;
+    error.detail = { shifted };
     throw error;
   }
 

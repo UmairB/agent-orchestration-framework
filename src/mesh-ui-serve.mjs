@@ -773,6 +773,10 @@ const ASSIGN_GATE_STATUS = Object.freeze({
   "assignment-target-unknown": 404,
   "assignment-repo-unavailable": 409,
   "assignment-already-active": 409,
+  // m43 / ADR-003 — the SCOPE lock's refusal is the same class of conflict as the
+  // exact-ref one (the item's CURRENT state forbids the mint), so it takes the same
+  // 409 rather than falling through to this table's 400 default.
+  "item-locked-by-assignment": 409,
 });
 
 function assignGateStatus(code) {

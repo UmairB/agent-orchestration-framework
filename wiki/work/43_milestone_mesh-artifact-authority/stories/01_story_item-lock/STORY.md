@@ -4,10 +4,10 @@ number: 01
 slug: item-lock
 title: "The exclusive item lock — an active assignment owns its item at EXECUTION scope, and every door (second assignment, local mint, retry, control-side mutation) refuses with one coded refusal until the next gate"
 parent: 43
-status: not-started
+status: done
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -78,12 +78,12 @@ Grounded in `ARCHITECTURE.md` **ADR-003**, closing the two holes STATE measured 
      aof-developer feasibility). Each is a tasks/NN_<slug>.feature whose @executable scenarios are the
      acceptance criteria. Kept independent of the other stories' tasks. -->
 
-- [ ] `tasks/00_scope-rule-one-home-faces-unchanged.feature` — the execution-scope rule moves down into the pure leaf and every existing face (continue/refine/verify, the board's row overlay, run-status) answers byte-identically (AC1's no-regression half; "defined exactly once" stays in the arch-test).
-- [ ] `tasks/01_lock-is-symmetric-over-execution-scope.feature` — an active assignment holds the WHOLE execution scope in both directions: running `42` locks `42/03` and running `42/03` locks `42`, while a sibling scope, a string-prefix near-miss and every terminal state stay free (AC2).
-- [ ] `tasks/02_one-coded-refusal-at-every-door.feature` — a second assignment, a local `run-start`, a `run-retry` and a control-side mutation are each refused with the one code `item-locked-by-assignment` and its five-key payload, minting nothing and renaming nothing — and all of them open again at the gate (AC3 + AC5).
-- [ ] `tasks/03_holder-admitted-by-identity-never-exemption.feature` — the mint carried out under the holding assignment is admitted because it names that assignment; a different, a stale, an unknown or an absent identity is refused, and an unheld or unmeshed item mints byte-identically (AC4 + AC8's behavioural half).
-- [ ] `tasks/04_next-skips-held-items-and-reports-the-holder.feature` — `work next` returns the next UNHELD item and reports every skipped one with its holder, never silently omitting it and never handing out an item `run-start` would refuse a step later (AC6).
-- [ ] `tasks/05_operator-refused-automatic-skipped-and-counted.feature` — an operator verb is refused loudly and exactly once; the control node's periodic publish tick skips the held rows, counts them in its own result, and logs no refusal across repeated ticks (AC7).
+- [x] `tasks/00_scope-rule-one-home-faces-unchanged.feature` — the execution-scope rule moves down into the pure leaf and every existing face (continue/refine/verify, the board's row overlay, run-status) answers byte-identically (AC1's no-regression half; "defined exactly once" stays in the arch-test).
+- [x] `tasks/01_lock-is-symmetric-over-execution-scope.feature` — an active assignment holds the WHOLE execution scope in both directions: running `42` locks `42/03` and running `42/03` locks `42`, while a sibling scope, a string-prefix near-miss and every terminal state stay free (AC2).
+- [x] `tasks/02_one-coded-refusal-at-every-door.feature` — a second assignment, a local `run-start`, a `run-retry` and a control-side mutation are each refused with the one code `item-locked-by-assignment` and its five-key payload, minting nothing and renaming nothing — and all of them open again at the gate (AC3 + AC5).
+- [x] `tasks/03_holder-admitted-by-identity-never-exemption.feature` — the mint carried out under the holding assignment is admitted because it names that assignment; a different, a stale, an unknown or an absent identity is refused, and an unheld or unmeshed item mints byte-identically (AC4 + AC8's behavioural half).
+- [x] `tasks/04_next-skips-held-items-and-reports-the-holder.feature` — `work next` returns the next UNHELD item and reports every skipped one with its holder, never silently omitting it and never handing out an item `run-start` would refuse a step later (AC6).
+- [x] `tasks/05_operator-refused-automatic-skipped-and-counted.feature` — an operator verb is refused loudly and exactly once; the control node's periodic publish tick skips the held rows, counts them in its own result, and logs no refusal across repeated ticks (AC7).
 - [ ] `tasks/06_cross-machine-lock-soak.feature` — `@manual`: on two real machines, a real control-side insert against a milestone a real worker is holding renames not one folder, every door is refused, the worker is never locked out of its own work, and everything releases at the gate.
 
 ## Notes

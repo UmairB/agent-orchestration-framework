@@ -18,8 +18,16 @@
 // reconciler scan closing the window between them. The REMAP is computed by the
 // engine BEFORE its renames (work-reindex.mjs's buildRefRemap) — after them the old
 // refs exist nowhere to be derived from, so the event must carry them.
-import { reindexForInsert } from "../work-reindex.mjs";
+import { reindexForInsert, refsTouchedByInsert } from "../work-reindex.mjs";
 import { resolveWorkspaceId } from "../workspace-identity.mjs";
+// m43 / ADR-003 + ADR-004 — the CONTROL-SIDE MUTATION door. STATE's settled rule
+// ("control-side writes refused mid-phase, allowed at a gate") lands in the SAME guard
+// as the mint door rather than as a second rule, and it lands HERE — the single seam
+// both insert call sites already route through — rather than in the cache's upsert
+// seam: an insert RENUMBERS FOLDERS while a worker holds a worktree full of the old
+// refs, which is the destructive case the lock exists for, and it is this seam that
+// opens the slot.
+import { guardItemLock, lockContextFor } from "../item-lock.mjs";
 import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral } from "./dispatch.mjs";
@@ -44,6 +52,15 @@ import { reportDegrade } from "../degrade.mjs";
 // otherwise would be a lie the crash-recovery drain would faithfully repeat.
 export async function transitionStreamReindexed(workspace, { at, space, parent } = {}, opts = {}) {
   const { publisherOptions = null, journalOptions = {}, drain = true } = opts;
+
+  // (0) THE LOCK — in front of the fact, so a refused insert renames not one folder.
+  // Every ref this insert would renumber must be free: a nested insert under a held
+  // milestone, and a top-level insert that shifts a held milestone's own number, are
+  // both refused with the ONE code naming the holder. The touched set comes from the
+  // engine's OWN selection (refsTouchedByInsert), never a second derivation.
+  await guardItemLock(await refsTouchedByInsert(workspace.workDir, { at, space, parent }), {
+    lock: lockContextFor(workspace, opts.publisherOptions ?? {}),
+  });
 
   // (1) The FACT — the engine's own guarded renumber.
   const result = await reindexForInsert(workspace.workDir, { at, space, parent });

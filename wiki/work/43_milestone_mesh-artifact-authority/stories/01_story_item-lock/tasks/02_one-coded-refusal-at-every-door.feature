@@ -140,6 +140,25 @@ Feature: every door onto a held item refuses with the one coded refusal `item-lo
     # the two UNHELD rows are the regression guard: gaining a lock door must not change
     # what an unheld item is told by the store it was always told by.
 
+  # CONTRACT EXTENSION (PO-sanctioned at build review, 2026-08-02; ADR-011/A1). Every
+  # scenario above aims the refusal at a node writing its OWN slice over the holder's
+  # work. The HOLDER's own reported rows travel through the very same row-writer, and a
+  # guard placed there filters them too: measured against the first build, an ACTIVE
+  # assignment for "42" made the worker's own delta land as `heldSkipped:1` and read
+  # back "not-started" — the cure inverted into ADR-004/D1's permanent revert, for the
+  # whole duration of the phase. The discriminator is WHOSE SLICE is being written,
+  # never what triggered the write. Only a behavioural scenario can catch this: a
+  # placement assertion cannot see which caller supplied the rows.
+  Scenario: the control node never discards the holder's own reported rows
+    Given an ACTIVE assignment for "42" held by node "aof-wsl" in state "running"
+    And the control's cache carries "42" as "not-started"
+    When node "aof-wsl" streams a delta frame reporting "42" as "in-progress"
+    Then the row for "42", read back through the global mesh status read, is "in-progress"
+    And that frame's own result reports heldSkipped 0 — a frame is not a tick
+    When node "aof-wsl" streams its completion frame reporting "42" and "42/01" as "done"
+    Then both rows read back "done", while the assignment is still active
+    And a subsequent control publish tick still counts "42" as held and leaves those rows alone
+
   # "…until the next gate" — the story title's closing clause, made observable. The
   # moment the phase ends (no active assignment), every door that was refused opens.
   Scenario: when the assignment settles, the same refused commands succeed — the gate is the release

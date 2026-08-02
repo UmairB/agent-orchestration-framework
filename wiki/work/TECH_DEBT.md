@@ -471,3 +471,42 @@ whether the scope resolved to at least one item; an unresolved scope becomes a c
 (`scope-not-found`) or a finding, never a PASS — matching the resolver behaviour the rest of the command
 surface already has (`work:tasks` throws `ref-not-found`; `work:doc` likewise). Keep the filter
 semantics; change only what an EMPTY match renders as.
+
+---
+
+## 12. Seventeen modules open the global mesh store for themselves — there is no per-invocation handle
+
+**Status:** open (raised 2026-08-02 by the architect, during milestone 43 story 01's structural review).
+**Severity:** low-medium — nothing is broken today, but the count only ever goes up, and each opener is a
+place a store can be opened against the *wrong* home.
+
+**What's wrong.** `openGlobalWorkProjectionStore` has no owner. **17 modules in `src/` import it and open
+their own connection** (measured 2026-08-02): `board-mesh-execution`, `board-worker-stream`,
+`commands/mesh-logs`, `commands/mesh-recover-push`, `commands/mesh-terminal-resume`,
+`control-stream-server`, `effects/table`, `global-mesh-query`, `global-work-publisher`,
+`global-work-store`, `item-lock`, `mesh-assignment-reclaim`, `mesh-assignment`, `mesh-presence`,
+`mesh-recovery-push`, `mesh-worker-execution`, `spine/face`. Each follows the same open-read-close
+shape, and each re-derives its own paths from its own options bag (`globalWorkStoreOptions`,
+`storeOptions`, `paths`, `env`, an injectable `openStore` override — five spellings of one thing).
+
+A single command invocation now opens the store **more than once**: `aof work run-start` on a meshed
+workspace opens it for the item-lock guard (`item-lock.mjs`) and again for the publish reactor
+(`global-work-publisher.mjs`); `aof work next` opens it for the held-scope read on every call. The
+overrides exist because tests must inject a hermetic home — which is the tell: the *invocation* has a
+store, but nothing models that, so every seam re-acquires it and every test re-injects it.
+
+**How it bites.** Three ways, none of them yet a failure:
+- **Correctness surface.** Every opener is an independent chance to resolve the wrong `AOF_GLOBAL_HOME`
+  — the same class as TECH_DEBT item 4 (cwd-derived identity), which silently discarded 100% of the
+  worker→control frames for days. A single acquisition point would have one place to get that wrong.
+- **Consistency.** Two opens inside one verb are two snapshots; a row can change between them, so a
+  command's guard and its publish can disagree about the same workspace.
+- **Ceremony.** Every new seam pays a ~10-line open/try/finally/close block plus an injection seam, and
+  every test pays the matching plumbing. That cost is why "just read one more fact" is never cheap.
+
+**The fix.** Give the invocation a store. The command `ctx` already threads `globalWorkStoreOptions`
+everywhere; make it thread a lazily-opened, once-per-invocation **handle** instead, closed by the spine
+when the command returns — the same shape `effectsJournalOptions`/the journal already gestures at. Seams
+take the handle rather than the options bag; the injectable `openStore` override collapses into "the test
+supplies the handle". Then a ratchet: `openGlobalWorkProjectionStore` may be called from exactly one
+module, and the 18th opener fails CI instead of needing a reviewer to notice.

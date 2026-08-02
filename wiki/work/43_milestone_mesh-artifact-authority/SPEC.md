@@ -6,7 +6,7 @@ title: "Mesh artifact authority — the cache is the read surface"
 status: in-progress
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -98,7 +98,7 @@ Six stories (ADR-009). The PO's five candidates stand, with ONE architect correc
 reader migration (the 18-site read-side sweep) — keeping them together made the critical path as long as
 the widest mechanical sweep and the risky change unreviewable inside a 13-module diff.
 
-- [ ] `01_story_item-lock` — an assignment exclusively owns its item at execution scope; a second
+- [x] `01_story_item-lock` — an assignment exclusively owns its item at execution scope; a second
       assignment, a local run mint and a control-side mutation are all refused, coded and loud, until
       the next gate. (ADR-003)
 - [ ] `02_story_cache-authority` — `work_items` stops being rebuilt from control disk and becomes an

@@ -40,6 +40,12 @@ import { reportDegrade } from "./degrade.mjs";
 // executable data, not a warning comment: the wholesale-delete guard below and
 // the ref-remap table derivation both read it.
 import { tableClass, refRemapTables } from "./effects/stores.mjs";
+// m43 / ADR-003 — the AUTOMATIC half of the item lock. An operator verb onto a held
+// item is refused, coded, loud; this periodic tick asked nothing, so it steps over the
+// rows it does not own and COUNTS the skips in its result. Read from the leaf that owns
+// every `global_assignments` read (assignment-record.mjs imports 0 — no cycle back
+// through the lock module or the publisher seam).
+import { activeScopeHolders, executionScopeRef } from "./assignment-record.mjs";
 export const workspaceIdFor = workspaceIdFromPath;
 
 // wholesaleDelete(db, table, workspaceId) — the ONLY sanctioned way this module
@@ -444,8 +450,50 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
   // never read by the function and is dropped here to match.
   const items = options.items ?? await readWorkspaceProjectionItems(workspace);
 
+  // THE HELD-SCOPE CARRY (m43/ADR-003, PLACED by ADR-011/A1) — `diskDerived`.
+  //
+  // This function is NOT the tick: it is the shared row-writer, and its three callers
+  // are the control's own publish (`global-work-publisher.mjs`) and the WORKER's two
+  // frame doors (`control-stream-server.mjs`'s applySnapshotFrame / applyDeltaFrame).
+  // The discriminator is therefore "whose slice is being written", never "what
+  // triggered the write": a node publishing its OWN disk-derived slice may be made to
+  // step over scopes it does not hold; a writer applying ANOTHER node's reported slice
+  // is the holder's own voice and may never be filtered by the lock. Filtering it was
+  // measured to discard the holder's authored delta — and its completion frame — for
+  // the whole duration of a phase, which is ADR-004/D1's permanent-revert inverted.
+  //
+  // So the carry is OFF by default and set ONLY by the disk-derived path. A caller
+  // supplying `options.items` from a frame is byte-unaffected.
+  const diskDerived = options.diskDerived === true;
+  const heldScopes = new Set();
+
   db.exec("BEGIN IMMEDIATE");
   try {
+    // Both the held-scope lookup and the carry SELECT read INSIDE the transaction
+    // (ADR-011/A1): read before `BEGIN IMMEDIATE` and a frame committing in that
+    // window is seen stale and then written back over.
+    const held = diskDerived ? activeScopeHolders(store, workspaceId) : new Map();
+    const carried = held.size === 0
+      ? []
+      : db.prepare("SELECT ref, type, slug, status, title, parent, source_path FROM work_items WHERE workspace_id = ?")
+        .all(workspaceId)
+        .filter((row) => held.has(executionScopeRef(row.ref)));
+    const carriedRefs = new Set(carried.map((row) => row.ref));
+    for (const row of carried) heldScopes.add(executionScopeRef(row.ref));
+    const publishable = [];
+    for (const item of items.rows) {
+      const scope = executionScopeRef(item.ref);
+      // The carry protects a row that EXISTS from being overwritten by this node's own
+      // stale disk. A ref the cache has never carried is not the holder's work yet — it
+      // is an item nobody has reported, and dropping it would make a held item VANISH
+      // from the read surface entirely, which is a worse lie than a stale row.
+      if (held.has(scope) && carriedRefs.has(item.ref)) {
+        heldScopes.add(scope);
+        continue;
+      }
+      publishable.push(item);
+    }
+
     db.prepare(`
       INSERT INTO workspaces (workspace_id, project_root, work_dir, name, last_published_at)
       VALUES (?, ?, ?, ?, ?)
@@ -463,7 +511,12 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
       INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    for (const item of items.rows) {
+    // The carried rows first, byte-for-byte as they already were — the disk-derived
+    // publish leaves the holder's work exactly as it found it.
+    for (const row of carried) {
+      insertItem.run(workspaceId, row.ref, row.type, row.slug, row.status, row.title, row.parent, row.source_path);
+    }
+    for (const item of publishable) {
       insertItem.run(
         workspaceId,
         item.ref,
@@ -498,7 +551,16 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
   return {
     workspaceId,
     itemCount: items.rows.length,
+    // `skipped` counts PROJECTION ERRORS and always has — two different skips summed
+    // into one number is a defect, not a variant (ADR-010/D1a), so the held-scope skip
+    // gets its own ADDITIVE, distinctly-named counter with the refs listed beside it
+    // so the count is explainable. Both count EXECUTION SCOPES stepped over, not rows:
+    // held-ness is a scope property (the predicate is symmetric), and `heldRefs` names
+    // the scopes so the number is always explainable by the list beside it. A frame
+    // caller is never filtered, so both are 0/[] there.
     skipped: items.errors.length,
+    heldSkipped: heldScopes.size,
+    heldRefs: [...heldScopes].sort(),
     publishedAt: now,
   };
 }
