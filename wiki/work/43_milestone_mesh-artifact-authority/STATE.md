@@ -27,10 +27,37 @@ story carries its authored contract. Nothing is built yet.
       workspace's cache), and the cure had introduced a renumber regression against HEAD (the operator's
       newly-inserted story never reached the cache). ADR-012 records the rulings. Task 08's `@manual`
       soak is **carried to the milestone gate**.
-- [ ] `03_story_artifact-sync-on-write` — refined, not started (wave 2)
+- [~] `03_story_artifact-sync-on-write` — **built, reviewed, validated; `in-review` awaiting `@uat`**
+      (2026-08-02). 38 `@executable` green, 790 arch green, `validate 43/03` PASS, and this repo's live
+      `.claude/settings.json` provably byte-unchanged. Two HIGH defects found at review: the story's
+      **trigger was never delivered** (the matcher existed nowhere outside a test fixture, so a fresh
+      `work init` installed the script and no entry), and five drain scenarios were **vacuous** — a plant
+      disabling the drain entirely left four of them green, because the reconciliation backstop re-reads
+      everything. ADR-013 records the ten rulings, including C8's supersession of AC5. **The `@uat` needs
+      an operator reading a live remote agent's features on the control node, mid-run.**
 - [ ] `04_story_staleness-and-resync` — refined, not started (wave 2)
 - [ ] `05_story_gate-propagation` — refined, not started (wave 2)
 - [ ] `06_story_cache-read-surface` — refined, not started (wave 3)
+
+**STOPPED 2026-08-02 at the first `@uat` gate** (`aof:continue 43` → `aof:autonomous 43`). Wave 1 is
+accepted and committed; wave 2's first story is built and validated but cannot be accepted without a
+human. The cascade halts here because `aof work next 43` keeps returning `43/03` while it is `in-review`,
+and because **every remaining lane in this milestone needs the same thing**: a deployed build on two real
+nodes plus an operator. Nothing further can be proven from this machine alone.
+
+**What the operator has to do to unblock it** — one session, in this order:
+
+1. `node scripts/install-local.mjs --skip-ui` then `node scripts/install-local.mjs --wsl --skip-ui`
+2. Quit the desktop app from its own UI, then `aof mesh desktop run` (never a force-kill; never a
+   hand-spawned daemon)
+3. Verify `~/.aof/bin/aof.exe --version` reports `payload <buildId>`, and both daemons print the same
+   `Build:` line
+4. Run the three carried lanes: `43/01` task 06 (cross-machine lock soak), `43/02` task 08 (cross-machine
+   cache-authority soak), `43/03` task 00's `@manual` (exec-form spawn on all three node types), task 03's
+   `@manual` (scratch-clone arming), and task 01's **`@uat`** — an operator reading a live remote agent's
+   freshly authored `tasks/*.feature` on the control node while the run is still live
+5. `aof:verify 43/03` to record the sign-off, then `aof:autonomous 43` to resume — it will pick up at
+   `43/04`
 
 Produced at refine: `RESEARCH.md`, `DESIGN.md`, `ARCHITECTURE.md` (ADR-001…ADR-010), `FEASIBILITY.md`,
 six scaffolded stories, **42 task features / 277 scenarios** (240 `@executable`, 19 `@manual`,
