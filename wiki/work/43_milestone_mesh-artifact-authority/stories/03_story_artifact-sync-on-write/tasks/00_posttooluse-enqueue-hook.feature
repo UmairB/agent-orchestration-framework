@@ -3,8 +3,18 @@
 # Task feature — the TRIGGER and the ENQUEUE (STORY.md AC1–AC4, ADR-001): a
 # `PostToolUse` `command` hook in EXEC form (`command` + `args`), matcher pinned to
 # exactly `Write|Edit|NotebookEdit`, whose body reads stdin, resolves the path field
-# through an EXPLICIT per-tool map, appends ONE NDJSON line to the queue file whose
-# absolute path was stamped into its argv at install time, and exits 0 — ALWAYS.
+# through an EXPLICIT per-tool map, appends ONE NDJSON line to the queue file it derives
+# from its own installed location, and exits 0 — ALWAYS.
+#
+# SUPERSEDED AT BUILD REVIEW (ADR-013/C2, 2026-08-02): this task originally required the
+# queue's ABSOLUTE path to be stamped into the argv at install time. `.claude/settings.json`
+# is TRACKED, and a `git worktree` — which is exactly how a mesh worker builds its checkout —
+# inherits it verbatim. Two failures followed: the queue path resolved outside the worktree
+# (the hook goes inert), and the SCRIPT path made `node` itself exit non-zero before the
+# script's "exit 0, always" could apply — AC4 defeated from outside the script. An argv
+# element in a tracked file may not carry an install-time absolute path. The argv is now a
+# single CHECKOUT-RELATIVE element and the script derives the queue from `process.argv[1]`,
+# which keeps AC2's no-derivation and AC1's no-environment-variable clauses intact.
 # LITMUS: every Then is confirmable from one of exactly three observable channels —
 # (a) the QUEUE FILE's bytes after a payload is delivered on the hook's stdin,
 # (b) the process's EXIT CODE and its stdout/stderr bytes as the harness observed them,
@@ -53,9 +63,9 @@ Feature: the PostToolUse hook names each artifact write and enqueues it without 
     And that group's `matcher` value is the exact string "Write|Edit|NotebookEdit"
     And the group's entry has `type` "command", `command` "node", and a non-empty `args` array
     And the entry carries no shell command string — no `&&`, `|`, `;`, redirection or quoting in `command`
-    And one `args` element is the absolute path of the enqueue script
-    And one `args` element is the absolute path of the queue file
-    And the entry names no environment variable and no relative path for either
+    And the `args` array holds exactly one element, the CHECKOUT-RELATIVE path of the enqueue script
+    And that element carries no drive letter, no leading separator and no `..` segment, so a second checkout of this tracked file resolves it against its OWN root
+    And the entry names no environment variable, and no absolute path for either the script or the queue
 
   # THE PER-TOOL PATH MAP (AC3) — the highest-value table in this story, because the
   # field name is NOT uniform: Write/Edit carry `tool_input.file_path`, NotebookEdit

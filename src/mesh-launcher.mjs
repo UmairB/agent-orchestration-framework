@@ -34,6 +34,16 @@ import { packageVersionString } from "./asset-base.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
 import { listItems, loadWorkspace } from "./work.mjs";
 import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
+// m43 / ADR-001 — the artifact-sync DRAIN. The producer is a derivation-free
+// PostToolUse hook; this is the consumer end, and it rides the EXISTING stream tick
+// below (no new timer, no new transport, no new listening surface). The module holds
+// the whole mechanism so the god-adjacent launcher gains a call site, not a block.
+import {
+  confirmArtifactSyncBatch,
+  createArtifactSyncState,
+  forgetArtifactSyncAssignment,
+  prepareArtifactSyncBatch,
+} from "./artifact-sync.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
 // m42 wave (c) / item 1 — the build stamp published on this node's presence record.
 import { readBuildInfo, buildInfoString } from "./build-info.mjs";
@@ -1445,8 +1455,15 @@ export async function startLauncher(ws, options = {}) {
     // dropped on arrival. An entry with no workspaceId is REPORTED and skipped — falling
     // back to the launch id is exactly the bug, and would merge one workspace's items
     // into another's rows.
+    // The artifact-sync tick state (m43 / ADR-007 AC8 + ADR-013/C7): the per-assignment
+    // sent-content hashes and the per-batch degrade signatures. In MEMORY on purpose —
+    // a daemon restart forgets, and forgetting means re-sending, which is the side of
+    // the choice that cannot lose an artifact.
+    const artifactSyncState = createArtifactSyncState();
     const pushActiveWorktreeState = async (fullItems = []) => {
-      for (const active of listActiveWorktrees()) {
+      const activeWorktrees = listActiveWorktrees();
+      forgetArtifactSyncAssignment(artifactSyncState, new Set(activeWorktrees.map((entry) => entry.assignmentId)));
+      for (const active of activeWorktrees) {
         try {
           const frameWorkspaceId = typeof active?.workspaceId === "string" && active.workspaceId.length > 0 ? active.workspaceId : null;
           if (frameWorkspaceId == null) {
@@ -1463,13 +1480,22 @@ export async function startLauncher(ws, options = {}) {
           // stamped with the SAME assignment workspaceId. A per-file read fault is
           // REPORTED (the no-silent-failure rule), never dropped, and never blocks
           // the rows already sent.
-          const content = await readWorkspaceContentRecords(worktreeWs, { itemRef: active.itemRef });
+          //
+          // m43 / ADR-001 — THE ARTIFACT-SYNC DRAIN rides this existing tick. The
+          // PostToolUse hook has been naming every artifact the agent writes into a
+          // queue file; consuming it here (rename-then-read, so an interruption
+          // RE-SENDS rather than loses) is what turns those names into one batched
+          // frame. The read below is still the full reconciliation backstop STATE
+          // mandates keeping — a `Bash`-written file is outside the hook's matcher and
+          // must still converge on this same tick — and the CONTENT HASH is what keeps
+          // the widened set affordable: only artifacts whose bytes moved ride the wire.
+          const worktreeItems = await listItems(worktreeWs.workDir);
+          const content = await readWorkspaceContentRecords(worktreeWs, { itemRef: active.itemRef, items: worktreeItems });
           // m42 (operator-forced rethink): the run-lifecycle bracket writes its run
-          // records against the CHECKOUT's work dir, not the worktree's — a live
-          // run streamed 0 run rows for 20+ minutes because this read looked only
-          // in the worktree. Read the checkout's runs for the same subtree and
-          // merge (checkout wins on a duplicate id — it is where the bracket
-          // actually writes).
+          // records against the CHECKOUT's work dir, not the worktree's — a live run
+          // streamed 0 run rows for 20+ minutes because this read looked only in the
+          // worktree. Read the checkout's runs for the same subtree and merge
+          // (checkout wins on a duplicate id — it is where the bracket actually writes).
           const checkoutWs = await loadWorkspace(checkoutRootForWorktree(active.worktreePath), undefined, { env: options?.globalWorkStoreOptions?.env });
           const checkoutContent = await readWorkspaceContentRecords(checkoutWs, { itemRef: active.itemRef });
           const runsById = new Map(content.runs.map((run) => [`${run.ref}::${run.runId}`, run]));
@@ -1483,12 +1509,44 @@ export async function startLauncher(ws, options = {}) {
               path: readError.sourcePath ?? null,
             }, options);
           }
-          if ((content.docs.length > 0 || content.runs.length > 0) && typeof streamClient.sendWorktreeContent === "function") {
-            await streamClient.sendWorktreeContent(
-              { itemRef: active.itemRef, docs: content.docs, runs: content.runs },
+          // THE DRAIN, as ONE call (ADR-013/C7 — this file is 2-in/30-out and the
+          // mechanism belongs in artifact-sync.mjs, not in another block here). It
+          // consumes the queue by rename-then-read, gates docs AND run records by
+          // content hash, and hands back the coded degrades the queue is the only
+          // possible source of — a named-but-now-missing artifact, an unresolved path,
+          // an unattributable spelling, a torn line — each reported once per batch.
+          const batch = await prepareArtifactSyncBatch({
+            state: artifactSyncState,
+            assignmentId: active.assignmentId,
+            worktreePath: active.worktreePath,
+            items: worktreeItems,
+            docs: content.docs,
+            runs: content.runs,
+          });
+          for (const warning of batch.warnings) emitWarning(launcherWarnings, warning, options);
+          // A send that cannot happen is NOT a delivery: the client returns
+          // `{ sent: false }` rather than throwing, and a transport-less build (no
+          // sendWorktreeContent at all) has delivered nothing either. Both leave the
+          // batch on disk and the hashes unrecorded, so the next tick re-sends.
+          let delivered = false;
+          if (typeof streamClient.sendWorktreeContent !== "function") {
+            delivered = false;
+          } else if (batch.docs.length === 0 && batch.runs.length === 0) {
+            delivered = true; // nothing to send: the batch is genuinely accounted for
+          } else {
+            const result = await streamClient.sendWorktreeContent(
+              { itemRef: active.itemRef, docs: batch.docs, runs: batch.runs },
               { workspaceId: frameWorkspaceId },
             );
+            delivered = result?.sent !== false;
           }
+          await confirmArtifactSyncBatch({
+            state: artifactSyncState,
+            assignmentId: active.assignmentId,
+            worktreePath: active.worktreePath,
+            pending: batch.pending,
+            delivered,
+          });
         } catch (error) {
           emitWarning(launcherWarnings, {
             code: "worker-worktree-stream-failed",

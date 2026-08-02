@@ -37,7 +37,11 @@ export const archTests = [
         process.chdir(tmp);
         const descriptorCount = readDescriptor().members.length;
         const bundle = loadBundle();
-        const loaded = bundle.resources.length + bundle.hooks.length + bundle.templates.length;
+        // m43 — `assets` is the fourth member kind (an aof-EXCLUSIVE file installed
+        // verbatim; the artifact-sync enqueue script is the first). Counted here so the
+        // invariant stays what it says: EVERY descriptor member resolves from an
+        // unrelated cwd, with no kind quietly falling outside the sum.
+        const loaded = bundle.resources.length + bundle.hooks.length + bundle.templates.length + bundle.assets.length;
         assert.equal(loaded, descriptorCount, "full member set resolves from an unrelated cwd");
         // The resolved root is inside the source tree, not the cwd.
         assert.ok(!bundleRoot().startsWith(tmp), "bundle root is not derived from cwd");

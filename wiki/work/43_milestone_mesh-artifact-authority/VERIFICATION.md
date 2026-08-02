@@ -208,6 +208,124 @@ exclusive — the armed one won, and the residual race can only skip-or-admit, n
 rules P0.3 fix-now; **B6** routes the two deletion gaps as one; **B7/B8** rule the judgement calls,
 pinning that the same-author `syncedAt` comparison **may never widen to two node ids**.
 
+## 43/03 · Write-triggered artifact sync — built and validated 2026-08-02, **AWAITING `@uat`**
+
+Lanes in scope: **`@executable`** (32 scenarios, all four tasks) + **`@manual`** (2) + **`@uat`** (1).
+The `@uat` is why this story is `in-review` and not `done` — see the gate below.
+
+### Verification evidence
+
+- **`@executable` suite green — 38 run / 0 failed** (the 32 contract scenarios plus 6 added at review),
+  re-run independently by the orchestration after the fix batch:
+  `test/artifact-sync-enqueue-hook.test.mjs` (9), `test/artifact-sync-drain.test.mjs` (10),
+  `test/artifact-sync-manifest.test.mjs` (8), `test/claude-settings-merge.test.mjs` (11).
+- **Fitness functions green — `test/arch/*` 790 run / 0 failed**, including the three that armed on this
+  story's code landing (`acd-artifact-sync-hook-derivation-free`, `acd-claude-settings-co-authored`,
+  `acd-work-artifact-set-single-home`) and the neighbours' 228/0 sweep.
+- **`aof work validate 43/03` → PASS.**
+- **Safety confirmed at the source** — `git status --short -- .claude .aof` is **empty**, tracked and
+  untracked. This repo's live hand-authored `.claude/settings.json` (~140 keys: the `SessionStart` /
+  `UserPromptSubmit` / `SessionEnd` session wiring, the `PreToolUse` test-isolation guard,
+  `permissions.deny`, `sandbox.filesystem`, `enabledPlugins`, `extraKnownMarketplaces`) is byte-unchanged,
+  no `claude` hook was added to this checkout's `.aof/aof.config.json`, and no `work init` / `work update`
+  / `assets apply` was run against this repo. Every fixture is `mkdtemp`; every hook spawn ran a byte-copy
+  of the script inside its own scratch checkout.
+- **Traceability** — QA mapped **32/32 contract instances 1:1**, then measured that five of them were
+  vacuous (below). After the batch, **QA's own `drain-blind` plant — making `drainArtifactQueue` return
+  empty and never consume — reds 7 of the 10 drain scenarios**, where before the batch it reddened
+  **nothing**. That is the acceptance bar this story is held to, and it is met.
+- **Falsifiability — 12 plants across the batch**, each reddening exactly its own invariant, plus the 13
+  from the original build.
+
+### The `@uat` gate — why this story stops here
+
+`tasks/01_daemon-drains-queue-into-one-batched-frame.feature`'s closing scenario is the human acceptance
+this story exists for, and the feature says plainly why it cannot be automated: *"it needs a real remote
+node running a real Claude Code agent whose own writes fire the hook, and an operator reading the control
+node WHILE the run is still live. It is the outsider check on `commands/tasks.mjs:15` — 'the features live
+in the worker's worktree and are not streamed yet'."*
+
+Two `@manual` scenarios also stand: task 00's exec-form spawn across all three node types (Windows control,
+Mac worker, WSL worker) and task 03's scratch-clone arming of the operator's real settings file.
+
+**None of the three is agent-runnable** — each needs a deployed build and, for the `@uat`, a live remote
+agent and a human at the control node. Under `.claude/rules/build-deploy-restart.md` the deploy + supervisor
+restart is an operator action.
+
+### Findings
+
+Raised across the architect (structural) and QA (behavioural) reviews. Both blockers fixed and re-verified.
+
+| id | observed | type | sev | triage | status |
+|---|---|---|---|---|---|
+| C1 | **AC1 — the story's entire trigger — was never delivered.** `grep -rn "Write\|Edit\|NotebookEdit" src/ .aof/` returned **nothing**: both occurrences were a constant the tests build themselves. The bundle declared three `kind:"hook"` members, all codex; the enqueue script shipped correctly as `kind:"asset"`, but **no member declared the claude-runtime hook entry** — so `aof work init` in a fresh workspace installed the script and no entry, and AC1 was asserted against a fixture | defect | **HIGH** | blocker | **fixed** — the trigger ships as `src/bundle/hooks/claude-artifact-sync.json` (`PostToolUse`, matcher pinned to exactly `Write\|Edit\|NotebookEdit`, `runtimes: ["claude"]`); `claudeHookDeclarations()` is the one resolver (bundle ∪ project config, deduped by id, project wins). Verified at the source by the orchestration |
+| C2 | **The install-time absolute argv.** `.claude/settings.json` is tracked and a `git worktree` — exactly how a mesh worker builds its checkout — inherits it verbatim. The **queue** path then resolved outside the worktree (hook inert), and worse, the **script** path made `node` itself exit non-zero **before** the script's "exit 0, always" could apply — AC4 defeated from outside the script | defect | **HIGH** | blocker; supersedes ADR-001 | **fixed** — `args` is a single checkout-relative element and the script derives its queue from `process.argv[1]`, keeping AC1's no-environment-variable and AC2's no-derivation clauses. Both QA scenarios built: a second checkout lands its line in its **own** queue and none in the first's, and the pre-amendment absolute form is shown failing beside the relative form exiting 0 |
+| F-1 | **The AC5 headline scenario was vacuous** — with the worktree and the writes held constant, the frame was byte-identical whether the queue held the right names, the wrong names, nothing, or did not exist | defect (test) + design-gap (contract) | **HIGH** | fix now + contract amendment | **fixed** — scenario replaced (see ADR-013/C8 below); it now asserts a coded `artifact-sync-artifact-missing` on `aof mesh logs` for a deleted-but-named artifact, which no re-scan can produce, plus the consumed batch's own bytes |
+| F-2 | Same shape, and the test had been **retitled** from the feature's "is not read" to "is not re-sent" — the assertion softened to match the build | defect (test) | **HIGH** | fix now | **fixed** — restated in the failing direction: an unchanged artifact does not ride *even when the queue names it*; a changed one rides *even when it does not* |
+| F-3 | "Re-draining an already-sent batch" never re-sent anything (the hash gate suppressed it), so every Then held trivially | defect (test) | MED | fix now | **fixed** — the identical frame now goes through the control's own door a second time, which is what a reconnect does |
+| F-4 | **AC7's "derived, never two literal lists" was guarded by nothing** — a planted stale literal beside the manifest passed the behavioural suite *and* its own fitness function. The guard was not weak but **blind**: its detector matched `= (Object.freeze()? [{` while the real form is `= Object.freeze(Object.fromEntries(`, so the symbol was never detected at all | design-gap | **HIGH** | fix now | **fixed** — the arch clause now requires the initializer to name `WORK_ITEM_ARTIFACTS`, forbids a literal, and pins the derived value to the manifest's `file`-kind entries in order; QA's behavioural `deepEqual` added |
+| F-5 | The degrade channel was not self-limiting — one enqueued `unresolved-path` line produced **10 copies over 10 ticks** with the transport down. Third instance of this shape in the repo (the Mac's log ring was 259/260 copies of one code) | defect | MED | fix now | **fixed** — reported once per batch, cleared on confirm; asserted at one copy after ten ticks, with a new batch still reporting |
+| F-6 | Relative and case-different paths were silently dropped by the drain, with no code and no warning — while the hook is *contractually required* to carry paths verbatim | defect | MED | fix now | **fixed** — coded `artifact-sync-unattributable-path`, bounded by the manifest; all three spellings covered, an ordinary source file asserted silent |
+| F-9 | The `unresolved-path` degrade was asserted on the launcher's `onWarning` collector, one hop short of the `aof mesh logs` channel the Then names | defect (test) | LOW | fix now | **fixed** — assertions now run `meshLogsCommand.run({ node })` for real |
+| F-11 | Run records were not hash-gated — three steady-state ticks with one run record sent three content frames | design-gap | LOW | fix now on cost-of-fix (C10) | **fixed** — an idle tick now sends **no content frame at all**, the end state AC8 describes |
+| F-10 | A settings file that is valid JSON but **not an object** was refused with a message saying "not parseable JSON" | enhancement | LOW | fix now (cheap) | **fixed** — message distinguishes torn from array/string/number; three additive rows in task 03's read-side outline |
+| C4 | `.aof/artifact-sync-queue.ndjson` and `.batch` were **not git-ignored** and would land in every agent worktree — crossing into 43/05, whose ADR-008 refuses on a dirty worktree. `ensureAofGitignore` also had exactly one caller (`work-init.mjs`) for three milestones, so existing workspaces would never get the entry | defect | MED | fix now | **fixed** — both entries added; `work update` now calls it, asserted against a stripped-back pre-43/03 baseline |
+| C5 | A `finally { … try { closeSync(fd) } catch { fd = null } }` was a **second** runtime silence the `acd-no-new-silent-catch` detector cannot see (`fd` is block-scoped and never read again — the assignment is dead), so the pinned count of `1` was dishonest | degradation | LOW | fix now | **fixed** — the `finally` is dropped; the counter now returns 1, matching the pin |
+| C3 | The drift line never told the operator about the escape hatch it depends on | degradation | LOW | fix now | **fixed** — it now says to remove the `aofManaged` key to keep a hand edit |
+| C7 | ~60 lines of drain **orchestration** were inlined into `mesh-launcher.mjs`, the widest out-degree module in `src/` (2-in / 30-out) — the mechanism went to a leaf but the orchestration did not | degradation | MED | fix now | **fixed** — two call sites (`prepareArtifactSyncBatch` / `confirmArtifactSyncBatch`); the launcher went 1,660 → **1,643** lines. TECH_DEBT item 10 re-measured, with `mesh-launcher.mjs` added as the second file on that trajectory |
+| — | Health: `work-orchestrator.mjs` still named the deleted `claudeSettingsJson` and told the operator to run `aof apply` (wrong verb *and* wrong mechanism); `listItems()` walked twice per tick per worktree; and if `streamClient.sendWorktreeContent` were absent, `delivered` stayed `true` and the batch was discarded unsent | degradation | LOW-MED | fix now | **fixed** (all three) |
+
+No blocker finding is open. Root `src/` siblings went 100 → 104 — each graph-verified as ADR-earned and
+leaf-shaped (`work-artifacts.mjs` 5-in/0-out, `claude-settings.mjs` 4-in/2-out, `work-content-read.mjs`
+2-in/3-out, `artifact-sync.mjs` 2-in/1-out): not sprawl by subject, sprawl by directory, measured and
+recorded rather than ratcheted. `global-work-store.mjs` went **1,279 → 1,250**, handing 43/04 thirty lines
+of headroom against ADR-012/B4's ceiling instead of one.
+
+### Contract amendments made at this gate (by the PO, on the architect's rulings)
+
+- **AC5 replaced (ADR-013/C8).** AC5 demanded both *"reads content for the named artifacts **only**"* and
+  *"one loop does both jobs — the targeted push AND the reconciliation backstop"*, which cannot both hold;
+  the build implemented the backstop and documented the deviation in a module header, but the record was
+  never amended, so the contract claimed a property the system did not have and the only scenario over it
+  could not fail. The orchestration argued for narrowing the read; the architect ruled against it with
+  evidence, and the ruling is accepted: narrowing would break **AC4's "never worse than today"** (an
+  unwritable queue becomes N× slower than HEAD), **task 00's "within one stream tick"** for `Bash`-written
+  files, and **every codex worker** — the enqueue script ships `runtimes: ["claude"]`, so a codex node's
+  queue is permanently empty and *all* its artifact sync would fall to the reduced cadence, which is the
+  silent-no-fire class ADR-001 rejected the `http` hook type for, re-entering through the read path. The
+  affordability argument was always the **content hash's**, in both ADR-001's and ADR-007's own words.
+  **(a) becomes right the day the trigger is universal** — every runtime, every write path — recorded in
+  C8 with that precondition so it is not lost.
+- **Task 01** — header, `Feature:` line, the headline scenario and the "only the named artifacts are read"
+  scenario all restated to the property the build has and can fail on.
+- **Task 03** — the torn-file rows now follow **ADR-010/R3.A** (refuse-and-report, writing nothing) rather
+  than ADR-002's `absent/torn ⇒ {}`; the header paragraph that flagged the concern at refine records that
+  it was upheld; AC11's Then is split per-door; and the `@manual` scenario now states what QA measured —
+  the first real merge **reformats the whole document** (1203 → 1913 bytes, CRLF → LF, 51 → 93 lines, 3
+  identical leading lines), a one-time, **irreversible** churn that reads as a whole-file rewrite in
+  `git diff` even though every value survives. Runs 2–8 skip cleanly with the mtime frozen.
+- **Task 00** — the `args` Thens no longer require an absolute path (ADR-013/C2); the argv is one
+  checkout-relative element with no drive letter, leading separator or `..` segment.
+
+### ADR amendments written at this gate
+
+`ARCHITECTURE.md` gained **ADR-013** (C1–C10): C1 the trigger-not-delivered gap; **C2** supersedes
+ADR-001's install-time absolute argv; **C3** supersedes ADR-010/R3.E in the developer's favour (the marker
+is the ownership boundary and un-marking is the operator's escape hatch, so restore-and-report stands);
+C4 pins the queue as ignorable runtime state; C5 rules the silent-catch count; C6 accepts non-retracting
+settings keys; C7 health; **C8** supersedes AC5; **C9** rules AC7 survives as an **anti-drift rule, not a
+migration promise** (it has zero production importers left — kept exported and derived so the next caller
+reaching for "the record-doc names" gets the manifest's answer instead of writing a fifth literal list);
+C10 rules the run-record hash gate.
+
+### Accept decision — 43/03
+
+**NOT YET ACCEPTED — `status: in-review`, awaiting human `@uat` sign-off.** Everything automatable is
+green (38/0 `@executable`, 790/0 fitness, `validate 43/03` PASS, no blocker finding open, the repo's live
+settings file provably untouched). The remaining gate is the one the story exists for and the one no agent
+can stand in for: an operator reading a live remote agent's freshly authored features on the control node,
+mid-run.
+
 ### Accept decision — 43/02
 
 **ACCEPT 43/02.** Every `@executable` scenario is green (93/0 for the story, 115/0 with the inherited

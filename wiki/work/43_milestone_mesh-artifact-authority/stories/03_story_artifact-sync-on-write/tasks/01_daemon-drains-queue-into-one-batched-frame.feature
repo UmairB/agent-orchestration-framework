@@ -2,11 +2,21 @@
 
 # Task feature — the DRAIN (STORY.md AC5, ADR-001): the worker daemon consumes the
 # queue on its EXISTING stream tick (`pushActiveWorktreeState`, mesh-launcher.mjs:1448,
-# fired every `streamSyncSeconds` at :1378-1392), de-duplicates by path, reads current
-# content for the NAMED artifacts only, and sends ONE batched frame. The drain is
+# fired every `streamSyncSeconds` at :1378-1392), de-duplicates by path, and sends ONE
+# batched frame carrying only artifacts whose CONTENT HASH moved. The drain is
 # idempotent and loss-averse: it consumes by rename-then-read (or a persisted offset),
 # so a crash mid-drain RE-SENDS rather than loses. One loop does both jobs — the
 # targeted push AND the reconciliation backstop STATE mandates keeping.
+#
+# SUPERSEDED AT BUILD REVIEW (ADR-013/C8, 2026-08-02): this task originally said the tick
+# "reads current content for the NAMED artifacts only". It does not, and it must not — the
+# reconciliation backstop STATE mandates is a FULL read, and it is what converges a
+# `Bash`-written file and a node with no hook installed (which is every codex worker, since
+# the enqueue script ships `runtimes: ["claude"]`). The queue bounds the WIRE and the
+# REPORTING; the content hash is what makes the widened set affordable, in both ADR-001's
+# and ADR-007's own words. Every Then below that read as a claim about the local read has
+# been restated as a claim about what rides the wire, or about a degrade only the queue
+# could produce.
 # LITMUS: every Then is confirmable from an observable outcome on one of four channels
 # — (a) the batched frame on the wire (which artifacts it names, how many frames per
 # tick), (b) the CONTROL node's answers, read through the existing verbs
@@ -34,25 +44,35 @@
 @cli @work @distribution
 Feature: the worker daemon drains the queue on its existing tick and sends one batched frame that names only what changed
   In order that a hot per-write hook costs one wire frame per tick rather than one per keystroke, and that no artifact is ever lost between the write that named it and the frame that carries it
-  the daemon must de-duplicate the queue by path, read content for the named artifacts only, send one batched frame, and consume the queue in a way that re-sends rather than loses when it is interrupted
+  the daemon must de-duplicate the queue by path, send one batched frame carrying only artifacts whose content hash moved, and consume the queue in a way that re-sends rather than loses when it is interrupted
 
   Background:
     Given a worker daemon streaming an active worktree for item "43/03" on its existing stream tick
     And a control node that already holds this item's previously streamed artifact rows
     And the artifact-sync queue file for that worktree
 
-  # HEADLINE (AC5) — one tick, one frame, only the named artifacts. This is the O(changed)
-  # property that makes widening the artifact set (task 02) affordable at all.
+  # HEADLINE (AC5, as superseded by ADR-013/C8) — one tick, one frame, only what CHANGED,
+  # plus the one thing only the queue could know. The O(changed) property that makes
+  # widening the artifact set (task 02) affordable belongs to the CONTENT HASH; the queue
+  # bounds the wire and the reporting, never the local read (the reconciliation backstop
+  # still reads everything, because a `Bash`-written file and a node with no hook installed
+  # must both still converge on the very next tick). The original form of this scenario was
+  # VACUOUS — measured 2026-08-02: with the worktree and the writes held constant, the frame
+  # was byte-identical whether the queue held the right names, the wrong names, nothing, or
+  # did not exist.
   @executable
-  Scenario: one tick drains the queue and sends a single batched frame carrying exactly the named artifacts
+  Scenario: one tick drains the queue, sends one frame of only what changed, and reports what only the queue could know
     Given the queue holds one line each for STORY.md, `tasks/00_a.feature` and `tasks/01_b.feature`
+    And STORY.md has been deleted from the worktree since the line naming it was written
     When the stream tick runs once
     Then exactly one artifact frame is sent for "43/03" in that tick
-    And the frame carries bodies for exactly those three artifacts
-    And the frame carries no body for any artifact the queue did not name
-    And after the tick the control node answers `aof work doc 43/03 STORY --json` with the worktree's current STORY.md body
+    And the frame carries bodies for exactly the two feature files
+    And the frame carries no body for any artifact whose bytes did not change
+    And `aof mesh logs --node <the worker's node name> --json` shows exactly one coded
+      `artifact-sync-artifact-missing` degrade, naming STORY — which no re-scan could produce,
+      because a re-scan sees only that the file is absent, never that an agent had just written it
+    And the consumed batch file no longer exists, so a subsequent tick re-offers none of the three lines
     And after the tick the control node's `aof work tasks 43/03 --json` lists both feature files
-    And the queue file no longer offers those three lines to a subsequent tick
 
   # DE-DUPLICATION BY PATH (AC5). A refine writes the same file many times inside one
   # tick window — the frame must carry ONE body per path, and it must be the file's
@@ -79,19 +99,25 @@ Feature: the worker daemon drains the queue on its existing tick and sends one b
       | two lines for STORY.md, the file deleted before the tick ran   | 0      | the deletion is reported, never sent as an empty body      |
       | one line naming a file outside the item's artifact manifest   | 0      | an unmanifested path is not streamed (task 02 bounds the set) |
 
-  # ONLY THE NAMED ARTIFACTS ARE READ (AC5). Stated as an outcome rather than as a
-  # claim about the code: the artifacts the queue did NOT name keep the `updatedAt`
-  # they already had on the control. A tick that re-read and re-sent everything would
-  # move every stamp.
+  # ONLY WHAT CHANGED RIDES THE WIRE (AC5 as superseded by ADR-013/C8). The original
+  # form of this scenario claimed the unnamed artifacts are "not read", and was VACUOUS —
+  # measured 2026-08-02: the outcome was byte-identical whether the queue named DESIGN,
+  # named all fourteen, or was empty, because the wire is decided by the content hash and
+  # not by the queue. Restated so it pins the rule that actually holds, in the direction
+  # that can fail: an UNCHANGED artifact does not ride even when the queue names it, and a
+  # CHANGED one rides even when the queue does not — which is precisely why a `Bash`-written
+  # file and a hookless codex worker still converge on the very next tick.
   @executable
-  Scenario: an artifact the queue did not name is not read and its control-side row does not move
+  Scenario: an unchanged artifact does not ride and its control-side row does not move, whatever the queue named
     Given the worktree holds eight record docs and six `tasks/*.feature` files, all previously streamed
     And the queue holds one line, for DESIGN.md only
+    And DESIGN.md's bytes are unchanged since it was last streamed, while STATE.md has been edited on disk
     When the stream tick runs once
-    Then the frame carries exactly one artifact body
-    And the control node's DESIGN row carries a new `updatedAt` and this worker as `reportedBy`
-    And every one of the other thirteen artifacts' rows carries the `updatedAt` it had before the tick
-    And every one of those thirteen bodies is byte-identical to before the tick
+    Then the frame carries exactly one artifact body, for STATE
+    And the control node's STATE row carries a new `updatedAt` and this worker as `reportedBy`
+    And the control node's DESIGN row carries the `updatedAt` it had before the tick, though the queue named it
+    And every one of the other twelve artifacts' rows carries the `updatedAt` it had before the tick
+    And every one of those twelve bodies is byte-identical to before the tick
 
   # LOSS-AVERSION IS BEHAVIOURAL AND MUST BE PROVEN (AC5). Rename-then-read (or a
   # persisted offset) is the mechanism; the CONTRACT is that an interruption at any

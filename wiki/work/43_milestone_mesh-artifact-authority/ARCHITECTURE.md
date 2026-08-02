@@ -1381,6 +1381,379 @@ wholesale by the publish reactor declared below on the same event"* at `remap-pr
 
 ---
 
+## ADR-013: Build-time reconciliation for story 03 — the mechanism is built and the TRIGGER is not, because nothing declares it and its argv cannot survive a tracked file; ADR-010/R3.E's "never restored" is SUPERSEDED for a marked hook entry (a marker is aof's claim, and un-marking is the operator's escape hatch); the queue file is per-node runtime state and must be git-ignored; and the enqueue hook's sanctioned silence must be COUNTED honestly
+
+**Status:** Accepted
+**Date:** 2026-08-02
+
+**Context.** Structural review of `43/03`'s build (uncommitted at review time, HEAD `069ead2`). Eleven
+of twelve ACs conform; the manifest, the drain, the content hash and the co-authored merge are all
+built as decided, and AC11 is a genuine removal rather than a guard. What does **not** hold is the one
+thing the story is named for: **the trigger is never installed in any workspace.** Two independently
+sufficient reasons, both measured, plus one they share. Each ruling below is labelled **SUPERSEDES** /
+**PINS** / **CLARIFIES** in ADR-010's form, and each was verified at source or by running the code.
+
+**Codebase-graph grounding.** Rebuilt at this review — `aof graph build src` → **2,389 nodes, 6,212
+edges, 114 communities**, built `2026-08-02T21:27:46Z` (up from ADR-012's 2,336/6,266 nodes). `aof
+graph impact` read back for every file in the diff. Actual, not inferred:
+
+- The four new modules are genuine leaves/near-leaves with distinct subjects, exactly as the ADRs
+  required: **`work-artifacts.mjs` 5-in / 0-out** (a true pure leaf, as ADR-007 demanded),
+  **`artifact-sync.mjs` 2-in / 1-out**, **`claude-settings.mjs` 4-in / 2-out**,
+  **`work-content-read.mjs` 2-in / 3-out**. None is a hub; none imports the store.
+- **`src/global-work-store.mjs`'s fan-in FELL from 17 to 16** — the publisher stopped importing the
+  content read from it. The story reduced coupling on the milestone's widest node, which is what
+  ADR-012/B4 asked for and is worth saying.
+- **`src/mesh-launcher.mjs` is 2-in / 30-out** — the widest out-degree in `src/` and, at 1,660 lines,
+  the third-largest file. It is a *sink*, the shape ADR-012/B4 named on `mesh-worker-execution.mjs`.
+
+### C1 — RULES the story's central gap: the TRIGGER is not delivered. `Write|Edit|NotebookEdit` exists in this repo only inside two test fixtures, and no shipped surface declares a claude-runtime hook
+
+Measured: `grep -rn "Write|Edit|NotebookEdit" src/ .aof/` returns **nothing**. Every occurrence is in
+`test/artifact-sync-enqueue-hook.test.mjs` and `test/claude-settings-merge.test.mjs`, in a fixture
+constant the tests build themselves. The merge is fed from the **project's** `.aof/aof.config.json`
+(`applyClaudeSettingsMerge(targetDir, (await readConfig(targetDir)).config)` at `work-init.mjs:116`,
+`work-update.mjs:125`, and the loaded config at `commands/assets-apply.mjs:136`), and no bundle member
+declares such a hook — `src/bundle/bundle.json` carries three `kind: "hook"` members, all `codex`.
+
+The asymmetry is structural, not cosmetic, and it is worth naming because AC11's removal created it.
+`synthesizeBundleConfig` builds `{ hooks: bundle.hooks }` and hands it to the render pipeline: that is
+how the bundle's own codex hooks reach `.codex/hooks.json` without an operator writing anything. The
+claude equivalent used to be `claudeSettingsJson` reading the *same* synthesized config. AC11 deleted
+that renderer — correctly — but wired its replacement to a **different config source**. So after this
+story: aof can ship a codex hook to every workspace and cannot ship a claude hook to any.
+
+**Ruling: the story is INCOMPLETE, and the missing piece is owed by it, not by the milestone gate.**
+`aof work init` in a fresh workspace must install the trigger, or AC1 is a claim about a fixture. The
+declaration belongs where the codex hooks already live — a `kind: "hook"` bundle member with
+`runtimes: ["claude"]`, `event: "PostToolUse"`, `matcher: "Write|Edit|NotebookEdit"` — and
+`applyClaudeSettingsMerge` must be fed the **union** of the bundle's claude hooks and the project
+config's, through ONE resolver, so the two doors cannot answer differently about "which hooks does aof
+install". Two config sources for one question is the drift this milestone keeps paying for.
+
+This does NOT reopen the safety rule: the declaration goes in **aof's bundle**, never in this repo's
+own `.aof/aof.config.json`, and this repo arms only when the operator chooses to. `aof work init` in a
+scratch workspace is the observable.
+
+### C2 — SUPERSEDES ADR-001's "a queue file whose absolute path was stamped into its argv at hook-install time". An install-time absolute path is correct on exactly the machine that ran the install, and `.claude/settings.json` is TRACKED
+
+Verified: `git ls-files --error-unmatch .claude/settings.json` succeeds — the file is committed. A mesh
+worker builds its checkout with `git worktree add`, so it inherits the committed settings verbatim. The
+entry's argv would then name **another checkout's** script and **another checkout's** queue.
+
+Both halves fail, and the second fails worse than the ADR's own guarantee allows:
+
+- **The queue path** resolves outside the worktree. The append either lands in a foreign checkout's
+  queue (whose drain runs against a different worktree and will never name those artifacts) or throws
+  and is swallowed. The hook becomes inert; the reconciliation backstop carries everything. Never worse
+  than today, but never better either.
+- **The script path** is the sharp one. `args[0]` is an absolute path to `.claude/hooks/aof/…`; on a
+  node where that path does not exist, **`node` itself exits non-zero before the script's `exit 0,
+  always` can apply**. AC4's guarantee is a property of the script, and the entry can defeat it from
+  outside. The `@manual` cross-node scenario is precisely where this surfaces.
+
+**Ruling: an argv element in a TRACKED file may not carry an install-time absolute path.** ADR-001's
+"the queue destination is an ARGUMENT, never a derivation" survives intact — its subject was workspace
+*identity* (TECH_DEBT item 4), not path composition. Two admissible shapes, builder's choice:
+
+- **(a) derive from the script's own installed location.** The harness passes the script's absolute
+  path as `process.argv[1]`; the script lives at `<root>/.claude/hooks/aof/`, so the queue is a fixed
+  relative walk from it. This is checkout-local by construction, needs no environment variable, and
+  keeps AC1's "names no environment variable" clause unchanged.
+- **(b) a harness-supplied project-directory token**, substituted by Claude Code at fire time. This is
+  an argument the harness supplies, not a value the hook computes — but it costs AC1 its no-env-var
+  clause and it is a version assumption ADR-001 deliberately avoided taking on. (a) is preferred.
+
+Either way **AC1's Then "one `args` element is the absolute path of the queue file" is amended** to
+"names the queue by a checkout-local rule, never by a path that was absolute when the entry was
+written". C2 is a **precondition on C1**: the trigger may not be declared until its argv is
+checkout-local, because declaring it is what puts the absolute path into a tracked file.
+
+The durable class, which is bigger than this milestone and is why this is an ADR clause rather than a
+note: **anything aof writes into a tracked file must be checkout-relative or resolved at run time.**
+
+### C3 — SUPERSEDES ADR-010/R3.E's "a hand-edited marked entry is DRIFT-WARNED, never silently restored". The build restores AND warns; that is right, and R3.E's stated reason is wrong for an ENTRY
+
+R3.E's reasoning — *"restoring it would be the wholesale-overwrite reflex at entry granularity, and the
+operator marked their intent by editing it"* — is the bundle's drift-preserve semantics, and this story
+correctly applies exactly those semantics to the enqueue **script** (AC12: a hand-modified script is
+reported as drift and preserved). Applying them to the **entry** is not the same act:
+
+- A bundled file is self-contained. Preserving a drifted copy leaves the operator holding a file they
+  can read, whose divergence is theirs.
+- A hook entry carries `aofManaged` — **aof's own claim of authorship**. Preserving a drifted marked
+  entry leaves aof *claiming* an entry it no longer controls, pointing at a queue aof does not believe
+  in, in a file aof will keep re-reading every run. There is no state in which that is the honest one.
+
+The option neither R3.E nor task 03 named is the one that resolves it: **the marker IS the ownership
+boundary, and removing it is the operator's escape hatch.** The build already honours that half — an
+unmarked look-alike is the operator's forever, neither adopted, edited nor retracted. So the operator
+who genuinely wants a different entry has a precise, total and already-built way to say so.
+
+**Ruling: restore AND report, as built.** With one REQUIREMENT, because an escape hatch nobody is told
+about is not an escape hatch: the drift-warning line must name it. `formatClaudeSettingsOutcome`
+(`src/claude-settings.mjs:274`) currently says *"…had been edited; restored to the configured value"*;
+it must also say how to keep an edit — remove the `aofManaged` key and the entry becomes yours.
+
+### C4 — PINS the queue file as per-node runtime state that must be GIT-IGNORED, and rules it a fix owed by THIS story
+
+Measured: `git check-ignore .aof/artifact-sync-queue.ndjson` → **not ignored**. `AOF_GITIGNORE_ENTRIES`
+(`src/aof-gitignore.mjs:29`) names three derived artefacts and neither the queue nor its `.batch`
+sibling. The queue is the same class as every entry already there — derived, regenerable, per-node,
+never an authoritative copy — and it is written into **every worktree an agent runs in**.
+
+Two ways it bites, the second across a story boundary:
+
+- Every agent worktree grows an untracked file that shows in `git status`, in an agent's own diff read,
+  and in any operator glance at a run.
+- **ADR-008 (43/05) refuses gate propagation on a DIRTY worktree.** A permanently-untracked runtime file
+  in every worktree is exactly the input that refusal is not meant to fire on. Story 05 would inherit a
+  defect this story created, three stories away from its cause.
+
+**Ruling: fix in this story** — one entry each for the queue and its `.batch` sibling. And the second
+half, which is the part that would otherwise be missed: `ensureAofGitignore` is called by
+`work-init.mjs:123` **and by nothing else**, so an existing workspace never receives a new baseline
+entry. `work update` must call it too, or the entry reaches only workspaces initialised after today.
+
+### C5 — RULES the amended silent-catch baseline: the sanctioned-floor rationale HOLDS, but the file's count does not. The ratchet is guarding a number that is not true
+
+The rationale for `"bundle/hooks/artifact-sync-enqueue.mjs": 1` is accepted on its merits and is the
+same shape as `degrade.mjs` / `mesh-log.mjs`: the file may not import the degrade sink (a *second*
+fitness function, `acd-artifact-sync-hook-derivation-free`, fails the build if it tries), must write
+nothing on stdout, and must exit 0. Its queue-append fault genuinely has nowhere to report, and its
+compensating control is architectural. That is a sanctioned floor, not a relaxation.
+
+**But the same diff put a SECOND runtime silence in the same file, which the detector does not count:**
+
+```js
+} finally {
+  if (fd != null) try { closeSync(fd); } catch { fd = null; }
+}
+```
+
+`fd` is block-scoped and never read again — the assignment is dead. The body is a statement, so
+`countSilentCatches` scores it 0, and the gate's own self-check asserts *"a body with a statement is
+handling, not silence"*. Here it is silence wearing a statement. The file's true count is 2 and its
+pin says 1, so the shrink-only ratchet now protects a number that understates its subject.
+
+**Ruling: the entry stays; the count must become true.** Preferred fix, because it removes the site
+rather than declaring it: **drop the `finally` entirely.** This is a process that exits within
+milliseconds of the append; the OS closes the descriptor, and an explicit `closeSync` buys nothing that
+justifies a second catch in the one file in the repo forbidden from reporting. The file then really
+does have exactly one silent catch and the pinned `1` is honest. (If the close is kept for any reason,
+the baseline must read `2` and the comment must name both sites.)
+
+### C6 — CLARIFIES what the merge does NOT retract, and accepts it
+
+`claudeSettingsPatch` spreads `config.settings.claude` into the merged document's top level (so
+`settings.claude.model` still becomes `.claude/settings.json`'s `model`, as `work-orchestrator.mjs`'s
+surface depends on). Unlike a hook entry, a spread settings key carries **no marker**, so removing it
+from config does not remove it from the file — where the deleted whole-file renderer would have dropped
+it. **Accepted, deliberately.** For a co-authored file, aof declining to delete a top-level key it
+cannot prove it authored is the conservative direction, and it is the same principle as C3's escape
+hatch read from the other side. Recorded so the next reader does not "fix" it into a deletion.
+
+### C7 — RULES the codebase-health finding: four new root siblings are each ADR-earned, `global-work-store.mjs` bought back 29 lines of headroom, and `mesh-launcher.mjs` is now the file on the god-file trajectory
+
+Measured 2026-08-02 against HEAD (`069ead2`), `.mjs` only, so every column is comparable:
+
+| Signal | 2026-08-01 | 43/01 | 43/02 (HEAD) | **43/03** | Trend |
+|---|---|---|---|---|---|
+| `src/` `.mjs` files | 202 | 203 | 203 | **208** | +5 (4 root + 1 bundle asset) |
+| `src/` root-level `.mjs` | 99 | 100 | 100 | **104** | **+4 — the flat trend ends** |
+| `src/` `.mjs` lines | 50,744 | 51,378 | 51,927 | **52,980** | +1,053 |
+| `src/global-work-store.mjs` | 885 | 885 | **1,279** | **1,250** | **−29 — headroom bought back** |
+| `src/mesh-launcher.mjs` | — | — | 1,585 | **1,660** | +75 |
+| store openers (TECH_DEBT 12) | 17 | 17 | 17 | **17** | flat |
+
+Three readings, and the first two are good news that should be said as plainly as the bad:
+
+- **The single-writer module SHRANK.** ADR-012/B4 set a 1,280-line ceiling; HEAD sat at **1,279** — one
+  line from red. By moving the worker-side content read into `work-content-read.mjs` this story took it
+  to 1,250 and its graph fan-in from 17 to 16. B4's ruling was *"the NEXT block lands in a module of its
+  own and is called from the store"*, and this is the first block that arrived after it, handled exactly
+  as ruled. **43/04's 30 lines of headroom are still 30 lines**: its mapper, staleness predicate and
+  Resync door land in their own module (ADR-005's `src/work-read.mjs`), and raising the ceiling remains
+  an ADR decision.
+- **The four new root modules are each ADR-earned and each leaf-shaped**, confirmed on the graph rather
+  than argued: `work-artifacts.mjs` (ADR-007 names it, 5-in/**0-out**), `claude-settings.mjs` (ADR-002
+  names it, 4-in/2-out), `work-content-read.mjs` (ADR-012/B4 requires it, 2-in/3-out),
+  `artifact-sync.mjs` (ADR-001's mechanism, 2-in/1-out). None is a hub, none opens a store, none is a
+  bag of leftovers. **This is not sibling-sprawl by subject.**
+- **It IS sprawl by directory, and the milestone's own health table has been calling it "flat".** 99 →
+  104 in three stories, and ADR-005 still owes a fifth (`work-read.mjs`) in 43/06. TECH_DEBT item 10's
+  argument stands — a root-file-count ceiling imposed today would fail CI for everyone else's reasons
+  before the grouping exists — so **no ratchet now**, but the measurement is written into item 10 so the
+  overhaul is scheduled against a number rather than an impression.
+
+**The new finding is `src/mesh-launcher.mjs`: 1,660 lines, 2-in / 30-out — the widest out-degree in
+`src/`.** The story did the right half (the drain mechanism lives in `artifact-sync.mjs`) and then
+inlined ~60 lines of *orchestration* — four `emitWarning` blocks, the hash-map lifecycle, the
+delivery-confirm sequencing — directly into `pushActiveWorktreeState`. That is how
+`mesh-worker-execution.mjs` reached 3,187: one justified block at a time. **Ruling: no refactor required
+of this story** (the same reasoning ADR-012/B4 applied), **but the B4 requirement now extends to it**:
+43/04 and 43/05 add a *call site* to `mesh-launcher.mjs`, never a block. A named function in
+`artifact-sync.mjs` that takes the tick's inputs and returns `{ frames, warnings }` is where a second
+block belongs. Routed to TECH_DEBT item 10 beside the god-file it is following.
+
+Two smaller items, both fix-in-story: `src/work-orchestrator.mjs:9` still names the deleted
+`runtime-config.claudeSettingsJson`, and `:169` tells the operator to *"run `aof apply` to re-render
+.claude/settings.json"* — advice that is now wrong in both verbs and mechanism. And the tick derives one
+fact twice: `listItems(worktreeWs.workDir)` is walked for `resolveDrainedArtifacts` and again inside
+`readWorkspaceContentRecords`, per tick per worktree.
+
+### C8 — SUPERSEDES AC5's *"reads current content for the named artifacts **only**"*. The queue bounds the WIRE, never the local read; the cost argument was always the HASH's, and a cadence split would break three other ACs to buy back a cost no ADR was defending
+
+QA measured the headline scenario with the worktree constant and only the queue varied: the exact three
+names, an empty queue, three wrong names and no queue file **all produce the identical frame**. That is
+correct: `changedDocs` comes from `content.docs` (the full reconciliation read) gated by
+`selectChangedArtifacts`, and `resolved.named` feeds only the three warning channels. The finding is
+sound and the scenario cannot fail. `src/artifact-sync.mjs:16-27` documents the deviation honestly; the
+record does not, which is the defect.
+
+**The tension is inside AC5 itself** — *"named artifacts only"* AND *"one loop does both jobs … the
+reconciliation backstop STATE mandates keeping"* — and the backstop is a full read by definition. One
+of the two clauses has to go.
+
+**Ruling: (b). Amend AC5 to the truth. The drain's shape does NOT change** — the three other findings on
+that code can be fixed in the same pass with no redesign.
+
+The coordinator's lean toward (a) rests on "(b) quietly concedes the cost argument that justified the
+hook". Checked against the ADRs' own words, it does not, because **the cost argument was never the
+hook's**:
+
+- ADR-007: *"Artifacts travel with a per-artifact content hash, and an unchanged artifact is never
+  re-sent … **With it, the tick is cheap** and ADR-001's hook-named change list is what usually decides
+  the batch."*
+- ADR-001, Consequences: *"Widening the artifact set (ADR-007) becomes affordable, **because the tick
+  stops re-sending unchanged content**."*
+
+Both assign affordability to the **hash**, and both were written about the *send*. The hook's unique
+contribution is the wire plus two signals a scan can never produce. What (b) concedes is one sentence in
+ADR-001's Context that said "re-scan-**and-send**" and then reasoned only about the send.
+
+**And (a) is not free — it breaks three AC-named cases**, because it makes convergence depend on a
+runtime-specific hook being installed:
+
+1. **AC4 says the degraded path is *"never worse than today"***, and today is a full read every tick.
+   Moving the backstop to every Nth tick makes an unwritable queue N× slower than HEAD — AC4 contradicted
+   directly by the fix meant to honour AC5.
+2. **`Bash`-written artifacts** are deliberately outside the matcher and are STATE's named reason for
+   keeping the backstop. Under (a) they wait for the reduced cadence, and task 00's *"within one stream
+   tick"* Thens become false.
+3. **A codex worker has no `PostToolUse` hook at all** (the enqueue script ships `runtimes: ["claude"]`).
+   Under (a) its queue is permanently empty, so its ordinary tick sends nothing and *all* of its artifact
+   sync runs at the reduced cadence. This is the silent-no-fire class ADR-001 rejected the `http` type
+   for, re-entering through the read path. **(1) and (3) apply to every node today**, since C1 has just
+   established that no node has the entry installed.
+
+QA's closing scenario (*"two edited, one named → only the named one rides"*) is satisfiable **only**
+under a cadence split, because the unnamed-but-edited artifact has to ride *some* later tick. So it is
+not an independent test of (a) — it is (a) restated, and it inherits (1)–(3).
+
+**(a) becomes right the day the trigger is universal** — every runtime, every write path, installed
+everywhere — at which point the backstop is genuinely redundant rather than load-bearing. That is a
+future ADR with a real precondition, recorded here so the option is not lost: it needs a `Bash`-covering
+trigger and a codex equivalent, not a cadence knob.
+
+**AC5's replacement text** (the property the build has, and which IS falsifiable):
+
+> 5. **The daemon owns batching and the wire.** The worker daemon drains the queue on its **existing**
+>    stream tick (`pushActiveWorktreeState`), de-duplicates by path, and sends one batched frame carrying
+>    **only artifacts whose content hash moved**. The queue bounds the **wire and the reporting**, not
+>    the local read: the tick still performs the full reconciliation read STATE mandates, because a
+>    `Bash`-written file and a node with no hook installed must both still converge on the very next
+>    tick. What the queue buys that no re-scan can: a named-but-now-missing artifact becomes a coded
+>    degrade instead of a silence, an `unresolved-path` line reaches an operator, and the drain is
+>    **idempotent and loss-averse** — it consumes by rename-then-read, so a crash mid-drain **re-sends
+>    rather than loses**. One loop does both jobs.
+
+**And the headline scenario is replaced** by one on a channel the backstop cannot reproduce. Task 01's
+`Scenario: one tick drains the queue and sends a single batched frame carrying exactly the named
+artifacts` becomes:
+
+```gherkin
+  @executable
+  Scenario: one tick drains the queue, sends one frame of only what changed, and reports what only the queue could know
+    Given the queue holds one line each for STORY.md, `tasks/00_a.feature` and `tasks/01_b.feature`
+    And STORY.md has been deleted from the worktree since the line naming it was written
+    When the stream tick runs once
+    Then exactly one artifact frame is sent for "43/03" in that tick
+    And the frame carries bodies for exactly the two feature files
+    And the frame carries no body for any artifact whose bytes did not change
+    And `aof mesh logs --node <the worker's node name> --json` shows exactly one coded
+      `artifact-sync-artifact-missing` degrade, naming STORY — which no re-scan could produce,
+      because a re-scan sees only that the file is absent, never that an agent had just written it
+    And the consumed batch file no longer exists, so a subsequent tick re-offers none of the three lines
+    And after the tick the control node's `aof work tasks 43/03 --json` lists both feature files
+```
+
+Its litmus already permits this: channel (d) is `aof mesh logs`, and the batch file's own bytes are the
+one artefact the backstop never touches.
+
+### C9 — RULES F-4/G2: AC7 was guarded by nothing, and the answer to "is the compatibility clause still meaningful" is NO — the AC survives as an ANTI-DRIFT rule, not a migration promise
+
+QA's plant is confirmed, and the guard was worse than weak — it was **blind**. `declares()` matches
+`= (Object.freeze()? [{`; the real derived form is `= Object.freeze(Object.fromEntries(`, which matches
+neither, so `WORK_ITEM_DOC_FILES` was never detected at all and the "both names in the same module"
+branch never executed. A stale literal beside the manifest satisfied every proof.
+
+**The invariant was never "one file"; it is "ONE DEFINITION, one DERIVED view — never two literal
+lists", and that is a property of the INITIALIZER.** `acd-work-artifact-set-single-home` gains the clause
+that reads it (written and green at this review): the declaration must exist in the manifest module, its
+initializer must name `WORK_ITEM_ARTIFACTS`, it may not open with an object/array literal, and the
+derived value must equal the manifest's `file`-kind entries in manifest order. QA's plant trips two
+clauses; the real form passes; a module with no declaration is reported rather than skipped.
+
+**On the importer question — measured: `WORK_ITEM_DOC_FILES` has ZERO production importers.** The only
+occurrences in `src/` are its declaration and the re-export from `global-work-store.mjs`; `commands/doc.mjs`,
+the last real consumer, moved to `resolveArtifactRequest`. So AC7's *"so every existing importer keeps
+working unchanged"* is now a claim about the empty set — **true, and meaningless**. It should not be
+deleted, because the constant is still exported from two modules and the moment anyone imports it the
+drift risk is live again; it should be **re-stated as what it now is**:
+
+> 7. **`WORK_ITEM_DOC_FILES` is DERIVED from the manifest** (its `file`-kind entries) and re-exported
+>    from `global-work-store.mjs`. It is a compatibility view with **no importers left in `src/`** — the
+>    migration it existed for is complete — and it is kept exported, and derived, so that the next caller
+>    to reach for "the record-doc names" gets the manifest's answer rather than writing a fifth literal
+>    list. One definition, one derived view — **never two literal lists**, enforced on the initializer,
+>    not on the filename.
+
+The honest reading of the AC's history is worth one line for the retro: a compatibility clause outlived
+the compatibility it promised, and nobody noticed because the guard was watching the wrong noun.
+
+### C10 — RULES F-11: run records get the SAME hash gate, in this batch
+
+Measured: three steady-state ticks with one run record send three frames (`docs: []`, `runs: [1,1,1]`).
+It is **pre-existing HEAD behaviour**, not a regression, and no AC is falsified — task 02's scenario says
+*"no artifact **body** is carried"*, which is true. So this is not a correctness finding.
+
+It is ruled **fix-now** on cost-of-fix rather than severity: the tick already holds the sent-hash map,
+`selectChangedArtifacts` / `recordSentArtifacts` are already generic over `{ ref, doc|runId, hash }`, and
+the change is a handful of lines in the same function. The alternative is a frame per tick per active
+worktree on every worker, forever, for a fact that stopped changing when the run ended — and the fix never
+gets cheaper than "the map is already here". Two conditions, both already true of the doc path and both
+required of the run path: the hash is over the **serialized record**, and the map is updated **only after
+delivery**, so an interruption re-sends. With docs and runs both gated, a genuinely idle tick sends **no
+content frame at all**, which is the end state AC8 describes.
+
+**Consequences.**
+- AC5 stops claiming a property the build does not have, and its headline scenario stops being a test of
+  the backstop; the drain's shape is unchanged, so the remaining findings fix in one pass.
+- The option (a) foreclosed here is foreclosed *with its precondition written down*, so a future
+  milestone can take it deliberately rather than rediscover the argument.
+- The story's mechanism is sound and its trigger is not shipped; C1 + C2 say so together, because the
+  reason it cannot ship yet (a tracked absolute path) is the reason it must not be armed first.
+- ADR-010/R3.E's blanket rule is replaced by a boundary that already exists in the build — the marker —
+  so "who owns this entry" has one answer and one operator-visible way to change it.
+- A runtime file the milestone introduces stops being story 05's inherited defect.
+- The one fitness function this story relaxed leaves the review with a true count rather than a
+  rationale, and `acd-claude-settings-co-authored` gains the UNCONDITIONAL removal assertion AC11
+  deserves (previously the clause armed only when this repo's own config declared a claude hook — which
+  the story's own safety rule forbids, so the invariant was protected by nothing here).
+
+---
+
 ## Fitness functions (the enforced invariants)
 
 Arch-tests live under `test/arch/acd-*.test.mjs` (node:test-style `archTests` arrays, registered in
@@ -1391,13 +1764,13 @@ unbuilt and bind the moment it lands. No file is committed RED.
 
 | File | ADR | State |
 |---|---|---|
-| `acd-artifact-sync-hook-derivation-free` | 001 | green (2 live proofs) + armed |
-| `acd-claude-settings-co-authored` | 002 | green (canary on the operator's keys) + armed at the hazard |
+| `acd-artifact-sync-hook-derivation-free` | 001 | green (2 live proofs) + **the armed clause FIRED at `43/03` and is green** against the real enqueue script |
+| `acd-claude-settings-co-authored` | 002 | green (canary on the operator's keys) + armed at the hazard + **an UNCONDITIONAL removal proof added by ADR-013**: `claudeSettingsJson` exists in no `src/` module, and `renderConfigOutputs` emits no `.claude/settings.json` for a config declaring BOTH a claude hook and `settings.claude` — with the codex leg of the same call as the non-vacuity control. The armed clause was keyed on THIS repo's config declaring a claude hook, which 43/03's own safety rule forbids, so AC11's removal was protected by a clean skip until now. |
 | `acd-item-lock-single-door` | 003 | green (single `executionScopeRef` definition; mint seam imports the lock module; no command re-derives the scope check) + armed — **amended by ADR-010/R1.1** (the armed clause forbids a command module deciding the SCOPE lock, and no longer flags the sanctioned exact-ref `findActiveAssignment`) and **by ADR-011/A1**: a further clause — *the publish path reads no `global_assignments` state* — is due at `43/02`, where authority becomes a `node_id` column and the assignment read disappears. Not committed now: it would be red against `43/01`'s interim carry. **DISCHARGED at `43/02`** (ADR-012/B1–B2): the clause is committed and green, in two halves — no `FROM global_assignments` in the store module, and `executionScopeRef` as the ONLY import it may take from the assignment leaf. |
 | `acd-work-items-single-writer` | 004 | green (single DML module; the armed reclassification clause FIRED at `43/02` and is green) + **two ratchets added by ADR-012**: `wholesaleDelete`'s exported caller set is pinned to one module (B3), and `src/global-work-store.mjs` carries a line ceiling so the milestone's single-writer module does not become the next god-file (B4) |
 | `acd-cache-read-surface-boundary` | 005 | green (worker/structural readers PINNED) + armed — **amended by ADR-010/R6.3**: `promote-gap-to-chore.mjs` moved from the control-side list into the positively-pinned STRUCTURAL list |
 | `acd-cache-staleness-single-predicate` | 006 | green (strict `>`, no time-predicated DELETE) + armed |
-| `acd-work-artifact-set-single-home` | 007 | green (one declaration site) |
+| `acd-work-artifact-set-single-home` | 007 | green (one declaration site) + **a DERIVATION clause added by ADR-013/C9**: `WORK_ITEM_DOC_FILES`' initializer must name `WORK_ITEM_ARTIFACTS`, may not be an object/array literal, and its value must equal the manifest's `file`-kind entries in manifest order. The pre-existing clause was blind — its detector matched `= (Object.freeze()? [{` and the real derived form is `= Object.freeze(Object.fromEntries(`, so a stale literal declared beside the manifest passed every proof (QA-planted, 43/03). The invariant is a property of the INITIALIZER, not of the filename. |
 | `acd-gate-propagation-never-discards` | 008 | green (no history-rewriting git op) + armed |
 
 **Invariants MOVED here out of the feature layer** — these are structural and must never be written as a

@@ -393,14 +393,32 @@ overwritable this way.
 medium — nothing is broken, but every measurement in item 0's own table has moved the wrong way, and
 this is the shape item 0 named.
 
-**What's wrong.** Measured 2026-08-01 against item 0's 2026-07-26 baseline:
+**What's wrong.** Measured 2026-08-01 against item 0's 2026-07-26 baseline, then re-measured through
+milestone 43's stories (`.mjs` only, so every column is comparable — 2026-08-02, ADR-013/C7):
 
-| Signal | 2026-07-26 | 2026-08-01 | Trend |
-|---|---|---|---|
-| `src/` files | 147 | **202** | +37% |
-| `src/` lines | 41,348 | **50,744** | +23% |
-| `src/` **root-level** `.mjs` | — | **99** (of 202) | half the tree is one flat directory |
-| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | **+47%** — the largest file in the repo |
+| Signal | 2026-07-26 | 2026-08-01 | 43/01 | 43/02 | 43/03 | Trend |
+|---|---|---|---|---|---|---|
+| `src/` `.mjs` files | 147 | **202** | 203 | 203 | **208** | +41% |
+| `src/` `.mjs` lines | 41,348 | **50,744** | 51,378 | 51,927 | **52,980** | +28% |
+| `src/` **root-level** `.mjs` | — | **99** (of 202) | 100 | 100 | **104** | half the tree is one flat directory |
+| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | 3,187 | 3,187 | 3,187 | **+47%** — the largest file in the repo |
+| `src/mesh-launcher.mjs` | — | — | — | 1,585 | **1,660** | 2-in / **30-out** — the widest out-degree in `src/` |
+
+**A SECOND file is now on the same trajectory: `src/mesh-launcher.mjs`.** Graph-measured 2026-08-02
+(2,389 nodes / 6,212 edges): it imports **30** modules and is imported by 2 — the same *sink* shape, not
+hub shape, that item 0 named on `mesh-worker-execution.mjs`. 43/03 added ~60 lines of drain
+*orchestration* inline to `pushActiveWorktreeState` (the drain *mechanism* correctly went to a new leaf,
+`src/artifact-sync.mjs`, so this is the residue rather than the whole block). ADR-013/C7 makes the same
+requirement ADR-012/B4 made of the store module: **43/04 and 43/05 add a call site to it, never a
+block.** Nothing in either file's growth was a bad diff on its own; that is the point of the item.
+
+**The root-sibling count moved for the first time in this milestone.** 99 → 104. ADR-013/C7 verified on
+the graph that each of 43/03's four new root modules is ADR-mandated and leaf-shaped
+(`work-artifacts.mjs` 5-in/0-out, `claude-settings.mjs` 4-in/2-out, `work-content-read.mjs` 2-in/3-out,
+`artifact-sync.mjs` 2-in/1-out) — so this is not sprawl by *subject*, and no ratchet was imposed. It is
+sprawl by *directory*, and ADR-005 still owes a fifth (`work-read.mjs`) in 43/06. The ceiling stays
+dishonest until the grouping below exists; the number is recorded here so the overhaul is scheduled
+against evidence rather than an impression.
 
 `mesh-worker-execution.mjs` imports 17 modules and is imported by 3 (codebase graph, 2026-08-01: 1960
 nodes / 5754 edges). It is not a hub anyone depends on — it is a **sink** that keeps absorbing. Its 47%

@@ -28,6 +28,7 @@ import {
 } from "../render-plan.mjs";
 import { RUNTIME_FLAGS, hasRuntimeOptions, parseRuntimes } from "../spine/flags.mjs";
 import { adapterWarningLines, renderValidationReport } from "./validate-shared.mjs";
+import { applyClaudeSettingsMerge, formatClaudeSettingsOutcome } from "../claude-settings.mjs";
 
 // Runtime resolution for apply (moved from cli.mjs with the migration): flags
 // win; else the config's own runtimes list; else every supported runtime.
@@ -129,8 +130,13 @@ export const assetsApplyCommand = {
     }
 
     await executeApplyActions(actions);
+    // m43 / ADR-002: `.claude/settings.json` is CO-AUTHORED, so it is absent from the
+    // plan by construction (adapters.mjs no longer renders it whole-file) and its
+    // claude hook entry / `settings.claude` keys land through the surgical merge —
+    // the SAME call `work init` and `work update` make.
+    const claudeSettings = await applyClaudeSettingsMerge(targetDir, config);
     await writeLock(paths.lockPath, manifest);
-    return { mode: "applied", ...base };
+    return { mode: "applied", ...base, claudeSettings };
   },
 
   cli: {
@@ -198,6 +204,8 @@ export const assetsApplyCommand = {
       for (const item of result.actions) {
         lines.push(result.verbose ? formatApplyAction(item) : formatFriendlyApplyAction(item, { targetDir: result.targetDir }));
       }
+      const settingsLine = formatClaudeSettingsOutcome(result.claudeSettings, { targetDir: result.targetDir });
+      if (settingsLine != null) lines.push(settingsLine);
       lines.push(`${successMarker()} Updated ${result.lockDisplay}`);
       return lines.join("\n");
     },
@@ -222,6 +230,7 @@ export const assetsApplyCommand = {
         adapterWarnings: result.adapterWarnings,
         actions: result.actions,
         lock: result.lockDisplay,
+        claudeSettings: result.claudeSettings ?? null,
       };
     },
 

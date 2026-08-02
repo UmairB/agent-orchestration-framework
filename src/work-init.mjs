@@ -34,6 +34,12 @@ import { bundleVersion, summarizeActions, synthesizeBundleConfig } from "./work-
 import { workspacePaths } from "./workspace.mjs";
 import { ensureAofGitignore } from "./aof-gitignore.mjs";
 import { setHeadroomEnabled, readConfig, writeConfig } from "./work-headroom.mjs";
+// m43 / ADR-002: `.claude/settings.json` is CO-AUTHORED and is therefore NOT in the
+// render plan above — `init` treats every unlocked file as fresh, which is exactly how
+// a whole-file render would delete the operator's hooks/permissions/sandbox. The
+// claude runtime's own hook entry reaches the file through the surgical merge, after
+// the plan has run and written the files the entry's argv names.
+import { applyClaudeSettingsMerge } from "./claude-settings.mjs";
 
 // ADR-009: the install manifest lives in the `work` section of the single unified
 // project lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There
@@ -107,6 +113,8 @@ export async function initWork(options = {}) {
 
   await executeApplyActions(actions);
 
+  const claudeSettings = await applyClaudeSettingsMerge(targetDir, (await readConfig(targetDir)).config);
+
   // Establish the workspace `.gitignore` baseline (milestone 04 round-trip finding
   // F-02): a SELF-CONTAINED nested `.aof/.gitignore` that ignores the derived,
   // regenerable artifacts (the memory index) — never the repo-root `.gitignore`.
@@ -162,6 +170,9 @@ export async function initWork(options = {}) {
     manifest,
     manifestPath: lockPath,
     manifestWritten: true,
+    // The merge's outcome rides the result rather than a console.log, so a refusal
+    // (`claude-settings-unparseable`) reaches --json as well as the human render.
+    claudeSettings,
     summary: summarizeActions(actions)
   };
 }

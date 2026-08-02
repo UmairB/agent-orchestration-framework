@@ -25,7 +25,20 @@ import { workspacePaths } from "./workspace.mjs";
 // Notion work-board sync's identity sidecar `notion.work-map.json` (17/ADR-001) joins
 // them: a derived, aof-owned mapping of aof ref → Notion page id, rebuildable by a
 // re-sync, never a committed authoritative source — so it is git-ignored here too.
-export const AOF_GITIGNORE_ENTRIES = ["aof.memory.index.json", "aof.memory.graphify.index.json", "notion.work-map.json"];
+// m43 / ADR-013/C4 — the artifact-sync QUEUE and its consumed `.batch` sibling join
+// them, and for the same reason: per-node runtime state, derived, regenerable, never an
+// authoritative copy. It is written into EVERY worktree an agent runs in, so leaving it
+// untracked-but-not-ignored would (a) show in every `git status` an agent or an operator
+// reads mid-run and (b) make every worktree permanently DIRTY — which is precisely the
+// input ADR-008 (43/05) refuses gate propagation on. Story 05 would otherwise inherit a
+// defect this story created, three stories from its cause.
+export const AOF_GITIGNORE_ENTRIES = [
+  "aof.memory.index.json",
+  "aof.memory.graphify.index.json",
+  "notion.work-map.json",
+  "artifact-sync-queue.ndjson",
+  "artifact-sync-queue.ndjson.batch",
+];
 
 const HEADER = "# aof — derived/regenerable artifacts; never commit (the tracked install is committed).\n";
 

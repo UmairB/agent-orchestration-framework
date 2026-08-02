@@ -5,10 +5,16 @@
 // role sub-agents (whose per-role models live in `work.agents.models`, story 30)
 // and does the top-level planning/routing itself. THIS surface sets the model the
 // orchestrator itself runs on. It is stored at `settings.claude.model`, the one
-// field the render engine (runtime-config.claudeSettingsJson) projects into
-// `.claude/settings.json` as `{ "model": ... }` — the key Claude Code reads to
-// pick a session's default model. So the choice is FUNCTIONAL: `aof apply`
-// re-renders settings.json and the next orchestrator session launches on it.
+// field aof splices into `.claude/settings.json` as `{ "model": ... }` — the key
+// Claude Code reads to pick a session's default model. So the choice is FUNCTIONAL:
+// `aof work update` (or `aof work init` / `aof assets apply`) SPLICES the key into
+// the co-authored settings file through `claude-settings.mjs`'s surgical merge, and
+// the next orchestrator session launches on it.
+//
+// m43 / ADR-002 AC11: the whole-file renderer this comment used to name
+// (`runtime-config.claudeSettingsJson`) is GONE. `.claude/settings.json` is
+// co-authored — an operator's hooks, permissions and sandbox live in it — so aof
+// merges its own keys in and never renders the file whole.
 //
 // The command is a config-only read-merge-write of `.aof/aof.config.json`,
 // following the established `useHeadroom` idiom:
@@ -166,7 +172,7 @@ export async function selectOrchestratorModel({ targetDir = process.cwd(), model
 
   const label = ORCHESTRATOR_CHOICES.find((choice) => choice.id === chosen)?.label ?? chosen;
   log(`Orchestrator model set to ${label} (settings.claude.model = "${chosen}") in ${configPath}`);
-  log("Run `aof apply` to re-render .claude/settings.json so the next session picks it up.");
+  log("Run `aof work update` to splice the model into .claude/settings.json so the next session picks it up (your own hooks and permissions in that file are preserved — aof merges, never re-renders).");
 
   return { configPath, config, model: chosen, previous, changed: previous !== chosen };
 }

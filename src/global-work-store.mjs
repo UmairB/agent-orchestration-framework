@@ -2,24 +2,17 @@ import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
-// schema v5 (TECH_DEBT item 6 — finish the board bridge): the worker-side content
-// reader (readWorkspaceContentRecords, below) reuses the run store's own reader so a
-// streamed run record is byte-identical to what `work:run-status` reads locally.
-// run-store.mjs imports no store/mesh module — no cycle.
-import { readRuns } from "./run-store.mjs";
 
 export const GLOBAL_WORK_SCHEMA_VERSION = 8;
 
-// The record docs a board/CLI face may request by NAME (work:doc's input contract)
-// and therefore exactly the doc bodies a worker streams for its active worktree —
-// ONE home for the set, imported by commands/doc.mjs and the content reader below,
-// so the streamed set and the requestable set can never drift.
-export const WORK_ITEM_DOC_FILES = {
-  SPEC: "SPEC.md",
-  STORY: "STORY.md",
-  VERIFICATION: "VERIFICATION.md",
-  RETROSPECTIVE: "RETROSPECTIVE.md",
-};
+// m43 / ADR-007 — the artifact set MOVED to the pure leaf `work-artifacts.mjs` and
+// widened to a two-kind manifest (8 exact filenames + `tasks/` × `.feature`).
+// `WORK_ITEM_DOC_FILES` is DERIVED there from the manifest's file-kind entries and is
+// RE-EXPORTED here so every existing importer keeps working byte-identically — one
+// definition, one derived compatibility view, never two literal lists. The invariant
+// this preserves is the one the constant's own comment always claimed: the streamed
+// set and the requestable set are the same set.
+export { WORK_ITEM_DOC_FILES } from "./work-artifacts.mjs";
 
 export function globalStoreError(message, code, status = 500, extra = {}) {
   const error = new Error(message);
@@ -56,6 +49,9 @@ import { executionScopeRef } from "./assignment-record.mjs";
 // verbatim, else the sanitized hostname — never persisted from here, exactly as
 // mesh-launcher's own resolveNodeIdentity reads it.
 import { deriveNodeId } from "./node-identity.mjs";
+// m43 / ADR-007 — the artifact manifest's own home (a pure leaf, 0 repo imports). The
+// reader below streams exactly what a face may request, because both read this table.
+import { canonicalArtifactDocKey } from "./work-artifacts.mjs";
 import os from "node:os";
 export const workspaceIdFor = workspaceIdFromPath;
 
@@ -1041,47 +1037,6 @@ export function readWorkspaceItems(store, workspaceId) {
   }));
 }
 
-// readWorkspaceContentRecords(workspace, { itemRef }) — the WORKER-side content read
-// (schema v5, TECH_DEBT item 6): for every item in the workspace that belongs to
-// `itemRef`'s subtree (the item, its milestone, the milestone's children — the SAME
-// scoping rule the worktree delta rows use), collect the requestable record-doc
-// bodies (WORK_ITEM_DOC_FILES) and the item's run records (run-store's own reader,
-// so a streamed record is byte-identical to a local read). A missing doc file is
-// absent-not-error (skipped); any OTHER read fault lands in `errors` for the caller
-// to report — never swallowed, never fatal to the rest of the read.
-export async function readWorkspaceContentRecords(workspace, { itemRef } = {}) {
-  const docs = [];
-  const runs = [];
-  const errors = [];
-  const milestone = typeof itemRef === "string" && itemRef.length > 0 ? itemRef.split("/")[0] : null;
-  for (const item of await listItems(workspace.workDir)) {
-    if (milestone != null
-      && item.ref !== itemRef
-      && item.ref !== milestone
-      && String(item.parent ?? "") !== milestone) continue;
-    for (const [doc, fileName] of Object.entries(WORK_ITEM_DOC_FILES)) {
-      const filePath = path.join(item.dir, fileName);
-      try {
-        docs.push({ ref: item.ref, doc, body: await readFile(filePath, "utf8") });
-      } catch (error) {
-        if (error?.code !== "ENOENT") {
-          errors.push({ sourcePath: normalizeSourcePath(filePath), message: error.message, code: error.code ?? "content-read-failed" });
-        }
-      }
-    }
-    try {
-      for (const record of await readRuns(item)) {
-        if (typeof record?.runId === "string" && record.runId.length > 0) {
-          runs.push({ ref: item.ref, runId: record.runId, record });
-        }
-      }
-    } catch (error) {
-      errors.push({ sourcePath: normalizeSourcePath(path.join(item.dir, "runs")), message: error.message, code: error.code ?? "content-read-failed" });
-    }
-  }
-  return { docs, runs, errors };
-}
-
 // upsertWorkItemContent(store, workspaceId, { docs, runs, nodeId }, { now }) — the
 // ONE writer for the v5 content tables (the control node's applyWorktreeContentFrame
 // call site). Upsert-only, per (ref, doc) / (ref, runId): a re-streamed body simply
@@ -1113,7 +1068,11 @@ export function upsertWorkItemContent(store, workspaceId, { docs, runs, nodeId }
         updated_at = excluded.updated_at
     `);
     for (const entry of docRows) {
-      upsertDoc.run(workspaceId, entry.ref, entry.doc.toUpperCase(), entry.body, reporter, at);
+      // m43 / ADR-007: ONE spelling of the key, shared with the reader. A dir-kind
+      // artifact keeps its MEMBER verbatim (`TASKS/00_a.feature`) — uppercasing it
+      // would destroy the filename a face has to render and would fold two files the
+      // manifest deliberately treats as different onto one row.
+      upsertDoc.run(workspaceId, entry.ref, canonicalArtifactDocKey(entry.doc), entry.body, reporter, at);
     }
     const upsertRun = db.prepare(`
       INSERT INTO work_item_runs (workspace_id, ref, run_id, record_json, node_id, updated_at)
@@ -1137,10 +1096,22 @@ export function upsertWorkItemContent(store, workspaceId, { docs, runs, nodeId }
 // readWorkItemDoc(store, workspaceId, ref, doc) — the board-face read over
 // work_item_docs. Null when nothing was ever streamed for that (ref, doc).
 export function readWorkItemDoc(store, workspaceId, ref, doc) {
+  const key = canonicalArtifactDocKey(doc);
   const row = store.db.prepare(
     "SELECT body, node_id, updated_at FROM work_item_docs WHERE workspace_id = ? AND ref = ? AND doc = ?"
-  ).get(workspaceId, ref, String(doc ?? "").toUpperCase());
-  return row == null ? null : { ref, doc: String(doc ?? "").toUpperCase(), body: row.body, nodeId: row.node_id, updatedAt: row.updated_at };
+  ).get(workspaceId, ref, key);
+  return row == null ? null : { ref, doc: key, body: row.body, nodeId: row.node_id, updatedAt: row.updated_at };
+}
+
+// readWorkItemDocMembers(store, workspaceId, ref, name) — the dir-kind read: every
+// streamed member of one manifest entry for one ref (`TASKS/*`), oldest key first.
+// The prefix is anchored with `/` so a file-kind name can never be matched by it.
+export function readWorkItemDocMembers(store, workspaceId, ref, name) {
+  const prefix = `${canonicalArtifactDocKey(name)}/`;
+  return store.db.prepare(
+    "SELECT doc, body, node_id, updated_at FROM work_item_docs WHERE workspace_id = ? AND ref = ? AND doc LIKE ? ESCAPE '\\' ORDER BY doc"
+  ).all(workspaceId, ref, `${prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`)
+    .map((row) => ({ doc: row.doc, body: row.body, nodeId: row.node_id, updatedAt: row.updated_at }));
 }
 
 // readWorkItemRuns(store, workspaceId, ref) — the board-face read over

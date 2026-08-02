@@ -1,0 +1,16 @@
+{
+  "runId": "20260802T202513657Z-0000",
+  "itemRef": "43/03",
+  "state": "running",
+  "attempt": 1,
+  "outcome": null,
+  "sessionId": null,
+  "brief": {},
+  "createdAt": "2026-08-02T20:25:13.657Z",
+  "updatedAt": "2026-08-02T20:25:13.657Z",
+  "failureReason": null,
+  "heartbeatAt": null,
+  "retryOf": null,
+  "reclaimedAt": null,
+  "node": "umairs-msi"
+}

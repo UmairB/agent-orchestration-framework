@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { applyConfig } from "../src/adapters.mjs";
 import { resolveConfig } from "../src/dsl.mjs";
+// m43 / ADR-002 — the door the claude runtime's hooks/settings take now that the
+// whole-file render is closed for the co-authored file.
+import { claudeSettingsPatch } from "../src/claude-settings.mjs";
 
 export const adapterTests = [
   {
@@ -231,10 +235,25 @@ async function rendersExpandedDslRuntimeOutputs() {
     });
 
     const writes = await applyConfig(config, { targetDir });
-    assert.equal(writes.length, 8);
+    // m43 / ADR-002 AC11 - SIX, not eight. `.claude/settings.json` is CO-AUTHORED and
+    // is no longer rendered whole-file at all (and with it goes the `.claude/.gitignore`
+    // this config's only other `.claude/` output would have triggered). Nothing is
+    // lost: the claude hook and the `settings.claude` keys travel through the surgical
+    // merge instead, asserted below.
+    assert.equal(writes.length, 6);
+    assert.equal(
+      existsSync(path.join(targetDir, ".claude", "settings.json")),
+      false,
+      "the render engine must never write the co-authored .claude/settings.json (ADR-002)",
+    );
+    // ADR-013/C1 — the merge is fed the UNION of the bundle's claude hooks and this
+    // config's, so `bundleHooks: []` isolates the config half this test is about.
+    const patch = claudeSettingsPatch(config, { targetDir, bundleHooks: [] });
+    assert.equal(patch.hooks.length, 1, "the claude hook still reaches the file - through the merge");
+    assert.equal(patch.hooks[0].event, "PostToolUse");
+    assert.deepEqual(patch.settings, { permissions: { allow: ["Bash(npm test)"] } }, "settings.claude still reaches the file - through the merge");
 
     const claudeMcp = await readFile(path.join(targetDir, ".mcp.json"), "utf8");
-    const claudeSettings = await readFile(path.join(targetDir, ".claude", "settings.json"), "utf8");
     const codexConfig = await readFile(path.join(targetDir, ".codex", "config.toml"), "utf8");
     const agents = await readFile(path.join(targetDir, "AGENTS.md"), "utf8");
     const codexHooks = JSON.parse(await readFile(path.join(targetDir, ".codex", "hooks.json"), "utf8"));
@@ -242,8 +261,6 @@ async function rendersExpandedDslRuntimeOutputs() {
 
     assert.match(claudeMcp, /"docs"/);
     assert.match(claudeMcp, /"type": "http"/);
-    assert.match(claudeSettings, /"hooks"/);
-    assert.match(claudeSettings, /"PostToolUse"/);
     assert.match(codexConfig, /\[mcp_servers\.docs\]/);
     assert.doesNotMatch(codexConfig, /\[\[hooks\.PostToolUse\]\]/);
     assert.equal(codexHooks.hooks.PostToolUse[0].matcher, "Write");

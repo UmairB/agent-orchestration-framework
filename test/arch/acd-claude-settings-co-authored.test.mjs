@@ -35,7 +35,7 @@
 //  Self-check (m03 non-vacuous): a planted claude-hook config trips the hazard detector,
 //  and a planted wholesale-rendered settings body fails the key canary.
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,16 @@ const HAND_WIRED_HOOK_EVENTS = ["SessionStart", "UserPromptSubmit", "SessionEnd"
 
 function stripComments(source) {
   return source.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+async function mjsFilesUnder(dir) {
+  const out = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await mjsFilesUnder(full)));
+    else if (entry.name.endsWith(".mjs")) out.push(full);
+  }
+  return out;
 }
 
 // The hazard is live once aof's own config asks for a claude-runtime hook or setting —
@@ -126,6 +136,84 @@ export const archTests = [
         writer != null,
         `no .claude/settings.json merge writer exists (looked for ${MERGE_WRITER_CANDIDATES.map((p) => path.relative(repoRoot, p)).join(", ")}) — a configured claude hook has no safe write path`,
       );
+    },
+  },
+  {
+    // m43 / ADR-013 (structural review of 43/03): AC11 is a REMOVAL, and only a
+    // removal-assertion protects a removal. Proof 3 above arms on THIS repo's
+    // `.aof/aof.config.json` declaring a claude hook — which 43/03's own safety rule
+    // forbids the story from doing — so the invariant was, in this repo, guarded by a
+    // clean skip. The whole-file renderer is now DELETED rather than merely uncalled,
+    // which is a stronger fact and can be asserted unconditionally: no module in src/
+    // may declare or call a whole-file `.claude/settings.json` writer, ever, whatever
+    // any config says. "A whole-file writer for a co-authored file that still exists is
+    // a whole-file writer someone will call."
+    name: "arch/43 ADR-002 + ADR-013 (acd-claude-settings-co-authored): UNCONDITIONAL — the whole-file renderer is GONE from src/, and the render pipeline emits no .claude/settings.json output for a config that declares a claude hook AND settings.claude",
+    run: async () => {
+      // (a) THE SOURCE FACT — the removal itself, which no behaviour can prove: an
+      // uncalled whole-file writer for a co-authored file is a whole-file writer
+      // someone will call, so the function must not EXIST.
+      const declarers = [];
+      for (const file of await mjsFilesUnder(path.join(repoRoot, "src"))) {
+        if (/\bclaudeSettingsJson\b/.test(stripComments(await readFile(file, "utf8")))) {
+          declarers.push(path.relative(repoRoot, file));
+        }
+      }
+      assert.deepEqual(declarers, [], `the whole-file .claude/settings.json renderer is back in: ${declarers.join(", ")}`);
+
+      // (b) THE PIPELINE FACT, asserted against the exact config shape that used to
+      // arm the hazard — a claude-runtime hook AND a settings.claude block. The old
+      // renderer fired on either. `renderConfigOutputs` is the render pipeline's own
+      // entry point, so this holds whatever the emitting function is renamed to.
+      const { renderConfigOutputs } = await import("../../src/adapters.mjs");
+      const { resolveConfig } = await import("../../src/dsl.mjs");
+      const config = await resolveConfig({
+        name: "co-authored-canary",
+        resources: [],
+        // The codex leg is the NON-VACUITY control, and it is the sharpest form this
+        // assertion can take: ONE call, TWO runtimes asking for the identical thing (a
+        // settings block plus a hook). codex — a file aof exclusively owns — is
+        // rendered whole. claude — a file with another author — is not rendered at all.
+        settings: { claude: { model: "opus" }, codex: { model: "gpt-5.4" } },
+        hooks: [
+          { id: "artifact-sync", event: "PostToolUse", matcher: "Write|Edit|NotebookEdit", type: "command", command: "node", runtimes: ["claude"] },
+          { id: "codex-control", event: "PostToolUse", matcher: "Write", type: "command", command: "node", runtimes: ["codex"] },
+        ],
+      });
+      const outputs = renderConfigOutputs(config, { targetDir: repoRoot });
+      const paths = outputs.map((output) => String(output.path ?? "").replaceAll("\\", "/"));
+      assert.ok(
+        paths.some((p) => p.endsWith(".codex/config.toml")),
+        `the pipeline still renders the aof-EXCLUSIVE runtime config for the same call (non-vacuous). Rendered: ${JSON.stringify(paths)}`,
+      );
+      assert.deepEqual(
+        paths.filter((p) => p.endsWith(".claude/settings.json")),
+        [],
+        `.claude/settings.json is CO-AUTHORED (ADR-002): the render pipeline must emit NO whole-file output for it, so it can never reach planApplyActions' ungated "existing file will be overwritten" (render-plan.mjs:48). Rendered: ${JSON.stringify(paths)}`,
+      );
+      // …and the claude runtime's hooks/settings still reach the file — through the
+      // merge, which is the half that makes the removal safe rather than lossy.
+      const { claudeSettingsPatch } = await import("../../src/claude-settings.mjs");
+      const patch = claudeSettingsPatch(config, { targetDir: repoRoot });
+      // ADR-013/C1 landed AFTER this clause was written: the merge is now fed the UNION
+      // of the BUNDLE's claude hooks and the project config's, through one resolver, so
+      // that `aof work init` in a fresh workspace installs the trigger at all. The
+      // assertion therefore names both halves rather than counting to one — which is
+      // strictly stronger, because a union that dropped either half now reds.
+      assert.ok(
+        patch.hooks.some((hook) => hook.id === "artifact-sync"),
+        `the PROJECT config's claude hook reaches the file through the merge writer. Got: ${JSON.stringify(patch.hooks.map((hook) => [hook.id, hook.matcher]))}`,
+      );
+      assert.ok(
+        patch.hooks.some((hook) => hook.id === "claude-artifact-sync" && hook.matcher === "Write|Edit|NotebookEdit"),
+        "…and so does the BUNDLE's own artifact-sync trigger (ADR-013/C1 — a fresh workspace must receive it with no project declaration at all)",
+      );
+      assert.equal(
+        patch.hooks.some((hook) => hook.id === "codex-control"),
+        false,
+        "…and the codex-only hook is not in the claude patch (the union filters by runtime, not by presence)",
+      );
+      assert.deepEqual(patch.settings, { model: "opus" }, "…and so does settings.claude");
     },
   },
   {

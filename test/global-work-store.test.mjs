@@ -11,8 +11,11 @@ import {
   upsertWorkItemContent,
   readWorkItemDoc,
   readWorkItemRuns,
-  readWorkspaceContentRecords,
 } from "../src/global-work-store.mjs";
+// m43 / ADR-012/B4 — the WORKER-side content read moved into its own module when 43/03
+// widened it to the artifact manifest (the store module's line ceiling's own escape
+// hatch). Same function, same shapes; imported from where it now lives.
+import { readWorkspaceContentRecords } from "../src/work-content-read.mjs";
 import { globalMeshPaths } from "../src/workspace.mjs";
 
 function frontmatter(fields) {

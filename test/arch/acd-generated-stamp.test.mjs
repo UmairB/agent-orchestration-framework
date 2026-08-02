@@ -13,12 +13,16 @@ import { loadBundle, renderBundleOutputs, TEMPLATE_STAMP } from "../../src/work-
 // the `aof-generated` marker in EITHER canonical form —
 //   - frontmatter key: a literal `aof-generated: <truthy>` line inside a leading
 //     `---` … `---` block; OR
-//   - comment form: the file head contains an `aof-generated:` comment marker.
+//   - comment form: the file head contains an `aof-generated:` comment marker,
+//     either the markdown/HTML `<!-- aof-generated: … -->` or (m43, the ASSET kind —
+//     a verbatim script, which cannot carry YAML frontmatter or an HTML comment and
+//     stay executable) the line-comment `// aof-generated: …`.
 function isManaged(content) {
   const text = String(content).replace(/^﻿/, "");
   // Comment form: head contains the aof-generated comment marker.
   const head = text.slice(0, 512);
   if (/<!--\s*aof-generated:/.test(head)) return true;
+  if (/^\s*\/\/\s*aof-generated:/m.test(head)) return true;
   // Frontmatter form: aof-generated truthy key inside the leading --- block.
   if (text.startsWith("---")) {
     const end = text.indexOf("\n---", 3);
@@ -63,6 +67,13 @@ export const archTests = [
           assert.ok(output.content.startsWith(TEMPLATE_STAMP), `${output.path} begins with the comment-form stamp`);
           // A template carries the comment form, NOT a YAML frontmatter key.
           assert.ok(!hasFrontmatterStamp(output.content), `${output.path} does not use the frontmatter form`);
+        } else if (output.resource.kind === "asset") {
+          // m43 — an ASSET ships VERBATIM (the artifact-sync enqueue script is the
+          // first): frontmatter would not parse and an HTML comment would not execute,
+          // so its stamp is the language's own line comment. The invariant is unchanged
+          // — every rendered file still declares itself aof-managed in-band.
+          assert.ok(/^\s*\/\/\s*aof-generated:/m.test(output.content.slice(0, 512)), `${output.path} carries the line-comment stamp`);
+          assert.ok(!hasFrontmatterStamp(output.content), `${output.path} does not use the frontmatter form`);
         } else {
           assert.ok(hasFrontmatterStamp(output.content), `${output.path} (${output.resource.kind}) carries aof-generated: true frontmatter`);
         }
@@ -78,7 +89,10 @@ export const archTests = [
         const isTemplate = output.resource.kind === "template";
         const hasComment = output.content.slice(0, 512).includes("<!-- aof-generated:");
         const hasFrontmatter = hasFrontmatterStamp(output.content);
-        if (isTemplate) {
+        if (output.resource.kind === "asset") {
+          assert.ok(!hasComment && !hasFrontmatter, `${output.path} uses neither of the document forms`);
+          assert.ok(/^\s*\/\/\s*aof-generated:/m.test(output.content.slice(0, 512)), `${output.path} has only the line-comment form`);
+        } else if (isTemplate) {
           assert.ok(hasComment && !hasFrontmatter, `${output.path} has only the comment form`);
         } else {
           assert.ok(hasFrontmatter && !hasComment, `${output.path} has only the frontmatter form`);

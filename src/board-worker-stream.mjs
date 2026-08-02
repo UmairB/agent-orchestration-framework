@@ -15,7 +15,10 @@
 // visibility — the board would still be blind for the entire duration of a run, which is
 // exactly the window an operator is watching. The worker is the authority on its own work;
 // the projection is how that authority reaches this node.
-import { openGlobalWorkProjectionStore, readWorkspaceItems, readWorkItemDoc, readWorkItemRuns } from "./global-work-store.mjs";
+import { openGlobalWorkProjectionStore, readWorkspaceItems, readWorkItemDoc, readWorkItemDocMembers, readWorkItemRuns } from "./global-work-store.mjs";
+// m43 / ADR-007 — the manifest's own member spelling, so the TASKS read below asks for
+// exactly the keys the worker streamed.
+import { artifactDocKeyMember } from "./work-artifacts.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
@@ -75,6 +78,29 @@ export async function readWorkerDoc(workspace, ref, doc, options = {}) {
   return withProjectionStore(workspace, options, (store, workspaceId) => {
     const row = readWorkItemDoc(store, workspaceId, ref, doc);
     return row == null ? null : { ref, doc: row.doc, body: row.body, reportedBy: row.nodeId ?? null, updatedAt: row.updatedAt ?? null };
+  });
+}
+
+// readWorkerDocMembers(workspace, ref, name, options) — the DIR-kind sibling of
+// readWorkerDoc (m43 / ADR-007): every member of one manifest entry (`TASKS`) that the
+// worker streamed for a ref, so `work:tasks` can answer on the control node from the
+// worker's own worktree — closing `commands/tasks.mjs:15`'s "the features live in the
+// worker's worktree and are not streamed yet". Null when nothing was streamed, so the
+// caller keeps its local behaviour.
+export async function readWorkerDocMembers(workspace, ref, name, options = {}) {
+  return withProjectionStore(workspace, options, (store, workspaceId) => {
+    const rows = readWorkItemDocMembers(store, workspaceId, ref, name);
+    if (rows.length === 0) return null;
+    return {
+      ref,
+      members: rows.map((row) => ({
+        member: artifactDocKeyMember(row.doc),
+        body: row.body,
+        reportedBy: row.nodeId ?? null,
+        updatedAt: row.updatedAt ?? null,
+      })),
+      reportedBy: rows.find((row) => row.nodeId != null)?.nodeId ?? null,
+    };
   });
 }
 

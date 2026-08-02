@@ -4,10 +4,10 @@ number: 03
 slug: artifact-sync-on-write
 title: "Write-triggered artifact sync — a PostToolUse hook whose body derives nothing names each artifact as the agent writes it, the daemon batches the send on its existing tick, the artifact set widens through one manifest, and the co-authored .claude/settings.json is MERGED, never rendered whole"
 parent: 43
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 depends: [43/02]
 schema: 1
 aofVersion: 0.1.0
@@ -57,12 +57,21 @@ Grounded in `ARCHITECTURE.md` **ADR-001** (the trigger), **ADR-002** (the settin
 4. **A failed enqueue NEVER fails the agent.** Exit code is always 0 (`PostToolUse` cannot block — the
    tool already ran). A queue that cannot be written degrades to the reconciliation tick, which is the
    pre-existing behaviour — **never worse than today**.
-5. **The daemon owns batching and the wire.** The worker daemon drains the queue on its **existing** stream
-   tick (`pushActiveWorktreeState`, `mesh-launcher.mjs:1448`), de-duplicates by path, reads current content
-   for the named artifacts **only**, and sends one batched frame. The drain is **idempotent and
-   loss-averse** — it consumes by rename-then-read (or a persisted offset), so a crash mid-drain **re-sends
-   rather than loses**. One loop does both jobs: the targeted push AND the reconciliation backstop STATE
-   mandates keeping (which is what covers files written by `Bash`, deliberately not hook-covered).
+5. **The daemon owns batching and the wire.** The worker daemon drains the queue on its **existing**
+   stream tick (`pushActiveWorktreeState`), de-duplicates by path, and sends one batched frame carrying
+   **only artifacts whose content hash moved**. The queue bounds the **wire and the reporting**, not
+   the local read: the tick still performs the full reconciliation read STATE mandates, because a
+   `Bash`-written file and a node with no hook installed must both still converge on the very next
+   tick. What the queue buys that no re-scan can: a named-but-now-missing artifact becomes a coded
+   degrade instead of a silence, an `unresolved-path` line reaches an operator, and the drain is
+   **idempotent and loss-averse** — it consumes by rename-then-read, so a crash mid-drain **re-sends
+   rather than loses**. One loop does both jobs.
+   <!-- AC5's original "reads current content for the named artifacts ONLY" was superseded at the
+        43/03 build review by ADR-013/C8: a cadence split would have broken AC4's "never worse than
+        today", task 00's "within one stream tick" for `Bash`-written files, and every codex worker
+        (which has no `PostToolUse` hook, so its queue is permanently empty). The affordability
+        argument was always the content hash's, in both ADR-001's and ADR-007's own words. -->
+
 6. **The artifact set becomes a bounded two-kind MANIFEST in a new pure-leaf `src/work-artifacts.mjs`:**
    `{ name, file }` for exact filenames (`SPEC.md`, `STORY.md`, `VERIFICATION.md`, `RETROSPECTIVE.md`,
    `ARCHITECTURE.md`, `DESIGN.md`, `RESEARCH.md`, `STATE.md`) and `{ name, dir, ext }` for a bounded

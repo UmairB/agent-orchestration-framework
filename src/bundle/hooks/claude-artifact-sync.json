@@ -1,0 +1,9 @@
+{
+  "event": "PostToolUse",
+  "matcher": "Write|Edit|NotebookEdit",
+  "type": "command",
+  "command": "node",
+  "claude": {
+    "args": [".claude/hooks/aof/artifact-sync-enqueue.mjs"]
+  }
+}

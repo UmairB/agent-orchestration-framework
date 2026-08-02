@@ -28,15 +28,12 @@
 # (`SessionStart`, `UserPromptSubmit`, `SessionEnd`, `PreToolUse`, and `PostToolUse`
 # present-but-empty), `permissions.deny` and `sandbox.filesystem.denyRead`.
 #
-# ONE RESIDUAL CONCERN RAISED AT REFINE (flagged to the PO, not silently encoded): the
-# TORN-file rows below follow ADR-002's stated contract literally — a torn read yields
-# `{}`. For `mergeLock`'s subject that is safe, because the lock is aof-owned; for a
-# CO-AUTHORED file with ~140 possible top-level keys it means a single missing brace in
-# the operator's own file is answered by replacing it with an aof-only three-line
-# document. The rows are written to the ADR, and the fifth row records the one thing
-# that softens it: when there is nothing to splice, the byte-identical skip leaves the
-# torn file untouched. If the architect wants a refuse-and-report instead, exactly two
-# rows change.
+# THE TORN-FILE ROWS FOLLOW ADR-010/R3.A, WHICH SUPERSEDES ADR-002's "absent/torn ⇒
+# `{}`" (ruled at the 43/03 build review, 2026-08-02 — the concern this paragraph used
+# to raise was upheld). For a co-authored file with ~140 top-level keys, answering one
+# missing brace by replacing it with a three-line aof-only document is the exact defect
+# this task exists to close, arriving through the fallback. ABSENT ⇒ `{}` (a genuine
+# fresh install); TORN ⇒ refuse-and-report, writing nothing.
 
 @cli @adapter @distribution
 Feature: the co-authored .claude/settings.json takes a surgical, idempotent, retractable merge — never a whole-file render
@@ -132,7 +129,7 @@ Feature: the co-authored .claude/settings.json takes a surgical, idempotent, ret
   # THE READ SIDE (AC9): absent / torn / `{}`. The `{}`-vs-missing distinction is real
   # and is what rows 2 and 4 pin — with nothing to splice, a missing file must stay
   # missing (no empty artefact is created) and a present `{}` must stay byte-identical.
-  # See the header's residual concern about the torn rows.
+  # See the header: the torn rows follow ADR-010/R3.A (refuse-and-report), not ADR-002's `{}`.
   @executable
   Scenario Outline: an absent, empty, torn or empty-object settings file is handled without inventing content
     Given the workspace's `.claude/settings.json` is <before>
@@ -147,8 +144,11 @@ Feature: the co-authored .claude/settings.json takes a surgical, idempotent, ret
       | absent (no file at all)           | omits       | still absent — no empty file is created                            |
       | present and zero bytes            | declares    | read as `{}`, then written with exactly aof's entry                |
       | present and exactly `{}`          | omits       | byte-identical, mtime unchanged — no write is performed            |
-      | present and torn (truncated JSON) | declares    | read as `{}`, then written with exactly aof's entry                |
-      | present and torn (truncated JSON) | omits       | byte-identical — the skip-write leaves the torn file untouched     |
+      | present and torn (truncated JSON) | declares    | left byte-identical, with a coded `claude-settings-unparseable` refusal naming the file — nothing is written |
+      | present and torn (truncated JSON) | omits       | left byte-identical, with the same coded refusal — a file aof cannot read is a file whose contents it cannot claim to preserve |
+      | present and a JSON array (`[]`)   | declares    | left byte-identical, refused — and the message says it parses as an ARRAY, never "not parseable JSON" |
+      | present and a JSON string         | declares    | left byte-identical, refused — and the message says it parses as a STRING |
+      | present and a JSON number         | declares    | left byte-identical, refused — and the message says it parses as a NUMBER |
 
   # SELF-IDENTIFYING MEANS AOF RECOGNISES ITS OWN, AND ONLY ITS OWN (AC10). An entry an
   # operator hand-copied without the marker is the operator's; aof neither adopts, edits
@@ -175,8 +175,8 @@ Feature: the co-authored .claude/settings.json takes a surgical, idempotent, ret
     And the workspace's `.claude/settings.json` has no entry in aof's install lock
     When `<command>` runs against the workspace
     Then the plan envelope names no action for `.claude/settings.json` — no create, no update, no drift-warning, no "existing file will be overwritten"
-    And the operator's five top-level keys are byte-identical afterwards
-    And the operator's four hand-wired hook events are byte-identical afterwards
+    And after the first run the operator's other four top-level keys and all four hand-wired hook events are byte-identical, and `hooks.PostToolUse` has grown by exactly one aof-authored entry
+    And after a second run of the same command all five top-level keys are byte-identical to after the first
 
     Examples:
       | command                 |
@@ -213,5 +213,5 @@ Feature: the co-authored .claude/settings.json takes a surgical, idempotent, ret
     And `aof work update` then `aof work init` are run in that clone
     Then the file's `permissions`, `sandbox`, `enabledPlugins` and `extraKnownMarketplaces` are byte-identical to the committed file
     And `SessionStart`, `UserPromptSubmit`, `SessionEnd` and `PreToolUse` are byte-identical to the committed file
-    And the only difference from the committed file is one added entry under `hooks.PostToolUse`
+    And the only differences from the committed file are one added entry under `hooks.PostToolUse` and a one-time whitespace normalisation of the whole document to 2-space JSON with LF endings — every VALUE unchanged; a subsequent run writes nothing at all
     And a `claude` session started in that clone still fires the session hooks and the test-isolation guard

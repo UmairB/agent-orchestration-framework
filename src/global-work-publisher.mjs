@@ -7,8 +7,11 @@ import {
   recordWorkspaceProjectionError,
   workspaceIdFor,
   readWorkspaceProjectionItems,
-  readWorkspaceContentRecords,
 } from "./global-work-store.mjs";
+// m43 / ADR-012/B4 — the WORKER-side content read moved OUT of the single-writer store
+// module into its own home when this story widened it to the artifact manifest. Same
+// function, same shapes; imported from where it now lives.
+import { readWorkspaceContentRecords } from "./work-content-read.mjs";
 import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.mjs";
 // m43 / ADR-003 + ADR-011/A1 — the ONE derivation of "which execution scopes are held",
 // read on the DISK-DERIVED publish path (this module) and handed to the row writer as

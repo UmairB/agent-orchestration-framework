@@ -40,6 +40,21 @@ export function readDescriptor() {
   return JSON.parse(readAssetText("bundle", "bundle.json"));
 }
 
+// hookMemberConfig(member) — ONE mapping from a `kind: "hook"` descriptor member to
+// the config-shaped hook the renderers and the settings merge both consume.
+function hookMemberConfig(member) {
+  return { ...JSON.parse(readAssetText("bundle", member.file)), id: member.id, runtimes: member.runtimes };
+}
+
+// loadBundleHooks() — the bundle's hook declarations ALONE, without reading the 40-odd
+// agent/command/skill bodies `loadBundle()` walks. m43 / ADR-013/C1: the co-authored
+// `.claude/settings.json` merge is fed the UNION of these and the project config's
+// claude hooks, through one resolver (`claude-settings.mjs`), so aof cannot ship a codex
+// hook to every workspace while being unable to ship a claude hook to any.
+export function loadBundleHooks() {
+  return readDescriptor().members.filter((member) => member.kind === "hook").map(hookMemberConfig);
+}
+
 // Minimal YAML-frontmatter reader for the migrated member files. The bundle's
 // agent/command bodies carry a single leading `---`…`---` block of `key: value`
 // lines (name/description/tools for agents; description/argument-hint/
@@ -75,6 +90,7 @@ export function loadBundle() {
   const resources = [];
   const templates = [];
   const hooks = [];
+  const assets = [];
 
   for (const member of descriptor.members) {
     if (member.kind === "agent" || member.kind === "command" || member.kind === "skill") {
@@ -109,12 +125,7 @@ export function loadBundle() {
       continue;
     }
     if (member.kind === "hook") {
-      const source = JSON.parse(readAssetText("bundle", member.file));
-      hooks.push({
-        ...source,
-        id: member.id,
-        runtimes: member.runtimes
-      });
+      hooks.push(hookMemberConfig(member));
       continue;
     }
     if (member.kind === "template") {
@@ -126,10 +137,51 @@ export function loadBundle() {
       });
       continue;
     }
+    // m43 / ADR-002 + AC12 — the ASSET kind: an aof-EXCLUSIVE file installed
+    // VERBATIM at a declared target path. The artifact-sync enqueue script is the
+    // first: the hook SCRIPT ships through this (the existing content-hashed,
+    // drift-protected bundle mechanism, which is correct exactly because aof owns
+    // the file outright), while the hook ENTRY ships through the co-authored
+    // `.claude/settings.json` MERGE. Splitting them is what keeps "a whole-file
+    // render iff aof exclusively owns the file" true of every file the bundle writes.
+    if (member.kind === "asset") {
+      assets.push({
+        id: member.id,
+        kind: "asset",
+        file: member.file,
+        target: member.target,
+        runtimes: member.runtimes,
+        body: readAssetText("bundle", member.file)
+      });
+      continue;
+    }
     throw new Error(`Unknown bundle member kind "${member.kind}" for "${member.id}".`);
   }
 
-  return { resources, hooks, templates, descriptor };
+  return { resources, hooks, templates, assets, descriptor };
+}
+
+// renderBundleAssetOutputs(bundle, { runtimes }) — the asset kind's renderer, the
+// structural twin of renderBundleTemplateOutputs: one output per asset member whose
+// declared runtimes intersect the selected ones, at its declared target path, with
+// its bytes UNCHANGED (a script is not a rendered document — a stamp would break it).
+export function renderBundleAssetOutputs(bundle, options = {}) {
+  const selected = options.runtimes ?? null;
+  const outputs = [];
+  for (const member of bundle.assets ?? []) {
+    const runtimes = Array.isArray(member.runtimes) && member.runtimes.length > 0 ? member.runtimes : ["claude"];
+    const runtime = selected == null ? runtimes[0] : runtimes.find((candidate) => selected.includes(candidate));
+    if (runtime == null) continue;
+    outputs.push({
+      path: String(member.target).replaceAll("\\", "/"),
+      runtime,
+      resource: { id: member.id, kind: "asset" },
+      content: member.body,
+      body: member.body,
+      hash: hashContent(member.body)
+    });
+  }
+  return outputs;
 }
 
 // --- template rendering (ADR-005, comment-form stamp) -----------------------
@@ -179,7 +231,8 @@ export function renderBundleOutputs(bundle, options = {}) {
     targetDir: options.targetDir
   }).filter((output) => memberKinds.has(output.resource?.kind));
   const templateOutputs = renderBundleTemplateOutputs(bundle, options);
-  return [...resourceOutputs, ...templateOutputs];
+  const assetOutputs = renderBundleAssetOutputs(bundle, options);
+  return [...resourceOutputs, ...templateOutputs, ...assetOutputs];
 }
 
 // --- per-role model override map (story 30) ---------------------------------

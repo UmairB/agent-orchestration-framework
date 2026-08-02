@@ -6,7 +6,6 @@ import { createAssetReferenceIndex, expandAssetReferences } from "./asset-refere
 import { RUNTIMES, mergeRuntimeOverride } from "./model.mjs";
 import {
   claudeMcpJson,
-  claudeSettingsJson,
   codexConfigToml,
   projectDocContent,
   codexHooksJson,
@@ -91,23 +90,22 @@ function renderRuntimeConfigOutputs(targetDir, requestedRuntimes, config, option
   const claudeMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("claude") && server.runtimes.includes("claude"));
   const codexMcpServers = (config.mcpServers ?? []).filter((server) => runtimes.has("codex") && server.runtimes.includes("codex"));
   const renderableHooks = (config.hooks ?? []).filter((hook) => !hasUnsupportedCommonHookFields(hook));
-  const claudeHooks = renderableHooks.filter((hook) => runtimes.has("claude") && hook.runtimes.includes("claude"));
   const codexHooks = renderableHooks.filter((hook) => runtimes.has("codex") && hook.runtimes.includes("codex"));
 
   if (claudeMcpServers.length > 0) {
     outputs.push(renderedRuntimeConfig(targetDir, ".mcp.json", "claude", "mcp", "mcpServers", claudeMcpJson(claudeMcpServers)));
   }
 
-  if (claudeHooks.length > 0 || hasRuntimeSettings(config.settings, "claude")) {
-    outputs.push(renderedRuntimeConfig(
-      targetDir,
-      path.join(".claude", "settings.json"),
-      "claude",
-      "settings",
-      "claude-settings",
-      claudeSettingsJson({ hooks: claudeHooks, settings: config.settings })
-    ));
-  }
+  // m43 / ADR-002 AC11 — `.claude/settings.json` IS DELIBERATELY NOT RENDERED HERE,
+  // and this is a REMOVAL rather than a guard at whichever call site needed one first
+  // (the m42 lesson: a rule living at one call site is not a rule). The file is
+  // CO-AUTHORED — an operator's hooks, permissions, sandbox and plugin config live in
+  // it — and a whole-file render builds the body from config.hooks + config.settings
+  // alone, so reaching `planApplyActions`' ungated "existing file will be overwritten"
+  // fall-through (render-plan.mjs:48) would silently delete every one of them. The
+  // claude runtime's hooks and `settings.claude` keys reach the file through the
+  // surgical merge in `src/claude-settings.mjs`, which every door calls — so a
+  // claude-only hook is filtered out below and produces no whole-file output at all.
 
   if (codexMcpServers.length > 0 || hasRuntimeSettings(config.settings, "codex")) {
     outputs.push(renderedRuntimeConfig(
