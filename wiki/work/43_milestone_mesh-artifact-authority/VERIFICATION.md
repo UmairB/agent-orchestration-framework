@@ -237,6 +237,87 @@ The `@uat` is why this story is `in-review` and not `done` — see the gate belo
 - **Falsifiability — 12 plants across the batch**, each reddening exactly its own invariant, plus the 13
   from the original build.
 
+### `@manual` lanes — RUN LIVE 2026-08-03, both PASS
+
+Run on real machines after the milestone build was deployed to both nodes (control node
+`payload 42864d8.20260803T000925`, desktop app supervising `:4181`/`:4182`; the WSL worker
+`umairs-msi-wsl` synced to the same `src/`). No daemon was started, stopped or restarted for these
+two lanes, and this repo's own `.claude/settings.json` and `.aof/aof.config.json` were provably
+untouched throughout (`git status --short` empty; the live file's sha unchanged at 1203 bytes).
+
+**Task 00's `@manual` — the exec-form entry spawns and enqueues identically on every node: PASS on
+two of three.** A scratch workspace per node, armed through the **real merge door** (`aof work init`,
+no hand-editing). The written `.claude/settings.json` was **byte-identical on both nodes** (371 bytes,
+LF): `command: "node"`, exactly one `args` element — `.claude/hooks/aof/artifact-sync-enqueue.mjs`,
+checkout-relative, forward slashes, no drive letter, no leading separator, no `..` — matcher the exact
+string `Write|Edit|NotebookEdit`, and the `aofManaged` marker. The installed script hashed identically
+on both nodes and against the repo's source.
+
+A **real `claude -p` session** (claude 2.1.220) then performed one `Write` on each node:
+
+| node | result |
+|---|---|
+| Windows control node | exit 0, one `TOOL_USE Write`, `is_error: false`. Queue gained exactly **one** line, 123 bytes, LF-terminated, no CR: `{"tool":"Write","path":"C:\\…\\wiki\\work\\99_milestone_lane1\\STORY.md"}` |
+| WSL worker `umairs-msi-wsl` | exit 0, `result success`, zero hook mentions in the transcript. Queue gained exactly **one** line, 84 bytes, LF, no CR: `{"tool":"Write","path":"/tmp/…/wiki/work/99_milestone_lane1/STORY.md"}` |
+| Mac worker `umairs-mac-mini` | **NOT-COVERED** — measured, not assumed: the host is reachable (`ssh … hostname` exit 0, 41 ms ping) but `which -a aof node claude` resolves **none** of the three in either a non-login or a `zsh -lc` shell, so a real session is not startable without an operator at the machine — and per the rules an SSH-spawned session would lack the login keychain anyway (the documented "unauthenticated `claude`, burned runs" hazard) |
+
+Field by field the two lines are **byte-comparable**: identical key set and order (`[tool, path]`),
+identical value types, `"Write"` byte-identical, **zero** extra keys (no workspace id, no item ref, no
+node id — AC2's "derives nothing", observed in a real harness rather than a fixture), LF terminator and
+exactly one line on both. The `path` values differ *only* in each OS's own spelling of the same file,
+which is the contract's own requirement that the payload path be carried **verbatim** — and through
+`normalizeArtifactPath` both converge exactly to `wiki/work/99_milestone_lane1/STORY.md`.
+
+This is the proof no fixture could give: **a real Claude Code harness on two different OSes fires the
+entry aof ships and produces the same line.** Given that the trigger was not delivered at all until this
+morning's fix (finding C1), it is the lane that most needed running.
+
+*Observability note worth carrying:* the artifact-sync hook produces **no** `system/hook_started` or
+`hook_response` event in the stream-json transcript on either node, while the operator's `SessionStart`
+hook does — the harness surfaces only hooks that emit output, which is independent confirmation of the
+"writes nothing on stdout" clause, observed in the real harness.
+
+**Task 03's `@manual` — arming the hook on a scratch clone leaves the operator's live settings intact:
+PASS, every Then.** A real `git clone --no-hardlinks` of this repo (HEAD `42864d8`), the operator's live
+`.claude/settings.json` copied in, the claude-runtime hook added to the clone's `.aof/aof.config.json`,
+then the verbs driven there:
+
+- `permissions`, `sandbox`, `enabledPlugins`, `extraKnownMarketplaces` — **all four value-identical AND
+  serialisation-identical**. Top-level key set unchanged; the `hooks` event-key set unchanged and in its
+  original order.
+- `SessionStart`, `UserPromptSubmit`, `SessionEnd`, `PreToolUse` — **all four byte-identical**.
+- The only change is `PostToolUse` `[]` → one aof-marked group: substituting that group back makes the
+  merged document **deep-serialisation-identical to the committed file**. **45 of the 50** original
+  non-empty lines survive verbatim; the 5 that do not are exactly the operator's compact one-line hook
+  groups, re-expanded to 2-space JSON.
+- A subsequent run writes **nothing**: after `work update` the sha, mtime **and inode** were frozen
+  across a second `work update` *and* a `work init --force` — the harder door, the one that "treats every
+  unlocked file as fresh". No temp file left beside it.
+- The plan envelope names **zero** actions for the file on either verb (`work init --force --json`
+  updated 35 files and named it in none; `claudeSettings: {action:"skipped", written:false, drift:[]}`).
+- **The operator's own wiring still fires with aof's entry spliced in beside it**, directly observed in a
+  live session in the clone: `SessionStart` → `hook_response exit_code 0`; `UserPromptSubmit` → the
+  session record's `lastPingAt` advanced while `startedAt` held (`pingSession`'s semantics and nothing
+  else's); `SessionEnd` → the record file unlinked; and the `PreToolUse` **test-isolation guard actually
+  blocked a real Bash call**. A final combined session did one `Write` and produced exactly one queue line
+  *while* the operator's hooks fired and the settings file's sha and mtime stayed unmoved.
+
+**Correction to a figure recorded earlier in this document.** QA measured the one-time reformat as
+`1203 → 1913 bytes, 51 → 93 lines` on a fixture. The live clone gives **1203 → 1743 bytes, 50 → 91
+newline-terminated lines**, CRLF → LF confirmed. The developer bounded it three ways (bundle declaration
+alone, config hook under the bundle's id, config hook under a different id → 1743 / 1743 / 2064); **none
+is 1913**, so the fixture figure is stale — most plausibly measured before ADR-013/C2 removed the
+absolute-queue-path argv element, whose long absolute temp path is the right order of magnitude for the
+difference. The **shape** of QA's finding stands (a one-time, irreversible whole-document reformat in
+which every value survives); only the magnitude was wrong.
+
+### Two findings from the live run (neither a defect in shipped code)
+
+| id | observed | disposition |
+|---|---|---|
+| L-1 | **`aof work init` (plain) refuses in a clone of this repo, exit 1** — `.aof/aof.lock.json` is tracked, so a clone carries one and init is guarded (`Run \`aof work update\`… or \`aof work init --force\``). It wrote nothing. The `@manual` scenario's literal "`aof work update` then `aof work init`" therefore cannot both run un-forced on a clone of *this* repo | The Then is satisfied — the harder `--force` door was driven instead and the file stayed byte-frozen. The **scenario's phrasing** needs the note, not the code |
+| L-2 | **The bundle↔config union is keyed by hook `id`**, so declaring the hook in config under an id other than the bundle's (`claude-artifact-sync`) yields **two** aof-managed `PostToolUse` groups. Measured on a real workspace: markers `["claude-artifact-sync","aof-artifact-sync"]` | **Cosmetic today, not a double-enqueue** — measured on a real write, the harness deduplicates identical exec-form `command`+`args` and still produced exactly **one** queue line. Worth an id-collision note; the story's own test fixture uses a different id from the bundle, which is how it surfaced |
+
 ### The `@uat` gate — why this story stops here
 
 `tasks/01_daemon-drains-queue-into-one-batched-frame.feature`'s closing scenario is the human acceptance
@@ -245,12 +326,9 @@ node running a real Claude Code agent whose own writes fire the hook, and an ope
 node WHILE the run is still live. It is the outsider check on `commands/tasks.mjs:15` — 'the features live
 in the worker's worktree and are not streamed yet'."*
 
-Two `@manual` scenarios also stand: task 00's exec-form spawn across all three node types (Windows control,
-Mac worker, WSL worker) and task 03's scratch-clone arming of the operator's real settings file.
-
-**None of the three is agent-runnable** — each needs a deployed build and, for the `@uat`, a live remote
-agent and a human at the control node. Under `.claude/rules/build-deploy-restart.md` the deploy + supervisor
-restart is an operator action.
+Both `@manual` scenarios have since been **run live and passed** (above) — task 00's exec-form spawn on the
+Windows control node and the WSL worker (the Mac is not covered, and why is recorded), and task 03's
+scratch-clone arming against the operator's real settings file. What remains is the `@uat` alone.
 
 ### Findings
 
@@ -301,9 +379,10 @@ of headroom against ADR-012/B4's ceiling instead of one.
 - **Task 03** — the torn-file rows now follow **ADR-010/R3.A** (refuse-and-report, writing nothing) rather
   than ADR-002's `absent/torn ⇒ {}`; the header paragraph that flagged the concern at refine records that
   it was upheld; AC11's Then is split per-door; and the `@manual` scenario now states what QA measured —
-  the first real merge **reformats the whole document** (1203 → 1913 bytes, CRLF → LF, 51 → 93 lines, 3
-  identical leading lines), a one-time, **irreversible** churn that reads as a whole-file rewrite in
-  `git diff` even though every value survives. Runs 2–8 skip cleanly with the mtime frozen.
+  the first real merge **reformats the whole document** — measured on the live clone at 1203 → 1743 bytes,
+  CRLF → LF, 50 → 91 lines, with 45 of the 50 original lines surviving verbatim — a one-time,
+  **irreversible** churn that reads as a whole-file rewrite in `git diff` even though every value
+  survives. Subsequent runs skip cleanly with the sha, mtime and inode all frozen.
 - **Task 00** — the `args` Thens no longer require an absolute path (ADR-013/C2); the argv is one
   checkout-relative element with no drive letter, leading separator or `..` segment.
 

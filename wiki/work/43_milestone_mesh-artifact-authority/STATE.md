@@ -53,11 +53,25 @@ nodes plus an operator. Nothing further can be proven from this machine alone.
 3. Verify `~/.aof/bin/aof.exe --version` reports `payload <buildId>`, and both daemons print the same
    `Build:` line
 4. Run the three carried lanes: `43/01` task 06 (cross-machine lock soak), `43/02` task 08 (cross-machine
-   cache-authority soak), `43/03` task 00's `@manual` (exec-form spawn on all three node types), task 03's
-   `@manual` (scratch-clone arming), and task 01's **`@uat`** — an operator reading a live remote agent's
+   cache-authority soak), and task 01's **`@uat`** — an operator reading a live remote agent's
    freshly authored `tasks/*.feature` on the control node while the run is still live
 5. `aof:verify 43/03` to record the sign-off, then `aof:autonomous 43` to resume — it will pick up at
    `43/04`
+
+**Updated 2026-08-03 — steps 1–3 are DONE and the two `@manual` lanes are CLOSED.** `ui/dist` was built
+for the first time in this checkout (the cause of the "9 pre-existing failures" every story hit); the
+payload is deployed to both nodes (`payload 42864d8.20260803T000925`); the desktop app is supervising
+`:4181`/`:4182`; the WSL worker has the current `src/` and a `claude` that authenticates in the daemon's
+own bare environment. `43/03`'s two `@manual` lanes were then **run live and passed** — see VERIFICATION.
+A deploy defect was found and fixed on the way (`*.sh` was never pinned to LF, so `core.autocrlf=true`
+made `scripts/deploy-wsl.sh` and `install.sh` unrunnable — commit `42864d8`).
+
+**What is still blocked, and on what:** the WSL worker *daemon* is not running — starting it was refused
+by the environment's permission classifier, twice, so the worker cannot connect to the control stream.
+Until it does, the three cross-machine lanes cannot run: `43/01` task 06, `43/02` task 08, and `43/03`'s
+`@uat`. The command the operator needs is
+`wsl -d Ubuntu-22.04 --cd /home/umair/source/aof -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/umair aof mesh serve --serve`
+— the clean env is not incidental, it is the environment in which `claude` was proven to authenticate.
 
 Produced at refine: `RESEARCH.md`, `DESIGN.md`, `ARCHITECTURE.md` (ADR-001…ADR-010), `FEASIBILITY.md`,
 six scaffolded stories, **42 task features / 277 scenarios** (240 `@executable`, 19 `@manual`,
