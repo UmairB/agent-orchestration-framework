@@ -78,14 +78,39 @@ export const archTests = [
       assert.ok(source.includes("redactDescriptor"), "control-stream-server.mjs imports the shared redaction seam (global-node-registry.mjs)");
       assert.ok(source.includes("global-node-registry.mjs"), "redaction is the ONE shared seam, not a re-implementation");
 
-      // Structural ordering check: within applySnapshotFrame/applyDeltaFrame, the
-      // redactDescriptor() call must textually precede the publishWorkspaceSnapshot()
-      // call that writes to the store.
-      const snapshotFn = source.slice(source.indexOf("export async function applySnapshotFrame"), source.indexOf("export async function applyDeltaFrame"));
-      assert.ok(snapshotFn.indexOf("redactDescriptor") < snapshotFn.indexOf("publishWorkspaceSnapshot"), "applySnapshotFrame redacts before the store write");
+      // Structural ordering check: on the row-frame apply path the redactDescriptor()
+      // call must textually precede the store write it feeds.
+      //
+      // m43/ADR-004 (43/02) renamed the callee, not the rule: both row-frame doors used
+      // to feed publishWorkspaceSnapshot (the wholesale writer) and now collapse onto
+      // upsertWorkItems (the shared row seam), through ONE shared body. The store write
+      // is located by CLASS — the first call into the store module's write surface —
+      // rather than by a hard-coded function name, so the next rename cannot silently
+      // turn this into a vacuous pass.
+      const STORE_WRITES = ["upsertWorkItems", "publishWorkspaceSnapshot"];
+      const firstStoreWrite = (body) => {
+        const positions = STORE_WRITES.map((name) => body.indexOf(`${name}(`)).filter((index) => index >= 0);
+        return positions.length === 0 ? -1 : Math.min(...positions);
+      };
+      // The slice ends at the FIRST door that follows the shared body, not at
+      // applyStreamFrame six doors later (ADR-012's review note): a wider slice would
+      // let an unrelated function's redactDescriptor/store-write pair satisfy the
+      // ordering below while the body under test had neither.
+      const applyBody = source.slice(source.indexOf("async function applyReportedRows"), source.indexOf("export async function applySnapshotFrame"));
+      assert.ok(applyBody.length > 200, "the row-frame apply body was located (non-vacuous)");
+      const redactAt = applyBody.indexOf("redactDescriptor");
+      const writeAt = firstStoreWrite(applyBody);
+      assert.ok(redactAt >= 0, "the row-frame apply path redacts");
+      assert.ok(writeAt >= 0, "…and writes to the store (so the ordering below is a real ordering)");
+      assert.ok(redactAt < writeAt, "the row-frame apply path redacts before the store write");
 
-      const deltaFn = source.slice(source.indexOf("export async function applyDeltaFrame"), source.indexOf("export async function applyStreamFrame"));
-      assert.ok(deltaFn.indexOf("redactDescriptor") < deltaFn.indexOf("publishWorkspaceSnapshot"), "applyDeltaFrame redacts before the store write");
+      // Both exported doors must route through that one body — the ordering above is
+      // only worth anything if neither door can write to the store on its own.
+      for (const door of ["applySnapshotFrame", "applyDeltaFrame"]) {
+        const body = source.slice(source.indexOf(`export async function ${door}`), source.indexOf(`export async function ${door}`) + 400);
+        assert.ok(/applyReportedRows\(/.test(body), `${door} routes through the shared, redacting apply body`);
+        assert.equal(firstStoreWrite(body.slice(0, body.indexOf("\n}"))), -1, `${door} performs no store write of its own`);
+      }
     },
   },
   {

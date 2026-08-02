@@ -288,7 +288,13 @@ export const itemLockCodedRefusalTests = [
         const rowFor = async (ref) => withStore(fx, (store) => readWorkspaceItems(store, fx.workspaceId).find((row) => row.ref === ref));
         assert.equal((await rowFor("42")).status, "not-started", "the control's cache carries 42 as not-started");
 
+        // m43/43/02 (the authority cut) — the frame now IDENTIFIES its reporter, and
+        // that is what makes this test's own claim checkable: "the holder's own voice"
+        // is only recognisable as the holder's if the frame says (and the connection
+        // authenticates) whose it is. A frame with no resolvable node id is refused
+        // outright rather than written as an unattributable row.
         const frame = (rows) => ({
+          nodeId: HOLDER,
           workspaceId: fx.workspaceId,
           at: "2026-08-02T10:00:00.000Z",
           items: rows,
@@ -304,9 +310,13 @@ export const itemLockCodedRefusalTests = [
         });
 
         await withStore(fx, async (store) => {
-          const progressed = await applyDeltaFrame(store, frame([itemRow("42", "in-progress")]), { now: "2026-08-02T10:00:00.000Z" });
-          assert.equal(progressed.heldSkipped, 0, "a frame is not a tick — the holder's own voice is never filtered");
-          assert.deepEqual(progressed.heldRefs, []);
+          const progressed = await applyDeltaFrame(store, frame([itemRow("42", "in-progress")]), { now: "2026-08-02T10:00:00.000Z", nodeId: HOLDER });
+          // 43/02 moved this channel from the publish envelope onto the frame apply's
+          // own result (a frame no longer routes through publishWorkspaceSnapshot at
+          // all). Same claim, one grain finer: not "no scope was stepped over" but "not
+          // one ROW of the holder's frame was refused, for any reason".
+          assert.deepEqual(progressed.skippedRows, [], "a frame is not a tick — the holder's own voice is never filtered");
+          assert.equal(progressed.upserted, 1, "…the row it carried was written");
         });
         assert.equal((await rowFor("42")).status, "in-progress", "the worker's delta landed");
 
@@ -314,9 +324,10 @@ export const itemLockCodedRefusalTests = [
           const completed = await applyDeltaFrame(
             store,
             frame([itemRow("42", "done"), itemRow("42/01", "done")]),
-            { now: "2026-08-02T10:05:00.000Z" },
+            { now: "2026-08-02T10:05:00.000Z", nodeId: HOLDER },
           );
-          assert.equal(completed.heldSkipped, 0, "…and neither is the completion frame");
+          assert.deepEqual(completed.skippedRows, [], "…and neither is the completion frame");
+          assert.equal(completed.upserted, 2, "…both of its rows were written");
         });
         assert.equal((await rowFor("42")).status, "done", "the completion frame landed for the scope");
         assert.equal((await rowFor("42/01")).status, "done", "…and for its story");

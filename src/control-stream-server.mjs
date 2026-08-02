@@ -21,8 +21,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import http from "node:http";
 import {
   openGlobalWorkProjectionStore,
-  publishWorkspaceSnapshot,
-  readWorkspaceItems,
+  upsertWorkItems,
   upsertWorkItemContent,
   appendNodeLogEntries,
 } from "./global-work-store.mjs";
@@ -33,7 +32,10 @@ import {
 import { WORKTREE_CONTENT_FRAME_KIND, LOG_ENTRIES_FRAME_KIND } from "./worker-stream-client.mjs";
 import { redactDescriptor } from "./global-node-registry.mjs";
 import { publishPresenceRecord } from "./mesh-presence.mjs";
-import { isActiveAssignmentState } from "./assignment-record.mjs";
+// m43 / ADR-003 + ADR-004 — `activeScopeHolders` is the ONE derivation of "which
+// execution scopes are held"; this door reads it and hands the answer to the upsert seam
+// as data, so the store module itself never queries the assignment table (ADR-011/A1).
+import { isActiveAssignmentState, activeScopeHolders } from "./assignment-record.mjs";
 // m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal-never-
 // regresses guards live in front of the write there, for every writer, and the
 // settle raises its declared cascade).
@@ -129,76 +131,85 @@ function resolveKnownWorkspaceRoot(store, workspaceId) {
     : null;
 }
 
-// applySnapshotFrame(store, workspace, frame, { now }) — writes a worker's FULL
-// item-row set into the global store through the SAME publishWorkspaceSnapshot seam
-// story 34/01 built (ADR-004: one shared publisher path). Redacts the frame's items
-// (ADR-005) before anything reaches the store/descriptor. Returns the publish result.
-// A frame for a workspaceId with no registered descriptor is REFUSED — never
-// published under a fabricated path (see resolveKnownWorkspaceRoot above).
-export async function applySnapshotFrame(store, frame, { now } = {}) {
-  const known = resolveKnownWorkspaceRoot(store, frame.workspaceId);
-  if (known == null) {
-    return { published: false, skipped: true, code: "unknown-workspace", workspaceId: frame.workspaceId };
-  }
-  const redactedItems = redactDescriptor(frame.items ?? []);
-  const workspace = { projectRoot: known.projectRoot, workDir: known.workDir, config: {} };
-  return publishWorkspaceSnapshot(store, workspace, {
-    workspaceId: frame.workspaceId,
-    items: { rows: redactedItems, errors: [] },
-    now: now ?? validFrameAt(frame.at) ?? new Date().toISOString(),
-  });
-}
-
-// A work_items row's NOT NULL columns (global-work-store.mjs's schema) — a merged
-// delta row missing any of these can never be INSERTed; applyDeltaFrame (below)
-// screens for exactly this completeness BEFORE the re-publish, so one partial delta
-// can never abort the whole workspace's merged re-publish (review fix P0.3).
-const REQUIRED_ITEM_FIELDS = ["ref", "type", "slug", "sourcePath"];
-
-function isCompleteItemRow(row) {
-  return REQUIRED_ITEM_FIELDS.every((field) => typeof row?.[field] === "string" && row[field].length > 0);
-}
-
-// applyDeltaFrame(store, frame, { now }) — a TARGETED item upsert: reads the
-// workspace's current rows, replaces/adds the delta rows by `ref`, and re-publishes
-// the merged set through the SAME snapshot-write seam (idempotent — publishing a
-// snapshot is always safe to repeat, ADR-004). Redacts the delta items first
-// (ADR-005). This is how "a delta reports the running item completed" ends up
-// `done` in the store: the merged row for that ref carries the delta's status.
+// applyReportedRows(store, frame, options, kind) — the ONE body behind both row-frame
+// doors (m43/ADR-004: `applyDeltaFrame` collapses to a call on the shared upsert seam,
+// and `applySnapshotFrame` collapses the same way, for the same reason).
 //
-// review fix P0.3: a delta for an UNSEEN ref (not in `existing`) whose own fields
-// don't supply the schema's NOT NULL columns (type/slug/sourcePath) would otherwise
-// merge into an INCOMPLETE row — publishWorkspaceSnapshot's INSERT then throws,
-// which rolls back the ENTIRE BEGIN IMMEDIATE txn and (via the caller's
-// .catch((error) => { reportDegrade("control-stream-server", error); })) silently drops every OTHER item in the same frame. Skip exactly
-// that incomplete merged row here, before the re-publish, so the rest of the
-// frame's items (and the rest of the workspace's already-published rows) are never
-// collaterally rolled back by one partial/unseen-ref delta.
-export async function applyDeltaFrame(store, frame, { now } = {}) {
-  // A frame for a workspaceId with no registered descriptor is REFUSED — same gate
-  // as applySnapshotFrame above, checked before any read/merge work.
+// WHAT COLLAPSED, AND WHY IT EXISTED. Both doors used to feed `publishWorkspaceSnapshot`
+// — the wholesale DELETE-then-reinsert writer — so a delta first had to READ the
+// workspace's rows, MERGE itself over them by ref, and re-publish the whole set, and a
+// snapshot simply REPLACED every row in the workspace with whatever subtree the worker
+// happened to send. Both dances existed only to feed a writer that could not update one
+// row. With a row upsert the frame's rows pass straight through, and with them go two
+// hazards: the P0.3 collateral rollback (one unstorable row aborting the whole frame's
+// transaction and silently dropping every other item in it) and the snapshot frame's
+// power to remove rows it never named.
+//
+// A frame is a node REPORTING ITS OWN SLICE (`authority: "reported"`), so it is never
+// filtered by who authored the cached row — that is what reporting means, and filtering
+// it is the ADR-011/A1 regression. It carries no authoritative ref set, so it retracts
+// NOTHING: a worker speaks for the subtree it is working, never for the workspace.
+//
+// SECURITY T6, unchanged and now load-bearing for authorship: the row is stamped with the
+// identity the CONNECTION authenticated as (`options.nodeId`), never a self-reported
+// `frame.nodeId` alone — the same precedence applyWorktreeContentFrame/applyPresenceFrame
+// keep. A frame arriving on worker-a's socket can never write a row attributed to
+// worker-b, which is what stops an impostor retracting another node's work later.
+//
+// A frame for a workspaceId with no registered descriptor is still REFUSED — never
+// published under a fabricated path (see resolveKnownWorkspaceRoot above).
+async function applyReportedRows(store, frame, options, kind) {
   const known = resolveKnownWorkspaceRoot(store, frame.workspaceId);
   if (known == null) {
     return { published: false, skipped: true, code: "unknown-workspace", workspaceId: frame.workspaceId };
   }
   const redactedItems = redactDescriptor(frame.items ?? []);
-  // review fix Craft: reads through global-work-store.mjs's own readWorkspaceItems
-  // accessor rather than a raw store.db.prepare(...) SELECT held here — a plain
-  // read, so this does not weaken acd-global-publisher-single-seam (write-scoped).
-  const existing = readWorkspaceItems(store, frame.workspaceId);
-  const byRef = new Map(existing.map((row) => [row.ref, row]));
-  for (const item of redactedItems) {
-    byRef.set(item.ref, { ...byRef.get(item.ref), ...item });
+  const ownerNode = typeof options?.nodeId === "string" && options.nodeId.length > 0 ? options.nodeId : null;
+  const frameNode = typeof frame?.nodeId === "string" && frame.nodeId.length > 0 ? frame.nodeId : null;
+  const nodeId = ownerNode ?? frameNode;
+  if (nodeId == null) {
+    return { published: false, skipped: true, code: "missing-node-id", workspaceId: frame.workspaceId };
   }
-  const mergedRows = [...byRef.values()].filter(isCompleteItemRow);
-  const workspace = { projectRoot: known.projectRoot, workDir: known.workDir, config: {} };
-  return publishWorkspaceSnapshot(store, workspace, {
-    workspaceId: frame.workspaceId,
-    items: { rows: mergedRows, errors: [] },
-    // review fix P2.9: a malformed frame.at falls back to the server clock, never
-    // a verbatim non-ISO string written into last_published_at.
-    now: now ?? validFrameAt(frame.at) ?? new Date().toISOString(),
+  // review fix P2.9, kept: a malformed frame.at falls back to the server clock, never a
+  // verbatim non-ISO string written into the row's provenance stamp.
+  const at = options?.now ?? validFrameAt(frame.at) ?? new Date().toISOString();
+  // The ADR-003 lock's answer, read HERE and handed to the seam as data (ADR-011/A1: the
+  // store module reads no `global_assignments` state). It refuses a frame from a node
+  // that is NOT the holder of the ref's execution scope, and never touches the holder's
+  // own frames — `activeScopeHolders` is the one derivation every rendering of the lock
+  // shares.
+  const result = upsertWorkItems(store, frame.workspaceId, redactedItems, {
+    nodeId,
+    authority: "reported",
+    syncedAt: at,
+    heldScopes: activeScopeHolders(store, frame.workspaceId),
   });
+  return {
+    published: true,
+    kind,
+    workspaceId: frame.workspaceId,
+    nodeId,
+    itemCount: result.upserted,
+    upserted: result.upserted,
+    skippedRows: result.skipped,
+    retracted: result.retracted,
+    publishedAt: result.syncedAt,
+  };
+}
+
+// applySnapshotFrame(store, frame, options) — a worker's FULL row set for the subtree it
+// is working. It ADDS and UPDATES the refs it carries and removes nothing else: the
+// frame's scope is the worker's worktree, never the workspace, so it claims authority
+// over nothing it did not name.
+export async function applySnapshotFrame(store, frame, options = {}) {
+  return applyReportedRows(store, frame, options, "snapshot");
+}
+
+// applyDeltaFrame(store, frame, options) — the same door for a partial report. This is
+// how "a delta reports the running item completed" ends up `done` in the store: the
+// frame's row for that ref lands, on its own, with the reporting node stamped on it.
+export async function applyDeltaFrame(store, frame, options = {}) {
+  return applyReportedRows(store, frame, options, "delta");
 }
 
 // applyWorktreeContentFrame(store, frame, options) — schema v5 (TECH_DEBT item 6):

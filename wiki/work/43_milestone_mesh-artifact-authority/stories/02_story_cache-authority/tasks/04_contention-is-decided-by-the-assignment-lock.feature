@@ -93,3 +93,14 @@ Feature: while an assignment holds an item, only the holder's report is accepted
       | no active assignment| control-1  | control-1 | on the periodic publish tick| accepts the write                                              |
       | no active assignment| worker-a   | control-1 | on the periodic publish tick| does not accept it, and counts it as a skipped ref             |
       | no active assignment| worker-a   | worker-a  | as a streamed frame         | accepts the write                                              |
+      | no active assignment| worker-a   | worker-b  | as a streamed frame         | accepts the write, and the ADR's `syncedAt` rule does NOT apply across nodes |
+
+  # THE LAST ROW IS A RULING, NOT A GAP (added at 43/02's structural review; PO decision
+  # on QA's G3). This feature's header says "outside a lock, last-write-wins by
+  # `syncedAt`". Between two NODES that is FALSE as built and is meant to be: the
+  # never-move-a-row-backwards guard is scoped to a single author, because comparing two
+  # machines' clocks hands the outcome to skew — and would let a worker whose clock
+  # trails the control's have its own holder frames rejected, which is ADR-011/A1's
+  # regression by another route. ADR-010/D1 forbids `syncedAt` as authority between
+  # nodes; ADR-012/B7 pins the scoping. So across nodes, outside a lock, ARRIVAL ORDER
+  # wins, and this row records that rather than leaving it as folklore.

@@ -96,7 +96,12 @@ export const globalWorkStoreTests = [
         // pinned-version re-arm as every bump above. (This pin had been left at 6
         // after the v7 bump — pre-existing red, fixed en route in m42 wave (d) d5,
         // verified by stash at HEAD.)
-        assert.equal(store.schemaVersion, 7);
+        // v7 -> v8 (m43 / ADR-004 + ADR-006, owned by 43/02 per ADR-010/D2): the
+        // work_items PROVENANCE columns node_id + updated_at — the same in-place,
+        // PRAGMA-checked ALTER, and the same pinned-version re-arm. The columns
+        // themselves are asserted below, because this bump is the one that decides
+        // whether a row can be attributed and retracted at all.
+        assert.equal(store.schemaVersion, 8);
         const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("aof_schema"));
         assert.ok(tables.includes("workspaces"));
@@ -110,6 +115,9 @@ export const globalWorkStoreTests = [
         assert.ok(tables.includes("work_item_docs"));
         assert.ok(tables.includes("work_item_runs"));
         assert.ok(tables.includes("node_logs"));
+        const workItemColumns = store.db.prepare("PRAGMA table_info(work_items)").all().map((column) => column.name);
+        assert.ok(workItemColumns.includes("node_id"), "v8: work_items carries the reporting node");
+        assert.ok(workItemColumns.includes("updated_at"), "v8: work_items carries the instant that node reported it");
       } finally {
         store.close();
       }
@@ -118,7 +126,7 @@ export const globalWorkStoreTests = [
       try {
         const versions = reopened.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").all();
         assert.equal(versions.length, 1);
-        assert.equal(versions[0].value, 7);
+        assert.equal(versions[0].value, 8);
       } finally {
         reopened.close();
       }

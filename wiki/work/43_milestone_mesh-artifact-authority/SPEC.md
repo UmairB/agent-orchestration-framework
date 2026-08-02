@@ -101,7 +101,7 @@ the widest mechanical sweep and the risky change unreviewable inside a 13-module
 - [x] `01_story_item-lock` — an assignment exclusively owns its item at execution scope; a second
       assignment, a local run mint and a control-side mutation are all refused, coded and loud, until
       the next gate. (ADR-003)
-- [ ] `02_story_cache-authority` — `work_items` stops being rebuilt from control disk and becomes an
+- [x] `02_story_cache-authority` — `work_items` stops being rebuilt from control disk and becomes an
       upserted, provenance-stamped **fact** behind ONE seam both the control node and every worker
       write through, with author-retraction deletion. **Also carries schema v8's guarded `ALTER` and the
       write-side provenance stamping** (moved here from story 04 at refine — ADR-010 R-D2). (ADR-004)

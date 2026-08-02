@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { globalMeshPaths } from "./workspace.mjs";
 import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
@@ -8,7 +8,7 @@ import { listItems, parseFrontmatter, recordDoc } from "./work.mjs";
 // run-store.mjs imports no store/mesh module — no cycle.
 import { readRuns } from "./run-store.mjs";
 
-export const GLOBAL_WORK_SCHEMA_VERSION = 7;
+export const GLOBAL_WORK_SCHEMA_VERSION = 8;
 
 // The record docs a board/CLI face may request by NAME (work:doc's input contract)
 // and therefore exactly the doc bodies a worker streams for its active worktree —
@@ -40,12 +40,23 @@ import { reportDegrade } from "./degrade.mjs";
 // executable data, not a warning comment: the wholesale-delete guard below and
 // the ref-remap table derivation both read it.
 import { tableClass, refRemapTables } from "./effects/stores.mjs";
-// m43 / ADR-003 — the AUTOMATIC half of the item lock. An operator verb onto a held
-// item is refused, coded, loud; this periodic tick asked nothing, so it steps over the
-// rows it does not own and COUNTS the skips in its result. Read from the leaf that owns
-// every `global_assignments` read (assignment-record.mjs imports 0 — no cycle back
-// through the lock module or the publisher seam).
-import { activeScopeHolders, executionScopeRef } from "./assignment-record.mjs";
+// m43 / ADR-003 — the ONE execution-scope rule (a pure string derivation on a leaf
+// that imports 0). The seam below reports the SCOPE a skipped ref belongs to, so a
+// count of stepped-over scopes is explainable by the list beside it.
+//
+// ADR-011/A1, ARMED AND NOW BINDING: this module reads NO `global_assignments` state.
+// 43/01's interim carry read `activeScopeHolders` here, because the wholesale rebuild
+// forced the shared row-writer to decide what to re-insert. With a row upsert the
+// writer decides nothing about assignments: the lock's answer arrives AS DATA
+// (`options.heldScopes`) from the caller that knows whose slice is being written —
+// the disk-derived publisher and the two frame doors, which read the leaf themselves.
+import { executionScopeRef } from "./assignment-record.mjs";
+// m43 / ADR-004 — the publishing node's own id, for the provenance stamp. The ONE
+// derivation (node-identity.mjs), in its in-memory mode: a pinned `mesh.nodeId` wins
+// verbatim, else the sanitized hostname — never persisted from here, exactly as
+// mesh-launcher's own resolveNodeIdentity reads it.
+import { deriveNodeId } from "./node-identity.mjs";
+import os from "node:os";
 export const workspaceIdFor = workspaceIdFromPath;
 
 // wholesaleDelete(db, table, workspaceId) — the ONLY sanctioned way this module
@@ -54,7 +65,15 @@ export const workspaceIdFor = workspaceIdFromPath;
 // unrecoverable dispatch/streamed state (the exact accident the old "MUST NEVER
 // touch" comments warned about), so a misclassified call throws BEFORE the
 // statement runs — schema-level gating, not prose.
-function wholesaleDelete(db, table, workspaceId) {
+//
+// EXPORTED (m43 / ADR-004): after the authority cut this guard has no `work_items`
+// caller at all, so "the sweep is refused" would be provable only by reading source.
+// It is the door a projection rebuild goes through, and it is now callable BY that
+// name from outside — which makes the refusal an outsider-visible coded error rather
+// than an absence. Exporting it widens nothing: the class gate is inside it, so a
+// caller reaching for a fact table gets `fact-table-wholesale-delete` and no
+// statement runs.
+export function wholesaleDelete(db, table, workspaceId) {
   const cls = tableClass(table);
   if (cls !== "projection") {
     throw globalStoreError(
@@ -176,6 +195,13 @@ function migrateSchema(db, existingVersion) {
         name TEXT,
         last_published_at TEXT
       );
+      -- schema v8 (m43 / ADR-004 + ADR-006, placed here by ADR-010/D2): the
+      -- PROVENANCE columns. node_id is the node that actually reported this row — the
+      -- column authority is decided by (a node may retract only what it authored) and
+      -- the column the 43/04 mapper will render as the wire's reportedBy; updated_at is
+      -- when that node last reported it (the wire's syncedAt). Same names, same shape
+      -- and same nullability as work_item_docs/work_item_runs already carry, because
+      -- this table is now the same KIND of thing they are.
       CREATE TABLE IF NOT EXISTS work_items (
         workspace_id TEXT NOT NULL,
         ref TEXT NOT NULL,
@@ -185,6 +211,8 @@ function migrateSchema(db, existingVersion) {
         title TEXT,
         parent TEXT,
         source_path TEXT NOT NULL,
+        node_id TEXT,
+        updated_at TEXT,
         PRIMARY KEY (workspace_id, ref)
       );
       CREATE INDEX IF NOT EXISTS idx_work_items_workspace ON work_items(workspace_id);
@@ -240,8 +268,10 @@ function migrateSchema(db, existingVersion) {
       -- schema v3 (milestone 35 / story 00, ADR-001) — the assignment record is
       -- operator/worker-CREATED state, never a projection of any doc, so it is a
       -- NEW, ADDITIVE table that publishWorkspaceSnapshot (below) MUST NEVER touch —
-      -- that DELETE-ALL-then-reinsert cycle would wipe a dispatch fact on the very
-      -- next converge tick. Keyed by assignment_id (PRIMARY KEY); dedicated single-row
+      -- the DELETE-ALL-then-reinsert cycle it ran until m43/ADR-004 would have wiped a
+      -- dispatch fact on the very next converge tick. (That sweep is gone now, for
+      -- work_items too; the rule it taught stands, and the class registry enforces it.)
+      -- Keyed by assignment_id (PRIMARY KEY); dedicated single-row
       -- writers (insertAssignment/updateAssignmentState, assignment-record.mjs) are the
       -- ONLY mutators. (mining prior-lesson R2/m20: the state column's SOLE producer
       -- per value is enforced by assignment-record.mjs's single source-of-truth enum,
@@ -268,8 +298,10 @@ function migrateSchema(db, existingVersion) {
       -- these when the ref does not resolve on the local disk, riding the SAME
       -- projection file the item rows already ride — never a git branch, never a
       -- new inter-process route. Like global_assignments, these are STREAM-written
-      -- state that publishWorkspaceSnapshot (the DELETE-then-reinsert row publisher)
-      -- MUST NEVER touch; applyWorktreeContentFrame's upsert is the only writer.
+      -- state no publish may sweep; applyWorktreeContentFrame's upsert is the only
+      -- writer. (m43/ADR-004: the row publisher no longer deletes-then-reinserts
+      -- anything — work_items joined these tables as a fact rather than the other way
+      -- round — and only the named workspace-removal path clears them.)
       CREATE TABLE IF NOT EXISTS work_item_docs (
         workspace_id TEXT NOT NULL,
         ref TEXT NOT NULL,
@@ -348,6 +380,22 @@ function migrateSchema(db, existingVersion) {
     if (!hasCodeColumn) {
       db.exec("ALTER TABLE global_assignments ADD COLUMN code TEXT");
     }
+    // schema v8 (m43 / ADR-004 + ADR-006; OWNED BY 43/02 per ADR-010/D2 — the columns
+    // are the shape this story's own upsert seam produces, so the retraction predicate
+    // has something to read). The SAME in-place, PRAGMA-checked ALTER discipline as
+    // clone_url/session_id/code above: every store already on a real machine has a
+    // work_items table, and `CREATE TABLE IF NOT EXISTS` never adds a column to one.
+    // The table is never dropped or wiped — a live fleet's cached rows survive the
+    // upgrade carrying `node_id IS NULL`, which reads as "no recorded author" and is
+    // therefore retractable by NOBODY (the migration residue task 02's last Examples
+    // row pins) until its author reports it again.
+    const workItemColumns = db.prepare("PRAGMA table_info(work_items)").all();
+    if (!workItemColumns.some((column) => column.name === "node_id")) {
+      db.exec("ALTER TABLE work_items ADD COLUMN node_id TEXT");
+    }
+    if (!workItemColumns.some((column) => column.name === "updated_at")) {
+      db.exec("ALTER TABLE work_items ADD COLUMN updated_at TEXT");
+    }
 
     if (existingVersion != null && existingVersion < GLOBAL_WORK_SCHEMA_VERSION) {
       db.prepare(`
@@ -374,7 +422,11 @@ function migrateSchema(db, existingVersion) {
 // place, or arriving over the d3 bridge when the reindex ran on another machine
 // (which is why that reactor keys by the payload's own workspaceId, never a
 // path this machine may not have). `work_items` is deliberately in NEITHER
-// list: a pure projection is rebuilt by the publish reactor, not patched.
+// list, and m43/ADR-004 does not move it: a renumber is re-REPORTED by each row's
+// own author (the control's next publish upserts the new refs and retracts the old
+// ones it authored; a worker re-reports its own), and a column remap here would
+// rewrite `ref` while leaving `parent`/`source_path` naming the old numbers — a
+// self-inconsistent row, which is the reason it was excluded before the cut too.
 //
 // A remap is a PERMUTATION (`{03→04, 04→05}`), so it is applied in the order the
 // engine hands it over — descending by the number that moved, so no update ever
@@ -439,61 +491,369 @@ export function remapWorkspaceFactRefs(store, workspaceId, remap = [], options =
   return remapRefKeyedTables(store, workspaceId, remap, refRemapTables("control-store"), "lastReindexFactsEventId", options);
 }
 
+// ------------------------------------------------ THE SHARED UPSERT SEAM (ADR-004) --
+//
+// A row that cannot be stored is SKIPPED AND COUNTED rather than thrown — one bad row
+// must never take the frame's other rows, or the workspace's already-cached rows, with
+// it. The screen lives with the writer, the only place that knows what a storable row is.
+//
+// IT COVERS EVERY VALUE THE STATEMENT BINDS, not only the NOT NULL ones (ADR-012/B5).
+// Screening the four required columns was measured insufficient: the upsert binds eight
+// row-derived values and `status`/`title`/`parent` reached it unchecked. A frame carrying
+// `title: ["alpha","beta"]` threw out of the whole batch and landed ZERO rows; the same
+// shape reaches the DISK path from ordinary operator input (`parseFrontmatter` parses an
+// inline list) and froze every other item in the workspace on every tick until a human
+// edited that one doc. That is P0.3's own sentence, so AC5's "retired" was false until
+// this screen existed.
+// Exported so the coverage ratchet reads the ONE definition rather than re-spelling it —
+// a second copy of the list would let the ratchet pass while the real screen was wrong.
+export const REQUIRED_ITEM_FIELDS = ["ref", "type", "slug", "sourcePath"];
+export const OPTIONAL_ITEM_FIELDS = ["status", "title", "parent"];
+
+// What SQLite binds: null/undefined, a string, a number/bigint. An array, a plain object
+// and a BOOLEAN all throw — measured, not assumed. Numbers stay admitted: a `title: 2026`
+// has always stored 2026, and rejecting it would be a behaviour change in a fix's clothes.
+function isBindableValue(value) {
+  return value == null || typeof value === "string" || typeof value === "number" || typeof value === "bigint";
+}
+
+// itemRowFault(row) → null when storable, else { reason, column } — so a count is always
+// explainable by the column that caused it.
+export function itemRowFault(row) {
+  if (row == null || typeof row !== "object" || Array.isArray(row)) return { reason: "incomplete-row", column: null };
+  for (const field of REQUIRED_ITEM_FIELDS) {
+    if (typeof row[field] !== "string" || row[field].length === 0) return { reason: "incomplete-row", column: field };
+  }
+  for (const field of OPTIONAL_ITEM_FIELDS) {
+    if (!isBindableValue(row[field])) return { reason: "unstorable-value", column: field };
+  }
+  return null;
+}
+
+export function isCompleteItemRow(row) {
+  return itemRowFault(row) == null;
+}
+
+// The two AUTHORITIES a writer can have — ADR-011/A1's ruling in one word, "whose slice
+// is being written" (narrowed by ADR-012/B1: the lock gate runs FIRST for every writer,
+// and `authority` decides only the second question):
+//
+//   "reported"     — the writer is reporting its OWN live slice (a worker's frame). It is
+//                    never filtered by who authored the cached row, because taking
+//                    authorship IS what reporting means; only an assignment held by
+//                    SOMEBODY ELSE refuses it.
+//   "disk-derived" — the writer is republishing its own local DISK slice (the control's
+//                    tick, publish-on-mutate). A disk read says what this node's checkout
+//                    looks like, never what another node is doing — so it is authoritative
+//                    ONLY over rows it authored (ADR-010/D1) and rows nobody has yet.
+//
+// There is no default: "reported" would silently re-open the permanent revert, and
+// "disk-derived" would silently discard a worker's frames (ADR-011/A1's HIGH regression).
+// Absent-means-something is the m42 shape ("three of the four mint sites silently had
+// none"), so a caller that does not say is refused.
+export const UPSERT_AUTHORITIES = Object.freeze(["reported", "disk-derived"]);
+
+// upsertWorkItems(store, workspaceId, rows, options) — THE row-level write seam for
+// work_items, and the structural twin of upsertWorkItemContent below: per-(workspace_id,
+// ref) upsert, stamping the WRITING node and the instant it reported, inside ONE
+// transaction that no single bad row can abort. Both writers use it — the control's own
+// publish with its own node id, a worker's frame with the CONNECTION-authenticated one.
+//
+//   nodeId            — the node this write is attributed to. REQUIRED: an unattributed
+//                       row could never be retracted by anyone, nor protected by the
+//                       lock (`missing-node-id`, the code applyLogEntriesFrame already
+//                       answers a node-less frame with).
+//   authority         — "reported" | "disk-derived" (above). REQUIRED.
+//   syncedAt          — the provenance stamp (storage `updated_at`; the wire's
+//                       `syncedAt`, mapped in 43/04). Defaults to now.
+//   heldScopes        — Map<scopeRef, { holderNode, assignmentId, state }>, the ADR-003
+//                       lock's answer supplied AS DATA by the caller that read it. The
+//                       seam never queries `global_assignments` itself (ADR-011/A1).
+//   authoritativeRefs — the full ref set this node claims to be authoritative for.
+//                       ABSENT ⇒ this is a partial report and retracts NOTHING; present
+//                       (even EMPTY) ⇒ rows THIS node authored and no longer claims are
+//                       retracted. Absent-vs-empty is the boundary between "I am telling
+//                       you about some items" and "I am telling you I have none".
+//   operatorRefs      — the refs an OPERATOR verb just mutated on this node. That door
+//                       TAKES authorship, and may retract those refs whoever authored them
+//                       (ADR-010/D1) — a gate is where authorship changes hands.
+//                       Deliberately a REF SET, not a flag: publish-on-mutate carries the
+//                       whole workspace, and the operator touched one item.
+//
+// Returns { workspaceId, upserted, retracted, syncedAt, skipped: [...] } where each skip
+// names its ref, its execution scope, its reason and whoever the reason points at.
+export function upsertWorkItems(store, workspaceId, rows = [], options = {}) {
+  const { nodeId, authority, syncedAt, heldScopes = new Map(), authoritativeRefs, operatorRefs } = options;
+
+  const reporter = typeof nodeId === "string" && nodeId.length > 0 ? nodeId : null;
+  if (reporter == null) {
+    throw globalStoreError(
+      "Refusing to write a work_items row with no reporting node — an unattributed row can be retracted by nobody and protected by nothing.",
+      "missing-node-id",
+      400,
+    );
+  }
+  if (!UPSERT_AUTHORITIES.includes(authority)) {
+    throw globalStoreError(
+      `upsertWorkItems needs an explicit authority (${UPSERT_AUTHORITIES.join(" | ")}) — "whose slice is being written" is the decision, and it has no safe default.`,
+      "upsert-authority-unknown",
+      500,
+    );
+  }
+  const at = typeof syncedAt === "string" && syncedAt.length > 0 && Number.isFinite(Date.parse(syncedAt))
+    ? syncedAt
+    : new Date().toISOString();
+  const operator = operatorRefs instanceof Set ? operatorRefs : new Set(operatorRefs ?? []);
+  const claimed = authoritativeRefs === undefined || authoritativeRefs === null
+    ? null
+    : new Set(authoritativeRefs);
+
+  const db = store.db;
+  const skipped = new Map();
+  const skip = (ref, reason, detail = {}) => {
+    if (skipped.has(ref)) return;
+    skipped.set(ref, { ref, scopeRef: ref == null ? null : executionScopeRef(ref), reason, ...detail });
+  };
+  // heldBy(ref) — the node holding this ref's execution scope, or null when it is free
+  // or held by the writer itself. ONE predicate, used by both the write and the
+  // retraction: a ref a non-holder may not write is also one it may not delete.
+  const heldBy = (ref) => {
+    const holder = heldScopes instanceof Map ? heldScopes.get(executionScopeRef(ref)) : null;
+    if (holder == null) return null;
+    const holderNode = holder.holderNode ?? holder.targetNodeId ?? null;
+    return holderNode === reporter ? null : holder;
+  };
+
+  let upserted = 0;
+  let retracted = 0;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const readRow = db.prepare("SELECT node_id, updated_at FROM work_items WHERE workspace_id = ? AND ref = ?");
+    const upsert = db.prepare(`
+      INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path, node_id, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, ref) DO UPDATE SET
+        type = excluded.type,
+        slug = excluded.slug,
+        status = excluded.status,
+        title = excluded.title,
+        parent = excluded.parent,
+        source_path = excluded.source_path,
+        node_id = excluded.node_id,
+        updated_at = excluded.updated_at
+    `);
+
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const fault = itemRowFault(row);
+      if (fault != null) {
+        // An unstorable entry still has to be COUNTED, and it may carry no usable ref
+        // at all (a null, a non-object, a row with no `ref`) — so the skip is keyed by
+        // whatever identity it does have and never collapses two bad entries into one.
+        // It names the REF and the SOURCE PATH it came from, never a bind-parameter
+        // index: the operator's remedy is to edit one record doc, and a number tells
+        // them nothing about which.
+        const ref = typeof row?.ref === "string" && row.ref.length > 0 ? row.ref : null;
+        skipped.set(ref ?? `unstorable:${skipped.size}`, {
+          ref,
+          scopeRef: ref == null ? null : executionScopeRef(ref),
+          reason: fault.reason,
+          column: fault.column,
+          ...(typeof row?.sourcePath === "string" && row.sourcePath.length > 0 ? { sourcePath: row.sourcePath } : {}),
+        });
+        continue;
+      }
+
+      // (1) THE LOCK, for every writer. While an assignment covers this ref's execution
+      // scope, only its holder may write the ref — which is what stops the control's
+      // tick republishing over a live phase AND what stops a second worker writing over
+      // the holder. It is NOT what decides between a node and its own frames: a holder
+      // writing its own scope passes straight through (heldBy returns null for itself),
+      // which is the ADR-011/A1 regression stated as code.
+      const holder = heldBy(row.ref);
+      if (holder != null) {
+        skip(row.ref, "held-by-assignment", {
+          holderNode: holder.holderNode ?? holder.targetNodeId ?? null,
+          assignmentId: holder.assignmentId ?? null,
+          state: holder.state ?? null,
+        });
+        continue;
+      }
+
+      const existing = readRow.get(workspaceId, row.ref);
+
+      // (2) AUTHORSHIP, for a disk-derived writer only. A node re-reading its own
+      // checkout knows nothing about another node's work, so it may refresh rows it
+      // authored and adopt rows nobody has authored yet — and it steps over the rest.
+      // This is the cure for the permanent revert: after a worker settles and stops
+      // ticking, the control's tick sees `node_id = <worker>` and skips FOREVER.
+      if (authority === "disk-derived" && !operator.has(row.ref)) {
+        if (existing != null && existing.node_id != null && existing.node_id !== reporter) {
+          skip(row.ref, "authored-elsewhere", { reportedBy: existing.node_id });
+          continue;
+        }
+      }
+
+      // (3) ORDERING WITHIN ONE AUTHOR — a node never moves its OWN row backwards in
+      // time. Frames are re-sent on reconnect by construction, so a redelivered older
+      // report is a real ordering, not a hypothetical one, and letting it land would
+      // undo a completion the same node already reported.
+      //
+      // Deliberately scoped to the SAME author, and deliberately NOT a tiebreaker
+      // between nodes (ADR-010/D1: `syncedAt` is provenance for display and staleness
+      // only, never authority). Comparing two NODES' clocks would hand the outcome to
+      // clock skew: a worker whose clock trails the control's would have its holder
+      // frames silently rejected as stale, which is the ADR-011/A1 regression by
+      // another route. Within one node there is one clock, so the comparison is sound.
+      if (existing?.node_id === reporter && typeof existing.updated_at === "string" && existing.updated_at > at) {
+        skip(row.ref, "stale-report", { reportedAt: existing.updated_at });
+        continue;
+      }
+
+      // Every row-derived value below is screened above, and that COVERAGE is ratcheted
+      // rather than remembered: `acd-work-items-single-writer` reads this statement's
+      // bindings and fails if one of them is not in the screen's field lists. A defensive
+      // try/catch here would absorb the symptom instead — and, measured, would hide the
+      // screen's own absence from four of the five tests that exist to catch it.
+      upsert.run(
+        workspaceId,
+        row.ref,
+        row.type,
+        row.slug,
+        row.status ?? null,
+        row.title ?? null,
+        row.parent ?? null,
+        row.sourcePath,
+        reporter,
+        at,
+      );
+      upserted += 1;
+    }
+
+    // (3) AUTHOR RETRACTION — the ONLY deletion a publish can perform, and never a
+    // sweep. The predicate is `node_id = <this node> AND ref NOT IN <claimed>`: a node
+    // removes exactly the rows it authored and no longer claims. It can never reach
+    // another node's row by AUTHORSHIP alone, and is never predicated on time (ADR-006's
+    // settled never-evict rule — age deletes nothing, ever). A ref whose scope is held
+    // by someone else is left alone for the same reason it is not written: it is not
+    // this node's to touch. The one widening — the operator's own rewritten refs — is
+    // named below and is bounded by the event that raised it.
+    if (claimed != null) {
+      // WHOSE rows this publish may retract: its own, plus any row sitting on a ref an
+      // OPERATOR verb on this node just rewrote (ADR-010/D1's operator door, which "may
+      // retract the ref regardless of `node_id`"). The second set is what makes a
+      // RENUMBER honest: after `43/03 -> 43/04` the ref `43/03` means a different item,
+      // so another node's row left there is not a stale copy of the right item — it is
+      // WRONG DATA at a live ref, and only the node that rewrote the ref can know that.
+      const retract = db.prepare("DELETE FROM work_items WHERE workspace_id = ? AND ref = ? AND node_id IS ?");
+      const reachable = db.prepare("SELECT ref, node_id FROM work_items WHERE workspace_id = ?").all(workspaceId)
+        .filter((row) => row.node_id === reporter || operator.has(row.ref));
+      for (const { ref, node_id: author } of reachable) {
+        if (claimed.has(ref)) continue;
+        const holder = heldBy(ref);
+        if (holder != null) {
+          skip(ref, "held-by-assignment", {
+            holderNode: holder.holderNode ?? holder.targetNodeId ?? null,
+            assignmentId: holder.assignmentId ?? null,
+            state: holder.state ?? null,
+          });
+          continue;
+        }
+        // Bound by the row's OWN recorded author, so the statement stays authorship-
+        // scoped (`IS`, not `=`, so a pre-v8 NULL-authored row is reachable too); the
+        // DECISION of whose rows may be reached is made above, in the open.
+        retracted += retract.run(workspaceId, ref, author).changes ?? 0;
+      }
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return { workspaceId, upserted, retracted, syncedAt: at, skipped: [...skipped.values()] };
+}
+
+// removeWorkspaceFromCache(store, workspaceId) — THE NAMED, OPERATOR-INITIATED removal
+// path (ADR-004's consequence, this story's to name). It is the ONLY door that can forget
+// a workspace: author retraction deliberately cannot reach rows another node authored, so
+// nothing else clears a worker-authored row for a workspace being unregistered. A distinct
+// call rather than a flag on the publish, so no periodic tick can ever reach it.
+//
+// It clears the whole CACHE footprint — rows, streamed bodies and run records (orphans
+// otherwise), the two projections the publish maintains (through the class guard, the one
+// spelling for a projection sweep) and its metadata. It deliberately does NOT touch the
+// DISPATCH facts (assignments, branches, descriptors): forgetting a workspace's cache is
+// not the same decision as erasing its dispatch history, and this door does not get to
+// make that one silently.
+export function removeWorkspaceFromCache(store, workspaceId) {
+  const db = store.db;
+  const removed = { items: 0, docs: 0, runs: 0 };
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    removed.items = db.prepare("DELETE FROM work_items WHERE workspace_id = ?").run(workspaceId).changes ?? 0;
+    removed.docs = db.prepare("DELETE FROM work_item_docs WHERE workspace_id = ?").run(workspaceId).changes ?? 0;
+    removed.runs = db.prepare("DELETE FROM work_item_runs WHERE workspace_id = ?").run(workspaceId).changes ?? 0;
+    wholesaleDelete(db, "projection_errors", workspaceId);
+    wholesaleDelete(db, "workspaces", workspaceId);
+    // …and its own bookkeeping (class `meta`, so the projection guard refuses it): a
+    // forgotten workspace's `lastPublishedAt` and reindex watermarks would otherwise
+    // outlive it under an id nothing will ever publish again.
+    db.prepare("DELETE FROM projection_metadata WHERE workspace_id = ?").run(workspaceId);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { workspaceId, ...removed, removed: removed.items + removed.docs + removed.runs };
+}
+
+// publishWorkspaceSnapshot(store, workspace, options) — a node publishing ITS OWN DISK
+// SLICE into the cache: it reads this node's checkout, upserts the rows it is entitled to
+// write through the seam above, retracts the rows it authored and no longer carries, and
+// rebuilds the projection-error list (a projection of this read — the one thing here
+// still swept and rebuilt).
+//
+// What it no longer does — the authority cut — is DELETE the workspace's work_items rows
+// and re-INSERT its own disk slice over them. That sweep is why a worker's row reverted to
+// the control's pre-run scaffold on a timer; it is now refused at the store gate
+// (`work_items` is classified `fact`), so it cannot come back by accident.
+//
+//   nodeId       — this node's id; resolved from the workspace when absent.
+//   heldScopes   — the ADR-003 lock's answer, supplied by the disk-derived caller that read
+//                  it (`global-work-publisher.mjs`). Absent ⇒ nothing is held.
+//   operatorRefs — the refs an operator verb just mutated (publish-on-mutate).
 export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
   const db = store.db;
   const now = options.now ?? new Date().toISOString();
   const projectRoot = path.resolve(workspace.projectRoot);
   const workDir = path.resolve(workspace.workDir);
   const workspaceId = resolveWorkspaceId(workspace, { override: options.workspaceId });
+  const nodeId = options.nodeId ?? await resolvePublishingNodeId(workspace);
   // review fix P2.10: readWorkspaceProjectionItems(workspace) takes ONE argument
-  // (its own doc-comment: "signature UNCHANGED") — the dead `{ now }` 2nd arg was
-  // never read by the function and is dropped here to match.
-  const items = options.items ?? await readWorkspaceProjectionItems(workspace);
+  // (its own doc-comment: "signature UNCHANGED").
+  const items = await readWorkspaceProjectionItems(workspace);
 
-  // THE HELD-SCOPE CARRY (m43/ADR-003, PLACED by ADR-011/A1) — `diskDerived`.
-  //
-  // This function is NOT the tick: it is the shared row-writer, and its three callers
-  // are the control's own publish (`global-work-publisher.mjs`) and the WORKER's two
-  // frame doors (`control-stream-server.mjs`'s applySnapshotFrame / applyDeltaFrame).
-  // The discriminator is therefore "whose slice is being written", never "what
-  // triggered the write": a node publishing its OWN disk-derived slice may be made to
-  // step over scopes it does not hold; a writer applying ANOTHER node's reported slice
-  // is the holder's own voice and may never be filtered by the lock. Filtering it was
-  // measured to discard the holder's authored delta — and its completion frame — for
-  // the whole duration of a phase, which is ADR-004/D1's permanent-revert inverted.
-  //
-  // So the carry is OFF by default and set ONLY by the disk-derived path. A caller
-  // supplying `options.items` from a frame is byte-unaffected.
-  const diskDerived = options.diskDerived === true;
-  const heldScopes = new Set();
+  // THE AUTHORITATIVE REF SET — what this node claims to carry, and the input to
+  // retraction. The refs it READ plus the refs whose record doc it could NOT read: an
+  // unparseable frontmatter is a read fault, never a statement that the item is gone, and
+  // dropping it from the claim would delete the item from the mesh's only readable copy.
+  // When the work stream itself could not be read (`authoritative: false`) the node claims
+  // NOTHING — the whole difference between "I have no items" and "I could not look".
+  const claimedRefs = items.rows.map((row) => row.ref)
+    .concat(items.errors.map((error) => error.ref).filter((ref) => typeof ref === "string" && ref.length > 0));
+
+  const upsert = upsertWorkItems(store, workspaceId, items.rows, {
+    nodeId,
+    authority: "disk-derived",
+    syncedAt: now,
+    heldScopes: options.heldScopes,
+    authoritativeRefs: items.authoritative ? claimedRefs : undefined,
+    operatorRefs: options.operatorRefs,
+  });
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    // Both the held-scope lookup and the carry SELECT read INSIDE the transaction
-    // (ADR-011/A1): read before `BEGIN IMMEDIATE` and a frame committing in that
-    // window is seen stale and then written back over.
-    const held = diskDerived ? activeScopeHolders(store, workspaceId) : new Map();
-    const carried = held.size === 0
-      ? []
-      : db.prepare("SELECT ref, type, slug, status, title, parent, source_path FROM work_items WHERE workspace_id = ?")
-        .all(workspaceId)
-        .filter((row) => held.has(executionScopeRef(row.ref)));
-    const carriedRefs = new Set(carried.map((row) => row.ref));
-    for (const row of carried) heldScopes.add(executionScopeRef(row.ref));
-    const publishable = [];
-    for (const item of items.rows) {
-      const scope = executionScopeRef(item.ref);
-      // The carry protects a row that EXISTS from being overwritten by this node's own
-      // stale disk. A ref the cache has never carried is not the holder's work yet — it
-      // is an item nobody has reported, and dropping it would make a held item VANISH
-      // from the read surface entirely, which is a worse lie than a stale row.
-      if (held.has(scope) && carriedRefs.has(item.ref)) {
-        heldScopes.add(scope);
-        continue;
-      }
-      publishable.push(item);
-    }
-
     db.prepare(`
       INSERT INTO workspaces (workspace_id, project_root, work_dir, name, last_published_at)
       VALUES (?, ?, ?, ?, ?)
@@ -504,31 +864,10 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
         last_published_at = excluded.last_published_at
     `).run(workspaceId, projectRoot, workDir, workspace.config?.name ?? null, now);
 
-    wholesaleDelete(db, "work_items", workspaceId);
+    // projection_errors stays a REBUILT PROJECTION and keeps its sweep: it is derived
+    // wholly from this one read, so a repaired record doc has to stop being reported —
+    // a fact-shaped error list would linger forever after the fix.
     wholesaleDelete(db, "projection_errors", workspaceId);
-
-    const insertItem = db.prepare(`
-      INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    // The carried rows first, byte-for-byte as they already were — the disk-derived
-    // publish leaves the holder's work exactly as it found it.
-    for (const row of carried) {
-      insertItem.run(workspaceId, row.ref, row.type, row.slug, row.status, row.title, row.parent, row.source_path);
-    }
-    for (const item of publishable) {
-      insertItem.run(
-        workspaceId,
-        item.ref,
-        item.type,
-        item.slug,
-        item.status ?? null,
-        item.title ?? null,
-        item.parent ?? null,
-        item.sourcePath,
-      );
-    }
-
     const insertError = db.prepare(`
       INSERT INTO projection_errors (workspace_id, source_path, message, code, occurred_at)
       VALUES (?, ?, ?, ?, ?)
@@ -548,21 +887,45 @@ export async function publishWorkspaceSnapshot(store, workspace, options = {}) {
     throw error;
   }
 
+  // The skips this tick made, at BOTH grains — one derivation, two renderings:
+  //   skippedRefs — every ROW it did not write, each naming why and who (the holder, or
+  //                 the node that authored the row it stepped over);
+  //   heldRefs / heldSkipped — the EXECUTION SCOPES an active assignment held it out of.
+  // `skipped` is untouched and still counts PROJECTION ERRORS: two different facts must
+  // not share a counter (ADR-010/D1a).
+  const heldRefs = [...new Set(
+    upsert.skipped.filter((entry) => entry.reason === "held-by-assignment").map((entry) => entry.scopeRef),
+  )].sort();
+
   return {
     workspaceId,
+    nodeId,
     itemCount: items.rows.length,
-    // `skipped` counts PROJECTION ERRORS and always has — two different skips summed
-    // into one number is a defect, not a variant (ADR-010/D1a), so the held-scope skip
-    // gets its own ADDITIVE, distinctly-named counter with the refs listed beside it
-    // so the count is explainable. Both count EXECUTION SCOPES stepped over, not rows:
-    // held-ness is a scope property (the predicate is symmetric), and `heldRefs` names
-    // the scopes so the number is always explainable by the list beside it. A frame
-    // caller is never filtered, so both are 0/[] there.
     skipped: items.errors.length,
-    heldSkipped: heldScopes.size,
-    heldRefs: [...heldScopes].sort(),
+    heldSkipped: heldRefs.length,
+    heldRefs,
+    skippedRefs: upsert.skipped,
+    upserted: upsert.upserted,
+    retracted: upsert.retracted,
+    // Whether this publish was a COMPLETE claim over the node's own slice. False means
+    // the work stream could not be read at all, so nothing was retracted and the read
+    // failure is reported rather than mistaken for an empty stream.
+    authoritative: items.authoritative,
     publishedAt: now,
   };
+}
+
+// resolvePublishingNodeId(workspace) — WHO this node is when it publishes its own slice.
+// The ONE derivation (node-identity.mjs) in its in-memory mode — a pinned
+// `config.mesh.nodeId` wins verbatim, else the sanitized hostname — never persisted from
+// here, exactly as mesh-launcher's own resolveNodeIdentity reads it. It is stable across
+// publishes, which is what author retraction depends on.
+async function resolvePublishingNodeId(workspace) {
+  return deriveNodeId({
+    config: workspace?.config ?? {},
+    hostname: os.hostname(),
+    salt: workspace?.config?.mesh?.salt,
+  });
 }
 
 export function recordWorkspaceProjectionError(store, workspace, error, options = {}) {
@@ -591,14 +954,44 @@ export function recordWorkspaceProjectionError(store, workspace, error, options 
   `).run(workspaceId, sourcePath, error?.message ?? "Projection write failed.", error?.code ?? "projection-write-failed", now);
 }
 
-// readWorkspaceProjectionItems(workspace) — exported additively (milestone 34 / story
-// 04) so the worker-stream client can build the SAME item-row shape a snapshot frame
-// carries, without a second read/parse of the record docs. Signature/behaviour
-// UNCHANGED for publishWorkspaceSnapshot's own internal call below.
+// readWorkspaceProjectionItems(workspace) — THE OWN-DISK READ. A node reading its own
+// checkout to know its own state: exported additively (milestone 34 / story 04) so the
+// worker-stream client builds the SAME item-row shape a snapshot frame carries, without a
+// second read/parse of the record docs. One argument, the same row shape, sourced from the
+// CALLER's disk — m43/ADR-004 leaves all three untouched, because the read primitive was
+// never the disease; the wholesale delete-and-rebuild wrapped around it was.
+//
+// TWO ADDITIVE KEYS the authority cut needs, both about the difference between "there is
+// nothing" and "I could not look" — a distinction that did not matter while every publish
+// rebuilt the table from scratch, and decides whether rows are DELETED now that it does not:
+//   `authoritative` — false when the work stream itself could not be read (a missing or
+//                     unreadable work dir). listItems answers a missing directory with an
+//                     empty list, which read as "every item was deleted" and would retract
+//                     the node's entire slice on a transient fault.
+//   `errors[].ref`  — the ref of the item whose record doc failed, so a publish can keep
+//                     claiming it. An unparseable frontmatter is a read fault, not a
+//                     statement that the item is gone.
 export async function readWorkspaceProjectionItems(workspace) {
   const rows = [];
   const errors = [];
-  for (const item of await listItems(workspace.workDir)) {
+  let authoritative = true;
+  let items = [];
+  try {
+    // The stream-level probe listItems cannot make: readDirSafe swallows every fault
+    // into an empty list, so the read must ask the directory itself whether it is there.
+    await readdir(workspace.workDir);
+    items = await listItems(workspace.workDir);
+  } catch (error) {
+    authoritative = false;
+    errors.push({
+      ref: null,
+      sourcePath: normalizeSourcePath(workspace.workDir),
+      message: `The work stream could not be read: ${error.message}`,
+      code: error.code ?? "work-stream-unreadable",
+    });
+    return { rows, errors, authoritative };
+  }
+  for (const item of items) {
     const doc = recordDoc(item);
     if (!doc) continue;
     const sourcePath = normalizeSourcePath(path.join(item.dir, doc));
@@ -619,13 +1012,14 @@ export async function readWorkspaceProjectionItems(workspace) {
       });
     } catch (error) {
       errors.push({
+        ref: item.ref,
         sourcePath,
         message: error.message,
         code: error.code ?? "projection-read-failed",
       });
     }
   }
-  return { rows, errors };
+  return { rows, errors, authoritative };
 }
 
 // readWorkspaceItems(store, workspaceId) — a thin accessor over the work_items

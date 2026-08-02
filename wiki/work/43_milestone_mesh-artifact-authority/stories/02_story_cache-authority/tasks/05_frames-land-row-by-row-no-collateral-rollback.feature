@@ -54,6 +54,20 @@ Feature: a worker frame lands row by row — one bad row is skipped and counted,
       | a row for "43/02" carrying only a `status`         |
       | an entry that is null                              |
       | an entry that is not an object                     |
+      | a row whose `title` is a list                      |
+      | a row whose `status` is a list                     |
+      | a row whose `parent` is a map                      |
+      | a row whose `status` is a boolean                  |
+
+  # ADDED at 43/02's structural review (ADR-012/B5), because the eight rows above are
+  # ALL missing-or-empty REQUIRED strings and so cannot reach the defect AC5 claims to
+  # retire. The four rows added to them carry a value that is PRESENT and WELL-FORMED for
+  # a reader but cannot be bound as a SQLite parameter — the shape both reviewers
+  # reproduced, which aborted the whole frame and left ZERO rows. The scenario below is
+  # the DISK half of the same defect, which no frame Examples row can reach: it arrives
+  # from ordinary operator input, because `parseFrontmatter` deliberately turns an inline
+  # `title: [alpha, beta]` into an array, and it froze every other item in the workspace
+  # on every tick until a human edited that one doc.
 
   # Two rows for the SAME ref inside one frame is a shape the wholesale INSERT could not survive
   # at all (a primary-key collision aborting the transaction). An upsert must simply settle on the
@@ -62,6 +76,13 @@ Feature: a worker frame lands row by row — one bad row is skipped and counted,
     When "worker-a" streams a frame carrying two rows for "43/02" with different statuses, and a good row for "43/01"
     Then a fresh read of the cached rows reports exactly one row for "43/02", with the status of the frame's LAST row for that ref
     And it reports "43/01" with the values the frame carried
+
+  Scenario: one record doc whose frontmatter carries a list-valued title never stops the workspace publishing
+    Given the control has published, so "43/01" and "43/03" are cached
+    When "43/03"'s record doc frontmatter sets `title: [alpha, beta]` and the control's disk moves "43/01" to status "done"
+    Then a fresh read of the cached rows reports "43/01" with status "done"
+    And the publish result counts "43/03" among its skipped rows, naming that ref
+    And the cached row for "43/03" still reports its last good title
 
   # A worker's FULL snapshot frame is scoped to the subtree it is working — so it may add and
   # update, but it claims authority over nothing else and must remove nothing. (Today it feeds the

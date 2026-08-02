@@ -11,8 +11,10 @@
 //                 module(s), one row at a time — never wholesale.
 //   projection  — derived from facts that live elsewhere (this workspace's disk,
 //                 a descriptor file, a peer's publish). Safe to delete + rebuild;
-//                 healing one is a re-publish/reconcile, never a patch
-//                 (the port-3 rule: `work_items` is not remapped, it is rebuilt).
+//                 healing one is a re-publish/reconcile, never a patch (the port-3
+//                 rule). `work_items` was the example here until m43/ADR-004 made it
+//                 a FACT: it is neither remapped nor rebuilt now — a renumber is
+//                 RE-REPORTED, row by row, by the node that authored each row.
 //   meta        — the store's own bookkeeping (schema versions, watermarks,
 //                 event-dedup stamps). Neither truth nor derivation.
 //
@@ -38,7 +40,26 @@ export const TABLE_CLASSIFICATION = Object.freeze({
   projection_metadata: Object.freeze({ class: "meta" }),
 
   workspaces: Object.freeze({ class: "projection", rebuiltBy: "publishWorkspaceSnapshot" }),
-  work_items: Object.freeze({ class: "projection", rebuiltBy: "publishWorkspaceSnapshot" }),
+  // m43 / ADR-004 — THE AUTHORITY CUT. `work_items` was a projection "rebuilt by
+  // publishWorkspaceSnapshot": every publish tick wholesale-DELETEd the workspace's
+  // rows and re-INSERTed the CALLING node's own disk slice. That is only sound while
+  // one node authors every row; it is not, and has not been since a worker started
+  // streaming its worktree. The measured consequence: after a worker settled and
+  // stopped ticking, the control's stale disk republished over live truth forever.
+  //
+  // It is now a FACT: rows arrive here as durable REPORTS from whichever node
+  // authored them (`node_id`, schema v8), are written ONE ROW AT A TIME through the
+  // single upsert seam below, and are removed only by their own author's retraction
+  // or by the explicitly named workspace-removal path. No local rebuild reconstructs
+  // another node's report — which is the definition of a fact in this registry.
+  //
+  // THE RECLASSIFICATION IS THE ENFORCEMENT: `wholesaleDelete` throws before it runs
+  // for any table not classified "projection", so the delete-and-rebuild cannot come
+  // back even by accident (`acd-work-items-single-writer` arms on this line).
+  work_items: Object.freeze({
+    class: "fact",
+    writers: Object.freeze(["src/global-work-store.mjs"]),
+  }),
   projection_errors: Object.freeze({ class: "projection", rebuiltBy: "publishWorkspaceSnapshot" }),
   global_nodes: Object.freeze({ class: "projection", rebuiltBy: "node descriptor publish" }),
   global_workspace_descriptors: Object.freeze({ class: "projection", rebuiltBy: "workspace descriptor publish" }),

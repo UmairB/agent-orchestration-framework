@@ -1174,6 +1174,213 @@ merge:
 
 ---
 
+## ADR-012: Build-time reconciliation for story 02 — the lock DOES filter a reported slice, but only from a NON-holder (ADR-011/A1's blanket phrasing is narrowed to what it measured); the held-scope read leaves the transaction because the carry it protected no longer exists; the row screen must cover every column it BINDS, not only the NOT NULL ones; and the newly-widened surfaces get their ratchets
+
+**Status:** Accepted
+**Date:** 2026-08-02
+
+**Context.** Structural review of `43/02`'s build (uncommitted at review time). The authority cut
+conforms on six of seven ACs; one AC's headline claim is false as built and is measured below. Two
+of the three amended arch-tests are genuinely stronger and one is stronger-but-over-scoped. ADR-011
+under-decided one thing and, in one clause, over-stated it. Each ruling is labelled **SUPERSEDES** /
+**PINS** / **CLARIFIES** in ADR-010's form, and each was verified at source or by running the code.
+
+**Codebase-graph grounding.** Rebuilt at this review — `aof graph build src` → **2,336 nodes, 6,266
+edges, 109 communities**, built `2026-08-02T19:04:19Z` (up from ADR-011's 1,960/5,754). `aof graph
+impact` read back for every file in the diff. Actual, not inferred: **`src/global-work-store.mjs`
+has 17 dependents and 8 dependencies** (it gained one, `node-identity.mjs`) — the third-widest
+fan-in in `src/`, and the module this story grew by 39%. `src/control-stream-server.mjs` is 3-in /
+11-out, `src/global-work-publisher.mjs` 9-in / 7-out, `src/effects/stores.mjs` **1-in / 0-out** (a
+pure leaf, which is why a classification change there is a safe enforcement point).
+
+### B1 — NARROWS ADR-011/A1. A writer applying another node's reported slice **is** filtered by the lock when the reporter is not the holder; A1's "may never be filtered" described the case it measured, not the rule
+
+A1 was written from one measurement: an ACTIVE assignment for `42`, the HOLDER's own delta discarded.
+Its ruling — *"a writer applying another node's reported slice is the holder's own voice and may never
+be filtered by the lock"* — silently assumed reporter == holder, which is the only case it had in hand.
+The build reads it more precisely and is **right to**: `upsertWorkItems`'s `heldBy(ref)` returns `null`
+when the holder **is** the reporter, so a holder's frame passes untouched, while a frame from a
+different node for a held scope is skipped. That is ADR-004/D3 verbatim — *"while an assignment covers
+a ref's execution scope, an upsert for that ref is accepted **only from the holder**"* — which A1's
+phrasing, taken literally, would have broken.
+
+**Ruling. The discriminator is `holder == writer`, in one predicate, for every authority.** The lock
+gate runs first for every writer; `authority` decides only the SECOND question (may this writer step
+over a row another node authored). Stated as the matrix the build implements and its tests pin:
+
+| scope | row author | writer | outcome |
+|---|---|---|---|
+| held by worker-a | anyone | worker-a (`reported`) | **accepted** — A1's regression, cured |
+| held by worker-a | anyone | worker-b (`reported`) | skipped `held-by-assignment` — ADR-004/D3 |
+| held by worker-a | anyone | control (`disk-derived`, automatic) | skipped + counted — ADR-003 |
+| held by worker-a | anyone | control (`disk-derived`, operator ref) | refused `item-locked-by-assignment` upstream |
+| free | worker-a | control (`disk-derived`, automatic) | skipped `authored-elsewhere` — ADR-010/D1, the cure |
+| free | worker-a | control (`disk-derived`, operator ref) | accepted, authorship changes hands — ADR-010/D1 |
+
+A1's ARMED clause is **discharged**: `acd-item-lock-single-door` now carries it, green, and the store
+module imports only `executionScopeRef` from the assignment leaf.
+
+### B2 — SUPERSEDES ADR-011/A1's "both reads move inside the transaction". The carry it protected is gone, and the OTHER A1 clause forbids the read being there at all
+
+A1 required the held-scope lookup and the carry `SELECT` to run inside `BEGIN IMMEDIATE`, because a
+frame committing in the window was read stale and then **written back over**. A1's own armed clause
+then required the store module to read no `global_assignments` state — so the two clauses cannot both
+hold, and the build resolves it correctly: the lock is read by the caller (`global-work-publisher.mjs`
+for the disk-derived path, `control-stream-server.mjs` for the frame doors) and handed down as
+`options.heldScopes` data, outside the writer's transaction.
+
+**Ruling — the transaction clause is superseded, and the residual race is named rather than hidden.**
+There is no longer any read-modify-write: a held ref is simply not written, so nothing is re-written
+over stale state. What remains is a lock answer that can be microseconds old, whose only two outcomes
+are (a) a write admitted that a just-arrived assignment would have blocked, or (b) a write skipped that
+a just-terminated assignment would have allowed. Both self-correct on the next frame or tick, and
+neither destroys a row. **A future writer must not "fix" this by pulling the assignment read back into
+`global-work-store.mjs`** — that is A1's HIGH regression's own habitat, and the arch-test clause now
+forbids it.
+
+### B3 — PINS the price of exporting `wholesaleDelete`, and ratchets it
+
+Exporting it is **justified**: after the cut nothing sweeps `work_items`, so "the sweep is refused" is
+provable from outside only by calling the guard by name (task 00's litmus (a)), and the class gate
+genuinely sits inside the function — verified behaviourally, not by reading it. But the private
+function could only ever be called from its own module; the exported one opens **every projection
+table in the shared store** to a wholesale sweep from anywhere. That is a widened surface with no
+named caller set. **Ruling: the caller set is PINNED to `src/global-work-store.mjs` and ratcheted in
+`acd-work-items-single-writer`; a second caller needs an ADR, not an import.**
+
+### B4 — RULES the codebase-health finding, and ratchets THAT too. `src/global-work-store.mjs` is on `mesh-worker-execution.mjs`'s trajectory
+
+Measured 2026-08-02, against ADR-011's own table:
+
+| Signal | 2026-08-01 | 43/01 review | 43/02 review | Trend |
+|---|---|---|---|---|
+| `src/` files | 202 | 203 | **203** | flat — this story adds NO module |
+| `src/` root-level `.mjs` | 99 | 100 | **100** | flat |
+| `src/` lines | 50,744 | 51,378 | **51,861** | +483 |
+| `src/global-work-store.mjs` | 885 | 885 | **1,233** | **+39% in one story** |
+| store openers (TECH_DEBT 12) | 17 | 17 | **17** | flat |
+
+The good news is real and should be said: this story added **no new root sibling**, no new store
+opener, and no new god-node. The bad news is the single-writer module. It is now the 5th-largest file
+in `src/`, the declared sole writer of four fact tables, and a 17-dependent node — and ADR-009 routes
+**more** into it (43/04's storage→wire mapper, the staleness predicate, the Resync door all read this
+table). `mesh-worker-execution.mjs` reached 3,187 lines exactly this way: one justified block at a
+time, no single diff ever looking wrong.
+
+**Ruling: no refactor is required OF THIS STORY** — a 1,200-line split forced into the milestone's
+riskiest diff is the scope explosion the health rule warns against, and the same reasoning ADR-011
+applied to the god-file applies here. **But the ratchet is due and is committed now**: a line ceiling
+on `src/global-work-store.mjs` in `acd-work-items-single-writer`, green today and red on the next
+block. **This is a REQUIREMENT on `43/04`, not a wish:** its mapper/predicate/Resync code lands in a
+module of its own (ADR-005 already creates `src/work-read.mjs` for exactly this read seam) and is
+*called* from the store — a call site, not a block. Raising the ceiling is an ADR decision.
+
+### B5 — RULES the P0.3 claim: it is NOT retired, and the fix is owed by this story
+
+AC5 and ADR-004 both assert that collapsing the frame doors onto the row seam retires P0.3 — *"one
+partial delta rolls back the ENTIRE `BEGIN IMMEDIATE` txn and silently drops every OTHER item in the
+same frame"*. **Measured against the build under review: it does not.** `upsertWorkItems` opens ONE
+`BEGIN IMMEDIATE` for the whole `rows` array and, on any error, `ROLLBACK`s and rethrows. Its screen
+(`isCompleteItemRow`) checks the four NOT NULL columns, but the statement **binds eight row-derived
+values**: `status`, `title` and `parent` are unscreened. A row that passes the screen and carries a
+non-bindable value for any of the three aborts the entire frame.
+
+Both halves measured, not argued:
+
+- **Frame path** — a delta carrying `43/01`, a `43/02` whose `status` is an object, and `43/03`:
+  `applyStreamFrame` **throws** (`TypeError: Provided value cannot be bound to SQLite parameter 5`),
+  **zero rows land**, and in production the accept loop's `.catch` swallows it into `reportDegrade` —
+  a sink ADR-010/R6.5 already records as having no reader until 43/06. Silent whole-frame loss: the
+  milestone's own disease.
+- **Disk path** — and it is reachable from ordinary operator input, not a malicious frame.
+  `parseFrontmatter` deliberately parses an inline list, so a record doc with `title: [alpha, beta]`
+  yields an ARRAY. Measured: the control's publish tick returns `published: false` with
+  `ERR_INVALID_ARG_TYPE`, and **the whole workspace's rows stop updating** — every other item's status
+  frozen — until that one doc is changed.
+
+The defect is **pre-existing** (HEAD binds the same values in the same transaction), so this is not a
+regression the story introduced. But the story's own headline says it retired it, the fix is three
+lines inside the seam this story owns, and shipping the claim without the fix is how AC5 becomes a
+lie the next milestone trusts. **Ruling: fix in this story.** Every value the statement binds is
+screened; a row that cannot be stored is SKIPPED AND COUNTED with its own reason (the `incomplete-row`
+discipline already there), never allowed to abort its siblings. The `title: [alpha, beta]` case gets a
+scenario — the litmus is that the OTHER items still publish.
+
+### B6 — PINS the two reported gaps as ONE finding, and routes it out of this story
+
+The developer reported two unbuilt things. They are the same disease and must not be filed as two:
+**a ref that no longer exists on the control's disk but carries a FOREIGN author's row is unreachable
+by every deletion path except `removeWorkspaceFromCache` (which takes the whole workspace).**
+
+- ADR-010/D1 named the cure — *"an **operator-initiated delete** … may retract the ref regardless of
+  `node_id`, and is refused while locked"* — and it is not built. The build's `operatorRefs` door
+  widens the UPSERT only; the retraction loop still reads `node_id = <me>`.
+- A renumber makes it bite without any operator delete at all. Verified: `stream.reindexed`'s reactor
+  list is `remap-run-refs`, `remap-notion-map`, `remap-projection`, `remap-control-facts` — **there is
+  no publish reactor on that event**, and `work_items` carries no `refRemap` entry. So after a
+  renumber the control's next tick upserts the NEW refs and retracts the OLD ones **it** authored,
+  while every worker-authored row keeps the OLD ref forever.
+
+**This is a genuine behaviour REGRESSION relative to HEAD** (the wholesale rebuild self-healed a
+renumber on the next tick) and it must be said as one, not as a pre-existing hole. It does **not**
+block this story: no AC covers it, aof has no item-delete verb for the operator door to hang on, and
+`work_items`'s exclusion from the ref-remap tables is a decision ADR-004 and the store registry both
+predate. **Route: `wiki/work/TECH_DEBT.md` item 13**, cited in the verdict, with the natural home
+named — 43/04 owns Resync, which is the door that already asks an owning node to re-report.
+
+**Two comments in the diff assert the opposite and must be corrected in this story**, because they are
+the justification a future reader would trust: `effects/table.mjs`'s *"The cascade's own publish step
+(below) reconciles it at the end"* (there is no publish step) and the pre-existing *"it is rebuilt
+wholesale by the publish reactor declared below on the same event"* at `remap-projection`.
+
+### B7 — CLARIFIES the two authority questions the build answered without an ADR, and accepts both
+
+- **The same-author-only `stale-report` rule** (a node never moves its OWN row backwards in time) is
+  **admitted**, and it does not contradict ADR-010/D1. D1 forbids `syncedAt` as a tiebreaker **between
+  nodes**, because that hands the outcome to clock skew; within one author there is one clock and one
+  monotonic sequence, and frames are re-sent on reconnect by construction, so a redelivered older
+  report is a real ordering rather than a hypothetical one. The build's scoping (`existing.node_id ===
+  reporter`) is exactly the line D1 draws. **PINNED: the comparison may never widen to two node ids.**
+- **The operator door is a REF SET, not a flag** — **PINNED, and it is the better reading of D1.**
+  Publish-on-mutate carries the whole workspace's rows while the operator touched one item; a boolean
+  would have let one `work:feedback` seize every worker's row in the workspace. Deriving the set from
+  the event's own payload is the reactor contract ("rebuild from the payload, never re-read racing
+  state") applied correctly. Two consequences named: the operator door is **subordinate to the lock**
+  (the lock gate runs first, so a held ref is refused whichever door asked), and `operatorRefsFor`'s
+  `remap` branch is **dead code** — `publish-projection` is registered on `run.started`,
+  `run.completed` and `feedback.recorded` only, none of which carry `remap`. Delete it or wire it;
+  do not leave a branch whose doc-comment describes an event that never arrives.
+
+### B8 — ACCEPTS the two smaller judgement calls, with their consequences named
+
+- **`readWorkspaceProjectionItems`'s two additive keys** (`authoritative`, `errors[].ref`) — accepted.
+  The signature is still one argument and the row shape is byte-unchanged, which is what task 07 pins;
+  the keys exist because "there is nothing" and "I could not look" became a *deletion* decision the
+  moment the rebuild went away. Without `authoritative`, `listItems`' empty-list-on-missing-dir would
+  retract a node's entire slice on a transient fault. This is the sharpest judgement call in the build
+  and it is right.
+- **A frame no longer writing `workspaces.last_published_at`** — accepted, and the consumer check was
+  made rather than assumed. `queryGlobalWorkProjection` reads `work_items` with **no join** to
+  `workspaces`, so no cached row disappears. The one gate that reads the column
+  (`mesh-assignment.mjs:93`'s `assignment-repo-unavailable`) is unreachable-by-this-change: a frame is
+  refused `unknown-workspace` unless a `global_workspace_descriptors` row exists, and descriptors are
+  written only by the local node's own `publishGlobalRegistryDescriptorsToStore` — which runs in the
+  same call as the publish that writes `last_published_at`. The column's meaning legitimately narrows
+  from "anything touched this workspace's cache" to "this node last published its own slice", which is
+  the more honest fact and the one 43/04's staleness surface wants.
+
+**Consequences.**
+- ADR-011/A1 is narrowed to what it measured and its transaction clause is retired, so the next reader
+  does not "restore" the regression in its name.
+- The milestone's own disease class (one bad row silently taking a batch) is closed in the seam rather
+  than asserted closed in a heading.
+- Two widened surfaces (`wholesaleDelete`'s export, the single-writer module's size) leave this review
+  with ratchets instead of with the reviewer's memory.
+- The one thing the cut genuinely cannot do — reach a foreign author's row for a ref that no longer
+  exists — is written down as debt rather than discovered by a phantom item on a board.
+
+---
+
 ## Fitness functions (the enforced invariants)
 
 Arch-tests live under `test/arch/acd-*.test.mjs` (node:test-style `archTests` arrays, registered in
@@ -1186,8 +1393,8 @@ unbuilt and bind the moment it lands. No file is committed RED.
 |---|---|---|
 | `acd-artifact-sync-hook-derivation-free` | 001 | green (2 live proofs) + armed |
 | `acd-claude-settings-co-authored` | 002 | green (canary on the operator's keys) + armed at the hazard |
-| `acd-item-lock-single-door` | 003 | green (single `executionScopeRef` definition; mint seam imports the lock module; no command re-derives the scope check) + armed — **amended by ADR-010/R1.1** (the armed clause forbids a command module deciding the SCOPE lock, and no longer flags the sanctioned exact-ref `findActiveAssignment`) and **by ADR-011/A1**: a further clause — *the publish path reads no `global_assignments` state* — is due at `43/02`, where authority becomes a `node_id` column and the assignment read disappears. Not committed now: it would be red against `43/01`'s interim carry. |
-| `acd-work-items-single-writer` | 004 | green (single DML module) + armed at the reclassification |
+| `acd-item-lock-single-door` | 003 | green (single `executionScopeRef` definition; mint seam imports the lock module; no command re-derives the scope check) + armed — **amended by ADR-010/R1.1** (the armed clause forbids a command module deciding the SCOPE lock, and no longer flags the sanctioned exact-ref `findActiveAssignment`) and **by ADR-011/A1**: a further clause — *the publish path reads no `global_assignments` state* — is due at `43/02`, where authority becomes a `node_id` column and the assignment read disappears. Not committed now: it would be red against `43/01`'s interim carry. **DISCHARGED at `43/02`** (ADR-012/B1–B2): the clause is committed and green, in two halves — no `FROM global_assignments` in the store module, and `executionScopeRef` as the ONLY import it may take from the assignment leaf. |
+| `acd-work-items-single-writer` | 004 | green (single DML module; the armed reclassification clause FIRED at `43/02` and is green) + **two ratchets added by ADR-012**: `wholesaleDelete`'s exported caller set is pinned to one module (B3), and `src/global-work-store.mjs` carries a line ceiling so the milestone's single-writer module does not become the next god-file (B4) |
 | `acd-cache-read-surface-boundary` | 005 | green (worker/structural readers PINNED) + armed — **amended by ADR-010/R6.3**: `promote-gap-to-chore.mjs` moved from the control-side list into the positively-pinned STRUCTURAL list |
 | `acd-cache-staleness-single-predicate` | 006 | green (strict `>`, no time-predicated DELETE) + armed |
 | `acd-work-artifact-set-single-home` | 007 | green (one declaration site) |

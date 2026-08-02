@@ -1594,6 +1594,27 @@ import { itemLockHolderIdentityTests } from "../test/item-lock-holder-identity.t
 import { itemLockNextSkipsHeldTests } from "../test/item-lock-next-skips-held.test.mjs";
 import { itemLockOperatorVsAutomaticTests } from "../test/item-lock-operator-vs-automatic.test.mjs";
 
+// milestone 43 / story 02 — THE AUTHORITY CUT (ADR-004 + ADR-010/D1/D2 + ADR-011/A1).
+// `work_items` stops being a disk-rebuilt projection and becomes a provenance-stamped,
+// row-upserted FACT written through ONE seam both the control node and every worker use,
+// with deletion by author retraction. Task 00: the reclassification IS the enforcement.
+// Task 01: one upsert seam, stamped by the CONNECTION-authenticated writer. Task 02:
+// author retraction is the only deletion — never a sweep, never time. Task 03: the
+// alternation proof (publish, stream a delta, publish again — the worker's row survives),
+// including after the worktree is gone. Task 04: contention is decided by the ADR-003
+// lock, in its two renderings. Task 05: a frame lands row by row (the P0.3 retirement).
+// Task 06: the one named, operator-initiated workspace-removal path. Task 07: the own-disk
+// read primitive is unchanged and no reader migrates. Task 08 (the two-machine soak) is
+// `@manual` and deliberately has no test file here.
+import { cacheAuthorityFactNotProjectionTests } from "../test/cache-authority-fact-not-projection.test.mjs";
+import { cacheAuthorityUpsertSeamTests } from "../test/cache-authority-upsert-seam.test.mjs";
+import { cacheAuthorityRetractionTests } from "../test/cache-authority-author-retraction.test.mjs";
+import { cacheAuthorityAlternationTests } from "../test/cache-authority-alternation.test.mjs";
+import { cacheAuthorityContentionTests } from "../test/cache-authority-contention-lock.test.mjs";
+import { cacheAuthorityFrameRowByRowTests } from "../test/cache-authority-frame-row-by-row.test.mjs";
+import { cacheAuthorityWorkspaceRemovalTests } from "../test/cache-authority-workspace-removal.test.mjs";
+import { cacheAuthorityOwnDiskReadTests } from "../test/cache-authority-own-disk-read.test.mjs";
+
 export const tests = [
   ...adapterWarningTests,
   ...packageTests,
@@ -2227,7 +2248,16 @@ export const tests = [
   ...itemLockCodedRefusalTests,
   ...itemLockHolderIdentityTests,
   ...itemLockNextSkipsHeldTests,
-  ...itemLockOperatorVsAutomaticTests
+  ...itemLockOperatorVsAutomaticTests,
+  // milestone 43 / story 02 — the authority cut (tasks 00–07; 08 is @manual)
+  ...cacheAuthorityFactNotProjectionTests,
+  ...cacheAuthorityUpsertSeamTests,
+  ...cacheAuthorityRetractionTests,
+  ...cacheAuthorityAlternationTests,
+  ...cacheAuthorityContentionTests,
+  ...cacheAuthorityFrameRowByRowTests,
+  ...cacheAuthorityWorkspaceRemovalTests,
+  ...cacheAuthorityOwnDiskReadTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

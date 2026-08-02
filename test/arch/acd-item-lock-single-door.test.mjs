@@ -141,6 +141,54 @@ export const archTests = [
     },
   },
   {
+    // ADDED at 43/02, exactly as ADR-011/A1 armed it: "once the upsert seam lands,
+    // `acd-item-lock-single-door` gains the clause — src/global-work-store.mjs's publish
+    // path reads no `global_assignments` state". It was left uncommitted at 43/01
+    // because it would have been red against that story's interim carry, which read
+    // `activeScopeHolders` inside the shared row-writer.
+    //
+    // WHY IT MATTERS, measured: `publishWorkspaceSnapshot` is not the tick — it is the
+    // SHARED row-writer, and the worker's frame doors write through it too. A lock read
+    // placed inside it fires for the holder's OWN frames, which discarded the holder's
+    // authored delta (its completion frame included) for a whole phase. Under ADR-004
+    // authority is a `node_id` column on the row, so the writer needs the assignment
+    // table for nothing at all: the lock's answer arrives as DATA from the caller that
+    // knows whose slice is being written. This clause is what stops it drifting back in.
+    //
+    // Scoped to STATE, not to the schema: this module CREATEs and migrates the table (it
+    // owns the file), which is not reading whose scope is held.
+    name: "arch/43 ADR-003 + ADR-011/A1 (acd-item-lock-single-door): the global work store's publish path reads NO global_assignments state — the lock's answer arrives as data, never as a query inside the shared row-writer",
+    run: async () => {
+      const store = stripComments(await readFile(path.join(SRC, "global-work-store.mjs"), "utf8"));
+
+      const reads = [...store.matchAll(/FROM\s+global_assignments\b/gi)].map((match) => match[0]);
+      assert.deepEqual(reads, [], `the row-writer must not query global_assignments (found: ${reads.join(", ")})`);
+
+      // The same rule at the import boundary: the ONLY thing it may take from the
+      // assignment leaf is the pure execution-scope string rule. Every other export
+      // there answers "which assignments are active", which is the query above wearing
+      // a function name.
+      const imported = [...store.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'][^"']*assignment-record\.mjs["']/g)]
+        .flatMap((match) => match[1].split(",").map((name) => name.trim().split(/\s+as\s+/)[0]).filter(Boolean));
+      const stateReaders = imported.filter((name) => name !== "executionScopeRef");
+      assert.deepEqual(
+        stateReaders,
+        [],
+        `global-work-store.mjs may import only the pure scope rule from the assignment leaf (leaked: ${stateReaders.join(", ")})`,
+      );
+
+      // Non-vacuous: the detectors fire on the shapes 43/01 actually shipped.
+      assert.equal([...'db.prepare("SELECT * FROM global_assignments WHERE workspace_id = ?")'.matchAll(/FROM\s+global_assignments\b/gi)].length, 1, "the query detector fires on a planted read");
+      const planted = 'import { activeScopeHolders, executionScopeRef } from "./assignment-record.mjs";';
+      assert.deepEqual(
+        [...planted.matchAll(/import\s*\{([^}]*)\}\s*from\s*["'][^"']*assignment-record\.mjs["']/g)]
+          .flatMap((match) => match[1].split(",").map((name) => name.trim()).filter((name) => name !== "executionScopeRef")),
+        ["activeScopeHolders"],
+        "the import detector fires on the interim carry's own import line",
+      );
+    },
+  },
+  {
     name: "arch/43 ADR-003 (acd-item-lock-single-door): self-check — planted second definitions and a planted store leak trip the SAME detectors",
     run: async () => {
       assert.ok(DEFINITION.test("export function executionScopeRef(ref) {"), "the detector recognises the real definition form");

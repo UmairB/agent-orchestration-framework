@@ -4,10 +4,10 @@ number: 02
 slug: cache-authority
 title: "The authority cut — work_items stops being a disk-rebuilt projection and becomes a provenance-stamped, row-upserted FACT written through ONE seam both the control node and every worker use, with deletion by author retraction"
 parent: 43
-status: not-started
+status: done
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -82,27 +82,27 @@ citations are stale — `:459-460` is the measured location.)*
      aof-developer feasibility). Each is a tasks/NN_<slug>.feature whose @executable scenarios are the
      acceptance criteria. Kept independent of the other stories' tasks. -->
 
-- [ ] `00_work-items-is-a-fact-not-a-rebuilt-projection` — the publish tick completes without sweeping
+- [x] `00_work-items-is-a-fact-not-a-rebuilt-projection` — the publish tick completes without sweeping
       `work_items`, and a wholesale delete of it is refused with `fact-table-wholesale-delete`, while
       `projection_errors` stays a rebuilt projection. (AC1)
-- [ ] `01_one-upsert-seam-stamped-by-the-writing-node` — one row-level upsert seam serves both writers,
+- [x] `01_one-upsert-seam-stamped-by-the-writing-node` — one row-level upsert seam serves both writers,
       stamping the control's own id on its publish and the **connection-authenticated** id on a worker's
       frame, whatever the frame self-reports. (AC2)
-- [ ] `02_author-retraction-is-the-only-deletion` — a node removes only rows it authored and no longer
+- [x] `02_author-retraction-is-the-only-deletion` — a node removes only rows it authored and no longer
       claims; another node's row, a partial report and the passage of time never delete anything. (AC4)
-- [ ] `03_alternation-proof-the-worker-row-survives` — publish → stream a worker delta → publish again,
+- [x] `03_alternation-proof-the-worker-row-survives` — publish → stream a worker delta → publish again,
       and the worker's row survives; a settled item still reads correctly after the worktree is deleted
       and the worker stops ticking. (AC6)
-- [ ] `04_contention-is-decided-by-the-assignment-lock` — a held ref is written only by its holder: the
+- [x] `04_contention-is-decided-by-the-assignment-lock` — a held ref is written only by its holder: the
       periodic tick skips and **counts** the skips, an operator's control-side mutation is refused with
       `item-locked-by-assignment`, and at a gate the same verb is accepted. (AC3)
-- [ ] `05_frames-land-row-by-row-no-collateral-rollback` — one unstorable row in a frame is skipped and
+- [x] `05_frames-land-row-by-row-no-collateral-rollback` — one unstorable row in a frame is skipped and
       counted while every other row in that frame lands, and a worker's snapshot frame removes nothing
       it did not carry (the P0.3 retirement). (AC5)
-- [ ] `06_deliberate-workspace-row-removal` — one explicitly named, operator-initiated path clears a
+- [x] `06_deliberate-workspace-row-removal` — one explicitly named, operator-initiated path clears a
       workspace's whole cache footprint; no publish tick ever does, including when the publishing node's
       own disk read fails. (AC7)
-- [ ] `07_own-disk-read-primitive-unchanged` — a node still reads its own disk to report its own state
+- [x] `07_own-disk-read-primitive-unchanged` — a node still reads its own disk to report its own state
       (the worker's frame-building read included), and no reader migrates onto the cache in this story.
 - [ ] `08_cross-machine-cache-authority-soak` — `@manual`: on two real machines, a settled item still
       reads correctly on the control long after the real worktree is gone and the real cadence has run.

@@ -510,3 +510,58 @@ when the command returns — the same shape `effectsJournalOptions`/the journal 
 take the handle rather than the options bag; the injectable `openStore` override collapses into "the test
 supplies the handle". Then a ratchet: `openGlobalWorkProjectionStore` may be called from exactly one
 module, and the 18th opener fails CI instead of needing a reviewer to notice.
+
+---
+
+## 13. After the authority cut, a foreign-authored cached row for a ref an OPERATOR deletes is unreachable
+
+**Status:** open, NARROWED 2026-08-02 (raised by the architect during milestone 43 story 02's
+structural review, routed by ADR-012/B6; the RENUMBER half was then ruled back INTO 43/02 by the PO
+at that story's review and is **built** — see "What was fixed" below). **Severity:** low-medium — a
+phantom item on the board, reachable only by an operator deleting an item a worker had reported.
+
+**What was fixed in 43/02, and what is left.** The two ways in were the same disease but not the same
+door. The renumber half was a live *regression* against HEAD (the wholesale rebuild self-healed a
+renumber; author retraction cannot) and turned out to be curable with the mechanism 43/02 had already
+built: `publish-projection` is now registered on `stream.reindexed`, carrying `operatorRefs` = BOTH
+ends of every remap entry, and the operator door may retract those refs whoever authored them. A
+renumber therefore re-derives its own refs and leaves no row on a ref it vacated. **What remains is
+the OPERATOR-DELETE half only**, below.
+
+**What's wrong.** `work_items` is now a fact, and ADR-004's deletion rule is author retraction: a node
+deletes only rows where `node_id = <itself> AND ref NOT IN <the set it still claims>`. That rule is
+correct and is the whole cure — no node may destroy another node's work. Its cost is the case nobody
+owns: **a ref whose row was authored by a worker, which then ceases to exist on the control's disk.**
+Nothing can remove it. The control cannot (not its row). The worker never will (it no longer carries
+that ref, and a frame retracts nothing by design). The only door that reaches it is
+`removeWorkspaceFromCache`, which takes the entire workspace.
+
+**The one way in that remains — an operator delete.** ADR-010/D1 named the cure — *"an
+operator-initiated delete is an operator door: it may retract the ref regardless of `node_id`, and is
+refused while locked. Without this an operator could not delete an item a worker had ever reported."*
+43/02 built exactly half of it: the operator door may now retract, but only for refs an event names as
+rewritten (a remap's two ends), because that is the only operator act aof currently has that vacates a
+ref. **aof has no item-delete verb**, so a deletion performed by an operator removing a folder by hand
+is invisible to the ledger and has no door to hang on. Until one exists, a worker-authored row for a
+ref the operator deleted from the control's disk survives every tick.
+
+*(Superseded, kept for the record: this item originally also covered the RENUMBER path — `43/03 →
+43/04` leaving every worker-authored row on the OLD ref forever, with two `src/effects/table.mjs`
+comments claiming a publish reactor that did not exist. Both comments and the defect were fixed in
+43/02; `acd-stream-reindex-cascade` now pins the reactor list including the publish step, and
+`cache-authority-author-retraction` covers the behaviour end-to-end through the real
+`work:insert-story` verb.)*
+
+**How it bites.** The control's cache — which this milestone is making the ONE read surface — keeps
+answering for an item that does not exist anywhere. It renders on `/api/mesh/status`, in
+`aof work list --mesh` and on the board, with a plausible status and a real `reportedBy`, and no
+operator action removes it short of forgetting the whole workspace. It is the same shape as the disease
+the milestone cures (a stale row outliving its truth), one deletion path over.
+
+**The fix.** ONE door, and half of it exists. `upsertWorkItems`'s retraction already reaches any
+`node_id` for a ref the caller names in `operatorRefs`, and is already refused while the scope is
+locked (ADR-003) — the renumber cascade is its first caller. What is left is the SECOND caller: an
+item-delete verb, which must name the deleted ref the same way `stream.reindexed` names a remap's two
+ends, so the deletion is an operator act carried by an event rather than a folder vanishing behind the
+ledger's back. **Natural home: `43/04`**, which already owns Resync — the door that asks an owning node
+to re-report — and is the only other story that touches this seam's read side.

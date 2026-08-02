@@ -394,8 +394,17 @@ export const controlStreamServerTests = [
   },
   {
     // review fix P2.9: a malformed frame.at (a non-ISO/garbage string) must never
-    // land verbatim in last_published_at — the server clock is used instead when
+    // land verbatim as a stored instant — the server clock is used instead when
     // no explicit `now` option is supplied.
+    //
+    // m43/ADR-004 (43/02, the authority cut) MOVED THIS TEST'S CHANNEL, and moved it
+    // closer to the fact. A frame no longer routes through publishWorkspaceSnapshot, so
+    // it no longer writes the workspace-level `lastPublishedAt` metadata row this used
+    // to read; it writes the ROW's own provenance stamp (`work_items.updated_at`,
+    // schema v8) and returns it. Both are asserted below — the stored instant AND the
+    // apply's own result — which is strictly more than the metadata row proved, because
+    // the metadata row was one value for a whole workspace while the stamp is the value
+    // actually attached to the row the frame carried.
     name: "control-stream-server/02 P2.9 a malformed frame.at falls back to the server clock rather than being written verbatim",
     async run() {
       await withGlobalHome(async ({ env }) => {
@@ -413,16 +422,18 @@ export const controlStreamServerTests = [
           };
           // No `now` option supplied — the ONLY candidate is the malformed frame.at.
           const before = Date.now();
-          await applyStreamFrame(store, snapshot);
+          const applied = await applyStreamFrame(store, snapshot);
           const after = Date.now();
 
-          const projection = queryGlobalWorkProjection(store, { workspaceId: "ws-worker-a" });
-          const metadata = projection.metadata.find((entry) => entry.key === "lastPublishedAt");
-          assert.ok(metadata != null, "a lastPublishedAt metadata row was written");
-          assert.notEqual(metadata.value, "not-a-real-timestamp", "the malformed frame.at is never written verbatim");
-          const publishedMs = Date.parse(metadata.value);
-          assert.ok(Number.isFinite(publishedMs), "the fallback value parses as a real instant");
-          assert.ok(publishedMs >= before - 1000 && publishedMs <= after + 1000, "the fallback is the server clock (close to now), not garbage");
+          const stamp = store.db.prepare("SELECT updated_at FROM work_items WHERE workspace_id = ? AND ref = ?")
+            .get("ws-worker-a", "34/04/00")?.updated_at;
+          for (const [channel, value] of [["the row's provenance stamp", stamp], ["the apply's result", applied.publishedAt]]) {
+            assert.ok(value != null, `${channel} was written`);
+            assert.notEqual(value, "not-a-real-timestamp", `${channel} never carries the malformed frame.at verbatim`);
+            const publishedMs = Date.parse(value);
+            assert.ok(Number.isFinite(publishedMs), `${channel} parses as a real instant`);
+            assert.ok(publishedMs >= before - 1000 && publishedMs <= after + 1000, `${channel} is the server clock (close to now), not garbage`);
+          }
         } finally {
           store.close();
         }
