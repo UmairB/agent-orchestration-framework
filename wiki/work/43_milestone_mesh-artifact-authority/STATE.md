@@ -27,7 +27,8 @@ story carries its authored contract. Nothing is built yet.
       workspace's cache), and the cure had introduced a renumber regression against HEAD (the operator's
       newly-inserted story never reached the cache). ADR-012 records the rulings. Task 08's `@manual`
       soak is **carried to the milestone gate**.
-- [~] `03_story_artifact-sync-on-write` — **built, reviewed, validated; `in-review` awaiting `@uat`**
+- [x] `03_story_artifact-sync-on-write` — **done** (built, reviewed, validated; both `@manual` lanes and
+      the `@uat` run LIVE on a real two-node mesh and **accepted by the operator 2026-08-03**)
       (2026-08-02). 38 `@executable` green, 790 arch green, `validate 43/03` PASS, and this repo's live
       `.claude/settings.json` provably byte-unchanged. Two HIGH defects found at review: the story's
       **trigger was never delivered** (the matcher existed nowhere outside a test fixture, so a fresh

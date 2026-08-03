@@ -4,7 +4,7 @@ number: 03
 slug: artifact-sync-on-write
 title: "Write-triggered artifact sync — a PostToolUse hook whose body derives nothing names each artifact as the agent writes it, the daemon batches the send on its existing tick, the artifact set widens through one manifest, and the co-authored .claude/settings.json is MERGED, never rendered whole"
 parent: 43
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-01
 updated: 2026-08-02
@@ -117,7 +117,7 @@ Grounded in `ARCHITECTURE.md` **ADR-001** (the trigger), **ADR-002** (the settin
      35 scenarios: 32 `@executable`, 2 `@manual` (each needs machines a single process cannot have),
      1 `@uat` (the human acceptance this whole story exists for). -->
 
-- [ ] `tasks/00_posttooluse-enqueue-hook.feature` — `@executable` + `@manual` — the trigger is a
+- [x] `tasks/00_posttooluse-enqueue-hook.feature` — `@executable` + `@manual` — the trigger is a
   `PostToolUse` `command` hook in EXEC form (`command` + `args`) with the matcher pinned to exactly
   `Write|Edit|NotebookEdit`; its body resolves the path through the explicit per-tool map (`Write`/`Edit`
   → `tool_input.file_path`, **`NotebookEdit` → `tool_input.notebook_path`**), enqueues a coded
@@ -126,7 +126,7 @@ Grounded in `ARCHITECTURE.md` **ADR-001** (the trigger), **ADR-002** (the settin
   cwd derivation), lands in the same argv-stamped queue file from any cwd, and **exits 0 under every
   queue fault and every malformed payload** — with the degraded run still converging on the
   reconciliation tick, i.e. never worse than today. (AC1–AC4, ADR-001)
-- [ ] `tasks/01_daemon-drains-queue-into-one-batched-frame.feature` — `@executable` + `@uat` — the
+- [x] `tasks/01_daemon-drains-queue-into-one-batched-frame.feature` — `@executable` + `@uat` — the
   worker daemon drains the queue on its **existing** stream tick (`pushActiveWorktreeState`), de-duplicates
   by path (including across `/` vs `\`), reads content for the **named** artifacts only — observable as
   every unnamed artifact's control-side `updatedAt` refusing to move — and sends ONE batched frame; an
@@ -135,7 +135,7 @@ Grounded in `ARCHITECTURE.md` **ADR-001** (the trigger), **ADR-002** (the settin
   reconciliation backstop still converges a `Bash`-written artifact the hook never saw. Closes with the
   operator reading a live remote agent's freshly authored features on the control node, mid-run.
   (AC5, ADR-001)
-- [ ] `tasks/02_artifact-manifest-widening-and-content-hash.feature` — `@executable` — the artifact set
+- [x] `tasks/02_artifact-manifest-widening-and-content-hash.feature` — `@executable` — the artifact set
   becomes a bounded TWO-KIND manifest (`{name,file}` × 8 exact filenames, `{name,dir,ext}` × `tasks/` +
   `.feature`) with no glob language: every `file` entry is streamed AND requestable by name, the `dir`
   entry is requested by name + member with traversal / nested / member-on-a-file-entry / unknown-name all
@@ -145,7 +145,7 @@ Grounded in `ARCHITECTURE.md` **ADR-001** (the trigger), **ADR-002** (the settin
   The headline is the payoff: `tasks/*.feature` ride the wire and read on the control node while the
   control's own checkout still has no `tasks/` directory — closing `commands/tasks.mjs:15`.
   (AC6–AC8, ADR-007)
-- [ ] `tasks/03_claude-settings-surgical-merge.feature` — `@executable` + `@manual` — `.claude/settings.json`
+- [x] `tasks/03_claude-settings-surgical-merge.feature` — `@executable` + `@manual` — `.claude/settings.json`
   is CO-AUTHORED and takes a surgical merge: every one of the operator's top-level keys and four
   hand-wired hook events survives **byte-identical**, an operator entry on the same `PostToolUse` event
   survives beside aof's, repeated runs leave exactly one aof entry and a byte-identical result **skips the

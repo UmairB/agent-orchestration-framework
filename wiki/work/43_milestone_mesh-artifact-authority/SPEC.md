@@ -105,7 +105,7 @@ the widest mechanical sweep and the risky change unreviewable inside a 13-module
       upserted, provenance-stamped **fact** behind ONE seam both the control node and every worker
       write through, with author-retraction deletion. **Also carries schema v8's guarded `ALTER` and the
       write-side provenance stamping** (moved here from story 04 at refine — ADR-010 R-D2). (ADR-004)
-- [ ] `03_story_artifact-sync-on-write` — the `PostToolUse` hook, the derivation-free enqueue, the
+- [x] `03_story_artifact-sync-on-write` — the `PostToolUse` hook, the derivation-free enqueue, the
       `.claude/settings.json` **merge** (never wholesale), the widened artifact manifest, and the
       daemon-side batched drain on the existing tick. (ADR-001, ADR-002, ADR-007)
 - [ ] `04_story_staleness-and-resync` — everything **read-side** from the v8 columns down: the shared

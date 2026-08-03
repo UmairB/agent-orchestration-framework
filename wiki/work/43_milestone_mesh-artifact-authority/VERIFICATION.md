@@ -318,7 +318,7 @@ which every value survives); only the magnitude was wrong.
 | L-1 | **`aof work init` (plain) refuses in a clone of this repo, exit 1** — `.aof/aof.lock.json` is tracked, so a clone carries one and init is guarded (`Run \`aof work update\`… or \`aof work init --force\``). It wrote nothing. The `@manual` scenario's literal "`aof work update` then `aof work init`" therefore cannot both run un-forced on a clone of *this* repo | The Then is satisfied — the harder `--force` door was driven instead and the file stayed byte-frozen. The **scenario's phrasing** needs the note, not the code |
 | L-2 | **The bundle↔config union is keyed by hook `id`**, so declaring the hook in config under an id other than the bundle's (`claude-artifact-sync`) yields **two** aof-managed `PostToolUse` groups. Measured on a real workspace: markers `["claude-artifact-sync","aof-artifact-sync"]` | **Cosmetic today, not a double-enqueue** — measured on a real write, the harness deduplicates identical exec-form `command`+`args` and still produced exactly **one** queue line. Worth an id-collision note; the story's own test fixture uses a different id from the bundle, which is how it surfaced |
 
-### `@uat` — RUN LIVE 2026-08-03 on a real two-node mesh; evidence complete, awaiting the operator's sign-off
+### `@uat` — RUN LIVE 2026-08-03 on a real two-node mesh; **ACCEPTED by the operator**
 
 The scenario's own words: *"it needs a real remote node running a real Claude Code agent whose own writes
 fire the hook, and an operator reading the control node WHILE the run is still live."* That is what was
@@ -388,8 +388,17 @@ because `list`/`next`/`find` still read the control's own disk. That is exactly 
 (nine rows) while the disk-based reader could not see it. The milestone's end state is reached at 43/06,
 and this run is direct evidence of why that story is load-bearing rather than mechanical.
 
-**Sign-off status: the evidence is complete; the acceptance is the operator's.** An agent cannot sign its
-own `@uat` — recorded here for the human to confirm.
+## User sign-off — 43/03
+
+**Accepted by the operator, 2026-08-03.** The claim put to them was the scenario's own: *an operator can
+read a live remote agent's freshly authored features on the control node, mid-run.* They were shown the
+`aof work tasks 00/01 --json` envelope above (`fromWorker: true`, `reportedBy: umairs-msi-wsl`, three
+`@executable` scenarios parsed from a feature file authored minutes earlier on another machine), together
+with the fact that the control node's own disk for that milestone held only `SPEC.md` and `STATE.md`.
+Verdict: **accept.**
+
+The orchestration produced the evidence and did **not** sign it — an agent signing its own acceptance
+gate would defeat the purpose of the lane.
 
 ### The `@uat` gate — the two `@manual` lanes and the human acceptance
 
@@ -472,11 +481,17 @@ C10 rules the run-record hash gate.
 
 ### Accept decision — 43/03
 
-**NOT YET ACCEPTED — `status: in-review`, awaiting human `@uat` sign-off.** Everything automatable is
-green (38/0 `@executable`, 790/0 fitness, `validate 43/03` PASS, no blocker finding open, the repo's live
-settings file provably untouched). The remaining gate is the one the story exists for and the one no agent
-can stand in for: an operator reading a live remote agent's freshly authored features on the control node,
-mid-run.
+**ACCEPT 43/03.** Everything automatable is green (38/0 `@executable`, 790/0 fitness,
+`validate 43/03` PASS, no blocker finding open, and this repo's live `.claude/settings.json` provably
+byte-unchanged throughout). Both `@manual` lanes were **run live** on two nodes and passed. The `@uat`
+was **run live on a real two-node mesh and accepted by the operator** — the control node read a feature
+file authored minutes earlier by a real Claude Code agent on the WSL worker, while its own disk carried
+no `stories/` directory at all. `STORY.md` → `status: done`.
+
+One gap is carried forward deliberately, and it is not this story's to close: `aof work list` on the
+control still answers from the control's own disk, so it did not show the worker-authored stories during
+the run. That is `43/06 · cache-read-surface`, unbuilt — and this run is the evidence that it is
+load-bearing.
 
 ### Accept decision — 43/02
 
