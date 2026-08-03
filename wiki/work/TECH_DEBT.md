@@ -620,7 +620,7 @@ correct for `file://` and for a public repo) instead of failing the assignment. 
 provider override would also work but is the larger change; the null-return is the one that restores
 the documented semantics.
 
-## 15. A workspace published AFTER a worker daemon starts is invisible to that worker until it restarts
+## 15. There is no path to enrol an EXISTING worker into a NEW workspace — `mesh join` grants a credential, never membership
 
 **Measured 2026-08-03**, same live run. The control node holds the enrollment facts for the new
 workspace — all three membership rows are present in its `global_node_workspaces`:
@@ -641,6 +641,30 @@ descriptors:     [... e1aa9092f951cedb, 9db1fd84f5895e38 ...]   # no 52294b30721
 ```
 
 The worker daemon started at 23:51; the workspace was published at 23:52 and the node joined at 23:55.
+**A daemon restart at 00:07 did NOT fix it** — the rows were still absent afterwards, which disproves the
+first reading of this item ("stale until restart") and points at the real cause below.
+
+**The root cause, measured.** A node's workspace membership is derived from the workspaces that node can
+**see on its own filesystem**, and is published in its own node record. The worker's
+`~/.aof/mesh/nodes/umairs-msi-wsl.json` lists exactly one workspace:
+
+```json
+"workspaces": [ { "workspaceId": "9db1fd84f5895e38", "name": "aof",
+                  "projectRoot": "/home/umair/source/aof" } ]
+```
+
+So the three verbs an operator would reach for each do something *other* than enrol:
+
+| verb | what it actually does |
+|---|---|
+| `aof mesh invite` (control) | mints a short-TTL join code |
+| `aof mesh join <code>` (worker) | stores a **relay credential** in the worker's global config — `{"joined": true}` — and adds **no** workspace |
+| `aof mesh repo publish` (control) | registers the workspace in the **control's** registry and writes its `clone_url` |
+| `aof mesh identity` (either) | republishes that node's own record — including its workspace list, derived from what it can see locally |
+
+Nothing in that set gives an existing worker a workspace it does not already have a checkout of. A
+pre-seeded clone under `<meshRoot>/checkouts/<workspaceId>/` does not count either — that directory is
+populated **by** dispatch, and is not a source of membership.
 
 **How it bites.** `workerHasRepo` (`src/mesh-worker-execution.mjs:319`) is the AND of two facts — the
 local `mesh.repo.published` marker and this node's OWN local `global_node_workspaces` membership row.
@@ -655,11 +679,18 @@ mesh; requiring a daemon restart on every worker to make it usable is the kind o
 reads as "the mesh is flaky". It also compounds item 14: the operator sees a credential error and goes
 looking at credentials, when the actual missing fact is a registry row.
 
-**The fix.** Sync the registry on the same cadence the rest of the mesh state moves on (or push a
-descriptor/membership delta to affected nodes when `mesh repo publish` / `mesh join` lands), rather
-than only at connect. Failing that, `workerHasRepo`'s miss should name the missing FACT — "no
-membership row for this workspace on this node" — instead of letting it surface downstream as a clone
-or credential failure.
+**The fix.** `mesh join` should take the workspace it was invited to and make the node a member of it —
+the invite already names one, so the code carries the fact; the join simply drops it. Concretely: on
+join, record the membership and let the worker acquire the checkout through the clone path it already
+has (which is exactly what a dispatch does), rather than requiring an operator to hand-place a checkout
+and re-run `mesh identity` on every worker. Failing that, `workerHasRepo`'s miss must name the missing
+FACT — "this node has no membership row for this workspace" — instead of letting it surface two hops
+downstream as a *clone* or *credential* failure, which is what sent this investigation to the wrong
+subsystem twice.
+
+**Measured operator workaround** (what a two-node fleet actually has to do today): give the worker a
+real checkout of the workspace somewhere it owns, run `aof mesh identity` there so its node record
+republishes with the new workspace in its list, and only then dispatch.
 
 ## 16. `aof mesh repo publish` silently discards a malformed `cloneUrl` and reports success
 
