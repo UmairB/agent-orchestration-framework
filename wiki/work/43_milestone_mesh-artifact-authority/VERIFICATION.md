@@ -318,7 +318,80 @@ which every value survives); only the magnitude was wrong.
 | L-1 | **`aof work init` (plain) refuses in a clone of this repo, exit 1** — `.aof/aof.lock.json` is tracked, so a clone carries one and init is guarded (`Run \`aof work update\`… or \`aof work init --force\``). It wrote nothing. The `@manual` scenario's literal "`aof work update` then `aof work init`" therefore cannot both run un-forced on a clone of *this* repo | The Then is satisfied — the harder `--force` door was driven instead and the file stayed byte-frozen. The **scenario's phrasing** needs the note, not the code |
 | L-2 | **The bundle↔config union is keyed by hook `id`**, so declaring the hook in config under an id other than the bundle's (`claude-artifact-sync`) yields **two** aof-managed `PostToolUse` groups. Measured on a real workspace: markers `["claude-artifact-sync","aof-artifact-sync"]` | **Cosmetic today, not a double-enqueue** — measured on a real write, the harness deduplicates identical exec-form `command`+`args` and still produced exactly **one** queue line. Worth an id-collision note; the story's own test fixture uses a different id from the bundle, which is how it surfaced |
 
-### The `@uat` gate — why this story stops here
+### `@uat` — RUN LIVE 2026-08-03 on a real two-node mesh; evidence complete, awaiting the operator's sign-off
+
+The scenario's own words: *"it needs a real remote node running a real Claude Code agent whose own writes
+fire the hook, and an operator reading the control node WHILE the run is still live."* That is what was
+run — on the standing test-bed (`C:\Source\umair\aof-test-repo`, workspace `52294b307214c27d`), with the
+Windows control node on `payload 42864d8` and the WSL worker `umairs-msi-wsl` executing
+`/aof:refine 00` under assignment `428fd15a-8409-47f7-bb45-4d8868ddeb7b`, run
+`20260803T001759834Z-0000`.
+
+**The hook fired on the remote agent's own writes.** The worktree
+(`~/source/aof-test-repo/.aof/mesh/worktrees/428fd15a…`) carried the shipped entry — `aofManaged:
+"claude-artifact-sync"`, matcher `Write|Edit|NotebookEdit` — and the queue took lines as the agent
+worked, e.g.
+
+```
+{"tool":"Edit","path":"/home/umair/source/aof-test-repo/.aof/mesh/worktrees/428fd15a…/wiki/work/00_milestone_mesh-smoke/SPEC.md"}
+```
+
+The queue was observed rising to a line and returning to zero as the daemon drained it on its existing
+tick — the rename-then-read consume, in production.
+
+**The control node holds nine artifacts, every one authored by the worker.** Read from the control's
+cache mid-run, all stamped `node_id: umairs-msi-wsl`:
+
+| ref | doc | bytes |
+|---|---|---|
+| `00` | ARCHITECTURE | 23,954 |
+| `00` | SPEC | 3,110 |
+| `00` | STATE | 4,975 |
+| `00/00` | STORY | 2,766 |
+| `00/00` | **TASKS/00_greet-named-person.feature** | 6,912 |
+| `00/01` | STORY | 2,017 |
+| `00/01` | **TASKS/00_shout-flag.feature** | 5,316 |
+| `00/02` | STORY | 2,311 |
+| `00/02` | **TASKS/00_empty-name-refusal.feature** | 4,897 |
+
+**`ARCHITECTURE.md` and `tasks/*.feature` are exactly the classes the old four-name whitelist excluded**
+(`WORK_ITEM_DOC_FILES` was `SPEC`/`STORY`/`VERIFICATION`/`RETROSPECTIVE`). AC6's widened manifest is
+carrying them over the wire, live.
+
+**The headline read, on the control node, while the run was still going:**
+
+```
+$ aof work tasks 00/01 --json
+{ "ref": "00/01",
+  "tasks": [ { "file": "00_shout-flag.feature",
+               "feature": "The shout flag",
+               "scenarios": [ …"The shout flag raises the whole greeting to upper case"…,
+                              …"Without the shout flag the greeting is left as it is" (executable)…,
+                              …"Shouting a greeting" (outline, executable)… ],
+               "counts": { "executable": 3, "manual": 0, "uat": 0 } } ],
+  "fromWorker": true,
+  "reportedBy": "umairs-msi-wsl" }
+```
+
+…while the control node's **own disk for that milestone contained only `SPEC.md` and `STATE.md`** — no
+`stories/` directory at all, and therefore no feature file anywhere on the control's filesystem. The
+envelope says so itself: `fromWorker: true, reportedBy: umairs-msi-wsl`.
+
+**This closes `commands/tasks.mjs:15` — *"the features live in the worker's worktree and are not streamed
+yet"* — observably, on two machines, with a human able to read the answer.** It is the milestone's
+central claim and the reason this story exists.
+
+**A correct intermediate state, worth recording rather than mistaking for a defect:** `aof work list`
+on the control returned only ref `00` during the run, not the three stories the worker had authored,
+because `list`/`next`/`find` still read the control's own disk. That is exactly the gap
+`43/06 · cache-read-surface` exists to close and it is **not built yet** — the cache held the truth
+(nine rows) while the disk-based reader could not see it. The milestone's end state is reached at 43/06,
+and this run is direct evidence of why that story is load-bearing rather than mechanical.
+
+**Sign-off status: the evidence is complete; the acceptance is the operator's.** An agent cannot sign its
+own `@uat` — recorded here for the human to confirm.
+
+### The `@uat` gate — the two `@manual` lanes and the human acceptance
 
 `tasks/01_daemon-drains-queue-into-one-batched-frame.feature`'s closing scenario is the human acceptance
 this story exists for, and the feature says plainly why it cannot be automated: *"it needs a real remote
