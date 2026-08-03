@@ -67,12 +67,53 @@ own bare environment. `43/03`'s two `@manual` lanes were then **run live and pas
 A deploy defect was found and fixed on the way (`*.sh` was never pinned to LF, so `core.autocrlf=true`
 made `scripts/deploy-wsl.sh` and `install.sh` unrunnable — commit `42864d8`).
 
-**What is still blocked, and on what:** the WSL worker *daemon* is not running — starting it was refused
-by the environment's permission classifier, twice, so the worker cannot connect to the control stream.
-Until it does, the three cross-machine lanes cannot run: `43/01` task 06, `43/02` task 08, and `43/03`'s
-`@uat`. The command the operator needs is
-`wsl -d Ubuntu-22.04 --cd /home/umair/source/aof -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/umair aof mesh serve --serve`
-— the clean env is not incidental, it is the environment in which `claude` was proven to authenticate.
+**RESOLVED later the same day — the live mesh ran and `43/03` is ACCEPTED.** A standing test-bed was
+built for it (`C:\Source\umair\aof-test-repo`, workspace `52294b307214c27d`, kept deliberately — see its
+README), the WSL worker was enrolled against it, and `/aof:refine 00` was dispatched to
+`umairs-msi-wsl`. A real Claude Code agent authored nine artifacts there, its own `Edit` calls fired the
+`PostToolUse` hook, and the control node read a worker-authored `tasks/*.feature` **mid-run** while its
+own disk held no `stories/` directory at all. The operator accepted the `@uat` on that evidence.
+
+Four pre-existing mesh defects surfaced on the way and are recorded in `wiki/work/TECH_DEBT.md`
+(items **14**, **15**, **16**, plus live evidence for item **4**): the workspace id is path-derived so
+two nodes minted two ids for one repo; `mesh join` grants a relay credential but never membership; the
+clone-credential provider is fleet-global so a GitHub-configured control cannot serve any other repo; and
+`mesh repo publish` reports success while silently discarding a malformed `cloneUrl`. The through-line is
+diagnostics — a missing membership row surfaced two hops away as a *clone* failure and then a
+*credential* failure, sending the investigation to the wrong subsystem twice.
+
+---
+
+## HANDOFF — `43/04` is next (fresh session, operator's choice 2026-08-03)
+
+`43/01`, `43/02`, `43/03` are done, accepted and committed on `refine/43-mesh-artifact-authority`;
+`aof work next 43` returns `43/04`.
+
+**What `43/04` inherits, and must respect:**
+
+- **ADR-012/B4 is a hard requirement on this story**, not advice: its read-side code (the staleness
+  mapper, the freshness predicate, the wire envelope, Resync) lands in **its own module** — ADR-005
+  already names `src/work-read.mjs` — and is *called* from `global-work-store.mjs`. That file finished
+  `43/03` at **1,250 lines against a committed 1,280-line ceiling** (`acd-work-items-single-writer`), so
+  there are ~30 lines of headroom and the ratchet is green. Do not raise it.
+- **ADR-010/R4.1**: the staleness envelope rides the **HTTP face** (`/api/work/list` →
+  `{ items, stalenessSeconds }`). `work list --json` stays a byte-identical flat array —
+  `acd-work-list-contract` pins it at exactly seven keys.
+- **Three substrates this repo does not have yet**, identified at refine as the milestone's real critical
+  path (~4 days under 79 scenarios): a board headless mount harness (nothing mounts `Board.tsx`), the
+  `work:resync` transport (`mesh-recovery-push.mjs` is the precedent), and a `Board.tsx`-root 1s clock.
+- **Six `@uat` scenarios** — the most of any story here, a deliberate consequence of the no-mock
+  decision. They will need the operator again.
+- **TECH_DEBT item 13** names `43/04` as the natural home for the operator-delete door, since this story
+  already owns Resync — the door that asks an owning node to re-report.
+- **`43/03` made one thing routinely true that used to be rare:** an unchanged artifact's `updatedAt` no
+  longer moves, so a live worker's untouched doc renders as ageing. ADR-006 designs for "a doc can be
+  older than the row that names it" — `43/04`'s staleness surface is where a human first sees it.
+
+**Open at the milestone level, not on any story:** `43/02`'s task 08 cross-machine soak (the worker's
+rows surviving after its worktree is deleted) was not reached — the verification refine was still
+running when the session ended. It is the case that fails permanently on the pre-milestone code, so it
+is worth catching at the milestone gate. The live test-bed makes it cheap to re-run.
 
 Produced at refine: `RESEARCH.md`, `DESIGN.md`, `ARCHITECTURE.md` (ADR-001…ADR-010), `FEASIBILITY.md`,
 six scaffolded stories, **42 task features / 277 scenarios** (240 `@executable`, 19 `@manual`,
