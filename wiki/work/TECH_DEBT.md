@@ -583,3 +583,99 @@ item-delete verb, which must name the deleted ref the same way `stream.reindexed
 ends, so the deletion is an operator act carried by an event rather than a folder vanishing behind the
 ledger's back. **Natural home: `43/04`**, which already owns Resync — the door that asks an owning node
 to re-report — and is the only other story that touches this seam's read side.
+
+## 14. The clone-credential provider is fleet-GLOBAL, so a GitHub-configured mesh cannot dispatch to any other repo
+
+**Measured 2026-08-03**, during the m43 live cross-machine verification, on a two-node fleet (Windows
+control `umairs-msi` + WSL worker `umairs-msi-wsl`) against a purpose-built local test repo
+(`C:\Source\umair\aof-test-repo`, workspace `52294b307214c27d`, `cloneUrl`
+`file:///mnt/c/Source/umair/aof-test-repo`).
+
+`resolveCloneCredentialProvider` (`src/mesh-clone-credential-provider.mjs:412`) reads ONE key —
+`config.mesh.repo.credential.provider` — and this control node's `~/.aof/aof.config.json` sets it to
+`github-app` (the `aof-mesh-clone` App, id 4317525, VoiceVox-ai). That choice is **per control node, not
+per workspace**, so every clone-credential request for every workspace is routed to the GitHub App
+mint. For a workspace whose repo the App has no installation for — a local `file://` repo, a public
+repo, a repo in another org — the provider **throws**, and `applyCloneCredentialRequestFrame`
+(`src/control-stream-server.mjs:616-622`) turns any throw into the coded refusal
+`clone-credential-mint-failed`. The worker then fails the whole assignment:
+
+```
+assignment-repo-unavailable: clone credential request failed for workspace "52294b307214c27d":
+clone-credential-request was refused by control (code=clone-credential-mint-failed)
+```
+
+**Why it is a real gap rather than a misconfiguration.** The `env-token` default deliberately treats
+"no credential" as a legitimate answer — `defaultMintCloneCredential` returns `null` when
+`AOF_MESH_CLONE_TOKEN` is absent, and the module doc calls that *"a legitimate 'no credential
+configured for this workspace' reply (the public-repo path), never a refusal."* The `github-app`
+provider has **no equivalent fall-through**: it cannot express "this workspace needs no credential". So
+the moment a fleet is configured for one private forge, every other repo in that fleet becomes
+undispatchable — including the local test-bed a developer would reach for to verify mesh behaviour
+without touching production repos.
+
+**The fix.** Give the App provider the same "no installation ⇒ `null`, not a throw" path the env-token
+provider already has, so a repo the App does not cover degrades to an unauthenticated clone (which is
+correct for `file://` and for a public repo) instead of failing the assignment. A per-workspace
+provider override would also work but is the larger change; the null-return is the one that restores
+the documented semantics.
+
+## 15. A workspace published AFTER a worker daemon starts is invisible to that worker until it restarts
+
+**Measured 2026-08-03**, same live run. The control node holds the enrollment facts for the new
+workspace — all three membership rows are present in its `global_node_workspaces`:
+
+```
+[{"node_id":"umairs-mac-mini","workspace_id":"52294b307214c27d"},
+ {"node_id":"umairs-msi","workspace_id":"52294b307214c27d"},
+ {"node_id":"umairs-msi-wsl","workspace_id":"52294b307214c27d"}]
+```
+
+The WORKER's own local projection store has **no row for that workspace at all** — neither the
+membership nor the descriptor — while carrying rows for the three workspaces that existed when its
+daemon started:
+
+```
+node_workspaces: [... e1aa9092f951cedb, 9db1fd84f5895e38 ...]   # no 52294b307214c27d
+descriptors:     [... e1aa9092f951cedb, 9db1fd84f5895e38 ...]   # no 52294b307214c27d
+```
+
+The worker daemon started at 23:51; the workspace was published at 23:52 and the node joined at 23:55.
+
+**How it bites.** `workerHasRepo` (`src/mesh-worker-execution.mjs:319`) is the AND of two facts — the
+local `mesh.repo.published` marker and this node's OWN local `global_node_workspaces` membership row.
+With the membership row absent the guard is false, the worker takes the clone-on-miss path, and with no
+local `clone_url` either it must ask the control for one — which is how a missing registry row surfaces
+as a *credential* failure two hops away from its cause. Every dispatch to that workspace fails until
+the worker daemon is restarted, and `aof mesh join` succeeding on the control gives an operator every
+reason to believe enrollment is complete.
+
+**Why it matters beyond the test-bed.** Enrolling a new workspace is a routine, expected act on a live
+mesh; requiring a daemon restart on every worker to make it usable is the kind of hidden coupling that
+reads as "the mesh is flaky". It also compounds item 14: the operator sees a credential error and goes
+looking at credentials, when the actual missing fact is a registry row.
+
+**The fix.** Sync the registry on the same cadence the rest of the mesh state moves on (or push a
+descriptor/membership delta to affected nodes when `mesh repo publish` / `mesh join` lands), rather
+than only at connect. Failing that, `workerHasRepo`'s miss should name the missing FACT — "no
+membership row for this workspace on this node" — instead of letting it surface downstream as a clone
+or credential failure.
+
+## 16. `aof mesh repo publish` silently discards a malformed `cloneUrl` and reports success
+
+**Measured 2026-08-03**, same live run — and it cost the first full dispatch cycle before the cause was
+found. `.aof/aof.config.json` was hand-configured with `"cloneUrl": "/mnt/c/Source/umair/aof-test-repo"`.
+`isWellFormedCloneUrl` (`src/mesh-repo-marker.mjs:23`) correctly rejects a bare filesystem path (it
+requires `scheme://host/...` or scp-style `user@host:path`), so the value was discarded — but
+`writeRepoPublishedMarker` then reported `"cloneUrl": null` inside an envelope whose `"ok": true` and
+`"published": true` say the publish succeeded. The module doc states the intent plainly: a detection
+failure *"is silent and non-fatal — the publish still succeeds with no `cloneUrl`."* That is right for a
+repo with **no** origin; it is wrong when the operator **configured** one and it was thrown away.
+
+**How it bites.** The next signal the operator gets is a worker failing an assignment with
+`assignment-repo-unavailable … cloneUrl unresolved`, on a different machine, minutes later. The publish
+that caused it reported success.
+
+**The fix.** Distinguish "nothing configured, nothing derived" (silent, correct) from "configured and
+rejected" (loud). A configured-but-malformed `cloneUrl` should warn on the publish envelope naming the
+value and the shape rule it failed — the same treatment the codebase gives every other coded refusal.
