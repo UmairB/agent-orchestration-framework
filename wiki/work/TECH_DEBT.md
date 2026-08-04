@@ -387,7 +387,7 @@ overwritable this way.
 
 ---
 
-## 10. `src/` has no interior structure: a 3,174-line god-file and 99 flat root modules
+## 10. `src/` has no interior structure: a 3,254-line god-file, 108 flat root modules, and a face-named module the spine now imports
 
 **Status:** open (raised 2026-08-01 by the architect, during milestone 43's Decide stage). **Severity:**
 medium — nothing is broken, but every measurement in item 0's own table has moved the wrong way, and
@@ -396,13 +396,45 @@ this is the shape item 0 named.
 **What's wrong.** Measured 2026-08-01 against item 0's 2026-07-26 baseline, then re-measured through
 milestone 43's stories (`.mjs` only, so every column is comparable — 2026-08-02, ADR-013/C7):
 
-| Signal | 2026-07-26 | 2026-08-01 | 43/01 | 43/02 | 43/03 | Trend |
-|---|---|---|---|---|---|---|
-| `src/` `.mjs` files | 147 | **202** | 203 | 203 | **208** | +41% |
-| `src/` `.mjs` lines | 41,348 | **50,744** | 51,378 | 51,927 | **52,980** | +28% |
-| `src/` **root-level** `.mjs` | — | **99** (of 202) | 100 | 100 | **104** | half the tree is one flat directory |
-| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | 3,187 | 3,187 | 3,187 | **+47%** — the largest file in the repo |
-| `src/mesh-launcher.mjs` | — | — | — | 1,585 | **1,660** | 2-in / **30-out** — the widest out-degree in `src/` |
+| Signal | 2026-07-26 | 2026-08-01 | 43/01 | 43/02 | 43/03 | 43/04 | Trend |
+|---|---|---|---|---|---|---|---|
+| `src/` `.mjs` files | 147 | **202** | 203 | 203 | 208 | **211** | +44% |
+| `src/` `.mjs` lines | 41,348 | **50,744** | 51,378 | 51,927 | 52,980 | **54,126** | +31% |
+| `src/` **root-level** `.mjs` | — | **99** (of 202) | 100 | 100 | 104 | **106** | half the tree is one flat directory |
+| `src/mesh-worker-execution.mjs` | 2,163 | **3,174** | 3,187 | 3,187 | 3,187 | 3,187 | **+47%** — the largest file in the repo |
+| `src/mesh-launcher.mjs` | — | — | — | 1,585 | 1,660 | **1,693** | 2-in / **30-out** — the widest out-degree in `src/` |
+
+**The root's biggest FAMILY is now measurable, and it is the partition that would pay best** (measured
+2026-08-03, 43/04's review): of the 106 root-level modules, **25 are `mesh-*`** and **20 are `work-*`**
+— 42% of the flat root is two subjects with no directory. A `src/mesh/` grouping alone would take the
+root under 82. 43/04's own two additions are on ADR-013/C7's test (`cache-provenance.mjs`, a 1-out
+near-leaf required by ADR-012/B4; `mesh-resync.mjs`, ADR-010/R4.2's transport beside the
+`mesh-recovery-push.mjs` it mirrors) — so, again, not sprawl by subject.
+
+**A duplicated SHAPE now has two instances, and the third must extract it** (ADR-014/E7):
+`mesh-resync.mjs` is `mesh-recovery-push.mjs`'s structure re-typed — two wire kinds, four identical
+lifecycle strings, `ensure*Table` / `request*` / `read*` / `list*Requests` / `mark*State` /
+`build*Frame` / `build*ResultFrame` / `apply*ResultFrame` / `run*DispatchTick`, ~270 lines each, keyed
+on a different column with one deliberate policy difference. Two instances is honest; the pattern is
+"a durable operator-requested row + a control-tick directive dispatch + an authorization-checked result
+apply", and the **third** instance owes the shared seam rather than a third copy. Each instance also
+costs **two** store openers (item 12), which is the same duplication measured from another angle.
+
+**A THIRD shape, and it is NAME drift rather than size** (measured 2026-08-04, 43/05+06's review,
+ADR-016/G10): **`src/board-worker-stream.mjs` has become the node's shared cache-read module while
+still being named for one face.** It grew **191 → 351 lines (+84%) in one wave** and its dependents
+went **5 → 9** (`aof graph impact`, 2,454 nodes / 6,135 edges) — the three new arrivals are
+`work-read.mjs`, `mesh-launcher.mjs` and `commands/doctor.mjs`, i.e. **the spine now imports a module
+named for a face.** In substance it is not a layering inversion: the module contains no render and no
+HTTP code, its own header already says its subject widened to "the node's read of the shared cache,
+of which 'as the worker sees it' was the first instance", and putting the three new readers there
+rather than opening a twentieth store connection was the right call (item 12). **But ADR-003 drew
+"the spine must not import a face" against `board-mesh-execution.mjs` on exactly this reasoning, and
+a module whose NAME asserts a layer its nine dependents contradict is how the next author gets it
+wrong.** The cure is a subject-named home for the cache-read half (`src/cache-read.mjs`, or the
+`src/mesh/` partition above taking it), and it is a rename touching nine importers — a decision, not
+a tidy-up, and a scope explosion inside any single story. **Trigger: the tenth dependent, or the
+`src/mesh/` partition, whichever comes first.**
 
 **A SECOND file is now on the same trajectory: `src/mesh-launcher.mjs`.** Graph-measured 2026-08-02
 (2,389 nodes / 6,212 edges): it imports **30** modules and is imported by 2 — the same *sink* shape, not
@@ -492,20 +524,53 @@ semantics; change only what an EMPTY match renders as.
 
 ---
 
-## 12. Seventeen modules open the global mesh store for themselves — there is no per-invocation handle
+## 12. NINETEEN modules open the global mesh store for themselves — there is no per-invocation handle
 
-**Status:** open (raised 2026-08-02 by the architect, during milestone 43 story 01's structural review).
+**Status:** open (raised 2026-08-02 by the architect, during milestone 43 story 01's structural review;
+**count moved 17 → 19 at 43/04's review, 2026-08-03** — the first movement since it was raised, and it
+crossed this item's own stated ratchet threshold; **held at 19 through 43/05+06, and took its first
+production bite there, 2026-08-04**).
 **Severity:** low-medium — nothing is broken today, but the count only ever goes up, and each opener is a
 place a store can be opened against the *wrong* home.
 
-**What's wrong.** `openGlobalWorkProjectionStore` has no owner. **17 modules in `src/` import it and open
-their own connection** (measured 2026-08-02): `board-mesh-execution`, `board-worker-stream`,
+**What's wrong.** `openGlobalWorkProjectionStore` has no owner. **19 modules in `src/` import it and open
+their own connection** (measured 2026-08-03): `board-mesh-execution`, `board-worker-stream`,
 `commands/mesh-logs`, `commands/mesh-recover-push`, `commands/mesh-terminal-resume`,
-`control-stream-server`, `effects/table`, `global-mesh-query`, `global-work-publisher`,
-`global-work-store`, `item-lock`, `mesh-assignment-reclaim`, `mesh-assignment`, `mesh-presence`,
-`mesh-recovery-push`, `mesh-worker-execution`, `spine/face`. Each follows the same open-read-close
-shape, and each re-derives its own paths from its own options bag (`globalWorkStoreOptions`,
-`storeOptions`, `paths`, `env`, an injectable `openStore` override — five spellings of one thing).
+**`commands/resync`**, `control-stream-server`, `effects/table`, `global-mesh-query`,
+`global-work-publisher`, `global-work-store`, `item-lock`, `mesh-assignment-reclaim`, `mesh-assignment`,
+`mesh-presence`, `mesh-recovery-push`, **`mesh-resync`**, `mesh-worker-execution`, `spine/face`. Each
+follows the same open-read-close shape, and each re-derives its own paths from its own options bag
+(`globalWorkStoreOptions`, `storeOptions`, `paths`, `env`, an injectable `openStore` override — five
+spellings of one thing).
+
+**The 18th and 19th arrived together, from ONE feature** (m43/04's Resync door, ADR-014/E7): the CLI
+half and the transport half each open their own, exactly as the `mesh-recover-push` pair before it
+does. That is the measurable cost of the shape item 10 now names — **a feature of this class costs two
+openers by construction**, so the count moves in twos and the "18th opener fails CI" ratchet proposed
+below would have fired on a diff that was individually reasonable. The ratchet is still right; it just
+has to land with the handle, not before it.
+
+**THE FIRST PRODUCTION BITE, measured 2026-08-04** (m43/05+06's review, ADR-016/G7). Until now this
+item was a count. 43/06 migrated the control's presence aggregation onto the cache-first seam —
+correctly; `mesh-launcher:390` is on ADR-005's must-migrate list, and the launcher going blind to
+worker-authored items was a real defect — and the migration turned **one disk scan per workspace per
+propagation tick** into **two SQLite opens per workspace per tick**: `listItemsCacheFirst`
+(→ `readCachedItemRows`) and then `readCachedActiveRunIds`, each acquiring its own connection
+(`mesh-launcher.mjs:411-419, 529-531`). With N = every workspace the control's fleet aggregation
+resolves, the tick costs **2N opens**. Measured against `test/mesh-coordination-launcher.test.mjs`
+("the healthy launcher refreshes this node's durable presence on each propagation tick"), ONE
+workspace, EMPTY store:
+
+```
+6b4ab7f (before): presence refreshed at ~27ms   — lane GREEN
+working tree:     not refreshed at 31ms; ~136ms — lane RED
+```
+
+**The store is ONE file for every workspace** (`withProjectionStore` keys on `globalMeshPaths(options)`),
+so every one of those opens after the first is pure ceremony — which is exactly what "the invocation
+has a store, but nothing models that" costs when the caller is a loop rather than a command. The
+per-tick fix is local and is required by that review; **the general fix is still the handle**, and
+this is the evidence that the ceremony has stopped being free.
 
 A single command invocation now opens the store **more than once**: `aof work run-start` on a meshed
 workspace opens it for the item-lock guard (`item-lock.mjs`) and again for the publish reactor
@@ -710,3 +775,109 @@ that caused it reported success.
 **The fix.** Distinguish "nothing configured, nothing derived" (silent, correct) from "configured and
 rejected" (loud). A configured-but-malformed `cloneUrl` should warn on the publish envelope naming the
 value and the shape rule it failed — the same treatment the codebase gives every other coded refusal.
+
+---
+
+## 17. Six test suites are imported by NEITHER runner — a whole accepted story's proof has never run in CI
+
+**Status:** open (measured 2026-08-03 by the architect, during milestone 43 story 04's structural
+review). **Severity:** medium — it is not a broken test, it is a *gate that isn't there*: a suite no
+runner imports is green, red or deleted with equal effect on every gate we have.
+
+**What's wrong.** Both runners register their suites by **explicit import** (`scripts/test.mjs` and
+`scripts/test-unit.mjs`). Nothing checks that the set of imports covers the set of files. Measured, six
+`test/**/*.test.mjs` files are imported by neither:
+
+| File | Origin | State when run by hand |
+|---|---|---|
+| `test/artifact-sync-drain.test.mjs` | m43/03 (ACCEPTED) | green |
+| `test/artifact-sync-enqueue-hook.test.mjs` | m43/03 (ACCEPTED) | green |
+| `test/artifact-sync-manifest.test.mjs` | m43/03 (ACCEPTED) | green |
+| `test/claude-settings-merge.test.mjs` | m43/03 (ACCEPTED) | green |
+| `test/mesh-ui-write-isolation-bounded.test.mjs` | m25-era (`15e0a92`) | **RED** — 3 of 6 fail |
+| `test/work-observe.test.mjs` | work-observe | exports no runner array |
+
+Two distinct problems, one cause. **(a)** An accepted story's four behavioural suites — 38 scenarios,
+the proof that `43/03` works — have never executed in `npm test`. They pass today; nothing would tell
+anyone the day they stop. **(b)** `mesh-ui-write-isolation-bounded` tests `POST /api/mesh/issue`, a
+route that no longer exists; its siblings were retired into
+`wiki/work/35_milestone_mesh-work-assignment/reference/retired-dispatch-tests/` and this one was
+missed. It has been red and invisible ever since.
+
+**How it bites.** It is the exact inverse of a flaky test, and worse: a flaky test is noisy, an
+unregistered one is silent. It also breaks the assumption every review in this repo makes — that "the
+suite is green" says something about the code under review. The m43/03 case is the sharp end: a story
+was reviewed, accepted and merged on evidence that CI has never re-checked once.
+
+**The fix.** A fitness function, and it is small: every `test/**/*.test.mjs` must be imported by
+`scripts/test.mjs` or `scripts/test-unit.mjs`, with the current orphan set as a **named, shrink-only
+baseline** (the `acd-no-new-silent-catch` idiom) so the seventh orphan fails CI while the six are paid
+down deliberately. Then: register 43/03's four green suites (four lines), and retire
+`mesh-ui-write-isolation-bounded` to the m35 reference directory its siblings already live in — its
+route is gone, so there is nothing to repair, only a file to file correctly.
+
+---
+
+## 18. `ui/` has no interior structure either — one surface's folder is the shared library, and the fleet cannot say which machine it is
+
+**Status:** open (measured 2026-08-03 by the architect, during milestone 43 story 04's **second-pass**
+structural review — the UI half). **Severity:** medium. This is TECH_DEBT item 10 (`src/` has no
+interior structure) seen in the other half of the codebase, plus one concrete consequence that is
+already blocking a test someone wants to write.
+
+**What's wrong — two things with one cause, that `ui/` was never given a shared layer.**
+
+**(a) `ui/src/board/` is the de-facto shared UI library, and nothing declares it.** `ui/src/fleet/`
+reaches into `ui/src/board/` **seven** times — `runs.mjs` (the one relative-time formatter),
+`status.tsx` (the status ramp), `api.ts` (wire types), and milestone 43's `freshness.mjs` ×2 +
+`StaleBadge.tsx` — up from four before 43/04. Meanwhile `ui/src/components/` (seven kit primitives)
+and `ui/src/lib/` exist and are the nominal shared homes, and neither holds any of it. So the import
+graph says "the fleet depends on the board", which is not the relationship: both depend on a shared
+ramp/vocabulary layer that has no folder. Each new cross-surface primitive lands in whichever surface
+built it first — exactly item 10's shape ("a rule living at whichever call site needed it first is
+not a rule"), one directory over.
+
+Line-count trend for the same subtree, measured from this repo's history:
+
+| file | m03 (06-21) | m26 (07-02) | 07-30 | 43/04 |
+|---|---|---|---|---|
+| `ui/src/board/DetailPanel.tsx` | 434 | 707 | 814 | **1,123** |
+| `ui/src/fleet/Fleet.tsx` | — | 508 | 1,463 | **1,521** |
+| `ui/src/board/Board.tsx` | 315 | 367 | 437 | **581** |
+| `ui/src` files | 29 | 33 | 48 | **53** |
+
+`acd-ui-surface-file-budget` (m43/ADR-015 F2) now ratchets the first two so the *files* stop growing;
+it does nothing about the missing *layer*, which is this item.
+
+**(b) The fleet payload cannot say which machine is serving it, so "this node" is unrenderable there.**
+Milestone 43/04 gave the board's `/api/work/list` envelope a `nodeId` key, and the board now reads
+`from aof-control (this node)` on rows it published itself. The fleet has no equivalent:
+`shapeGlobalStatus` (`src/global-mesh-query.mjs`) states `stalenessSeconds` but no serving-node
+identity, and `mesh-ui-serve.mjs` already resolves one internally (`controlNodeId()`, used only as the
+assign `issuer`). The fleet's `node.local` marker IS produced — by the `mesh:status` command
+(`src/commands/mesh-identity.mjs:~343`) — but its only web consumer is `NodeCard`
+(`ui/src/fleet/Fleet.tsx:1069`), which **never mounts in the web app**: the codebase records this at
+`Fleet.tsx:951-954` (m38 finding F9) — *"mesh-ui-serve.mjs serves BOTH scopes from
+queryGlobalMeshStatus, so isGlobalStatus(status) is always true and NodeCard/NodesRegion never mount
+there."* The card that does render falls back to the registry's `role` (`control`/`worker`), which
+answers a different question.
+
+**How it bites.** (a) compounds silently: the next shared primitive lands in `board/` too, and the
+fleet's dependency on the board deepens until neither can be moved. (b) bites now and concretely —
+**a lane asserting that the fleet's "this node" tag and the board's new `(this node)` clause agree
+about the same machine cannot be written**, because the fleet has no such tag on the wire. Two
+surfaces answering "which machine is this?" differently, with no test able to compare them, is the
+disagreement class milestone 43 exists to remove. It also leaves a whole local-shape render path
+(`NodesRegion`, `NodeCard`, `BoardsRegion`, `BoardDrillIn` — several hundred lines) reachable by no
+production request, dead since m38 and never routed.
+
+**The fix.** Two independent, both small.
+- **(a)** A shared layer — `ui/src/ramps/` (the five read-only ramps: status, runs, assignment,
+  presence, freshness) or an honest `ui/src/shared/` — and move the cross-surface modules into it, so
+  `fleet → board` becomes `fleet → shared ← board`. Mechanical, but it touches every importer, which
+  is why it is here rather than inside a story.
+- **(b)** `shapeGlobalStatus` states the serving node's identity on the payload, the way
+  `/api/work/list` now does (`mesh-ui-serve.mjs` already has it memoised). Then `node.local` is
+  derivable in `ui/` for the card that actually renders, the two surfaces answer the question from one
+  source, and the cross-surface lane becomes writable. While there, decide the fate of the
+  never-mounting local-shape components: render them or retire them, but not neither.

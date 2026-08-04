@@ -73,7 +73,8 @@ fleet. It adds exactly **one new vocabulary** — the freshness ramp below — a
 - **390** (mobile) — and **360** additionally for the fleet surface, because the fleet's existing
   width findings (DESIGN GAP D1, [index.css:30-36](../../../ui/src/index.css#L30);
   [Fleet.tsx:179-185](../../../ui/src/fleet/Fleet.tsx#L179)) were measured at 360–414px and the badge
-  must survive that squeeze. The badge's **degraded forms** (below) are what the 390/360 renders judge.
+  must survive that squeeze. What the 390/360 renders judge is whether each surface's **fixed form**
+  (below) FITS — not whether a runtime ladder fires. *(Amended 2026-08-03, design-conformance review.)*
 
 **Render routes.** Board: `/?mode=board` with the item in the hash (e.g. `/?mode=board#43/03`) —
 served on an **ephemeral** per-workspace port that changes on every daemon restart
@@ -170,8 +171,53 @@ order of discrete whole drops, never a shrink factor and never a paint order —
 | Form | Text | Used where |
 |---|---|---|
 | **full** | `◌ stale · 12m ago` | detail-panel header, overview milestone card |
-| **short** | `◌ stale` | lane card; any surface where the full form does not fit |
-| **minimal** | `◌` alone | only when the short form cannot fit (fleet card at 360px). Becomes `role="img"` with the full sentence as `aria-label`. |
+| **short** | `◌ stale` | lane card, **fleet milestone card**, legend swatch; and any surface where the full form does not fit at a documented breakpoint |
+| **minimal** | `◌` alone | **reserved — no surface paints it in this milestone** (see the ruling below). Becomes `role="img"` with the full sentence as `aria-label`. |
+
+#### The form is chosen by the SURFACE, not by the viewport (ruling, 2026-08-03)
+
+*This section replaces the earlier reading in which a surface walked full → short → minimal as its own
+width shrank. The order above is still the priority order — it says which form outranks which when a
+surface must be pinned to a narrower one. It is not a runtime ladder, and three reasons make it one
+rather than the other.*
+
+1. **The fleet card's width is viewport-invariant by construction, so a viewport rule cannot express
+   "it does not fit here".** The milestones grid is
+   `repeat(auto-fill, minmax(320px, 1fr))` with `gap-4` ([Fleet.tsx:482](../../../ui/src/fleet/Fleet.tsx#L482))
+   inside a `px-4 sm:px-8` main ([Fleet.tsx:419](../../../ui/src/fleet/Fleet.tsx#L419)). Auto-fill pins
+   every column into one narrow band and adds columns rather than width as the viewport grows, so the
+   card is roughly **300–370px inside its own `p-4` at every documented breakpoint** — and at very wide
+   viewports it is *narrower* than at 1280, because a seventh column appears. A media query keyed to the
+   viewport would therefore paint `full` in a ~345px card at 2560 and `minimal` in a ~330px card at 390.
+   That is not a yield; it is an incoherence the operator reads as a bug.
+2. **The m38 derived-character-budget idiom does not transfer here, and saying so is the point.** Those
+   budgets (`ASSIGN_MESSAGE_BUDGET_CH`, `REGION5_NAME_BUDGET_CH`, `REGION5_DRILLIN_ABBREV_AT_CH`,
+   [assign-affordance.mjs](../../../ui/src/fleet/assign-affordance.mjs)) exist to decide **how much of a
+   variable-length datum survives**, and they are honest because that datum renders in the **`mono`**
+   ramp, where `ch` *is* the exact character advance ("not an approximation", the module's own comment).
+   The badge has neither property: its three forms are **fixed strings**, and it renders in **Inter**,
+   where a character budget over proportional type would be false precision. There is no datum to
+   budget. The right instrument for a fixed set of whole forms is: **the surface picks one.**
+3. **That is already the house instrument, twice over.** `status.tsx` emits a ring, a chip and a dot from
+   one source and the **surface** decides which — no width is consulted. This design already applies it:
+   §1a pins the lane card to `short` and §1b/§1c pin the two headers to `full`. A width-conditional
+   fourth mechanism would be a new one, and a11y-hostile besides: a form swap must be a real element
+   swap (the minimal form carries `role="img"` + `aria-label`, the text forms must not), so a CSS reveal
+   that hid the word `stale` at some widths would silently convert a compliant badge into an unnamed
+   glyph — the exact failure §Accessibility rule 3 exists to prevent.
+
+**Consequences, binding:**
+
+- The **fleet milestone card paints `short` at every width** (§Surface 2). At 360 that leaves the row
+  with real slack instead of the ~60px deficit the full form implies.
+- **`minimal` has no painter in this milestone.** It remains the ramp's third rendering with its full
+  `role="img"` + `aria-label` contract, exercised by the ramp module and by task 08, and reserved for a
+  surface narrower than the fleet card. An unpainted-but-correct rendering is honest; a painted-but-
+  unnamed one is not.
+- If a render shows a **fixed form overflowing**, that is a **GAP** whose fix is to pin *that surface* to
+  the next form down and record the breakpoint here — never a runtime shrink, never an overprint, and
+  never a truncation of the word `stale`. DG-13's sixth clause ("no two elements may occupy the same
+  pixels") binds unchanged.
 
 The badge **never** carries the node id — the `title` and the provenance line carry it. This is the
 region-5 lesson applied pre-emptively: a chip that spends its width on a long node id truncates the
@@ -192,9 +238,12 @@ synced time unknown · from aof-wsl
 ([DetailPanel.tsx:170](../../../ui/src/board/DetailPanel.tsx#L170)).
 
 **One badge per item context.** The badge attaches to the status-chip cluster (or the lane-card meta
-line); provenance lines use the label form. The two never both appear for the same record — that is how
+line); provenance lines use the label form. **Exactly one BADGE per record per surface** — that is how
 the ramp stays one vocabulary in two primitives, the same way `status.tsx` emits a ring, a chip and a
-dot from one source.
+dot from one source. *(Amended 2026-08-03: this clause previously read "the two never both appear for
+the same record", which contradicted §1c and §Accessibility rule 10 — the detail panel deliberately
+carries BOTH the header badge and the provenance line for the same item, and rule 10 depends on that
+coexistence. The rule being stated was never "one primitive at a time"; it is "one badge, never two".)*
 
 ### One source module
 
@@ -257,8 +306,15 @@ fine inside both.
 Row 1 is `ring · mono ref · "milestone" · ml-auto status chip`
 ([Overview.tsx:98-105](../../../ui/src/board/Overview.tsx#L98)). The `ml-auto` moves from the chip's
 span onto a **cluster** span holding `badge + chip` in that order, so the chip keeps its exact current
-position. Full form (`◌ stale · 12m ago`); if row 1 cannot fit it, the uppercase `milestone` label
-yields first (it is redundant with the card's context), then the badge drops to short, then minimal.
+position. Full form (`◌ stale · 12m ago`).
+
+**If the render shows row 1 cannot fit the full form at a documented breakpoint, the fix is a fixed
+`short` form for this surface**, pinned here from the render — never a runtime shrink and never a
+viewport media query (§"The form is chosen by the SURFACE"). *(Amended 2026-08-03: this previously read
+"the uppercase `milestone` label yields first, then the badge drops to short, then minimal".)* **The
+uppercase `milestone` label does not yield.** A label that disappears only when a row happens to be
+stale makes its own absence an accidental second signal for staleness — the m38 DG-20 lesson, which
+established that a fit gate must never turn absence-of-an-element into a covert state indicator.
 
 **`uat` gate bars carry no badge** ([Overview.tsx:178-220](../../../ui/src/board/Overview.tsx#L178)) —
 gates are local acceptance items with no cached provenance. Absent, not "fresh".
@@ -270,6 +326,16 @@ box / `slug · primary action` ([DetailPanel.tsx:150-238](../../../ui/src/board/
 
 - **Badge:** row 1, `ml-auto` cluster becomes `badge + status chip` (chip keeps its right anchor).
   Full form.
+- **Row 1's yield rule (NEW, 2026-08-03 — DESIGN previously gave none for this row, which left the
+  build with an open question at exactly the widest form on the narrowest row).** The detail column is a
+  fixed ~382px (`03/DESIGN.md` §2) and row 1 already carries ring + ref + type chip before the cluster.
+  **None of that row's children can shrink** — every one has `min-width: auto` content and the row does
+  not wrap — so an over-wide row does not compress, it **overflows**, and the status chip loses the
+  right-edge anchor that documented-default 3 exists to protect. The yield order, in whole discrete
+  drops, is therefore: **(1) the badge drops `full` → `short`; (2) nothing else drops.** The ring, the
+  ref, the type chip and the status chip are all facts about *what the item is* and outrank freshness
+  (the status > freshness hierarchy) — none of them yields to make room for the badge. Which of the two
+  forms row 1 takes is **pinned per breakpoint from the render**, not measured at runtime.
 - **The provenance box widens.** Today it renders only when `item.execution` exists
   ([:169-223](../../../ui/src/board/DetailPanel.tsx#L169)). It must now render for **every**
   cache-published item, because "which node authored this" is a first-class fact of this milestone, not
@@ -287,7 +353,9 @@ box / `slug · primary action` ([DetailPanel.tsx:150-238](../../../ui/src/board/
 - **`(this node)`** marks a row the control node itself published — under this milestone the control is
   simply one more writer into the cache (STATE: "the cache has one read surface and many writers"). It
   is the plain clause `(this node)` here, matching the box's mono type; the fleet keeps its existing
-  bordered `this node` tag ([Fleet.tsx:1010-1015](../../../ui/src/fleet/Fleet.tsx#L1010)).
+  bordered `this node` tag ([Fleet.tsx:1010-1015](../../../ui/src/fleet/Fleet.tsx#L1010), rendered at
+  [:1069-1073](../../../ui/src/fleet/Fleet.tsx#L1069) off `node.local`, which `mesh:status` sets
+  whenever a `mesh.nodeId` is configured — [mesh-identity.mjs:343](../../../src/commands/mesh-identity.mjs#L343)).
 
 **The Resync action.**
 
@@ -329,7 +397,14 @@ box / `slug · primary action` ([DetailPanel.tsx:150-238](../../../ui/src/board/
 | **landed** (a fresher `syncedAt` arrives) | back at idle — and then **removed**, because the row is no longer stale | empty | **badge clears**; line resets to `synced just now · from <node>` |
 | **no answer** (accepted, but nothing landed inside the watch window) | back to `⟳ Resync`, enabled — retryable | `no answer from <node> — still showing the 12m-old copy` (**muted**) | unchanged |
 | **owner unreachable** (the request could not be delivered) | back to `⟳ Resync`, enabled | `owner <node> unreachable — showing the 12m-old copy` (**muted**), and the line gains a persistent `· owner unreachable` clause | unchanged |
+| **owner is this node** (the row's recorded author IS the node the board runs on; **no call is made at all** — this node's own publish tick is what refreshes it) | back to `⟳ Resync`, enabled | `no peer to ask — <node> is this node, still showing the 12m-old copy` (**muted**), outcome-first, full server text in `title` | unchanged, and the line gains **no** clause |
 | **refused** (no owning node recorded; a coded control-side refusal) | back to `⟳ Resync`, enabled | `no owning node recorded` / `resync refused — <code>` (**destructive**), outcome-first, full server text in `title` | unchanged |
+
+*(The **owner is this node** row was added 2026-08-03, from 43/ADR-014/E2. It is a state the original
+table did not name, and it must be named here rather than absorbed into "owner unreachable": absorbing
+it would make the surface assert a connectivity fact that was never tested — see decision 4 below.
+Separately, **"no answer" has two producers** and that is correct: the command's own request-leg bound
+and the client's watch window elapsing. Both are "the world did not answer", so both read the same.)*
 
 Five decisions inside that table, each with a reason:
 
@@ -351,6 +426,15 @@ Five decisions inside that table, each with a reason:
    over-alarm precisely the condition this milestone exists to normalise. A refusal, by contrast, is a
    fault we own, and reads `destructive` like every other coded refusal on these surfaces
    ([Fleet.tsx:850](../../../ui/src/fleet/Fleet.tsx#L850)).
+   **Confirmed against the transport's six codes (design-conformance review, 2026-08-03):**
+   `resync-requested`, `resync-pending`, `resync-owner-not-connected`, `resync-owner-unreachable` and
+   `resync-owner-is-self` are **muted**; `resync-no-owner` is the **only rejection and therefore the only
+   `destructive` rung**. `resync-owner-is-self` is muted **because no call was made** — nothing can have
+   been rejected, so the destructive rung's own predicate is not met, and "moot" is not "rejected". For
+   the same reason it writes **no** `· owner unreachable` clause: no connectivity was tested, so none may
+   be claimed (binding rail 2, "never assert what is not known"). This is the one place where the tone
+   rule needs its own carve-out stated, because a control-authored row goes stale precisely when the
+   control's own publish tick stops — the case where a wrong clause would be most visible and least true.
 5. **Resync is always clickable while stale — it is never pre-disabled on presence.** The tempting
    alternative is to grey it out when the owner has no live presence, but (a) the board's wire shape
    carries no presence at all ([api.ts:6-43](../../../ui/src/board/api.ts#L6)), so that would need a
@@ -403,13 +487,13 @@ convention: a dashed placeholder reading `No cached SPEC yet — <node> has not 
   *empty* (non-mesh workspace, or `syncedAt` unknown) — no badge;
   *error* (list fetch failed) — no badge; the existing page-level error line owns the failure ([Board.tsx:359-365](../../../ui/src/board/Board.tsx#L359));
   *populated-fresh* — no badge;
-  *populated-stale* — the badge in its widest fitting form, `title` carrying the full sentence.
+  *populated-stale* — the badge in this surface's pinned form (§"The form is chosen by the SURFACE"), `title` carrying the full sentence.
 - **Provenance box line 2:**
   *loading* — the line is absent until the first list response (never a skeleton that could be mistaken for content);
   *empty* — non-mesh workspace: the whole box is absent. Mesh workspace, no `syncedAt`: `synced time unknown · from <node>`; no node either: `synced time unknown · reporting node unknown` (explicit unknowns, never an omitted row — DESIGN GAP D2);
-  *error* — a failed Resync renders in the message slot per the state table (destructive for a refusal, muted for an unreachable/no-answer owner); it never replaces the line or hides the cached facts;
+  *error* — a failed Resync renders in the message slot per the state table (destructive for a refusal, muted for an unreachable / no-answer / owner-is-self owner); it never replaces the line or hides the cached facts;
   *populated* — `[stale · ]synced <age> · from <node>[ (this node)]`, plus the Resync button when stale.
-- **Resync button:** *idle · in-flight · accepted · landed · no-answer · unreachable · refused* exactly as the state table above; never rendered when the row is fresh; never left in-flight unbounded.
+- **Resync button:** *idle · in-flight · accepted · landed · no-answer · unreachable · owner-is-self · refused* exactly as the state table above; never rendered when the row is fresh; never left in-flight unbounded.
 - **Doc body provenance line:**
   *loading* — the existing `.mono "Loading SPEC..."` line, no provenance line ([DetailPanel.tsx:412](../../../ui/src/board/DetailPanel.tsx#L412));
   *empty* — dashed placeholder `No cached SPEC yet — <node> has not reported one.` (absent, not error);
@@ -425,8 +509,9 @@ convention: a dashed placeholder reading `No cached SPEC yet — <node> has not 
 - **Type:** badge `text-[11px] font-semibold`; provenance labels `mono text-[11px]`; message slot
   `mono text-[10.5px]` (the established message-slot size, [Fleet.tsx:850](../../../ui/src/fleet/Fleet.tsx#L850));
   Resync `text-[11px] font-semibold`. Strictly below the `text-xs` status chip.
-- **Spacing/shape:** badge `rounded-full px-2 py-0.5 gap-1`; Resync `rounded-md px-2.5 py-1`; cluster
-  gap `gap-1.5` (the header cluster idiom); box padding unchanged (`px-2 py-1.5`).
+- **Spacing/shape:** badge `rounded-full px-2 py-0.5 gap-1`; Resync `rounded-md px-2.5 py-1` with a
+  `min-h-6` target floor; cluster gap `gap-1.5` (the header cluster idiom); box padding unchanged
+  (`px-2 py-1.5`).
 - **Time:** every relative age is `relativeTime` from [runs.mjs:26-39](../../../ui/src/board/runs.mjs#L26)
   — one formatter for the whole product (`just now` / `Ns ago` / `Nm ago` / `Nh ago` / `yesterday` / `Nd ago`).
 - **Motion:** none.
@@ -443,10 +528,18 @@ and carries the assignment chip and the assign affordance
   `25_milestone_mesh-ui/mocks/mesh-ui.png` remains the baseline for everything *already* on this
   surface; the checklist below is the mandatory baseline for the freshness delta only.
 - **Badge:** row 1's `ml-auto shrink-0` chip span becomes a `shrink-0` cluster of `badge + chip`
-  ([Fleet.tsx:526-533](../../../ui/src/fleet/Fleet.tsx#L526)). **Yield order at 360px:** the uppercase
-  `milestone` label ([:529](../../../ui/src/fleet/Fleet.tsx#L529)) drops **whole** first; then the badge
-  goes full → short → minimal. Discrete drops, never a shrink factor, never overprinting — DG-13's sixth
-  clause ("no two elements may occupy the same pixels") applies here unchanged.
+  ([Fleet.tsx:526-533](../../../ui/src/fleet/Fleet.tsx#L526)), **in the `short` form (`◌ stale`) at
+  every width** — see §"The form is chosen by the SURFACE, not by the viewport" for why this card in
+  particular cannot carry a viewport-keyed ladder (its `auto-fill minmax(320px,1fr)` grid pins it to one
+  narrow width band at *every* breakpoint, and makes it narrower at 2560 than at 1280). **The uppercase
+  `milestone` label does not drop**, and nothing on this card is width-conditional: the card is part of
+  the m25 committed baseline, and a label that disappears only when a row happens to be stale would make
+  its absence an accidental second signal for staleness (the m38 DG-20 lesson). DG-13's sixth clause
+  ("no two elements may occupy the same pixels") still binds — if the 360 render shows the short badge
+  overprinting, wrapping, or forcing the status chip off its right-edge anchor, the next whole drop is
+  the `milestone` label, and that is a **GAP for the render to raise and this document to pin**, never a
+  runtime behaviour to build. *(Amended 2026-08-03; this bullet previously specified a full → short →
+  minimal ladder at 360.)*
 - **Attribution is on-demand here** (the badge's `title` / `aria-label`), not a new line. Reason: region
   5's geometry is fitness-locked (`test/fleet-assign-row-geometry.test.mjs`, asserted from
   [Fleet.tsx:790-792](../../../ui/src/fleet/Fleet.tsx#L790)), the workspace strip above already carries
@@ -467,8 +560,8 @@ and carries the assignment chip and the assign affordance
 - **States:** *loading* — the existing region placeholders, no badge
   ([Fleet.tsx:1361-1381](../../../ui/src/fleet/Fleet.tsx#L1361)); *empty* — the existing dashed
   placeholders, no badge; *error* — the existing page-level accent + Retry, no badge; *populated-fresh*
-  — no badge; *populated-stale* — the badge in its widest fitting form per the yield order, `title`
-  carrying `Last synced from <node> at <time> (<age>)`.
+  — no badge; *populated-stale* — the badge in its **`short`** form at every width, `title` carrying
+  `Last synced from <node> at <time> (<age>)`.
 - **Ramp:** identical to surface 1 (`muted-foreground`, dashed, `text-[11px]`, `relativeTime`, no
   motion). The badge must remain visually distinct from the node-presence dot, the run chip and the
   assignment chip on the same page — which the dashed-pill primitive guarantees.
@@ -492,6 +585,8 @@ ramp is self-documenting exactly as the two existing ramps are"*
   window`. The window is rendered in words from the configured `stalenessSeconds` on the wire; if the
   wire does not carry it, the row degrades to `◌ stale — no fresh copy inside the staleness window`
   (never a guessed number).
+- **The swatch is the `short` form.** A legend row documents the STATE, not any particular copy, so it
+  carries no age and no instant — and that also makes the swatch identical on both legends.
 
 #### Binding checklist (mandatory)
 
@@ -534,6 +629,8 @@ mechanically at **WCAG 2.1 AA**, ADR-004's documented default.
    - **Minimal (glyph-only) badge:** must become `role="img"` with that same sentence as `aria-label`
      — a bare `◌` with no accessible name is exactly the failure the `role="img" aria-label` pattern
      already prevents on `StatusRing` ([status.tsx:118-123](../../../ui/src/board/status.tsx#L118)).
+     This contract binds even though no surface paints the minimal form in this milestone: it is what
+     makes the form safe to pin a future surface to.
 4. **The Resync control names its object.** `aria-label="Resync <ref> from <node>"` — the established
    naming pattern (`aria-label={\`Assign ${ref} to a worker node\`}`,
    [Fleet.tsx:802](../../../ui/src/fleet/Fleet.tsx#L802); `aria-label="Sync work stream"`,
@@ -593,6 +690,15 @@ The PO can override any of these; they exist so the build has no open question.
     cache-miss placeholder.
 13. **The staleness window is ONE configured number, on the wire, shared by every surface and stated in
     the legend.** Two predicates that can disagree about the same instant is a defect.
+14. **The badge's FORM is chosen by the SURFACE, never by the viewport** *(added 2026-08-03)*. Detail
+    header + overview card = `full`; lane card, fleet milestone card and legend swatch = `short`;
+    `minimal` is reserved and unpainted in this milestone. Full → short → minimal remains the **priority
+    order** used to pin a surface, not a runtime ladder. A surface that overflows is a GAP fixed by
+    pinning it one form down and recording the breakpoint here — never a shrink factor, never an
+    overprint, never a truncation of the word `stale`.
+15. **"No call was made" is MUTED and writes no clause** *(added 2026-08-03)*. `resync-owner-is-self` is
+    muted because nothing was rejected, and it adds no `· owner unreachable` clause because no
+    connectivity was tested. `resync-no-owner` remains the only `destructive` rung.
 
 ---
 

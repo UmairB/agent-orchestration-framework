@@ -1,7 +1,7 @@
 ---
 doc: verification
 milestone: 43
-verified: 2026-08-02
+verified: 2026-08-03
 verifier: aof:verify
 verdict: in-progress
 ---
@@ -500,3 +500,123 @@ item-lock lane and the frame doors), all fitness functions green (787/0) includi
 work validate 43/02` is PASS, and no blocker finding is open. The `@manual` soak is carried to the
 milestone gate; G2b and G4 are recorded as open non-blocking gaps with named homes. `STORY.md` →
 `status: done`.
+
+## 43/04 · Staleness, never eviction — built and validated 2026-08-03, **AWAITING `@uat`**
+
+Lanes in scope: **`@executable`** (tasks 00–08, 65 scenarios) + **`@uat`** (task 09, 14 scenarios).
+There are **no `@manual` scenarios** in this story. It is the milestone's only story touching `ui/`, so
+it is the first to run the design-conformance step.
+
+### Verification evidence
+
+- **`@executable` suite green — 373 run / 0 failed across 36 suites**, re-run **independently by the
+  orchestration** after the final fix batch rather than taken from any agent's report (every invocation
+  under a per-test hermetic `AOF_GLOBAL_HOME`; focused imports only — the full suite binds `:4182`,
+  held by the live control daemon). Runner: `scratchpad/run-final.mjs`.
+  - Story data layer: `staleness-schema-v8-provenance` (6), `staleness-cached-rows-provenance` (14),
+    `staleness-marks-never-evicts` (25).
+  - Story UI: `board-freshness-ramp` (12), `board-provenance-attribution` (9), `board-resync-door` (9),
+    `board-resync-outcomes` (8), `board-freshness-legend` (6), `board-staleness-a11y` (10).
+  - Story transport: `mesh-resync` (20) — owed because tasks 05/06 are both `@ui` and cannot reach the
+    codes the route layer produces.
+  - Ratchets (11 suites, 47): including the two this story armed — `acd-ui-surface-file-budget` and
+    `acd-test-suite-registration` — and `acd-cache-staleness-single-predicate`, tightened twice.
+  - Regression (11 suites, 169): the board/fleet surfaces, the four fleet-harness consumers the
+    extraction had to leave unweakened, and the cache-authority seams from 43/02.
+- **`aof work validate 43/04` → PASS**; **`aof work validate` (whole stream) → PASS**.
+- **`node scripts/ui-build.mjs` green** (`tsc -b` + `vite build`), and `cd ui && npx tsc -b` exit 0.
+- **Three of the story's claims were proved by MUTATION, not by assertion** — the discipline this
+  milestone has had to learn four times over (STATE feedback): the bounded watch poll (deleting the
+  effect turns exactly the new lanes red, and killed **0** lanes before the repair), the
+  local-authorship discriminator (reverting it to the shipped presence check fails only the new lane —
+  measuring the blindness itself), and the fleet badge form (reverting to `full` fails the new lane).
+
+### Design conformance — **INCONCLUSIVE**, naming the missing render
+
+Per ADR-001/002/003 the orchestration renders and the read-only designer judges. **No render was
+produced and none could be**: the board is a per-workspace server on an ephemeral port serving the
+**deployed payload**, not this branch's uncommitted work, and restarting daemons on this machine is an
+operator action that was not requested. The honest verdict is therefore `INCONCLUSIVE` — *not* a
+`CONFORMS`/`GAPS` inferred from component source, which the process explicitly forbids.
+
+The missing artifact, named: populated renders of the **board at 1280/768/390** (ephemeral base URL
+supplied at capture time) and the **fleet at 1280/768/390/360**, carrying a stale item, a fresh item, an
+unknown-`syncedAt` item, a blocked-and-stale item, and each Resync outcome standing. **That is exactly
+task 09's `@uat` job**, so the gate below is where this is discharged rather than a gap to fix first.
+
+What the designer *could* discharge — the **programmatic** half of DESIGN's binding checklists, judged
+from the rendered element tree the suites assert (text, DOM order, roles, ARIA, counts, class tokens) —
+it audited region by region: the detail-panel header, the provenance box and the legends are fully
+discharged; four clauses are **built but unasserted** (the overview card's cluster order/anchor, the
+lane card's `ml-auto` placement, the provenance box's own class set, the fleet badge's
+loading/empty/error states), recorded as F-D3 below.
+
+### Findings
+
+| id | observed | type | severity | triage | routed to | status |
+|---|---|---|---|---|---|---|
+| F-A1 | m08's locked `00_routes-byte-for-byte.feature` asserts `GET /api/work/list` returns the m03 envelope byte-for-byte; ADR-010/R4.1 makes it `{ items, stalenessSeconds }`. Both accepted, cannot both hold | contract | blocker | implement the newer ADR; record the supersession on m08's contract without weakening it | PO + architect (ADR-015/E1 verified all six collateral surfaces still assert the seven-field row exactly, one level down) | closed |
+| F-A2 | `work:resync` on a row **this** node authored answered `resync-owner-not-connected` — naming a connectivity fact never tested, and misdiagnosing the common case (a control-authored row goes stale exactly when the control's publish tick stops) | correctness | blocker | fifth code `resync-owner-is-self`, muted | ADR-014/E2 → developer | closed |
+| F-A3 | The resync request bound (10s literal) was **shorter than the drain cadence it waits on** (15s), so ~1 in 3 healthy resyncs would report "no answer" and exit non-zero on a working system | correctness | blocker | derive from `mesh.sync.cadenceSeconds`; cadence policy extracted to `src/mesh-sync-cadence.mjs` and the launcher's private copy deleted | ADR-014/E5 → developer | closed |
+| F-A4 | A **second** storage→wire translation site (`board-worker-stream.mjs:247`) set `reportedBy` from the *assignment overlay* — a different fact under this story's key, correct only by later overwrite | structure | blocker | deleted; the dead third parameter of `mergeWorkerItems` dropped with it | ADR-014/E4 → developer | closed |
+| F-A5 | The Resync transport (483 new lines) had **no behavioural test** — the only exercise hit `resync-no-owner` before any row, tick or frame existed | test-coverage | blocker | 20-lane suite modelled on `mesh-recovery-push`, mutation-verified | ADR-014/E6 → developer | closed |
+| F-A6 | **Six test suites imported by neither runner** — four of them milestone 43/03's behavioural proof (38 scenarios) for a story already reviewed, accepted and merged. Green when run by hand; nothing would have said a word the day they broke | process | blocker | five paid down (four registered + green; the m25 orphan retired to m35's `reference/retired-dispatch-tests/`); `acd-test-suite-registration` armed so the next orphan fails CI | ADR-014/E7 → PO | closed |
+| F-B1 | **A user-facing regression**: widening `reportedBy` to every cache-published row silently retired m03's designed empty states, so on every operator's own control node the panel read "No cached VERIFICATION yet — aof-control has not reported one" instead of "Not verified yet — run `aof:verify`" — false, and it **deleted the call to action**. The suite was blind because every provenance/resync lane states a *remote* reporter | correctness | blocker | discriminator changed to `reportedBy !== thisNode`, answered from the same expression that renders AC 11's `(this node)`; local-authorship lanes added | ADR-015/F5 → developer | closed |
+| F-B2 | R4.4 said **lift** the 1s tick; the build **added** one — one cadence from three homes with three spellings, under a comment claiming "one number, so the surfaces cannot drift apart". The added tick was provably redundant | structure | major | leaf interval deleted, root `now` threaded down | ADR-015/F6 → developer | closed |
+| F-B3 | `DetailPanel.tsx` took **+284 lines in this one story — more than in the entire month before it** — and crossed 1,000: `global-work-store.mjs`'s trajectory one layer over | health | major | `ProvenanceLine` extracted (994 lines, ceiling 1,000); `acd-ui-surface-file-budget` armed | ADR-015/F2 → developer | closed |
+| F-B4 | `acd-cache-staleness-single-predicate`'s `ui/` clause was **satisfiable by a rename** — measured: `const stale = now - Date.parse(row.syncedAt) > windowSeconds * 1000` passes every clause, and `windowSeconds` is what every downstream consumer already calls it | test-quality | major | detector re-keyed on the **subject** (only `freshness.mjs` may read `syncedAt` off a record) | ADR-015/F1 → architect | closed |
+| F-C1 | The **bounded watch poll had no falsifiable test** — QA deleted the effect and three of the story's own lanes stayed green, including the very scenario R4.3(b) exists to protect, which the *broken* build satisfies more reliably. All eight "a fresher copy lands" moments drove the operator's **manual** `⟳ sync` | test-quality | blocker | lanes now land the copy the way production does, against a settled baseline measured in-lane; mutation-verified | QA → developer | closed |
+| F-C2 | `src`'s `cacheFreshness` and `ui`'s `freshnessState` **disagreed** on a missing/invalid window (`stale` vs `unknown`) — against ADR-006's own "two predicates that can disagree is a defect, not a variant" | correctness | major | `cacheFreshness` returns `unknown`; `resolveCacheStalenessSeconds`'s config-layer fallback (and its honouring of `0`) deliberately untouched, with both layers now named in the header | QA → developer | closed |
+| F-C3 | Task 06's "never pre-disabled on presence" Examples column was **never bound** — three rows, one fabric, the distinguishing value dropped | test-quality | minor | absence asserted positively off the real wire | QA → developer | closed |
+| F-D1 | DESIGN specified a **viewport-keyed** badge yield for a card whose width is viewport-**invariant** (`repeat(auto-fill, minmax(320px,1fr))` adds columns, not width — the card is narrower at 2560 than at 1280) | design-gap | major | requirement **withdrawn**, not deferred; new binding rule "the form is chosen by the SURFACE, not the viewport"; `minimal` reserved with its `role="img"`/`aria-label` contract still binding | designer (DESIGN.md amended, 15 changes) → PO amended tasks 03 + 09 | closed |
+| F-D2 | Two defects **in DESIGN.md itself**: a self-contradiction ("badge and label never both appear" vs its own §1c and a11y rule 10, which *require* both), and **no yield rule at all** for the detail panel header — the narrowest row carrying the widest form, by arithmetic within ~±20px of overflow at the primary judgement width | design-gap | major | both fixed in DESIGN.md; the header overflow is the **first** thing the `@uat` reviewer is pointed at | designer | closed |
+| F-D3 | Four binding-checklist clauses are **built but unasserted**: the overview card's cluster order/anchor (checklist region 2 has no lane at all), the lane card's `ml-auto` right-end placement, the provenance box's own class set, the fleet badge's loading/empty/error/fresh states | test-coverage | non-blocker | **deferred** — each is a structural clause the `@uat` render also covers; carried as a named gap rather than closed silently | backlog | open |
+| F-D4 | `resync-owner-is-self` was asserted only on the pure derivation, on a premise (`commands/resync.mjs` still returns `owner-not-connected`) that was already stale — the only one of the eight rendered Resync states with no producer behind it | test-quality | major | producer-fed end to end through the real door → route → command | QA → developer | closed |
+| F-E1 | A fresh copy pushed in the **final interval** of the watch window is not collected automatically (the poll fires at ack+5s and ack+10s; the third tick coincides with the window's own expiry and is cleared by it). The operator gets the honest "no answer" and picks it up on the next sync | behaviour | non-blocker | **accepted as designed** — it follows from the bounds ADR-014 set, not from a mistake. Recorded so it is not re-discovered as a bug | STATE feedback | open (by design) |
+
+Every blocker is **closed**. The two open findings (F-D3, F-E1) are non-blocking and named.
+
+### Contract amendments made at this gate (by the PO, on the reviewers' rulings)
+
+The `.feature` files are a locked contract for *developers*; the PO corrects one only when it is
+demonstrably unsatisfiable or false, and records why inline. Four were needed — an unusually high
+count, itself distilled into the retro:
+
+1. **Task 03 + task 04**, the same defect at two addresses: an Examples cell spelling out `synced 4s
+   ago`, which the single `relativeTime` formatter those lines *delegate to* cannot produce (it renders
+   anything under five seconds as `just now`). Ages moved to 10s; the vocabulary was never in question.
+2. **Task 01**, unsatisfiable as written: the `Then` fixed `syncedAt` as null **unconditionally** while
+   the table varied the stored instant, so its third row (`instant known, node unknown`) could not
+   pass. The `Then` is now parameterised over both halves of its own subject.
+3. **Task 03**, a false premise with a right outcome: "gates are local acceptance items with no cached
+   provenance" — measured, a `uat` gate row **does** carry `reportedBy`/`syncedAt`; the badge is absent
+   because no gate-bar component paints one, which is a claim about *where the ramp renders*.
+4. **Task 03 + task 09**, on the designer's ruling: the fleet card's form (`minimal` → `short`) and
+   task 09's whole yield outline, rewritten from "did the ladder fire in the right order" to "does this
+   surface's ONE pinned form FIT" — with the highest-risk cell (the detail header at 1280) named.
+
+Also amended: **m08's `00_routes-byte-for-byte.feature`**, which now records the R4.1 supersession for
+`GET /api/work/list` rather than silently asserting something false. Editing the scenario itself was
+rejected — it would have destroyed the evidence that the contract moved.
+
+### ADRs written at this gate
+
+**ADR-014** (build-time reconciliation, `src/` half — rulings E1–E8) and **ADR-015** (UI half —
+F1–F9). Between them they rule the m08 supersession and the ACCEPT-time rule it earns, the fifth
+resync code, the `global-work-store.mjs` ceiling holding at 1,280 unraised, the one-mapper boundary
+(row-subject → `cache-provenance.mjs`, response-subject → the face, so a fourth envelope key needs no
+fifth ruling), the bound-vs-cadence defect, the transport's owed test, the suite-registration ratchet,
+and the `ui/` file budget. R4.1's stale wording was corrected **by ruling rather than by edit**, on
+E1's own argument.
+
+`TECH_DEBT.md`: item 10 extended (root `.mjs` 104 → 106; 42% of the flat root is now two subjects with
+no directory), item 12 updated (store openers 17 → 19, crossing its own stated threshold), item 17
+created then paid down to one named baseline, item 18 created (`ui/` has no shared layer — `fleet/`
+reaches into `board/` seven times; and the fleet payload states no serving-node identity, which is the
+prerequisite for a board↔fleet "this node" agreement lane).
+
+### The `@uat` gate — **awaiting the operator**
+
+Task 09's 14 `@uat` scenarios are the human half, and they are genuinely human: the perceptual
+judgements no element-tree assertion can reach. `STORY.md` stays `status: in-review`; **no accept
+decision is recorded for 43/04 yet.**

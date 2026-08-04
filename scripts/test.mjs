@@ -1575,6 +1575,16 @@ import { archTests as acdCacheReadSurfaceBoundaryTests } from "../test/arch/acd-
 import { archTests as acdCacheStalenessSinglePredicateTests } from "../test/arch/acd-cache-staleness-single-predicate.test.mjs";
 // ADR-007 — the streamed set and the requestable set are ONE manifest, one home.
 import { archTests as acdWorkArtifactSetSingleHomeTests } from "../test/arch/acd-work-artifact-set-single-home.test.mjs";
+// ADR-015/F2 (43/04's UI structural review) — `global-work-store.mjs`'s trajectory, one layer
+// over: `DetailPanel.tsx` took +284 lines in THIS ONE STORY, more than in the whole month
+// before it, and crossed 1,000. Answered the way ADR-012/B4 answered the store — a ceiling
+// that fails CI rather than a comment hoping someone splits it later. `Board.tsx` is
+// deliberately exempt as the composition root, with the reason recorded in the test itself.
+import { archTests as acdUiSurfaceFileBudgetTests } from "../test/arch/acd-ui-surface-file-budget.test.mjs";
+// ADR-014/E7 (43/04's structural review) — a test suite imported by NEITHER runner is no
+// gate at all. Measured: six orphans, four of them milestone 43/03's accepted behavioural
+// proof. Shrink-only with a NAMED baseline, so the seventh fails CI. (TECH_DEBT item 17.)
+import { archTests as acdTestSuiteRegistrationTests } from "../test/arch/acd-test-suite-registration.test.mjs";
 // ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
 // no force, no reset on the branch path; a conflicting merge aborts and refuses.
 import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
@@ -1614,6 +1624,95 @@ import { cacheAuthorityContentionTests } from "../test/cache-authority-contentio
 import { cacheAuthorityFrameRowByRowTests } from "../test/cache-authority-frame-row-by-row.test.mjs";
 import { cacheAuthorityWorkspaceRemovalTests } from "../test/cache-authority-workspace-removal.test.mjs";
 import { cacheAuthorityOwnDiskReadTests } from "../test/cache-authority-own-disk-read.test.mjs";
+// milestone 43 / story 03 — WRITE-TRIGGERED ARTIFACT SYNC (ADR-001/002/007 + ADR-013).
+// REGISTERED 2026-08-03 by 43/04's structural review (ADR-014/E7): these four were imported
+// by NEITHER runner, so an ACCEPTED story's behavioural proof had never once run in CI —
+// the enqueue hook's derivation-free body, the daemon's batched drain, the two-kind artifact
+// manifest, and the co-authored .claude/settings.json merge. All four were green on the day
+// they were found; the gap was registration, not correctness. `acd-test-suite-registration`
+// now makes the next orphan fail CI instead of waiting for a reviewer to notice.
+import { artifactSyncEnqueueHookTests } from "../test/artifact-sync-enqueue-hook.test.mjs";
+import { artifactSyncDrainTests } from "../test/artifact-sync-drain.test.mjs";
+import { artifactSyncManifestTests } from "../test/artifact-sync-manifest.test.mjs";
+import { claudeSettingsMergeTests } from "../test/claude-settings-merge.test.mjs";
+// milestone 43 / story 04 — STALENESS, NEVER EVICTION (ADR-006 + DESIGN's freshness ramp).
+// Task 03: the fifth ramp. One pure headless module (ui/src/board/freshness.mjs) emits the
+// three states and both renderings with `now` passed in and strict `>`, so it agrees with
+// src/'s shared isStale AT the threshold instant; the board paints `stale` as a dashed
+// `muted` pill immediately left of the right-anchored status chip; and the badge appears
+// within ONE SECOND of the crossing off a Board-root cosmetic tick with ZERO network — the
+// clause that proves the crossing is clock-driven rather than fetch-driven, which is what a
+// settled item (the very case a stale row IS) depends on. Driven through the REAL <Board/>
+// mounted headlessly against the REAL board face on a controllable clock.
+import { boardFreshnessRampTests } from "../test/board-freshness-ramp.test.mjs";
+// …and the DATA-LAYER half of the same story. Task 00: opening a pre-v8 store lands the two
+// provenance columns on `work_items` through a guarded, idempotent, IN-PLACE ALTER, leaves
+// every existing row intact and UNSTAMPED (a fabricated backfill is forbidden), and touches
+// neither content table. Task 01: every row and artifact the read surface serves says who
+// reported it and when — STORAGE names in the store, WIRE names on the response, ONE mapper
+// for both subjects — with the configured window stated once on the board envelope and the
+// frozen CLI array unbroken. Task 02: the shared strict-`>` predicate judges the row and
+// each artifact separately at an injected `now`, a missing instant reads `unknown` rather
+// than `stale`, and an ancient row is marked stale yet stays fully readable — removal is by
+// AUTHOR RETRACTION, never by age.
+import { stalenessSchemaProvenanceTests } from "../test/staleness-schema-v8-provenance.test.mjs";
+import { stalenessCachedRowsProvenanceTests } from "../test/staleness-cached-rows-provenance.test.mjs";
+import { stalenessMarksNeverEvictsTests } from "../test/staleness-marks-never-evicts.test.mjs";
+// …and the story's UI BEHAVIOUR half, every lane driven through the REAL <Board/> mounted
+// headlessly against the REAL board face on a controllable clock. Task 04: the provenance
+// line renders for EVERY cache-published item (not only executing ones), each doc states its
+// own provenance above its body, and RemoteContentNotice's "documents aren't bridged" copy
+// is retired to a cache-miss placeholder. Task 05: ONE Resync door, on the provenance line,
+// only while stale — it reports the CALL, never the DATA, so there is no success toast and
+// the badge clearing is the only confirmation; both in-flight legs are bounded. Task 06:
+// DESIGN's Resync states as a table — muted when the world did not answer, destructive ONLY
+// when the request was rejected, acknowledgements decaying while facts persist, never
+// pre-disabled on presence. Task 07: both legends paint the real badge and state the window
+// from the wire, degrading to WORDS rather than a guessed number. Task 08: the programmatic
+// a11y contract — the word carries the meaning, Resync names its object and agrees visibly
+// and programmatically about being busy, and the crossing is deliberately NOT announced.
+import { boardProvenanceAttributionTests } from "../test/board-provenance-attribution.test.mjs";
+import { boardResyncDoorTests } from "../test/board-resync-door.test.mjs";
+import { boardResyncOutcomesTests } from "../test/board-resync-outcomes.test.mjs";
+import { boardFreshnessLegendTests } from "../test/board-freshness-legend.test.mjs";
+import { boardStalenessA11yTests } from "../test/board-staleness-a11y.test.mjs";
+// …and the story's Resync TRANSPORT (ADR-010/R4.2 + ADR-014/E2/E6), the node→node "push me
+// your state" request the UI's one door calls. Modelled on mesh-recovery-push: a lazily
+// created additive table (no schema bump), a control tick that dispatches to a connected
+// admitted peer, and a worker result frame admitted by CONNECTION identity — including the
+// spoofed self-declaring frame, which is refused with the row left byte-identical. Owed
+// because tasks 05/06 are both @ui and cannot reach the codes the route layer produces.
+import { meshResyncTests } from "../test/mesh-resync.test.mjs";
+// milestone 43 / story 05 — GATE-TIME PROPAGATION (ADR-008 + ADR-010/R5.1/R5.2). A dispatch
+// advances an EXISTING item branch to the directive's pinned base at the worker's REUSE door —
+// the door that until now ignored the pin by design, so a continuing item never saw a
+// control-side gate edit. Task 00: already-current / fast-forward / a REAL merge when the two
+// lines have diverged (which is the common case, not the rare one). Task 01: both refusals —
+// a dirty worktree and a conflicted merge — leave the branch byte-identical and settle the
+// assignment `failed` with their code. Task 02: the outcome is reported on the EXISTING
+// worker-worktree-base channel with both commits, so "which base did it run on" stays one
+// `aof mesh logs --node` read. Task 03: the create path and the unavailable-base regression.
+// Task 04 (the two-node soak) is @manual and task 05 is @uat — neither has a test file here.
+import { gatePropagationReuseDoorAdvanceTests } from "../test/gate-propagation-reuse-door-advance.test.mjs";
+import { gatePropagationRefusalsTests } from "../test/gate-propagation-refusals-leave-branch.test.mjs";
+import { gatePropagationReportedTests } from "../test/gate-propagation-reported-on-base-channel.test.mjs";
+import { gatePropagationCreatePathRegressionTests } from "../test/gate-propagation-create-path-regression.test.mjs";
+// milestone 43 / story 06 — THE READERS MIGRATE (ADR-005 + ADR-010/R6.x), the milestone's
+// payoff: the cache stops being a write-only fact and becomes the READ surface. Task 00: a new
+// cache-first seam (`src/work-read.mjs`) that imports `work.mjs` and is NEVER imported back,
+// with every degrade named on the durable sink rather than silently swallowed. Task 01: the
+// chokepoint — `commands/resolve.mjs` and its EIGHT dependents move together, with the
+// write-doors guarded by one `item-not-local` refusal. Task 02: the control-side leaves migrate
+// independently. Task 03: the worker-side and structural readers stay PINNED to disk by
+// POSITIVE assertion — including the echo chamber, where a worktree must read its own disk and
+// never another node's view of it. Task 04: doctor keeps ONE snapshot — structure from disk,
+// status overlaid from the cache, each fact recording which side answered. Task 05 (the
+// remote-authored soak) is @manual and deliberately has no test file here.
+import { cacheReadSeamTests } from "../test/cache-read-seam.test.mjs";
+import { cacheReadResolveChokepointTests } from "../test/cache-read-resolve-chokepoint.test.mjs";
+import { cacheReadControlLeavesTests } from "../test/cache-read-control-leaves.test.mjs";
+import { cacheReadBoundaryHoldsTests } from "../test/cache-read-boundary-holds.test.mjs";
+import { cacheReadDoctorOverlayTests } from "../test/cache-read-doctor-overlay.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2241,7 +2340,9 @@ export const tests = [
   ...acdCacheReadSurfaceBoundaryTests,
   ...acdCacheStalenessSinglePredicateTests,
   ...acdWorkArtifactSetSingleHomeTests,
+  ...acdUiSurfaceFileBudgetTests,
   ...acdGatePropagationNeverDiscardsTests,
+  ...acdTestSuiteRegistrationTests,
   // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
   ...itemLockScopeOneHomeTests,
   ...itemLockSymmetricScopeTests,
@@ -2257,7 +2358,40 @@ export const tests = [
   ...cacheAuthorityContentionTests,
   ...cacheAuthorityFrameRowByRowTests,
   ...cacheAuthorityWorkspaceRemovalTests,
-  ...cacheAuthorityOwnDiskReadTests
+  ...cacheAuthorityOwnDiskReadTests,
+  // milestone 43 / story 03 — write-triggered artifact sync (registered by ADR-014/E7)
+  ...artifactSyncEnqueueHookTests,
+  ...artifactSyncDrainTests,
+  ...artifactSyncManifestTests,
+  ...claudeSettingsMergeTests,
+  // milestone 43 / story 04 — the freshness ramp + the stale badge (task 03)
+  ...boardFreshnessRampTests,
+  // milestone 43 / story 04 — the data layer: schema v8's read side, the wire, the
+  // predicate and the never-evict rule (tasks 00–02)
+  ...stalenessSchemaProvenanceTests,
+  ...stalenessCachedRowsProvenanceTests,
+  ...stalenessMarksNeverEvictsTests,
+  // …and the UI behaviour half: the provenance line, the Resync door and its
+  // outcome table, the legends, and the programmatic a11y contract (tasks 04–08)
+  ...boardProvenanceAttributionTests,
+  ...boardResyncDoorTests,
+  ...boardResyncOutcomesTests,
+  ...boardFreshnessLegendTests,
+  ...boardStalenessA11yTests,
+  // …and the Resync transport the UI's one door calls (ADR-014/E6)
+  ...meshResyncTests,
+  // milestone 43 / story 05 — gate-time propagation at the reuse door (tasks 00–03;
+  // 04 is @manual and 05 is @uat)
+  ...gatePropagationReuseDoorAdvanceTests,
+  ...gatePropagationRefusalsTests,
+  ...gatePropagationReportedTests,
+  ...gatePropagationCreatePathRegressionTests,
+  // milestone 43 / story 06 — the readers migrate (tasks 00–04; 05 is @manual)
+  ...cacheReadSeamTests,
+  ...cacheReadResolveChokepointTests,
+  ...cacheReadControlLeavesTests,
+  ...cacheReadBoundaryHoldsTests,
+  ...cacheReadDoctorOverlayTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

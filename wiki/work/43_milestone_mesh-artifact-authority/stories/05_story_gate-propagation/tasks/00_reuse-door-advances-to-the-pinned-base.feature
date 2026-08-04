@@ -100,7 +100,13 @@ Feature: A dispatch advances an EXISTING item branch to the directive's pinned b
     When the worker dispatches the continuing assignment
     Then `git rev-parse aof/mesh/43-05^1` resolves to W2 — the item branch's own tip is the FIRST parent
     And `git rev-parse aof/mesh/43-05^2` resolves to C2 — the pinned base is merged IN, not the other way round
-    And `git rev-list --count aof/mesh/43-05^1..aof/mesh/43-05` is 1 — exactly one merge commit was added
+    And `git rev-list --count --merges aof/mesh/43-05^1..aof/mesh/43-05` is 1 — exactly one merge commit was added
+    # CORRECTED at build (PO, 2026-08-04): this read `--count` without `--merges` and asserted 1,
+    # which is arithmetically unreachable in the case the scenario is ABOUT. `M^1..M` means
+    # "reachable from M but not from W2", which is the merge commit PLUS the entire control line
+    # it just brought in (measured here: 2). It could only read 1 if the two lines had never
+    # diverged — precisely the case the surrounding Givens exclude. `--merges` asserts the thing
+    # the cell was reaching for: one merge commit was created, and no second one.
     And `git log --format=%H aof/mesh/43-05` contains W1 and W2 with their original hashes — no commit was rewritten
     And `git cat-file -e aof/mesh/43-05:<the-gate-edited-path>` exits 0
 
