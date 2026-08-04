@@ -5,10 +5,13 @@
 // this machine node id on the run record, then publishes the workspace snapshot into
 // the global mesh store for WebSocket/backstop propagation.
 import { readdir } from "node:fs/promises";
-import { resolveItemExact } from "./resolve.mjs";
+import { resolveItemExact, requireLocalCheckout } from "./resolve.mjs";
+// m43 / story 06 (ADR-005) — the fleet sweep below is a CONTROL-SIDE read and migrates onto
+// the cache-first seam; `localItemsOnly` is the shared reach-through filter, because the
+// sweep reads run RECORDS out of each candidate's folder and a cache-answered row has none.
+import { listItemsCacheFirst, localItemsOnly, reportReachThroughSkips } from "../work-read.mjs";
 import { commandError } from "../command-error.mjs";
 import { readRuns, runsDir, shouldRetry } from "../run-store.mjs";
-import { listItems } from "../work.mjs";
 import { isNodeStale, resolveStalenessSeconds, readPresenceRecord } from "../mesh-presence.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
 import { transitionRunStart, transitionStaleRunsReclaimed } from "../effects/run-transitions.mjs";
@@ -47,8 +50,13 @@ export const runStartCommand = {
 
     // The WRITE resolves by EXACT ref — never the free-text slug fallback the read
     // command tolerates. A typo'd/partial ref → ref-not-found, never the wrong item.
-    const item = await resolveItemExact(ctx.workspace.workDir, ref);
+    const item = await resolveItemExact(ctx, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    // m43 / story 06 (ADR-010/R6.4) — the SECOND door that writes through `item.dir`: a run
+    // record is minted under it. A ref that resolves only from the cache has no folder here,
+    // and minting one would create a second authority for an item another node owns — the
+    // disease, reintroduced by the cure. Refuse coded, before the reclaim scan or any write.
+    requireLocalCheckout(item, ref);
 
     const ws = ctx.workspace;
     const config = ws.config ?? {};
@@ -120,7 +128,17 @@ export const runStartCommand = {
       // daemon, no new verb): any OTHER item whose in-flight run is owned by a
       // presence-stale peer joins the scan. This node's own runs on other items are
       // EXCLUDED (they stay under the local scan's existing rules).
-      for (const candidate of await listItems(ws.workDir)) {
+      // m43 / story 06 — the sweep's candidate set is now the CACHE-FIRST one, so a peer's
+      // orphaned run on an item this checkout has never held is visible to the reclaim at
+      // all. Its reach-through obligation is uniform with every other leaf's: a row whose
+      // folder is not on this node is SKIPPED, never faulted on and never given a fabricated
+      // `runs/` path (ADR-010/R6.4). Nothing is lost by skipping — a run record this node
+      // cannot read is one it could not reclaim either.
+      const swept = localItemsOnly(await listItemsCacheFirst(ws, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} }));
+      // Reported, not swallowed — a run record is a frozen shape with nowhere to carry it,
+      // so the durable degrade sink is where the skip is answerable (rule 2 of the seam).
+      reportReachThroughSkips("work:run-start fleet sweep", swept.skipped);
+      for (const candidate of swept.items) {
         if (candidate.ref === item.ref) continue;
         if (!(await hasForeignPartition(candidate))) continue; // zero parses on the common path
         for (const run of await readRuns(candidate)) {

@@ -15,7 +15,13 @@ import { readMeshLog, meshLogPath } from "../mesh-log.mjs";
 import { openGlobalWorkProjectionStore, readNodeLogEntries } from "../global-work-store.mjs";
 import { globalMeshPaths } from "../workspace.mjs";
 
-const KNOWN_PROCS = ["mesh-serve", "mesh-ui"];
+// m43 / ADR-010/R6.5 — `degrade` is ADMITTED, and it is not cosmetic. `reportDegrade`
+// (src/degrade.mjs) writes every coded degrade event into a sink beside the daemons' own
+// logs, and until now no verb could read it: ADR-005 requires the reader migration's
+// fallback to be an EXPLICIT, REPORTED degrade rather than a silent one, and a report with
+// no reader is a report only a file has seen. One entry, and without it the requirement is
+// decorative.
+const KNOWN_PROCS = ["mesh-serve", "mesh-ui", "degrade"];
 
 export const meshLogsCommand = {
   id: "mesh:logs",

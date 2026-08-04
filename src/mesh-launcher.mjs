@@ -32,7 +32,14 @@ import { readNodeRecords } from "./mesh-store.mjs";
 import { deriveNodeId, sidecarPathFor, readSidecar } from "./node-identity.mjs";
 import { packageVersionString } from "./asset-base.mjs";
 import { assemblePresenceRecord, readActiveRuns, readLiveSessions, publishPresenceRecord, resolveNodeWorkspaces, resolveWorkspaceProjectRoot } from "./mesh-presence.mjs";
+// `listItems` is STILL imported here and must stay: mesh-launcher's OTHER read (:1503) is a
+// WORKER-side read of a materialized worktree, which ADR-005 pins to disk by positive
+// assertion — a worker must never read another node's opinion of its own checkout.
 import { listItems, loadWorkspace } from "./work.mjs";
+// m43 / story 06 (ADR-005) — the CONTROL-side aggregation's default reader, plus the shared
+// reach-through filter and the cached-run union (see assembleActiveRunsAndSubsumedWorkspaces).
+import { listItemsCacheFirst, localItemsOnly, reportReachThroughSkips } from "./work-read.mjs";
+import { readCachedActiveRunIds, sharedProjectionStore } from "./board-worker-stream.mjs";
 import { publishGlobalWorkSnapshot, readWorkspaceProjectionItems, readWorkspaceContentRecords } from "./global-work-publisher.mjs";
 // m43 / ADR-001 — the artifact-sync DRAIN. The producer is a derivation-free
 // PostToolUse hook; this is the consumer end, and it rides the EXISTING stream tick
@@ -58,6 +65,18 @@ import { createMeshWorkerExecutionHandler, createMeshRecoveryPushHandler, create
 // recovery-push DOWN-frame (runRecoveryPushDispatchTick); the worker registers its
 // commit+push handler on the SAME client (createMeshRecoveryPushHandler, above).
 import { runRecoveryPushDispatchTick } from "./mesh-recovery-push.mjs";
+// m43 / story 04 (ADR-014/E5) — the SYNC cadence policy (`mesh.sync.cadenceSeconds` +
+// its documented 15s default) moved OUT of this module into a pure leaf, because a
+// second consumer arrived that does not start the tick but WAITS on it: the Resync
+// door's bounded poll must outlast the cadence this launcher drains at, and a bound
+// derived from a private constant it cannot see is a bound that measures the clock.
+// Behaviour here is byte-identical — the same resolver, now shared.
+import { syncCadenceFromConfig } from "./mesh-sync-cadence.mjs";
+// m43 / story 04 (ADR-010/R4.2) — the RESYNC drain rides the SAME control tick: an
+// operator-requested "push me a fresh copy" is dispatched to the owning node, or answered
+// with its coded unreachable outcome on the first tick (never a silent retry ladder — an
+// operator is waiting on the answer).
+import { runResyncDispatchTick } from "./mesh-resync.mjs";
 import { createEnrollmentHttpHandler, relayMode } from "./mesh-relay.mjs";
 // (2026-07-27, the `direct` fabric cutover) — CONNECTION IDENTITY BY CREDENTIAL. The
 // control stream server deliberately does not import this surface itself (its own
@@ -114,7 +133,6 @@ import { openEffectsJournal } from "./effects/journal.mjs";
 import { drainOutbox, applyEffectAck } from "./effects/outbox.mjs";
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
 
-const DEFAULT_CADENCE_SECONDS = 15;
 const DEFAULT_CONTROL_SERVICE_PORT = 4182;
 const DEFAULT_CONTROL_STREAM_PATH = "/ws/relay";
 // How often the control node re-reports the SAME refused-frame condition (per node +
@@ -122,18 +140,6 @@ const DEFAULT_CONTROL_STREAM_PATH = "/ws/relay";
 // occurrence would bury the log; reporting once and never again would hide a condition
 // that is still live.
 const SKIPPED_FRAME_REPORT_INTERVAL_MS = 5 * 60 * 1000;
-
-function resolveCadenceSeconds(value) {
-  if (typeof value !== "number") return DEFAULT_CADENCE_SECONDS;
-  if (!Number.isFinite(value)) return DEFAULT_CADENCE_SECONDS;
-  if (!Number.isInteger(value)) return DEFAULT_CADENCE_SECONDS;
-  if (value <= 0) return DEFAULT_CADENCE_SECONDS;
-  return value;
-}
-
-function cadenceFromConfig(workspace) {
-  return resolveCadenceSeconds(workspace?.config?.mesh?.sync?.cadenceSeconds);
-}
 
 function resolveNow(options = {}) {
   if (typeof options?.now === "function") return String(options.now());
@@ -389,7 +395,16 @@ function resolveAggregationWorkspaces(ws, registryResult) {
 // (Windows has no reliable cross-platform way to force a genuine EACCES on a
 // directory a test just created) — mirrors every other launcher dependency
 // (exec/now/tickers) already being injectable via options.
-async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) {
+// EXPORTED at m43 / story 06 (ADR-005 stage 2). This leaf has no verb of its own — it
+// migrates by SWAPPING A DEFAULT — so its outcome is observable only through the union it
+// returns, which is the m41 story-01 precedent the task's litmus names: an engine with no CLI
+// is called directly via its API and the OUTCOME is read back. Exported under its existing
+// name so the production call site below is the same call the proof makes.
+// `cacheOptions` is the per-TICK cache-read options — in production the shared store handle
+// below, so the whole aggregation opens the projection AT MOST ONCE however many workspaces
+// it walks (m43 / ADR-016/G7). Absent (every existing caller and test double) it is `{}`,
+// which is byte-identical to the per-read open this function used to do.
+export async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn, cacheOptions = {}) {
   const activeRuns = [];
   const workspacesWithRuns = new Set();
   for (const workspace of workspaces) {
@@ -397,8 +412,18 @@ async function assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn) 
     // be enumerated (its dir vanished mid-tick, a permissions fault, …) is skipped —
     // absence-is-benign; the rest of the union still aggregates.
     try {
-      const items = await listItemsFn(workspace.workDir);
-      const runs = await readActiveRuns(items);
+      // m43 / story 06 (ADR-005) — the seam MIGRATES BY SWAPPING ITS DEFAULT (below), not by
+      // editing this call site: `listItemsFn` keeps its `(workDir)` signature so every
+      // injected test double is untouched, and gains the workspace as an ADDITIVE second
+      // argument the default uses to reach this workspace's cache. A double that ignores it
+      // behaves exactly as it did.
+      const items = await listItemsFn(workspace.workDir, workspace);
+      const local = localItemsOnly(items);
+      reportReachThroughSkips("mesh launcher aggregation", local.skipped);
+      const runs = [
+        ...(await readActiveRuns(local.items)),
+        ...(await readCachedActiveRunIds(workspace, local.skipped, cacheOptions)),
+      ];
       if (runs.length > 0) {
         activeRuns.push(...runs);
         if (typeof workspace.workspaceId === "string" && workspace.workspaceId.length > 0) {
@@ -482,7 +507,39 @@ async function recoverSkippedViaMeshCheckout(skipped, options) {
 // first offered the mesh-checkout fallback above; only the genuinely unresolvable
 // remainder warns.
 async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsSink = []) {
-  const registryResult = await resolveNodeWorkspaces(nodeId, options);
+  // ONE PROJECTION-STORE OPEN FOR THE WHOLE TICK (m43 / ADR-016/G7 — a MEASURED regression
+  // this repairs, and it is repaired past its own baseline).
+  //
+  // 43/06's leaf migration is CORRECT — the launcher going blind to worker-authored items was
+  // a real defect — but as first built the aggregation opened the projection per workspace in
+  // `listItemsCacheFirst` and AGAIN per workspace in `readCachedActiveRunIds`: 2N SQLite opens
+  // on the daemon's hot loop, where N is every workspace the fleet aggregation resolves. THE
+  // STORE IS ONE FILE FOR ALL OF THEM (`withProjectionStore`/`resolveNodeWorkspaces` both key
+  // on `globalMeshPaths(storeOptions)`), so the whole tick shares ONE handle and closes it
+  // ONCE, in a `finally` that runs on every path including a throw. `resolveNodeWorkspaces`
+  // below joins the same handle rather than opening its own, which is why the tick now opens
+  // the store exactly once — the same count it had BEFORE the migration, not merely a smaller
+  // multiple of it. The lane that caught this (`mesh-coordination-launcher/03`, a 25ms
+  // presence-refresh budget) measures the world, so the bound stays fixed and the code moves.
+  //
+  // The tick's own store options ride with it. The cache reads passed `{}` before, which
+  // quietly sent them at the PROCESS-DEFAULT global home rather than the one this launcher was
+  // started under — invisible while every read opened its own handle, and a correctness bug
+  // the moment one open has to serve them all.
+  const shared = sharedProjectionStore(options?.openStore ? { openStore: options.openStore } : {});
+  try {
+    return await assemblePresenceForTick(ws, nodeId, options, warningsSink, shared.openStore);
+  } finally {
+    shared.close();
+  }
+}
+
+async function assemblePresenceForTick(ws, nodeId, options, warningsSink, openStore) {
+  // Every store-backed read in this tick is handed the SAME opener (see above). A caller that
+  // injected its own `openStore` still gets it — `sharedProjectionStore` wraps it rather than
+  // replacing it — so the hermetic-test seam is unchanged.
+  const tickOptions = { ...options, openStore };
+  const registryResult = await resolveNodeWorkspaces(nodeId, tickOptions);
   const { recovered, remaining } = await recoverSkippedViaMeshCheckout(registryResult.skipped ?? [], options);
   if (registryResult.ok && recovered.length > 0) {
     registryResult.workspaces.push(...recovered);
@@ -500,8 +557,20 @@ async function assembleCurrentPresenceRecord(ws, nodeId, options = {}, warningsS
   // workspacesWithRuns is the per-workspace attribution the render layer cannot
   // derive from the wire shape (review F1) — used below to subsume a same-workspace
   // live session BEFORE the record is published.
-  const listItemsFn = typeof options?.listItems === "function" ? options.listItems : listItems;
-  const { activeRuns, workspacesWithRuns } = await assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn);
+  // m43 / story 06 (ADR-005), STAGE 2 — THE DEFAULT SWAP, and that is the whole migration
+  // for this leaf. The injected seam is unchanged; only what it defaults to moves, from
+  // work.mjs's disk `listItems` to the cache-first equivalent. A workspace the aggregation
+  // reaches is now enumerated as the MESH knows it, so an item a worker authored is in the
+  // union even though this node's disk has never held it — enumerated through the TICK's one
+  // shared store handle (ADR-016/G7, the block at the head of this pair of functions).
+  const cacheOptions = {
+    globalWorkStoreOptions: options?.globalWorkStoreOptions ?? {},
+    openStore,
+  };
+  const listItemsFn = typeof options?.listItems === "function"
+    ? options.listItems
+    : (workDir, workspace) => listItemsCacheFirst(workspace ?? { workDir, projectRoot: workDir }, cacheOptions);
+  const { activeRuns, workspacesWithRuns } = await assembleActiveRunsAndSubsumedWorkspaces(workspaces, listItemsFn, cacheOptions);
 
   // sessions is the union of this node's LIVE session records (ADR-001/002) — session
   // records are stored per-NODE (mesh-session.mjs), not per-workspace-dir, so ONE
@@ -714,8 +783,9 @@ async function resolveLauncherStatus(ws, options) {
 // (the sync-loop ticker, default intervalTicker()), { peerPollTicker } (a SEPARATE
 // injectable ticker for the peer re-read cadence, defaulting to the same real
 // intervalTicker() when absent), { peerPollSeconds } (default 15s, the mesh propagation
-// DEFAULT_CADENCE_SECONDS precedent), { onPeers } (a test/observer hook invoked with
-// the resolvePeers() result on each peer-poll tick — production wires no observer).
+// DEFAULT_SYNC_CADENCE_SECONDS precedent — mesh-sync-cadence.mjs), { onPeers } (a
+// test/observer hook invoked with the resolvePeers() result on each peer-poll tick —
+// production wires no observer).
 export async function startLauncher(ws, options = {}) {
   const config = ws.config ?? {};
   const probe = await probeFabric(config, options);
@@ -1276,7 +1346,7 @@ export async function startLauncher(ws, options = {}) {
   });
 
   const propagationTicker = typeof options?.propagationTicker === "object" && options.propagationTicker != null ? options.propagationTicker : intervalTicker();
-  const propagationSeconds = typeof options?.propagationSeconds === "number" && options.propagationSeconds > 0 ? options.propagationSeconds : cadenceFromConfig(ws);
+  const propagationSeconds = typeof options?.propagationSeconds === "number" && options.propagationSeconds > 0 ? options.propagationSeconds : syncCadenceFromConfig(ws);
   const propagationHandle = propagationTicker.start(propagationSeconds, () => {
     capturePropagation().catch((error) => {
       emitWarning(launcherWarnings, { code: error?.code ?? "global-work-propagation-failed", message: error?.message ?? "Global work propagation failed.", path: null }, options);
@@ -1330,7 +1400,7 @@ export async function startLauncher(ws, options = {}) {
       : intervalTicker();
     const controlTickSeconds = typeof options?.controlDispatchReclaimSeconds === "number" && options.controlDispatchReclaimSeconds > 0
       ? options.controlDispatchReclaimSeconds
-      : cadenceFromConfig(ws);
+      : syncCadenceFromConfig(ws);
     // Reuse the SAME store-options resolution the real control-stream server's
     // own store already opened under (controlStreamServerOptions.storeOptions),
     // falling back to the launcher's globalWorkStoreOptions knob — never a second,
@@ -1368,6 +1438,17 @@ export async function startLauncher(ws, options = {}) {
         mintWriteCredential: controlMintWriteCredential,
       }).catch((error) => {
         emitWarning(launcherWarnings, { code: error?.code ?? "control-recovery-push-tick-failed", message: error?.message ?? "The control recovery-push dispatch tick failed.", path: null }, options);
+      }),
+      // m43 / story 04 — drain any operator-requested RESYNCs on the SAME control tick,
+      // beside the recovery drain it mirrors (own store-open, own failure isolation, so a
+      // resync fault never takes down the primary tick). No credential is minted and no
+      // work is dispatched: the frame only asks the owner to push the state it already
+      // reports periodically, which is what makes this pull safe.
+      runResyncDispatchTick(streamServer, {
+        now: resolveNow(options),
+        storeOptions,
+      }).catch((error) => {
+        emitWarning(launcherWarnings, { code: error?.code ?? "control-resync-tick-failed", message: error?.message ?? "The control resync dispatch tick failed.", path: null }, options);
       }),
       ]);
     });
@@ -1557,6 +1638,40 @@ export async function startLauncher(ws, options = {}) {
       }
     };
     streamSyncHandle = streamSyncTicker.start(streamSyncSeconds, () => pushStreamSnapshot().catch((error) => { reportDegrade("mesh-launcher", error); }));
+
+    // m43 / story 04 (ADR-010/R4.2) — THE RESYNC ANSWER, and it is deliberately the
+    // smallest possible one: run the push this node already runs periodically, NOW instead
+    // of on its next tick. That is the whole meaning of "push me a fresh copy" — the frame
+    // carries no command, no credential and no scope of its own, so a resync can only ever
+    // cause the owner to say what it was going to say anyway. It is registered HERE rather
+    // than beside onDirective because `pushStreamSnapshot` is this block's own local: the
+    // handler is a call to it, not a second streaming path that could drift from it.
+    //
+    // The UP-reply reports whether the PUSH went out — never that the control has applied
+    // it. What actually clears the operator's stale badge is the fresher `syncedAt` landing
+    // on the ordinary snapshot/delta/content frames, which is the same "the data is the
+    // only proof" rule the surface keeps.
+    streamClient.onResync?.((frame) => {
+      const workspaceId = typeof frame?.workspaceId === "string" ? frame.workspaceId : null;
+      const itemRef = typeof frame?.itemRef === "string" ? frame.itemRef : null;
+      (async () => {
+        try {
+          await pushStreamSnapshot();
+          await streamClient.sendResyncResult?.({ workspaceId, itemRef, ok: true });
+        } catch (error) {
+          // Never a crash and never silence: the requester is told the push failed, with
+          // the code, so the surface can report a terminal outcome instead of waiting out
+          // its watch window against a push that was never going to arrive.
+          await streamClient.sendResyncResult?.({ workspaceId, itemRef, ok: false, code: error?.code ?? "resync-push-failed" })
+            ?.catch?.(() => {});
+          emitWarning(launcherWarnings, {
+            code: "worker-resync-failed",
+            message: `answering the resync request for ${itemRef ?? "(no ref)"} failed: ${error?.message ?? error}`,
+            path: null,
+          }, options);
+        }
+      })().catch((error) => { reportDegrade("mesh-launcher", error); });
+    });
 
     // m42 wave (b) / TECH_DEBT item 7 leg 2 — STARTUP RECLAIM. Every worktree
     // directory found on disk at startup belongs to a run whose PTY child cannot be

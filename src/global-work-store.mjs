@@ -52,6 +52,10 @@ import { deriveNodeId } from "./node-identity.mjs";
 // m43 / ADR-007 — the artifact manifest's own home (a pure leaf, 0 repo imports). The
 // reader below streams exactly what a face may request, because both read this table.
 import { canonicalArtifactDocKey } from "./work-artifacts.mjs";
+// m43 / story 04 (ADR-006) — the ONE storage→wire mapping. The fleet's row projection below
+// reaches for it rather than spelling a wire name itself, so the board and fleet faces can
+// never disagree about what a provenance fact is called or what an unknown one looks like.
+import { toWireProvenance } from "./cache-provenance.mjs";
 import os from "node:os";
 export const workspaceIdFor = workspaceIdFromPath;
 
@@ -1037,6 +1041,23 @@ export function readWorkspaceItems(store, workspaceId) {
   }));
 }
 
+// readWorkspaceItemProvenance(store, workspaceId) — the PROVENANCE half of the row read
+// (m43 / story 04, ADR-006): a SEPARATE accessor from readWorkspaceItems above, not two
+// more fields on it. (a) SUBJECT — that one answers "what does the cache say this item IS",
+// this answers "who said so, and when", and the read surface applies the second to every
+// row it serves, including local-disk rows. (b) IDENTITY — the row shape is compared for
+// EQUALITY by callers and tests, and `updated_at` moves on every re-report, so folding it in
+// would turn "the row did not change" into "the row was not re-reported".
+//
+// STORAGE names out; the wire names are the mapper's alone (cache-provenance.mjs). A Map, so
+// stamping a whole list is one read rather than one query per row.
+export function readWorkspaceItemProvenance(store, workspaceId) {
+  return new Map(store.db
+    .prepare("SELECT ref, node_id, updated_at FROM work_items WHERE workspace_id = ? ORDER BY ref")
+    .all(workspaceId)
+    .map((row) => [row.ref, { nodeId: row.node_id ?? null, updatedAt: row.updated_at ?? null }]));
+}
+
 // upsertWorkItemContent(store, workspaceId, { docs, runs, nodeId }, { now }) — the
 // ONE writer for the v5 content tables (the control node's applyWorktreeContentFrame
 // call site). Upsert-only, per (ref, doc) / (ref, runId): a re-streamed body simply
@@ -1213,6 +1234,10 @@ function mapWorkspaceRow(row) {
   };
 }
 
+// mapItemRow(row) — the FLEET's row projection (what `/api/mesh/status` serves through
+// global-mesh-query.mjs). m43 / story 04: provenance rides the SAME one mapper the board's
+// rows use (`toWireProvenance`), never a second translation site — ADR-006's "one home …
+// applied identically". Without it the fleet card could not be fed a stale row at all.
 function mapItemRow(row) {
   return {
     workspaceId: row.workspace_id,
@@ -1223,6 +1248,7 @@ function mapItemRow(row) {
     title: row.title,
     parent: row.parent,
     sourcePath: row.source_path,
+    ...toWireProvenance(row),
   };
 }
 

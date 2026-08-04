@@ -1882,6 +1882,30 @@ function baseCommitUnavailableDetail(commit, branch = null) {
   return `the dispatched base commit ${commit} is not reachable in this worker's checkout${branch != null ? ` (advancing branch "${branch}")` : ""} (fetched origin once) — an unpushed control checkout, or a stale clone that cannot see it. Cure: push the control checkout, then re-dispatch.`;
 }
 
+// gatePropagationRefusalDetail(advance, branch, worktreePath) — the SAME rule for the two
+// refusals m43/ADR-008's reuse door adds (m43 / ADR-016/G8, which makes ADR-010 R5.1's clause
+// GENERAL to every coded refusal this milestone adds, not specific to the one it was written
+// about). The two codes have genuinely DIFFERENT cures, and one shared string named neither —
+// nor the tree to look at, which is the sharper omission: an operator reading
+// `aof mesh logs --node` was told a merge was refused and given no path to inspect. The
+// worktree is RETAINED on both paths (`onCleanup(assignmentId, "failed", worktreePath)`), so
+// naming it is naming something that is still there.
+function gatePropagationRefusalDetail(advance, branch, worktreePath) {
+  const named = advance.branch ?? branch ?? "the item branch";
+  const head = `the gate-time advance of branch "${named}" to the dispatched base commit ${advance.base} was refused; the branch is unchanged at ${advance.tip}, and the worktree is RETAINED for inspection at ${worktreePath}.`;
+  if (advance.code === "assignment-gate-propagation-dirty-worktree") {
+    // Nothing was checked out and nothing merged — the uncommitted bytes are the one thing
+    // git cannot recover, which is why this is a refusal rather than a stash.
+    return `${head} Cause: that worktree has uncommitted changes (\`git -C ${worktreePath} status --porcelain\` is non-empty). Cure: commit them on "${named}", or clean the worktree, then re-dispatch.`;
+  }
+  if (advance.code === "assignment-gate-propagation-conflict") {
+    // `git merge --abort` has already run, so the tree is exactly as it was found — the
+    // operator is being asked to resolve on the branch, not to rescue a half-merged worktree.
+    return `${head} Cause: merging the base into "${named}" conflicted; the merge was ABORTED, so no half-merged state was left behind. Cure: resolve the conflict on "${named}" yourself (merge ${advance.base} into it in ${worktreePath} or in the control checkout, commit, push), then re-dispatch.`;
+  }
+  return head;
+}
+
 // ── control-driven WITHDRAWAL (2026-07-27, the duplicate-run wall) ────────────
 //
 // Measured live: `aof mesh assign 18 --withdraw` flipped the control-side row and
@@ -2459,11 +2483,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
           // A coded refusal settles `failed` exactly as an unavailable base commit does,
           // and RETAINS the worktree for inspection — the agent is never started on a tree
           // the advance could not safely bring up to the pinned base.
-          reportAssignmentFailure(
-            assignmentId,
-            advance.code,
-            `the gate-time advance of branch "${advance.branch ?? branch}" to the dispatched base commit ${advance.base} was refused; the branch is unchanged at ${advance.tip}`,
-          );
+          reportAssignmentFailure(assignmentId, advance.code, gatePropagationRefusalDetail(advance, branch, worktreePath));
           await reportSettled(assignmentId, "failed", { code: advance.code });
           onCleanup(assignmentId, "failed", worktreePath);
           return;

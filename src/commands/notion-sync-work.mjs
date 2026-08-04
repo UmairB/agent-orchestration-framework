@@ -97,6 +97,10 @@ export const notionSyncWorkCommand = {
       milestone: input.milestone,
       dryRun: input.dryRun === true,
       notionSpawn: ctx?.notionSpawn ?? deps.notionSpawn ?? null,
+      // m43 / story 06 — the core's traversal is cache-first now, so it needs this
+      // command's store injection seam (a test's hermetic global home) exactly as every
+      // other migrated leaf does.
+      globalWorkStoreOptions: ctx?.globalWorkStoreOptions ?? {},
     });
 
     // The verb's ledger half: a real (configured, non-dry-run) sync pays this

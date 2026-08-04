@@ -16,7 +16,13 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
-import { listItems } from "../work.mjs";
+// m43 / story 06 (ADR-005 + ADR-010/R6.4) — a STAGE-2 LEAF. The stream traversal is
+// cache-first, so a milestone a worker authored is at least CONSIDERED by the rebuild; but
+// every record this module builds is parsed out of a real file under the item's folder, so
+// a cache-answered row with no local checkout is SKIPPED and the skip is COUNTED. Indexing
+// an empty body as though it were the item would put a blank lesson/ADR in the memory index
+// under a real ref — strictly worse than not indexing it.
+import { listItemsCacheFirst, localItemsOnly, reportReachThroughSkips } from "../work-read.mjs";
 import { readJson, writeText } from "../fs.mjs";
 import { ensureAofGitignore } from "../aof-gitignore.mjs";
 import { importStoreRoot } from "../import/store.mjs";
@@ -593,7 +599,15 @@ function hasImportedMarker(text) {
 // imports carry a non-numeric namespaced `item`, so they are never "milestone NN".
 export async function buildRecords(only, ctx) {
   const { workDir, projectRoot } = ctx;
-  const items = await listItems(workDir);
+  // The workspace the seam needs: the loaded one when the caller has it, else the two
+  // anchors `resolveWorkspaceId` falls back to. A ctx with neither simply gets no cache,
+  // which degrades to today's disk-only behaviour rather than failing the rebuild.
+  const workspace = ctx.workspace ?? { workDir, projectRoot, config: ctx.config };
+  const local = localItemsOnly(await listItemsCacheFirst(workspace, {
+    globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+  }));
+  reportReachThroughSkips("memory reindex", local.skipped);
+  const items = local.items;
   const milestones = items
     .filter((item) => item.type === "milestone" && item.parent == null)
     .filter((item) => !only || Number.parseInt(item.number, 10) === Number.parseInt(only, 10));

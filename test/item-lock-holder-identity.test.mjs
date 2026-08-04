@@ -55,9 +55,18 @@ function waitFor(predicate, { timeoutMs = 5000, intervalMs = 10 } = {}) {
 const HOLDER = "aof-wsl";
 const NOW = "2026-08-01T10:00:00.000Z";
 
+// m43 / story 06 (ADR-005) — `resolveItemExact` moved onto the cache-first seam and its first
+// parameter changed from a `workDir` STRING to the command `ctx` (it needs the whole workspace
+// to reach the cache). The three call sites in this file were left on the old signature and
+// threw `Cannot read properties of undefined (reading 'workDir')` inside `buildStreamView` —
+// 9 of this suite's 21 lanes, RED and unattributed. Re-pointed at `fx.ctx`, which the fixture
+// already builds (`item-lock-fixture.mjs:83-87`); nothing about what the lanes assert changes.
+// (Found 2026-08-04 at the ADR-016 must-fix pass, and attributed by re-running at `6b4ab7f`,
+// where this suite is 21/21 GREEN.)
+
 // The worker's own mint, byte-for-byte as `mesh-worker-execution.mjs` issues it.
 async function dispatchMint(fx, ref, assignmentId, { now = NOW } = {}) {
-  const item = await resolveItemExact(fx.workspace.workDir, ref);
+  const item = await resolveItemExact(fx.ctx, ref);
   return transitionRunStart(
     item,
     { now, node: HOLDER, brief: { assignmentId, itemRef: ref } },
@@ -387,7 +396,7 @@ export const itemLockHolderIdentityTests = [
     name: "item-lock/03 identity (ADR-010/R1.3): a mint reaching the seam with NO lock context in a mesh-configured workspace fails LOUD with item-lock-context-missing — an absent opt never means skip",
     run: () =>
       withItemLockFixture(async (fx) => {
-        const item = await resolveItemExact(fx.workspace.workDir, "42");
+        const item = await resolveItemExact(fx.ctx, "42");
         const error = await refuse(() => transitionRunStart(item, {}, { workspace: fx.workspace, journalOptions: fx.ctx.effectsJournalOptions }));
         assert.equal(error.code, "item-lock-context-missing");
         assert.deepEqual((await invoke("work:run-status", { ref: "42" }, fx.ctx)).runs, [], "nothing was minted");
@@ -397,7 +406,7 @@ export const itemLockHolderIdentityTests = [
     name: "item-lock/03 identity (ADR-010/R1.4): a workspace mesh was never configured for mints FREELY — the correct answer, not a fail-open",
     run: () =>
       withItemLockFixture(async (fx) => {
-        const item = await resolveItemExact(fx.workspace.workDir, "42");
+        const item = await resolveItemExact(fx.ctx, "42");
         const { record } = await transitionRunStart(item, {}, { workspace: fx.workspace, journalOptions: fx.ctx.effectsJournalOptions });
         assert.equal(record.state, "running", "no mesh configured ⇒ there is no assignment and there cannot be one");
       }, { mesh: false }),

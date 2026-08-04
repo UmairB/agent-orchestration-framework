@@ -168,21 +168,49 @@ export const cacheAuthorityOwnDiskReadTests = [
 
   // ==========================================================================
   // Scenario: the disk-based read commands are unchanged by this story
+  //
+  // AMENDED at 43/06 (ADR-005; ADR-014/E1's enumerate-and-amend rule). This scenario pinned
+  // 43/02's SCOPE — "the authority cut moves the WRITE side; no reader migrates HERE" — and
+  // 43/06 is, by name and by ADR, the story that migrates them. The claim it made about THIS
+  // story is unchanged and is still asserted: 43/02 changed no reader, and work.mjs's disk
+  // readers still answer from the control's own disk. What it can no longer assert is the
+  // state of the COMMANDS after the reader story, so their new answer is asserted alongside
+  // it — the pair is the point, and this file records the supersession rather than quietly
+  // losing a scenario.
   // ==========================================================================
   {
-    name: "cache-authority/07 no reader migrates in this story — `work list --json` and `work find --json` both still answer from the control's own disk while the cache says otherwise",
+    name: "cache-authority/07 this story moves the WRITE side only — the cached row carries the worker's value, work.mjs's disk readers still see the control's own disk, and the commands that migrate onto the cache at 43/06 report it as a cache answer",
     run: withFixture(async (fx) => {
       await tick(fx);
       await stream(fx, WORKER_A, [itemRow("43/02", { status: "in-progress", title: "worker 43/02" })]);
       assert.equal((await rows(fx)).get("43/02").status, "in-progress", "the cached row disagrees with the control's disk (non-vacuous)");
 
+      // 43/02's own deliverable, unchanged: work.mjs's disk readers — the ones this story
+      // never touched, and which 43/06 pins to disk positively — still say not-started.
+      const { findWork, listStream } = await import("../src/work.mjs");
+      assert.equal((await findWork(fx.workDir, "43/02"))[0].status, "not-started", "the control's own disk still reads not-started");
+      assert.equal((await listStream(fx.workDir)).find((row) => row.ref === "43/02").status, "not-started", "…and the disk reader reports it");
+
+      // …and from 43/06 the COMMANDS answer from the cache, saying which side answered —
+      // EXCEPT on this one CLI face (m43 / ADR-016/G1). `aof work list --json` is m03/ADR-002's
+      // frozen seven-field array, and the milestone's review ruled the answering-side stamp a
+      // FACE concern that rides `/api/work/list`, `work find --json` and `work next --json`
+      // rather than widening a machine contract. So the migration is asserted here by the
+      // VALUE and by the shape, and the stamp is asserted immediately below on `work find`,
+      // which keeps it. Both halves; neither dropped.
       const listed = listJson(fx).find((item) => item.ref === "43/02");
-      assert.equal(listed.status, "not-started", "`work list --json` reports the status on the control's own disk");
+      assert.equal(listed.status, "in-progress", "`work list --json` reports the worker's value (43/06)");
+      assert.deepEqual(
+        Object.keys(listed).sort(),
+        ["dir", "parent", "ref", "slug", "status", "title", "type"],
+        "…in m03/ADR-002's seven frozen fields EXACTLY — the answering-side stamp never reaches this array",
+      );
 
       const found = await invoke("work:find", { query: "43/02" }, fx.ctx);
       const hit = found.rows.find((row) => row.ref === "43/02");
       assert.ok(hit != null, "`work find 43/02 --json` resolves the item");
-      assert.equal(hit.status, "not-started", "…from the control's own disk, not the cache");
+      assert.equal(hit.status, "in-progress", "…with the worker's value");
+      assert.equal(hit.answeredFrom, "cache", "…reported as a cache answer");
     }),
   },
 ];

@@ -22,6 +22,11 @@ import { commandError } from "../command-error.mjs";
 // `.feature` member is streamed and readable here — parsed identically to a local
 // read, and stamped with the worker that reported it.
 import { readStreamedItemRow, readWorkerDocMembers } from "../board-worker-stream.mjs";
+// m43 / story 06 — the same whose-view-is-fresher rule work:doc keeps, from the same home:
+// the node id from the mesh gate, the predicate from the seam that owns `answeredFrom`
+// (ADR-016/G10 — this file and `doc.mjs` each kept a byte-identical three-line copy).
+import { meshNodeIdOf } from "./mesh-gate.mjs";
+import { reportedElsewhere } from "../work-read.mjs";
 
 // parseStreamedTasks(streamed) — the streamed members rendered through the SAME
 // parse + lane-count the local read uses, so a control-side answer for a remote item
@@ -57,17 +62,34 @@ export const tasksCommand = {
     const streamedTasks = (lookupRef) => readWorkerDocMembers(ctx.workspace, lookupRef, "TASKS", {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
     });
-    const item = await resolveItem(ctx.workspace.workDir, ref);
+    const item = await resolveItem(ctx, ref);
     if (!item) {
       const streamed = await streamedTasks(ref);
       if (streamed != null) {
-        return { ref, tasks: parseStreamedTasks(streamed), fromWorker: true, reportedBy: streamed.reportedBy };
+        return { ref, tasks: parseStreamedTasks(streamed), fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
       }
       const row = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
       if (row != null) {
-        return { ref, tasks: [], fromWorker: true };
+        return { ref, tasks: [], fromWorker: true, answeredFrom: "cache" };
       }
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    }
+
+    // m43 / story 06 (ADR-010/R6.4) — THE NAMED REGRESSION THIS CLOSES. Before the
+    // chokepoint moved, `fromWorker` was set only on the `!item` branch above. Once
+    // `resolve` succeeds from the cache the readdir below simply ENOENTs, and the honest
+    // "this came from the worker, and its features are not here" marker was LOST — leaving
+    // `{ ref, tasks: [] }`, a silent empty list dressed as a pass. The marker's meaning
+    // moves with the migration: it no longer means "resolve missed", it means "the answer
+    // did not come from this node's disk", which is the fact a caller actually needs.
+    if (item.dir == null || reportedElsewhere(item, meshNodeIdOf(ctx.workspace.config ?? {}))) {
+      const streamed = await streamedTasks(item.ref);
+      if (streamed != null) {
+        return { ref: item.ref, tasks: parseStreamedTasks(streamed), fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
+      }
+      if (item.dir == null) {
+        return { ref: item.ref, tasks: [], fromWorker: true, answeredFrom: "cache", reportedBy: item.reportedBy ?? null };
+      }
     }
 
     const tasksDir = path.join(item.dir, "tasks");
@@ -81,9 +103,9 @@ export const tasksCommand = {
         // for work:doc's ENOENT path. Local disk still wins whenever it can answer.
         const streamed = await streamedTasks(item.ref);
         if (streamed != null) {
-          return { ref: item.ref, tasks: parseStreamedTasks(streamed), fromWorker: true, reportedBy: streamed.reportedBy };
+          return { ref: item.ref, tasks: parseStreamedTasks(streamed), fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
         }
-        return { ref: item.ref, tasks: [] };
+        return { ref: item.ref, tasks: [], answeredFrom: "disk" };
       }
       throw error;
     }
@@ -99,7 +121,7 @@ export const tasksCommand = {
       fileNames.map(async (file) => ({ file, ...parsedTask(await readFile(path.join(tasksDir, file), "utf8")) }))
     );
 
-    return { ref: item.ref, tasks };
+    return { ref: item.ref, tasks, answeredFrom: "disk" };
   },
 
   cli: {

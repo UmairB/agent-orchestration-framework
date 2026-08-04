@@ -19,7 +19,13 @@
 // definition.
 import { isNodeStale, readPresenceRecord, DEFAULT_PRESENCE_STALENESS_SECONDS } from "./mesh-presence.mjs";
 import { isStale, readRuns } from "./run-store.mjs";
-import { findWork } from "./work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. The reclaim resolves the assignment's item to
+// read its LOCAL run record; on a cross-machine assignment that item is exactly the one this
+// checkout does not hold, so a disk-only resolve returned null and the streamed-record
+// fallback below carried the whole path. Resolving cache-first makes the ref resolvable, and
+// the `item != null` guard already in place keeps the local read honest for a cache-answered
+// row (its `dir` is null and `readRuns` is simply not attempted for it).
+import { findWorkCacheFirst } from "./work-read.mjs";
 import { isActiveAssignmentState, listAllAssignments } from "./assignment-record.mjs";
 // m42 wave (d) leg d3 — the SHARED assignment transition (holder + terminal guards
 // in front of EVERY write; this tick previously had none of its own).
@@ -131,8 +137,12 @@ export async function reclaimStaleAssignments(store, workspace, workspaceId, opt
   for (const row of rows) {
     if (row.runId == null) continue; // no run minted yet (still `assigned`) — the dispatch retry loop owns that state
 
-    const matches = await findWork(workspace.workDir, row.itemRef);
-    const item = matches.find((m) => m.ref === row.itemRef) ?? matches[0] ?? null;
+    const matches = await findWorkCacheFirst(workspace, row.itemRef, { globalWorkStoreOptions: options.globalWorkStoreOptions ?? {} });
+    // ADR-010/R6.4 — a cache-answered row names no folder here, so it is not a LOCAL run
+    // record candidate. The streamed record below is its truthful source; treating it as
+    // local would join `readRuns` onto a null dir.
+    const resolved = matches.find((m) => m.ref === row.itemRef) ?? matches[0] ?? null;
+    const item = resolved != null && typeof resolved.dir === "string" && resolved.dir.length > 0 ? resolved : null;
 
     // m42 wave (b) / item 7 leg 3 — THE RUN RECORD, WHEREVER IT ACTUALLY IS. The
     // original read was local-only (`readRuns(item)` against THIS checkout), and a

@@ -115,7 +115,12 @@ export async function resolveDirectivePhase(workspace, phase, dispatchRef, store
   if (phase !== "continue") return phase;
   let type = null;
   try {
-    const local = await resolveItem(workspace.workDir, dispatchRef);
+    // m43 / story 06 (ADR-005) — through the migrated chokepoint, so a ref only the cache
+    // knows resolves its TYPE here instead of falling through to the streamed-row lookup
+    // below. The fallback stays: an artifact streamed ahead of the row that names it still
+    // answers, and an unresolvable type still degrades to the single phase rather than
+    // blocking the act.
+    const local = await resolveItem({ workspace, globalWorkStoreOptions: storeOptions ?? {} }, dispatchRef);
     type = local?.type ?? null;
     if (type == null) {
       const streamed = await readStreamedItemRow(workspace, dispatchRef, { globalWorkStoreOptions: storeOptions });

@@ -161,7 +161,11 @@ async function hitRoute(url, op) {
   // The three PHASE DOORS (continue 2026-07-26; refine/verify m42 wave (b)) share
   // one probe shape: same-origin POST, fixture item with no prior run resolves
   // `where: "local"` and mints nothing.
-  if (op === "continue" || op === "refine" || op === "verify") {
+  // m43 / story 04 (ADR-010/R4.2) — `resync` joins the same POST probe shape: a same-origin
+  // POST carrying a ref. The fixture is not mesh-configured and its cache holds no row for
+  // "03/01", so the door answers the coded `resync-no-owner` document at 200 without
+  // dispatching anything or entering its bounded poll.
+  if (op === "continue" || op === "refine" || op === "verify" || op === "resync") {
     return fetch(new URL(`/api/work/${op}`, url), {
       method: "POST",
       headers: { "content-type": "application/json", origin: new URL(url).origin },

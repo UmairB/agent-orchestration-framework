@@ -67,6 +67,10 @@ import { serveBoard } from "./board-serve.mjs";
 // global-work-store/global-node-registry modules directly (ADR-006 "must not import
 // low-level work/run/mesh writers; it talks to a query surface").
 import { queryGlobalMeshStatus, workspaceIdForProjectRoot } from "./global-mesh-query.mjs";
+// m43 / story 04 (ADR-006) — the ONE cache-staleness window resolver. The face reads no
+// threshold of its own; it resolves the configured number through the single home and hands
+// it to the query surface, which states it once on the payload.
+import { resolveCacheStalenessSeconds } from "./cache-provenance.mjs";
 // milestone 38 / story 04 (ADR-012) — the fleet face's FIRST live write route. Two
 // imports, both DELIBERATE and narrow: `loadWorkspace` (the standard workspace
 // object every CLI verb loads, `./work.mjs`) resolves the { workDir, config,
@@ -231,6 +235,31 @@ export async function serveMeshUi({
       controlNodeIdMemo = ownWorkspace.config?.mesh?.nodeId ?? null;
     }
     return controlNodeIdMemo;
+  };
+
+  // m43 / story 04 (ADR-006) — the CACHE-FRESHNESS WINDOW the fleet payload states once.
+  // Read off THIS node's own checkout, the same lazy machine-fact memo shape as
+  // controlNodeId above and for the same reason: the fleet is machine-wide, so the window
+  // it renders is a property of the machine an operator configured, not of whichever card
+  // they are looking at. Going through `resolveCacheStalenessSeconds` (never a literal
+  // here) is what keeps the board and the fleet on ONE number — the defect DESIGN calls out
+  // by name is two surfaces that can disagree about the same instant.
+  //
+  // A workspace that will not load is not a failure: the resolver answers the documented
+  // default, which is the honest machine-wide answer and exactly what an unconfigured
+  // machine should see.
+  let cacheStalenessMemo;
+  const cacheStalenessSeconds = async () => {
+    if (cacheStalenessMemo === undefined) {
+      let config = undefined;
+      try {
+        config = (await loadWorkspace(resolvedProjectDir, undefined, { env: globalStoreOptions?.env })).config;
+      } catch (error) {
+        reportDegrade("mesh-ui-serve", error);
+      }
+      cacheStalenessMemo = resolveCacheStalenessSeconds(config);
+    }
+    return cacheStalenessMemo;
   };
 
   const server = http.createServer(async (request, response) => {
@@ -489,7 +518,13 @@ export async function serveMeshUi({
         // started server honours a ?scope=local deep-link the same way.
         const effectiveScope = scope === "local" ? "local" : (requestedScope ?? "global");
         const workspaceId = effectiveScope === "local" ? workspaceIdForProjectRoot(resolvedProjectDir) : null;
-        const result = await queryGlobalMeshStatus({ ...globalStoreOptions, workspaceId });
+        const result = await queryGlobalMeshStatus({
+          ...globalStoreOptions,
+          workspaceId,
+          // m43 / story 04 — the freshness window this machine is configured with, stated
+          // once on the payload beside the rows' own `syncedAt`/`reportedBy`.
+          cacheStalenessSeconds: await cacheStalenessSeconds(),
+        });
         const body = { ...result, scope: effectiveScope };
         if (effectiveScope === "local") body.currentWorkspace = resolvedProjectDir;
         sendJson(response, 200, body);

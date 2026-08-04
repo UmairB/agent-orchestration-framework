@@ -27,6 +27,11 @@
 import { loadWorkspace } from "./work.mjs";
 import { listCommand } from "./commands/list.mjs";
 import { continueCommand, refineDoorCommand, verifyDoorCommand } from "./commands/continue.mjs";
+// m43 / story 04 (ADR-006 + ADR-010/R4.2) — work:resync, the milestone's ONE sanctioned
+// pull: ask the node that REPORTED a stale cached row to push a fresh copy. Registered into
+// the SAME core so the board's Resync control, `aof work resync <ref>` and any future face
+// all go through one door with one coded outcome vocabulary.
+import { resyncCommand } from "./commands/resync.mjs";
 import { docCommand } from "./commands/doc.mjs";
 import { tasksCommand } from "./commands/tasks.mjs";
 import { validateCommand } from "./commands/validate.mjs";
@@ -353,6 +358,8 @@ const COMMANDS = [
   // door (one factory, one decision, one scope rule) with their own lifecycle phase.
   refineDoorCommand,
   verifyDoorCommand,
+  // m43 / story 04 — the Resync door (see the import note).
+  resyncCommand,
   // m42 wave (d) leg d1 — the first route-table commands (see the import note).
   assetsListCommand,
   packagesListCommand,

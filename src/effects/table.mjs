@@ -159,6 +159,9 @@ async function syncNotionStatus(event, ctx = {}) {
     const result = await syncMilestoneWork(workspace, {
       milestone,
       notionSpawn: ctx.publisherOptions?.notionSpawn ?? null,
+      // m43 / story 06 — the sync core's traversal is cache-first; the reactor threads the
+      // same store options its own ledger runs on.
+      globalWorkStoreOptions: ctx.publisherOptions?.globalWorkStoreOptions ?? {},
     });
     // Config removed between append and drain: the consequence can no longer
     // apply, and ending the step honestly beats retrying it forever (the d3

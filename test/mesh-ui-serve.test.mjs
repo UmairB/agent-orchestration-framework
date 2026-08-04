@@ -305,7 +305,10 @@ export const meshUiServeTests = [
 
         const boardList = await fetch(new URL("/api/work/list", first.url));
         assert.equal(boardList.status, 200, "the returned board origin serves /api/work/list");
-        const items = await boardList.json();
+        // m43 / story 04 (ADR-010/R4.1) — the board route answers the
+        // `{ items, stalenessSeconds }` envelope; the drill-in assertion is about WHICH
+        // workspace's stream the returned origin serves, which is unmoved.
+        const items = (await boardList.json()).items;
         assert.ok(items.some((item) => item.ref === "34" && item.title === "Global Mesh"), "the board serves the selected workspace's work stream");
 
         const secondResponse = await fetch(new URL(`/api/mesh/board-url?workspaceId=${encodeURIComponent(workspaceId)}&ref=34`, url));

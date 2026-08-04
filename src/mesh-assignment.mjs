@@ -22,7 +22,12 @@
 // refusal (34/ADR-008) that mints nothing; nothing here silently returns.
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
-import { findWork } from "./work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. Assignment is the mesh's own door and it must
+// be able to name an item the mesh knows about: before this migration a control node could
+// not assign a ref its own disk had never held, which is precisely the item another node
+// authored. The resolution stays EXACT (`matches.length !== 1` below is unchanged) — the
+// cache widens the SET the exact rule is applied to, never the rule.
+import { findWorkCacheFirst } from "./work-read.mjs";
 import {
   assembleAssignmentRecord,
   findActiveAssignment,
@@ -119,7 +124,7 @@ async function resolveItem(workspace) {
 export async function assignWork(workspace, ref, nodeId, ctx = {}) {
   const store = await openStore(ctx);
   try {
-    const matches = await findWork(workspace.workDir, ref);
+    const matches = await findWorkCacheFirst(workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
     if (matches.length !== 1) {
       return {
         ok: false,
@@ -202,7 +207,7 @@ export async function assignWork(workspace, ref, nodeId, ctx = {}) {
 export async function withdrawWork(workspace, ref, ctx = {}) {
   const store = await openStore(ctx);
   try {
-    const matches = await findWork(workspace.workDir, ref);
+    const matches = await findWorkCacheFirst(workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
     if (matches.length !== 1) {
       return {
         ok: false,

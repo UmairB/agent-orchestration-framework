@@ -83,6 +83,16 @@ export const TABLE_CLASSIFICATION = Object.freeze({
     class: "fact",
     writers: Object.freeze(["src/mesh-recovery-push.mjs"]),
   }),
+  // m43 / story 04 (ADR-010/R4.2) — the RESYNC request row, the recovery-push table's exact
+  // sibling and classified the same way for the same reason: it is OPERATOR-CREATED state
+  // (someone clicked Resync / ran `aof work resync`), never a projection of any doc, so no
+  // publish tick may ever sweep it. Lazily created by its own module, which is why it needs
+  // no schema bump — but it is still a real table this repo creates, so it is classified
+  // here, where the two-way ratchet can see it.
+  global_resync_requests: Object.freeze({
+    class: "fact",
+    writers: Object.freeze(["src/mesh-resync.mjs"]),
+  }),
   // The worker-STREAMED mirrors (schema v5/v6): facts that ARRIVED here durably —
   // a peer's worktree truth surviving that worktree's cleanup, a worker's log
   // events. No local rebuild reconstructs them (the "MUST NEVER touch" comments

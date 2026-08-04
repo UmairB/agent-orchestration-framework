@@ -15,6 +15,7 @@
 //   03_feedback-write-command.feature — one bullet/refs/verbatim-heading/
 //        exact-only/milestone+story+uat/missing-fields/only-STATE.md-changed
 import assert from "node:assert/strict";
+import { assertFrozenShape, assertAnswersFrom } from "./support/answering-side.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -68,6 +69,11 @@ const WORK_IDS = [
   // door (one factory, one decision, one scope rule) with their own phase.
   "work:refine",
   "work:verify",
+  // m43 / story 04 (ADR-006 + ADR-010/R4.2) — work:resync, the milestone's ONE sanctioned
+  // pull: ask the node that REPORTED a stale cached row to push a fresh copy. Another
+  // sanctioned in-namespace extension, board-served (POST /api/work/resync) as well as
+  // CLI-routed, so it is covered by both bijection guards rather than a carve-out.
+  "work:resync",
   // m42 wave (d) leg d1 (the CLI-only batch) — the previously CLI-only faces as
   // registered route-table Commands: init/update (the ACD bundle render pair),
   // find/observe (reads), the headroom toggle pair, work:ui (the launcher-seam
@@ -288,8 +294,11 @@ export const commandCoreContractTests = [
         const ctx = await ctxFor(repo);
 
         const result = await invoke("work:doc", { ref: "08", doc: "SPEC" }, ctx);
-        // carries exactly the fields ref, doc, present, body
-        assert.deepEqual(Object.keys(result).sort(), ["body", "doc", "present", "ref"]);
+        // carries the fields ref, doc, present, body — plus, since m43 / story 06 (ADR-005
+        // rule 3), the answering-side stamp. The guarantee the exact-key form held is kept:
+        // nothing frozen was renamed, dropped or retyped, and nothing else was added.
+        assertFrozenShape(result, ["body", "doc", "present", "ref"], "work:doc");
+        assertAnswersFrom(result, "disk", "work:doc over a local SPEC.md");
         // equals the object the command's own run produces for the same input
         const direct = await getCommand("work:doc").run({ ref: "08", doc: "SPEC" }, ctx);
         assert.deepEqual(result, direct, "invoke returns run's result verbatim (no projection)");
@@ -467,7 +476,9 @@ export const commandCoreContractTests = [
         const ctx = await ctxFor(repo);
 
         const result = await invoke("work:tasks", { ref: "08/01" }, ctx);
-        assert.deepEqual(result, { ref: "08/01", tasks: [] }, "absent tasks/ → empty list, no error");
+        assertFrozenShape(result, ["ref", "tasks"], "work:tasks");
+        assert.equal(result.ref, "08/01");
+        assert.deepEqual(result.tasks, [], "absent tasks/ → empty list, no error");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -628,8 +639,15 @@ export const commandCoreContractTests = [
 
         const result = await invoke("work:list", {}, ctx);
         const direct = await listStream(workDir);
-        // the full work-stream array, dir exactly as listStream produces
-        assert.deepEqual(result, direct, "the result is the full listStream array, unwrapped + unprojected");
+        // The full work-stream array, `dir` exactly as listStream produces — unwrapped and
+        // unprojected. m43 / story 06 (ADR-005) moved this command onto the cache-first seam,
+        // so the rows are no longer listStream's OBJECT; the guarantee this assertion holds is
+        // that for a stream the cache says nothing about they are listStream's VALUES, plus the
+        // answering-side stamp and nothing else. Strip the stamp and the two documents are
+        // identical, which is a sharper statement than the deep-equal it replaces.
+        for (const row of result) assertAnswersFrom(row, "disk", `${row.ref} (nothing is cached here)`);
+        const stripped = result.map(({ answeredFrom, reportedBy, syncedAt, ...row }) => row); // eslint-disable-line no-unused-vars
+        assert.deepEqual(stripped, direct, "the result is the full listStream array, unwrapped + unprojected");
         for (const row of result) {
           // forward-slashed absolute, neither cwd- nor projectRoot-relative
           assert.ok(!row.dir.includes("\\"), "each dir is forward-slashed (as listStream emits)");

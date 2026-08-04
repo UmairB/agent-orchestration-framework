@@ -18,6 +18,14 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { loadWorkspace, invoke } from "../src/command-core.mjs";
+// m43 / story 06 (ADR-005 rule 3) — the ONE statement of what this milestone may add to an
+// m42-era frozen envelope, and of what it may not. Three exact-key `deepEqual`s below were
+// RED against the delivered 43/06 build (found 2026-08-04, at the ADR-016 must-fix pass, and
+// attributed by re-running with that pass's own edits reverted). They are amended with the
+// SAME instrument ADR-016/G9 verified across the other five collateral suites, which asserts
+// MORE than the deepEqual it replaces: every frozen key still present, the only additions the
+// three named answering-side keys, PLUS the stamp's two-value domain.
+import { assertFrozenShape, assertAnswersFrom } from "./support/answering-side.mjs";
 import { openGlobalWorkProjectionStore, upsertWorkItemContent } from "../src/global-work-store.mjs";
 
 const WORKSPACE_ID = "ws-board-content";
@@ -120,7 +128,13 @@ export const boardWorkerContentTests = [
           "an unknown ref with no streamed body is still ref-not-found",
         );
         const result = await invoke("work:doc", { ref: "18", doc: "VERIFICATION" }, ctx);
-        assert.deepEqual(result, { ref: "18", doc: "VERIFICATION", present: false, body: "" }, "a missing doc with no streamed body is still absent-not-error");
+        assertFrozenShape(result, ["ref", "doc", "present", "body"], "work:doc for a missing doc");
+        assert.deepEqual(
+          { ref: result.ref, doc: result.doc, present: result.present, body: result.body },
+          { ref: "18", doc: "VERIFICATION", present: false, body: "" },
+          "a missing doc with no streamed body is still absent-not-error",
+        );
+        assertAnswersFrom(result, "disk", "…answered by this node's own disk (m43/06)");
       });
     },
   },
@@ -171,7 +185,13 @@ export const boardWorkerContentTests = [
         }
 
         const tasks = await invoke("work:tasks", { ref: "18/04" }, ctx);
-        assert.deepEqual(tasks, { ref: "18/04", tasks: [], fromWorker: true }, "tasks: EMPTY for a streamed item, never ref-not-found");
+        assertFrozenShape(tasks, ["ref", "tasks", "fromWorker"], "work:tasks for a streamed-only item");
+        assert.deepEqual(
+          { ref: tasks.ref, tasks: tasks.tasks, fromWorker: tasks.fromWorker },
+          { ref: "18/04", tasks: [], fromWorker: true },
+          "tasks: EMPTY for a streamed item, never ref-not-found",
+        );
+        assertAnswersFrom(tasks, "cache", "…and the empty answer says the CACHE produced it (m43/06)");
 
         const doc = await invoke("work:doc", { ref: "18/04", doc: "VERIFICATION" }, ctx);
         assert.equal(doc.present, false, "doc: absent-not-error for a streamed item with no streamed copy");
@@ -203,7 +223,13 @@ export const boardWorkerContentTests = [
           (error) => error.code === "ref-not-found" && error.status === 404,
         );
         const result = await invoke("work:run-status", { ref: "18" }, ctx);
-        assert.deepEqual(result, { ref: "18", runs: [] }, "an item with no runs anywhere is still an empty history, not an error");
+        assertFrozenShape(result, ["ref", "runs"], "work:run-status for an item with no runs");
+        assert.deepEqual(
+          { ref: result.ref, runs: result.runs },
+          { ref: "18", runs: [] },
+          "an item with no runs anywhere is still an empty history, not an error",
+        );
+        assertAnswersFrom(result, "disk", "…answered by this node's own disk (m43/06)");
       });
     },
   },

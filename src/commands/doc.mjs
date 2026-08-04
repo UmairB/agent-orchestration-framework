@@ -25,6 +25,18 @@ import { commandError } from "../command-error.mjs";
 // out-of-contract member is a CODED refusal rather than a read.
 import { resolveArtifactRequest } from "../work-artifacts.mjs";
 import { readWorkerDoc, readStreamedItemRow } from "../board-worker-stream.mjs";
+// m43 / story 06 (ADR-005) — WHOSE VIEW IS FRESHER, decided by `node_id` and nothing else.
+// The resolver is now cache-first, so a ref another node authored resolves here even when
+// this node holds only a stale scaffold — and for THAT ref the cached artifact is the
+// truthful body, while the local file is the scaffold the milestone exists to stop serving.
+// For a ref THIS node last reported, the opposite holds by construction: the disk is what
+// this node publishes FROM, so the local file is never older than the copy it produced, and
+// preferring the cache would shadow the operator's own live edits with their last publish.
+// One rule, both directions, and it is the same discriminator ADR-005 gives doctor.
+// The predicate itself lives at the seam that owns `answeredFrom` (ADR-016/G10 collapsed the
+// byte-identical copy this file and `tasks.mjs` each kept: one fact, one source).
+import { meshNodeIdOf } from "./mesh-gate.mjs";
+import { reportedElsewhere } from "../work-read.mjs";
 
 export const docCommand = {
   id: "work:doc",
@@ -54,19 +66,39 @@ export const docCommand = {
     // is byte-unchanged from before the widening (no stray key appears).
     const memberField = request.member == null ? {} : { member: request.member };
 
-    const item = await resolveItem(ctx.workspace.workDir, ref);
+    // m43 / story 04 — the ARTIFACT's own provenance, under the SAME two wire names the row
+    // carries (`reportedBy` + `syncedAt`). A doc can be older than the row that names it, so
+    // its instant travels with it rather than being inferred from the row. `answeredFrom`
+    // (m43 / story 06) says which SIDE produced the body sitting beside them.
+    const fromCache = (lookupRef, streamed) => ({
+      ref: lookupRef, doc: docName, ...memberField, present: true, body: streamed.body,
+      fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy, syncedAt: streamed.syncedAt,
+    });
+
+    const item = await resolveItem(ctx, ref);
     if (!item) {
-      // The local checkout has never seen this ref (a worker-streamed story) — the
-      // projection is the only place its docs exist on this machine.
+      // Neither this node's disk nor the cache's ROW set resolves the ref — but the cache
+      // may still hold its docs (an artifact streamed ahead of the row that names it).
       const streamed = await streamedDoc(ref);
-      if (streamed != null) {
-        return { ref, doc: docName, ...memberField, present: true, body: streamed.body, fromWorker: true, reportedBy: streamed.reportedBy };
-      }
+      if (streamed != null) return fromCache(ref, streamed);
       // The streamed-existence rule (m42): a listed streamed item with no
       // streamed copy of THIS doc is absent-not-error — never ref-not-found.
       const row = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
-      if (row != null) return { ref, doc: docName, ...memberField, present: false, body: "", fromWorker: true };
+      if (row != null) return { ref, doc: docName, ...memberField, present: false, body: "", fromWorker: true, answeredFrom: "cache" };
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    }
+
+    // A ref another node reported — the cached body is the truthful one, and for a ref with
+    // NO local folder at all it is the only one there can be (ADR-010/R6.4: never fabricate
+    // a path to go looking for the other).
+    if (item.dir == null || reportedElsewhere(item, meshNodeIdOf(ctx.workspace.config ?? {}))) {
+      const streamed = await streamedDoc(item.ref);
+      if (streamed != null) return fromCache(item.ref, streamed);
+      if (item.dir == null) {
+        // Resolved, cache-answered, and the cache holds no copy of THIS doc: absent, and
+        // explicitly so — never an unmarked empty dressed as a local read.
+        return { ref: item.ref, doc: docName, ...memberField, present: false, body: "", fromWorker: true, answeredFrom: "cache", reportedBy: item.reportedBy ?? null };
+      }
     }
 
     // path.join on the native dir (findWork returns the OS-native path). A missing
@@ -75,14 +107,12 @@ export const docCommand = {
     // a pre-run scaffold while the worker holds the real doc).
     try {
       const body = await readFile(path.join(item.dir, fileName), "utf8");
-      return { ref: item.ref, doc: docName, ...memberField, present: true, body };
+      return { ref: item.ref, doc: docName, ...memberField, present: true, body, answeredFrom: "disk" };
     } catch (error) {
       if (error.code === "ENOENT") {
         const streamed = await streamedDoc(item.ref);
-        if (streamed != null) {
-          return { ref: item.ref, doc: docName, ...memberField, present: true, body: streamed.body, fromWorker: true, reportedBy: streamed.reportedBy };
-        }
-        return { ref: item.ref, doc: docName, ...memberField, present: false, body: "" };
+        if (streamed != null) return fromCache(item.ref, streamed);
+        return { ref: item.ref, doc: docName, ...memberField, present: false, body: "", answeredFrom: "disk" };
       }
       throw error;
     }

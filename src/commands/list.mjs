@@ -5,7 +5,13 @@
 // (work.mjs:223) — so the command neither re-bases nor re-slashes it: it is
 // basis-neutral (neither cwd- nor projectRoot-relative) and both faces emit it
 // unchanged. Path display for list is therefore a no-op on either face.
-import { listStream } from "../work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. This is the read the milestone's own accept
+// note names as the evidence it was load-bearing: on a live two-node run "`aof work list` on
+// the control still answers from the control's own disk, so it did not show the
+// worker-authored stories". It answers from the cache now, on BOTH faces — the `mesh`
+// opt-in below still governs the board's EXECUTION overlay (an affordance), never whether
+// the rows themselves tell the truth.
+import { listStreamCacheFirst, withoutAnsweringSide } from "../work-read.mjs";
 // VERIFICATION (board mesh-execution overlay, 2026-07-25) — the board asked "what is the
 // state of this item?" and got the CONTROL node's own local frontmatter, which reads
 // `not-started` for work a WORKER on another machine is executing on its own branch. The
@@ -14,17 +20,21 @@ import { readExecutionOverlay, applyExecutionOverlay } from "../board-mesh-execu
 // …and the WORKER's own live view of those items (streamed from its worktree into the
 // projection), which is what a mesh item's rows come from — otherwise a fully-broken-down
 // milestone reads "0 stories" because this checkout has only the pre-run scaffold.
-import { readWorkerItems, mergeWorkerItems } from "../board-worker-stream.mjs";
+import { readWorkerItems, mergeWorkerItems, readCachedProvenance, applyCachedProvenance } from "../board-worker-stream.mjs";
 
 export const listCommand = {
   id: "work:list",
-  // `mesh` is an OPT-IN (the board face passes it; the CLI never does), so `aof work list`
-  // stays a pure local read with no store open — the overlay is a board affordance, not a
-  // new cost on every list.
+  // `mesh` is an OPT-IN (the board face passes it; the CLI never does) and it now governs
+  // exactly one thing: the board's EXECUTION overlay (is this item running, and where) —
+  // an affordance, not a fact about the item. The ROWS themselves are cache-first on both
+  // faces as of m43/06, which is a deliberate new cost on every list: answering from this
+  // node's disk alone is the defect the milestone exists to remove.
   input: { type: "object", properties: { mesh: { type: "boolean" } }, additionalProperties: false },
 
   async run(input, ctx) {
-    const rows = await listStream(ctx.workspace.workDir);
+    const rows = await listStreamCacheFirst(ctx.workspace, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
     if (input?.mesh !== true) return rows;
     const overlay = await readExecutionOverlay(ctx.workspace, {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
@@ -39,6 +49,15 @@ export const listCommand = {
       globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
       refs: [...overlay.keys()],
     });
+    // …and WHO reported each cached row, and WHEN (m43 / story 04, ADR-006). Read for the
+    // WHOLE workspace, not just the executing items: DESIGN renders the provenance line on
+    // every cache-published item, and the control's own rows are as much a reported copy as
+    // a worker's — under this milestone the control is simply one more writer into the
+    // cache. The window itself is NOT here: it is one number for the whole response, so it
+    // rides the board's HTTP envelope (ADR-010/R4.1) and never a row.
+    const provenance = await readCachedProvenance(ctx.workspace, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
     // Overlay LAST (2026-07-26, operator-found): a mesh milestone's stories often exist
     // ONLY as worker-streamed rows (the local checkout holds the pre-run scaffold), and
     // the earlier merge-after-overlay order meant those inserted rows never passed the
@@ -46,7 +65,14 @@ export const listCommand = {
     // "Running on <node>". applyExecutionOverlay skips its status override for
     // fromWorker rows (their streamed status IS the live truth), so the order swap
     // changes affordance data only, never a worker-reported status.
-    return applyExecutionOverlay(mergeWorkerItems(rows, worker, overlay), overlay);
+    //
+    // Provenance is stamped AFTER the merge, over every row alike — which is what makes it
+    // ONE mapping with ONE source. It is now also the ONLY attribution on this path: the
+    // merge no longer sets a `reportedBy` of its own from the assignment overlay (ADR-014/E4
+    // — that value answered "which node was this item ASSIGNED to", while the question this
+    // key asks is "which node REPORTED this row"), so correctness here no longer depends on
+    // one writer overwriting another's.
+    return applyCachedProvenance(applyExecutionOverlay(mergeWorkerItems(rows, worker), overlay), provenance);
   },
 
   cli: {
@@ -82,7 +108,24 @@ export const listCommand = {
 
     // `aof work list --json` passes the stream through. `dir` is already
     // forward-slashed; today's CLI emits it as-is, so no cwd projection.
-    json: (rows) => rows,
+    //
+    // …MINUS the answering-side stamp, and that is a FACE PROJECTION with its reason stated
+    // here at the projection (m43 / ADR-016/G1 — the third ruling of ADR-010/R4.1 on this one
+    // route). m03 / ADR-002 froze this array's element at SEVEN fields
+    // (`acd-work-list-contract`), and R4.1's split is that an enrichment rides the FACE that
+    // can carry it: `stalenessSeconds` went on `/api/work/list`, `nodeId` after it, and now
+    // `answeredFrom`. The decisive ground is WIDTH — the stamp is one key on a disk-answered
+    // row and three on a cache-answered one — so admitting it would replace an exact machine
+    // contract with a range that varies by whether this machine has a mesh cache at all.
+    //
+    // THE STRIP IS THIS ADAPTER'S ALONE, DELIBERATELY. `run` above keeps the stamp, because
+    // `board-ui.mjs` builds the board's envelope from `invoke("work:list")`'s RESULT and
+    // DESIGN renders the answering side there — `board-face-contract` and `board-api` hold
+    // `assertAnswersFrom` on that route, so a later tidy-up that moves this strip up into
+    // `run` breaks the board loudly rather than silently. The same fact stays readable from
+    // `aof work find --json` and `aof work next --json`, which are not frozen this way.
+    // (Precedent for projecting at the face: `find.mjs`'s own `json` adapter re-bases `dir`.)
+    json: (rows) => rows.map(withoutAnsweringSide),
   },
 };
 

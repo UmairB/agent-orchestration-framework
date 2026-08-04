@@ -38,17 +38,28 @@ export const runStatusCommand = {
       (await streamedRuns(lookupRef)) ?? (executionScopeRef(lookupRef) !== lookupRef ? await streamedRuns(executionScopeRef(lookupRef)) : null);
 
     // The READ tolerates the slug-fallback resolver (like work:doc / work:tasks).
-    const item = await resolveItem(ctx.workspace.workDir, ref);
+    const item = await resolveItem(ctx, ref);
     if (!item) {
       // The streamed-existence rule (m42): an item the worker streams EXISTS.
       // Its runs come from the projection (own ref, else scope); no streamed
       // runs is an EMPTY history — "Could not load runs" for a listed item was
       // a lie about existence.
       const streamed = await streamedScoped(ref);
-      if (streamed != null) return { ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
+      if (streamed != null) return { ref, runs: streamed.runs, fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
       const row = await readStreamedItemRow(ctx.workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
-      if (row != null) return { ref, runs: [], fromWorker: true };
+      if (row != null) return { ref, runs: [], fromWorker: true, answeredFrom: "cache" };
       throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    }
+
+    // m43 / story 06 (ADR-010/R6.4) — THE REACH-THROUGH. A cache-answered row for a ref with
+    // no local folder has no `runs/` dir to read, and `readRuns` would join onto a null
+    // `dir`. The cache's own run records ARE the answer here; when it holds none, the empty
+    // history is marked rather than returned bare, so an operator never reads "no runs" and
+    // takes it for a statement about the item rather than about this checkout.
+    if (item.dir == null) {
+      const streamed = await streamedScoped(item.ref);
+      if (streamed != null) return { ref: item.ref, runs: streamed.runs, fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
+      return { ref: item.ref, runs: [], fromWorker: true, answeredFrom: "cache", reportedBy: item.reportedBy ?? null };
     }
 
     // readRuns is absence-tolerant: an item with no runs/ dir → an empty array —
@@ -57,9 +68,9 @@ export const runStatusCommand = {
     const runs = await readRuns(item);
     if (runs.length === 0) {
       const streamed = await streamedScoped(item.ref);
-      if (streamed != null) return { ref: item.ref, runs: streamed.runs, fromWorker: true, reportedBy: streamed.reportedBy };
+      if (streamed != null) return { ref: item.ref, runs: streamed.runs, fromWorker: true, answeredFrom: "cache", reportedBy: streamed.reportedBy };
     }
-    return { ref: item.ref, runs };
+    return { ref: item.ref, runs, answeredFrom: item.answeredFrom ?? "disk" };
   },
 
   cli: {

@@ -149,12 +149,24 @@ Feature: the remaining control-side readers migrate onto the seam one leaf at a 
   # changes its answer ONLY for refs the cache knows better. Every disk-known ref's
   # answer is byte-identical to what it was before stage 2 — so reverting one leaf can
   # only ever un-answer cache-known refs, and can never disturb the rest of the stream.
+  # AMENDED at review (PO on ADR-016/G1, 2026-08-04) — the two `answeredFrom` clauses below
+  # named `work list --json` as a carrier of the stamp. It is not, and must not be: m03/ADR-002
+  # freezes that face at exactly seven fields, and this milestone's own ADR-010/R4.1 already
+  # ruled twice on this route that face-level enrichment rides the HTTP envelope while the CLI
+  # array stays byte-identical. The decisive measurement is that the stamp is NOT ONE KEY — a
+  # disk-answered row carries `answeredFrom` alone, a cache-answered row carries it plus
+  # `reportedBy` and `syncedAt` — so honouring the old wording would have made the frozen key
+  # set vary with whether a machine has a mesh cache and whether that cache holds the row, and
+  # a contract whose width varies by deployment is not frozen. The stamp is still asserted, on
+  # `find`, on `next`, on the command RESULT and on `/api/work/list`; only the CLI `--json`
+  # projection strips it. Both lanes were already driven through `invoke("work:list")`, so the
+  # amendment makes the contract truthful about the face rather than changing what is proven.
   Scenario: a disk-known ref's answer is byte-identical before and after the leaves migrate
     When I run `aof work find 05 --json`
     Then the row for "05" carries exactly the status, type, slug, title and parent the disk holds
     And a fresh `aof work list 05 --json` renders the same rows, in the same order, as before stage 2
     And a fresh `aof work next 05 --json` offers the same item it offered before stage 2
-    And each of those rows reports `answeredFrom` for itself, adding provenance without changing any other field
+    And each row from `find` and `next` reports `answeredFrom` for itself, adding provenance without changing any other field, while `aof work list --json` stays m03/ADR-002's frozen seven fields
 
   # The fallback is inherited whole by every leaf, not re-implemented per leaf: with the
   # cache absent, every migrated command still answers — from disk, and says so.
@@ -162,7 +174,7 @@ Feature: the remaining control-side readers migrate onto the seam one leaf at a 
     Given the control node's cache is absent — a fresh workspace that has never published
     When I run `aof work list --json`
     Then the command exits 0 and lists the control disk's items
-    And every listed row reports `answeredFrom` "disk"
+    And every row returned by `aof work find 05 --json` and `aof work next --json` reports `answeredFrom` "disk"
     And a fresh `aof work find 05 --json` exits 0 with the disk's row
     And a fresh `aof work next --json` exits 0 and offers the disk's next actionable item
     And the durable degrade sink holds a coded entry naming the unavailable cache

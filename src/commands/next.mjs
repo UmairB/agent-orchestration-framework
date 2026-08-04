@@ -13,7 +13,12 @@
 // "everything is being worked"), and handing one out to be refused a step later (a bad
 // seam). One rule, two renderings.
 import path from "node:path";
-import { nextWork, listItems } from "../work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF, and the one whose migration changes a DECISION
+// rather than a display. SPEC names `next` as pure disk; on a mesh that means a driver a
+// worker finished still reads `not-started` here, so its dependants stay `blocked` and the
+// operator is told to wait on work that is done. Both reads move: the candidacy walk and
+// the item enumeration the held-scope view is built from.
+import { nextWorkCacheFirst, listItemsCacheFirst } from "../work-read.mjs";
 // The lock's read side. The command never decides the scope lock itself and never
 // queries `global_assignments` — it asks the predicate (acd-item-lock-single-door).
 import { readHeldScopes } from "../item-lock.mjs";
@@ -40,8 +45,9 @@ export const nextCommand = {
     // workspace mesh was never configured for — in which case everything below is a
     // no-op and the envelope is byte-identical to the pre-lock one, plus an empty
     // `skipped`.
-    const held = await readHeldScopes(ws, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
-    const items = held.size === 0 ? [] : await listItems(ws.workDir);
+    const seamOptions = { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} };
+    const held = await readHeldScopes(ws, seamOptions);
+    const items = held.size === 0 ? [] : await listItemsCacheFirst(ws, seamOptions);
 
     // The candidacy view is the EXISTING injected seam (m26/ADR-005, m27/ADR-004) —
     // "being worked, just not here" is precisely what a held scope means, so the walk
@@ -56,7 +62,10 @@ export const nextCommand = {
 
     // The raw nextWork result — its `path` (when present) is the OS-native
     // absolute item directory; the command does not relativise or slash it.
-    const result = await nextWork(ws.workDir, scope, candidacyView.size > 0 ? { candidacyView } : {});
+    const result = await nextWorkCacheFirst(ws, scope, {
+      ...seamOptions,
+      ...(candidacyView.size > 0 ? { candidacyView } : {}),
+    });
     const skipped = skippedEntries(items, held, scope);
     if (skipped.length === 0) return { ...result, skipped };
 
@@ -112,11 +121,17 @@ export const nextCommand = {
         return `Blocked: ${result.ref} (${result.slug}) waits on milestone(s) ${result.waitingOn.join(", ")} — not done.${skippedNote}`;
       }
       const head = `${result.ref.padEnd(7)} ${result.type.padEnd(9)} ${(result.status ?? "-").padEnd(12)} ${result.slug}`;
-      return `${head}\n        ${path.relative(process.cwd(), result.path)}${skippedNote}`;
+      // m43 / ADR-010/R6.4 — an item offered from the cache alone has no folder on this
+      // node, so the second line says so rather than printing a path that resolves nowhere.
+      const where = typeof result.path === "string"
+        ? path.relative(process.cwd(), result.path)
+        : `(no local checkout — answered from the cache${result.reportedBy ? `, reported by ${result.reportedBy}` : ""})`;
+      return `${head}\n        ${where}${skippedNote}`;
     },
 
     // `aof work next --json` relativises `path` to cwd (cli.mjs:611), passing the
-    // rest of the result through; a path-less (done/held) result passes through whole.
+    // rest of the result through; a path-less (done/held, or cache-only) result passes
+    // through whole.
     json: (result) =>
       typeof result.path === "string"
         ? { ...result, path: path.relative(process.cwd(), result.path) }

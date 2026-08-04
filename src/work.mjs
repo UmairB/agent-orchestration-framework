@@ -259,8 +259,27 @@ async function readDirSafe(dir) {
 
 // ------------------------------------------------------------ discovery ----
 
-// Enumerate items by folder name only — no file reads.
-export async function listItems(workDir) {
+// THE OPTIONAL STREAM VIEW (milestone 43 / ADR-005) — the ONE seam through which the
+// cache-first read module (`src/work-read.mjs`) reuses the four readers below instead of
+// re-deriving their rules.
+//
+// `view` is PLAIN DATA built OUTSIDE this module — `{ items, meta }`, where `items` is a
+// pre-built `listItems` set (the disk's items plus any the cache alone knows) and `meta` is
+// a `Map<ref, { status?, title? }>` OVERLAY applied on top of each item's own frontmatter.
+// This module imports NO cache module, opens no store and learns no wire vocabulary: the
+// seam needs the readers, not the reverse (m41/ADR-001, reused verbatim — `work.mjs` is the
+// 37-importer god-node and its blast radius must not grow). The `candidacyView` parameter
+// on `nextWork` is the same device from milestone 26/ADR-005, and this is deliberately its
+// twin rather than a second mechanism.
+//
+// ABSENT ⇒ BYTE-IDENTICAL. Every reader below behaves exactly as it did before this
+// milestone when no view is passed, which is what the 37 unmigrated importers rely on and
+// what 43/06 task 03 asserts behaviourally.
+
+// Enumerate items by folder name only — no file reads. With a `view`, the pre-built item
+// set REPLACES the disk scan (the view's builder has already done it, plus the merge).
+export async function listItems(workDir, { view } = {}) {
+  if (Array.isArray(view?.items)) return view.items;
   const items = [];
   for (const entry of await readDirSafe(workDir)) {
     if (!entry.isDirectory()) continue;
@@ -356,14 +375,27 @@ function parseScalarOrCollection(value) {
   return value.replace(/^["']|["']$/g, "");
 }
 
-async function readMeta(item) {
+// One item's frontmatter, with the OPTIONAL view's overlay applied on top (ADR-005).
+// Two shapes, and the difference matters:
+//   · an item this node HAS on disk keeps its own frontmatter — `depends`, `created`,
+//     everything — and the overlay replaces only the facts it carries (status/title). A
+//     cache-authoritative status must never cost the driver its own `depends`, or a
+//     migrated `next` would stop honouring gates it can read perfectly well.
+//   · an item this node does NOT have (`dir == null` — a ref only the cache knows) has no
+//     frontmatter to read, so the overlay IS the answer. No path is fabricated to go
+//     looking for one.
+async function readMeta(item, view) {
+  const overlay = view?.meta?.get?.(item.ref);
+  if (item.dir == null) return overlay ?? {};
   const doc = recordDoc(item);
-  if (!doc) return {};
+  if (!doc) return overlay ?? {};
+  let meta = {};
   try {
-    return parseFrontmatter(await readFile(path.join(item.dir, doc), "utf8"));
+    meta = parseFrontmatter(await readFile(path.join(item.dir, doc), "utf8"));
   } catch {
-    return {};
+    meta = {};
   }
+  return overlay == null ? meta : { ...meta, ...overlay };
 }
 
 const asList = (value) => (Array.isArray(value) ? value : value == null || value === "" ? [] : [value]);
@@ -517,8 +549,8 @@ export async function applyItemFrontmatter(item, mutate) {
 
 // `query` is a structured ref (`NN`, `NN/SS`) or a free-text slug match.
 // Semantic matching slots in at the lexical branch below.
-export async function findWork(workDir, query) {
-  const items = await listItems(workDir);
+export async function findWork(workDir, query, { view } = {}) {
+  const items = await listItems(workDir, { view });
   const ref = (query ?? "").trim();
   let matches;
 
@@ -534,15 +566,17 @@ export async function findWork(workDir, query) {
       );
     } else {
       const needle = ref.toLowerCase();
+      // `name` is the on-disk FOLDER basename, so a ref only the cache knows has none —
+      // and none is fabricated (ADR-010/R6.4). Its `slug` still matches free text.
       matches = items.filter(
-        (item) => item.slug.toLowerCase().includes(needle) || item.name.toLowerCase().includes(needle),
+        (item) => item.slug.toLowerCase().includes(needle) || (item.name ?? "").toLowerCase().includes(needle),
       );
     }
   }
 
   const rows = [];
   for (const item of matches) {
-    const meta = await readMeta(item);
+    const meta = await readMeta(item, view);
     rows.push({
       ref: item.ref,
       type: item.type,
@@ -572,8 +606,8 @@ export async function findWork(workDir, query) {
 // This is the single source of the `aof work list --json` contract; the board
 // API (story 01) reuses it. Keep it a thin pass over `listItems` — no new
 // traversal, no convenience fields.
-export async function listStream(workDir) {
-  const items = await listItems(workDir);
+export async function listStream(workDir, { view } = {}) {
+  const items = await listItems(workDir, { view });
 
   const byNum = (a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10);
   const topLevel = items.filter((item) => item.parent == null).sort(byNum);
@@ -592,7 +626,7 @@ export async function listStream(workDir) {
 
   const rows = [];
   for (const item of ordered) {
-    const meta = await readMeta(item);
+    const meta = await readMeta(item, view);
     rows.push({
       ref: item.ref,
       type: item.type,
@@ -600,7 +634,9 @@ export async function listStream(workDir) {
       status: meta.status ?? null,
       title: meta.title ?? null,
       parent: item.parent,
-      dir: item.dir.replaceAll("\\", "/"),
+      // A ref only the cache knows names a folder that is NOT on this node, so its `dir`
+      // is null rather than a plausible-looking path nothing would resolve (ADR-010/R6.4).
+      dir: item.dir == null ? null : item.dir.replaceAll("\\", "/"),
     });
   }
   return rows;
@@ -869,8 +905,8 @@ const ready = (item, status) => ({
 // milestone-ACCEPT fallthrough (all stories done) stays deliberately
 // candidacy-BLIND — a genuinely-done milestone is not a claimable work ref, so a
 // lease/directive entry for it is ignored (the carve-out).
-export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
-  const items = await listItems(workDir);
+export async function nextWork(workDir, scopeRef, { candidacyView, view } = {}) {
+  const items = await listItems(workDir, { view });
   const drivers = items
     .filter(isDriver)
     .sort((a, b) => Number.parseInt(a.number, 10) - Number.parseInt(b.number, 10));
@@ -879,7 +915,7 @@ export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
   const driverStatus = async (num) => {
     if (statusCache.has(num)) return statusCache.get(num);
     const item = drivers.find((d) => Number.parseInt(d.number, 10) === num);
-    const status = item ? (await readMeta(item)).status ?? null : null;
+    const status = item ? (await readMeta(item, view)).status ?? null : null;
     statusCache.set(num, status);
     return status;
   };
@@ -889,7 +925,7 @@ export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
   let blocked = null;
 
   for (const driver of scoped) {
-    const meta = await readMeta(driver);
+    const meta = await readMeta(driver, view);
     statusCache.set(Number.parseInt(driver.number, 10), meta.status ?? null);
     if (meta.status === "done") continue;
 
@@ -939,7 +975,7 @@ export async function nextWork(workDir, scopeRef, { candidacyView } = {}) {
 
     let candidacySkipped = false;
     for (const story of stories) {
-      const storyMeta = await readMeta(story);
+      const storyMeta = await readMeta(story, view);
       if (storyMeta.status !== "done") {
         const candidacy = candidacyView?.get?.(story.ref);
         if (candidacy?.routed === "elsewhere") {

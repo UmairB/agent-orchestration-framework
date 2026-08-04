@@ -374,8 +374,12 @@ export async function workMemoryCommand(argv, { loadWorkspace } = {}) {
   // `--config` may select an explicit config path (same convention as other
   // work subcommands); pull it out without disturbing memory argv parsing.
   const explicitConfig = explicitConfigFrom(argv);
-  const { config, workDir, projectRoot } = await load(process.cwd(), explicitConfig);
-  const ctx = { workDir, projectRoot, configMemory: config?.memory ?? {} };
+  const workspace = await load(process.cwd(), explicitConfig);
+  const { config, workDir, projectRoot } = workspace;
+  // m43 / story 06 — `workspace` rides along so the local indexer's cache-first traversal
+  // can resolve this workspace's mesh identity. Additive: every existing ctx consumer reads
+  // `workDir`/`projectRoot`/`configMemory` and is untouched.
+  const ctx = { workDir, projectRoot, workspace, configMemory: config?.memory ?? {} };
 
   const outcome = await runMemory(stripConfigFlag(argv), {
     config,

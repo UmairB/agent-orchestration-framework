@@ -18,6 +18,7 @@
 // envelope assertions mirror board-face-contract.test.mjs (the m08 byte-for-byte
 // oracle) — this is a rename-parity check over the SAME envelope, not a re-derivation.
 import assert from "node:assert/strict";
+import { assertFrozenShape } from "./support/answering-side.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -145,28 +146,38 @@ export const workUiBoardServesUnchangedTests = [
       const { root } = await makeFixture();
       try {
         await withBoard(root, async ({ url }) => {
-          // list → a flat ListRow[] array carrying the 7 contract fields.
+          // list → the `{ items, stalenessSeconds }` envelope whose rows are the flat
+          // ListRow[] carrying the 7 contract fields. m43 / story 04 (ADR-010/R4.1) added
+          // the envelope so the cache-staleness window is stated once per response instead
+          // of being duplicated per row or defaulted in the client. This file's subject —
+          // that `aof work ui` serves the SAME board face as `aof work board` ever did — is
+          // unmoved: the row shape below is byte-identical and the change is on the route
+          // for both callers alike.
           const list = await getJson(url, "/api/work/list");
           assert.equal(list.status, 200, "list answers 200");
-          assert.ok(Array.isArray(list.body), "list is a flat JSON array (the m03 success envelope)");
-          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"].sort();
-          for (const item of list.body) {
-            assert.deepEqual(Object.keys(item).sort(), expected, `${item.ref} carries the 7 contract fields`);
+          assert.equal(typeof list.body.stalenessSeconds, "number", "the envelope states the window once");
+          const listRows = list.body.items;
+          assert.ok(Array.isArray(listRows), "the list rows are a flat JSON array (the m03 row envelope)");
+          // m43 / story 06 (ADR-005 rule 3) — the seven frozen fields are all still present and
+          // unrenamed; the answering-side stamp is the only permitted addition (ADR-014/E1).
+          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"];
+          for (const item of listRows) {
+            assertFrozenShape(item, expected, `${item.ref} carries the 7 contract fields`);
           }
-          assert.ok(list.body.some((r) => r.ref === "03"), "milestone 03 present");
-          assert.ok(list.body.some((r) => r.ref === "03/01"), "story 03/01 present");
+          assert.ok(listRows.some((r) => r.ref === "03"), "milestone 03 present");
+          assert.ok(listRows.some((r) => r.ref === "03/01"), "story 03/01 present");
 
           // doc → { ref, doc, present, body } with the verbatim SPEC.md body.
           const doc = await getJson(url, "/api/work/doc?ref=03&doc=SPEC");
           assert.equal(doc.status, 200, "doc answers 200");
-          assert.deepEqual(Object.keys(doc.body).sort(), ["body", "doc", "present", "ref"], "the frozen doc envelope keys");
+          assertFrozenShape(doc.body, ["body", "doc", "present", "ref"], "the frozen doc envelope keys");
           assert.equal(doc.body.ref, "03");
           assert.equal(doc.body.present, true);
 
           // tasks → { ref, tasks } with the parsed feature counts.
           const tasks = await getJson(url, "/api/work/tasks?ref=03/01");
           assert.equal(tasks.status, 200, "tasks answers 200");
-          assert.deepEqual(Object.keys(tasks.body).sort(), ["ref", "tasks"], "the frozen tasks envelope keys");
+          assertFrozenShape(tasks.body, ["ref", "tasks"], "the frozen tasks envelope keys");
           assert.equal(tasks.body.ref, "03/01");
           assert.equal(tasks.body.tasks.length, 1, "the one seeded feature");
           assert.equal(tasks.body.tasks[0].file, "00_routes.feature");
