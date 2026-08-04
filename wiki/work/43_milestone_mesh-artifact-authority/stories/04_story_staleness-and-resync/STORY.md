@@ -4,10 +4,10 @@ number: 04
 slug: staleness-and-resync
 title: "Staleness, never eviction — schema v8 stamps every cached row with who reported it and when, ONE strict-> predicate decides freshness on both sides of the wire, the board renders a stale badge and a Resync action, and no deletion may ever be predicated on time"
 parent: 43
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-03
 depends: [43/02]
 schema: 1
 aofVersion: 0.1.0
@@ -107,33 +107,33 @@ source of truth for this story's UI — no mock was elicited; see Notes).
      attribution, Resync, the legend and the two review gates. 43/02's upsert seam is the only dependency
      that crosses out of this story. -->
 
-- [ ] `00_schema-v8-provenance-columns.feature` — opening a v7 store lands `node_id` + `updated_at` on
+- [x] `00_schema-v8-provenance-columns.feature` — opening a v7 store lands `node_id` + `updated_at` on
       `work_items` through a guarded, idempotent, in-place `ALTER`, leaves every existing row intact and
       unstamped, and touches neither content table. (AC 1, AC 2)
-- [ ] `01_cached-rows-carry-provenance.feature` — every row and artifact the read surface serves carries
+- [x] `01_cached-rows-carry-provenance.feature` — every row and artifact the read surface serves carries
       who reported it and when, under storage names in the store and wire names on the response, with the
       configured window stated once and the frozen CLI array contract unbroken. (AC 3, AC 5, AC 6)
-- [ ] `02_stale-marks-never-evicts.feature` — the shared strict-`>` predicate judges the row and each
+- [x] `02_stale-marks-never-evicts.feature` — the shared strict-`>` predicate judges the row and each
       artifact separately at the boundary, a missing instant reads `unknown` rather than `stale`, and an
       ancient row is marked stale yet stays fully readable — removal is by author retraction, never by age.
       (AC 2, AC 4, AC 6, AC 12)
-- [ ] `03_freshness-ramp-and-stale-badge.feature` — one headless ramp module emits the three states, the
+- [x] `03_freshness-ramp-and-stale-badge.feature` — one headless ramp module emits the three states, the
       board paints `stale` as a dashed `muted` pill left of the right-anchored status chip, and the badge
       appears within one second of the crossing off the cosmetic tick with zero network. (AC 4, AC 7, AC 8)
-- [ ] `04_provenance-line-and-node-attribution.feature` — the provenance line renders for every
+- [x] `04_provenance-line-and-node-attribution.feature` — the provenance line renders for every
       cache-published item with `(this node)` for control-authored rows, each doc body states its own
       provenance above the markdown, and the retired "documents aren't bridged" notice survives only as the
       reworded cache-miss placeholder. (AC 2, AC 11)
-- [ ] `05_resync-requests-fresh-push.feature` — one Resync door, on the provenance line, only while stale;
+- [x] `05_resync-requests-fresh-push.feature` — one Resync door, on the provenance line, only while stale;
       it reports the call and never the data, so there is no success toast and the badge clearing is the
       only confirmation; the in-flight state is bounded on both legs. (AC 9, AC 10)
-- [ ] `06_resync-owner-unreachable.feature` — DESIGN's seven Resync states as a table: muted when the world
+- [x] `06_resync-owner-unreachable.feature` — DESIGN's seven Resync states as a table: muted when the world
       did not answer and destructive only when the request was rejected, acknowledgements decaying while
       facts persist, never pre-disabled on presence, and the cached copy never hidden by a failure. (AC 10)
-- [ ] `07_freshness-legend-documents-the-window.feature` — both legends gain a Freshness block painting the
+- [x] `07_freshness-legend-documents-the-window.feature` — both legends gain a Freshness block painting the
       real badge and stating the configured window from the wire, degrading to words — never to a guessed
       number — when the wire does not carry it. (AC 5)
-- [ ] `08_staleness-a11y-contract.feature` — the ramp's programmatic accessibility contract: the word
+- [x] `08_staleness-a11y-contract.feature` — the ramp's programmatic accessibility contract: the word
       `stale` always carries the meaning, a glyph-only badge is `role="img"` + `aria-label`, Resync names
       its object and agrees visibly and programmatically about being busy, and the permanent polite live
       region announces outcomes while the crossing is deliberately silent. (AC 13)

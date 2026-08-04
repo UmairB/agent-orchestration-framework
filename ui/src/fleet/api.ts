@@ -142,6 +142,15 @@ export type GlobalWorkItem = {
   parent: string | null;
   sourcePath: string;
   assignment?: WorkAssignment;
+  // The CACHE-PROVENANCE pair (milestone 43 / ADR-006) — the SAME two wire names
+  // the board's row carries, mapped from `work_items.node_id`/`updated_at` by the
+  // one row mapper (`global-work-store.mjs`'s `mapItemRow` → `toWireProvenance`),
+  // never a fleet-local translation. Both keys are EXPLICITLY PRESENT (null when
+  // unknown) for a cache-published row and ABSENT for a workspace the cache does
+  // not publish: presence, not value, is what tells a surface whether this is a
+  // copy of something another machine said.
+  reportedBy?: string | null;
+  syncedAt?: string | null;
 };
 
 // A global registry node descriptor (src/global-node-registry.mjs) — the "node
@@ -189,6 +198,13 @@ export type GlobalDiagnostics = {
 // The GLOBAL scope's status payload (src/global-mesh-query.mjs shapeGlobalStatus).
 // Also the shape a globally-started server answers for a `?scope=local` deep-link
 // (the SAME fields, narrowed to one workspace, with `scope` relabelled "local").
+// milestone 43 / story 04 — the payload also carries the cache-freshness WINDOW,
+// once for the whole response, beside the rows that carry the facts a reader
+// applies it to (`shapeGlobalStatus`, the same key and the same resolver as the
+// board's `/api/work/list` envelope). Its WIRE NAME is deliberately not spelled
+// in this file: `../board/freshness.mjs`'s `readStalenessWindow` is the ONE
+// reader of it in `ui/`, which is what keeps the threshold from growing a second
+// copy — or a default — on this side of the wire.
 export type GlobalMeshStatus = {
   scope: "global" | "local";
   workspaceId?: string | null;

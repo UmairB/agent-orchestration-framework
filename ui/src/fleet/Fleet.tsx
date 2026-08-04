@@ -7,6 +7,16 @@ import { FleetTerminalView } from "./terminal-view/FleetTerminalView";
 import { fleetCurrentWorkLines } from "./runs.mjs";
 import { StatusRing, StatusChip, StatusDot } from "../board/status";
 import type { WorkStatus } from "../board/api";
+// milestone 43 / story 04 — the FIFTH read-only ramp, imported from the ONE
+// headless module the board also imports (never a fleet copy), so the two
+// surfaces cannot disagree about whether a row is stale or about how the badge
+// is painted. The fleet's own delta is deliberately small: a badge in the
+// milestone card's row-1 cluster with the full sentence in its `title`, and the
+// legend's fourth block. There is NO Resync here — one door per item, on the
+// surface that also shows WHAT is stale (DESIGN §Surface 2).
+import { freshness, isCachePublished, readStalenessWindow } from "../board/freshness.mjs";
+import type { Freshness } from "../board/freshness.mjs";
+import { StaleBadge, FreshnessLegend } from "../board/StaleBadge";
 import {
   scopeLabel,
   scopeFromSearch,
@@ -162,6 +172,19 @@ export function Fleet() {
   const nowIso = useMemo(() => new Date(nowMs).toISOString(), [nowMs]);
   const state = pageState({ loading, error, status });
 
+  // milestone 43 / story 04 — the fleet's own reading of the SAME ramp, off the
+  // SAME 1s clock the freshness label already rides. The window is read through
+  // the ONE reader in `freshness.mjs`; when this payload does not carry it, the
+  // ramp withholds every verdict (no badge is asserted on a window nobody
+  // stated) and the legend degrades to words. Null for a row the cache does not
+  // publish, which is what keeps a non-mesh fleet free of the vocabulary.
+  const stalenessWindow = readStalenessWindow(status);
+  const freshnessOf = useCallback(
+    (item: GlobalWorkItem | null | undefined): Freshness | null =>
+      item && isCachePublished(item) ? freshness(item, { now: nowMs, windowSeconds: stalenessWindow }) : null,
+    [nowMs, stalenessWindow]
+  );
+
   // milestone 38 / story 04 / task 06 (DESIGN §Surface 2 A8, F22) — on a
   // successful assign the surface fires EXACTLY ONE additional re-load, so
   // region 5's m35 `assigned` chip lands within a round trip of the 2xx instead
@@ -189,6 +212,7 @@ export function Fleet() {
         onScopeChange={onScopeChange}
         fetchedAt={fetchedAt}
         nowIso={nowIso}
+        stalenessWindow={stalenessWindow}
         onRefresh={() => void load(scope, { silent: true })}
       />
 
@@ -201,7 +225,7 @@ export function Fleet() {
         // scenario 1: "does not call the mesh broken or failed").
         <EmptyFleet scope={scope} />
       ) : isGlobalStatus(status) ? (
-        <GlobalScopeView status={status} onAssigned={onAssigned} />
+        <GlobalScopeView status={status} freshnessOf={freshnessOf} onAssigned={onAssigned} />
       ) : (
         // populated — the two LOCAL card grids. A stale node RENDERS (degraded
         // liveness, never dropped); a nodes-but-no-boards fleet shows the Boards
@@ -235,6 +259,7 @@ function TopBar({
   onScopeChange,
   fetchedAt,
   nowIso,
+  stalenessWindow,
   onRefresh,
 }: {
   group: string;
@@ -242,6 +267,10 @@ function TopBar({
   onScopeChange: (next: Scope) => void;
   fetchedAt: number | null;
   nowIso: string;
+  // The configured cache-staleness window off the status payload, for the
+  // legend's Freshness block. Null when the wire does not carry it, in which
+  // case the block states the window in words rather than guessing a number.
+  stalenessWindow: number | null;
   onRefresh: () => void;
 }) {
   const freshness =
@@ -266,7 +295,7 @@ function TopBar({
       <span className="h-4 w-px bg-border" aria-hidden="true" />
       <ScopeControl scope={scope} onScopeChange={onScopeChange} />
       <span className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-        <Legend />
+        <Legend windowSeconds={stalenessWindow} />
         {/* ⟳ refresh — click re-polls in place (non-tearing, keep-last-good on a
             failed silent poll). NO push/stream chrome. It both shows freshness AND
             triggers a manual re-poll. Re-polls under the CURRENT scope (task 02
@@ -313,13 +342,18 @@ function ScopeControl({ scope, onScopeChange }: { scope: Scope; onScopeChange: (
   );
 }
 
-// The four-ramp legend (◷ legend) — the reader's key to node-liveness vs
-// run-state vs assignment-lifecycle (never confused; item-status is one level
-// down, not here). milestone 35 / story 03 (DESIGN §1 item 1 / §4 legend-parity
-// note) — the "Assignment" block is the THIRD ramp, below "Node liveness" and
-// "Run state", one row per lifecycle state (mark + label) so the new ramp is
+// The legend (◷ legend) — the reader's key to node-liveness vs run-state vs
+// assignment-lifecycle (never confused; item-status is one level down, not
+// here). milestone 35 / story 03 (DESIGN §1 item 1 / §4 legend-parity note) —
+// the "Assignment" block is the THIRD ramp, below "Node liveness" and "Run
+// state", one row per lifecycle state (mark + label) so the new ramp is
 // self-documenting exactly as the two existing ramps are.
-function Legend() {
+//
+// milestone 43 / story 04 — and "Freshness" is the FOURTH, for the same reason
+// and by the same rule, painting the REAL badge component the surfaces paint
+// (never a fleet-local drawing) and stating the window from the wire. It is the
+// LAST block on both this legend and the board's, so the two read alike.
+function Legend({ windowSeconds }: { windowSeconds: number | null }) {
   return (
     <span className="group relative" aria-label="Legend">
       <span className="cursor-default select-none">◷ legend</span>
@@ -342,6 +376,9 @@ function Legend() {
           <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" /> running</span>
           <span className="flex items-center gap-1.5"><span className="grid h-3 w-3 place-items-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground">✓</span> done</span>
           <span className="flex items-center gap-1.5"><span className="grid h-3 w-3 place-items-center rounded-full bg-destructive text-[8px] font-bold text-destructive-foreground">!</span> failed</span>
+        </span>
+        <span className="mt-2 block">
+          <FreshnessLegend windowSeconds={windowSeconds} />
         </span>
       </span>
     </span>
@@ -369,7 +406,17 @@ function RegionHeader({ label, summary }: { label: string; summary: string }) {
 // still the global-shaped payload — task 01 scenario 3); the CURRENT workspace
 // path is surfaced when the narrowing is active (DESIGN "--local … current
 // workspace path/name is visible").
-function GlobalScopeView({ status, onAssigned }: { status: GlobalMeshStatus; onAssigned: () => void }) {
+function GlobalScopeView({
+  status,
+  freshnessOf,
+  onAssigned,
+}: {
+  status: GlobalMeshStatus;
+  // The fleet's ONE freshness reading for an item row — computed once at the
+  // page root off its own 1s clock and the payload's window, then handed down.
+  freshnessOf: (item: GlobalWorkItem | null | undefined) => Freshness | null;
+  onAssigned: () => void;
+}) {
   return (
     <main className="min-w-0 flex-1 px-4 py-7 sm:px-8">
       <div className="mx-auto flex w-full min-w-0 max-w-[1240px] flex-col gap-8">
@@ -379,7 +426,7 @@ function GlobalScopeView({ status, onAssigned }: { status: GlobalMeshStatus; onA
           </p>
         ) : null}
         <WorkspacesSummary workspaces={status.workspaces} />
-        <MilestonesList items={status.items} workspaces={status.workspaces} nodes={status.nodes} onAssigned={onAssigned} />
+        <MilestonesList items={status.items} workspaces={status.workspaces} nodes={status.nodes} freshnessOf={freshnessOf} onAssigned={onAssigned} />
         <GlobalNodePanel nodes={status.nodes} />
         <DiagnosticsRegion status={status} />
       </div>
@@ -422,7 +469,7 @@ function WorkspacesSummary({ workspaces }: { workspaces: GlobalWorkspace[] }) {
 // consumers and local filtering, but this overview intentionally stays at the
 // milestone level and reuses the work-board card language: status ring/chip,
 // progress track, and child story dots derived from the same flat item stream.
-function MilestonesList({ items, workspaces, nodes, onAssigned }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[]; nodes: GlobalNode[]; onAssigned: () => void }) {
+function MilestonesList({ items, workspaces, nodes, freshnessOf, onAssigned }: { items: GlobalWorkItem[]; workspaces: GlobalWorkspace[]; nodes: GlobalNode[]; freshnessOf: (item: GlobalWorkItem | null | undefined) => Freshness | null; onAssigned: () => void }) {
   const milestones = milestoneCardModels(items);
   const workspaceFor = (workspaceId: string) => workspaces.find((w) => w.workspaceId === workspaceId) ?? null;
   const summary = `${milestones.length} ${plural(milestones.length, "milestone")}`;
@@ -441,6 +488,7 @@ function MilestonesList({ items, workspaces, nodes, onAssigned }: { items: Globa
               milestone={milestone}
               workspace={workspaceFor(milestone.item.workspaceId)}
               nodes={nodes}
+              freshness={freshnessOf(milestone.item)}
               onAssigned={onAssigned}
             />
           ))}
@@ -450,7 +498,7 @@ function MilestonesList({ items, workspaces, nodes, onAssigned }: { items: Globa
   );
 }
 
-function GlobalMilestoneCard({ milestone, workspace, nodes, onAssigned }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null; nodes: GlobalNode[]; onAssigned: () => void }) {
+function GlobalMilestoneCard({ milestone, workspace, nodes, freshness, onAssigned }: { milestone: FleetMilestoneCard; workspace: GlobalWorkspace | null; nodes: GlobalNode[]; freshness: Freshness | null; onAssigned: () => void }) {
   const m = milestone;
   const isDone = m.item.status === "done";
   const progressLabel = m.total === 0 ? "not started" : "stories done";
@@ -527,7 +575,28 @@ function GlobalMilestoneCard({ milestone, workspace, nodes, onAssigned }: { mile
           <StatusRing status={asWorkStatus(m.item.status)} size={18} />
           <span className="mono shrink-0 text-sm text-muted-foreground">{m.item.ref}</span>
           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">milestone</span>
-          <span className="ml-auto shrink-0">
+          {/* milestone 43 / story 04 (DESIGN §Surface 2) — row 1's `ml-auto
+              shrink-0` span becomes a CLUSTER of `badge + chip`, so the status
+              chip keeps its exact right-edge anchor and nothing moves when a card
+              crosses the threshold. Attribution here is ON DEMAND (the badge's
+              `title`) rather than a new line: region 5's geometry is
+              fitness-locked, the workspace strip above already carries workspace
+              identity in full, and the node panel already answers "is that machine
+              alive". There is NO Resync on this surface — one door per item, on
+              the board, which is also the surface that shows WHAT is stale. The
+              badge is a non-interactive <span>, so the drill-in <button> it sits
+              inside stays a single focus stop (m38/ADR-012).
+
+              THE FORM IS `short` AT EVERY WIDTH, pinned from the render (DESIGN
+              §"The form is chosen by the SURFACE, not by the viewport",
+              2026-08-03). This card's width is viewport-INVARIANT by
+              construction: the grid above is `repeat(auto-fill, minmax(320px,
+              1fr))`, so a wider viewport buys COLUMNS rather than width and the
+              card sits in a ~300–370px band at every breakpoint — narrower at
+              2560 than at 1280. A viewport-keyed ladder would therefore paint the
+              WIDEST form in the NARROWER card, which reads as a bug. */}
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <StaleBadge freshness={freshness} form="short" />
             <StatusChip status={asWorkStatus(m.item.status)} />
           </span>
         </div>

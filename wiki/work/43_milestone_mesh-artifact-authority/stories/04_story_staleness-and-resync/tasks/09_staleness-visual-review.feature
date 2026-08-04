@@ -33,8 +33,12 @@
 # per-workspace port that changes on every daemon restart, so its base URL must be supplied
 # to the render at capture time and NEVER hard-coded; the FLEET is the fixed-port surface.
 # Breakpoints: 1280 (primary judgement width), 768, 390 — and 360 additionally for the fleet,
-# because that surface's existing width findings were measured at 360–414px and the badge's
-# degraded forms must survive that squeeze.
+# because that surface's existing width findings were measured at 360–414px. Note (PO, on the
+# designer's ruling, 2026-08-03): 360 is NOT there to watch a yield ladder fire — that ladder
+# is withdrawn (see the pinned-forms scenario below). The fleet card is roughly the SAME width
+# at 360 as at 1280, because its grid adds columns rather than width, so the two renders are a
+# cross-check on each other: a fit at 360 means a fit everywhere, and a failure at 1280
+# indicts the grid rather than the phone.
 #
 # THE BASELINE SEAM. Once the designer judges a render CONFORMS, that approved render becomes
 # the baseline QA's `toHaveScreenshot` visual-regression guards against future drift. This
@@ -147,23 +151,40 @@ Feature: the freshness ramp reads as degraded rather than broken — a design-co
     And no surface anywhere still claims that this board bridges the item list but not its documents
     And the verdict for this region is CONFORMS or names a specific GAP
 
-  # THE DEGRADED FORMS, at the widths that force them. A yield order of discrete whole drops
-  # — never a shrink factor, never an overprint.
-  Scenario Outline: the badge yields in whole discrete drops at narrow widths, and the word `stale` is never truncated
+  # THE PINNED FORMS, at every width — does each surface's ONE form actually FIT?
+  # REWRITTEN at review (PO on the designer's ruling, 2026-08-03). This scenario used to ask
+  # whether a viewport-driven yield ladder fired in the right order. DESIGN has WITHDRAWN that
+  # ladder — not deferred it — because it was keyed to the wrong variable: the fleet grid is
+  # `repeat(auto-fill, minmax(320px, 1fr))`, so it adds COLUMNS rather than width and its card
+  # sits in a ~300–370px band at EVERY breakpoint (narrower at 2560 than at 1280), which would
+  # have made a viewport rule paint `full` at 2560 and `minimal` at 390 in cards of the same
+  # size. m38's derived character budgets deliberately do NOT transfer either: those are honest
+  # only because their datum is `mono`, where `ch` is the exact advance — the badge is fixed
+  # strings in Inter, so a `ch` budget would be false precision. The binding rule is now
+  # "the form is chosen by the SURFACE, not the viewport". So the question a person answers
+  # here is no longer "did it yield correctly" but "does the ONE pinned form fit".
+  Scenario Outline: each surface's pinned badge form FITS at every width, and the word `stale` is never truncated
     Given the <surface> is rendered at <width>
-    When the designer judges the badge against DESIGN §"Three forms, and a pinned yield order"
-    Then the badge is in its widest FITTING form
-    And the drop was a whole form change, never a shrink factor and never a truncation of the word `stale`
-    And no two elements in the row occupy the same pixels
-    And what yielded first is <first to yield>
+    When the designer judges the badge against DESIGN §"The form is chosen by the SURFACE, not the viewport"
+    Then the badge is in that surface's PINNED form — <pinned form> — at this width as at every other
+    And it fits: the row does not overflow, nothing is clipped, and no two elements occupy the same pixels
+    And the word `stale` is never truncated, shrunk by a scale factor, or overprinted
+    And the status chip still holds the row's right-edge anchor
+    And <what to check hardest>
     And the verdict for this breakpoint is CONFORMS or names a specific GAP
 
     Examples:
-      | surface | width | first to yield                                                  |
-      | board   | 1280  | nothing — every badge is in its full form                       |
-      | board   | 768   | the badge drops to short only where the row genuinely cannot fit it |
-      | board   | 390   | the badge drops to short, then minimal                          |
-      | fleet   | 360   | the uppercase `milestone` label drops WHOLE first, then the badge goes full → short → minimal |
+      | surface | width | pinned form | what to check hardest                                                                 |
+      | board   | 1280  | full        | THE HIGHEST-RISK CELL — the detail header is ~382px with nothing in row 1 able to shrink, so an over-wide row OVERFLOWS rather than compressing; use a `milestone` type chip and an `in-progress` status (the longest of each) |
+      | board   | 768   | full        | the overview card row 1, whose cluster carries badge + chip together                   |
+      | board   | 390   | full/short  | the lane card meta line: its barber bar is `min-w-0 flex-1` and the badge `shrink-0`, so the BAR must yield and the badge must not be crowded onto it |
+      | fleet   | 1280  | short       | judge this WITH the 360 render — the card is ~the same width at both, so a fit here is a fit everywhere and a failure here indicts the grid, not the phone |
+      | fleet   | 360   | short       | the uppercase `milestone` label must NOT drop: a label that vanishes only when a row happens to be stale becomes a covert second staleness signal (m38 DG-20) |
+    # If a render shows an overflow, the REMEDY is to pin that surface one rung down
+    # (full → short; nothing else drops) and record it — a finding against DESIGN, never a
+    # runtime ladder, shrink factor, overprint or truncation. `minimal` is RESERVED and has no
+    # painter in this milestone; its `role="img"` + `aria-label` contract still binds (task 08),
+    # which is what keeps it safe to pin a future surface to.
 
   # THE LEGEND — a new ramp documents itself, painting the real component.
   Scenario: both legends carry a Freshness block painting the real badge, as their last section

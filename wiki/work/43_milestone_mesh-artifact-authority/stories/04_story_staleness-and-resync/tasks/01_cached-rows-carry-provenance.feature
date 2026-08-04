@@ -119,15 +119,22 @@ Feature: every cache-published row and artifact carries who reported it and when
   Scenario Outline: an unstamped row serialises its unknowns EXPLICITLY — present and null, never omitted and never fabricated
     Given a pre-v8 row for "43/04" whose stored `node_id` is <stored node> and whose stored `updated_at` is <stored time>
     When the list response is serialised
-    Then the row carries a `syncedAt` key whose value is null
+    Then the row carries a `syncedAt` key whose value is <wire time>
     And it carries a `reportedBy` key whose value is <wire node>
     And neither key is omitted from the row, and neither is filled with the serving node's id, the current time, or an empty string
 
     Examples:
-      | case                        | stored node     | stored time | wire node       |
-      | never stamped (pre-v8)      | NULL            | NULL        | null            |
-      | node known, instant unknown | umairs-mac-mini | NULL        | umairs-mac-mini |
-      | instant known, node unknown | NULL            | 30s ago     | null            |
+      | case                        | stored node     | stored time | wire node       | wire time        |
+      | never stamped (pre-v8)      | NULL            | NULL        | null            | null             |
+      | node known, instant unknown | umairs-mac-mini | NULL        | umairs-mac-mini | null             |
+      | instant known, node unknown | NULL            | 30s ago     | null            | that same instant|
+    # CORRECTED at build (PO, 2026-08-03): the Then read "a `syncedAt` key whose value is
+    # null" UNCONDITIONALLY while the table varied the stored instant, so row 3 — whose
+    # stored `updated_at` IS 30s ago — could not satisfy it. The two halves of the scenario's
+    # subject are independent (a node without an instant, an instant without a node), which is
+    # the whole point of the third row; the Then had only been parameterised over one of them.
+    # The implementation asserted the correct thing throughout; it was the contract that could
+    # not be met as written.
 
   # ADR-002's frozen contract — the additive rule, asserted so the bump cannot break the
   # CLI face while serving the board.

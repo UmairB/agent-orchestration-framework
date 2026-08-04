@@ -58,6 +58,10 @@ import { TERMINAL_FRAME_KIND } from "./mesh-terminal-relay-bridge.mjs";
 // connection-bound nodeId every other apply* uses). The DOWN-frame + tick live in
 // mesh-recovery-push.mjs; only the result-apply is dispatched here.
 import { RECOVERY_PUSH_RESULT_KIND, applyRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
+// m43 / story 04 (ADR-010/R4.2) — the RESYNC result UP-frame, the same discipline one
+// mechanism over: the wire-kind literal and the apply live in mesh-resync.mjs (the ONE
+// contract home) and are dispatched here, never re-spelled.
+import { RESYNC_RESULT_KIND, applyResyncResultFrame } from "./mesh-resync.mjs";
 // VERIFICATION (continue-on-existing-branch, 2026-07-25) — when a worker reports a `done`
 // carrying the branch it pushed, record it as the item's active mesh branch so the next
 // continue/verify dispatch reuses it (the work accumulates on ONE branch per item).
@@ -814,6 +818,7 @@ export async function applyStreamFrame(store, frame, options = {}) {
   if (frame?.kind === "write-credential-request") return applyWriteCredentialRequestFrame(store, frame, options);
   if (frame?.kind === EFFECT_STEP_FRAME_KIND) return applyEffectStepFrame(store, frame, options);
   if (frame?.kind === RECOVERY_PUSH_RESULT_KIND) return applyRecoveryPushResultFrame(store, frame, options);
+  if (frame?.kind === RESYNC_RESULT_KIND) return applyResyncResultFrame(store, frame, options);
   return { published: false, skipped: true, code: "unknown-frame-kind" };
 }
 

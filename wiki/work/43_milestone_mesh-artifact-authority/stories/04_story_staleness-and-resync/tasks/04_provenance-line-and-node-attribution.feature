@@ -46,13 +46,20 @@ Feature: provenance is always on where there is room and on demand where there i
 
     Examples:
       | case                       | situation                                                     | line 2                                                    | line 1                     |
-      | running on a worker        | being executed right now by "umairs-mac-mini"                 | synced 4s ago · from umairs-mac-mini                      | present, exactly as today  |
+      | running on a worker        | being executed right now by "umairs-mac-mini"                 | synced 10s ago · from umairs-mac-mini                     | present, exactly as today  |
       | settled after a run        | finished executing; the worker has stopped reporting          | stale · synced 12m ago · from umairs-mac-mini             | present, exactly as today  |
       | never executed, remote     | reported by "aof-wsl" and never dispatched                    | synced 30s ago · from aof-wsl                             | absent                     |
       | never executed, local      | published by the control node itself                          | synced 30s ago · from aof-control (this node)             | absent                     |
     # Line 1 keeps its existing rule verbatim (`item.execution` or nothing); line 2 is the
     # new always-on content. Both live in the SAME existing box — no new panel, dock or
     # column is introduced.
+    # CORRECTED at build (PO, 2026-08-03): the first row read `synced 4s ago`, which the one
+    # `relativeTime` formatter these lines delegate to cannot produce — it renders anything
+    # under five seconds as `just now` (`ui/src/board/runs.mjs:32`). Second instance of the
+    # same defect in this story (task 03's ramp table was the first), which is why the retro
+    # note generalises it rather than logging it twice: an Examples cell that spells out a
+    # formatter's output is a claim about that formatter's thresholds, and refine has no gate
+    # that checks it. The row's subject is a seconds-grain fresh age, so the age moved.
 
   # AC 11 — `(this node)`. Under this milestone the control is simply one more writer into
   # the cache, so its rows are attributed like anyone else's, with a clause that says which

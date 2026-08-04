@@ -53,14 +53,18 @@ Feature: the freshness ramp renders a dashed `muted` stale badge that appears wi
 
     Examples:
       | case              | syncedAt              | state   | badge                | label                                       |
-      | freshly reported  | 4 seconds before now  | fresh   | (none)               | synced 4s ago · from umairs-mac-mini        |
+      | freshly reported  | 10 seconds before now | fresh   | (none)               | synced 10s ago · from umairs-mac-mini       |
       | inside the window | 120 seconds before now| fresh   | (none)               | synced 2m ago · from umairs-mac-mini        |
       | past the window   | 720 seconds before now| stale   | ◌ stale · 12m ago    | stale · synced 12m ago · from umairs-mac-mini |
       | never stamped     | null                  | unknown | (none)               | synced time unknown · from umairs-mac-mini  |
     # `unknown` renders NO badge and an explicit words-form label: a fact slot degrades to
     # "unknown" (DESIGN GAP D2), an ASSERTION is withheld. Every relative age comes from the
-    # product's one `relativeTime` formatter, so `4s ago` / `2m ago` / `12m ago` are its
+    # product's one `relativeTime` formatter, so `10s ago` / `2m ago` / `12m ago` are its
     # words, not this ramp's.
+    # CORRECTED at build (PO, 2026-08-03): the first row read `4 seconds` / `synced 4s ago`,
+    # which that one formatter cannot produce — it renders anything under five seconds as
+    # `just now` (`ui/src/board/runs.mjs:32`). The row's subject is a seconds-grain fresh
+    # age, so the age moved rather than the vocabulary; the ramp's own claims are unchanged.
 
   # AC 4 — the two sides of the wire must agree AT the instant. Same three boundary points
   # task 02 samples on the server.
@@ -133,10 +137,21 @@ Feature: the freshness ramp renders a dashed `muted` stale badge that appears wi
       | detail panel header        | the detail panel header row 1  | full    | ◌ stale · 12m ago |
       | overview milestone card    | the overview card row 1        | full    | ◌ stale · 12m ago |
       | lane card meta line        | the lane card meta line        | short   | ◌ stale           |
-      | fleet card at its narrowest| the fleet milestone card row 1 | minimal | ◌                 |
+      | fleet milestone card       | the fleet milestone card row 1 | short   | ◌ stale           |
     # The region-5 lesson applied pre-emptively: a chip that spends its width on a long node
     # id truncates the thing it exists to say. The node lives in `title` and on the
     # provenance line (task 04).
+    # CORRECTED at review (PO on the designer's ruling, 2026-08-03): the last row read
+    # `fleet card at its NARROWEST | minimal | ◌`, which assumed a viewport-driven yield
+    # ladder. DESIGN has WITHDRAWN that ladder — not deferred it — because it was keyed to the
+    # wrong variable: the fleet grid is `repeat(auto-fill, minmax(320px, 1fr))`, so it adds
+    # COLUMNS rather than width and the card sits in a ~300–370px band at EVERY breakpoint
+    # (it is narrower at 2560 than at 1280). A viewport rule would therefore paint `full` in a
+    # ~345px card at 2560 and `minimal` in a ~330px card at 390. The binding rule is now
+    # "the form is chosen by the SURFACE, not the viewport", so this card has ONE form at all
+    # widths — `short`. `minimal` is RESERVED with no painter in this milestone; its
+    # `role="img"` + `aria-label` contract still binds (task 08), which is what keeps it safe
+    # to pin a future surface to.
 
   # AC 7 / DESIGN's per-region States checklist — the ABSENT cases. Freshness is never
   # asserted before it is known, and a page-level failure is not a freshness fact.
@@ -153,7 +168,16 @@ Feature: the freshness ramp renders a dashed `muted` stale badge that appears wi
       | unknown instant         | the row's `syncedAt` is null                          | the provenance line says so in words instead (task 04)                |
       | list fetch failed       | the list request errored                              | the existing page-level error line owns the failure, unchanged        |
       | fresh row               | the row is 60 seconds old inside a 300s window        | freshness is the norm and earns no mark                               |
-      | a `uat` gate bar        | an overview `uat` gate bar is rendered                | gates are local acceptance items with no cached provenance — absent, not "fresh" |
+      | a `uat` gate bar        | an overview `uat` gate bar is rendered                | no gate bar paints a badge — the ramp is an ITEM-SURFACE vocabulary; absent, not "fresh" |
+    # CORRECTED at build (PO, 2026-08-03): the last row's stated reason was false, though its
+    # outcome was right. It read "gates are local acceptance items with no cached provenance";
+    # measured at the wire, a `uat` gate row DOES carry `reportedBy` + `syncedAt` like any
+    # other row — `publishWorkspaceSnapshot` publishes it exactly as it publishes the rest.
+    # The badge is absent because no gate-bar component paints one, which is a statement about
+    # WHERE the ramp is rendered, not about what the cache holds. Left as a scenario because
+    # the outcome is the contract; the reason is corrected so a future author does not build
+    # on it. (If gates SHOULD be excluded from cache publication, that is a separate claim
+    # this story never made and the implementation quietly disagrees with — flagged for retro.)
 
   # AC 9 / m38 ADR-012, the structural half that belongs with the BADGE: a card that is
   # itself a `<button>` may hold the badge, because the badge is not interactive. (The "one

@@ -11,7 +11,7 @@
 // comments are stripped for display.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { workApi } from "./api";
-import type { DocName, RunRecord, TaskFeature, TaskLane, WorkItem, WorkStatus } from "./api";
+import type { DocName, DocResponse, RunRecord, TaskFeature, TaskLane, WorkItem, WorkStatus } from "./api";
 import type { PrimaryAction } from "./action.mjs";
 import {
   historyOrder,
@@ -23,6 +23,9 @@ import {
   selectCurrentRun,
 } from "./runs.mjs";
 import { StatusRing, StatusChip } from "./status";
+import { StaleBadge, ProvenanceLabel } from "./StaleBadge";
+import type { Freshness, FreshnessRecord } from "./freshness.mjs";
+import { ProvenanceLine } from "./ProvenanceLine";
 import { ActionsStrip } from "./ActionsStrip";
 import { Markdown } from "./Markdown";
 
@@ -39,9 +42,12 @@ function tabsFor(item: WorkItem): Tab[] {
   return ["SPEC"];
 }
 
+// `record` is the doc response VERBATIM, kept so the ARTIFACT's own provenance
+// (`reportedBy`/`syncedAt` — the same two wire names the row carries) reaches the
+// freshness ramp without being flattened into a second shape here.
 type DocState =
   | { kind: "loading" }
-  | { kind: "present"; body: string }
+  | { kind: "present"; body: string; record: DocResponse }
   | { kind: "absent" }
   | { kind: "error"; message: string };
 
@@ -57,6 +63,10 @@ export function DetailPanel({
   item,
   action,
   actor,
+  freshnessOf,
+  now,
+  pollMs,
+  onResyncWatch,
   onRunAgent,
   onContinue,
   onMirror,
@@ -68,6 +78,30 @@ export function DetailPanel({
   // only when there is no selection (the panel shows the empty prompt instead).
   action: PrimaryAction | null;
   actor: string;
+  // The board's ONE freshness reading, computed against its 1s cosmetic tick and
+  // the wire's configured window. It is a FUNCTION rather than a value because
+  // this panel judges TWO subjects independently — the row, and each doc body it
+  // renders: "a doc can be older than the row that names it" (ADR-006). One
+  // predicate, two subjects, one `now`. NULL means the cache does not publish
+  // that subject — a workspace that is not mesh-enabled shows no provenance
+  // region at all, which is what preserves the board's plain local default (the
+  // same discipline the execution overlay already keeps).
+  freshnessOf: (record: FreshnessRecord | null | undefined) => Freshness | null;
+  // The BOARD's cosmetic clock, threaded from the composition root rather than
+  // ticked again here (43/ADR-010 R4.4 as corrected by ADR-015/F6: *lifting* a
+  // derivation a level means the lower one GOES). The runs section renders
+  // relative timestamps off it; it re-renders and fetches nothing.
+  now: number;
+  // The BOARD's own list-poll cadence, threaded here rather than re-declared:
+  // the Resync acknowledgement's hold IS exactly one poll interval, and its
+  // watch window is three of them. One number, measured where it is consumed.
+  pollMs: number;
+  // Armed while a Resync is waiting for a pushed copy, so the Board can run its
+  // bounded poll for the duration of the watch window (43/ADR-010 R4.3). Without
+  // it "no answer" would be structurally guaranteed rather than measured: a
+  // settled board schedules no list poll of its own, and a settled row is
+  // exactly the case Resync exists for.
+  onResyncWatch: (watching: boolean) => void;
   onRunAgent: (ref: string, command?: string) => void;
   // CONTINUE is routed separately (2026-07-26): the server decides whether it runs
   // here or on the worker node that last worked on the item.
@@ -98,7 +132,7 @@ export function DetailPanel({
       .doc(item.ref, tab)
       .then((response) => {
         if (cancelled) return;
-        setDoc(response.present ? { kind: "present", body: response.body } : { kind: "absent" });
+        setDoc(response.present ? { kind: "present", body: response.body, record: response } : { kind: "absent" });
       })
       .catch((error) => {
         if (cancelled) return;
@@ -143,6 +177,13 @@ export function DetailPanel({
   }
 
   const tabs = tabsFor(item);
+  const freshness = freshnessOf(item);
+  // The DOC's own freshness, judged separately from the row's. `present`-gated:
+  // an absent or still-loading doc asserts nothing about its own age.
+  const docFreshness = doc.kind === "present" ? freshnessOf(doc.record) : null;
+  // WHICH machine's artifact is missing — null when it is this one's. The whole
+  // cache-miss copy hangs off this (see `remoteReporter` below).
+  const elsewhere = remoteReporter(item, freshness);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-card">
@@ -154,21 +195,38 @@ export function DetailPanel({
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${typeChipClasses(item.type)}`}>
             {item.type}
           </span>
-          <span className="ml-auto">
+          {/* The `ml-auto` anchor moved from the chip's own span onto a CLUSTER
+              holding the badge then the chip, so the status chip keeps its exact
+              right-edge anchor and nothing moves when the row crosses the
+              threshold (DESIGN documented-default 3 — the m03 header baselines
+              survive). Status outranks freshness: the chip stays `text-xs`, the
+              badge is `text-[11px]`. */}
+          <span className="ml-auto flex items-center gap-1.5">
+            <StaleBadge freshness={freshness} form="full" />
             <StatusChip status={item.status} />
           </span>
         </div>
         <h2 className="mt-2 text-[16px] font-bold leading-snug">{item.title ?? humanizeSlug(item.slug)}</h2>
-        {/* The MESH-EXECUTION line (VERIFICATION 2026-07-25). This board reads the LOCAL
-            checkout's frontmatter, which says `not-started` for work a WORKER ran on
-            another machine on its own branch — so without this the panel silently
-            contradicts reality. Rendered ONLY when the mesh has actually dispatched this
-            item; a local-only item shows nothing new. A LIVE run is stated as running on
-            its node; a FINISHED one names the branch the work actually landed on, which is
-            the fact the local view cannot know. */}
-        {item.execution ? (
+        {/* THE PROVENANCE BOX (milestone 43 — widened). It used to render only
+            while `item.execution` existed, which made attribution an EXECUTION
+            detail; under this milestone the cache is the read surface, so "which
+            node authored this copy, and when" is a first-class fact of the item
+            and the box renders for every cache-published row — most of all for a
+            SETTLED one, which is the row most likely to be old. Two lines in the
+            SAME box; no new panel, dock or column is introduced. The whole region
+            is absent for a workspace that is not mesh-enabled. */}
+        {item.execution || freshness ? (
           <div className="mono mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {/* LINE 1 — the MESH-EXECUTION facts (VERIFICATION 2026-07-25),
+                unchanged. This board reads the LOCAL checkout's frontmatter,
+                which says `not-started` for work a WORKER ran on another machine
+                on its own branch — so without this the panel silently contradicts
+                reality. Rendered ONLY when the mesh has actually dispatched this
+                item; a local-only item shows nothing new. A LIVE run is stated as
+                running on its node; a FINISHED one names the branch the work
+                actually landed on, which is the fact the local view cannot know. */}
+            {item.execution ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               {/* m42 interactive worker terminals — a session the worker reports
                   WAITING ON A HUMAN (code: needs-input) says so, amber, ahead of
                   the generic "running": the primary button is the answer's door. */}
@@ -218,7 +276,23 @@ export function DetailPanel({
                   · watch on the fleet →
                 </a>
               ) : null}
-            </div>
+              </div>
+            ) : null}
+            {/* LINE 2 — provenance/freshness + the item's ONE Resync door. The
+                badge above and this line never disagree: both read the SAME ramp
+                descriptor, so when the badge appears the line gains its `stale ·`
+                prefix in the same tick. It is also why the badge is never the
+                only signal of its own state — a reader who misses a small pill
+                still meets the fact in prose. */}
+            {freshness ? (
+              <ProvenanceLine
+                key={item.ref}
+                item={item}
+                freshness={freshness}
+                pollMs={pollMs}
+                onResyncWatch={onResyncWatch}
+              />
+            ) : null}
           </div>
         ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
@@ -260,7 +334,16 @@ export function DetailPanel({
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <DocBody tab={tab} doc={doc} item={item} records={records} onRunAgent={onRunAgent} />
+        <DocBody
+          tab={tab}
+          doc={doc}
+          item={item}
+          docFreshness={docFreshness}
+          elsewhere={elsewhere}
+          now={now}
+          records={records}
+          onRunAgent={onRunAgent}
+        />
       </div>
 
       {/* footer actions */}
@@ -330,12 +413,23 @@ function DocBody({
   tab,
   doc,
   item,
+  docFreshness,
+  elsewhere,
+  now,
   records,
   onRunAgent,
 }: {
   tab: Tab;
   doc: DocState;
   item: WorkItem;
+  // The DOC's own freshness — judged from `work_item_docs`' own instant, never
+  // inherited from the row's. Null when this body came off local disk (there is
+  // no cached copy to attribute) or when it is absent/still loading.
+  docFreshness: Freshness | null;
+  // The node that reported this ROW when that node is ANOTHER machine, else null
+  // — the cache-miss copy's whole precondition (see `remoteReporter`).
+  elsewhere: string | null;
+  now: number;
   records: Record<string, boolean>;
   onRunAgent: (ref: string, command?: string) => void;
 }) {
@@ -358,14 +452,25 @@ function DocBody({
   if (tab === "RUNS") {
     // The item's run log, read through /api/work/run-status (the current-run strip
     // + the newest-first history + the ↻ Rerun affordance + the poll refresh).
-    return <RunsTab item={item} onRunAgent={onRunAgent} />;
+    return <RunsTab item={item} elsewhere={elsewhere} now={now} onRunAgent={onRunAgent} />;
   }
 
   return (
     <div className="space-y-5">
+      {/* PER-ARTIFACT PROVENANCE, and it is the doc region's FIRST child (DESIGN
+          §Surface 1c) — ABOVE the rendered markdown, before the reader reads the
+          body rather than after it. A doc can be older than the row that names it
+          (`work_item_docs` carries its OWN `node_id` + `updated_at`), so this line
+          is judged independently of the header's. No second badge and no second
+          Resync: the header's ONE door serves the item and its artifacts alike. */}
+      {docFreshness ? (
+        <div className="flex flex-wrap items-center gap-x-2">
+          <ProvenanceLabel freshness={docFreshness} />
+        </div>
+      ) : null}
       {/* A milestone's SPEC tab leads with a Records summary (which milestone docs exist). */}
       {item.type === "milestone" && tab === "SPEC" ? <MilestoneRecords records={records} /> : null}
-      <DocMarkdown tab={tab} doc={doc} item={item} />
+      <DocMarkdown tab={tab} doc={doc} item={item} elsewhere={elsewhere} />
     </div>
   );
 }
@@ -407,23 +512,37 @@ function MilestoneRecords({ records }: { records: Record<string, boolean> }) {
   );
 }
 
-function DocMarkdown({ tab, doc, item }: { tab: Tab; doc: DocState; item: WorkItem }) {
+function DocMarkdown({
+  tab,
+  doc,
+  item,
+  elsewhere,
+}: {
+  tab: Tab;
+  doc: DocState;
+  item: WorkItem;
+  elsewhere: string | null;
+}) {
   const docLabel = tab === "SPEC" && item.type !== "milestone" ? "document" : tab;
   if (doc.kind === "loading") return <p className="mono text-sm text-muted-foreground">Loading {docLabel}...</p>;
-  // A WORKER-REPORTED row has no document on THIS machine (2026-07-26): the stream
-  // bridges the item list, not doc bodies, so `work:doc` resolves the ref against a
-  // local work dir that does not contain it. Rendering the raw resolver error made the
-  // board assert a story exists and then deny it. Say where the document actually is.
-  if (doc.kind === "error" && item.fromWorker) {
-    return (
-      <RemoteContentNotice
-        node={item.reportedBy ?? item.execution?.nodeId ?? null}
-        what={`This ${docLabel} document`}
-      />
-    );
+  // milestone 43 — THE CACHE-MISS STATE, and all that survives of the retired
+  // "documents aren't bridged" notice. Its old copy became FALSE the moment the
+  // cache became the read surface: the body IS here, and the provenance line
+  // says whose it is. What is left is the genuine miss, reworded to the m03
+  // absent-not-error convention — the SAME dashed treatment as every other
+  // absent doc, never the error token, because absent is not an error. A
+  // resolution failure on a row ANOTHER MACHINE reported is a miss, not a fault:
+  // this checkout was never going to have that file. On a row THIS node
+  // authored, the same failure is a genuine fault and keeps the m03 error line.
+  if (doc.kind === "error" && elsewhere != null) {
+    return <CachedDocAbsent what={docLabel} node={elsewhere} />;
   }
   if (doc.kind === "error") return <p className="text-sm text-accent">Could not load {docLabel}: {doc.message}</p>;
   if (doc.kind === "absent") {
+    // A row ANOTHER machine reported names that node as the one which has not
+    // reported the doc; a row THIS node authored keeps its own m03 copy,
+    // unchanged — including its call to action.
+    if (elsewhere != null) return <CachedDocAbsent what={docLabel} node={elsewhere} />;
     // For a story this is its STORY.md; for a milestone, the chosen record doc.
     const what =
       tab === "STORY"
@@ -436,7 +555,43 @@ function DocMarkdown({ tab, doc, item }: { tab: Tab; doc: DocState; item: WorkIt
     return <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">{what}</div>;
   }
   // Render the cleaned (frontmatter/comment-stripped) body as HTML, not raw text.
+  // The artifact's own provenance line is the region's FIRST child and is emitted
+  // by `DocBody` above, so this returns the body and nothing else.
   return <Markdown source={cleanDoc(doc.body)} />;
+}
+
+// The node that reported this row, for the copy the cache-miss placeholder needs.
+// `reportedBy` is the row's own recorded author and outranks the execution
+// overlay's node, which answers a different question (who was it ASSIGNED to).
+function reportingNode(item: WorkItem): string | null {
+  return item.reportedBy ?? item.execution?.nodeId ?? null;
+}
+
+// THE CACHE-MISS DISCRIMINATOR (43/ADR-015 F5) — the reporting node, but ONLY
+// when it is ANOTHER machine. Null means "this item is mine", and every empty
+// state below then keeps its m03 copy.
+//
+// WHY IT IS NOT A PRESENCE TEST, WHICH IS WHAT IT WAS. Before this story
+// `reportedBy` reached a row only when a WORKER streamed it, so `reportedBy !=
+// null` was a serviceable proxy for "this artifact lives elsewhere". This story
+// widened the key to EVERY cache-published row — including the control's own —
+// which turned the proxy permanently true on every mesh-enabled workspace, i.e.
+// on every operator's own machine. The panel then told them that `aof-control`
+// had failed to report a VERIFICATION for an item that simply has none yet, and
+// deleted the `run aof:verify (Run agent)` call to action that answers it. That
+// is the same defect `RemoteContentNotice` was retired FOR ("its copy became
+// FALSE the moment the cache became the read surface"), made again in the
+// replacement.
+//
+// `freshness.local` is the SAME fact the provenance line's ` (this node)` clause
+// is rendered from, deliberately: AC 11's clause and this branch are one
+// question asked twice, and answering them from two expressions is how they
+// drift apart. A null `freshness` is a row the cache does not publish at all —
+// the plain local board — where the pre-mesh rule still applies: an item another
+// node EXECUTED still reports where its records are.
+function remoteReporter(item: WorkItem, freshness: Freshness | null): string | null {
+  if (freshness?.local === true) return null;
+  return reportingNode(item);
 }
 
 // The story's TASKS tab — its tasks/*.feature files, parsed server-side.
@@ -554,15 +709,21 @@ const RUNS_POLL_MS = 5000;
 
 function RunsTab({
   item,
+  elsewhere,
+  now,
   onRunAgent,
 }: {
   item: WorkItem;
+  elsewhere: string | null;
+  // The BOARD's 1s cosmetic tick, threaded from the composition root, which keeps
+  // the relative timestamps + the "refreshed Ns ago" label live without
+  // re-fetching. This section used to run a SECOND interval of its own at the
+  // same cadence; it is gone, and the reason lives once, at the root that owns
+  // the tick (Board.tsx, `CLOCK_TICK_MS`; 43/ADR-015 F6).
+  now: number;
   onRunAgent: (ref: string, command?: string) => void;
 }) {
   const [state, setState] = useState<RunsState>({ kind: "loading" });
-  // A 1s tick keeps the relative timestamps + the "refreshed Ns ago" label live
-  // without re-fetching (pure cosmetic re-render; the data is poll-driven).
-  const [now, setNow] = useState(() => Date.now());
   // Ignore a stale response: only the latest request applies, so an item change
   // or an overlapping poll never clobbers the view with an out-of-date payload.
   const reqRef = useRef(0);
@@ -588,20 +749,18 @@ function RunsTab({
   useEffect(() => {
     void load(false);
     const poll = setInterval(() => void load(true), RUNS_POLL_MS);
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      clearInterval(poll);
-      clearInterval(tick);
-    };
+    return () => clearInterval(poll);
   }, [load]);
 
   if (state.kind === "loading") return <p className="mono text-sm text-muted-foreground">Loading runs…</p>;
   if (state.kind === "error") return <p className="text-sm text-accent">Could not load runs: {state.message}</p>;
 
   const runs = state.runs;
-  // The item is passed so an empty LOCAL run list on a worker-run item reports where the
-  // records actually are, instead of the false "this item hasn't been run".
-  if (runs.length === 0) return <RunsEmpty item={item} />;
+  // The REMOTE reporter is passed so an empty LOCAL run list on an item ANOTHER
+  // machine reported says where the records actually are, instead of the false
+  // "this item hasn't been run" — and so an item THIS machine authored keeps that
+  // m03 copy, which for it is simply true.
+  if (runs.length === 0) return <RunsEmpty elsewhere={elsewhere} />;
 
   const nowIso = new Date(now).toISOString();
   const current = selectCurrentRun(runs);
@@ -768,12 +927,15 @@ function RunHistory({ runs, nowIso }: { runs: RunRecord[]; nowIso: string }) {
 
 // The empty state (DESIGN documented-default 5): a dashed-border card, the m03
 // doc-absent convention — an item with no runs is ABSENT, not an error.
-function RunsEmpty({ item }: { item?: WorkItem }) {
-  // "No runs yet" is a LIE for an item a worker has run (2026-07-26): run records live
-  // in the worker's own checkout and are not bridged, so this tab reads an empty local
-  // runs/ directory. Absence of a local record is not absence of a run.
-  const node = item?.execution?.nodeId ?? item?.reportedBy ?? null;
-  if (node) return <RemoteContentNotice node={node} what="This item's run history" />;
+function RunsEmpty({ elsewhere }: { elsewhere: string | null }) {
+  // "No runs yet" is a LIE for an item another node has run (2026-07-26): this tab
+  // reads an empty LOCAL runs/ directory, and absence of a local record is not
+  // absence of a run. Under milestone 43 the honest answer is the same one every
+  // other cache miss gets — that node has not reported any — rather than the
+  // retired "not bridged, go and watch the fleet" claim. For an item THIS machine
+  // authored, though, an empty local runs/ IS an empty run history, and the m03
+  // copy is the true one (ADR-015/F5).
+  if (elsewhere != null) return <CachedDocAbsent what="run history" node={elsewhere} />;
   return (
     <div className="flex flex-col items-center gap-2 rounded-md border border-dashed border-border p-6 text-center">
       <span className="inline-block h-6 w-6 rounded-full border-2 border-dashed border-muted-foreground/45" aria-hidden="true" />
@@ -783,25 +945,18 @@ function RunsEmpty({ item }: { item?: WorkItem }) {
   );
 }
 
-// The one notice for "this content lives on another node". The board bridges a worker's
-// item ROWS but not its documents, run records or terminal (TECH_DEBT item 6) — until it
-// does, say so plainly and point at the surface that CAN show it, rather than rendering a
-// resolution error or a false "nothing here".
-function RemoteContentNotice({ node, what }: { node: string | null; what: string }) {
+// THE CACHE MISS — all that survives of the retired `RemoteContentNotice`
+// (milestone 43 / story 04). Its copy ("this board bridges the item list, not its
+// documents or runs … Open the fleet to watch that node") became FALSE the moment
+// the cache became the read surface, and false copy on a degraded path is worse
+// than no copy: it sent the reader to another screen for something that is now
+// here. What remains is the honest absence, in the m03 absent-not-error
+// convention — a dashed placeholder, the `muted` ramp, no error token, no link
+// away, no claim about what this board can or cannot reach.
+function CachedDocAbsent({ what, node }: { what: string; node: string | null }) {
   return (
-    <div className="flex flex-col items-start gap-2 rounded-md border border-dashed border-border p-4">
-      <p className="text-sm text-muted-foreground">
-        {what} lives on <span className="mono text-foreground">{node ?? "another node"}</span>, not on this
-        machine — this board bridges the item list, not its documents or runs.
-      </p>
-      <a
-        href="http://127.0.0.1:4181/?mode=fleet&scope=global"
-        target="_blank"
-        rel="noreferrer"
-        className="text-sm underline underline-offset-2"
-      >
-        Open the fleet to watch {node ?? "that node"} →
-      </a>
+    <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+      No cached {what} yet — {node ?? "the reporting node"} has not reported one.
     </div>
   );
 }

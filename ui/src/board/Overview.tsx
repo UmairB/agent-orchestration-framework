@@ -4,19 +4,27 @@
 // board. Task counts are deliberately omitted (not in the contract).
 import type * as React from "react";
 import { StatusRing, StatusChip, StatusDot } from "./status";
+import { StaleBadge } from "./StaleBadge";
 import type { Derived, Milestone } from "./model";
 import { milestoneOfGate, titleOf } from "./model";
 import type { WorkItem } from "./api";
+import type { Freshness } from "./freshness.mjs";
 
 export function Overview({
   derived,
   gateWaiting,
+  freshnessOf,
   onOpenMilestone,
   onOpenGate,
 }: {
   derived: Derived;
   // Optional per-gate "waiting on" labels fetched from /api/work/next (may be empty).
   gateWaiting: Record<string, string[]>;
+  // The board's ONE freshness reading for a row (Board-computed off the 1s tick
+  // and the wire's window). Null for a row the cache does not publish — a
+  // `uat` gate is a LOCAL acceptance item and carries none, which is why the
+  // gate bar takes no badge at all (absent, not `fresh`).
+  freshnessOf: (item: WorkItem | null | undefined) => Freshness | null;
   onOpenMilestone: (ref: string) => void;
   onOpenGate: (gate: WorkItem) => void;
 }) {
@@ -45,7 +53,12 @@ export function Overview({
 
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
         {milestones.map((m) => (
-          <MilestoneCard key={m.item.ref} milestone={m} onOpen={() => onOpenMilestone(m.num)} />
+          <MilestoneCard
+            key={m.item.ref}
+            milestone={m}
+            freshness={freshnessOf(m.item)}
+            onOpen={() => onOpenMilestone(m.num)}
+          />
         ))}
       </div>
 
@@ -75,7 +88,15 @@ function SummaryChip({ className, children }: { className: string; children: Rea
   );
 }
 
-function MilestoneCard({ milestone, onOpen }: { milestone: Milestone; onOpen: () => void }) {
+function MilestoneCard({
+  milestone,
+  freshness,
+  onOpen,
+}: {
+  milestone: Milestone;
+  freshness: Freshness | null;
+  onOpen: () => void;
+}) {
   const m = milestone;
   const isDone = m.item.status === "done";
   const progressLabel = m.total === 0 ? "not started" : "stories done";
@@ -94,12 +115,19 @@ function MilestoneCard({ milestone, onOpen }: { milestone: Milestone; onOpen: ()
       onClick={onOpen}
       className="group flex flex-col rounded-[10px] border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
     >
-      {/* 1 — ring · ref · MILESTONE · status chip */}
+      {/* 1 — ring · ref · MILESTONE · [stale badge] status chip.
+          The `ml-auto` moved from the chip's own span onto a CLUSTER holding the
+          badge then the chip, so the chip keeps its exact right-edge anchor and
+          NOTHING MOVES when a row crosses the threshold (DESIGN documented-default
+          3 — the m03 header baselines survive). The badge is a non-interactive
+          <span>: this card is itself a <button>, and an HTML button may never nest
+          another interactive element (m38/ADR-012), so there is no Resync here. */}
       <div className="flex items-center gap-2">
         <StatusRing status={m.item.status} size={18} />
         <span className="mono text-sm text-muted-foreground">{m.item.ref}</span>
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">milestone</span>
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-1.5">
+          <StaleBadge freshness={freshness} form="full" />
           <StatusChip status={m.item.status} />
         </span>
       </div>
