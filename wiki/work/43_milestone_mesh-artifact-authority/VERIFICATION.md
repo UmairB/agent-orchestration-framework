@@ -620,3 +620,124 @@ prerequisite for a board↔fleet "this node" agreement lane).
 Task 09's 14 `@uat` scenarios are the human half, and they are genuinely human: the perceptual
 judgements no element-tree assertion can reach. `STORY.md` stays `status: in-review`; **no accept
 decision is recorded for 43/04 yet.**
+
+### Post-incident note (2026-08-05) — this story's UI half was destroyed and rebuilt
+
+While story 06 was in review, a `git worktree remove --force` followed a Windows junction into the
+repo's real `node_modules` and, through npm's workspace symlink `@aof/ui → ../../ui`, deleted the
+`ui/` directory. Story 04's UI half was **uncommitted** at the time. Recovery, in full:
+
+- All 56 tracked files restored from `573c18c`. 49 were byte-perfect (unmodified since HEAD).
+- `Board.tsx` recovered **byte-exact** from a QA mutation backup (581 lines, verified to differ from
+  HEAD and to carry 8 story-04 markers).
+- `ProvenanceLine.tsx`, `StaleBadge.tsx`, `freshness.mjs`/`.d.mts`, `resync.mjs`/`.d.mts` recovered
+  from full write snapshots — `ProvenanceLine.tsx` at **204 lines, exactly** ADR-016/G10's
+  independently measured figure.
+- `DetailPanel.tsx`, `Fleet.tsx`, `board/api.ts`, `fleet/api.ts`, `Overview.tsx` and `BoardLanes.tsx`
+  were **genuinely lost and re-derived** against the six intact UI suites (which live in `test/`, not
+  `ui/`, and survived) plus ADR-014/015/016's recorded end state.
+
+The re-derivation is corroborated independently of the tests: a saved copy of the `ProvenanceLine`
+block *as it lived inline* in `DetailPanel.tsx`, removed from the transcript replay, yields **993
+lines** — ADR-016/G10's measured figure to the line; the delivered file is 994, matching the number
+already recorded above. `DetailPanel.tsx` 994 ≤ 1,000 ceiling, `Fleet.tsx` 1,532 ≤ 1,560.
+
+**Re-verified after recovery, by the orchestration rather than the agent that did the work: 374 tests
+/ 0 failed across 36 suites**, `ui-build` green, `tsc -b` exit 0. The story's evidence above stands
+unchanged. One deviation accepted and recorded: `now={now}` was added to `Board.tsx`'s `<DetailPanel>`
+call site (the byte-exact backup predates ADR-015's must-fixes), without which F-B2's "leaf interval
+deleted, root `now` threaded down" could not hold.
+
+---
+
+## 43/05 · Gate-time propagation — built and validated 2026-08-04, **AWAITING `@manual` + `@uat`**
+
+Lanes in scope: **`@executable`** (tasks 00–03, 19 scenarios) + **`@manual`** (task 04, the two-node
+soak) + **`@uat`** (task 05, 3 scenarios). No UI surface, so no design-conformance step.
+
+### Verification evidence
+
+- **`@executable` suite green — 19/19**, plus the 3 fitness-function lanes, re-run **independently by
+  the orchestration**: `gate-propagation-reuse-door-advance` (6), `-refusals-leave-branch` (4),
+  `-reported-on-base-channel` (4), `-create-path-regression` (5).
+- **`acd-gate-propagation-never-discards` is now genuinely ARMED** — it asserted an absence while no
+  advance existed; a `merge` now exists in `mesh-worktree.mjs` and the ban is live. Green.
+- **Mutation evidence, seven mutations against red-lane counts** — the strongest in the milestone:
+  reverting the advance to the shipped no-op reds **17/22**; `merge` → `rebase` reds **14** (including
+  the fitness function itself); removing `merge --abort` reds 3 (including the armed lane); removing
+  the dirty guard reds exactly the 3 dirty lanes; suppressing the report reds 7. The pass also caught
+  one of the story's **own** over-permissive lanes — "HEAD stays on the item branch" stayed green
+  without the mechanism — which was then tightened.
+- `aof work validate` (whole stream) **PASS**.
+
+### Two judgement calls, both recorded in the source
+
+1. **`already-current` is decided BEFORE the dirty-tree guard**, because that path runs no writing git
+   verb: refusing a dispatch that was never going to touch the tree would convert a working continue
+   into a coded failure for no safety gain. Every path that *acts* — `--ff-only` included, which
+   writes tracked files exactly as a merge does — stays behind the guard. Ruled correct (ADR-016/Q5).
+2. **The create door checks base availability *before* materialization; the reuse door *after*.** Not
+   an inconsistency: create needs the commit **to build** the worktree, reuse needs it **to advance**
+   the branch. One rule — *the availability check runs immediately before the operation that needs the
+   commit* — and task 03's two rows ("no worktree was materialized" / "the worktree is retained for
+   inspection") are its consequences, not its cause. Ruled sound (ADR-016/Q6).
+
+### Findings
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| F-05.1 | Task 00's cell `git rev-list --count <branch>^1..<branch>` is 1 is **arithmetically unreachable** in the diverged case the scenario is about — that range is the merge PLUS the whole control line it brought in (measured: 2). It could only read 1 if the lines had never diverged | contract | blocker | PO corrected the cell to `--count --merges`, which asserts what it was reaching for | closed |
+| F-05.2 | Both new refusal codes shared one message naming **no cure and no worktree path**, though ADR-010/R5.1 already requires the cure be named | diagnostics | major | `gatePropagationRefusalDetail` now names the cause, the cure and the retained worktree; ADR-016/G8 makes R5.1 general to every coded refusal this milestone adds | closed |
+
+### Accept decision — 43/05
+
+**NOT YET.** Everything automatable is green and the structural review says **CONFORMS to ADR-008**,
+but task 04's `@manual` two-node soak and task 05's `@uat` both need a deployed build on two real
+nodes and an operator. `STORY.md` stays `status: in-review`.
+
+---
+
+## 43/06 · The readers migrate — built and validated 2026-08-04, **AWAITING `@manual`**
+
+Lanes in scope: **`@executable`** (tasks 00–04, 43 scenarios) + **`@manual`** (task 05, the
+remote-authored read-surface soak). No `@uat`, no UI surface.
+
+### Verification evidence
+
+- **`@executable` suite green — 58/58** across the five suites (`cache-read-seam` 13,
+  `-resolve-chokepoint` 12, `-control-leaves` 9, `-boundary-holds` 10, `-doctor-overlay` 14),
+  re-run independently by the orchestration; **298 tests / 0 failed** across the 29-suite blast radius
+  including 43/05.
+- **Twelve mutations**, each reddening the expected lanes: `seam-to-disk` reds 20; `stage1-revert` and
+  `stage2-revert-leaves` red *different* task sets, which is what proves the staging claims; the
+  worktree-boundary, doctor-overlay, write-door and degrade mutations each red their own.
+- `aof work validate` (whole stream) **PASS**.
+
+### The mutation pass found a real defect in the build — the story's best evidence
+
+`worker-reads-cache` came back **green**, which looked like defence in depth and was not: it was green
+for the wrong reason, and chasing why exposed two fixture lies (a path-derived workspace id and an
+arbitrary path). Corrected to production shape, `aof work find` run **inside a worker's own worktree**
+answered with **another node's `in-progress` over the worktree's freshly-authored `done`** — the echo
+chamber arriving through the command layer, which is precisely the hazard ADR-005's positive pinning
+exists to prevent. Fixed with `isMeshWorktree` in the seam; the scenario now asserts through `invoke`,
+because the direct call cannot see it.
+
+### Findings
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| F-06.1 | **Cross-milestone contract collision** — m03/ADR-002 freezes `work list --json` at exactly seven fields; ADR-005 rule 3 wants every row to say which side answered. `acd-work-list-contract` RED | contract | blocker | The stamp is a **face projection**: stripped in the CLI adapter, kept on the command result and the board route. Decisive reason — the stamp is **not one key** (a cache-answered row carries three), so widening the contract would make its key set vary by deployment. ADR-016/G1; PO amended task 02's two clauses | closed |
+| F-06.2 | `acd-cache-read-surface-boundary`'s worker-side pin had been **green on the wrong subject since 43/03** — `readWorkspaceContentRecords` moved to `src/work-content-read.mjs` and the grep began matching a different `listItems` in the publish path, which ADR-005 says must NOT migrate | test-quality | blocker | Re-pointed at subjects by the architect; `src/mesh-launcher.mjs:1532` **added**, having been pinned by nothing at all (its rule lived only in a source comment) | closed |
+| F-06.3 | **A regression in the daemon's hot loop**: the presence tick opened the projection store once per workspace instead of once per tick (2→10 opens at 5 workspaces; ~27ms→~136ms). Verified GREEN at `6b4ab7f`, so caused by this story | performance | blocker | `sharedProjectionStore` — one open per tick, measured 1 open at every workspace count; `mesh-coordination-launcher` green 10/10 | closed |
+| F-06.4 | `freshnessGroup` — declared "disk-only and explicitly so", its **file not even in the diff** — had its gate silently become cache-authoritative, because `buildSnapshot` writes the cache's status into `meta.status`. Measured false finding against an item another machine was actively working | correctness | blocker | Gate reads `item.diskStatus`, which `overlayFor` already stamped on both branches. Rule: *a group's source is a property of the facts it consumes, not of whether its file is in the diff — and a gate is a read* | closed |
+| F-06.5 | `work:doctor` bypassed the seam's worktree guard entirely, calling `readCachedWorkFacts` directly — two false findings plus a knock-on inside a worker's own checkout, on **the normal mid-phase state** | correctness | blocker | `isMeshWorktree` exported as a workspace fact; doctor consults it and degrades to `cache: null` | closed |
+| F-06.6 | Two byte-identical copies of `reportedElsewhere` in `commands/doc.mjs` and `commands/tasks.mjs` | structure | minor | Collapsed to one exported predicate in `work-read.mjs` | closed |
+| F-06.7 | The staging claims (stage 0/1 states) are **not simultaneously satisfiable** with the delivered stage-3 tree | contract | non-blocker | Ruled an **acceptable discharge**: each suite asserts the invariant half behaviourally and the ordering half by mutation, with a re-runnable harness committed at the milestone's `reference/staging-mutations.mjs`. ADR-016 | closed |
+| F-06.8 | Two undeclared reds found and repaired: `board-worker-content` (3 exact-key `deepEqual`s the story had enriched) and `item-lock-holder-identity` (three call sites left on `resolveItemExact`'s old signature) — both green at `6b4ab7f`, so both this story's | correctness | major | Amended with `assertFrozenShape` + `assertAnswersFrom`; call sites re-pointed | closed |
+
+### Accept decision — 43/06
+
+**NOT YET.** Every `@executable` scenario is green, the structural review says **CONFORMS to ADR-005**
+after the seven must-fixes, and `validate` is PASS — but task 05's `@manual` remote-authored soak
+needs a deployed build on two nodes. `STORY.md` stays `status: in-review`.

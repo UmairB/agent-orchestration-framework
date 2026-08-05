@@ -36,9 +36,20 @@ story carries its authored contract. Nothing is built yet.
       disabling the drain entirely left four of them green, because the reconciliation backstop re-reads
       everything. ADR-013 records the ten rulings, including C8's supersession of AC5. **The `@uat` needs
       an operator reading a live remote agent's features on the control node, mid-run.**
-- [ ] `04_story_staleness-and-resync` — refined, not started (wave 2)
-- [ ] `05_story_gate-propagation` — refined, not started (wave 2)
-- [ ] `06_story_cache-read-surface` — refined, not started (wave 3)
+- [ ] `04_story_staleness-and-resync` — **built, reviewed, validated, committed** (2026-08-03/05).
+      374 `@executable` green across 36 suites, `validate 43/04` PASS. Reviewed four ways (architect
+      ×2, QA, designer) — 18 findings, every blocker closed. **AWAITING `@uat`** (task 09, 14
+      scenarios): design conformance is INCONCLUSIVE by construction until there is a render, which
+      is what task 09 exists to produce. Its UI half was destroyed and rebuilt mid-milestone — see
+      VERIFICATION's post-incident note.
+- [ ] `05_story_gate-propagation` — **built, reviewed, validated, committed** (2026-08-04). 19
+      `@executable` green + the now-ARMED `acd-gate-propagation-never-discards`; architect says
+      **CONFORMS to ADR-008**. **AWAITING `@manual`** (task 04, two-node soak) **and `@uat`**
+      (task 05).
+- [ ] `06_story_cache-read-surface` — **built, reviewed, validated, committed** (2026-08-04). 58
+      `@executable` green (298 across the blast radius); architect says **CONFORMS to ADR-005** after
+      seven must-fixes, including a hot-loop regression this story caused and two measured false
+      doctor findings. **AWAITING `@manual`** (task 05, the remote-authored soak).
 
 **STOPPED 2026-08-02 at the first `@uat` gate** (`aof:continue 43` → `aof:autonomous 43`). Wave 1 is
 accepted and committed; wave 2's first story is built and validated but cannot be accepted without a
@@ -84,7 +95,65 @@ diagnostics — a missing membership row surfaced two hops away as a *clone* fai
 
 ---
 
-## HANDOFF — `43/04` is next (fresh session, operator's choice 2026-08-03)
+## HANDOFF — every story is BUILT; only the human/two-node gates remain (2026-08-05)
+
+**All six stories are built, reviewed, validated and committed** on
+`refine/43-mesh-artifact-authority`. Nothing further can be proven from the control node alone: the
+four remaining lanes all need a **deployed build on two real nodes** and, for three of them, the
+operator's eyes. `aof work next 43` still returns `43/04` because it is `in-review` — that is the
+gate, not a bug.
+
+| Story | Status | What is outstanding |
+|---|---|---|
+| `43/01` `43/02` `43/03` | **done, accepted** | — (their `@manual` soaks were carried and closed at 43/03's live run) |
+| `43/04` | `in-review` | **`@uat` task 09** — 14 scenarios, the perceptual half |
+| `43/05` | `in-review` | **`@manual` task 04** (two-node gate soak) + **`@uat` task 05** |
+| `43/06` | `in-review` | **`@manual` task 05** (remote-authored read-surface soak) |
+
+Commits: `573c18c` (43/05) · `8873238` (43/04) · `fbc8cee` (43/06) · `988a9b7` (ADRs 014/015/016,
+the registration ratchet, two contract amendments).
+
+**Deploy sequence (unchanged, and required before any of the four lanes):**
+
+1. `node scripts/install-local.mjs --skip-ui` — then, because 43/04 changed `ui/`, run it **without**
+   `--skip-ui` at least once so `ui/dist` is rebuilt into the payload.
+2. `node scripts/install-local.mjs --wsl --skip-ui`
+3. Quit the desktop app from its own UI, then `aof mesh desktop run` (never a force-kill, never a
+   hand-spawned daemon).
+4. Verify `~/.aof/bin/aof.exe --version` reports `payload <buildId>` and both daemons print the same
+   `Build:` line.
+
+**Then the four lanes, in the order that shares the most setup:**
+
+- **`43/06` task 05** (`@manual`, agent-runnable) — dispatch a refine to the WSL worker against the
+  standing test-bed (`C:\Source\umair\aof-test-repo`, workspace `52294b307214c27d`) and confirm the
+  control's `aof work list` / `find` / `doc` now answer with the worker's rows. This is the exact
+  failure 43/03's live run recorded, so it is also the milestone's proof.
+- **`43/05` task 04** (`@manual`) — edit a gate on the control while an item is mid-flight, dispatch a
+  continue, and confirm the worker's reuse door merged the pinned base without discarding a commit.
+- **`43/05` task 05** and **`43/04` task 09** (`@uat`) — the operator's two. Task 09 needs the board
+  rendered at 1280/768/390 and the fleet at 1280/768/390/360.
+
+**Where to look FIRST at task 09** (from the design review, ranked by "the evidence cannot reach here
+and a mistake is expensive"): the **detail panel header at 1280** — a ~382px column in which nothing
+can shrink, so an over-wide row overflows rather than compressing, and by arithmetic it sits within
+~±20px of that boundary; use a `milestone` type chip with an `in-progress` status (the longest of
+each). Then the **`owner unreachable`** Resync message (the most likely production outcome and the
+easiest to over-alarm — if it reads red, that is a GAP), and the **blocked-AND-stale** item (two
+degraded facts, two vocabularies; the red must belong to the status chip alone).
+
+**Two things a fresh session should know before touching anything:**
+
+- **Never create a git worktree with a linked `node_modules`.** That is what destroyed `ui/` on
+  2026-08-04: a junction into the repo's real `node_modules`, then `git worktree remove --force`,
+  which recursed through it and — via npm's workspace symlink `@aof/ui → ../../ui` — into the source
+  tree. Use `npm ci` inside the worktree instead. Full account in the feedback log.
+- **`scripts/check.mjs` is not covered by the test-isolation guard hook** and shells the full suite
+  unisolated (which also binds `:4182`, held by the live daemon). Do not run it.
+
+---
+
+## HANDOFF — `43/04` is next (fresh session, operator's choice 2026-08-03) — SUPERSEDED
 
 `43/01`, `43/02`, `43/03` are done, accepted and committed on `refine/43-mesh-artifact-authority`;
 `aof work next 43` returns `43/04`.

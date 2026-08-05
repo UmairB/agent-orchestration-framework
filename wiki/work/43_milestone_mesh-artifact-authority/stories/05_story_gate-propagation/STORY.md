@@ -4,10 +4,10 @@ number: 05
 slug: gate-propagation
 title: "Gate-time propagation — a dispatch advances an existing item branch to the directive's pinned base at the worker's reuse door, by fast-forward when possible and a REAL MERGE otherwise, so a control-side gate edit reaches a continuing item and no worker commit is ever discarded"
 parent: 43
-status: in-progress
+status: in-review
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-04
+updated: 2026-08-05
 depends: [43/01]
 schema: 1
 aofVersion: 0.1.0
