@@ -53,7 +53,17 @@ Feature: END-TO-END on a REAL mesh — a milestone worked by a real worker reads
     And `aof work doc <ref>/<story> STORY --json` returns the worker's STORY.md body
     And `aof work run-status <ref> --json` returns the worker's run rows
     And `aof work tasks <ref>/<story> --json` returns the worker's task features
-    And every one of those answers says which side answered it
+    # AMENDED by the PO, 2026-08-05, at the live run — applying a ruling already made.
+    # As written this said "every one of those answers", which `work list --json` cannot
+    # satisfy: m03/ADR-002 freezes it at EXACTLY seven keys and `acd-work-list-contract`
+    # arms that. ADR-016/G1 (raised as F-06.1 at this story's build review) already ruled
+    # the provenance stamp a FACE PROJECTION — stripped in the CLI adapter, kept on the
+    # command result and the board route — because a cache-answered row carries THREE
+    # keys, so widening the contract would make its key set vary by deployment. The PO
+    # amended task 02's two clauses then and missed this identical clause. Amended now,
+    # same reason. Measured at the live run: 5 of 6 surfaces carry `answeredFrom`.
+    And every one of those answers EXCEPT `work list` says which side answered it
+    And `work list --json` stays exactly seven keys, its provenance riding the board route instead
 
   # THE PERMANENCE HALF — the measured disease was not staleness, it was staleness
   # actively republished over live truth on a timer. So the proof is not one read: it

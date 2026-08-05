@@ -881,3 +881,136 @@ production request, dead since m38 and never routed.
   derivable in `ui/` for the card that actually renders, the two surfaces answer the question from one
   source, and the cross-surface lane becomes writable. While there, decide the fate of the
   never-mounting local-shape components: render them or retire them, but not neither.
+
+---
+
+## 19. A settled run can read `running` forever — three surfaces disagree about one run's outcome
+
+**Measured 2026-08-05**, live on the standing test-bed, while running `43/06`'s `@manual` soak. For run
+`20260803T001759834Z-0000` (assignment `428fd15a`, milestone `00`, worker `umairs-msi-wsl`):
+
+| surface | state |
+|---|---|
+| the WORKER's own run record on disk | `state: done`, `outcome: done`, at `2026-08-03T00:56:11.602Z` |
+| the control's `global_assignments` row | `state: failed`, at `2026-08-03T00:56:11.846Z` — **244 ms later** |
+| the control's cached run row (`work run-status`) | `state: running`, `outcome: null`, `updatedAt` still the **start** instant |
+
+So `aof work run-status 00` shows an operator a run that has been "running" for two days, for work that
+finished. The agent phase genuinely succeeded; what failed 244 ms later was the push (item **14** — the
+clone-credential provider is fleet-global and cannot serve this `file://` test-bed), which also left the
+worktree undeleted.
+
+**Why it is not `43/06`'s bug, and why it still matters.** That story migrates READERS, and the read
+surface here is faithful: it reports exactly what it was told. The defect is upstream — the terminal
+transition that should have moved the cached run row was never reported, so the row keeps its opening
+state forever. The cache has no TTL eviction by design (this milestone's own ruling), which means a run
+row that misses its terminal frame is wrong **permanently** rather than briefly.
+
+**The fix, and the shape to prefer.** The run row needs the same authority discipline the item rows got
+in `43/02`: a terminal assignment state should either carry the run row with it or be reconciled against
+it. The cheap, honest interim is a *reconciliation* at read time — a run whose assignment is terminal
+cannot be `running` — but the durable fix is that whatever writes `global_assignments` terminal also
+settles the run row in the same transaction. Worth pairing with item **14**, since a push failure is
+exactly the path that produced it.
+
+---
+
+## 20. The desktop supervisor has NO programmatic stop — the documented deploy loop needs a human at a GUI
+
+**Measured 2026-08-05** while deploying this milestone to both nodes. `aof mesh desktop` exposes exactly
+two verbs, `install` and `run`. There is **no** `stop`, `quit` or `restart`. And the app is deliberately
+close-to-tray: `WM_CLOSE` (and the custom titlebar's `✕`) only hide the window — the source states it
+twice, *"Never a full exit — only Quit exits"* — so the ONLY graceful exit is the tray menu's Quit item,
+which calls `app.exit(0)`.
+
+The consequence is that `.claude/rules/build-deploy-restart.md`'s restart step is **not automatable**:
+an agent, a script, or a CI job cannot restart the control node's daemons, and every deploy stalls on an
+operator right-clicking a tray icon.
+
+**What makes this cheap to fix, and safe.** The child daemons are held in a Windows Job Object created
+with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and the source already names the equivalence:
+*"on Quit OR on the supervisor's OWN crash/exit (the OS closes every handle on process termination)"* —
+so the child tree is reaped identically either way. Two options, both small:
+
+- **(a) the narrow one, and it already works.** The per-child watchdog restarts a crashed child under
+  jittered backoff. Recycling the two supervised daemons therefore reloads a new payload **without
+  touching the supervisor at all** — verified this session: both came back on
+  `payload 7002ffb+dirty.20260805T112416` at `12:54:52Z`/`12:54:53Z` while the app kept running. This is
+  strictly better than the documented loop (no window churn, no relaunch) and deserves to be a verb:
+  `aof mesh desktop reload`.
+- **(b) the complete one.** `aof mesh desktop stop`, exiting the supervisor the way Quit does.
+
+**Also worth correcting in the rules while this is fixed:** the deploy loop says to verify the restart
+landed via `aof --version` and the daemons' `Build:` line. The first of those is **not evidence** — a
+node's presence `buildId` is re-read from `BUILD_ID.json` at every heartbeat, so it reports the INSTALLED
+payload even when the running daemons still hold the previous module graph. Measured this session: the
+roster showed the new build roughly 90 minutes before either daemon had restarted onto it. Only the
+`daemon-started` log line proves a restart.
+
+---
+
+## 21. A worker clones into its managed checkout even when one is already there, and fails the assignment
+
+**Measured 2026-08-05**, running `43/05`'s `@manual` two-node soak. With a managed checkout already
+present at `~/.aof/mesh/checkouts/<workspaceId>`, a dispatch fails outright:
+
+```
+assignment-repo-unavailable: git clone failed for workspace "52294b307214c27d":
+fatal: destination path '/home/umair/.aof/mesh/checkouts/52294b307214c27d'
+already exists and is not an empty directory.
+```
+
+The checkout in question was healthy — a clean clone of the right origin, on `main`, no uncommitted
+work — so the correct action was to FETCH into it, not to clone over it. Renaming it aside made the
+next dispatch succeed immediately, which is the confirmation.
+
+**It is systematic, not occasional — measured 2026-08-05.** Across six dispatches in one session,
+**every** dispatch onto an existing managed checkout failed this way, and the workspace only became
+dispatchable again by moving the directory aside by hand each time. In practice **a workspace is
+dispatchable exactly ONCE per worker checkout.** The 2026-08-03 history shows the same shape (three of
+five assignments to this workspace failed identically), which means this has been the state of things
+for at least two days of live use and was misread as unrelated failures.
+
+**Why it matters more than it looks.** The failure mode is "the mesh worked once and then stopped
+working", with a message that points at the clone rather than at the stale directory. It also compounds
+item **14**: both surface as `assignment-repo-unavailable`, so two unrelated causes wear one code and an
+operator cannot tell them apart without reading the detail string.
+
+**The fix.** Reuse an existing checkout whose `origin` matches the workspace's resolved clone URL
+(fetch + reset to the required base); clone only when the directory is absent or does not match. If a
+mismatched directory is found, say so in its own coded refusal rather than surfacing git's raw
+"already exists" text.
+
+---
+
+## 22. A failed assignment carries no code, so the fleet can only ever say "failed"
+
+**Measured 2026-08-05**, running `43/05`'s `@manual` soak. A deliberately conflicting gate edit was
+refused exactly as designed — the worker reported
+`assignment-gate-propagation-conflict` and settled the assignment with that code — yet the control's
+`global_assignments` row reads:
+
+```
+state=failed   code=NULL
+```
+
+Across the whole live store: **45 of 46 assignment rows carry `code = NULL`, including all 30 in state
+`failed`.** The only non-null value anywhere is a single `resumed`. So the coded reason is being dropped
+somewhere between the worker's `reportSettled(assignmentId, "failed", { code })` and the row an operator
+reads.
+
+**Why it matters.** The fleet is the surface an operator is told to use for "what happened to my
+assignment", and it can only ever answer `failed`. Every distinguishing fact — conflict vs missing base
+commit vs unavailable repo vs credential refusal — exists, is computed, and is thrown away at the last
+hop. The information survives only on the log channel (`aof mesh logs --node <worker>`), which does
+carry cause, cure and both hashes; but that is a second place to look, and nothing on the fleet tells
+the operator to look there.
+
+It also silently weakens any acceptance criterion phrased as "the fleet shows … with code X" —
+`43/05`'s task 04 scenario 4 and task 05's `@uat` scenario 3 both are, and both were written in good
+faith against a column that is never populated.
+
+**The fix.** Persist the code the worker already sends on the assignment row, and render it beside the
+state on the fleet. Worth doing WITH item **14**, whose two distinct causes currently share the
+`assignment-repo-unavailable` code — together they are the difference between an operator diagnosing a
+failed dispatch from the fleet and having to open a log.

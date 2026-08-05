@@ -689,11 +689,163 @@ soak) + **`@uat`** (task 05, 3 scenarios). No UI surface, so no design-conforman
 | F-05.1 | Task 00's cell `git rev-list --count <branch>^1..<branch>` is 1 is **arithmetically unreachable** in the diverged case the scenario is about — that range is the merge PLUS the whole control line it brought in (measured: 2). It could only read 1 if the lines had never diverged | contract | blocker | PO corrected the cell to `--count --merges`, which asserts what it was reaching for | closed |
 | F-05.2 | Both new refusal codes shared one message naming **no cure and no worktree path**, though ADR-010/R5.1 already requires the cure be named | diagnostics | major | `gatePropagationRefusalDetail` now names the cause, the cure and the retained worktree; ADR-016/G8 makes R5.1 general to every coded refusal this milestone adds | closed |
 
+### `@manual` task 04 — RUN LIVE 2026-08-05; the headline claim PASSES, and the run found a REAL GAP
+
+Run on the standing test-bed against the deployed build (control `payload
+7002ffb+dirty.20260805T112416`, worker `umairs-msi-wsl` on byte-identical `src/`). The fixture was
+built exactly as the Background specifies: `origin/aof/mesh/00` established at the worker's own commit
+`68c8d76`, the item at a gate (all prior assignments terminal), and a **substantive** control-side edit
+committed at that gate — a new `--greeting <word>` acceptance criterion carrying the unique token
+`GATE-EDIT-20260805`, so "the agent saw it" is checkable rather than asserted. Pinned base `4f853f8`;
+branch and base genuinely **diverged**.
+
+**THE HEADLINE THEN PASSES.** In the worker's materialized worktree, the edited file contains the
+operator's edit **verbatim**, token and all, and `git merge-base --is-ancestor 4f853f8 aof/mesh/00`
+exits **0**. A control-side edit made at a gate reached a real worker's phase on another machine before
+the agent started. That is the claim this story exists to restore, and on real hardware it holds.
+
+**But the REUSE DOOR never opened, and that is the gap.** The dispatch logged
+`worker-worktree-base: worktree on fresh branch aof/mesh/00 off 4f853f8…` — the **create** path. There
+is therefore **no advance entry** on the log channel, no merge, and the earlier phase's commit is gone
+from the line: `git merge-base --is-ancestor 68c8d76 aof/mesh/00` exits **1**, though
+`origin/aof/mesh/00` holds `68c8d76` and had been fetched into the very same checkout.
+
+Root cause, read at the source rather than inferred —
+[`mesh-worker-execution.mjs:2402`](../../../src/mesh-worker-execution.mjs#L2402):
+
+```js
+const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+const reuseDoor = baseBranch != null || branchExists;
+```
+
+and `localBranchExists` runs `show-ref --verify --quiet refs/heads/<branch>` — **local heads only**. A
+checkout that has fetched `refs/remotes/origin/<branch>` but has no local head takes the create door and
+forks the item's line. The control's directive carried no `baseBranch` either, so neither half of the
+`reuseDoor` predicate fired.
+
+**This is not an artefact of the fixture.** The worker's managed checkout
+(`~/.aof/mesh/checkouts/<workspaceId>`) only ever held `main`; it was always going to take the create
+door. Nor is it hypothetical: any SECOND worker, or one whose checkout was rebuilt, meets it — and the
+mesh exists to have more than one worker.
+
+| # | scenario | verdict (first run) | verdict (after the F-05.3 fix) |
+|---|---|---|---|
+| 1 | a gate-time edit reaches a real worker's continuing phase before the agent starts | **PARTIAL** — edit ✓, base an ancestor ✓; earlier commit reachable ✗, `^2` a real merge ✗ | **PASS — every Then** |
+| 2 | the advance is readable from the control in one `mesh logs --node` read | **FAIL** — no advance entry (create path) | **PASS — all five Thens** |
+| 3 | from a separate clone of the real origin, both lines present after settle | NOT REACHED | **PASS on the durability claim** — push performed by hand, not by the worker's completion path (TECH_DEBT 14/21) |
+| 4 | a conflicting gate edit refuses and leaves the branch untouched | NOT REACHED | **PASS on every Then but one** — the fleet carries no code (F-05.5) |
+
+### The re-run after the fix — scenarios 1 and 2 PASS on real hardware
+
+F-05.3 was fixed (below), deployed to both nodes, and both daemons restarted onto it (control
+`payload 7002ffb+dirty.20260805T164722` at `15:47:50Z`; worker at `15:51:31Z`). The fixture was then
+rebuilt to the EXACT precondition the defect needs — a checkout holding the item's line only at
+`refs/remotes/origin/aof/mesh/00` (`68c8d76`) with no local head, which is what a second worker, or one
+whose checkout was rebuilt, always has. Pinned base `4f853f8`.
+
+The worker's own log channel, read from the CONTROL node in one `aof mesh logs --node` call:
+
+```
+15:53:08.741  worker-worktree-base:    worktree on EXISTING item branch aof/mesh/00 ADOPTED from origin
+15:53:08.811  worker-gate-propagation: gate-propagation merged on aof/mesh/00
+                                       — base 4f853f8…, tip b70014fb…
+```
+
+and in the worker's checkout:
+
+| Then | measured |
+|---|---|
+| the edited file contains the operator's edit verbatim | ✅ `GATE-EDIT-20260805` present in the materialized worktree |
+| `git merge-base --is-ancestor <pinned-base> aof/mesh/00` exits 0 | ✅ |
+| each worker commit recorded in the Background is still reachable | ✅ `68c8d76` reachable — **nothing discarded** |
+| `git rev-parse aof/mesh/00^2` resolves to the pinned base | ✅ `4f853f8` — a real merge, not a rewrite |
+| the advance entry reports outcome `merged` | ✅ |
+| its base hash equals the control's `git rev-parse HEAD` at dispatch | ✅ `4f853f8` |
+| its tip hash equals `git rev-parse aof/mesh/00` on the worker | ✅ `b70014fb` |
+| the `worker-worktree-base` entry is present alongside it | ✅ |
+
+```
+*   b70014f  aof(mesh): advance aof/mesh/00 to the dispatched base 4f853f8…
+|\
+| * 4f853f8  feat(work): 00 — a --greeting <word> flag, added at the gate   <- the CONTROL's line
+* | 68c8d76  aof(mesh): 00 — /aof:refine 00 --autonomous                     <- the WORKER's line
+|/
+* 7919b4e
+```
+
+Both lines are in the tree at the tip: the worktree carries the operator's new acceptance criterion
+**and** the previous phase's `ARCHITECTURE.md` and `stories/`. `^1` is the worker's commit and `^2` is
+the pinned base — the merge joins them in the order ADR-008 specifies.
+
+### Scenario 4 — the refusal, MADE to happen rather than waited for
+
+The operator edited, on the control node, the **same line** the worker's own commit `68c8d76` had
+already replaced (`To be broken down at refine.` → a stories checklist on the worker's side, → a
+`CONFLICT-PROBE-20260805` sentence on the control's). Pinned base `a32eea1`. The advance refused:
+
+```
+worker-gate-propagation: assignment-gate-propagation-conflict on aof/mesh/00
+                         — base a32eea1…, tip 68c8d76…            <- tip UNCHANGED
+assignment-gate-propagation-conflict: … the branch is unchanged at 68c8d76…, and the worktree is
+  RETAINED for inspection at … Cause: merging the base into "aof/mesh/00" conflicted; the merge was
+  ABORTED, so no half-merged state was left behind. Cure: resolve the conflict … then re-dispatch.
+```
+
+| Then | measured |
+|---|---|
+| the fleet shows the assignment `failed` with code `assignment-gate-propagation-conflict` | ⚠️ `failed` yes; **code no** — see F-05.5 |
+| `mesh logs --node` shows the advance entry carrying that code and the unchanged tip | ✅ |
+| `git rev-parse aof/mesh/00` equals the Background hash | ✅ `68c8d76`, untouched |
+| `git rev-parse -q --verify MERGE_HEAD` exits non-zero — the tree is not left MERGING | ✅ absent in both the checkout and the worktree; no unmerged paths |
+| no agent session was started for that assignment | ✅ zero `claude` processes |
+| re-dispatching after the operator resolves the conflict succeeds normally | ✅ conflict reverted on the control → next dispatch logged `merged` on base `64aaae2` |
+
+The refusal message is worth quoting because it is F-05.2/ADR-016/G8 discharged in production: one line
+carries the **cause**, the **cure** and the **retained worktree path**, so an operator can act without
+opening a shell on the worker.
+
+### Scenario 3 — the durability half, verified from a SEPARATE clone of the real origin
+
+The advanced branch was pushed to the real origin and read back from a **fresh clone made for the
+purpose**: `origin/aof/mesh/00` is listed; the pinned base is an ancestor; the worker's `68c8d76` is
+still reachable; `git log --format=%H` contains **both** hashes **unchanged** (nothing rebased or
+rewritten); and the tree at the tip carries both phases' work — the worker's `ARCHITECTURE.md`,
+`stories/*/STORY.md` and `tasks/*.feature`, alongside the operator's `GATE-EDIT-20260805` criterion in
+`SPEC.md`.
+
+**Stated honestly:** the push was performed by hand rather than by the worker's own settle-and-push
+path, which TECH_DEBT **14** and **21** block on this test-bed. So the scenario's *git durability*
+claim is verified and its *"after the run settles"* framing is not — the run was withdrawn rather than
+driven to `done`.
+
+### Findings — `@manual` task 04
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| F-05.3 | **The reuse-door predicate is LOCAL-ONLY.** `localBranchExists` checks `refs/heads/<branch>` and never `refs/remotes/origin/<branch>`, so a worker with a fetched-but-not-checked-out item branch takes the CREATE door, bases the line on the pinned base and **orphans every commit the previous phase made**. Measured live: local `aof/mesh/00` = `4f853f8`, `68c8d76` unreachable, while `origin/aof/mesh/00` = `68c8d76` in the same checkout | correctness | **blocker** | **FIXED at this gate.** `remoteBranchExists` + `adoptRemoteBranch` in `mesh-worktree.mjs` (which owns every git verb, ADR-010 R5.2); the worker adopts a remote-only line as a local head and routes it to the reuse door, leaving the move-to-base to `advanceBranchToBase` alone so ADR-008's refusal semantics stay in one place. Re-run on real hardware: `ADOPTED from origin` → `merged`, `68c8d76` reachable, `^2` = the pinned base. **The armed invariant was extended to cover this door** and mutation-tested: reverting the fix reds exactly the new proof | closed |
+| F-05.4 | The worker attempts `git clone` into an existing managed checkout and fails the whole assignment: *"destination path … already exists and is not an empty directory"* — rather than fetching into it. **Systematic, not occasional:** measured across six dispatches this session, EVERY one onto an existing checkout failed, and the workspace only became dispatchable again by moving the directory aside by hand. The 2026-08-03 history shows the same shape (three of five assignments failed identically) | correctness | major | Not this story's code, but it is on this story's only route to a real two-node run, and it means a workspace is dispatchable **once** per checkout. Routed to TECH_DEBT **21** | routed |
+| F-05.5 | **The coded failure reason never reaches the assignment row, so the fleet cannot show it.** Scenario 4 requires the fleet to show `failed` with code `assignment-gate-propagation-conflict`; the row reads `state=failed, code=NULL`. Measured across the whole store: **45 of 46 assignment rows carry `code = NULL`, including all 30 `failed` ones** (the single non-null is `resumed`) | diagnostics | major | **Pre-existing across every milestone, not a 43/05 regression** — the worker does pass the code (`reportSettled(…, { code })`), so it is being dropped between the worker's report and the control's row. Not fixed here: unlike F-05.3 it is not a discard, the information is not lost (the full cause+cure is one `aof mesh logs --node` read, which scenario 2 proves), and the fix belongs to the assignment lifecycle rather than to gate propagation. Routed to TECH_DEBT **22**. It does, however, weaken task 05's `@uat` scenario 3 — "the fleet shows … a code that names the cause" — so the operator should be shown the log line, and told the fleet does not yet carry it | routed |
+
 ### Accept decision — 43/05
 
-**NOT YET.** Everything automatable is green and the structural review says **CONFORMS to ADR-008**,
-but task 04's `@manual` two-node soak and task 05's `@uat` both need a deployed build on two real
-nodes and an operator. `STORY.md` stays `status: in-review`.
+**`@manual` task 04 is COMPLETE and PASSES; the story awaits only its `@uat` (task 05).**
+
+The gate found a real blocker (F-05.3 — a remote-only line was forked and the previous phase's commits
+orphaned), it was **fixed at the gate**, the armed invariant was **extended to cover the door that did
+the discarding**, and the whole lane was **re-run on real hardware**:
+
+- **scenario 1 — PASS, every Then.** `ADOPTED from origin` → `merged`; the operator's edit verbatim in
+  the worktree; `68c8d76` still reachable; `^2` = the pinned base, i.e. a real merge.
+- **scenario 2 — PASS, all five Thens**, in one `aof mesh logs --node` read from the control node.
+- **scenario 3 — PASS on its durability claim**, read from a separate fresh clone of the real origin;
+  the settle-and-push framing was not exercised (TECH_DEBT 14/21).
+- **scenario 4 — PASS on every Then but one.** The refusal fires, names cause + cure + retained
+  worktree, leaves the branch at its Background hash with no `MERGE_HEAD` and no agent session, and a
+  re-dispatch after resolution advances cleanly. The single miss is F-05.5: the fleet shows `failed`
+  without the code, which is a pre-existing lifecycle gap rather than this story's.
+
+The fix is committed with the story. **`STORY.md` stays `status: in-review` only because task 05's
+`@uat` needs the operator** — there is no longer any machine work outstanding on this story.
 
 ---
 
@@ -736,8 +888,118 @@ because the direct call cannot see it.
 | F-06.7 | The staging claims (stage 0/1 states) are **not simultaneously satisfiable** with the delivered stage-3 tree | contract | non-blocker | Ruled an **acceptable discharge**: each suite asserts the invariant half behaviourally and the ordering half by mutation, with a re-runnable harness committed at the milestone's `reference/staging-mutations.mjs`. ADR-016 | closed |
 | F-06.8 | Two undeclared reds found and repaired: `board-worker-content` (3 exact-key `deepEqual`s the story had enriched) and `item-lock-holder-identity` (three call sites left on `resolveItemExact`'s old signature) — both green at `6b4ab7f`, so both this story's | correctness | major | Amended with `assertFrozenShape` + `assertAnswersFrom`; call sites re-pointed | closed |
 
+### `@manual` task 05 — RUN LIVE 2026-08-05 on the real two-node mesh; **PASS**
+
+Run on the standing test-bed (`C:\Source\umair\aof-test-repo`, workspace `52294b307214c27d`) after
+deploying this milestone's HEAD to both nodes.
+
+**The build under test, verified at the source rather than assumed.** Control node
+`payload 7002ffb+dirty.20260805T112416`; **both daemons restarted onto it** — `mesh-ui` at
+`2026-08-05T12:54:52.491Z` and `mesh-serve` at `12:54:53.051Z`, each printing that build on its own
+`daemon-started` line. The WSL worker `umairs-msi-wsl` restarted at `12:55:57.765Z`; its `src/` tree is
+**byte-identical to the control's — 213 of 213 `.mjs` files, zero differing** (per-file sha256, both
+sides normalised). `claude` answers `MESH_AUTH_OK` in the daemon's own bare environment
+(`env -i PATH=/usr/local/bin:/usr/bin:/bin`), so the documented "resolvable but unauthenticated" hazard
+is excluded by measurement.
+
+**A verification trap worth carrying.** `aof mesh status` reported the control's presence `buildId` as
+the NEW payload *before any restart had happened* — presence re-reads `BUILD_ID.json` at each heartbeat,
+so it reflects what is INSTALLED, never what is LOADED. **Presence buildId is not evidence of a restart;
+the `daemon-started` log line is.** Anything gated on "the daemons are on the new build" must read the
+log line.
+
+| # | scenario | verdict |
+|---|---|---|
+| 1 | six read surfaces answer with the worker's view | **PASS**, two deviations recorded below |
+| 2 | the answer does not revert while the republish tick runs on | **PASS** |
+| 3 | doctor reports no false findings against the worker-authored milestone | **PASS** |
+| 4 | a fresh never-published workspace still answers from disk | **PASS** |
+| 5 | on the worker node, the item reads from the worker's own checkout | **PASS** |
+
+**Scenario 1 — the outsider-observable proof.** The control node's disk for milestone `00` holds
+**exactly two files**, `SPEC.md` and `STATE.md` — no `stories/` directory anywhere on this filesystem.
+Against that, on the control node:
+
+| surface | answer | names the answering side? |
+|---|---|---|
+| `work find 00 --json` | the worker's row | `answeredFrom: cache`, `reportedBy: umairs-msi-wsl` |
+| `work list --json` | **three worker-authored stories** (`00/00`, `00/01`, `00/02`), each `dir: null` | **no — by contract, see F-06.9** |
+| `work next --json` | `00/00` ready | `answeredFrom: cache`, `reportedBy: umairs-msi-wsl` |
+| `work doc 00/00 STORY --json` | the worker's 3,670-byte STORY.md body | `fromWorker: true`, `answeredFrom: cache`, `reportedBy: umairs-msi-wsl` |
+| `work run-status 00 --json` | the worker's run row | `fromWorker: true`, `answeredFrom: cache`, `reportedBy: umairs-msi-wsl` |
+| `work tasks 00/01 --json` | the worker's parsed `00_shout-flag.feature` | `fromWorker: true`, `reportedBy: umairs-msi-wsl` |
+
+`work list` returning three stories whose `dir` is `null`, on a machine whose disk has no `stories/`
+directory at all, is the exact transition this story exists to make: at `43/03`'s live run the same
+command returned **only ref `00`**, and VERIFICATION recorded that as the gap `43/06` would close. It is
+closed, observably, on two machines.
+
+**Scenario 2 — permanence, measured against a LIVE adversary rather than a quiet one.** The naive form of
+this check is vacuous: an answer that does not change proves nothing unless something is actively trying
+to change it. So the control's republish tick was proven to be *running during the window*, by watching a
+**control-authored** population move while the worker-authored one stood still:
+
+- control-authored workspace `9db1fd84f5895e38` — `newest = 13:06:59.432Z`, sampled at `13:07:03.275Z`:
+  **the tick is writing, seconds before the sample**;
+- worker-authored test-bed rows `00/00`, `00/01`, `00/02` — frozen at `2026-08-03T00:56:05.435Z`,
+  **two days old and unmoved**, still `reportedBy: umairs-msi-wsl`.
+
+Across a 7.4-minute window (`13:04:04Z` → `13:11:27Z`) with that tick running throughout,
+`work find 00 --json`, `work list --json` and `work doc 00 SPEC --json` were **byte-identical** — three
+diffs, zero bytes changed. At no point did the milestone read back as its pre-run scaffold, and the
+reporting node named on the row was the WORKER at both ends.
+
+**Scenario 3 — `aof work doctor --json` on the control node reports ZERO findings** (`errors: 0`,
+`warnings: 0`, `findings: []`) against a milestone whose disk holds a bare scaffold while its cache holds
+three stories. This is the operator-visible form of F-06.4/F-06.5: before those fixes, precisely this
+shape produced false findings whose subject was another machine's live work.
+
+**Scenario 4 — the negative outsider check.** A fresh workspace that has never published
+(`.aof/aof.config.json` with no `mesh` block, one milestone on disk): `work list`, `work find`,
+`work next` and `work doc` each **exit 0**, and `find`/`next`/`doc` each state `"answeredFrom": "disk"`
+explicitly. No command failed because the cache held nothing for it.
+
+**Scenario 5 — the boundary, and the sharpest single datum in this lane.** Run INSIDE the worker's own
+worktree, `aof work list --json` returns the worktree's own state with real `dir` paths into it — and
+milestone `00` reads **`status: in-progress` there while the control's cache says `not-started`**. A
+worker reading the control's copy would have said `not-started`. It says `in-progress`, which is its own
+disk's truth and a state the control has never received. This is the same hazard F-06.2's re-pointed pin
+and the `isMeshWorktree` guard exist to prevent, observed now on real hardware rather than in a fixture.
+
+### Two deviations from scenario 1 as written, recorded rather than papered over
+
+1. **The worker's worktree was never deleted, so "the run settles and the worker deletes its worktree"
+   was not reproduced as written.** The standing fixture's run (`428fd15a`, 2026-08-03) had its agent
+   phase *succeed* — the worker's own run record reads `state: done, outcome: done` at `00:56:11.602Z` —
+   and the control marked the assignment `failed` **244 ms later**, at `00:56:11.846Z`, retaining the
+   worktree. The cause is **TECH_DEBT item 14** (the clone-credential provider is fleet-global, so a
+   GitHub-configured control cannot serve this `file://` test-bed), not anything this milestone owns:
+   `git push --dry-run origin aof/mesh/00` from the worker exits **0** and would create the branch, so
+   the push path is not structurally blocked — only the mesh's credential path is.
+   **Why the scenario's PROPERTY still holds.** Worktree deletion is the scenario's *mechanism* for
+   "the worker will never tick again"; the *property* is what scenario 2 asserts. That property was met
+   independently and is measured above: the worker is **not** republishing this workspace (its last
+   stamp on `00` is `11:54:50.794Z`, i.e. **before** its own `12:55:57Z` restart, and it has not moved
+   since), while the control's tick demonstrably runs on. The disease — stale republished over live truth
+   on a timer — had every condition it needs and did not occur.
+2. **"`next` treats the worker's completed work as complete" could not be evaluated**, because that run
+   authored artifacts without advancing statuses: all four rows are still `not-started`, so there is no
+   completed work for `next` to mishandle. `next` correctly offers `00/00`. Recorded as **not reached**,
+   not as passed.
+
+### Findings — `@manual` task 05
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| F-06.9 | Scenario 1's closing Then — *"every one of those answers says which side answered it"* — is **unsatisfiable for `work list --json`**, which carries exactly seven keys and no provenance. Measured: 5 of 6 surfaces carry `answeredFrom`; `list` carries none | contract | non-blocker | **Not a defect — this is ADR-016/G1 working as ruled.** F-06.1 already decided the stamp is a *face projection*: stripped in the CLI adapter, kept on the command result and the board route, because a cache-answered row carries three keys and widening `acd-work-list-contract` would make its key set vary by deployment. The PO amended **task 02**'s two clauses then and missed the identical clause in **task 05**; amended now, same reason, recorded inline | closed |
+| F-06.10 | **A run row can be stuck `running` on the control while the worker's own record says `done`.** Measured three-way divergence for run `20260803T001759834Z-0000`: worker disk `done`/outcome `done`; control `global_assignments` `failed`; control cached run row `running`. `work run-status` therefore shows an operator a run that has been "running" for two days | correctness | major | **Out of this story's scope** — 43/06 migrates READERS; the run row's terminal state is written by the assignment/run lifecycle (m26/m42 territory), and the divergence originates in the push failure of TECH_DEBT 14. Routed to TECH_DEBT as a new item rather than fixed here. Worth carrying because the *cache* faithfully reports what it was told: the defect is upstream of the read surface this story owns | routed |
+
 ### Accept decision — 43/06
 
-**NOT YET.** Every `@executable` scenario is green, the structural review says **CONFORMS to ADR-005**
-after the seven must-fixes, and `validate` is PASS — but task 05's `@manual` remote-authored soak
-needs a deployed build on two nodes. `STORY.md` stays `status: in-review`.
+**ACCEPT.** Every `@executable` scenario is green (58/58; 298 across the blast radius), the structural
+review says **CONFORMS to ADR-005** after seven must-fixes, `validate` is PASS, and task 05's `@manual`
+remote-authored soak has now **run live on the real two-node mesh and passed** — five scenarios outright,
+with scenario 1's six read surfaces all answering from the worker's view on a control node whose disk
+holds no `stories/` directory. The two deviations are recorded above with their causes; neither is a
+defect in this story, and the property scenario 1's unreproduced precondition exists to create was proven
+independently under a demonstrably live republish tick. `STORY.md` moves to `status: done`.

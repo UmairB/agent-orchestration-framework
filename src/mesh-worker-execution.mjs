@@ -133,7 +133,7 @@ import { transitionRunComplete, transitionRunStart } from "./effects/run-transit
 // m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
 // bridge (raise -> outbox -> ack), never a fire-once frame.
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
-import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, ensureCommitAvailable, advanceBranchToBase } from "./mesh-worktree.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, remoteBranchExists, adoptRemoteBranch, ensureCommitAvailable, advanceBranchToBase } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
@@ -2399,7 +2399,19 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // re-refine after a prior run on the same item) — `-b` would refuse, so an
       // existing branch takes the reuse door: the item's line continues, never forks.
       const commitish = directive.commit ?? "HEAD";
-      const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      const localExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      // M43 / story 05, VERIFICATION F-05.3 — the item's line may exist ONLY on the
+      // remote. A freshly built checkout (a second worker, or one rebuilt after cleanup)
+      // has `refs/remotes/origin/<branch>` and no local head, so the local-only question
+      // answered "no line" and the CREATE door forked the item off the pinned base,
+      // discarding the previous phase's commits. Adopting the remote ref as a local head
+      // routes it to the reuse door instead, where the advance already does the right
+      // thing: a line that exists ANYWHERE must never be forked.
+      let adoptedFromRemote = false;
+      if (baseBranch == null && !localExists && (await remoteBranchExists(ws.projectRoot, branch, { exec }))) {
+        adoptedFromRemote = await adoptRemoteBranch(ws.projectRoot, branch, { exec });
+      }
+      const branchExists = localExists || adoptedFromRemote;
       // M43 / story 05 (ADR-008): the REUSE DOOR — either door onto an existing line
       // (the directive's cache-resolved `baseBranch`, or the derived branch already
       // present locally). Named once so the pin, the materialization and the advance
@@ -2439,7 +2451,7 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         options.onLog?.({
           code: "worker-worktree-base",
           level: "info",
-          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
+          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : adoptedFromRemote ? `EXISTING item branch ${branch} ADOPTED from origin` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
         });
       } catch (error) {
         reportDegrade("mesh-worker-execution", error);

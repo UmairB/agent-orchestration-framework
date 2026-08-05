@@ -172,6 +172,39 @@ export async function localBranchExists(projectRoot, branch, options = {}) {
   return result.status === 0;
 }
 
+// remoteBranchExists(projectRoot, branch) — m43 / story 05, VERIFICATION F-05.3.
+//
+// "Does this item already have a line?" has TWO halves, and `localBranchExists` answers
+// only one. A checkout built fresh — a SECOND worker, or one whose checkout was rebuilt
+// after cleanup — has fetched `refs/remotes/origin/<branch>` and has nothing under
+// `refs/heads/`. Asking the local half alone therefore answered "no line" for an item
+// whose line was sitting in the same clone, and the create door forked it off the pinned
+// base, orphaning every commit the previous phase made (measured live 2026-08-05: local
+// tip == the pinned base, the previous phase's commit unreachable, while
+// `origin/<branch>` still held it).
+export async function remoteBranchExists(projectRoot, branch, options = {}) {
+  const exec = resolveExec(options);
+  const result = await exec(["show-ref", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { cwd: projectRoot });
+  return result.status === 0;
+}
+
+// adoptRemoteBranch(projectRoot, branch) — give a remote-only line a LOCAL head at the
+// commit the remote already has, so the reuse door (which checks out a local branch) and
+// its advance apply unchanged.
+//
+// Deliberately NOT a checkout and NOT a merge: this only NAMES the line locally. Moving
+// it to the pinned base stays the sole business of `advanceBranchToBase`, so there is
+// still exactly one function that decides how a branch reaches its base — which is what
+// keeps ADR-008's refusal semantics (and its never-discards invariant) in one place.
+export async function adoptRemoteBranch(projectRoot, branch, options = {}) {
+  const exec = resolveExec(options);
+  // Best-effort refresh, mirroring reuseWorktreeOnBranch's own first step: a fault here
+  // (origin unreachable) must not block adopting the ref this clone already has.
+  try { await exec(["fetch", "origin", branch], { cwd: projectRoot }); } catch { /* best effort */ }
+  const result = await exec(["branch", branch, `refs/remotes/origin/${branch}`], { cwd: projectRoot });
+  return result.status === 0;
+}
+
 // isUnderMeshWorktreesRoot(projectRoot, candidatePath) — the structural/behavioural
 // "prefix-child of the dedicated root" check tests + the reclaim/cleanup paths reuse,
 // so "scoped" has one definition.

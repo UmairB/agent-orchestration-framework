@@ -83,6 +83,39 @@ function discardingOps(tokenGroups) {
 }
 
 export const archTests = [
+  // VERIFICATION F-05.3 — the discard this invariant forbids was reached WITHOUT any
+  // forbidden git verb. The reuse-door predicate asked only `refs/heads/<branch>`, so a
+  // checkout holding the line at `refs/remotes/origin/<branch>` and nothing local was
+  // judged to have no line at all: the CREATE door then based the item on the pinned
+  // base and every commit the previous phase made became unreachable. No rebase, no
+  // force, no reset — the history was discarded by NOT LOOKING for it.
+  //
+  // So this clause keys on the DATA the decision consumes, not on any spelling
+  // (ADR-015/F1, ADR-016/G2): the branch-existence question must be asked of the remote
+  // as well as of local heads, and the create door must be reachable only after both
+  // have been asked.
+  {
+    name: "arch/43 ADR-008 (acd-gate-propagation-never-discards): the 'does this item already have a line?' question consults the REMOTE, not only local heads — a remote-only line must never be forked",
+    run: async () => {
+      const worktree = stripComments(await readFile(WORKTREE, "utf8"));
+      assert.ok(
+        /refs\/remotes\/[^"'`\s]*\$\{branch\}|refs\/remotes\/origin\//.test(worktree),
+        "src/mesh-worktree.mjs never verifies a ref under refs/remotes/ — the branch-existence question is local-only, so a worker whose checkout has fetched the item's line but has no local head for it will take the create door and orphan the previous phase's commits (VERIFICATION F-05.3)",
+      );
+
+      const execution = stripComments(await readFile(path.join(repoRoot, "src", "mesh-worker-execution.mjs"), "utf8"));
+      // The reuse/create decision must be fed by BOTH halves. Keyed on the predicates the
+      // decision consumes rather than on the variable's name.
+      assert.ok(
+        /localBranchExists\s*\(/.test(execution) && /remoteBranchExists\s*\(/.test(execution),
+        "src/mesh-worker-execution.mjs decides the reuse door without asking whether the branch exists on the remote — the item's line can then be forked (VERIFICATION F-05.3)",
+      );
+      assert.ok(
+        /adoptRemoteBranch\s*\(/.test(execution),
+        "src/mesh-worker-execution.mjs finds a remote-only line but never adopts it as a local head, so the reuse door (and its advance) cannot apply to it (VERIFICATION F-05.3)",
+      );
+    },
+  },
   {
     name: "arch/43 ADR-008 (acd-gate-propagation-never-discards): no history-rewriting or force git operation exists on the branch-advance path — a worker commit can never be discarded",
     run: async () => {

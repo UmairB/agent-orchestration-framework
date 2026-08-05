@@ -4,7 +4,7 @@ number: 06
 slug: cache-read-surface
 title: "The readers migrate — a new cache-first seam beside the work.mjs god-node, staged chokepoint-first through commands/resolve.mjs's 8 dependents, with the worker-side and structural readers PINNED to disk by positive assertion and doctor keeping one snapshot with a cache status overlay"
 parent: 43
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-01
 updated: 2026-08-05
