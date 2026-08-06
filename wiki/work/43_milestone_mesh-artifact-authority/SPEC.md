@@ -3,10 +3,10 @@ type: milestone
 number: 43
 slug: mesh-artifact-authority
 title: "Mesh artifact authority — the cache is the read surface"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-06
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -108,14 +108,14 @@ the widest mechanical sweep and the risky change unreviewable inside a 13-module
 - [x] `03_story_artifact-sync-on-write` — the `PostToolUse` hook, the derivation-free enqueue, the
       `.claude/settings.json` **merge** (never wholesale), the widened artifact manifest, and the
       daemon-side batched drain on the existing tick. (ADR-001, ADR-002, ADR-007)
-- [ ] `04_story_staleness-and-resync` — everything **read-side** from the v8 columns down: the shared
+- [x] `04_story_staleness-and-resync` — everything **read-side** from the v8 columns down: the shared
       staleness predicate, the wire envelope (`syncedAt` / `reportedBy` / `stalenessSeconds`), the
       never-evict rule, and the board's stale badge + Resync action. Also carries three substrates the
       repo does not have yet — a board headless mount harness, the `work:resync` transport, and a
       `Board.tsx`-root 1s clock. (ADR-006, ADR-010 R4, DESIGN.md)
-- [ ] `05_story_gate-propagation` — the dispatch advances an existing item branch to the pinned base
+- [x] `05_story_gate-propagation` — the dispatch advances an existing item branch to the pinned base
       commit at the worker's reuse door, never discarding a worker commit. (ADR-008)
-- [ ] `06_story_cache-read-surface` — the cache-first read seam and the staged reader migration,
+- [x] `06_story_cache-read-surface` — the cache-first read seam and the staged reader migration,
       chokepoint-first through `commands/resolve.mjs`, with the worker-side and structural readers
       pinned to disk, and doctor's status overlay. (ADR-005)
 
