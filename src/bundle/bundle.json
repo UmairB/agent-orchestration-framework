@@ -12,6 +12,8 @@
     { "id": "codex-session-start", "kind": "hook", "file": "hooks/codex-session-start.json", "runtimes": ["codex"] },
     { "id": "codex-session-prompt-ping", "kind": "hook", "file": "hooks/codex-session-prompt-ping.json", "runtimes": ["codex"] },
     { "id": "codex-session-stop-ping", "kind": "hook", "file": "hooks/codex-session-stop-ping.json", "runtimes": ["codex"] },
+    { "id": "artifact-sync-enqueue", "kind": "asset", "file": "hooks/artifact-sync-enqueue.mjs", "target": ".claude/hooks/aof/artifact-sync-enqueue.mjs", "runtimes": ["claude"] },
+    { "id": "claude-artifact-sync", "kind": "hook", "file": "hooks/claude-artifact-sync.json", "runtimes": ["claude"] },
 
     { "id": "add-chore", "kind": "command", "file": "commands/add-chore.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "add-milestone", "kind": "command", "file": "commands/add-milestone.md", "runtimes": ["claude"], "commandNamespace": "aof" },

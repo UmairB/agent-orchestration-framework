@@ -17,6 +17,11 @@ import { applicableReactors } from "./table.mjs";
 import { openEffectsJournal, appendEvent } from "./journal.mjs";
 import { drainEffects, runEffectsEphemeral, reachableLoci } from "./dispatch.mjs";
 import { reportDegrade } from "../degrade.mjs";
+// m43 / ADR-003 — THE item lock. It sits INSIDE this seam, in front of the fact, and
+// not in front of it at each of the five mint call sites: a rule living at whichever
+// call site needed it first is not a rule (assignment-transitions.mjs's discipline,
+// copied deliberately). No mint can reach the run store without passing it.
+import { guardItemLock } from "../item-lock.mjs";
 
 // transitionRunStart(item, edge, opts) — mint a run and raise `run.started`
 // (m42 wave (d) leg d4, port 1). The MINT is the second run-store fact to get a
@@ -32,13 +37,24 @@ import { reportDegrade } from "../degrade.mjs";
 //          attempts-exhausted / duplicate-run — propagating untouched, nothing
 //          appended); anything else is the fresh mint (startRun, whose
 //          duplicate-run rejection propagates the same way).
-//   opts — { workspace, publisherOptions, journalOptions, drain = true }
+//   opts — { workspace, lock, publisherOptions, journalOptions, drain = true }
 //          `workspace` ABSENT ⇒ payload workspaceRoot null ⇒ the publish reactor
 //          skips. That is how the mint sites that never propagated (run-retry,
 //          the worker's two) keep their behaviour while still riding the ledger.
+//          `lock` — m43/ADR-003's item-lock context, `{ workspaceId, byAssignment }`,
+//          DELIBERATELY a separate opt from `workspace` (ADR-010/R1.3): reusing
+//          `workspace` would set the event's workspaceRoot and flip run-retry into
+//          publishing as a side effect. A mint made UNDER an assignment names it in
+//          `byAssignment` and is admitted by that identity; every other mint onto a
+//          held execution scope is refused `item-locked-by-assignment`.
 export async function transitionRunStart(item, edge = {}, opts = {}) {
   const { mode = "start", runId, sessionId, brief, now, node = null, maxAttempts } = edge;
-  const { workspace = null, publisherOptions = null, journalOptions = {}, drain = true } = opts;
+  const { workspace = null, lock, publisherOptions = null, journalOptions = {}, drain = true } = opts;
+
+  // (0) THE LOCK — the ONE enforcement door, in front of the fact. It outranks the
+  // store's own refusals (duplicate-run, no-retryable-run …) because a held item's
+  // honest answer is "held", never a store-level cause that is only incidentally true.
+  await guardItemLock(item.ref, { lock, workspace });
 
   // (1) The FACT — the store's own guarded mint. A refusal here means no event.
   const record =

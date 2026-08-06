@@ -208,6 +208,28 @@ export async function countShiftedByInsert(workDir, { at, space, parent } = {}) 
   return selectAffected(items, { at, space, parent }).length;
 }
 
+// refsTouchedByInsert(workDir, { at, space, parent }) — every ref this insert would
+// TOUCH, as refs rather than a count (milestone 43 / ADR-003). The control-side
+// mutation guard has to know what an insert would disturb BEFORE it disturbs it, and
+// it must read the identical selection the count and the engine use — a second
+// derivation of "which items move" is exactly how a guard and the mutation it guards
+// come to disagree.
+//
+// It is a superset of the SHIFTED set by exactly one member: on the nested axis the
+// owning milestone itself is touched (its stories set changes, its checklist is
+// rewritten) even when no sibling shifts, so an insert into a HELD milestone is
+// refused whether or not it renumbers anything. Pure: reads no config, mutates nothing.
+export async function refsTouchedByInsert(workDir, { at, space, parent } = {}) {
+  const items = await listItems(workDir);
+  const refs = selectAffected(items, { at, space, parent }).map((item) => item.ref);
+  if (space === "nested") {
+    const parentNum = Number.parseInt(parent, 10);
+    const owner = items.find((item) => item.parent == null && Number.parseInt(item.number, 10) === parentNum);
+    if (owner) refs.push(owner.ref);
+  }
+  return refs;
+}
+
 // buildRefRemap(items, { shiftMap, space, parent }) — the OLD → NEW ref list for
 // the refs this reindex is about to change (m42 wave (d) leg d4, port 3). Computed
 // from the PRE-rename item list, because after the renames the old refs no longer

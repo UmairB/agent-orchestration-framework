@@ -29,6 +29,12 @@ import { RUNTIMES } from "./model.mjs";
 import { loadBundle } from "./work-bundle.mjs";
 import { bundleVersion, summarizeActions, synthesizeBundleConfig } from "./work-bundle-synthesis.mjs";
 import { workspacePaths } from "./workspace.mjs";
+import { readConfig } from "./work-headroom.mjs";
+import { ensureAofGitignore } from "./aof-gitignore.mjs";
+// m43 / ADR-002: the co-authored `.claude/settings.json` is not in the render plan;
+// the claude hook ENTRY lands through the surgical merge (the SAME call init makes, so
+// the two doors cannot drift), after the plan has written the files its argv names.
+import { applyClaudeSettingsMerge } from "./claude-settings.mjs";
 
 // ADR-009: the install manifest is the `work` section of the single unified project
 // lock `.aof/aof.lock.json` (resolved via workspacePaths().lockPath). There is no
@@ -117,6 +123,15 @@ export async function updateWork(options = {}) {
 
   await executeApplyActions(actions);
 
+  // m43 / ADR-013/C4 — the `.aof/.gitignore` baseline is re-established on UPDATE too,
+  // not only on init. It was called by `work-init.mjs` and by nothing else, so a
+  // workspace initialised before a baseline entry existed would never receive it: the
+  // artifact-sync queue would stay untracked-but-not-ignored in every worktree of every
+  // existing install. Idempotent and additive, exactly as on the init path.
+  await ensureAofGitignore(targetDir);
+
+  const claudeSettings = await applyClaudeSettingsMerge(targetDir, (await readConfig(targetDir)).config);
+
   // Rewrite the install manifest (task 03, ADR-004 → ADR-009): createLockManifest
   // produces the lock-v2 record — it already PRESERVES drift-warned entries (keeps
   // their PRIOR entry, passed as previousLock = the `work` section) and DROPS
@@ -163,6 +178,7 @@ export async function updateWork(options = {}) {
     manifest,
     manifestPath: lockPath,
     manifestWritten: true,
+    claudeSettings,
     summary: summarizeActions(actions)
   };
 }

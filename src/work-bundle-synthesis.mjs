@@ -14,7 +14,7 @@
 import path from "node:path";
 import { createRenderPlan } from "./render-plan.mjs";
 import { partitionByCapability } from "./work-bundle-runtime.mjs";
-import { renderBundleTemplateOutputs } from "./work-bundle.mjs";
+import { renderBundleAssetOutputs, renderBundleTemplateOutputs } from "./work-bundle.mjs";
 import { packageVersion } from "./work-bundle-manifest.mjs";
 import { readConfig, readDelegation, readDelegationModel, applyDelegationToResources, applyDelegationModelToResources } from "./work-delegation.mjs";
 
@@ -41,7 +41,16 @@ export async function planDesiredOutputs(bundle, installableResources, runtimes,
     ...output,
     absolutePath: path.join(targetDir, output.path)
   }));
-  return [...resourceOutputs, ...templateOutputs];
+  // m43 / AC12 — the asset kind (the artifact-sync enqueue SCRIPT). It rides the
+  // SAME content-hashed, drift-protected engine as every other bundled file: a
+  // hand-modified copy classifies `drift-warning` and is preserved, exactly as for
+  // an agent or a command. Only the hook ENTRY is special-cased, and it goes through
+  // the co-authored settings MERGE, never through this plan.
+  const assetOutputs = renderBundleAssetOutputs(bundle, { runtimes }).map((output) => ({
+    ...output,
+    absolutePath: path.join(targetDir, output.path)
+  }));
+  return [...resourceOutputs, ...templateOutputs, ...assetOutputs];
 }
 
 // Partition + plan in one step: the IDENTICAL desired set both init and update

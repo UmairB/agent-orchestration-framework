@@ -9,7 +9,11 @@
 // STDOUT and exits 1 (a read-miss, not an error) — but --json stays exit 0 with
 // `[]` (the machine face reports the empty set, the caller branches).
 import path from "node:path";
-import { findWork } from "../work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF, migrated onto the cache-first seam. `find` is
+// one of the three surfaces the milestone's headline names: an item a worker authored and
+// whose worktree is gone used to be invisible here, because this node's disk had never held
+// it. Every returned row now says which side answered it.
+import { findWorkCacheFirst } from "../work-read.mjs";
 import { commandError } from "../command-error.mjs";
 
 export const findCommand = {
@@ -24,7 +28,9 @@ export const findCommand = {
   },
 
   async run(input, ctx) {
-    const rows = await findWork(ctx.workspace.workDir, input.query);
+    const rows = await findWorkCacheFirst(ctx.workspace, input.query, {
+      globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {},
+    });
     return { query: input.query, rows };
   },
 
@@ -52,14 +58,25 @@ export const findCommand = {
       for (const row of result.rows) {
         const title = row.title ? `  — ${row.title}` : "";
         lines.push(`${row.ref.padEnd(7)} ${row.type.padEnd(9)} ${(row.status ?? "-").padEnd(12)} ${row.slug}${title}`);
-        lines.push(`        ${path.relative(process.cwd(), row.dir)}`);
+        // A cache-answered row for a ref this node does not hold has NO folder here
+        // (ADR-010/R6.4). The human line says where the answer came from instead of printing
+        // a relative path to nothing — `path.relative(cwd, null)` would throw, and a plausible
+        // path would be worse than a throw.
+        lines.push(`        ${displayDir(row)}`);
       }
       return lines.join("\n");
     },
 
-    json: (result) => result.rows.map((row) => ({ ...row, dir: path.relative(process.cwd(), row.dir) })),
+    json: (result) => result.rows.map((row) => ({ ...row, dir: row.dir == null ? null : path.relative(process.cwd(), row.dir) })),
 
     // A no-match READ exits 1 on the human face only (--json reports [] at 0).
     exit: (result, faceCtx) => (faceCtx.options.json !== true && result.rows.length === 0 ? 1 : 0),
   },
 };
+
+// The human render's second line: this node's own path where there is one, else an honest
+// statement of whose copy answered. Never a fabricated path (m43 / ADR-010/R6.4).
+function displayDir(row) {
+  if (typeof row.dir === "string" && row.dir.length > 0) return path.relative(process.cwd(), row.dir);
+  return `(no local checkout — answered from the cache${row.reportedBy ? `, reported by ${row.reportedBy}` : ""})`;
+}

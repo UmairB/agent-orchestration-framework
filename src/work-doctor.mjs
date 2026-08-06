@@ -26,7 +26,7 @@ import { listItems, parseFrontmatter } from "./work.mjs";
 // the registry below (ADR-003). They consume ITEM_RE/isDriver from this module
 // (the cycle is safe — the bindings are read only inside the group bodies at run
 // time, never at module-evaluation time).
-import { statusCoherenceGroup, lifecycleCompletenessGroup } from "./work-doctor-coherence.mjs";
+import { statusCoherenceGroup, lifecycleCompletenessGroup, cacheAuthorityGroup } from "./work-doctor-coherence.mjs";
 import { freshnessGroup, structuralIntegrityGroup } from "./work-doctor-freshness.mjs";
 import { budgetGroup } from "./work-doctor-budget.mjs";
 // milestone 33 / story 00 (ADR-004.4, F-3203) — the mesh-identity-committed warn group.
@@ -153,7 +153,83 @@ async function hasTaskFiles(dir) {
 //   storyEntries — per milestone, its `stories/` dir listing (dirs only)
 // Mtimes come from a single `stat` pass here — the one FS time read, taken at
 // build and handed to the freshness group as DATA (never a clock it calls).
-export async function buildSnapshot(workDir) {
+// THE CACHE OVERLAY (milestone 43 / story 06, ADR-005 + ADR-010/R6.1).
+//
+// `work-doctor` does NOT simply migrate onto the cache, and the reason is the whole point:
+// doctor's SUBJECT is this node's disk — folder identity, orphans, numbering, folder mtime —
+// so a doctor that read its ITEM SET from the cache would start reporting findings whose
+// `path` names folders that are not here. But a doctor that read its STATUS from the disk
+// would report a FALSE finding against every item a worker authored, because the control's
+// disk holds only the stale pre-run scaffold. Neither half is optional.
+//
+// So the snapshot is still built ONCE, from disk, and the BUILDER overlays the facts the
+// cache is authoritative for onto the rows it already has. The pure `(snapshot, ctx) =>
+// Finding[]` group architecture is untouched — no group changes its source or its signature.
+//
+// THE OVERLAY IS PER-FACT, and each fact degrades to disk INDEPENDENTLY, recording its own
+// source (ADR-010/R6.1). Overlaying status alone would have created a new false-finding class
+// one group over: `lifecycleCompletenessGroup` reads `status × docs × children`, so a
+// worker-authored milestone reported `done` would fire missing-verification +
+// missing-retrospective + milestone-no-stories against EVERY remote milestone. The stamps
+// below are what let that group tell "the cache says this is done AND carries its
+// deliverables" apart from "the cache says this is done and I know nothing else about it".
+//
+// Nothing here reads the FS or a clock: the overlay arrives as plain data through
+// `doctorWork`'s options, at the same impure edge `now` / `rawCommittedMesh` already use.
+function overlayFor(item, cache, diskMeta, diskDocs) {
+  const row = cache?.rows?.get?.(item.ref);
+  if (row == null) {
+    return {
+      meta: diskMeta,
+      docs: diskDocs,
+      statusFrom: "disk",
+      docsFrom: {},
+      childrenFrom: "disk",
+      cachedChildRefs: [],
+      reportedBy: null,
+      diskStatus: diskMeta.status ?? null,
+    };
+  }
+  // STATUS — the cache's row wins, whoever reported it. The DISK's own value is kept beside
+  // it (never discarded): a disagreement is a finding when this node itself last reported
+  // the row, and silent when another node did, and `node_id` is the only thing that tells
+  // those two apart (ADR-005). Discarding the disk value would make the pair unaskable.
+  const meta = { ...diskMeta, status: row.status ?? null };
+
+  // DOCS — per NAME, because the cache genuinely holds some and not others (a worker streams
+  // what it wrote). A name the cache answers for is cache-sourced; every other name keeps the
+  // disk's probe, and says so.
+  const cachedDocs = cache?.docs?.get?.(item.ref);
+  const docs = { ...diskDocs };
+  const docsFrom = {};
+  for (const name of Object.keys(diskDocs)) {
+    const cached = cachedDocs?.get?.(name);
+    if (cached == null) continue;
+    docs[name] = { present: cached.present, nonEmpty: cached.nonEmpty };
+    docsFrom[name] = "cache";
+  }
+
+  // CHILDREN — the cache's rows carry `parent`, so a milestone's children are derivable from
+  // the same read. Sourced from the cache only when it actually knows of any; a milestone the
+  // cache holds with no children is indistinguishable from one it holds nothing about, and
+  // guessing the difference is what a `cache-incomplete` finding exists to avoid.
+  const cachedChildRefs = item.type === "milestone" && cache?.rows != null
+    ? [...cache.rows.values()].filter((r) => r.parent != null && String(r.parent) === item.number).map((r) => r.ref)
+    : [];
+
+  return {
+    meta,
+    docs,
+    statusFrom: "cache",
+    docsFrom,
+    childrenFrom: cachedChildRefs.length > 0 ? "cache" : "disk",
+    cachedChildRefs,
+    reportedBy: cache?.provenance?.get?.(item.ref)?.reportedBy ?? null,
+    diskStatus: diskMeta.status ?? null,
+  };
+}
+
+export async function buildSnapshot(workDir, { cache = null, selfNode = null } = {}) {
   const items = await listItems(workDir);
 
   const enriched = [];
@@ -191,17 +267,28 @@ export async function buildSnapshot(workDir) {
       docs[name] = { present: state.present, nonEmpty: state.nonEmpty };
       if (name === "ARCHITECTURE.md" && state.present) docSizes["ARCHITECTURE.md"] = { lines: state.lines };
     }
+    const overlaid = overlayFor(item, cache, meta, docs);
     enriched.push({
       ...item,
-      meta,
+      meta: overlaid.meta,
       mtimeMs: await mtimeMs(item.dir),
       // The newest mtime of any file in the item's folder subtree, for the
       // freshness group's `mtime-ahead-of-updated` check. The folder mtime alone is
       // insufficient (it does not move on a descendant-file content change).
       newestFileMtimeMs: await newestFileMtimeMs(item.dir),
-      docs,
+      docs: overlaid.docs,
       docSizes,
       hasTasks: item.type === "story" ? await hasTaskFiles(item.dir) : false,
+      // The per-fact SOURCE stamps (ADR-005 / ADR-010/R6.1). Internal snapshot fields with
+      // no black-box channel of their own — a Finding is `{ code, severity, path, message }`
+      // and nothing else — so they are observable only through WHICH findings appear, and
+      // through the message of the two findings that must NAME the reporting node (R6.2).
+      statusFrom: overlaid.statusFrom,
+      docsFrom: overlaid.docsFrom,
+      childrenFrom: overlaid.childrenFrom,
+      cachedChildRefs: overlaid.cachedChildRefs,
+      reportedBy: overlaid.reportedBy,
+      diskStatus: overlaid.diskStatus,
     });
   }
 
@@ -223,7 +310,11 @@ export async function buildSnapshot(workDir) {
       .map((child) => child.name);
   }
 
-  return { items: enriched, workDir, topEntries, storyEntries };
+  // `selfNode` rides on the snapshot because the two cache findings are decided by AUTHORSHIP
+  // and nothing else: a status disagreement on a ref THIS node last reported is a real fault
+  // (something wrote the disk without publishing), and the identical disagreement on a ref
+  // another node reported is the mesh working as designed.
+  return { items: enriched, workDir, topEntries, storyEntries, selfNode };
 }
 
 // -------------------------------------------------- seed check-groups ----
@@ -309,6 +400,12 @@ export const CHECK_GROUPS = [
   duplicateDriverNumberGroup,
   statusCoherenceGroup,
   lifecycleCompletenessGroup,
+  // milestone 43 / story 06 (ADR-005 + ADR-010/R6.1/R6.2) — the two findings the cache
+  // overlay itself makes possible: a real status DIVERGENCE on a ref this node reported, and
+  // the ONE honest `cache-incomplete` that replaces three false lifecycle findings when the
+  // cache knows an item's status but not its deliverables. APPENDED, like every group before
+  // it — the registry seam is why the overlay costs doctor no control flow.
+  cacheAuthorityGroup,
   freshnessGroup,
   structuralIntegrityGroup,
   budgetGroup,
@@ -409,8 +506,12 @@ function dedupe(findings) {
 // file's mesh block independently and hands it in here as plain data, exactly like
 // `now`/`staleWindow` — the engine itself performs no extra disk read.
 export async function doctorWork(workDir, config, scope, options = {}) {
-  const { now, staleWindow, budgets, groups = CHECK_GROUPS, rawCommittedMesh, committedConfigPath, legacyIdentitySidecarPresent, legacyIdentitySidecarPath } = options;
-  const snapshot = await buildSnapshot(workDir);
+  const { now, staleWindow, budgets, groups = CHECK_GROUPS, rawCommittedMesh, committedConfigPath, legacyIdentitySidecarPresent, legacyIdentitySidecarPath, cache, selfNode } = options;
+  // milestone 43 / story 06 (ADR-005) — `cache` + `selfNode` are injected at the SAME impure
+  // edge as `now` and `rawCommittedMesh`: plain data, read by `commands/doctor.mjs`, so the
+  // engine still performs no store open and still reads no clock. Absent ⇒ the snapshot is
+  // byte-identical to the pre-overlay one and every group sees exactly what it saw before.
+  const snapshot = await buildSnapshot(workDir, { cache: cache ?? null, selfNode: selfNode ?? null });
   const ctx = {
     now: now ?? null,
     staleWindow: staleWindow ?? staleWindowFromConfig(config),

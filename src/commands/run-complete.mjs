@@ -14,7 +14,7 @@
 // completeRun call sites as they port (the wave-(d) migration plan's d2 sweep).
 // A reactor failure is a failed journal step + degrade event (retried by later
 // drains), never a silent skip and never a lost completion.
-import { resolveItemExact } from "./resolve.mjs";
+import { resolveItemExact, requireLocalCheckout } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionRunComplete } from "../effects/run-transitions.mjs";
 import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
@@ -56,8 +56,14 @@ export const runCompleteCommand = {
 
     // (2) The WRITE resolves by EXACT ref — a typo'd/partial ref → ref-not-found,
     // never completing a run on the wrong item.
-    const item = await resolveItemExact(ctx.workspace.workDir, ref);
+    const item = await resolveItemExact(ctx, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    // m43 / story 06 (ADR-010/R6.4) — the resolver is cache-first, so a ref another node
+    // owns now RESOLVES here. This door reads and rewrites run records under `item.dir`,
+    // which is not on this node for such a ref: refuse coded (echoing the resolved ref, so
+    // "resolved but not writable here" is distinguishable from "no such ref") and write
+    // nothing. Never scaffold — that would mint a second authority for another node's item.
+    requireLocalCheckout(item, ref);
 
     // (3) The transition seam: fact write (the store's no-running-run /
     // ambiguous-run / illegal-transition rejections propagate untouched, and

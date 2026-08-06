@@ -21,7 +21,12 @@
 // (a verb on the `integrations notion` namespace; 17/ADR-002). Refs are not paths, so
 // `json` returns the envelope verbatim — no relativise step.
 import { commandError } from "../command-error.mjs";
-import { listItems } from "../work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. Associating a milestone with a Notion parent
+// is a DESCRIPTOR write, not a record-doc write, so a milestone another node authored is
+// legitimately associable here: it resolves from the cache rather than dead-ending on
+// ref-not-found the way it did while this read was the local disk alone.
+import { listItemsCacheFirst } from "../work-read.mjs";
+import { requireLocalCheckout } from "./resolve.mjs";
 import {
   readRouting,
   writeRouting,
@@ -117,7 +122,7 @@ export const notionAssociateCommand = {
 
     // Resolve the milestone via the SHARED listItems traversal (NO new traversal,
     // 17/ADR-002). Routing is associated on a TOP-LEVEL milestone only.
-    const all = await listItems(ctx.workspace.workDir);
+    const all = await listItemsCacheFirst(ctx.workspace, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
     // Match the ref ANYWHERE (top-level or a story NN/SS) so a non-milestone ref gets
     // the specific not-a-milestone message rather than a bare ref-not-found.
     let item = all.find((entry) => entry.ref === String(ref));
@@ -135,6 +140,11 @@ export const notionAssociateCommand = {
         400
       );
     }
+
+    // m43 / story 06 (ADR-010/R6.4) — the descriptor is a file INSIDE the milestone's own
+    // folder, so a ref that resolves from the cache alone has nowhere here to hold it.
+    // Refuse coded rather than scaffolding a folder for another node's milestone.
+    requireLocalCheckout(item, ref);
 
     // Read the CURRENT descriptor (absent ⇒ {}). The associate verb's ONLY mutation is
     // the rewrite of this descriptor (ADR-004) — no sidecar, no Notion.

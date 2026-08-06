@@ -33,6 +33,17 @@ const srcRoot = path.join(repoRoot, "src");
 const BASELINE = {
   "degrade.mjs": 1,
   "mesh-log.mjs": 1,
+  // m43 / ADR-001 — the SAME sanctioned-floor rationale, in a third file: a fault with
+  // nowhere lower to report. `src/bundle/hooks/artifact-sync-enqueue.mjs` is the
+  // PostToolUse enqueue hook, and every reporting channel is closed to it BY CONTRACT
+  // and by a second fitness function: it may import nothing from `src/` (so it cannot
+  // reach `reportDegrade` — `acd-artifact-sync-hook-derivation-free` fails the build if
+  // it tries), it must write nothing on stdout, and it must exit 0 because `PostToolUse`
+  // cannot block. The ONE site is the queue append; its compensating control is the
+  // daemon's reconciliation tick, which converges the artifact anyway. Pinned at 1 and
+  // shrink-only, like every other entry — if the hook ever gains a second catch, this
+  // gate reds.
+  "bundle/hooks/artifact-sync-enqueue.mjs": 1,
 };
 
 function walk(dir, out = []) {

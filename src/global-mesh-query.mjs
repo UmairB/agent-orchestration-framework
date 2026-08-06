@@ -22,6 +22,11 @@ import { MESH_GLOBAL_DISABLED_CODE } from "./global-work-publisher.mjs";
 // story 03 added to Story 00's frozen assignment-record module (assignment-
 // record.mjs) — a plain SELECT, no new writer.
 import { listAllAssignments } from "./assignment-record.mjs";
+// m43 / story 04 (ADR-006 + ADR-010/R4.1) — the cache-staleness WINDOW's ONE resolver and
+// ONE documented default. The fleet payload states it once for the whole response, exactly
+// as the board's list envelope does, so `ui/` carries no default and no literal on either
+// surface and the two can never disagree about the same instant.
+import { resolveCacheStalenessSeconds } from "./cache-provenance.mjs";
 
 // Re-exported so the serve face (ADR-006 "thin … talks to a query surface") can
 // resolve a `?scope=local` deep-link's workspace id WITHOUT importing
@@ -52,7 +57,19 @@ export async function queryGlobalMeshStatus(options = {}) {
     // testable rather than a second SQL WHERE clause here).
     const assignments = listAllAssignments(store);
 
-    return shapeGlobalStatus({ paths, workProjection, registry, assignments, now: options.now });
+    return shapeGlobalStatus({
+      paths,
+      workProjection,
+      registry,
+      assignments,
+      now: options.now,
+      // m43 / story 04 (ADR-006) — the CACHE-freshness window, resolved through the ONE
+      // resolver. Deliberately a DISTINCT option from `options.stalenessSeconds` above,
+      // which is the PRESENCE window the registry query takes: they answer different
+      // questions ("is this node alive" vs "how old is this copy") over different cadences,
+      // and collapsing them onto one option is how two facts come to share a number.
+      cacheStalenessSeconds: options.cacheStalenessSeconds ?? resolveCacheStalenessSeconds(options.config),
+    });
   } finally {
     if (ownsStore) store.close?.();
   }
@@ -133,7 +150,7 @@ function projectAssignment(row) {
 // Shape the two query results into the ONE global status payload. Kept a pure
 // function of its inputs (no I/O) so the shaping is independently testable without a
 // live store.
-export function shapeGlobalStatus({ paths, workProjection, registry, assignments, now }) {
+export function shapeGlobalStatus({ paths, workProjection, registry, assignments, now, cacheStalenessSeconds }) {
   const workspaceRows = workProjection.workspaces ?? [];
   const itemRows = workProjection.items ?? [];
   const registryWorkspaces = registry.workspaces ?? [];
@@ -252,6 +269,13 @@ export function shapeGlobalStatus({ paths, workProjection, registry, assignments
   return {
     scope: "global",
     workspaceId: workProjection.workspaceId ?? null,
+    // m43 / story 04 — the cache-freshness WINDOW, once for the whole payload, beside the
+    // rows that carry the facts (`reportedBy`/`syncedAt`) a reader applies it to. The same
+    // key, the same resolver and the same "stated once, never per row" discipline as the
+    // board's `/api/work/list` envelope. When a caller supplies nothing the payload states
+    // the documented default rather than omitting the key: DESIGN's absent-window degrade
+    // is for a wire that genuinely cannot answer, not for one that simply did not bother.
+    stalenessSeconds: cacheStalenessSeconds ?? resolveCacheStalenessSeconds(undefined),
     workspaces,
     items,
     nodes,

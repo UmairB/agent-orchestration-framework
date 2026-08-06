@@ -3,6 +3,9 @@ import { workApi } from "./api";
 import type { WorkItem } from "./api";
 import { deriveBoard, milestoneOfGate } from "./model";
 import { primaryAction } from "./action.mjs";
+import { freshness, isCachePublished, readCacheNodeId, readStalenessWindow } from "./freshness.mjs";
+import type { Freshness, FreshnessRecord } from "./freshness.mjs";
+import { FreshnessLegend } from "./StaleBadge";
 import { Overview } from "./Overview";
 import { BoardLanes } from "./BoardLanes";
 import { DetailPanel } from "./DetailPanel";
@@ -22,10 +25,34 @@ type View = "overview" | "board";
 // signal stays live everywhere it is surfaced.
 const RUNNING_PROBE_MS = 5000;
 
+// The COSMETIC CLOCK TICK (milestone 43 / DESIGN §"The threshold crossing";
+// ADR-010 R4.4). THE board tree's ONE tick: the runs section used to keep a
+// second interval at this same cadence and it is gone (ADR-015/F6 — "lifting a
+// derivation a level means the lower one GOES"; it was also redundant, since
+// `now` is state here and nothing below is memoised). `ui/src/fleet/Fleet.tsx`
+// keeps its own and correctly so — it is a separate application ROOT, not a
+// second home inside this tree.
+const CLOCK_TICK_MS = 1000;
+
 export function Board() {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The configured staleness window, straight off the list envelope (43/ADR-010
+  // R4.1). It is NOT defaulted here and there is no literal anywhere in `ui/`:
+  // when the wire does not carry it the surfaces degrade to words rather than
+  // guess a number, because a guessed window would keep reading "5 minutes" long
+  // after an operator configured 30 — a second threshold by another route.
+  const [stalenessWindow, setStalenessWindow] = useState<number | null>(null);
+  // WHICH MACHINE "here" is, off the same envelope — so a row this node itself
+  // published reads `(this node)` rather than being silently un-attributed.
+  // Under this milestone the control is simply one more writer into the cache,
+  // so its rows are attributed like anyone else's. Null until the wire says.
+  const [thisNode, setThisNode] = useState<string | null>(null);
+  // Armed by a Resync waiting for a pushed copy (43/ADR-010 R4.3). See the poll
+  // effect below: it is what turns "no answer" from a structural guarantee into
+  // a measurement.
+  const [resyncWatching, setResyncWatching] = useState(false);
 
   const [view, setView] = useState<View>("overview");
   const [focus, setFocus] = useState<"all" | string>("all");
@@ -62,7 +89,10 @@ export function Board() {
       setError(null);
     }
     try {
-      setItems(await workApi.list());
+      const envelope = await workApi.list();
+      setItems(envelope.items);
+      setStalenessWindow(readStalenessWindow(envelope));
+      setThisNode(readCacheNodeId(envelope));
       silentFailures.current = 0;
       setServerGone(false);
     } catch (e) {
@@ -80,6 +110,39 @@ export function Board() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // THE COSMETIC TICK, AT THE ITEM-SURFACE LEVEL (DESIGN §"The threshold
+  // crossing"; 43/ADR-010 R4.4 — load-bearing, not a detail). Cache freshness is
+  // judged against a LIVE clock, never against fetch time: the list only
+  // re-polls while something is EXECUTING (below), so a SETTLED item — which is
+  // the common case for a stale row, since it is stale precisely because its
+  // owner stopped reporting — would otherwise never grow its badge until a
+  // manual `⟳ sync`. The tick already existed inside the runs section and the
+  // fleet; the lane, overview and header badges need it a level up, here — and
+  // the runs section's own copy was DELETED rather than left beside it, which is
+  // what "lift" means (ADR-015/F6). It re-renders and fetches NOTHING, so the
+  // badge appears within one second of the crossing with no network activity.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(tick);
+  }, []);
+
+  // The ONE call site for the freshness ramp on this surface: every badge and
+  // every provenance line on the board reads this, so one `now` and one window
+  // serve them all. Null for a row the cache does not publish (a workspace that
+  // is not mesh-enabled omits the provenance keys entirely) — such a board keeps
+  // its plain local default with no freshness vocabulary at all.
+  //
+  // It takes any record carrying the two wire keys, not only a WorkItem, because
+  // the ramp has TWO subjects: the ROW's freshness and each ARTIFACT's own — "a
+  // doc can be older than the row that names it" (ADR-006). One predicate, two
+  // subjects, one `now`, one window.
+  const freshnessOf = useCallback(
+    (record: FreshnessRecord | null | undefined): Freshness | null =>
+      record && isCachePublished(record) ? freshness(record, { now, windowSeconds: stalenessWindow, thisNode }) : null,
+    [now, stalenessWindow, thisNode]
+  );
 
   const derived = useMemo(() => deriveBoard(items), [items]);
 
@@ -186,6 +249,28 @@ export function Board() {
     const poll = setInterval(() => void load({ silent: true }), RUNNING_PROBE_MS);
     return () => clearInterval(poll);
   }, [items, runningRefs, load]);
+
+  // …and the SAME CADENCE, armed for the SAME reason, while a Resync is watching
+  // for the copy it asked for (43/ADR-010 R4.3). It is the mirror image of the
+  // rule above: the list is sync-gated on a quiet board, and a stale row is
+  // stale precisely BECAUSE nothing is executing — so without this bounded poll
+  // "no answer inside the watch window" would be guaranteed by construction
+  // rather than measured, and the surface would be lying by shape. It disarms
+  // with the window rather than becoming a second permanent poll.
+  //
+  // It is its OWN effect, and that is load-bearing rather than tidy. Folding it
+  // into the clause above would put `runningRefs` in its dependency list, and
+  // that set is REPLACED by every run-status probe — on the SAME 5s cadence — so
+  // the poll's interval would be cleared and re-armed at the exact instant it was
+  // due, and would never actually fire. (Measured, not reasoned: the watch window
+  // elapsed with exactly one list request on the wire, the initial load.) The two
+  // signals SHARE THE CADENCE, which is the m21/R2 rule; sharing the effect is
+  // what breaks it.
+  useEffect(() => {
+    if (!resyncWatching) return;
+    const poll = setInterval(() => void load({ silent: true }), RUNNING_PROBE_MS);
+    return () => clearInterval(poll);
+  }, [resyncWatching, load]);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.ref === selectedRef) ?? null,
@@ -344,7 +429,7 @@ export function Board() {
           <span className="text-sm text-muted-foreground">Work Board</span>
         </span>
         <span className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-          <StatusLegend />
+          <StatusLegend windowSeconds={stalenessWindow} />
           <button
             type="button"
             onClick={() => void load({ silent: true })}
@@ -379,6 +464,7 @@ export function Board() {
           <Overview
             derived={derived}
             gateWaiting={gateWaiting}
+            freshnessOf={freshnessOf}
             onOpenMilestone={openMilestone}
             onOpenGate={openGate}
           />
@@ -393,6 +479,7 @@ export function Board() {
                 focus={focus}
                 selectedRef={selectedRef}
                 runningRefs={runningRefs}
+                freshnessOf={freshnessOf}
                 switchOpen={switchOpen}
                 onToggleSwitch={() => setSwitchOpen((v) => !v)}
                 onCloseSwitch={() => setSwitchOpen(false)}
@@ -413,6 +500,10 @@ export function Board() {
                 item={selectedItem}
                 action={selectedAction}
                 actor="you"
+                freshnessOf={freshnessOf}
+                now={now}
+                pollMs={RUNNING_PROBE_MS}
+                onResyncWatch={setResyncWatching}
                 onRunAgent={runAgent}
                 onContinue={continueWork}
                 onMirror={openMirror}
@@ -457,7 +548,16 @@ export function Board() {
 // the REAL <StatusRing> shape (the same glyph-ring the cards show) next to its
 // label, so the legend mirrors the painted ramp 1:1 — not a different vocabulary
 // of inline text glyphs.
-function StatusLegend() {
+//
+// milestone 43 — and now a FRESHNESS block below a divider, for exactly that
+// reason and by exactly that rule: a new read-only vocabulary that is not in the
+// legend is a vocabulary the operator must guess. It paints the REAL badge
+// component (the m35 precedent, where the fleet legend's assignment block paints
+// real chips rather than drawings) and states the window from the wire, in words
+// — degrading to an unquantified sentence, never a guessed number, when the wire
+// did not carry one. The block renders from the ramp module alone, so it is
+// correct before any data has arrived.
+function StatusLegend({ windowSeconds }: { windowSeconds: number | null }) {
   const [open, setOpen] = useState(false);
   return (
     <span className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
@@ -465,13 +565,15 @@ function StatusLegend() {
         ◷ status legend
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-border bg-card p-2 shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-border bg-card p-2 shadow-lg">
           {LANE_ORDER.map((status) => (
             <p key={status} className="flex items-center gap-2 py-0.5 text-xs text-foreground">
               <StatusRing status={status} size={14} />
               <span>{statusMeta(status).short}</span>
             </p>
           ))}
+          <span className="my-1.5 block border-t border-border" />
+          <FreshnessLegend windowSeconds={windowSeconds} />
         </div>
       ) : null}
     </span>

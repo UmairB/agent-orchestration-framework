@@ -19,6 +19,14 @@
 // slashes — the milestone-03 wire, ADR-002).
 import path from "node:path";
 import { invoke, loadWorkspace } from "./command-core.mjs";
+// m43 / story 04 (ADR-006 + ADR-010/R4.1) — the staleness WINDOW is one number for the
+// whole response, so it is an ENVELOPE concern and therefore a FACE concern: the board
+// route states it once beside the rows, while `work:list`'s own result and `aof work list
+// --json`'s flat array stay byte-identical. This is `validate.mjs`'s documented discipline
+// ("Path display is a FACE adapter … the command result stays the richer envelope") applied
+// in the other direction. The resolver is a pure config read — no operation logic follows
+// it here, and the number itself has exactly one home (cache-provenance.mjs).
+import { resolveCacheStalenessSeconds } from "./cache-provenance.mjs";
 
 // Returns true if the request was an `/api/work*` route (handled here), else
 // false so the caller falls through to its own routing/404.
@@ -51,7 +59,35 @@ export async function handleWorkApi(request, response, options = {}) {
       // untouched. The overlay degrades to the local rows on any fault, so this cannot
       // fail the board.
       const rows = await invoke("work:list", { mesh: true }, ctx);
-      sendJson(response, 200, rows);
+      // m43 / story 04 — THE ENVELOPE. `{ items, stalenessSeconds, nodeId }`: the rows carry
+      // the per-row FACTS (`reportedBy`, `syncedAt`), and the two things that are ONE fact
+      // for the WHOLE response are stated once beside them.
+      //
+      //   `stalenessSeconds` — the window the reader applies to those facts. Per-row would
+      //   let two rows in one response disagree about the same threshold, and a client-side
+      //   default would be the "two predicates" defect in its most common form — so `ui/`
+      //   carries neither.
+      //
+      //   `nodeId` — WHICH MACHINE IS SERVING THIS READ, so a row THIS node published can
+      //   read `(this node)` (AC 11; DESIGN §1c "the control is simply one more writer into
+      //   the cache"). It is the same shape of face change and for the same reason: a node
+      //   identity is a property of the surface, not of a row, so per-row would be a second
+      //   spelling of one fact — and `ui/` cannot derive it, because a row names its
+      //   REPORTER, which is the fact being qualified rather than the qualifier.
+      //
+      // It is read the way the sibling FLEET face reads its own machine identity
+      // (`mesh-ui-serve.mjs`'s `controlNodeId`): the raw optional-chain off the loaded
+      // workspace, which is where `loadWorkspace` has already resolved the per-install
+      // identity sidecar over the committed config. NOT `meshNodeIdOf` — that helper lives
+      // in `src/commands/`, which no face and no lower module may import
+      // (acd-work-ui-no-core-import, acd-command-layer-imports-downward). An unconfigured
+      // machine states `null` and NO row is marked local: a board that does not know which
+      // machine it is must not guess, and every row still names its reporter plainly.
+      sendJson(response, 200, {
+        items: rows,
+        stalenessSeconds: resolveCacheStalenessSeconds(workspace.config),
+        nodeId: workspace.config?.mesh?.nodeId ?? null,
+      });
       return true;
     }
 
@@ -160,6 +196,29 @@ export async function handleWorkApi(request, response, options = {}) {
     }
     if (request.method === "POST" && pathname === "/api/work/verify") {
       return handlePhaseDoor("verify");
+    }
+
+    // m43 / story 04 (ADR-010/R4.2) — THE RESYNC DOOR. A POST rather than a GET because it
+    // causes a node→node request to leave this machine, and it carries the SAME same-origin
+    // admission guard the phase doors use for the same reason. It is not a board WRITE: the
+    // face still writes no file and spawns nothing; the command writes one request row for
+    // the control daemon's own tick to drain.
+    //
+    // The answer is a CODED OUTCOME DOCUMENT at 200, never an error envelope — the offline
+    // owner is the LIKELY case here (the row is stale precisely because its owner stopped
+    // reporting), so it is a designed state the surface renders, not a fault it reports. The
+    // face therefore passes the command's document through verbatim: `{ ok, code, ref, node,
+    // message }`, which is exactly what `mesh:recover-push` established.
+    if (request.method === "POST" && pathname === "/api/work/resync") {
+      const expectedOrigin = `http://${request.headers.host}`;
+      if (request.headers.origin !== expectedOrigin) {
+        sendApiError(response, 403, "Cross-origin write refused.", "cross-origin-refused");
+        return true;
+      }
+      const body = await readJsonBody(request);
+      const result = await invoke("work:resync", { ref: body.ref }, ctx);
+      sendJson(response, 200, result);
+      return true;
     }
 
     if (request.method === "POST" && pathname === "/api/work/feedback") {

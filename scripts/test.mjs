@@ -1553,6 +1553,166 @@ import { archTests as acdItemBranchDerivableTests } from "../test/arch/acd-item-
 // busy_timeout, the projection with WAL, proven by a cross-process collision
 // against a pre-fix control.
 import { archTests as acdSharedStoreConcurrencyTests } from "../test/arch/acd-shared-store-concurrency.test.mjs";
+// ---- milestone 43 · mesh artifact authority (the cache is the read surface) ----
+// ADR-001 — the PostToolUse trigger's body DERIVES NOTHING (no src/ import, no store,
+// no workspace-identity derivation, exit 0 always) and resolves BOTH path fields
+// (file_path for Write/Edit, notebook_path for NotebookEdit — measured).
+import { archTests as acdArtifactSyncHookDerivationFreeTests } from "../test/arch/acd-artifact-sync-hook-derivation-free.test.mjs";
+// ADR-002 — .claude/settings.json is CO-AUTHORED: aof splices only its own entry, never
+// a whole-file render (m42 leg d4's writeLock defect class, one file over).
+import { archTests as acdClaudeSettingsCoAuthoredTests } from "../test/arch/acd-claude-settings-co-authored.test.mjs";
+// ADR-003 — one execution-scope rule, one lock door (inside transitionRunStart), and the
+// run store stays mesh-blind.
+import { archTests as acdItemLockSingleDoorTests } from "../test/arch/acd-item-lock-single-door.test.mjs";
+// ADR-004 — work_items has ONE writer module, and the effects/stores.mjs
+// reclassification to `fact` is what structurally ends the wholesale disk rebuild.
+import { archTests as acdWorkItemsSingleWriterTests } from "../test/arch/acd-work-items-single-writer.test.mjs";
+// ADR-005 — the reader migration's boundary in BOTH directions: the cache seam depends
+// on work.mjs (never the reverse), and the worker-side/structural readers stay on disk.
+import { archTests as acdCacheReadSurfaceBoundaryTests } from "../test/arch/acd-cache-read-surface-boundary.test.mjs";
+// ADR-006 — one staleness predicate (strict >), one threshold (on the wire), and the
+// settled never-evict rule: no DELETE against a cache table may be predicated on time.
+import { archTests as acdCacheStalenessSinglePredicateTests } from "../test/arch/acd-cache-staleness-single-predicate.test.mjs";
+// ADR-007 — the streamed set and the requestable set are ONE manifest, one home.
+import { archTests as acdWorkArtifactSetSingleHomeTests } from "../test/arch/acd-work-artifact-set-single-home.test.mjs";
+// ADR-015/F2 (43/04's UI structural review) — `global-work-store.mjs`'s trajectory, one layer
+// over: `DetailPanel.tsx` took +284 lines in THIS ONE STORY, more than in the whole month
+// before it, and crossed 1,000. Answered the way ADR-012/B4 answered the store — a ceiling
+// that fails CI rather than a comment hoping someone splits it later. `Board.tsx` is
+// deliberately exempt as the composition root, with the reason recorded in the test itself.
+import { archTests as acdUiSurfaceFileBudgetTests } from "../test/arch/acd-ui-surface-file-budget.test.mjs";
+// ADR-014/E7 (43/04's structural review) — a test suite imported by NEITHER runner is no
+// gate at all. Measured: six orphans, four of them milestone 43/03's accepted behavioural
+// proof. Shrink-only with a NAMED baseline, so the seventh fails CI. (TECH_DEBT item 17.)
+import { archTests as acdTestSuiteRegistrationTests } from "../test/arch/acd-test-suite-registration.test.mjs";
+// ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
+// no force, no reset on the branch path; a conflicting merge aborts and refuses.
+import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
+// milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
+// R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
+// byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
+// 02: one coded refusal at every door (second assignment / local mint / retry /
+// control-side mutation), minting nothing and renaming nothing. Task 03: the holder is
+// admitted by IDENTITY, never by exemption. Task 04: `work next` skips-and-reports
+// through the SAME predicate. Task 05: an operator verb is refused loudly, the control's
+// periodic publish tick skips quietly and counts. Task 06 (the two-machine soak) is
+// `@manual` and deliberately has no test file here.
+import { itemLockScopeOneHomeTests } from "../test/item-lock-scope-one-home.test.mjs";
+import { itemLockSymmetricScopeTests } from "../test/item-lock-symmetric-scope.test.mjs";
+import { itemLockCodedRefusalTests } from "../test/item-lock-coded-refusal-every-door.test.mjs";
+import { itemLockHolderIdentityTests } from "../test/item-lock-holder-identity.test.mjs";
+import { itemLockNextSkipsHeldTests } from "../test/item-lock-next-skips-held.test.mjs";
+import { itemLockOperatorVsAutomaticTests } from "../test/item-lock-operator-vs-automatic.test.mjs";
+
+// milestone 43 / story 02 — THE AUTHORITY CUT (ADR-004 + ADR-010/D1/D2 + ADR-011/A1).
+// `work_items` stops being a disk-rebuilt projection and becomes a provenance-stamped,
+// row-upserted FACT written through ONE seam both the control node and every worker use,
+// with deletion by author retraction. Task 00: the reclassification IS the enforcement.
+// Task 01: one upsert seam, stamped by the CONNECTION-authenticated writer. Task 02:
+// author retraction is the only deletion — never a sweep, never time. Task 03: the
+// alternation proof (publish, stream a delta, publish again — the worker's row survives),
+// including after the worktree is gone. Task 04: contention is decided by the ADR-003
+// lock, in its two renderings. Task 05: a frame lands row by row (the P0.3 retirement).
+// Task 06: the one named, operator-initiated workspace-removal path. Task 07: the own-disk
+// read primitive is unchanged and no reader migrates. Task 08 (the two-machine soak) is
+// `@manual` and deliberately has no test file here.
+import { cacheAuthorityFactNotProjectionTests } from "../test/cache-authority-fact-not-projection.test.mjs";
+import { cacheAuthorityUpsertSeamTests } from "../test/cache-authority-upsert-seam.test.mjs";
+import { cacheAuthorityRetractionTests } from "../test/cache-authority-author-retraction.test.mjs";
+import { cacheAuthorityAlternationTests } from "../test/cache-authority-alternation.test.mjs";
+import { cacheAuthorityContentionTests } from "../test/cache-authority-contention-lock.test.mjs";
+import { cacheAuthorityFrameRowByRowTests } from "../test/cache-authority-frame-row-by-row.test.mjs";
+import { cacheAuthorityWorkspaceRemovalTests } from "../test/cache-authority-workspace-removal.test.mjs";
+import { cacheAuthorityOwnDiskReadTests } from "../test/cache-authority-own-disk-read.test.mjs";
+// milestone 43 / story 03 — WRITE-TRIGGERED ARTIFACT SYNC (ADR-001/002/007 + ADR-013).
+// REGISTERED 2026-08-03 by 43/04's structural review (ADR-014/E7): these four were imported
+// by NEITHER runner, so an ACCEPTED story's behavioural proof had never once run in CI —
+// the enqueue hook's derivation-free body, the daemon's batched drain, the two-kind artifact
+// manifest, and the co-authored .claude/settings.json merge. All four were green on the day
+// they were found; the gap was registration, not correctness. `acd-test-suite-registration`
+// now makes the next orphan fail CI instead of waiting for a reviewer to notice.
+import { artifactSyncEnqueueHookTests } from "../test/artifact-sync-enqueue-hook.test.mjs";
+import { artifactSyncDrainTests } from "../test/artifact-sync-drain.test.mjs";
+import { artifactSyncManifestTests } from "../test/artifact-sync-manifest.test.mjs";
+import { claudeSettingsMergeTests } from "../test/claude-settings-merge.test.mjs";
+// milestone 43 / story 04 — STALENESS, NEVER EVICTION (ADR-006 + DESIGN's freshness ramp).
+// Task 03: the fifth ramp. One pure headless module (ui/src/board/freshness.mjs) emits the
+// three states and both renderings with `now` passed in and strict `>`, so it agrees with
+// src/'s shared isStale AT the threshold instant; the board paints `stale` as a dashed
+// `muted` pill immediately left of the right-anchored status chip; and the badge appears
+// within ONE SECOND of the crossing off a Board-root cosmetic tick with ZERO network — the
+// clause that proves the crossing is clock-driven rather than fetch-driven, which is what a
+// settled item (the very case a stale row IS) depends on. Driven through the REAL <Board/>
+// mounted headlessly against the REAL board face on a controllable clock.
+import { boardFreshnessRampTests } from "../test/board-freshness-ramp.test.mjs";
+// …and the DATA-LAYER half of the same story. Task 00: opening a pre-v8 store lands the two
+// provenance columns on `work_items` through a guarded, idempotent, IN-PLACE ALTER, leaves
+// every existing row intact and UNSTAMPED (a fabricated backfill is forbidden), and touches
+// neither content table. Task 01: every row and artifact the read surface serves says who
+// reported it and when — STORAGE names in the store, WIRE names on the response, ONE mapper
+// for both subjects — with the configured window stated once on the board envelope and the
+// frozen CLI array unbroken. Task 02: the shared strict-`>` predicate judges the row and
+// each artifact separately at an injected `now`, a missing instant reads `unknown` rather
+// than `stale`, and an ancient row is marked stale yet stays fully readable — removal is by
+// AUTHOR RETRACTION, never by age.
+import { stalenessSchemaProvenanceTests } from "../test/staleness-schema-v8-provenance.test.mjs";
+import { stalenessCachedRowsProvenanceTests } from "../test/staleness-cached-rows-provenance.test.mjs";
+import { stalenessMarksNeverEvictsTests } from "../test/staleness-marks-never-evicts.test.mjs";
+// …and the story's UI BEHAVIOUR half, every lane driven through the REAL <Board/> mounted
+// headlessly against the REAL board face on a controllable clock. Task 04: the provenance
+// line renders for EVERY cache-published item (not only executing ones), each doc states its
+// own provenance above its body, and RemoteContentNotice's "documents aren't bridged" copy
+// is retired to a cache-miss placeholder. Task 05: ONE Resync door, on the provenance line,
+// only while stale — it reports the CALL, never the DATA, so there is no success toast and
+// the badge clearing is the only confirmation; both in-flight legs are bounded. Task 06:
+// DESIGN's Resync states as a table — muted when the world did not answer, destructive ONLY
+// when the request was rejected, acknowledgements decaying while facts persist, never
+// pre-disabled on presence. Task 07: both legends paint the real badge and state the window
+// from the wire, degrading to WORDS rather than a guessed number. Task 08: the programmatic
+// a11y contract — the word carries the meaning, Resync names its object and agrees visibly
+// and programmatically about being busy, and the crossing is deliberately NOT announced.
+import { boardProvenanceAttributionTests } from "../test/board-provenance-attribution.test.mjs";
+import { boardResyncDoorTests } from "../test/board-resync-door.test.mjs";
+import { boardResyncOutcomesTests } from "../test/board-resync-outcomes.test.mjs";
+import { boardFreshnessLegendTests } from "../test/board-freshness-legend.test.mjs";
+import { boardStalenessA11yTests } from "../test/board-staleness-a11y.test.mjs";
+// …and the story's Resync TRANSPORT (ADR-010/R4.2 + ADR-014/E2/E6), the node→node "push me
+// your state" request the UI's one door calls. Modelled on mesh-recovery-push: a lazily
+// created additive table (no schema bump), a control tick that dispatches to a connected
+// admitted peer, and a worker result frame admitted by CONNECTION identity — including the
+// spoofed self-declaring frame, which is refused with the row left byte-identical. Owed
+// because tasks 05/06 are both @ui and cannot reach the codes the route layer produces.
+import { meshResyncTests } from "../test/mesh-resync.test.mjs";
+// milestone 43 / story 05 — GATE-TIME PROPAGATION (ADR-008 + ADR-010/R5.1/R5.2). A dispatch
+// advances an EXISTING item branch to the directive's pinned base at the worker's REUSE door —
+// the door that until now ignored the pin by design, so a continuing item never saw a
+// control-side gate edit. Task 00: already-current / fast-forward / a REAL merge when the two
+// lines have diverged (which is the common case, not the rare one). Task 01: both refusals —
+// a dirty worktree and a conflicted merge — leave the branch byte-identical and settle the
+// assignment `failed` with their code. Task 02: the outcome is reported on the EXISTING
+// worker-worktree-base channel with both commits, so "which base did it run on" stays one
+// `aof mesh logs --node` read. Task 03: the create path and the unavailable-base regression.
+// Task 04 (the two-node soak) is @manual and task 05 is @uat — neither has a test file here.
+import { gatePropagationReuseDoorAdvanceTests } from "../test/gate-propagation-reuse-door-advance.test.mjs";
+import { gatePropagationRefusalsTests } from "../test/gate-propagation-refusals-leave-branch.test.mjs";
+import { gatePropagationReportedTests } from "../test/gate-propagation-reported-on-base-channel.test.mjs";
+import { gatePropagationCreatePathRegressionTests } from "../test/gate-propagation-create-path-regression.test.mjs";
+// milestone 43 / story 06 — THE READERS MIGRATE (ADR-005 + ADR-010/R6.x), the milestone's
+// payoff: the cache stops being a write-only fact and becomes the READ surface. Task 00: a new
+// cache-first seam (`src/work-read.mjs`) that imports `work.mjs` and is NEVER imported back,
+// with every degrade named on the durable sink rather than silently swallowed. Task 01: the
+// chokepoint — `commands/resolve.mjs` and its EIGHT dependents move together, with the
+// write-doors guarded by one `item-not-local` refusal. Task 02: the control-side leaves migrate
+// independently. Task 03: the worker-side and structural readers stay PINNED to disk by
+// POSITIVE assertion — including the echo chamber, where a worktree must read its own disk and
+// never another node's view of it. Task 04: doctor keeps ONE snapshot — structure from disk,
+// status overlaid from the cache, each fact recording which side answered. Task 05 (the
+// remote-authored soak) is @manual and deliberately has no test file here.
+import { cacheReadSeamTests } from "../test/cache-read-seam.test.mjs";
+import { cacheReadResolveChokepointTests } from "../test/cache-read-resolve-chokepoint.test.mjs";
+import { cacheReadControlLeavesTests } from "../test/cache-read-control-leaves.test.mjs";
+import { cacheReadBoundaryHoldsTests } from "../test/cache-read-boundary-holds.test.mjs";
+import { cacheReadDoctorOverlayTests } from "../test/cache-read-doctor-overlay.test.mjs";
 
 export const tests = [
   ...adapterWarningTests,
@@ -2171,7 +2331,67 @@ export const tests = [
   ...acdNotionSyncLedgeredTests,
   ...acdFactProjectionSplitTests,
   ...acdItemBranchDerivableTests,
-  ...acdSharedStoreConcurrencyTests
+  ...acdSharedStoreConcurrencyTests,
+  // milestone 43 · mesh artifact authority — ADR-001..008
+  ...acdArtifactSyncHookDerivationFreeTests,
+  ...acdClaudeSettingsCoAuthoredTests,
+  ...acdItemLockSingleDoorTests,
+  ...acdWorkItemsSingleWriterTests,
+  ...acdCacheReadSurfaceBoundaryTests,
+  ...acdCacheStalenessSinglePredicateTests,
+  ...acdWorkArtifactSetSingleHomeTests,
+  ...acdUiSurfaceFileBudgetTests,
+  ...acdGatePropagationNeverDiscardsTests,
+  ...acdTestSuiteRegistrationTests,
+  // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
+  ...itemLockScopeOneHomeTests,
+  ...itemLockSymmetricScopeTests,
+  ...itemLockCodedRefusalTests,
+  ...itemLockHolderIdentityTests,
+  ...itemLockNextSkipsHeldTests,
+  ...itemLockOperatorVsAutomaticTests,
+  // milestone 43 / story 02 — the authority cut (tasks 00–07; 08 is @manual)
+  ...cacheAuthorityFactNotProjectionTests,
+  ...cacheAuthorityUpsertSeamTests,
+  ...cacheAuthorityRetractionTests,
+  ...cacheAuthorityAlternationTests,
+  ...cacheAuthorityContentionTests,
+  ...cacheAuthorityFrameRowByRowTests,
+  ...cacheAuthorityWorkspaceRemovalTests,
+  ...cacheAuthorityOwnDiskReadTests,
+  // milestone 43 / story 03 — write-triggered artifact sync (registered by ADR-014/E7)
+  ...artifactSyncEnqueueHookTests,
+  ...artifactSyncDrainTests,
+  ...artifactSyncManifestTests,
+  ...claudeSettingsMergeTests,
+  // milestone 43 / story 04 — the freshness ramp + the stale badge (task 03)
+  ...boardFreshnessRampTests,
+  // milestone 43 / story 04 — the data layer: schema v8's read side, the wire, the
+  // predicate and the never-evict rule (tasks 00–02)
+  ...stalenessSchemaProvenanceTests,
+  ...stalenessCachedRowsProvenanceTests,
+  ...stalenessMarksNeverEvictsTests,
+  // …and the UI behaviour half: the provenance line, the Resync door and its
+  // outcome table, the legends, and the programmatic a11y contract (tasks 04–08)
+  ...boardProvenanceAttributionTests,
+  ...boardResyncDoorTests,
+  ...boardResyncOutcomesTests,
+  ...boardFreshnessLegendTests,
+  ...boardStalenessA11yTests,
+  // …and the Resync transport the UI's one door calls (ADR-014/E6)
+  ...meshResyncTests,
+  // milestone 43 / story 05 — gate-time propagation at the reuse door (tasks 00–03;
+  // 04 is @manual and 05 is @uat)
+  ...gatePropagationReuseDoorAdvanceTests,
+  ...gatePropagationRefusalsTests,
+  ...gatePropagationReportedTests,
+  ...gatePropagationCreatePathRegressionTests,
+  // milestone 43 / story 06 — the readers migrate (tasks 00–04; 05 is @manual)
+  ...cacheReadSeamTests,
+  ...cacheReadResolveChokepointTests,
+  ...cacheReadControlLeavesTests,
+  ...cacheReadBoundaryHoldsTests,
+  ...cacheReadDoctorOverlayTests
 ];
 
 // Run the suite ONLY when this module is the entry point. The

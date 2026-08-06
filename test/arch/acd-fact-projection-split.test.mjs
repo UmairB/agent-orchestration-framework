@@ -36,6 +36,7 @@ import { drainEffects, CONTROL_LOCI } from "../../src/effects/dispatch.mjs";
 import {
   openGlobalWorkProjectionStore,
   remapWorkspaceFactRefs,
+  wholesaleDelete,
 } from "../../src/global-work-store.mjs";
 import { setItemBranch, readItemBranch } from "../../src/mesh-assignment-directive.mjs";
 import { resolveWorkspaceId } from "../../src/workspace-identity.mjs";
@@ -125,29 +126,127 @@ export const archTests = [
   },
 
   {
-    name: "arch/m42-d5: wholesale deletes are class-gated — the publisher sweeps only through the guard, and the guard refuses a fact table",
+    // AMENDED BY m43 / ADR-004 (story 43/02, the authority cut) — the three clauses
+    // this test used to make about `work_items` said the OPPOSITE of the invariant now
+    // in force, and were named in that story's contract as owed amendments:
+    //
+    //   was: `tableClass("work_items") === "projection"`
+    //   now: === "fact". The table is no longer derived from one node's disk; it holds
+    //        durable REPORTS from whichever node authored each row, and no local
+    //        rebuild reconstructs another node's report.
+    //
+    //   was: the publisher's `wholesaleDelete(db, "work_items", …)` sweep MUST EXIST.
+    //   now: it must NOT exist ANYWHERE in src/, and the guard must actually THROW for
+    //        it — asserted behaviourally below, not by the presence of a string. That
+    //        is strictly stronger: the old clause proved a call site was spelled a
+    //        certain way; this proves the gate refuses the act.
+    //
+    //   was: NO raw `DELETE FROM <t> WHERE workspace_id = ?` may appear at all.
+    //   now: the same rule, with the two named doors the cut created enumerated and
+    //        each held to a HARDER standard than "absent" — an author retraction must
+    //        carry the `node_id = ?` predicate that makes it a retraction rather than a
+    //        sweep, and an unqualified whole-workspace DELETE of a cache table may
+    //        exist ONLY inside `removeWorkspaceFromCache`, the one explicitly named,
+    //        operator-initiated removal path. A publish tick reaching either is exactly
+    //        what this now catches.
+    name: "arch/m42-d5 (+m43 ADR-004): wholesale deletes are class-gated — work_items is a FACT the guard refuses, projection_errors is still swept through it, and the only raw cache-table DELETEs are the named retraction and the named removal path",
     run: async () => {
       const source = await readFile(path.join(SRC_DIR, "global-work-store.mjs"), "utf8");
       const code = stripComments(source);
       assert.ok(/function wholesaleDelete\s*\(/.test(code), "the one guard exists");
       assert.ok(/tableClass\(table\)/.test(code), "…and consults the classification");
       assert.ok(/fact-table-wholesale-delete/.test(code), "…refusing with the coded error before the statement runs");
-      // No raw workspace-sweep DELETE survives outside the guard: the guard's own
-      // template is the ONE spelling.
-      const rawSweeps = [...code.matchAll(/DELETE FROM (\w+) WHERE workspace_id = \?/g)].map((match) => match[1]);
-      assert.deepEqual(rawSweeps, [], `no raw workspace-sweep DELETE outside the guard (found: ${rawSweeps.join(", ")})`);
-      assert.ok(/wholesaleDelete\(db, "work_items"/.test(code), "the publisher's work_items sweep routes through the guard");
-      assert.ok(/wholesaleDelete\(db, "projection_errors"/.test(code), "the publisher's projection_errors sweep routes through the guard");
-      // Self-check (non-vacuous): the raw-sweep matcher FIRES on the retired form.
-      assert.equal(
-        [...'db.prepare("DELETE FROM work_items WHERE workspace_id = ?")'.matchAll(/DELETE FROM (\w+) WHERE workspace_id = \?/g)].length,
-        1,
-        "the raw-sweep matcher fires on a planted raw delete",
+
+      // (1) THE CUT: no wholesale sweep of work_items survives anywhere in src/.
+      const sweepers = [];
+      for (const file of await listSourceFiles(SRC_DIR)) {
+        if (/wholesaleDelete\s*\([^)]*["']work_items["']/.test(stripComments(await readFile(file, "utf8")))) {
+          sweepers.push(path.relative(repoRoot, file));
+        }
+      }
+      assert.deepEqual(sweepers, [], `work_items is a fact — nothing may wholesale-sweep it (offenders: ${sweepers.join(", ")})`);
+      assert.ok(/wholesaleDelete\(db, "projection_errors"/.test(code), "the publisher's projection_errors sweep still routes through the guard");
+
+      // (2) THE RAW-SWEEP RULE, with its two named doors. Every raw workspace-scoped
+      // DELETE is located, attributed to the function it sits in, and judged there.
+      const removalStart = code.indexOf("export function removeWorkspaceFromCache");
+      assert.ok(removalStart > 0, "the named removal path exists (the sweep it replaces is gone, so this door must be there)");
+      const removalEnd = code.indexOf("\nexport ", removalStart + 1);
+      const removalBody = code.slice(removalStart, removalEnd === -1 ? undefined : removalEnd);
+      const guardStart = code.indexOf("export function wholesaleDelete");
+      const guardBody = code.slice(guardStart, code.indexOf("\n}", guardStart));
+
+      const offenders = [];
+      for (const match of code.matchAll(/DELETE FROM (\w+) WHERE workspace_id = \?([^"'`]*)/g)) {
+        const [statement, table, tail] = match;
+        const inGuard = guardStart >= 0 && match.index >= guardStart && match.index < guardStart + guardBody.length;
+        const inRemoval = removalEnd === -1 ? match.index >= removalStart : match.index >= removalStart && match.index < removalEnd;
+        if (inGuard) continue; // the guard's own class-gated template — the ONE sanctioned sweep spelling
+        if (inRemoval) continue; // the explicitly named, operator-initiated removal door
+        // Anywhere else, a DELETE against a cache table must be AUTHORSHIP-SCOPED:
+        // bound to the recorded author of the row it removes. Without the node_id
+        // predicate it is a sweep wearing a retraction's name. `IS` as well as `=`,
+        // because the operator door (ADR-010/D1) removes a row by ITS OWN author —
+        // which may be the pre-v8 NULL that `=` can never match.
+        if (!/\bnode_id (?:=|IS) \?/.test(tail)) {
+          offenders.push(`${table}: ${statement.trim().slice(0, 90)}`);
+        }
+      }
+      assert.deepEqual(
+        offenders,
+        [],
+        `a workspace-scoped DELETE outside the guard and outside removeWorkspaceFromCache must carry the node_id authorship predicate (offenders: ${offenders.join("; ")})`,
       );
-      // The classification answers the way the guard depends on.
-      assert.equal(tableClass("work_items"), "projection");
+      // …and the retraction really is spelled that way, so the clause above is not
+      // passing over an absence.
+      assert.ok(
+        /DELETE FROM work_items WHERE workspace_id = \? AND ref = \? AND node_id IS \?/.test(code),
+        "the retraction is scoped by the row's own recorded author — never an unqualified sweep",
+      );
+
+      // (3) Self-checks (non-vacuous): the matcher still fires on the retired form, and
+      // the authorship predicate is what distinguishes it from a retraction.
+      const scan = (text) => [...text.matchAll(/DELETE FROM (\w+) WHERE workspace_id = \?([^"'`]*)/g)]
+        .filter(([, , tail]) => !/\bnode_id (?:=|IS) \?/.test(tail));
+      assert.equal(scan('db.prepare("DELETE FROM work_items WHERE workspace_id = ?")').length, 1, "the raw-sweep matcher fires on the retired wholesale delete");
+      assert.equal(scan('db.prepare("DELETE FROM work_items WHERE workspace_id = ? AND node_id = ? AND ref = ?")').length, 0, "…and does NOT fire on an author-scoped retraction");
+      assert.equal(scan('db.prepare("DELETE FROM work_items WHERE workspace_id = ? AND ref = ? AND node_id IS ?")').length, 0, "…nor on the NULL-safe form the operator door needs");
+
+      // (4) The classification answers the way the guard depends on.
+      assert.equal(tableClass("work_items"), "fact", "m43/ADR-004: the reclassification IS the enforcement");
+      assert.equal(tableClass("projection_errors"), "projection", "…and it is scoped to ONE table: the error list is still rebuilt");
       assert.equal(tableClass("global_assignments"), "fact");
       assert.equal(tableClass("nonexistent_table"), null);
+
+      // (5) BEHAVIOURAL: the gate actually refuses the act, and actually performs the
+      // sanctioned one. A string assertion could never tell these two apart.
+      await withGlobalHome(async () => {
+        const store = await openGlobalWorkProjectionStore({});
+        try {
+          store.db.prepare("INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path, node_id, updated_at) VALUES ('ws-1','01','milestone','m','not-started','M',NULL,'/x/SPEC.md','node-a','2026-08-02T10:00:00.000Z')").run();
+          store.db.prepare("INSERT INTO projection_errors (workspace_id, source_path, message, code, occurred_at) VALUES ('ws-1','/x/BROKEN.md','bad','frontmatter-unparseable','2026-08-02T10:00:00.000Z')").run();
+
+          assert.throws(
+            () => wholesaleDelete(store.db, "work_items", "ws-1"),
+            (error) => error.code === "fact-table-wholesale-delete",
+            "the guard refuses a fact table with the coded error",
+          );
+          assert.equal(
+            store.db.prepare("SELECT COUNT(*) AS n FROM work_items WHERE workspace_id = 'ws-1'").get().n,
+            1,
+            "…and the refusal deleted nothing (a guard that had already swept would be worse than none)",
+          );
+
+          wholesaleDelete(store.db, "projection_errors", "ws-1");
+          assert.equal(
+            store.db.prepare("SELECT COUNT(*) AS n FROM projection_errors WHERE workspace_id = 'ws-1'").get().n,
+            0,
+            "a projection table is still swept and rebuilt",
+          );
+        } finally {
+          store.close?.();
+        }
+      });
     },
   },
 
@@ -206,11 +305,19 @@ export const archTests = [
             store.db
               .prepare("INSERT INTO work_item_runs (workspace_id, ref, run_id, record_json, node_id, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
               .run(workspaceId, "02", "run-1", "{}", null, "2026-01-01T00:00:00Z");
+            // The row's STATE is incidental to this proof — the fact remap is a plain
+            // UPDATE by ref and never reads it — but it can no longer be an ACTIVE
+            // one: m43/ADR-003's item lock refuses a control-side insert that would
+            // renumber a ref whose execution scope an active assignment holds, which
+            // is exactly what this fixture would be doing. A settled (terminal) row is
+            // the same fixture at a gate, and every assertion below is unchanged.
+            // (m20/R1: a guard added to a shared spine seam invalidates the PRIOR
+            // milestone's tests of that seam — enumerated here rather than discovered.)
             store.db
               .prepare(
                 "INSERT INTO global_assignments (assignment_id, item_ref, workspace_id, target_node_id, issuer, state, assigned_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
               )
-              .run("asg-1", "02", workspaceId, "node-a", "operator", "running", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+              .run("asg-1", "02", workspaceId, "node-a", "operator", "done", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
             setItemBranch(store, workspaceId, "02", "aof/mesh/02");
 
             // The seam, end-to-end: the CLI's own drain (LOCAL_LOCI) pays the

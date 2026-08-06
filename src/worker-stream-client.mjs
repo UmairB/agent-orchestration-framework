@@ -44,6 +44,11 @@ import { buildTerminalFrameEnvelope, buildTerminalEndEnvelope, TERMINAL_INPUT_KI
 // the control-side owner); imported here so both sides share the contract, never a
 // re-spelled literal at this call site.
 import { RECOVERY_PUSH_KIND, buildRecoveryPushResultFrame } from "./mesh-recovery-push.mjs";
+// m43 / story 04 (ADR-010/R4.2) — the RESYNC lane, an exact sibling of the recovery-push
+// lane above: a DOWN-frame asking THIS node to push a fresh copy of a cached row it
+// reported, and the UP-reply that says the push went out. Wire kinds + frame builder come
+// from the ONE contract home (mesh-resync.mjs), never re-spelled here.
+import { RESYNC_KIND, buildResyncResultFrame } from "./mesh-resync.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
 // m42 wave (d) leg d3 — the outbox's two frame kinds live in ONE home (the
@@ -253,6 +258,8 @@ export function createWorkerStreamClient({
   // handler, a clean additive sibling to directiveHandler above. Registered via
   // onRecoveryPush(handler); invoked with the PARSED recovery-push DOWN-frame (below).
   let recoveryPushHandler = null;
+  // m43 / story 04 — the resync DOWN-frame's one handler, registered via onResync().
+  let resyncHandler = null;
   // 2026-07-27 (the duplicate-run wall) — the withdraw DOWN-frame's one handler.
   let withdrawHandler = null;
   let effectAckHandler = null;
@@ -394,6 +401,14 @@ export function createWorkerStreamClient({
     // a crash), exactly like directive with no directiveHandler.
     if (frame?.kind === RECOVERY_PUSH_KIND) {
       recoveryPushHandler?.(frame);
+      return;
+    }
+    // m43 / story 04 — the RESYNC DOWN-frame: an operator on the control node is looking
+    // at a stale copy of a row THIS node reported and has asked for a fresh one. Handed to
+    // the registered resyncHandler (which pushes and replies via sendResyncResult below);
+    // an unregistered handler drops it, exactly like every other kind here.
+    if (frame?.kind === RESYNC_KIND) {
+      resyncHandler?.(frame);
       return;
     }
     // m42 wave (d) leg d3 — the DURABLE RECEIPT for an outbox-delivered effect
@@ -807,6 +822,21 @@ export function createWorkerStreamClient({
     recoveryPushHandler = typeof handler === "function" ? handler : null;
   }
 
+  // sendResyncResult({ workspaceId, itemRef, ok, code }) — m43 / story 04: the worker's
+  // UP-reply to a resync DOWN-frame, over the SAME sendFrame failure-isolation seam every
+  // other up-frame uses (a transport fault is a warning, never a rethrow — ADR-004). It
+  // reports that the PUSH went out; the fresh row itself travels on the ordinary snapshot/
+  // delta/content frames, which is what actually clears the badge.
+  async function sendResyncResult({ workspaceId, itemRef, ok, code } = {}) {
+    return sendFrame(buildResyncResultFrame(nodeId, { workspaceId, itemRef, ok, code, now: resolveNow() }));
+  }
+
+  // onResync(handler) — registers the ONE handler invoked with a PARSED resync DOWN-frame,
+  // mirroring onRecoveryPush exactly. Additive — unregistered drops resync frames silently.
+  function onResync(handler) {
+    resyncHandler = typeof handler === "function" ? handler : null;
+  }
+
   // onDirective(handler) — milestone 35 / ADR-002, story 01: registers the ONE
   // handler invoked with a PARSED directive frame when one arrives on the receive
   // listener above. Mirrors createWorkerWsTransport's onDrop(handler) shape
@@ -889,11 +919,13 @@ export function createWorkerStreamClient({
     sendTerminalFrame,
     sendTerminalEnd,
     sendRecoveryPushResult,
+    sendResyncResult,
     requestCloneCredential,
     requestCloneUrl,
     requestWriteCredential,
     onDirective,
     onRecoveryPush,
+    onResync,
     onWithdraw,
     onTerminalInput,
     onTerminalResume,

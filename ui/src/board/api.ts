@@ -39,14 +39,61 @@ export type WorkItem = {
   // are NOT bridged, so a row carrying these needs a "lives on <node>" answer rather
   // than a local resolution error (TECH_DEBT item 6).
   fromWorker?: boolean;
+  // The CACHE-PROVENANCE pair (milestone 43 / ADR-006): who last reported this row
+  // and when, mapped from the store's `node_id`/`updated_at` by the ONE row mapper
+  // on the other side of the wire. Both keys are EXPLICITLY PRESENT (null when the
+  // fact is unknown) for a cache-published row, and ABSENT for a workspace that is
+  // not mesh-enabled — presence, not value, is what tells the board whether this
+  // is a copy of something another machine said. `unknown` is a designed state:
+  // a missing `syncedAt` is never rendered as `stale`.
   reportedBy?: string | null;
+  syncedAt?: string | null;
 };
 
 export type WorkStatus = "not-started" | "in-progress" | "in-review" | "blocked" | "done";
 
+// The `/api/work/list` envelope (milestone 43 / ADR-010 R4.1, as corrected by
+// ADR-015/F7 — the envelope is three keys). The HTTP FACE — not the command —
+// carries the configured staleness window beside the rows, so `work:list`'s
+// result and `aof work list --json`'s flat array stay byte-identical.
+//
+// The window's WIRE NAME is deliberately NOT spelled here: `freshness.mjs`'s
+// `readStalenessWindow` is the ONE reader of it in `ui/`, which is what stops a
+// second copy (or a default) of the threshold appearing on this side of the
+// wire. `nodeId` rides the envelope for the same reason the window does — which
+// machine "here" is, is ONE fact for the whole response, not a per-row one — and
+// it is what lets a row this node published read `(this node)` (AC 11).
+export type WorkListEnvelope = { items: WorkItem[]; nodeId?: string | null };
+
 export type DocName = "SPEC" | "STORY" | "VERIFICATION" | "RETROSPECTIVE";
 
-export type DocResponse = { ref: string; doc: DocName; present: boolean; body: string };
+// The ARTIFACT's own provenance (milestone 43 / ADR-006) travels under the SAME
+// two wire names the row carries, because it is the same fact about a different
+// subject — and a doc can legitimately be older than the row that names it, so
+// its instant is never inferred from the row's. Absent for a doc this checkout
+// answered from its own disk (there is no cached copy to attribute).
+export type DocResponse = {
+  ref: string;
+  doc: DocName;
+  present: boolean;
+  body: string;
+  fromWorker?: boolean;
+  reportedBy?: string | null;
+  syncedAt?: string | null;
+};
+
+// The `/api/work/resync` answer (43/ADR-010 R4.2) — a CODED OUTCOME DOCUMENT at
+// 200, never an error envelope, because the offline owner is the LIKELY case
+// here (the row is stale precisely because its owner stopped reporting) and is a
+// DESIGNED state rather than a fault. `ok` reports the CALL and never the DATA:
+// only a fresher `syncedAt` on the next list response proves a copy landed.
+export type ResyncResponse = {
+  ok: boolean;
+  code: string | null;
+  ref: string;
+  node: string | null;
+  message: string;
+};
 
 export type Finding = { path: string; problem: string };
 export type ValidateResponse = { findings: Finding[] };
@@ -134,6 +181,23 @@ async function getJson<T>(route: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+// A refusal that keeps its CODE. The board's error bodies are `{ ok:false, error,
+// code }` (src/board-ui.mjs's sendApiError), and a caller that shapes its own copy
+// from the code — rather than printing the server's sentence — needs the code to
+// survive the throw. The message stays the server's, for the `title`.
+async function codedError(response: Response): Promise<Error & { code?: string }> {
+  let code: string | undefined;
+  let message = `Request failed (${response.status})`;
+  try {
+    const body = (await response.json()) as { error?: string; code?: string };
+    if (typeof body.error === "string") message = body.error;
+    if (typeof body.code === "string") code = body.code;
+  } catch {
+    /* a non-JSON body keeps the status-shaped message */
+  }
+  return Object.assign(new Error(message), code ? { code } : {});
+}
+
 async function safeError(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: string };
@@ -144,8 +208,8 @@ async function safeError(response: Response): Promise<string> {
 }
 
 export const workApi = {
-  list(): Promise<WorkItem[]> {
-    return getJson<WorkItem[]>("/api/work/list");
+  list(): Promise<WorkListEnvelope> {
+    return getJson<WorkListEnvelope>("/api/work/list");
   },
   doc(ref: string, doc: DocName): Promise<DocResponse> {
     return getJson<DocResponse>(`/api/work/doc?ref=${encodeURIComponent(ref)}&doc=${encodeURIComponent(doc)}`);
@@ -184,6 +248,22 @@ export const workApi = {
     });
     if (!response.ok) throw new Error(await safeError(response));
     return (await response.json()) as ContinueResponse;
+  },
+  // THE RESYNC DOOR (milestone 43 / ADR-010 R4.2) — "ask the node that reported this
+  // cached row to push a fresh copy". A POST, because it causes a node→node request to
+  // leave this machine; the route answers a CODED OUTCOME DOCUMENT at 200 whatever the
+  // owner said, so an unreachable owner arrives here as DATA to render rather than as a
+  // thrown fault. Only a genuine transport/admission failure rejects, and it carries the
+  // route's own `code` so the affordance can shape its message from the coded envelope
+  // rather than printing a raw sentence.
+  async resync(ref: string): Promise<ResyncResponse> {
+    const response = await fetch("/api/work/resync", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ref }),
+    });
+    if (!response.ok) throw await codedError(response);
+    return (await response.json()) as ResyncResponse;
   },
   async feedback(input: { ref: string; note: string; actor: string; refs?: string }): Promise<FeedbackResponse> {
     const response = await fetch("/api/work/feedback", {

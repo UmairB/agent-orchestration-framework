@@ -181,18 +181,29 @@ export async function runCommandFace(command, args) {
 }
 
 // EXACTLY ONE structured document on stdout — success or failure — so every
-// `aof … --json` is parseable without sniffing stderr. An error carrying a
-// structured `shifted` count (the insert family's confirm-required refusal,
-// ADR-004's never-deadlock guard) keeps it in the envelope — callers read the
-// shift size without re-deriving it.
+// `aof … --json` is parseable without sniffing stderr. A coded refusal that carries
+// STRUCTURE keeps it in the envelope, through ONE channel: `error.detail`.
 function emitJsonErrorEnvelope(error) {
   console.log(JSON.stringify({
     ok: false,
     error: error.message,
     code: error.code ?? "error",
-    ...(error.shifted !== undefined ? { shifted: error.shifted } : {}),
+    ...structuredDetail(error),
   }, null, 2));
   process.exitCode = 1;
+}
+
+// The ONE structured-refusal channel. Two riders today: the insert family's
+// confirm-required `{ shifted }` (ADR-004's never-deadlock guard — callers read the
+// shift size without re-deriving it) and m43/ADR-003's item lock, whose five keys
+// `{ itemRef, scopeRef, assignmentId, holderNode, state }` let a face render "42 is
+// held by aof-wsl — refused" without parsing prose. One concept, one mechanism: a
+// per-key special case here is how a face grows a second vocabulary. It is a plain
+// object on `error.detail`, and it can never shadow the envelope's three contract keys.
+function structuredDetail(error) {
+  const detail = error?.detail;
+  if (detail == null || typeof detail !== "object" || Array.isArray(detail)) return {};
+  return Object.fromEntries(Object.entries(detail).filter(([key]) => key !== "ok" && key !== "error" && key !== "code"));
 }
 
 async function performInvoke(command, options) {

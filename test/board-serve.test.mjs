@@ -139,11 +139,14 @@ export const boardServeTests = [
         ({ server, url } = await serveSetupUi(null, { projectDir: repo, port: 0, uiRoot: dist, spawn: stubSpawn() }));
         const port = server.address().port;
 
-        // The work-list API answers a flat JSON array on the same origin.
+        // The work-list API answers on the same origin. m43 / story 04 (ADR-010/R4.1): the
+        // route's response is the `{ items, stalenessSeconds }` envelope — the rows are
+        // still a flat array, one level down. This scenario's subject is the ONE ORIGIN,
+        // which is unmoved.
         const apiRes = await fetch(new URL("/api/work/list", url));
         assert.equal(apiRes.status, 200, "the work-list API answers");
-        const list = await apiRes.json();
-        assert.ok(Array.isArray(list), "the response is a flat JSON array");
+        const list = (await apiRes.json()).items;
+        assert.ok(Array.isArray(list), "the rows are a flat JSON array");
         assert.ok(list.length >= 1, "the array is non-empty");
 
         // The hashed bundle asset serves with a JavaScript content type.

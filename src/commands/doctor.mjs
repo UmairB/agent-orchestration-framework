@@ -33,6 +33,16 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { doctorWork, staleWindowFromConfig } from "../work-doctor.mjs";
+// m43 / story 06 (ADR-005) — the cache's three per-item facts (status, convention-doc
+// presence, children), read ONCE here and handed to the engine as plain data…
+import { readCachedWorkFacts } from "../board-worker-stream.mjs";
+// …and the WORKSPACE fact that decides whether this node may consult the cache at all. It is
+// a named export of the read seam, not a private helper of one reader, precisely so that
+// THIS door — which does not go through the seam — can reach it (ADR-016/G4). Importing the
+// predicate does NOT make doctor a cache-first reader: its item set is still the disk's,
+// which is what `acd-cache-read-surface-boundary` pins `buildSnapshot` on.
+import { isMeshWorktree } from "../work-read.mjs";
+import { meshNodeIdOf } from "./mesh-gate.mjs";
 import { readJson } from "../fs.mjs";
 import { probeFabric, remediationForReason } from "../mesh-fabric.mjs";
 import { commandError } from "../command-error.mjs";
@@ -105,9 +115,38 @@ export const doctorCommand = {
     } catch {
       legacyIdentitySidecarPresent = false;
     }
+    // milestone 43 / story 06 (ADR-005) — THE CACHE OVERLAY's read, at this SAME impure edge.
+    // Doctor's engine builds its snapshot once and hands pure data to pure groups, so the
+    // store read belongs here beside `Date.now()` and the raw committed config, never inside
+    // the engine. A fault degrades to `null`, which is exactly "no overlay": every group then
+    // sees the disk-only snapshot it saw before this story, rather than doctor failing
+    // because the mesh cache is unavailable.
+    //
+    // …AND THE WORKTREE GUARD IS APPLIED HERE TOO (m43 / ADR-016/G4, MEASURED). ADR-005's
+    // echo-chamber rule is a fact about the WORKSPACE, not about one reader: a per-assignment
+    // worktree reports under the SAME workspace id as the control, so inside a worker's own
+    // checkout the cache answers with another node's opinion of the work this checkout is
+    // authoring. `work-read.mjs`'s seam already refuses that; this read reaches the store
+    // DIRECTLY and was the second, unguarded door. Measured inside a real worktree it produced
+    // `cache-status-divergence` on every item whose disk had moved past the last stream tick
+    // — the normal mid-phase state — plus a `started-story-no-tasks` fired only because the
+    // OVERLAID status made a not-started story read in-progress. `null` costs no new control
+    // flow: `doctorWork` already treats it as "no overlay", which in a worktree is exactly
+    // right — its own disk IS the authority on the work it is doing.
+    const cache = isMeshWorktree(ctx.workspace.projectRoot)
+      ? null
+      : await readCachedWorkFacts(
+        ctx.workspace,
+        { docNames: ["VERIFICATION.md", "RETROSPECTIVE.md", "ARCHITECTURE.md"] },
+        { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} },
+      );
     const findings = await doctorWork(ctx.workspace.workDir, ctx.workspace.config, scope, {
       now: Date.now(), // the impure edge — the engine stays wall-clock-free
       staleWindow: staleWindowFromConfig(ctx.workspace.config),
+      cache,
+      // WHOSE report counts as "this node's own" — the discriminator between a real
+      // divergence and the mesh working as designed (ADR-005).
+      selfNode: meshNodeIdOf(ctx.workspace.config ?? {}),
       rawCommittedMesh,
       committedConfigPath: ctx.workspace.configPath,
       legacyIdentitySidecarPresent,

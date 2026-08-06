@@ -25,7 +25,11 @@
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
-import { isActiveAssignmentState } from "./assignment-record.mjs";
+// m43/ADR-003 — `executionScopeRef` moved DOWN into the assignment-record LEAF (the
+// mint seam needs the same rule and the spine must not import this face). It is
+// imported here and RE-EXPORTED below, so this module's three consumers
+// (continue/list/run-status) are byte-unchanged.
+import { isActiveAssignmentState, executionScopeRef } from "./assignment-record.mjs";
 import { readItemBranch } from "./mesh-assignment-directive.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
@@ -108,16 +112,16 @@ function safeBranch(store, workspaceId, itemRef) {
 // milestone was running on another machine. The continue door then fell through to
 // "here" and started a rival local run: the exact one-door defect, one level down.
 //
-// This is the ONE home for the scope rule. Both consumers use it: the continue
-// decision (src/commands/continue.mjs) and the row overlay (applyExecutionOverlay,
-// below) — so "what the board shows on the story" and "where the story's continue
-// goes" can never disagree.
-
-// executionScopeRef(ref) — the top-level item ref a child's execution is recorded
-// under ("18/02" → "18"; "18" → "18").
-export function executionScopeRef(ref) {
-  return String(ref ?? "").split("/")[0];
-}
+// The scope rule has ONE home and it is `src/assignment-record.mjs` (m43/ADR-003 —
+// it is an assignment-record concern by subject, "which item ref does an assignment
+// cover", and a pure leaf is the only home both this face and the mint seam can
+// reach without inverting the layering). It is RE-EXPORTED here so this module's
+// consumers — the continue decision (src/commands/continue.mjs), run-status'
+// streamed-run lookup, and the row overlay (applyExecutionOverlay, below) — keep
+// importing it from where they always have, and so "what the board shows on the
+// story", "where the story's continue goes" and "what the mint door refuses" can
+// never disagree.
+export { executionScopeRef };
 
 // resolveScopedExecution(overlay, ref) → { execution, scopeRef } | null — the item's
 // own execution when it has one, else its top-level scope's. Null when neither exists

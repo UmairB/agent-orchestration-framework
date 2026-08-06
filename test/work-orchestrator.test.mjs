@@ -17,7 +17,11 @@ import {
   selectOrchestratorModel,
   showOrchestratorModel
 } from "../src/work-orchestrator.mjs";
-import { claudeSettingsJson } from "../src/runtime-config.mjs";
+// m43 / ADR-002 AC11: the whole-file `claudeSettingsJson` renderer is GONE (a
+// co-authored file gets a surgical merge, never a whole-file render). The orchestrator
+// model still lands in `.claude/settings.json` — through the merge PATCH, which is what
+// this test now proves is functional.
+import { claudeSettingsPatch } from "../src/claude-settings.mjs";
 
 async function fixture(config) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "aof-orchestrator-"));
@@ -145,14 +149,14 @@ export const workOrchestratorTests = [
   },
 
   {
-    name: "work-orchestrator: the chosen model renders into .claude/settings.json as { model }",
+    name: "work-orchestrator: the chosen model reaches .claude/settings.json as { model } — through the ADR-002 merge",
     run: async () => {
       // Prove the choice is FUNCTIONAL: the same field the surface writes is the
       // one runtime-config projects into settings.json.
       const config = {};
       setOrchestratorModel(config, "fable");
-      const rendered = JSON.parse(claudeSettingsJson({ settings: config.settings }));
-      assert.equal(rendered.model, "fable", "settings.claude.model projects into settings.json model");
+      const patch = claudeSettingsPatch({ settings: config.settings }, { targetDir: process.cwd() });
+      assert.equal(patch.settings.model, "fable", "settings.claude.model is spliced into settings.json as `model`");
     }
   }
 ];

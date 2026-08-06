@@ -23,7 +23,15 @@
 // #3 / acd-presence-write-scope — story 00's, untouched). The activeRuns read is a READ
 // of the run records — it mutates no run record.
 import os from "node:os";
-import { listItems } from "../work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. The item enumeration is cache-first, so the
+// heartbeat's run read considers every item the mesh knows about rather than only the ones
+// this checkout happens to hold. What it must NOT do is advertise another node's run as its
+// own: `activeRuns` is "the OWNER node's synced presence.activeRuns … the only fleet-durable
+// run signal" (mesh-identity.mjs, m38 finding F1), so the RECORDS still come from run files
+// on this node's disk, and a cache-known ref with no local checkout is SKIPPED and reported
+// (ADR-010/R6.4) rather than having a run invented for it.
+import { listItemsCacheFirst, localItemsOnly, reportReachThroughSkips } from "../work-read.mjs";
+import { readCachedActiveRunIds } from "../board-worker-stream.mjs";
 import { resolveInstallSalt } from "./mesh-identity.mjs";
 import { packageVersionString } from "../asset-base.mjs";
 import { deriveNodeId, sidecarPathFor } from "../node-identity.mjs";
@@ -67,8 +75,17 @@ export const meshHeartbeatCommand = {
     // activeRuns is a READ of the run records across the work items (the 23 → 20 → 19
     // seam) — readActiveRuns enumerates every item's runs/ and filters to running. It
     // calls no write/transition verb, so a heartbeat leaves every run record unchanged.
-    const items = await listItems(ws.workDir);
-    const activeRuns = await readActiveRuns(items);
+    const seamOptions = { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} };
+    const local = localItemsOnly(await listItemsCacheFirst(ws, seamOptions));
+    reportReachThroughSkips("mesh:heartbeat activeRuns", local.skipped);
+    // The union is "the running runs visible from here": this checkout's own run FILES for
+    // the items it holds, plus the cache's run RECORDS for the items it does not. The second
+    // half is what the migration buys — before it, an item a worker was executing and this
+    // node had never held was invisible to the heartbeat entirely.
+    const activeRuns = [
+      ...(await readActiveRuns(local.items)),
+      ...(await readCachedActiveRunIds(ws, local.skipped, seamOptions)),
+    ];
 
     // The heartbeat instant — the injected now (white-box) or wall-clock, UTC-Z.
     const heartbeatAt = typeof input?.now === "string" && input.now.length > 0 ? input.now : new Date().toISOString();

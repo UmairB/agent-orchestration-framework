@@ -128,9 +128,15 @@ export const archTests = [
       assert.ok(Array.isArray(reactors), "stream.reindexed is a declared event");
       assert.deepEqual(
         reactors.map((reactor) => reactor.key),
-        ["remap-run-refs", "remap-notion-map", "remap-projection", "remap-control-facts"],
-        "all four remaps are declared, in cascade order (the fact half split out by leg d5)",
+        ["remap-run-refs", "remap-notion-map", "remap-projection", "remap-control-facts", "publish-projection"],
+        "all four remaps are declared, in cascade order (the fact half split out by leg d5), and the publish LAST",
       );
+      // m43/43/02 (ADR-012/B6) — the publish step is new and its POSITION is the
+      // invariant, not its presence: it re-derives the renumbered refs from the renamed
+      // stream, so it must run AFTER every remap has moved the rows those refs key. Two
+      // source comments claimed this reactor existed for a whole milestone while it did
+      // not, which is exactly why the list above is pinned rather than sampled.
+      assert.equal(reactors.at(-1).key, "publish-projection", "the publish is the LAST step of the cascade, after every remap");
       // The sidecar remap is a LOCAL file rewrite, so it must NOT be declared at the
       // integration locus: a plain CLI process reaches checkout + local only, and an
       // integration-locus step would sit deferred forever — leaving the very

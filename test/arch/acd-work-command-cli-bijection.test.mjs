@@ -227,6 +227,14 @@ function argsFor(sub) {
     // m42 wave (b) — refine/verify are the SAME door (one factory, one decision).
     case "refine": return ["work", "refine", "03/01", "--json"];
     case "verify": return ["work", "verify", "03/01", "--json"];
+    // m43 / story 04 (ADR-010/R4.2) — work:resync asks the node that REPORTED a cached row
+    // to push a fresh copy. The fixture is not mesh-configured and its cache holds no row
+    // for "03/01", so the door resolves NO OWNING NODE and answers the coded
+    // `resync-no-owner` document at exit 0 — nothing is written, nothing is dispatched, and
+    // no bounded poll is entered (the refusal is decided before any request row exists).
+    // A coded refusal that still emits ONE parseable document is a clean probe, the same
+    // shape `update` above establishes.
+    case "resync": return ["work", "resync", "03/01", "--json"];
     default: throw new Error(`unmapped subcommand ${sub}`);
   }
 }

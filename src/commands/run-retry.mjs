@@ -10,10 +10,15 @@
 // this command never re-derives the retryable/non-retryable table; it surfaces the
 // store's coded rejections (not-retryable / attempts-exhausted / no-retryable-run)
 // unchanged. The result is the new running run record (records carry refs, not paths).
-import { resolveItemExact } from "./resolve.mjs";
+import { resolveItemExact, requireLocalCheckout } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionRunStart } from "../effects/run-transitions.mjs";
 import { meshNodeIdOf } from "./mesh-gate.mjs";
+// m43 / ADR-003 — the item-lock context. It rides `opts.lock`, NOT `opts.workspace`
+// (ADR-010/R1.3), precisely so this verb's never-published-on-mutate posture is
+// byte-unchanged: a lock check must not smuggle a propagation behaviour change into
+// the verb it now sits in front of.
+import { lockContextFor } from "../item-lock.mjs";
 
 export const runRetryCommand = {
   id: "work:run-retry",
@@ -36,8 +41,14 @@ export const runRetryCommand = {
 
     // The WRITE resolves by EXACT ref — never the free-text slug fallback the read
     // commands tolerate. A typo'd/partial ref → ref-not-found, never the wrong item.
-    const item = await resolveItemExact(ctx.workspace.workDir, ref);
+    const item = await resolveItemExact(ctx, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
+    // m43 / story 06 (ADR-010/R6.4) — the resolver is cache-first, so a ref another node
+    // owns now RESOLVES here. This door reads and rewrites run records under `item.dir`,
+    // which is not on this node for such a ref: refuse coded (echoing the resolved ref, so
+    // "resolved but not writable here" is distinguishable from "no such ref") and write
+    // nothing. Never scaffold — that would mint a second authority for another node's item.
+    requireLocalCheckout(item, ref);
 
     // The attempt ceiling is the resolved config value (work.autonomous.maxAttempts,
     // default 3 — the same value the aof:autonomous skill reads and --max-attempts
@@ -65,7 +76,7 @@ export const runRetryCommand = {
     const { record } = await transitionRunStart(
       item,
       { mode: "retry", runId: input.runId, maxAttempts, now: input.now, node: meshNodeId },
-      { journalOptions: ctx.effectsJournalOptions ?? {} },
+      { lock: lockContextFor(ctx.workspace, ctx), journalOptions: ctx.effectsJournalOptions ?? {} },
     );
     return record;
   },

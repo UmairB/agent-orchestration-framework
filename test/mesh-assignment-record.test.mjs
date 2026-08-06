@@ -134,10 +134,13 @@ export const meshAssignmentRecordTests = [
         // tables — the pin bumps again, same rationale.
         // v7 (m42 interactive worker terminals): the additive global_assignments.code
         // column (the needs-input status refinement) — same rationale again.
-        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 7);
-        assert.equal(v3.schemaVersion, 7);
+        // v8 (m43 / ADR-004 + ADR-006, owned by story 43/02): the additive
+        // work_items.node_id + work_items.updated_at provenance columns — same
+        // rationale, and the migration itself has its own fixture below.
+        assert.equal(GLOBAL_WORK_SCHEMA_VERSION, 8);
+        assert.equal(v3.schemaVersion, 8);
         const version = v3.db.prepare("SELECT value FROM aof_schema WHERE key = 'version'").get();
-        assert.equal(version.value, 7);
+        assert.equal(version.value, 8);
 
         const tables = v3.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
         assert.ok(tables.includes("global_assignments"), "global_assignments table exists");
@@ -197,6 +200,56 @@ export const meshAssignmentRecordTests = [
         assert.equal(row.clone_url, null, "the new column reads null for a row that predates it, never a fabricated value");
       } finally {
         v4.close();
+      }
+    }),
+  },
+  {
+    // m43 / ADR-004 + ADR-006 (story 43/02, the authority cut) — the SAME fixture shape
+    // as the v3->v4 clone_url migration above, for schema v8's provenance columns. This
+    // is the path EVERY live fleet store takes: `CREATE TABLE IF NOT EXISTS` never adds
+    // a column to an existing table, so a store that already has work_items rows gets
+    // them only from the explicit ALTER. The rows must survive it — they are the mesh's
+    // only readable copy of settled work — and must read `node_id` NULL, which is
+    // exactly "no recorded author": retractable by nobody until its author reports again.
+    name: "assignment-record/00 opening a v7 store (no work_items.node_id) with a v8 build adds the provenance columns via ALTER TABLE, losing no existing row",
+    run: async () => withTemp(async (home) => {
+      const v7 = await openGlobalWorkProjectionStore({ env: { AOF_GLOBAL_HOME: home } });
+      v7.db.exec(`
+        CREATE TABLE work_items_v7_shape (
+          workspace_id TEXT NOT NULL,
+          ref TEXT NOT NULL,
+          type TEXT NOT NULL,
+          slug TEXT NOT NULL,
+          status TEXT,
+          title TEXT,
+          parent TEXT,
+          source_path TEXT NOT NULL,
+          PRIMARY KEY (workspace_id, ref)
+        );
+        DROP TABLE work_items;
+        ALTER TABLE work_items_v7_shape RENAME TO work_items;
+      `);
+      v7.db.prepare(`
+        INSERT INTO work_items (workspace_id, ref, type, slug, status, title, parent, source_path)
+        VALUES ('ws-preexisting', '35/00', 'story', 'demo', 'in-progress', 'Pre-existing row', '35', '/pre/root/wiki/work/35/STORY.md')
+      `).run();
+      v7.db.prepare("UPDATE aof_schema SET value = 7 WHERE key = 'version'").run();
+      v7.close();
+
+      const v8 = await openStore(home);
+      try {
+        const columns = v8.db.prepare("PRAGMA table_info(work_items)").all().map((c) => c.name);
+        assert.ok(columns.includes("node_id"), "node_id is added by the v7->v8 migration, not just on a brand-new database");
+        assert.ok(columns.includes("updated_at"), "…and updated_at with it");
+
+        const row = v8.db.prepare("SELECT * FROM work_items WHERE workspace_id = ? AND ref = ?").get("ws-preexisting", "35/00");
+        assert.ok(row, "the pre-existing row survives the ALTER TABLE untouched");
+        assert.equal(row.status, "in-progress", "every pre-existing column value is preserved byte-identical");
+        assert.equal(row.title, "Pre-existing row");
+        assert.equal(row.node_id, null, "the new column reads null for a row that predates it, never a fabricated author");
+        assert.equal(row.updated_at, null);
+      } finally {
+        v8.close();
       }
     }),
   },

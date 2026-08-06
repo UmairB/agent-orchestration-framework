@@ -32,6 +32,17 @@ Feature: Every /api/work route routes through the registry and returns the miles
       | GET /api/work/validate           | 200    |
       | GET /api/work/next               | 200    |
 
+  # AMENDED 2026-08-03 (milestone 43, story 04) — `GET /api/work/list` is the ONE row of
+  # this table whose envelope is no longer the milestone-03 one, and the change is
+  # deliberate: m43/ADR-010 R4.1 makes the route answer `{ items, stalenessSeconds }`,
+  # because the cache staleness WINDOW is one number for the whole response and must not be
+  # duplicated per row (nor held as a literal in `ui/`). This scenario's oracle is the
+  # committed `test/board-api.test.mjs`, which now asserts the seven-field row contract one
+  # level down at `body.items` — unweakened, and every other route in the table is untouched.
+  # The CLI face is the contract that did NOT move: `work list --json` is still the flat
+  # array of the seven frozen fields (`test/arch/acd-work-list-contract.test.mjs`), which is
+  # what ADR-010 R4.1 protects by putting the window on the HTTP face alone.
+
   # The validate route projects the command's raw-absolute finding paths against
   # projectRoot and forward-slashes them — the milestone-03 board wire.
   Scenario: the validate route projects finding paths to projectRoot-relative forward-slashed

@@ -12,6 +12,10 @@
 // ({ guarded|notInitialized, manifest, message }).
 import path from "node:path";
 import { initWork } from "../work-init.mjs";
+// m43 / ADR-002 — the co-authored settings merge reports on the SAME envelope the
+// plan does, so a refusal (`claude-settings-unparseable`) or a restored drift is
+// visible on both faces rather than only in a log line.
+import { formatClaudeSettingsOutcome } from "../claude-settings.mjs";
 import { updateWork } from "../work-update.mjs";
 import { formatFriendlyApplyAction, relativeDisplayPath } from "../render-plan.mjs";
 import { RUNTIME_FLAGS, hasRuntimeOptions, parseRuntimes } from "../spine/flags.mjs";
@@ -101,6 +105,8 @@ export const workInitCommand = {
       if (!result.dryRun) {
         const { created, updated, skipped } = result.summary;
         const drift = result.summary["drift-warning"];
+        const settingsLine = formatClaudeSettingsOutcome(result.claudeSettings, { targetDir: result.targetDir });
+        if (settingsLine != null) lines.push(settingsLine);
         lines.push(`Initialised ACD: ${created} created, ${updated} updated, ${skipped} kept, ${drift} drift-warning.`);
         lines.push(`Manifest: ${relativeDisplayPath(result.manifestPath, result.targetDir)}`);
       }
@@ -119,6 +125,7 @@ export const workInitCommand = {
         manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, result.targetDir) : null,
         actions: jsonActions(result),
         notInstallable: result.notInstallable,
+        claudeSettings: result.claudeSettings ?? null,
       };
     },
 
@@ -174,6 +181,8 @@ export const workUpdateCommand = {
       if (!result.dryRun) {
         const { created, updated, skipped, deleted } = result.summary;
         const drift = result.summary["drift-warning"];
+        const settingsLine = formatClaudeSettingsOutcome(result.claudeSettings, { targetDir: result.targetDir });
+        if (settingsLine != null) lines.push(settingsLine);
         lines.push(`Updated ACD: ${created} created, ${updated} updated, ${skipped} up-to-date, ${deleted} deleted, ${drift} drift-warning.`);
         lines.push(`Manifest: ${relativeDisplayPath(result.manifestPath, result.targetDir)}`);
       }
@@ -192,6 +201,7 @@ export const workUpdateCommand = {
         manifest: result.manifestWritten ? relativeDisplayPath(result.manifestPath, result.targetDir) : null,
         actions: jsonActions(result),
         notInstallable: result.notInstallable,
+        claudeSettings: result.claudeSettings ?? null,
       };
     },
 

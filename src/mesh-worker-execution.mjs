@@ -133,7 +133,7 @@ import { transitionRunComplete, transitionRunStart } from "./effects/run-transit
 // m42 wave (d) leg d3 — a TERMINAL assignment report is a durable fact over the
 // bridge (raise -> outbox -> ack), never a fire-once frame.
 import { reportAssignmentSettled } from "./effects/assignment-transitions.mjs";
-import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, ensureCommitAvailable } from "./mesh-worktree.mjs";
+import { addWorktree, reuseWorktreeOnBranch, removeWorktree, meshWorktreesRoot, meshWorktreePath, meshItemBranchName, localBranchExists, remoteBranchExists, adoptRemoteBranch, ensureCommitAvailable, advanceBranchToBase } from "./mesh-worktree.mjs";
 import { globalMeshPaths } from "./workspace.mjs";
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
@@ -1872,6 +1872,40 @@ function logAssignmentFailure(assignmentId, code, detail) {
   console.error(`[mesh-worker] assignment ${assignmentId} failed (${code}): ${detail}`);
 }
 
+// baseCommitUnavailableDetail(commit, branch) — ONE wording for
+// `assignment-base-commit-unavailable`, now that m43/ADR-008 fires it at BOTH doors (the
+// create door needs the commit to build the worktree; the reuse door needs it to advance
+// the branch). ADR-010 R5.1 requires the refusal to NAME THE CURE: a coded failure whose
+// remedy is unstated is exactly how TECH_DEBT item 2 reads, and the remedy here is always
+// the same — the control checkout has commits it never pushed.
+function baseCommitUnavailableDetail(commit, branch = null) {
+  return `the dispatched base commit ${commit} is not reachable in this worker's checkout${branch != null ? ` (advancing branch "${branch}")` : ""} (fetched origin once) — an unpushed control checkout, or a stale clone that cannot see it. Cure: push the control checkout, then re-dispatch.`;
+}
+
+// gatePropagationRefusalDetail(advance, branch, worktreePath) — the SAME rule for the two
+// refusals m43/ADR-008's reuse door adds (m43 / ADR-016/G8, which makes ADR-010 R5.1's clause
+// GENERAL to every coded refusal this milestone adds, not specific to the one it was written
+// about). The two codes have genuinely DIFFERENT cures, and one shared string named neither —
+// nor the tree to look at, which is the sharper omission: an operator reading
+// `aof mesh logs --node` was told a merge was refused and given no path to inspect. The
+// worktree is RETAINED on both paths (`onCleanup(assignmentId, "failed", worktreePath)`), so
+// naming it is naming something that is still there.
+function gatePropagationRefusalDetail(advance, branch, worktreePath) {
+  const named = advance.branch ?? branch ?? "the item branch";
+  const head = `the gate-time advance of branch "${named}" to the dispatched base commit ${advance.base} was refused; the branch is unchanged at ${advance.tip}, and the worktree is RETAINED for inspection at ${worktreePath}.`;
+  if (advance.code === "assignment-gate-propagation-dirty-worktree") {
+    // Nothing was checked out and nothing merged — the uncommitted bytes are the one thing
+    // git cannot recover, which is why this is a refusal rather than a stash.
+    return `${head} Cause: that worktree has uncommitted changes (\`git -C ${worktreePath} status --porcelain\` is non-empty). Cure: commit them on "${named}", or clean the worktree, then re-dispatch.`;
+  }
+  if (advance.code === "assignment-gate-propagation-conflict") {
+    // `git merge --abort` has already run, so the tree is exactly as it was found — the
+    // operator is being asked to resolve on the branch, not to rescue a half-merged worktree.
+    return `${head} Cause: merging the base into "${named}" conflicted; the merge was ABORTED, so no half-merged state was left behind. Cure: resolve the conflict on "${named}" yourself (merge ${advance.base} into it in ${worktreePath} or in the control checkout, commit, push), then re-dispatch.`;
+  }
+  return head;
+}
+
 // ── control-driven WITHDRAWAL (2026-07-27, the duplicate-run wall) ────────────
 //
 // Measured live: `aof mesh assign 18 --withdraw` flipped the control-side row and
@@ -2365,27 +2399,47 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // re-refine after a prior run on the same item) — `-b` would refuse, so an
       // existing branch takes the reuse door: the item's line continues, never forks.
       const commitish = directive.commit ?? "HEAD";
-      const branchExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      const localExists = baseBranch == null && (await localBranchExists(ws.projectRoot, branch, { exec }));
+      // M43 / story 05, VERIFICATION F-05.3 — the item's line may exist ONLY on the
+      // remote. A freshly built checkout (a second worker, or one rebuilt after cleanup)
+      // has `refs/remotes/origin/<branch>` and no local head, so the local-only question
+      // answered "no line" and the CREATE door forked the item off the pinned base,
+      // discarding the previous phase's commits. Adopting the remote ref as a local head
+      // routes it to the reuse door instead, where the advance already does the right
+      // thing: a line that exists ANYWHERE must never be forked.
+      let adoptedFromRemote = false;
+      if (baseBranch == null && !localExists && (await remoteBranchExists(ws.projectRoot, branch, { exec }))) {
+        adoptedFromRemote = await adoptRemoteBranch(ws.projectRoot, branch, { exec });
+      }
+      const branchExists = localExists || adoptedFromRemote;
+      // M43 / story 05 (ADR-008): the REUSE DOOR — either door onto an existing line
+      // (the directive's cache-resolved `baseBranch`, or the derived branch already
+      // present locally). Named once so the pin, the materialization and the advance
+      // below all read the SAME predicate.
+      const reuseDoor = baseBranch != null || branchExists;
       // M42 base-commit pin (operator, 2026-08-01): a fresh worktree builds from
       // the EXACT commit the control assigned against — the directive carries the
       // control checkout's HEAD, and a clone that does not have it yet fetches
       // once. Unavailable after the fetch is a LOUD coded failure, never a silent
       // build from this clone's stale HEAD (the other half of the wrong-base
-      // disease). The reuse doors ignore it by design: an existing line continues
-      // from where it is.
-      if (baseBranch == null && !branchExists && directive.commit != null) {
+      // disease).
+      // M43 / ADR-008 + ADR-010 R5.1: the pin gate no longer stops at the create
+      // door. The reuse doors used to ignore it BY DESIGN ("an existing line
+      // continues from where it is"), which is exactly why a control-side gate edit
+      // never reached a CONTINUING item. The check below stays where it is because
+      // the create door needs the commit to BUILD the worktree; the reuse door needs
+      // it to ADVANCE the branch, so its own availability check runs after the
+      // worktree exists (and therefore RETAINS that worktree on a refusal, as every
+      // other `failed` outcome does).
+      if (!reuseDoor && directive.commit != null) {
         const available = await ensureCommitAvailable(ws.projectRoot, directive.commit, { exec });
         if (!available) {
-          reportAssignmentFailure(
-            assignmentId,
-            "assignment-base-commit-unavailable",
-            `the dispatched base commit ${directive.commit} is not reachable in this worker's checkout (fetched origin once) — an unpushed control checkout, or a stale clone that cannot see it`,
-          );
+          reportAssignmentFailure(assignmentId, "assignment-base-commit-unavailable", baseCommitUnavailableDetail(directive.commit));
           await reportSettled(assignmentId, "failed", { code: "assignment-base-commit-unavailable" });
           return;
         }
       }
-      worktreePath = baseBranch != null || branchExists
+      worktreePath = reuseDoor
         ? await reuseWorktreeOnBranch(ws.projectRoot, assignmentId, branch, { exec })
         : await addWorktree(ws.projectRoot, assignmentId, commitish, { exec, branch });
       // 2026-07-27 (the wrong-base dispatch) — the worker's OWN half of the
@@ -2397,10 +2451,55 @@ export function createMeshWorkerExecutionHandler(options = {}) {
         options.onLog?.({
           code: "worker-worktree-base",
           level: "info",
-          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
+          message: `assignment ${assignmentId} (${itemRef}): worktree on ${baseBranch != null ? `EXISTING branch ${baseBranch}` : adoptedFromRemote ? `EXISTING item branch ${branch} ADOPTED from origin` : branchExists ? `EXISTING item branch ${branch}` : `fresh branch ${branch} off ${commitish}`}`,
         });
       } catch (error) {
         reportDegrade("mesh-worker-execution", error);
+      }
+
+      // ── M43 / story 05 (ADR-008) — GATE-TIME PROPAGATION, the reuse door's own half ──
+      // A CALL SITE, not a block: the branch-advance mechanics live in mesh-worktree.mjs,
+      // which already owns every git verb (ADR-010 R5.2 / TECH_DEBT item 10). It runs HERE
+      // — after the worktree is materialized, before the agent is spawned — so the phase
+      // the operator is about to get starts from the base they pinned at the gate. Safe
+      // precisely because it runs at a gate: ADR-003's item lock is what makes the line
+      // quiescent at this moment (the lock creates the quiet window; the advance uses it).
+      if (reuseDoor && directive.commit != null) {
+        // The pin's availability check at THIS door (ADR-010 R5.1 — the refusal already
+        // fires for a refine; only the reuse door silently proceeded, so this removes an
+        // inconsistency rather than adding a refusal). Never a silent build from a stale
+        // base.
+        const available = await ensureCommitAvailable(ws.projectRoot, directive.commit, { exec });
+        if (!available) {
+          reportAssignmentFailure(assignmentId, "assignment-base-commit-unavailable", baseCommitUnavailableDetail(directive.commit, branch));
+          await reportSettled(assignmentId, "failed", { code: "assignment-base-commit-unavailable" });
+          onCleanup(assignmentId, "failed", worktreePath);
+          return;
+        }
+        const advance = await advanceBranchToBase(worktreePath, directive.commit, { exec, node: nodeId });
+        // The advance's own decision record, on the SAME channel `worker-worktree-base`
+        // rides, carrying the outcome (or the refusal code) and BOTH commits — so "which
+        // base did this phase actually run on" stays one `aof mesh logs --node` read even
+        // when the answer is "it refused". Wrapped exactly as the line above it: a faulting
+        // sink degrades, it never blocks the run.
+        try {
+          options.onLog?.({
+            code: "worker-gate-propagation",
+            level: advance.code != null ? "warn" : "info",
+            message: `assignment ${assignmentId} (${itemRef}): gate-propagation ${advance.code ?? advance.outcome} on ${advance.branch ?? branch} — base ${advance.base}, tip ${advance.tip}`,
+          });
+        } catch (error) {
+          reportDegrade("mesh-worker-execution", error);
+        }
+        if (advance.code != null) {
+          // A coded refusal settles `failed` exactly as an unavailable base commit does,
+          // and RETAINS the worktree for inspection — the agent is never started on a tree
+          // the advance could not safely bring up to the pinned base.
+          reportAssignmentFailure(assignmentId, advance.code, gatePropagationRefusalDetail(advance, branch, worktreePath));
+          await reportSettled(assignmentId, "failed", { code: advance.code });
+          onCleanup(assignmentId, "failed", worktreePath);
+          return;
+        }
       }
 
       // VERIFICATION (live worktree streaming, 2026-07-25) — from HERE the agent's output
@@ -2455,10 +2554,18 @@ export function createMeshWorkerExecutionHandler(options = {}) {
       // worker's completion sites pass none — worker-side projection publishing
       // stays d3's settle-assignment territory, so the publish reactor skips on a
       // null workspaceRoot and worker behaviour is byte-unchanged.
+      // m43 / ADR-003 — the mint names the assignment it is running UNDER, so the
+      // seam's item lock admits it BY IDENTITY (never by a "worker is exempt"
+      // branch): the assignment that holds this scope is the one minting. The id is
+      // already on the brief; `opts.lock` carries it plus the directive's own
+      // workspaceId — never a cwd-derived one (TECH_DEBT item 4).
       ({ record: runRecord } = await transitionRunStart(
         item,
         { now: nowIso, node: nodeId, brief: { assignmentId, itemRef } },
-        { journalOptions: { env: globalWorkStoreOptions?.env } },
+        {
+          lock: { workspaceId, byAssignment: assignmentId, globalWorkStoreOptions: globalWorkStoreOptions ?? {} },
+          journalOptions: { env: globalWorkStoreOptions?.env },
+        },
       ));
 
       // running — the worktree is materialized, the run is minted; the assignment's
@@ -2954,7 +3061,12 @@ export function createMeshWorkerTerminalResumeHandler(options = {}) {
         ?? (await transitionRunStart(
           item,
           { now: resolveNow(), node: nodeId, brief: { assignmentId, itemRef, resumedFrom: sessionId } },
-          { journalOptions: { env: globalWorkStoreOptions?.env } },
+          {
+            // m43 / ADR-003 — the resume mints under the SAME assignment, so the item
+            // lock admits it by that identity exactly as the fresh dispatch above is.
+            lock: { workspaceId, byAssignment: assignmentId, globalWorkStoreOptions: globalWorkStoreOptions ?? {} },
+            journalOptions: { env: globalWorkStoreOptions?.env },
+          },
         )).record;
       if (priorRunning != null) {
         log("info", `session ${sessionId}: continuing PAUSED run ${priorRunning.runId} (a needs-input park is the same run resuming, never a second record)`);

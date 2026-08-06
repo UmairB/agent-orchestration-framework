@@ -18,14 +18,13 @@ export function claudeMcpJson(servers) {
   return jsonContent({ mcpServers });
 }
 
-export function claudeSettingsJson({ hooks = [], settings = {} } = {}) {
-  const body = { ...runtimeSettings(settings, "claude") };
-  const renderedHooks = claudeHooks(hooks);
-  if (Object.keys(renderedHooks).length > 0) {
-    body.hooks = renderedHooks;
-  }
-  return jsonContent(body);
-}
+// m43 / ADR-002 AC11 — `claudeSettingsJson` IS GONE, not merely unused. It built the
+// ENTIRE `.claude/settings.json` body from `config.hooks` + `config.settings`, which
+// is only ever correct for a file aof exclusively owns; that file is CO-AUTHORED. The
+// claude runtime's hooks and settings now reach it through the surgical merge in
+// `src/claude-settings.mjs`. Deleting the renderer rather than leaving it exported and
+// uncalled is the point: a whole-file writer for a co-authored file that still exists
+// is a whole-file writer someone will call.
 
 export function codexConfigToml({ mcpServers = [], hooks = [], settings = {} } = {}) {
   const body = { ...runtimeSettings(settings, "codex") };
@@ -109,26 +108,6 @@ function codexMcpServers(servers) {
     });
   }
   return rendered;
-}
-
-function claudeHooks(hooks) {
-  const byEvent = {};
-  for (const hook of sortById(hooks)) {
-    const entry = withoutEmpty({
-      matcher: hook.matcher,
-      hooks: [
-        withoutEmpty({
-          type: hook.type,
-          command: hook.command,
-          ...runtimeExtension(hook, "claude")
-        })
-      ]
-    });
-    const group = byEvent[hook.event] ?? [];
-    group.push(entry);
-    byEvent[hook.event] = group;
-  }
-  return byEvent;
 }
 
 function codexHooks(hooks) {

@@ -27,6 +27,7 @@ import {
   sameOriginAssign,
   dropNodeFromRoster,
   readAssignmentRows,
+  settleAssignmentsFor,
 } from "./support/mesh-ui-assign-fixture.mjs";
 import { withFleetApp } from "./support/fleet-app-harness.mjs";
 
@@ -165,6 +166,13 @@ export const fleetAssignAffordanceTests = [
         // So a mis-dispatch to it would have returned a plausible `200 ok` and
         // minted, exactly as the live defect did; nothing about this lane's pass
         // is owed to a gate catching the wrong target.
+        //
+        // m43/ADR-003 — the probe's VEHICLE changed, its claim did not. "38/04" is not
+        // a second item any more: the item lock is symmetric over the execution scope,
+        // so the click's own record on "38" now holds "38/04" too. Node eligibility is
+        // a `global_nodes` fact that a withdraw does not touch, so the scope is released
+        // first and the probe then asks the same question of the same node.
+        await settleAssignmentsFor({ home }, workspaceId, "38");
         const stillEligible = await sameOriginAssign(url, "38/04", "aaa-first-node", "OWN");
         assert.equal(
           stillEligible.status,

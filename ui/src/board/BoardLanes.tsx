@@ -7,9 +7,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type * as React from "react";
 import { StatusRing, StatusDot, statusMeta, LANE_ORDER } from "./status";
 import type { StatusKind } from "./status";
+import { StaleBadge } from "./StaleBadge";
 import type { Derived } from "./model";
 import { gatesFor, titleOf } from "./model";
 import type { WorkItem } from "./api";
+import type { Freshness } from "./freshness.mjs";
 
 // A card placed in a lane carries the source item plus a small right-tag.
 type LaneCard = { item: WorkItem; tag: string };
@@ -19,6 +21,7 @@ export function BoardLanes({
   focus,
   selectedRef,
   runningRefs,
+  freshnessOf,
   switchOpen,
   onToggleSwitch,
   onCloseSwitch,
@@ -33,6 +36,9 @@ export function BoardLanes({
   // Refs with a live `running` run — drives the in-flight pulse dot (DESIGN
   // surface 2b). Empty set ⇒ no dots.
   runningRefs: Set<string>;
+  // The board's ONE freshness reading for a row (Board-computed off the 1s tick
+  // and the wire's window). Null for a row the cache does not publish.
+  freshnessOf: (item: WorkItem | null | undefined) => Freshness | null;
   switchOpen: boolean;
   onToggleSwitch: () => void;
   onCloseSwitch: () => void;
@@ -108,6 +114,7 @@ export function BoardLanes({
               cards={lanes[status]}
               selectedRef={selectedRef}
               runningRefs={runningRefs}
+              freshnessOf={freshnessOf}
               onSelect={onSelect}
             />
           ))}
@@ -156,12 +163,14 @@ function Lane({
   cards,
   selectedRef,
   runningRefs,
+  freshnessOf,
   onSelect,
 }: {
   status: StatusKind;
   cards: LaneCard[];
   selectedRef: string | null;
   runningRefs: Set<string>;
+  freshnessOf: (item: WorkItem | null | undefined) => Freshness | null;
   onSelect: (ref: string) => void;
 }) {
   const meta = statusMeta(status);
@@ -189,6 +198,7 @@ function Lane({
             tag={tag}
             selected={item.ref === selectedRef}
             running={runningRefs.has(item.ref)}
+            freshness={freshnessOf(item)}
             onSelect={() => onSelect(item.ref)}
           />
         ))}
@@ -202,6 +212,7 @@ function LaneCardView({
   tag,
   selected,
   running,
+  freshness,
   onSelect,
 }: {
   item: WorkItem;
@@ -209,6 +220,8 @@ function LaneCardView({
   selected: boolean;
   // The item has a live `running` run → carry the in-flight pulse dot.
   running: boolean;
+  // This row's cache-freshness reading; null when the cache does not publish it.
+  freshness: Freshness | null;
   onSelect: () => void;
 }) {
   const meta = statusMeta(item.status);
@@ -242,12 +255,28 @@ function LaneCardView({
         </span>
       </div>
       <p className="mt-1.5 text-sm font-medium leading-snug">{titleOf(item)}</p>
-      <div className="mt-1.5">
+      {/* The meta line: the barber bar or the short status text on the left, and
+          the stale badge at the RIGHT end (`ml-auto`, `shrink-0`). The lane card
+          has no status chip, so this is the local form of the global "immediately
+          left of the status chip" rule (DESIGN §1a). SHORT form only — the
+          reporting node lives in the badge's `title`, never in its visible text.
+          No Resync here, and that is STRUCTURAL: the card is itself a `<button
+          data-card>`, and an HTML button may never nest another interactive
+          element (m38/ADR-012); a non-interactive `<span>` badge inside it is
+          fine. */}
+      <div className="mt-1.5 flex items-center gap-2">
         {item.status === "in-progress" ? (
-          <BarberBar />
+          <span className="min-w-0 flex-1">
+            <BarberBar />
+          </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">{meta.short}</span>
         )}
+        {freshness?.badge ? (
+          <span className="ml-auto">
+            <StaleBadge freshness={freshness} form="short" />
+          </span>
+        ) : null}
       </div>
     </button>
   );

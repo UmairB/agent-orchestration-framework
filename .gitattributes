@@ -1,3 +1,14 @@
+# Shell scripts are executed by a POSIX shell, which treats a trailing CR as part of
+# the token — so a `core.autocrlf=true` Windows checkout produces scripts that cannot
+# run at all. Measured 2026-08-03: `scripts/deploy-wsl.sh` (the distro-side half of
+# `install-local.mjs --wsl`, documented in .claude/rules as runnable by hand) failed
+# with `set: pipefail: invalid option name`, `$'\r': command not found` and a syntax
+# error on `case "$DST" in`, which is the CR on every line. `install.sh` — the public
+# installer — carried the same defect. This repo authors on Windows and executes on
+# Linux and macOS, so the pin belongs on the file type, not on the two paths that
+# happened to break first.
+*.sh text eol=lf
+
 .aof/**/*.json text eol=lf
 # milestone 41 review fast-follow: pin the insert-scaffolded work-item templates
 # to LF too — a `core.autocrlf=true` Windows checkout would otherwise hand

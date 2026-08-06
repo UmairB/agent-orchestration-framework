@@ -7,9 +7,17 @@ import {
   recordWorkspaceProjectionError,
   workspaceIdFor,
   readWorkspaceProjectionItems,
-  readWorkspaceContentRecords,
 } from "./global-work-store.mjs";
+// m43 / ADR-012/B4 — the WORKER-side content read moved OUT of the single-writer store
+// module into its own home when this story widened it to the artifact manifest. Same
+// function, same shapes; imported from where it now lives.
+import { readWorkspaceContentRecords } from "./work-content-read.mjs";
 import { publishGlobalRegistryDescriptorsToStore } from "./global-node-registry.mjs";
+// m43 / ADR-003 + ADR-011/A1 — the ONE derivation of "which execution scopes are held",
+// read on the DISK-DERIVED publish path (this module) and handed to the row writer as
+// data. assignment-record.mjs imports 0, so there is no cycle back through this seam.
+import { activeScopeHolders } from "./assignment-record.mjs";
+import { resolveWorkspaceId } from "./workspace-identity.mjs";
 // m42 item 3 — every former silent catch reports a coded degrade event.
 import { reportDegrade } from "./degrade.mjs";
 
@@ -92,7 +100,31 @@ export async function publishGlobalWorkSnapshot(workspace, ctx = {}) {
     const openStore = ctx.openGlobalWorkProjectionStore ?? openGlobalWorkProjectionStore;
     const store = await openStore({ ...storeOptions, paths });
     try {
-      const result = await publishWorkspaceSnapshot(store, workspace, { now: ctx.now });
+      // THE HELD-SCOPE READ LIVES HERE (m43 / ADR-011/A1, and it REPLACES 43/01's
+      // interim carry rather than extending it).
+      //
+      // `publishWorkspaceSnapshot` is not the tick — it is the shared row-writer, whose
+      // other callers are the WORKER's two frame doors. A lock filter placed inside it
+      // fires for the worker's own frames, which was measured to discard the holder's
+      // authored delta (its completion frame included) for a whole phase. THIS function
+      // is the tick: the one path that reads the calling node's OWN local disk slice
+      // (the control's periodic publish and publish-on-mutate), and the only one
+      // entitled to step over execution scopes an active assignment holds. So it reads
+      // the lock and hands the answer DOWN as data; a frame door reads its own and hands
+      // down its own. The store module queries the assignment table for nobody.
+      //
+      // 43/01's read-carry-reinsert dance is gone with the rebuild that forced it: a row
+      // upsert simply does not write a held ref, so there is nothing to carry back over.
+      const workspaceId = resolveWorkspaceId(workspace);
+      const result = await publishWorkspaceSnapshot(store, workspace, {
+        now: ctx.now,
+        heldScopes: activeScopeHolders(store, workspaceId),
+        // The OPERATOR door (ADR-010/D1): the refs a control-side verb just mutated take
+        // authorship, because a gate is where authorship legitimately changes hands. It
+        // is a REF SET, not a flag on the whole publish — publish-on-mutate carries every
+        // row in the workspace, and the operator touched one item, not all of them.
+        operatorRefs: ctx.operatorRefs,
+      });
       const registry = await publishGlobalRegistryDescriptorsToStore(store, workspace, {
         now: ctx.now,
         fabricPeers: ctx.fabricPeers,

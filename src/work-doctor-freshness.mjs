@@ -131,8 +131,26 @@ export function freshnessGroup(snapshot, ctx) {
 
     // stale-updated (warn): an in-progress item whose updated is older than the
     // staleWindow before now (now - updated >= staleWindow). Only in-progress items.
+    //
+    // THE STATUS GATE READS THE DISK'S STATUS, EXPLICITLY (m43 / ADR-005 + ADR-016/G5,
+    // MEASURED). ADR-005 declares this group disk-only, and every OTHER datum it compares —
+    // `created`, `updated`, `newestFileMtimeMs` — is this node's own filesystem. `meta.status`
+    // is NOT: 43/06's snapshot builder overlays the cache's status onto `item.meta`, so this
+    // gate silently became cache-authoritative while its comparands stayed the disk's. On a
+    // control node holding a pre-run scaffold for an item a WORKER is actively building, that
+    // produced `item 07 is in-progress but updated "…" is older than the stale window` — a
+    // finding whose `path` is the control's folder, whose subject is another machine's live
+    // work, and which is false about the item and true only about a scaffold nobody was meant
+    // to be reading. `item.diskStatus` is the disk's own value, stamped by `overlayFor` on
+    // BOTH of its branches, so the whole comparison is one node's facts again.
+    //
+    // THE RULE, stated because "disk-only" was read as "unedited": A GROUP IS DISK-ONLY WHEN
+    // THE FACTS IT READS ARE THE DISK'S — A GATE IS A READ. A group's source is a property of
+    // what it consumes, not of whether its file appears in a diff. Comparing one machine's
+    // status against another machine's mtimes is a defect whichever line was edited to
+    // produce it.
     if (
-      meta.status === "in-progress" &&
+      item.diskStatus === "in-progress" &&
       updated != null &&
       now != null &&
       staleWindow != null &&

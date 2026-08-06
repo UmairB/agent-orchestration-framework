@@ -14,7 +14,13 @@
 // spawn built from the resolved config), so a test injects a spy and asserts
 // dry-run / no-op / skip paths call it ZERO times.
 import { commandError } from "../command-error.mjs";
-import { listItems, parseFrontmatter, recordDoc } from "../work.mjs";
+import { parseFrontmatter, recordDoc } from "../work.mjs";
+// m43 / story 06 (ADR-005 + ADR-010/R6.4) — the cache-first traversal, plus the shared
+// reach-through filter. This projection needs REAL FILES (each item's frontmatter and its
+// record-doc BODY), so a cache-answered row with no local checkout is SKIPPED and the skip
+// is REPORTED — never indexed as an empty body, which would publish a blank page over a
+// real one.
+import { listItemsCacheFirst, localItemsOnly, reportReachThroughSkips } from "../work-read.mjs";
 import { readMapping } from "./mapping.mjs";
 import { projectMilestone } from "./projection.mjs";
 import { applyPlan } from "./sync.mjs";
@@ -86,7 +92,7 @@ async function readItemBody(item) {
 // (missing-milestone / milestone-not-found / the RoutingError family /
 // no-board-resolved) are thrown command errors — the verb surfaces them on its
 // face; the ledger's reactor maps the not-owed ones to honest skips.
-export async function syncMilestoneWork(workspace, { milestone, dryRun = false, notionSpawn = null } = {}) {
+export async function syncMilestoneWork(workspace, { milestone, dryRun = false, notionSpawn = null, ...options } = {}) {
   if (typeof milestone !== "string" || milestone.length === 0) {
     throw commandError(
       "Usage: aof work integrations notion sync-work <milestone>",
@@ -118,7 +124,10 @@ export async function syncMilestoneWork(workspace, { milestone, dryRun = false, 
   // (src/notion/sync.mjs) on a non-dry-run path.
   const spawn = notionSpawn ?? defaultNotionSpawnFor(notionConfig);
 
-  const all = await listItems(workspace.workDir);
+  // m43 / story 06 (ADR-005) — a STAGE-2 LEAF: the traversal is cache-first, so a milestone
+  // a worker authored is syncable from the control node rather than dead-ending on
+  // "milestone-not-found" because this checkout only ever held the scaffold.
+  const all = await listItemsCacheFirst(workspace, { globalWorkStoreOptions: options.globalWorkStoreOptions ?? {} });
   let milestoneItem = all.find(
     (item) => item.type === "milestone" && item.parent == null && item.ref === String(milestone)
   );
@@ -143,8 +152,13 @@ export async function syncMilestoneWork(workspace, { milestone, dryRun = false, 
   );
   // A tolerantly-resolved GSD milestone is not in `all`; include it explicitly.
   if (!scope.some((item) => item.ref === milestoneItem.ref)) scope.unshift(milestoneItem);
+  // ADR-010/R6.4 — SKIP the rows with no local checkout and COUNT them. The projection's
+  // inputs are this node's files; a cache-answered row has none, and projecting an empty
+  // body as though it were the item would overwrite a real Notion page with a blank one.
+  const local = localItemsOnly(scope);
+  reportReachThroughSkips("notion sync-work", local.skipped);
   const items = await Promise.all(
-    scope.map(async (item) => ({
+    local.items.map(async (item) => ({
       ref: item.ref,
       type: item.type,
       slug: item.slug,
@@ -213,5 +227,8 @@ export async function syncMilestoneWork(workspace, { milestone, dryRun = false, 
     configured: true,
     dryRun,
     items: results,
+    // The honest half of the answer: which cache-known refs this node could not project,
+    // because their files are on another machine. Reported, never swallowed.
+    skippedNotLocal: local.skipped,
   };
 }

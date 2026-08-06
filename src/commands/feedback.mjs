@@ -16,7 +16,7 @@
 // raises `feedback.recorded`. This command composes the canonical bullet and
 // guards the input; it no longer decides whether the workspace propagates
 // afterwards (the retired `withGlobalWorkPropagation` import) — the ledger does.
-import { resolveItemExact } from "./resolve.mjs";
+import { resolveItemExact, requireLocalCheckout } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionFeedbackAppended } from "../effects/doc-transitions.mjs";
 import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
@@ -47,11 +47,17 @@ export const feedbackCommand = {
 
     // The WRITE resolves by EXACT ref — never the free-text slug fallback the read
     // commands tolerate. A typo'd/partial ref → ref-not-found, never the wrong item.
-    const item = await resolveItemExact(ctx.workspace.workDir, ref);
+    const item = await resolveItemExact(ctx, ref);
     if (!item) throw commandError(`No item resolves to ref "${ref}".`, "ref-not-found", 404);
     if (item.type !== "milestone" && item.type !== "story") {
       throw commandError("Feedback targets a milestone or story item.", "unsupported-target", 400);
     }
+    // m43 / story 06 (ADR-010/R6.4) — one of the two doors that WRITES through `item.dir`.
+    // The resolver is cache-first now, so a ref another node owns resolves here; appending a
+    // bullet to it would mean scaffolding a record doc for content this node does not own.
+    // Refuse coded, before any write. The gate ordering matters: `unsupported-target` above
+    // is a property of the REF and is answerable from the cache, so it still fires first.
+    requireLocalCheckout(item, ref);
 
     // The canonical bullet form (templates/uat/STATE.md): em-dash before
     // "Raised by:", and exactly three spaces before an optional "Refs:".

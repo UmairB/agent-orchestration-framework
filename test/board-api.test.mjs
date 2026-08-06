@@ -13,6 +13,7 @@
 //   04_next-item.feature             — ready/blocked/done / waitingOn /
 //        changes-no-files
 import assert from "node:assert/strict";
+import { assertFrozenShape, assertAnswersFrom } from "./support/answering-side.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -156,15 +157,26 @@ export const boardApiTests = [
         void m00; void m03;
 
         await withServer(repo, async (url) => {
-          const { status, body } = await getJson(url, "/api/work/list");
+          const { status, body: envelope } = await getJson(url, "/api/work/list");
           assert.equal(status, 200);
+          // m43 / story 04 (ADR-010/R4.1) — the board ROUTE answers the envelope
+          // `{ items, stalenessSeconds }`: the cache-staleness window is ONE number for
+          // the whole response, so it has no honest home on a row. The ROW contract below
+          // is UNCHANGED and is still the subject of this scenario — it simply reads one
+          // level down. (`aof work list --json` stays the flat array; that split is R4.1's
+          // whole point and is asserted by acd-work-list-contract.)
+          const body = envelope.items;
           // a flat JSON array, not a nested tree
-          assert.ok(Array.isArray(body), "the response is a flat JSON array, not a nested tree");
+          assert.ok(Array.isArray(body), "the rows are a flat JSON array, not a nested tree");
           assert.ok(!body.some((item) => "children" in item), "no element carries a nested children edge");
-          // every element carries exactly the seven contract fields
-          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"].sort();
+          // every element carries the seven contract fields — and, since m43 / story 06
+          // (ADR-005 rule 3, "every row says which side answered it"), the answering-side stamp
+          // beside them. `assertFrozenShape` holds the guarantee the exact-key form encoded: no
+          // frozen key renamed, dropped or retyped, and no addition other than that one stamp.
+          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"];
           for (const item of body) {
-            assert.deepEqual(Object.keys(item).sort(), expected, `element ${item.ref} carries exactly the 7 contract fields`);
+            assertFrozenShape(item, expected, `element ${item.ref} carries the 7 contract fields`);
+            assertAnswersFrom(item, null, `element ${item.ref}`);
           }
           // depth-0 items 00, 03, 04 have a null/absent parent
           for (const ref of ["00", "03", "04"]) {
@@ -509,7 +521,9 @@ export const boardApiTests = [
         await withServer(repo, async (url) => {
           const { status, body } = await getJson(url, "/api/work/tasks?ref=03");
           assert.equal(status, 200, "the response is not an error");
-          assert.deepEqual(body, { ref: "03", tasks: [] }, "absent tasks/ → empty list");
+          assertFrozenShape(body, ["ref", "tasks"], "the absent-tasks envelope");
+          assert.equal(body.ref, "03");
+          assert.deepEqual(body.tasks, [], "absent tasks/ → empty list");
         });
       } finally {
         await rm(repo, { recursive: true, force: true });

@@ -122,7 +122,15 @@ export const archTests = [
         assert.equal(apiRes.status, 200, "the HTTP API answers");
         assert.ok(apiRes.headers.get("content-type")?.includes("application/json"), "the API returns JSON");
         const list = await apiRes.json();
-        assert.ok(Array.isArray(list), "the work list is a JSON array");
+        // m43 / story 04 (ADR-010/R4.1) — the board's list ROUTE now answers the envelope
+        // `{ items, stalenessSeconds }`: the cache-staleness window is ONE number for the
+        // whole response, so it has no honest home on a row, and the envelope is the one
+        // place to put it. (`work:list`'s command result and `aof work list --json`'s flat
+        // array are untouched — that split is the point of R4.1.) The rows still arrive as
+        // a JSON array, one level down; THIS file's invariant is the single server on a
+        // single port, and it is unmoved — only the smoke read of the body follows the
+        // sanctioned envelope change.
+        assert.ok(Array.isArray(list.items), "the work list rows are a JSON array on the { items, stalenessSeconds } envelope");
 
         // A static GET serves (index.html at the root).
         const staticRes = await fetch(new URL("/", url));

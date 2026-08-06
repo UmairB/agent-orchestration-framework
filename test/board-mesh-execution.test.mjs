@@ -16,7 +16,7 @@ import { assembleAssignmentRecord, insertAssignment, updateAssignmentState } fro
 import { setItemBranch } from "../src/mesh-assignment-directive.mjs";
 import { readExecutionOverlay, applyExecutionOverlay, resolveScopedExecution } from "../src/board-mesh-execution.mjs";
 import { resolveContinueDecision, resolveDirectivePhase } from "../src/commands/continue.mjs";
-import { mergeWorkerItems } from "../src/board-worker-stream.mjs";
+import { mergeWorkerItems, applyCachedProvenance } from "../src/board-worker-stream.mjs";
 import { listCommand } from "../src/commands/list.mjs";
 
 const WS = "ws-board-1";
@@ -152,23 +152,42 @@ export const boardMeshExecutionTests = [
         ["18/00", { ref: "18/00", type: "story", slug: "alpha", status: "in-review", title: "Alpha", parent: "18", sourcePath: "/wt/wiki/work/18_m/stories/00_story_alpha/STORY.md" }],
         ["18/01", { ref: "18/01", type: "story", slug: "beta", status: "not-started", title: "Beta", parent: "18", sourcePath: "/wt/wiki/work/18_m/stories/01_story_beta/STORY.md" }],
       ]);
-      const overlay = new Map([["18", { nodeId: "umairs-mac-mini", active: true }]]);
-      const merged = mergeWorkerItems(local, worker, overlay);
+      const merged = mergeWorkerItems(local, worker);
 
       assert.deepEqual(merged.map((r) => r.ref), ["18", "18/00", "18/01", "20"], "the worker's stories land under their milestone; unrelated items keep their place");
       assert.equal(merged[0].status, "in-progress", "the WORKER's status wins over the local not-started");
       assert.equal(merged[0].fromWorker, true, "…and the row is marked as the worker's view");
       assert.equal(merged[1].title, "Alpha");
-      assert.equal(merged[1].reportedBy, "umairs-mac-mini", "an inserted story names the node that reported it");
       assert.equal(merged[3].status, "not-started", "an item the worker says nothing about is untouched");
+
+      // AMENDED at 43/04's structural review (m43/ADR-014/E4). This line used to assert
+      // `merged[1].reportedBy === "umairs-mac-mini"`, sourced from the ASSIGNMENT overlay's
+      // target node — "which node was this item ASSIGNED to" wearing the wire key that means
+      // "which node REPORTED this row". Two facts, one key: the merge's value happened to
+      // agree whenever the assignee was also the reporter, and was wrong whenever it was not
+      // (a control-published child under a worker's assignment), surviving only because the
+      // provenance stamp overwrote it downstream. The MERGE now attributes nothing…
+      assert.ok(!("reportedBy" in merged[1]), "the merge asserts nothing about who reported an inserted child — that is not a fact it holds");
+      assert.ok(!("syncedAt" in merged[1]), "…and never a lone reportedBy without the instant beside it");
+      // …and the ONE application point is what supplies both keys, from the cache's own
+      // per-row author, for merged and inserted rows alike. Sourced from the SAME provenance
+      // map `commands/list.mjs` builds, so this is the production composition, not a mock of
+      // it — and the assignee here is deliberately a DIFFERENT node from the reporter, which
+      // is exactly the case the old assertion got wrong.
+      const stamped = applyCachedProvenance(merged, new Map([
+        ["18/00", { reportedBy: "aof-control", syncedAt: "2026-08-03T11:59:00.000Z" }],
+      ]));
+      assert.equal(stamped[1].reportedBy, "aof-control", "attribution comes from the cache row's own author, not from who the item was assigned to");
+      assert.equal(stamped[1].syncedAt, "2026-08-03T11:59:00.000Z", "…with its instant, always together");
+      assert.ok(!("reportedBy" in stamped[2]), "a row the cache does not hold stays byte-identical — 'never published' is not 'author unknown'");
     },
   },
   {
     name: "worker-view: no worker rows ⇒ the local rows pass through byte-identical (local-first for every non-mesh item and workspace)",
     run: async () => {
       const local = localRows();
-      assert.deepEqual(mergeWorkerItems(local, new Map(), new Map()), local);
-      assert.deepEqual(mergeWorkerItems(local, null, new Map()), local);
+      assert.deepEqual(mergeWorkerItems(local, new Map()), local);
+      assert.deepEqual(mergeWorkerItems(local, null), local);
     },
   },
   {
@@ -182,7 +201,7 @@ export const boardMeshExecutionTests = [
         ["18", { ref: "18", status: "in-progress" }],
         ["18/00", { ref: "18/00", status: "in-review", title: "from worker", parent: "18" }],
       ]);
-      const merged = mergeWorkerItems(local, worker, new Map());
+      const merged = mergeWorkerItems(local, worker);
       assert.equal(merged.filter((r) => r.ref === "18/00").length, 1, "no duplicate row");
       assert.equal(merged.find((r) => r.ref === "18/00").status, "in-review", "the worker's row wins");
     },
@@ -240,7 +259,7 @@ export const boardMeshExecutionTests = [
       ]);
 
       // The EXACT list.mjs composition: merge first, overlay last.
-      const rows = applyExecutionOverlay(mergeWorkerItems(local, worker, overlay), overlay);
+      const rows = applyExecutionOverlay(mergeWorkerItems(local, worker), overlay);
 
       const story = rows.find((r) => r.ref === "18/02");
       assert.ok(story, "the worker-only story row is present");

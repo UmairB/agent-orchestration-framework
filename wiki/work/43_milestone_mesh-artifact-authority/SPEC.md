@@ -3,10 +3,10 @@ type: milestone
 number: 43
 slug: mesh-artifact-authority
 title: "Mesh artifact authority — the cache is the read surface"
-status: not-started
+status: done
 owner: product-owner
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-06
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -93,20 +93,50 @@ Out of scope:
 
 <!-- Populated at the Break-down stage (refine). -->
 
-- [ ] `43_story_item-lock` — an assignment exclusively owns its item at execution scope; second
-      assignment, local run mint and control-side mutation all refused, coded and loud, until the
-      next gate.
-- [ ] `43_story_artifact-sync-on-write` — the `PostToolUse` hook + thin-enqueue body + daemon-side
-      batched send; the artifact set widens to everything a reader reads; the periodic tick is
-      retained as the reconciliation backstop.
-- [ ] `43_story_cache-read-surface` — the cache becomes authoritative: the wholesale rebuild from
-      control disk stops, the control publishes its own writes through the shared seam, and the
-      disk-based readers migrate.
-- [ ] `43_story_staleness-and-resync` — `syncedAt` + reporting node on every cached artifact, the
-      staleness window, the board's stale badge and the Resync action.
-- [ ] `43_story_gate-propagation` — a dispatch fast-forwards an existing item branch to the pinned
-      base commit, so control-side gate edits reach a continuing item without a branch switch or a
-      pull into a live tree.
+Six stories (ADR-009). The PO's five candidates stand, with ONE architect correction: the original
+`cache-read-surface` **split in two** along the authority cut (the ~3-module write-side change) vs. the
+reader migration (the 18-site read-side sweep) — keeping them together made the critical path as long as
+the widest mechanical sweep and the risky change unreviewable inside a 13-module diff.
+
+- [x] `01_story_item-lock` — an assignment exclusively owns its item at execution scope; a second
+      assignment, a local run mint and a control-side mutation are all refused, coded and loud, until
+      the next gate. (ADR-003)
+- [x] `02_story_cache-authority` — `work_items` stops being rebuilt from control disk and becomes an
+      upserted, provenance-stamped **fact** behind ONE seam both the control node and every worker
+      write through, with author-retraction deletion. **Also carries schema v8's guarded `ALTER` and the
+      write-side provenance stamping** (moved here from story 04 at refine — ADR-010 R-D2). (ADR-004)
+- [x] `03_story_artifact-sync-on-write` — the `PostToolUse` hook, the derivation-free enqueue, the
+      `.claude/settings.json` **merge** (never wholesale), the widened artifact manifest, and the
+      daemon-side batched drain on the existing tick. (ADR-001, ADR-002, ADR-007)
+- [x] `04_story_staleness-and-resync` — everything **read-side** from the v8 columns down: the shared
+      staleness predicate, the wire envelope (`syncedAt` / `reportedBy` / `stalenessSeconds`), the
+      never-evict rule, and the board's stale badge + Resync action. Also carries three substrates the
+      repo does not have yet — a board headless mount harness, the `work:resync` transport, and a
+      `Board.tsx`-root 1s clock. (ADR-006, ADR-010 R4, DESIGN.md)
+- [x] `05_story_gate-propagation` — the dispatch advances an existing item branch to the pinned base
+      commit at the worker's reuse door, never discarding a worker commit. (ADR-008)
+- [x] `06_story_cache-read-surface` — the cache-first read seam and the staged reader migration,
+      chokepoint-first through `commands/resolve.mjs`, with the worker-side and structural readers
+      pinned to disk, and doctor's status overlay. (ADR-005)
+
+**Build order** — wave 1 (parallel): `01` ∥ `02`, the two risk-carrying cores. Wave 2 (parallel):
+`03` ∥ `04` ∥ `05`, each depending on wave 1 and on no wave-2 sibling. Wave 3: `06`, last on purpose —
+it is the widest and most mechanical change, and it is only *correct* once the cache is authoritative
+and provenance-stamped.
+
+Three conditions on that order, established by the Three Amigos at refine and not optional:
+
+1. **Wave 1 is parallel only if story 01's control-side-mutation guard lands in
+   `effects/stream-transitions.mjs`** (`transitionStreamReindexed`), not in story 02's upsert seam.
+   Routing it through the seam serialises `01` behind `02`.
+2. **Story 04's three missing substrates should be started during wave 1** — the board mount harness
+   (~1.5–2.5 days), the `work:resync` transport (~2 days), and the `Board.tsx`-root clock. They are
+   ~4 days of work under 79 scenarios and are the milestone's real critical path, not the cache cut.
+3. **`src/mesh-launcher.mjs` is the concentration point, not `mesh-worker-execution.mjs`** — four of the
+   six stories touch it (`02`, `03`, `06`, and `04` if it hosts Resync). ADR-009's claim that
+   `artifact-sync` shares only a new leaf with the cache work is false: ADR-007 re-exports the derived
+   `WORK_ITEM_DOC_FILES` from `global-work-store.mjs`, which `02`, `03` and `04` all edit. Sequence the
+   textual overlap rather than assuming it away.
 
 ## Dependencies
 

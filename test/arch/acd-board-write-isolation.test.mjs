@@ -193,6 +193,18 @@ export const archTests = [
         // SAME door (one factory, one decision, one scope rule) with their own phase.
         "refine",
         "verify",
+        // m43 / story 04 (ADR-006 + ADR-010/R4.2) — THE RESYNC DOOR. It is a POST for the
+        // same reason `continue` is: it causes a node→node request to leave this machine
+        // (the control asks the row's OWN reporting node to push a fresh copy), and it
+        // carries the identical same-origin admission guard. It is admitted here WITHOUT
+        // weakening this file's invariant, which is that the board face WRITES NOTHING and
+        // SHELLS OUT TO NOTHING: `work:resync` touches no record doc and no fs verb — it
+        // writes one `requested` row into the additive global_resync_requests table for the
+        // control daemon's own tick to drain, exactly as `mesh recover-push` does. Every
+        // other assertion in this file still holds over it, and the allowlist below is
+        // deliberately a NAMED set rather than a count, so this entry is a decision on the
+        // record rather than a silently-admitted second POST.
+        "resync",
       ]);
       for (const route of postRoutes) {
         assert.ok(allowedPosts.has(route), `board-ui.mjs POSTs an unlisted route /api/work/${route} — the board face stays read-mostly`);

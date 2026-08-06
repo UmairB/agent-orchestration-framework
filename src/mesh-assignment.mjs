@@ -22,8 +22,12 @@
 // refusal (34/ADR-008) that mints nothing; nothing here silently returns.
 import { openGlobalWorkProjectionStore } from "./global-work-store.mjs";
 import { resolveWorkspaceId } from "./workspace-identity.mjs";
-import { globalMeshPaths } from "./workspace.mjs";
-import { findWork } from "./work.mjs";
+// m43 / story 06 (ADR-005) — a STAGE-2 LEAF. Assignment is the mesh's own door and it must
+// be able to name an item the mesh knows about: before this migration a control node could
+// not assign a ref its own disk had never held, which is precisely the item another node
+// authored. The resolution stays EXACT (`matches.length !== 1` below is unchanged) — the
+// cache widens the SET the exact rule is applied to, never the rule.
+import { findWorkCacheFirst } from "./work-read.mjs";
 import {
   assembleAssignmentRecord,
   findActiveAssignment,
@@ -40,12 +44,24 @@ import { isAssignmentPhase, setAssignmentPhase, DEFAULT_ASSIGNMENT_PHASE } from 
 // the guard-free store writer directly and re-derive a weaker version of the
 // terminal rule inline; the rule now lives in front of every write.
 import { transitionAssignmentState } from "./effects/assignment-transitions.mjs";
+// m43 / ADR-003 — the SCOPE lock, the second assign gate. It sits AFTER the exact-ref
+// uniqueness gate, which keeps its own pinned `assignment-already-active` code
+// (ADR-010/R1.1): the two answer different questions — "this exact item already has an
+// assignment" vs "this item's execution SCOPE is held" — and the first is an
+// HTTP-409-mapped wire contract an m38 feature asserts twice.
+import { inspectItemLock, itemLockMessage, openLockableStore, ITEM_LOCKED_CODE } from "./item-lock.mjs";
 
+// The store open routes through the LOCK's coded opener (m43/ADR-010 R1.4): this verb
+// reads the store for its own gates before the lock is ever consulted, so a torn or
+// unopenable store here would otherwise escape as a raw ERR_SQLITE_ERROR — the one door
+// in the set answering an uncoded exception to exactly the condition R1.4 rules on
+// ("store configured but unopenable ⇒ refuse `item-lock-undeterminable`, and the
+// message names the remedy"). Every door now says the same thing about the same fault.
 async function openStore(ctx) {
-  const storeOptions = ctx.globalWorkStoreOptions ?? {};
-  const paths = storeOptions.paths ?? globalMeshPaths(storeOptions);
-  const openFn = ctx.openGlobalWorkProjectionStore ?? openGlobalWorkProjectionStore;
-  return openFn({ ...storeOptions, paths });
+  return openLockableStore({
+    storeOptions: ctx.globalWorkStoreOptions ?? {},
+    openStore: ctx.openGlobalWorkProjectionStore ?? openGlobalWorkProjectionStore,
+  });
 }
 
 // resolveTarget(store, workspaceId, nodeId) — the control-side repo-availability gate
@@ -108,7 +124,7 @@ async function resolveItem(workspace) {
 export async function assignWork(workspace, ref, nodeId, ctx = {}) {
   const store = await openStore(ctx);
   try {
-    const matches = await findWork(workspace.workDir, ref);
+    const matches = await findWorkCacheFirst(workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
     if (matches.length !== 1) {
       return {
         ok: false,
@@ -132,6 +148,23 @@ export async function assignWork(workspace, ref, nodeId, ctx = {}) {
     const gate = resolveTarget(store, workspaceId, nodeId);
     if (!gate.ok) {
       return { ok: false, error: gate.message, code: gate.code, target: nodeId };
+    }
+
+    // THE SCOPE LOCK (m43/ADR-003), the LAST gate: a milestone running on one node
+    // holds every story under it, and a story running on one node holds its milestone —
+    // both directions, because both execute in ONE worktree on ONE branch. A second
+    // assignment anywhere in a held scope mints nothing and is refused, coded, naming
+    // the holder.
+    //
+    // It runs BEHIND this verb's pre-existing gates on purpose. Each of those refusals
+    // is a pinned wire contract with an m38 feature asserting it (the exact-ref
+    // duplicate above keeps `assignment-already-active` per ADR-010/R1.1; the two
+    // target gates are asserted over a CHILD of an already-assigned milestone), and the
+    // new lock must not steal an earlier gate's answer — the same discipline the
+    // milestone's own task 02 pins for `ref-not-found`.
+    const locked = inspectItemLock(store, workspaceId, item.ref);
+    if (locked) {
+      return { ok: false, error: itemLockMessage(locked), code: ITEM_LOCKED_CODE, holder: locked.holderNode, detail: locked };
     }
 
     const issuer = ctx.issuer ?? workspace.config?.mesh?.nodeId ?? null;
@@ -174,7 +207,7 @@ export async function assignWork(workspace, ref, nodeId, ctx = {}) {
 export async function withdrawWork(workspace, ref, ctx = {}) {
   const store = await openStore(ctx);
   try {
-    const matches = await findWork(workspace.workDir, ref);
+    const matches = await findWorkCacheFirst(workspace, ref, { globalWorkStoreOptions: ctx.globalWorkStoreOptions ?? {} });
     if (matches.length !== 1) {
       return {
         ok: false,

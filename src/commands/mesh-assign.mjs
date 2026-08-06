@@ -34,7 +34,18 @@ export const meshAssignCommand = {
       ? await withdrawWork(ctx.workspace, input.ref, {})
       : await assignWork(ctx.workspace, input.ref, input.to, {});
     if (!result.ok) {
-      throw commandError(result.error, result.code);
+      const error = commandError(result.error, result.code);
+      // A core refusal that carries STRUCTURE keeps it on the thrown error, so the
+      // face's one `--json` envelope surfaces it verbatim (m43/ADR-003's five-key
+      // lock payload is the first rider; the `shifted` count on the insert family's
+      // confirm-required refusal is the precedent).
+      if (result.detail) {
+        error.detail = result.detail;
+        // …and on the error itself, so an in-process caller reads the same five facts
+        // the `--json` envelope publishes without unwrapping a second object.
+        Object.assign(error, result.detail);
+      }
+      throw error;
     }
     return result;
   },

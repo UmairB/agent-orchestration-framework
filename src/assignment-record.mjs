@@ -196,10 +196,37 @@ export function readAssignment(store, assignmentId) {
   return mapAssignmentRow(store.db.prepare("SELECT * FROM global_assignments WHERE assignment_id = ?").get(assignmentId));
 }
 
+// --- EXECUTION SCOPE (milestone 43 / ADR-003 — moved DOWN out of the board face) ---
+//
+// Runs, assignments, branches and worktrees are all recorded against the TOP-LEVEL
+// item (the milestone): a mesh run of "18" builds its stories inside ONE worktree on
+// ONE branch. A child ref therefore has no execution row of its own.
+//
+// This is the ONE home for the scope rule, and it lives HERE — a pure leaf (imports
+// 0) — rather than in src/board-mesh-execution.mjs, where it began. Two consumers
+// need it and they sit on opposite sides of the layering: the FACE (the board's row
+// overlay + the continue/refine/verify door, which re-export it from
+// board-mesh-execution.mjs so their imports are unchanged) and the SPINE (the mint
+// seam's item lock, effects/run-transitions.mjs). The spine must never import a
+// face, and the rule must never be derived twice (acd-item-lock-single-door asserts
+// exactly one definition in src/), so the only home both can reach is the leaf.
+//
+// executionScopeRef(ref) — the top-level item ref a child's execution is recorded
+// under ("18/02" → "18"; "18" → "18").
+export function executionScopeRef(ref) {
+  return String(ref ?? "").split("/")[0];
+}
+
 // findActiveAssignment(store, workspaceId, itemRef) — the ADR-003 uniqueness-invariant
 // read: the (at most one) ACTIVE assignment row for this (workspaceId, itemRef), or
 // null. "Active" = state IN ('assigned','accepted','running') — a plain store query,
 // never a git/lease read (acd-assignment-arbitration-store-not-git).
+//
+// EXACT-REF, deliberately: this primitive is the assign verb's duplicate gate
+// (mesh-assignment.mjs — its one caller in src/), whose refusal
+// `assignment-already-active` is a pinned, HTTP-409-mapped wire contract. m43/ADR-003
+// adds the SCOPE-symmetric read below as a NEW composition beside it; this one is
+// untouched (m43/ADR-010 R1.1/R1.2).
 export function findActiveAssignment(store, workspaceId, itemRef) {
   const placeholders = ACTIVE_ASSIGNMENT_STATES.map(() => "?").join(", ");
   const row = store.db.prepare(`
@@ -209,6 +236,55 @@ export function findActiveAssignment(store, workspaceId, itemRef) {
     LIMIT 1
   `).get(workspaceId, itemRef, ...ACTIVE_ASSIGNMENT_STATES);
   return mapAssignmentRow(row);
+}
+
+// listActiveAssignments(store, workspaceId) — every ACTIVE row in this workspace,
+// most-recent first (milestone 43 / ADR-003). The ONE active-state query the scope
+// predicate and its skip-and-report rendering share, so "which items are held" is
+// answered by the same rows everywhere (no command module may re-derive it —
+// acd-item-lock-single-door).
+export function listActiveAssignments(store, workspaceId) {
+  const placeholders = ACTIVE_ASSIGNMENT_STATES.map(() => "?").join(", ");
+  return store.db.prepare(`
+    SELECT * FROM global_assignments
+    WHERE workspace_id = ? AND state IN (${placeholders})
+    ORDER BY assigned_at DESC
+  `).all(workspaceId, ...ACTIVE_ASSIGNMENT_STATES).map(mapAssignmentRow);
+}
+
+// activeScopeHolders(store, workspaceId) → Map<scopeRef, record> — every EXECUTION
+// SCOPE an active assignment holds in this workspace, keyed by the scope ref
+// (milestone 43 / ADR-003). ONE derivation of "which scopes are held", with three
+// readers: the lock's refusal (src/item-lock.mjs), its skip-and-report rendering for
+// `work next`, and the control's publish tick, which steps over the rows it does not
+// own and counts them.
+//
+// The scope match is evaluated in JS rather than in SQL on purpose: the scope rule has
+// ONE definition (executionScopeRef, above) and a `LIKE 'NN/%'` clause would be a
+// second one, in a different language, free to disagree — and free to make "420" a
+// child of "42".
+export function activeScopeHolders(store, workspaceId) {
+  const held = new Map();
+  if (workspaceId == null) return held;
+  // listActiveAssignments is most-recent-first, so the FIRST row for a scope is the
+  // one that holds it now; an older row never overwrites it.
+  for (const row of listActiveAssignments(store, workspaceId)) {
+    const scope = executionScopeRef(row.itemRef);
+    if (!held.has(scope)) held.set(scope, row);
+  }
+  return held;
+}
+
+// findActiveAssignmentForScope(store, workspaceId, ref) — milestone 43 / ADR-003's
+// SCOPE-SYMMETRIC read: the active row whose `item_ref` shares THIS ref's execution
+// scope, or null.
+//
+// Symmetry is load-bearing and is a conscious extension of `resolveScopedExecution`,
+// which only walks UPWARD (own row, else the parent scope's): running "42" must lock
+// "42/03" AND running "42/03" must lock "42", because both execute in one worktree on
+// one branch. One predicate covers both directions.
+export function findActiveAssignmentForScope(store, workspaceId, ref) {
+  return activeScopeHolders(store, workspaceId).get(executionScopeRef(ref)) ?? null;
 }
 
 // listAssignmentsForItem(store, workspaceId, itemRef) — every assignment row (active

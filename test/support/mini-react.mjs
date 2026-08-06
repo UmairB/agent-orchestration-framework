@@ -37,7 +37,16 @@ function sameDeps(a, b) {
 // cadence" deterministic assertions instead of sleeps. Node's own fetch/http
 // captured their timers at module load, long before install(), so real I/O is
 // untouched.
-export function createClock() {
+//
+// `epoch` (milestone 43 / story 04) — when supplied, install() ALSO owns
+// `Date.now()`, reading `epoch + elapsed`. A surface whose behaviour is a
+// function of wall-clock time rather than of timers alone — the board's
+// freshness ramp is judged on `now - syncedAt`, recomputed off a 1s cosmetic
+// tick — cannot be driven without it: advancing the timers would fire the tick
+// while `Date.now()` stayed put, and "the badge appears within one second of the
+// crossing" would measure nothing. Default absent, so every existing caller's
+// `Date` is untouched.
+export function createClock({ epoch = null } = {}) {
   let now = 0;
   let seq = 0;
   const scheduled = new Map();
@@ -63,6 +72,11 @@ export function createClock() {
 
   const clock = {
     now: () => now,
+    // The wall-clock instant the app reads through `Date.now()` — `epoch +
+    // elapsed`. Exposed so a lane can state a fixture timestamp ("this row was
+    // synced 299 seconds ago") in the SAME frame of reference the mounted app
+    // judges it in, instead of guessing at the real clock.
+    date: () => (epoch ?? 0) + now,
     pending: () => scheduled.size,
     setTimeout(fn, ms = 0, ...args) {
       const id = ++seq;
@@ -130,6 +144,13 @@ export function createClock() {
       globalThis.clearTimeout = clock.clear;
       globalThis.setInterval = clock.setInterval;
       globalThis.clearInterval = clock.clear;
+      // Only `Date.now` is taken, and only when an epoch was asked for — never
+      // the `Date` constructor, so `new Date(iso)` / `Date.parse` (how every
+      // timestamp on these wires is read) keep their real behaviour.
+      if (epoch != null) {
+        real.dateNow = Date.now;
+        Date.now = () => epoch + now;
+      }
       return real;
     },
     restore() {
@@ -137,6 +158,7 @@ export function createClock() {
       if (real.clearTimeout) globalThis.clearTimeout = real.clearTimeout;
       if (real.setInterval) globalThis.setInterval = real.setInterval;
       if (real.clearInterval) globalThis.clearInterval = real.clearInterval;
+      if (real.dateNow) Date.now = real.dateNow;
     },
   };
   return clock;
@@ -330,4 +352,17 @@ export function textOf(node) {
   if (Array.isArray(node)) return node.map(textOf).join("");
   if (typeof node !== "object") return String(node);
   return (node.children ?? []).map(textOf).join("");
+}
+
+// The text a READER sees, rather than the raw concatenation. Adjacent element
+// children are separated on screen (a flex `gap`, an inline box boundary) even
+// when their text nodes abut, so they are joined with a space and the result is
+// whitespace-collapsed. This is what lets a lane assert a rendered phrase
+// verbatim — "◌ stale · 12m ago" — when the mark and the words are two spans
+// because the mark must be `aria-hidden` and the words must not be.
+export function visibleTextOf(node) {
+  if (node == null || node === false || node === true) return "";
+  if (Array.isArray(node)) return node.map(visibleTextOf).join(" ").replace(/\s+/g, " ").trim();
+  if (typeof node !== "object") return String(node);
+  return (node.children ?? []).map(visibleTextOf).join(" ").replace(/\s+/g, " ").trim();
 }

@@ -87,14 +87,44 @@ async function rollbackStatusIfFailed(event) {
 // globalWorkStoreOptions, now, fabricPeers…), which is what the retired wrapper
 // forwarded. A crash-recovery drain supplies none and the reactor opens its own,
 // exactly as the reactor contract requires.
+//
+// m43 / ADR-004 + ADR-010/D1 — THIS reactor is the OPERATOR DOOR. Publish-on-mutate
+// fires because a verb on THIS node changed an item, so the control legitimately takes
+// authorship of that item's cached row ("a gate is where authorship changes hands"),
+// while the rest of the publish stays an ordinary disk-derived tick that steps over rows
+// other nodes authored. The operator's reach is therefore exactly the refs the event
+// itself names — never the whole workspace, which is what a bare `operator: true` flag
+// would have meant and would have let one `work:feedback` seize every worker's row.
 async function publishItemProjection(event, ctx = {}) {
   const { workspaceRoot } = event.payload ?? {};
   if (!workspaceRoot) return { skipped: true, reason: "no-workspace-root" };
   const workspace = await loadWorkspace(workspaceRoot);
-  const publish = await publishGlobalWorkSnapshot(workspace, ctx.publisherOptions ?? {});
+  const publish = await publishGlobalWorkSnapshot(workspace, {
+    ...(ctx.publisherOptions ?? {}),
+    operatorRefs: operatorRefsFor(event.payload),
+  });
   if (publish.warning) return { published: false, warning: publish.warning };
   if (publish.skipped) return { published: false, skipped: true, code: publish.code };
   return { published: publish.published === true };
+}
+
+// operatorRefsFor(payload) — the refs the operator's verb actually mutated, read from
+// the event's OWN evidence (the reactor contract: rebuild from the payload, never
+// re-read racing state). A run/feedback event names one `ref`. A reindex names BOTH
+// ENDS of every remap entry, because a renumber rewrites a pair: `to` gains an item, and
+// `from` — the ref the renumber VACATED — now means something else entirely, so a row
+// left there under the old meaning is wrong data at a live ref rather than a stale copy
+// of the right one. Both ends, and nothing wider: the operator's reach is the refs its
+// own act touched, never the workspace.
+function operatorRefsFor(payload = {}) {
+  const refs = [];
+  if (typeof payload?.ref === "string" && payload.ref.length > 0) refs.push(payload.ref);
+  for (const entry of Array.isArray(payload?.remap) ? payload.remap : []) {
+    for (const end of [entry?.from, entry?.to]) {
+      if (typeof end === "string" && end.length > 0) refs.push(end);
+    }
+  }
+  return refs;
 }
 
 // run.completed / notion-status-sync — the Notion status sync as a LEDGERED
@@ -129,6 +159,9 @@ async function syncNotionStatus(event, ctx = {}) {
     const result = await syncMilestoneWork(workspace, {
       milestone,
       notionSpawn: ctx.publisherOptions?.notionSpawn ?? null,
+      // m43 / story 06 — the sync core's traversal is cache-first; the reactor threads the
+      // same store options its own ledger runs on.
+      globalWorkStoreOptions: ctx.publisherOptions?.globalWorkStoreOptions ?? {},
     });
     // Config removed between append and drain: the consequence can no longer
     // apply, and ending the step honestly beats retrying it forever (the d3
@@ -239,13 +272,13 @@ async function settleAssignment(event, ctx = {}) {
 // renames the old refs exist nowhere to be re-derived from — the PRD's "never an
 // empty ping that forces reactors to re-read racing state" in its sharpest form.
 //
-// DELIBERATELY ABSENT: publish-projection. `work_items` is a pure projection that
-// any publish DELETES and rebuilds from disk, and it carries `parent` and
-// `source_path` beside `ref` — so remapping one column would leave the row
-// self-inconsistent, while publishing HERE would publish an intermediate stream (the
-// slot is open but the new item is not scaffolded until the caller's next step).
-// It keeps the eventual-consistency it already had; reconciling a projection rather
-// than patching it is exactly what leg d5 is for.
+// DELIBERATELY ABSENT FROM THE REF-REMAP: `work_items`. It carries `parent` and
+// `source_path` beside `ref`, so remapping one column would leave the row
+// self-inconsistent. What reconciles it instead is the cascade's LAST step,
+// `publish-projection` — which, until m43/43/02 (ADR-012/B6), this comment claimed
+// existed when it did not. It exists now, it is declared in the EFFECTS entry above,
+// and it re-derives the renumbered refs from the renamed stream on disk with the
+// operator's own remapped refs taking authorship.
 
 // stream.reindexed / remap-run-refs — the checkout half: each renumbered item's own
 // run records. Resolved by the item's NEW ref against the CURRENT stream, so a
@@ -282,8 +315,10 @@ async function remapNotionSidecar(event) {
 // stream.reindexed / remap-projection — this node's own STREAMED-MIRROR rows
 // (work_item_docs / work_item_runs — the `local`-locus half of the d5 split; the
 // table list derives from the store classification). `work_items` is NOT among
-// them by design: it is rebuilt wholesale by the publish reactor declared below
-// on the same event, which is also what finally makes an insert propagate at all.
+// them by design: it is re-derived from the renamed stream by the publish reactor
+// declared LAST on this same event, which is also what makes an insert propagate at
+// all. (Pre-m43 this comment said "rebuilt wholesale" and named a reactor that did
+// not exist; the sweep is gone — `work_items` is a fact — and the reactor is real.)
 // The payload's own workspaceId is preferred; the derivation survives as the
 // fallback for a pre-d5 journaled event redelivered across an upgrade.
 async function remapProjectionRefs(event, ctx = {}) {
@@ -377,9 +412,21 @@ export const EFFECTS = Object.freeze({
   ]),
   // m42 wave (d) leg d4 port 3 — the insert/reindex cascade. Array order is
   // cascade order: the two checkout remaps and the projection remap run over the
-  // OLD refs the payload names, and the publish LAST, rebuilding work_items from
-  // the renamed stream on disk (which is also the first time an insert has ever
-  // propagated at all).
+  // OLD refs the payload names, and the publish LAST — over the renamed stream.
+  //
+  // THE PUBLISH STEP IS REAL AS OF m43/43/02 (ADR-012/B6); until then this comment
+  // described one that did not exist. It is not decoration: after the authority cut a
+  // renumber can no longer self-heal on the next tick, because the tick may not write a
+  // ref another node authored — so `43/03 -> 43/04` left the cache answering for `43/03`
+  // with the PREVIOUS occupant's slug, title and status, permanently, at a ref the
+  // operator had just given to a different item. This reactor is the cure and it is the
+  // ONLY caller that carries `remap` in its payload: the publish takes authorship of
+  // exactly the refs the renumber rewrote (both ends), and of nothing else.
+  //
+  // It still publishes an INTERMEDIATE stream — the slot is open, the caller scaffolds
+  // the new item on its next step — so the newly created ref appears on the following
+  // tick. That eventual consistency is unchanged from before this reactor existed; what
+  // changes is that a vacated ref stops carrying another item's data in the meantime.
   "stream.reindexed": Object.freeze([
     Object.freeze({ key: "remap-run-refs", locus: "checkout", apply: remapRunRecordRefs }),
     Object.freeze({ key: "remap-notion-map", locus: "checkout", apply: remapNotionSidecar }),
@@ -394,6 +441,7 @@ export const EFFECTS = Object.freeze({
       apply: remapControlFactRefs,
       applies: meshFactsApply,
     }),
+    Object.freeze({ key: "publish-projection", locus: "local", apply: publishItemProjection }),
   ]),
   // m42 wave (d) leg d3 — every assignment state change flows through
   // effects/assignment-transitions.mjs, which raises this. Its one declared

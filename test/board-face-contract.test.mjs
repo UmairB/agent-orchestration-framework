@@ -17,6 +17,7 @@
 //   02_resolver-distinction-preserved.feature — read (slug-fallback) vs
 //        feedback-write (exact-only); a non-exact ref reads but never writes
 import assert from "node:assert/strict";
+import { assertFrozenShape, assertAnswersFrom } from "./support/answering-side.mjs";
 import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -235,12 +236,24 @@ export const boardFaceContractTests = [
       try {
         await eightStream(workDir);
         await withServer(repo, async (url) => {
-          const { status, body } = await getJson(url, "/api/work/list");
+          const { status, body: envelope } = await getJson(url, "/api/work/list");
           assert.equal(status, 200);
-          assert.ok(Array.isArray(body), "list is a flat JSON array");
-          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"].sort();
+          // m43 / story 04 (ADR-010/R4.1) — the list ROUTE gained the
+          // `{ items, stalenessSeconds }` envelope so the cache-staleness window can be
+          // stated once per response rather than duplicated onto every row (or, worse,
+          // defaulted client-side). The milestone-03 ROW envelope this scenario is about
+          // is byte-unchanged and is asserted below, one level down.
+          assert.equal(typeof envelope.stalenessSeconds, "number", "the envelope states the window once");
+          const body = envelope.items;
+          assert.ok(Array.isArray(body), "the list rows are a flat JSON array");
+          // m43 / story 06 (ADR-005 rule 3, "every row says which side answered it"): the seven
+          // milestone-03 fields are all still present and unrenamed; the ONLY permitted addition
+          // is the answering-side stamp (ADR-014/E1 — a superseding ADR enumerates and amends the
+          // tests asserting the old meaning rather than leaving them silently green).
+          const expected = ["ref", "type", "slug", "status", "title", "parent", "dir"];
           for (const item of body) {
-            assert.deepEqual(Object.keys(item).sort(), expected, `${item.ref} carries the 7 contract fields`);
+            assertFrozenShape(item, expected, `${item.ref} carries the 7 contract fields`);
+            assertAnswersFrom(item, null, `${item.ref}`);
             assert.ok(!String(item.dir).includes("\\"), "dir is forward-slashed");
           }
           assert.ok(body.some((r) => r.ref === "08"), "milestone 08 present");
@@ -261,7 +274,7 @@ export const boardFaceContractTests = [
         await withServer(repo, async (url) => {
           const { status, body } = await getJson(url, "/api/work/doc?ref=08&doc=SPEC");
           assert.equal(status, 200);
-          assert.deepEqual(Object.keys(body).sort(), ["body", "doc", "present", "ref"]);
+          assertFrozenShape(body, ["body", "doc", "present", "ref"], "the doc envelope");
           assert.equal(body.ref, "08");
           assert.equal(body.doc, "SPEC");
           assert.equal(body.present, true);
@@ -286,7 +299,7 @@ export const boardFaceContractTests = [
         await withServer(repo, async (url) => {
           const { status, body } = await getJson(url, "/api/work/tasks?ref=08/00");
           assert.equal(status, 200);
-          assert.deepEqual(Object.keys(body).sort(), ["ref", "tasks"]);
+          assertFrozenShape(body, ["ref", "tasks"], "the tasks envelope");
           assert.equal(body.ref, "08/00");
           assert.ok(Array.isArray(body.tasks), "tasks is an array");
           assert.equal(body.tasks.length, 1);
@@ -433,7 +446,9 @@ export const boardFaceContractTests = [
         await withServer(repo, async (url) => {
           const { status, body } = await getJson(url, "/api/work/tasks?ref=08/01");
           assert.equal(status, 200, "absent tasks/ is not an error");
-          assert.deepEqual(body, { ref: "08/01", tasks: [] }, "absent tasks/ → empty list");
+          assertFrozenShape(body, ["ref", "tasks"], "the absent-tasks envelope");
+          assert.equal(body.ref, "08/01");
+          assert.deepEqual(body.tasks, [], "absent tasks/ → empty list");
         });
       } finally {
         await rm(repo, { recursive: true, force: true });
