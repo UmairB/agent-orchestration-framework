@@ -847,6 +847,66 @@ the discarding**, and the whole lane was **re-run on real hardware**:
 The fix is committed with the story. **`STORY.md` stays `status: in-review` only because task 05's
 `@uat` needs the operator** — there is no longer any machine work outstanding on this story.
 
+### `@uat` task 05 — the EVIDENCE assembled for the operator (2026-08-05/06)
+
+The `@uat`'s three scenarios ask an operator for judgements, not measurements. What follows is the
+evidence each is to be judged against; the verdict itself is the operator's and is recorded below it.
+
+**Scenario 1 — "the continuing phase worked from the EDITED item."** This is the one the mechanical
+lane cannot answer, so a real cascade was driven to produce it. The gate edit deliberately asked for
+something a phase must ACT on, not merely carry: a `--greeting <word>` acceptance criterion **and**
+"a fourth story, `03_story_greeting-word`, covering that flag". A real Claude Code agent then refined
+the milestone on the WSL worker from the pinned base carrying that edit. It produced:
+
+```
+stories/00_story_greeting-seam        <- the PREVIOUS phase's work, still present
+stories/01_story_shout-flag           <- "
+stories/02_story_empty-name-refusal   <- "
+stories/03_story_greeting-word        <- AUTHORED FROM THE GATE EDIT
+    STORY.md      "Choose the greeting word", depends: [00/00]
+    tasks/00_greeting-word.feature
+```
+
+and its user story reads *"I want a `--greeting <word>` flag that swaps the leading word of the
+sentence, so that I can say `Morning, Ada!`…"* — **the operator's own example sentence from the SPEC
+edit**, which is about as direct as "the agent saw it" gets. The phase did not work from the pre-edit
+text (which had three stories and no such flag), and nothing the previous phase produced is missing.
+
+**Scenario 2 — "which base did it run on", from the control node alone.** One
+`aof mesh logs --node umairs-msi-wsl` read returns the pair, for every outcome the advance has:
+
+```
+worker-worktree-base:    worktree on EXISTING item branch aof/mesh/00 ADOPTED from origin
+worker-gate-propagation: gate-propagation merged        on aof/mesh/00 — base 64aaae24…, tip cff999de…
+worker-gate-propagation: gate-propagation already-current on aof/mesh/00 — base 64aaae24…
+worker-gate-propagation: gate-propagation assignment-gate-propagation-conflict on aof/mesh/00
+                         — base a32eea1d…, tip 68c8d769…   (tip UNCHANGED)
+```
+
+All three outcomes — `merged`, `already-current`, the coded refusal — were produced live and read this
+way. No SSH session and no worker-side `git log` was needed for any of them.
+
+**Scenario 3 — "a refusal is legible and actionable."** The refusal line carries cause, cure and the
+retained worktree path (quoted in full under scenario 4 above). **The operator must judge this knowing
+F-05.5**: the scenario's own first clause — *"the fleet shows the assignment failed with a code that
+names the cause"* — is NOT satisfied. The row reads `state=failed, code=NULL`, as do 45 of 46
+assignment rows across every milestone. Everything needed to act is present; it is one surface away
+from where the scenario says to look.
+
+### An observation the run produced for free — the stall class, on real hardware
+
+The cascade above **stalled rather than completing**: the agent authored its last artifact at
+`21:44`–`22:04` and the `claude` process was still resident 4h41m later at ~3.6% CPU having written
+nothing further, with the assignment row frozen at `running` since `20:24:06`. It was withdrawn by the
+control to end it.
+
+This is the failure the repo already knows about ("refines that take hours are usually a STALLED agent,
+and aof has no watchdog to recover one") — recorded here because this is a **measured instance with
+timestamps**, and because it compounds TECH_DEBT **19**: a stalled agent and a settled-but-unreported
+run are indistinguishable on `work run-status`, since both read `running` forever. The evidence
+scenario 1 needed was already on disk when the stall began, so it cost this gate nothing — but a
+milestone that depended on the cascade's completion would have waited indefinitely with no signal.
+
 ---
 
 ## 43/06 · The readers migrate — built and validated 2026-08-04, **AWAITING `@manual`**
