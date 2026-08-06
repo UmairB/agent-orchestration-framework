@@ -86,9 +86,9 @@ Out of scope:
   terminal *sockets* cross that boundary is spike 44's question.
 
 ## Stories
-- [ ] `01_story_route-model` — one pure, framework-free table that says what a URL means, and what
+- [x] `01_story_route-model` — one pure, framework-free table that says what a URL means, and what
       every legacy URL becomes.
-- [ ] `02_story_static-serve-history-fallback` — a refreshed path renders instead of 404ing: one
+- [x] `02_story_static-serve-history-fallback` — a refreshed path renders instead of 404ing: one
       static-serving leaf, one traversal guard, and a fallback that never masks a missing asset.
 - [ ] `03_story_app-shell-and-entry` — the three pages become one application: a thin entry, a shell
       with named regions, and navigation that has never existed.

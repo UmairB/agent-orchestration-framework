@@ -4,7 +4,7 @@ number: 01
 slug: route-model
 title: "The route model — one pure, framework-free table that says what a URL means, and what every legacy URL becomes"
 parent: 45
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-06
 updated: 2026-08-07

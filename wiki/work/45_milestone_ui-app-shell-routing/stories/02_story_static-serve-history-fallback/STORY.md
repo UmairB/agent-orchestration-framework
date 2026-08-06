@@ -4,7 +4,7 @@ number: 02
 slug: static-serve-history-fallback
 title: "A refreshed path renders instead of 404ing — one static-serving leaf, one traversal guard, and a fallback that never masks a missing asset"
 parent: 45
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-06
 updated: 2026-08-07
