@@ -426,7 +426,7 @@
         "id": "artifact-sync-enqueue",
         "kind": "asset"
       },
-      "hash": "sha256:b084db2a0d0928cccce3f445d80181c37e5da106426f3e8b50af0adf7afaf2c8"
+      "hash": "sha256:b48b8f0163b8e026fee7ec7d39c236defe0a25eea5c7d1065eb6ba0978978739"
     },
     {
       "path": ".claude/skills/codex-computer-use/SKILL.md",
