@@ -11,3 +11,5 @@ notion.work-map.json
 # here. A REAL node where .aof/mesh/ IS the git-tracked bus is a DIFFERENT repo with no
 # such ignore. (Location moved from wiki/work/.mesh/ to .aof/mesh/ at 28/verify.)
 mesh/
+artifact-sync-queue.ndjson
+artifact-sync-queue.ndjson.batch
