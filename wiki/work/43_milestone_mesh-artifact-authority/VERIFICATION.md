@@ -615,11 +615,88 @@ created then paid down to one named baseline, item 18 created (`ui/` has no shar
 reaches into `board/` seven times; and the fleet payload states no serving-node identity, which is the
 prerequisite for a board↔fleet "this node" agreement lane).
 
-### The `@uat` gate — **awaiting the operator**
+### The `@uat` gate — **RUN 2026-08-06 over a real render; ACCEPTED by the operator**
 
-Task 09's 14 `@uat` scenarios are the human half, and they are genuinely human: the perceptual
-judgements no element-tree assertion can reach. `STORY.md` stays `status: in-review`; **no accept
-decision is recorded for 43/04 yet.**
+The design-conformance verdict had been **INCONCLUSIVE by construction** since 2026-08-03 for one
+reason only: there was no render. There is now.
+
+**How the render was produced.** An ISOLATED fixture: the real production board (`ui/dist` + the real
+`/api/work/*` face via `serveSetupUi`) over its own `AOF_GLOBAL_HOME`, seeded through the real
+publisher — the operator's live `~/.aof`, the running daemons and `~/.claude.json` were never touched.
+(`serveBoard` was deliberately NOT used: it wires the real `ensureWorktreeTrusted`, which writes the
+operator's `~/.claude.json`.) The wire came back as ADR-010/R4.1 specifies —
+`{ items, stalenessSeconds: 300, nodeId }`, per-row `reportedBy`/`syncedAt`, and an EXPLICIT
+`syncedAt: null` for the pre-v8 row. The fixture carried a stale item reported by `umairs-mac-mini`, a
+fresh one reported by this node, one with unknown `syncedAt`, and a **blocked AND stale** one, plus a
+`uat` gate. Renders were driven through the cached ms-playwright Chromium — never `npx playwright` —
+with interaction and geometry taken over CDP against the same binary.
+
+**The two clauses the contract asks to be MEASURED, measured:**
+
+| clause | measurement |
+|---|---|
+| the status chip keeps its right-edge anchor whether or not a badge sits beside it | **1264 px on BOTH** — stale `#43`: `◌ stale · 13m ago` 1059–1162, `◐ in-progress` 1168–**1264**; fresh `#43/03`: `✓ done` 1204–**1264** |
+| the Resync hit target is ≥ 24×24 CSS px at every breakpoint | **82 × 27** at 1280, 768 and 390; `font-size: 11px`, `1px solid` — visual weight unchanged |
+
+**The highest-risk cell, settled with a number.** The detail-panel header at 1280 — the ~382px column
+in which nothing can shrink, which the design review placed within ~±20px of overflow — **fits with
+about 30px of slack** carrying the longest forms of both chips (`milestone` type chip ends at 1029, the
+badge cluster starts at 1059, the row ends at 1264). `documentElement.scrollWidth === innerWidth` at
+360, 390, 768 and 1280: **no page-level overflow at any breakpoint.**
+
+**The `owner unreachable` message — the one the review said to look hardest at, because it is the most
+likely production outcome and the easiest to over-alarm.** Driven for real (the REAL control-daemon
+drain, `runResyncDispatchTick`, with the fabric standing in for "a socket exists but the dispatch does
+not complete"), the board renders:
+
+```
+stale · synced 13m ago · from umairs-mac-mini · owner unreachable
+[⟳ Resync]   owner umairs-mac-mini unreachable — showing the 13m-old copy
+```
+
+in **muted grey mono, with no red and no destructive treatment anywhere on the item**, and the control
+back at `⟳ Resync`, enabled. **It does not read red. CONFORMS** — the review's stated GAP condition is
+not met.
+
+| region | verdict |
+|---|---|
+| stale reads DEGRADED, not broken | CONFORMS |
+| blocked AND stale — two vocabularies, red on the status chip alone | CONFORMS |
+| detail header cluster + the anchor rule | CONFORMS (measured) |
+| nothing moves at the threshold | CONFORMS (measured — 1264 both) |
+| provenance line, `(this node)`, Resync idle + unreachable | CONFORMS |
+| Resync subordinate to the single teal-filled headline action | CONFORMS |
+| doc region states its own provenance above the markdown | CONFORMS |
+| each surface's pinned badge form FITS at every width | CONFORMS (measured) |
+| the Resync hit target | CONFORMS (measured) |
+
+**Three things recorded rather than claimed:**
+
+1. **"the stale badge is visibly smaller than the status chip"** is not true of the BOUNDING BOX —
+   badge 103×23 vs chip 96×20. It is true of type scale and weight (11px dashed outline vs a filled
+   tint). Read as intended-and-satisfied on weight; recorded because the wording says "smaller" and the
+   geometry does not support that reading.
+2. **The unreachable MESSAGE truncates** at the provenance box edge (`…showing the 13m-old …`). The
+   contract's actual clause — that the *cached facts* stay legible and untruncated — **is** satisfied:
+   `stale · synced 13m ago · from umairs-mac-mini` is intact on the line above. An observation, not a
+   GAP.
+3. **Not covered by this run:** the greyscale / colour-vision read, the legend's Freshness block, and
+   the absent-doc placeholder — the last being **unreachable in this fixture by construction**, since
+   the seeded stream writes real files to disk so the doc route always finds one. Carried forward
+   rather than claimed.
+
+## User sign-off — 43/04
+
+**Accepted by the operator, 2026-08-06**, on the evidence above: a real render of the real board at
+every documented breakpoint, the two measured clauses measured, and the `owner unreachable` message
+confirmed muted rather than alarming. The three items above were put to the operator explicitly and
+accepted as recorded. Verdict: **accept.**
+
+### Accept decision — 43/04
+
+**ACCEPT.** 374 `@executable` green across 36 suites, `validate 43/04` PASS, reviewed four ways with
+every blocker closed, and task 09's 14 `@uat` scenarios now judged against a real render rather than
+returning INCONCLUSIVE for want of one. `STORY.md` moves to `status: done`.
 
 ### Post-incident note (2026-08-05) — this story's UI half was destroyed and rebuilt
 
@@ -892,6 +969,30 @@ F-05.5**: the scenario's own first clause — *"the fleet shows the assignment f
 names the cause"* — is NOT satisfied. The row reads `state=failed, code=NULL`, as do 45 of 46
 assignment rows across every milestone. Everything needed to act is present; it is one surface away
 from where the scenario says to look.
+
+## User sign-off — 43/05
+
+**Accepted by the operator, 2026-08-06.** The claim put to them was the story's own: *when I fix
+something at a gate, does the next phase behave as though my fix had always been there — and when it
+can't, do I know what to do?* They were shown (a) `stories/03_story_greeting-word` — a story the worker
+authored **because of** the gate edit, whose user story reuses the operator's own example sentence from
+the SPEC — standing beside the three stories the previous phase had produced, none of them lost;
+(b) all three advance outcomes (`merged`, `already-current`, and the coded conflict refusal) readable
+from the control node in one `aof mesh logs --node` call, with no SSH and no worker-side `git log`; and
+(c) the refusal message naming cause, cure and retained worktree.
+
+**The one clause that fails was put to them explicitly**: scenario 3's *"the fleet shows the assignment
+failed with a code that names the cause"* is not satisfied (F-05.5 — `code` is NULL on 45 of 46
+assignment rows, milestone-wide and pre-existing). The operator accepted knowing the cause is fully
+legible one surface away, on the log channel, and that the fix is routed to TECH_DEBT **22**.
+Verdict: **accept.**
+
+### Accept decision — 43/05
+
+**ACCEPT.** 19 `@executable` green plus the now-ARMED (and extended) `acd-gate-propagation-never-discards`,
+architect CONFORMS to ADR-008, task 04's `@manual` two-node soak **run live and passed on all four
+scenarios** after the gate found and closed F-05.3, and task 05's `@uat` accepted above.
+`STORY.md` moves to `status: done`.
 
 ### An observation the run produced for free — the stall class, on real hardware
 

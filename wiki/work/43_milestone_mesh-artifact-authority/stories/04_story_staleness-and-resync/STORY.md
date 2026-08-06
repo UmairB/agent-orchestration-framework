@@ -4,7 +4,7 @@ number: 04
 slug: staleness-and-resync
 title: "Staleness, never eviction — schema v8 stamps every cached row with who reported it and when, ONE strict-> predicate decides freshness on both sides of the wire, the board renders a stale badge and a Resync action, and no deletion may ever be predicated on time"
 parent: 43
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-01
 updated: 2026-08-03
