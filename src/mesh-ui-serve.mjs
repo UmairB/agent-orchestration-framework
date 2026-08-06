@@ -59,6 +59,14 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { assetPath } from "./asset-base.mjs";
+// milestone 45 / story 02 (ADR-004): the THREE static-serving rules live ONCE, in a
+// pure leaf, and this face re-derives none of them. `safeStaticPath` and `contentType`
+// were defined here (:861-884) and again in setup-ui.mjs — the guard byte-identically,
+// the MIME table already drifted (this copy was the richer one, and the merged table is
+// its union, so nothing about THIS origin's MIME answers changes).
+// `shouldServeAppShell` is the predicate that TIGHTENS this face's previously
+// unconditional catch -> index.html fallback.
+import { contentType, safeStaticPath, shouldServeAppShell } from "./static-serve.mjs";
 import { serveBoard } from "./board-serve.mjs";
 // milestone 34 / story 03 (ADR-006) — the ONE global query surface this thin serve
 // face is allowed to reach for its GLOBAL `/api/mesh/status` read. `queryGlobalMeshStatus`
@@ -265,7 +273,10 @@ export async function serveMeshUi({
   const server = http.createServer(async (request, response) => {
     let requestUrl;
     try {
-      requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      // A "//x" request target parses as PROTOCOL-RELATIVE — see the identical guard in
+      // setup-ui.mjs: without this, //api/* dodges the API guard and the SPA fallback
+      // answers HTML for it. Collapse LEADING slashes only.
+      requestUrl = new URL((request.url ?? "/").replace(/^\/\/+/, "/"), "http://127.0.0.1");
     } catch {
       sendApiError(response, 400, "Invalid request URL.", "invalid-url");
       return;
@@ -550,6 +561,12 @@ export async function serveMeshUi({
 
     // Everything else is the static bundle (the built ui/dist). A missing asset
     // is a friendly 404, never a crash.
+    //
+    // m45 / story 02 (ADR-004 [Amigos-2]) — THE ORDER IS THE DECISION: the traversal
+    // guard's `null` is TERMINAL. Several traversal encodings survive URL parsing intact
+    // AND end in an extension-less segment, so routing a REFUSED path into the fallback
+    // predicate would answer 200 text/html to an attempted directory escape — a refusal
+    // silently converted into a success.
     const filePath = safeStaticPath(dist, pathname);
     if (!filePath) {
       sendApiError(response, 404, "Mesh API route not found.", "not-found");
@@ -560,8 +577,20 @@ export async function serveMeshUi({
         send(response, 200, contentType(filePath), content);
       })
       .catch(() => {
-        // A missing static file falls back to index.html (the SPA entry) so a
-        // deep link renders; a missing index is the friendly not-found envelope.
+        // m45 / story 02 (ADR-004) — this fallback WAS UNCONDITIONAL, and that was a
+        // live defect on this origin: a missing `/assets/index-abc.js` was answered with
+        // index.html and `Content-Type: text/html`, so a deploy that shipped without its
+        // JavaScript arrived in the browser as `Uncaught SyntaxError: Unexpected token
+        // '<'`, arbitrarily far from its cause, while `curl` of the asset said 200. It is
+        // now gated behind the SHARED predicate, so a deep-linked `/fleet` still renders
+        // and a missing FILE stays loud. This is a deliberate NARROWING of live fleet
+        // behaviour, decided in ADR-004, not a regression.
+        if (!shouldServeAppShell(pathname)) {
+          sendApiError(response, 404, "Mesh API route not found.", "not-found");
+          return;
+        }
+        // A missing index is the friendly not-found envelope — ui-build-missing stays
+        // loud, never a blank 200.
         readFile(path.join(dist, "index.html"))
           .then((index) => send(response, 200, "text/html", index))
           .catch(() => sendApiError(response, 404, "Mesh API route not found.", "not-found"));
@@ -858,27 +887,8 @@ function send(response, status, contentTypeValue, body) {
   response.end(body);
 }
 
-function contentType(filePath) {
-  if (filePath.endsWith(".js")) return "text/javascript";
-  if (filePath.endsWith(".css")) return "text/css";
-  if (filePath.endsWith(".html")) return "text/html";
-  if (filePath.endsWith(".json")) return "application/json";
-  if (filePath.endsWith(".svg")) return "image/svg+xml";
-  return "application/octet-stream";
-}
-
-// The static-path guard (setup-ui.mjs's safeStaticPath, mirrored): map a pathname
-// to a file INSIDE the served root, refusing traversal (an absolute or escaping
-// path returns null → not-found).
-function safeStaticPath(uiRoot, pathname) {
-  let relativePath;
-  try {
-    relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-  } catch {
-    return null;
-  }
-  if (path.isAbsolute(relativePath)) return null;
-  const filePath = path.resolve(uiRoot, relativePath);
-  const root = path.resolve(uiRoot);
-  return filePath === root || filePath.startsWith(`${root}${path.sep}`) ? filePath : null;
-}
+// m45 / story 02 (ADR-004): `contentType` and `safeStaticPath` used to be defined here,
+// the guard byte-identically with setup-ui.mjs's copy and the MIME table already drifted
+// ahead of it. They now have ONE home — ./static-serve.mjs, imported at the top of this
+// file. The merged MIME table is the UNION, i.e. THIS copy, so no answer this origin
+// gives changes; it is the board/config origin that stops being one file type behind.

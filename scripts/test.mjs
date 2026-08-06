@@ -1588,6 +1588,52 @@ import { archTests as acdTestSuiteRegistrationTests } from "../test/arch/acd-tes
 // ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
 // no force, no reset on the branch path; a conflicting merge aborts and refuses.
 import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
+
+// ── milestone 45 · UI app shell & path routing — the fitness functions authored at refine.
+// EXPECTED RED until 45's stories land; that is the house convention (an arch test written
+// at refine time is part of the CONTRACT, not a report on the present), and they are
+// registered NOW because m43/ADR-014 E7 established that an unregistered suite is no gate
+// at all — including a red one nobody can see.
+//   ADR-001/002 — ONE route table; the render root selects through it and by nothing else;
+//                 the application entry imports surfaces and defines none.
+import { archTests as acdUiSingleRouteTableTests } from "../test/arch/acd-ui-single-route-table.test.mjs";
+//   ADR-002/003 — no `?mode=` surface URL is minted anywhere in src/ · ui/src/ · app/desktop/;
+//                 the legacy vocabulary is read-only and only the translator reads it.
+import { archTests as acdNoSurfaceModeUrlLiteralTests } from "../test/arch/acd-no-surface-mode-url-literal.test.mjs";
+//   ADR-004     — ONE shared static-serving module (src/static-serve.mjs) for BOTH servers:
+//                 the history fallback never shadows /api/* and never masks a missing asset
+//                 (driven against the REAL serveSetupUi handler, not a copy of its logic),
+//                 and the byte-identical, twice-defined safeStaticPath traversal guard
+//                 (setup-ui.mjs:269-280 == mesh-ui-serve.mjs:873-884) gets one definition.
+import { archTests as acdSpaFallbackNeverMasksTests } from "../test/arch/acd-spa-fallback-never-masks.test.mjs";
+//   ADR-001/006 — the route module is React-free, DOM-free and node:test-loadable, and the
+//                 legacy translation preserves every other query parameter and the fragment.
+import { archTests as acdRouteLogicFrameworkFreeTests } from "../test/arch/acd-route-logic-framework-free.test.mjs";
+// milestone 45 / story 02 (ADR-004) — the BEHAVIOURAL half of the static-serving rules, and
+// the traceability wiring for all three of that story's @executable task features
+// (00_one-traversal-guard, 01_history-fallback, 02_missing-asset-still-404s). Real HTTP
+// against real started servers — serveBoard, serveSetupUi and serveMeshUi on ephemeral
+// ports, all three serving one fixture bundle — because the features' own LITMUS is "every
+// Then is a real HTTP request against a started server", never "the predicate returns true".
+// The PLACEMENT invariants (one definition, pure leaf, guard-before-fallback ordering) stay
+// in acd-spa-fallback-never-masks above; that division is deliberate.
+import { staticServeFallbackTests } from "../test/static-serve-fallback.test.mjs";
+//   ADR-005     — the shell owns a CLOSED stacking ladder (DESIGN DG-45-2): `z-50` means the
+//                 shell's fullscreen occupant and nothing else, and no surface invents a rung
+//                 at the call site. Ratchets the gap 45/03 closes so 46/47/49 cannot reopen it
+//                 — 49 being precisely the milestone that puts a surface fullscreen.
+import { archTests as acdShellZLadderSingleHomeTests } from "../test/arch/acd-shell-z-ladder-single-home.test.mjs";
+
+// ── milestone 45 / story 01 — THE ROUTE MODEL (ADR-001/002/003/006): ui/src/app/routes.mjs,
+// the ONE pure route table (`routeFor`) plus the ONE legacy `?mode=` translation
+// (`legacyRedirectFor`). Framework-free by contract — this repo has NO React test harness, so
+// the route decision lives in a plain .mjs that node:test drives headlessly, in the house
+// pattern of ui/src/fleet/scope.mjs + test/fleet-scope.test.mjs. Three @executable task
+// features: 00_route-table (four paths, one shared 404, frozen/origin-blind table),
+// 01_legacy-mode-redirect (every advertised ?mode= URL onto its path, `mode` the only thing
+// removed, idempotent), 02_query-and-fragment-passthrough (`?scope=`, unknown parameters and
+// the `#ref` fragment survive, in order).
+import { appRoutesTests } from "../test/app-routes.test.mjs";
 // milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
 // R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
 // byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
@@ -2343,6 +2389,16 @@ export const tests = [
   ...acdUiSurfaceFileBudgetTests,
   ...acdGatePropagationNeverDiscardsTests,
   ...acdTestSuiteRegistrationTests,
+  // milestone 45 — UI app shell & path routing (EXPECTED RED until 45's stories land)
+  ...acdUiSingleRouteTableTests,
+  ...acdNoSurfaceModeUrlLiteralTests,
+  ...acdSpaFallbackNeverMasksTests,
+  ...acdRouteLogicFrameworkFreeTests,
+  ...acdShellZLadderSingleHomeTests,
+  // milestone 45 / story 01 — the route model (tasks 00–02, all @executable)
+  ...appRoutesTests,
+  // milestone 45 / story 02 — the static-serving leaf (tasks 00–02, all @executable)
+  ...staticServeFallbackTests,
   // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
   ...itemLockScopeOneHomeTests,
   ...itemLockSymmetricScopeTests,

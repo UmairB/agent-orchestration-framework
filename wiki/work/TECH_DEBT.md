@@ -1014,3 +1014,37 @@ faith against a column that is never populated.
 state on the fleet. Worth doing WITH item **14**, whose two distinct causes currently share the
 `assignment-repo-unavailable` code — together they are the difference between an operator diagnosing a
 failed dispatch from the fleet and having to open a log.
+
+---
+
+## 23. The static-bundle traversal guard is LEXICAL, so a symlink inside the served root still escapes it
+
+**Measured 2026-08-07**, during the structural review of `45/02`. `safeStaticPath`
+(`src/static-serve.mjs:53-64`, moved verbatim from the two byte-identical server copies that m45/ADR-004
+de-duplicated) refuses an escape with `path.isAbsolute` plus a resolved-prefix containment check. Both are
+**purely lexical** — `path.resolve` does not resolve symlinks — so a symlink that LIVES inside the served
+root and POINTS outside it is admitted, and `readFile` follows it. Probed against the real
+`serveSetupUi` with a marker file one directory above the bundle:
+
+```
+GET /linked.json  ->  200 application/json  { "marker": "OUTSIDE-THE-ROOT" }
+```
+
+Every percent-encoded, mixed-separator and double-encoded traversal in `45/02`'s own tables is correctly
+refused; this is the one shape none of them covers, and it returns a byte from outside the root.
+
+**How it bites.** Low reachability today and loopback-only: the served roots are the vite build output
+(`ui/dist`, which emits no symlinks) and — on the dev `aof assets ui` API port — the `ui/` **source**
+directory, where `node_modules` is full of them. It is recorded because m45/ADR-004's whole argument for
+the new leaf was *"the guard has ONE definition, so hardening it once hardens both origins"*. This is the
+first hardening that argument was bought for, and the milestone deliberately did not spend it: ADR-004
+mandates a VERBATIM move with no behavioural delta, so changing the guard inside `45/02` would have
+broken its own pin.
+
+**The fix.** Contain on the REAL path, not the lexical one — `fs.realpath` the resolved candidate (and
+the root) before the prefix check, refusing on `ENOENT` exactly as the miss path already does. It is a
+~4-line change in ONE file now, plus a row in `test/static-serve-fallback.test.mjs`'s traversal table and
+the fixture symlink to feed it. Two things to decide with it rather than after: the extra syscall per
+static request (cache the resolved root; the candidate still costs one), and whether a deliberately
+symlinked deploy layout must keep working — if so the rule is "the real path stays inside the real root",
+which a symlinked `ui/dist` itself still satisfies.
