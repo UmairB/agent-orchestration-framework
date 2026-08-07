@@ -184,7 +184,7 @@ async function projectCommand(args) {
   // Commands routed in run() through the generic face; they never reach this
   // ladder.
 
-  throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run\n  aof project provision graphify [--version 0.8.44] [--uninstall] [--dry-run] [--json]`);
+  throw new Error(`Unknown project command "${subcommand ?? ""}".\n\nExamples:\n  aof project show\n  aof project validate\n  aof project doctor\n  aof project migrate --dry-run\n  aof project provision graphify [--version 0.9.5] [--uninstall] [--dry-run] [--json]`);
 }
 
 async function workCommand(args) {
