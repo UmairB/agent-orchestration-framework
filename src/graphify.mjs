@@ -49,9 +49,15 @@ export const GRAPHIFY_SPEC = "graphifyy";
 export const GRAPHIFY_BINARY = "graphify";
 
 // The version the command contract is verified against (RESEARCH §G desk-checked
-// 0.8.44, 2026-06-19). The verb mapping is gated on this; an unexpected installed
-// version is a doctor warning (ADR-004), never a silent mismap.
-export const PINNED_GRAPHIFY_VERSION = "0.8.44";
+// 0.8.44, 2026-06-19; re-verified live against 0.9.5 on a 617-file corpus,
+// 2026-08-07: `extract` with docs and no key still exits 1 writing nothing, and
+// `update` still runs code-only with no key — the two measured facts the verb
+// mapping depends on). 0.9.5 is also what PyPI serves today, so an unprovisioned
+// machine's PATH fallback runs it anyway — the pin should name the version that
+// is actually verified AND actually running. The verb mapping is gated on this;
+// an unexpected installed version is a doctor warning (ADR-004), never a silent
+// mismap.
+export const PINNED_GRAPHIFY_VERSION = "0.9.5";
 
 // --------------------------------------------------------------- resolution ---
 

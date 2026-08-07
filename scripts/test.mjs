@@ -517,6 +517,7 @@ import { archTests as acdWorkCommandNoSubprocessTests } from "../test/arch/acd-w
 // milestone 09 — graphify command core (story 00: the three graph:* commands + the
 // driver/normalizer + the `aof graph` dispatch; @executable traceability)
 import { graphCommandCoreTests } from "../test/graph-command-core.test.mjs";
+import { graphBuildFailurePropagationTests } from "../test/graph-build-failure-propagation.test.mjs";
 // milestone 09 — graphify command core (story 01: binary-provisioning — the
 // resolveGraphifyBinary absent-case behaviour + the doctorConfig graphify-binary
 // check, ADR-002/ADR-004; @executable traceability)
@@ -1795,6 +1796,7 @@ export const tests = [
   ...acdWorkUiNoCoreImportTests,
   ...acdWorkCommandNoSubprocessTests,
   ...graphCommandCoreTests,
+  ...graphBuildFailurePropagationTests,
   ...graphBinaryProvisioningTests,
   ...graphRenderedFacesTests,
   ...graphMcpServerTests,

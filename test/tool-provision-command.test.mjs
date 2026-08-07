@@ -22,13 +22,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCommand, listCommands } from "../src/command-core.mjs";
 import { toolStoreRoot, toolVersionDir } from "../src/paths.mjs";
+import { GRAPHIFY_DESCRIPTOR } from "../src/tool-store.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "bin", "aof.mjs");
 
-// The pinned graphify version the frozen descriptor declares (story 00). The
+// The pinned graphify version — read from the frozen descriptor (story 00) so
+// this suite tracks a pin bump instead of failing on a stale hardcode. The
 // upgrade scenario provisions a DIFFERENT version into a NEW dir.
-const GRAPHIFY_VERSION = "0.8.44";
+const GRAPHIFY_VERSION = GRAPHIFY_DESCRIPTOR.version;
 
 // Spawn the CLI with AOF_GLOBAL_HOME pointed at a temp dir so the store root is
 // deterministic + isolated. cwd is the temp dir too (the --json face relativises
@@ -112,7 +114,7 @@ export const toolProvisionCommandTests = [
 
   {
     // @executable: `aof project provision graphify --uninstall` (dry-run) targets
-    // EXACTLY the graphify 0.8.44 version dir under the store root — derived via
+    // EXACTLY the pinned graphify version dir under the store root — derived via
     // toolVersionDir with the same temp AOF_GLOBAL_HOME, never hardcoded.
     name: "tool-provision/00 aof project provision --uninstall targets exactly the version dir",
     async run() {
@@ -134,11 +136,11 @@ export const toolProvisionCommandTests = [
         // The removal target carried in the plan is exactly the version dir.
         const removeDir = envelope.plan?.removeDir;
         assert.ok(typeof removeDir === "string", "the plan names the removal target dir");
-        assert.equal(removeDir, expectedDir, "the removal target is exactly the graphify 0.8.44 version dir under the store root");
+        assert.equal(removeDir, expectedDir, "the removal target is exactly the pinned graphify version dir under the store root");
 
         // And it is UNDER the store root (not a global/PATH/system path).
         assert.ok(removeDir.startsWith(storeRoot), `the removal target is under the store root (${storeRoot})`);
-        assert.ok(removeDir.endsWith(path.join("graphify", GRAPHIFY_VERSION)), "the removal target ends with graphify/0.8.44");
+        assert.ok(removeDir.endsWith(path.join("graphify", GRAPHIFY_VERSION)), "the removal target ends with graphify/<pinned version>");
       } finally {
         await rm(globalHome, { recursive: true, force: true });
       }
@@ -148,7 +150,7 @@ export const toolProvisionCommandTests = [
   {
     // @executable: provisioning a NEW version plans into the NEW version dir and
     // leaves the old pin (the store is version-keyed — ADR-003). Observable over
-    // the dry-run plan: the plan targets the requested 0.9.0 dir, NOT the 0.8.44 dir.
+    // the dry-run plan: the plan targets the requested 0.9.0 dir, NOT the pinned dir.
     name: "tool-provision/00 provisioning a new version plans into the new version dir, leaving the old pin",
     async run() {
       const globalHome = await makeTempHome();
@@ -169,7 +171,7 @@ export const toolProvisionCommandTests = [
 
         assert.equal(envelope.version, newVersion, "the envelope reports the requested new version");
 
-        // The plan (the uv lane's commands) targets the 0.9.0 dir, never the 0.8.44
+        // The plan (the uv lane's commands) targets the 0.9.0 dir, never the pinned
         // dir. Assert over the PARSED plan structure (the deserialised path strings),
         // not a re-stringified blob — JSON escaping of backslashes would otherwise
         // mask a match on Windows.
@@ -183,7 +185,7 @@ export const toolProvisionCommandTests = [
         );
         assert.ok(
           !planPaths.some((value) => value === oldDir),
-          "the plan does not target or remove the graphify 0.8.44 version dir"
+          "the plan does not target or remove the pinned graphify version dir"
         );
 
         // storePath (relativised to cwd=globalHome) resolves back to the 0.9.0 dir.

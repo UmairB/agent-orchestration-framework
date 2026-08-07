@@ -363,12 +363,15 @@ export function uninstall(descriptor, { removeDir, env } = {}) {
 // arch-tests enumerate these via toolDescriptors()/TOOL_DESCRIPTORS.
 
 // graphify — the uv-lane PyPI tool `graphifyy` shipping TWO binaries
-// (graphify + graphify-mcp), pinned at 0.8.44 (RESEARCH §"Cross-platform").
+// (graphify + graphify-mcp), pinned at 0.9.5 (originally 0.8.44 per RESEARCH
+// §"Cross-platform"; bumped 2026-08-07 to the live-verified version — keep in
+// lockstep with PINNED_GRAPHIFY_VERSION in graphify.mjs, which is the store key
+// the resolver looks up).
 export const GRAPHIFY_DESCRIPTOR = {
   name: "graphify",
   provider: "uv",
   packageSpec: "graphifyy",
-  version: "0.8.44",
+  version: "0.9.5",
   binaries: ["graphify", "graphify-mcp"],
 };
 
