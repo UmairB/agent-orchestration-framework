@@ -1,6 +1,6 @@
 ---
 description: Refine a work item — break a milestone into independent stories, or author a story's task features (Three Amigos), producing ARCHITECTURE/DESIGN/RESEARCH as needed. With --autonomous, cascade the whole item (break down + author every contract) and stop once for a single review at the end.
-argument-hint: <item ref — NN or slug> [--autonomous]
+argument-hint: <item ref — NN or slug> [--autonomous] [--solo]
 allowed-tools: [Read, Grep, Glob, Write, Edit, Bash, Task]
 ---
 <objective>
@@ -10,8 +10,22 @@ author a story's task `.feature` files via Three Amigos.
 
 <config>
 Read `.aof/aof.config.json` → `work.dir`, `work.agents`, `work.tags`. Parse `$ARGUMENTS` into the item
-**ref** (`NN` / `NN/SS` / slug) and an optional **`--autonomous`** flag. Resolve the ref by running
-`aof work find "<ref>" --json` (folder-name lookup — never glob `**/*.md`).
+**ref** (`NN` / `NN/SS` / slug), an optional **`--autonomous`** flag and an optional **`--solo`**
+flag. Resolve the ref by running `aof work find "<ref>" --json` (folder-name lookup — never glob
+`**/*.md`).
+
+**Execution mode.** Resolve from `work.agents.mode`: `"solo"` → play every role inline in this
+session; any other value → orchestrated (spawn the role agents). **`--solo` OVERRIDES an
+orchestrated config to solo for this run** — the same effect as `work.agents.mode: "solo"`, without
+editing config. It changes only WHO does the work, never WHAT is produced: the same documents, the
+same contracts, the same gates.
+
+Use it when the orchestration is costing more than it buys — a well-trodden change where the
+main session already holds the context a fresh sub-agent would have to rediscover. A spawned agent
+starts cold: it re-reads the codebase, re-derives what you already know, and hands back a summary
+you then re-read. Inline pays none of that, at the cost of the parallelism and the independent
+perspective a separate agent brings. In solo mode the roles are still played in full and their
+outputs still land in the same files — you are the architect, the QA and the developer in turn.
 </config>
 
 <process>
@@ -90,7 +104,10 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      were this build's output.
 
 - **story — Contract (Three Amigos):** author the task `.feature` files under `tasks/`: PO writes the
-  headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility. **Litmus**
+  headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility.
+  **In solo mode you play all three yourself, in that order, in this session — no agent is
+  spawned.** The three passes still happen and the contract is the same; what disappears is three
+  cold starts and three hand-back summaries. **Litmus**
   every line; tag each scenario (one verification — `@executable`/`@manual`/`@uat` — +
   layer/refinement/domain from `work.tags`); defect-origin → `@bug` + `@finding-<id>`. List the tasks
   in `STORY.md` `## Tasks`.

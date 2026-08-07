@@ -15,6 +15,22 @@ Read `.aof/aof.config.json` → `work.dir`, `work.agents`. Resolve the ref by ru
 index). Items nest by scope: `milestone/ → stories/<story>/ → tasks/<task>.feature`.
 </config>
 
+<config>
+Parse `$ARGUMENTS` into the item **ref** and an optional **`--solo`** flag.
+
+**Execution mode.** Resolve from `work.agents.mode`: `"solo"` → play every role inline in this
+session; any other value → orchestrated (spawn the role agents). **`--solo` OVERRIDES an
+orchestrated config to solo for this run**, and is passed through to any `/aof:refine` or
+`/aof:autonomous` this command delegates to. It changes only WHO does the work, never WHAT is
+produced — the same build, the same review lanes, the same gates.
+
+Reach for it when the main session already holds the context a spawned agent would have to
+rediscover from cold: a well-trodden change, a small story, or a fix round on work you just did.
+The trade is real in both directions — inline keeps the context and pays no hand-off, but loses
+the parallelism across independent stories and the independent perspective a separate reviewer
+brings. On a milestone with genuinely independent stories, orchestrated is usually still faster.
+</config>
+
 <process>
 **Re-entry first — before anything else, run `aof work resume`.** This command is the thing an operator
 types after a run died, so the first question is always "was something already in flight?". The sweep
@@ -28,7 +44,7 @@ attempts on a kill that is certain to repeat. If the sweep is empty, proceed nor
 Dispatch on the item's `type`:
 
 - **milestone** — the whole milestone, to completion: run `/aof:autonomous <NN>` (the SlashCommand
-  tool) and stop when it hands back. The autonomous loop is the ONE implementation of
+  tool — **append `--solo` when it was passed to this command**) and stop when it hands back. The autonomous loop is the ONE implementation of
   "drive an item refine → build → verify until done" (it fans out independent stories, gates each on
   `aof work validate`, and stops only for a genuine human gate or blocker) — never re-implement a
   partial fan-out here: a milestone continue that builds one slice and parks is the exact defect this
@@ -37,7 +53,8 @@ Dispatch on the item's `type`:
   1. Read the milestone's ADRs/DESIGN + the story's task features. If tasks are thin/untagged, stop and
      send the user to `aof:refine <ref>`.
   2. **Build** — (orchestrated) spawn `aof-developer` to implement code + `@executable` step defs until
-     every task's `@executable` scenarios/rows are green and fitness functions pass; else inline. Flag,
+     every task's `@executable` scenarios/rows are green and fitness functions pass; **in solo mode
+     (config or `--solo`), do it yourself in this session — spawn nothing.** Flag,
      don't change, a wrong scenario — and note any blocker or contract problem in the milestone's
      `STATE.md` `## Feedback (for retro)` section (distilled into `RETROSPECTIVE.md` at `aof:verify`).
 
@@ -47,6 +64,13 @@ Dispatch on the item's `type`:
      build. An **empty block means nothing to surface** (memory may be off) — proceed unchanged.
   3. **Review** — `aof-architect` (structural) + `aof-qa` (behavioural) + **`aof-designer` (design
      conformance, when the story has UI)** + an automated craft pass; apply confirmed fixes.
+     **In solo mode you perform each review lane yourself in this session, in turn, and record
+     the same verdicts — spawn nothing.** Be aware of what that costs: the value of a
+     spawned reviewer is that it did not write the code and cannot be talked into liking it. Judge
+     against the contract and the ADRs, not against your own build.
+
+     Also add `--solo` to the `/aof:autonomous` or `/aof:refine` invocation of any delegation
+     below, so the mode holds for the whole cascade rather than reverting at the first hand-off.
 
      **Design conformance (when the story has UI) — render → hand to the designer → spawn QA
      (ADR-001/002/003).** Catch design-gaps here (at build) — far cheaper than at the `aof:verify` gate

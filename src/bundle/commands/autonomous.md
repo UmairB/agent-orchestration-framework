@@ -1,6 +1,6 @@
 ---
 description: Run a range of milestones end-to-end, unattended — driven by `aof work next`: refine → build → verify each item in dependency order, gating on `aof work validate`. Stops only for a genuine human gate (@uat), a blocker, or an unsafe ambiguity. Resumable.
-argument-hint: "<range — NN-MM or NN> [--ship] [--max-attempts N]"
+argument-hint: "<range — NN-MM or NN> [--ship] [--max-attempts N] [--solo]"
 allowed-tools: [Read, Grep, Glob, Bash, Edit, Write, Task, SlashCommand]
 ---
 <objective>
@@ -19,6 +19,19 @@ Read `.aof/aof.config.json` → `work.agents`, `work.autonomous.maxAttempts` (de
 - **--ship** — after a milestone is accepted, run `aof:code-review <NN>` (opens the PR; merges only if
   `work.codeReview.autoComplete`). Default off — autonomous builds + accepts but doesn't open/merge PRs.
 - **--max-attempts N** — override the per-item fix-loop cap.
+- **--solo** — force solo execution for this whole run (see below).
+
+**Execution mode.** Resolve from `work.agents.mode`: `"solo"` → play every role inline in this
+session; `"orchestrated"` (the default) → spawn the role agents. **`--solo` overrides an
+orchestrated config to solo for this run**, and MUST be appended to every `/aof:refine`,
+`/aof:continue` and `/aof:verify` this loop delegates to — otherwise the mode is lost at the first
+hand-off and the cascade silently reverts to spawning.
+
+This command is the heaviest spawner in the system: it drives refine → build → verify for every item
+in the range. Under solo it does the same work in one session — no fan-out across independent
+stories, but no cold start per agent either. On a range of genuinely independent milestones the
+orchestrated fan-out usually wins; on a single small item, or well-trodden work where this session
+already holds the context, inline usually does.
 
 Ordering, done-skipping, and the structural gate are delegated to the CLI — you never pick the order
 or hand-glob the stream.
@@ -54,7 +67,8 @@ Loop until `aof work next <range> --json` returns `state: "done"`:
      cases, dev feasibility).
    - **story with tasks, not done** → `aof:continue NN/SS` (code + `@executable` green; `aof-architect`
      + `aof-qa` review — the automated gate autonomous clears without a human). Then **drive to the
-     gate**: `aof work validate NN/SS` (exit 0); on findings/red, spawn `aof-developer` to fix **within
+     gate**: `aof work validate NN/SS` (exit 0); on findings/red, spawn `aof-developer` (or fix it
+     yourself in solo mode) to fix **within
      the locked contract** — never edit a scenario/fitness function to force green; if one is
      wrong/infeasible, **stop**. Re-validate up to `maxAttempts`; on exhaustion, **stop**. Then
      `aof:verify NN/SS` (automated + `@manual` lanes); if the story has any **`@uat`** scenario,
