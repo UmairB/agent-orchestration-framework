@@ -231,6 +231,15 @@ proceeded unchanged.
 
 ## Feedback (for retro)
 
+- 45/03 bookkeeping (2026-08-07, caught by the operator): after an infra-failure retry, the run
+  LINEAGE resumed but nothing re-asserted the ITEM status — `run-complete --outcome failed` rolls the
+  item to `not-started` (by design), `run-retry` does not roll it forward, and the orchestrator's
+  later status edit pattern-matched the pre-rollback value and silently no-opped. The board honestly
+  reported the wrong record for hours. Lessons: (a) after any run-retry, re-assert the item status
+  explicitly rather than assuming the pre-failure edit survived; (b) a status edit should verify its
+  own result (the sed printed nothing and nobody looked); (c) possibly a CLI gap — `run-retry` could
+  restore the status its own failure-path rolled back. — Raised by: operator + orchestrator
+
 - 45/01 review (2026-08-07): a locked feature's Then can smuggle a cross-story coupling into a leaf
   story. Feature 02 scenario 5's last Then ("board-url's response SHAPE is untouched by any of this")
   is a claim about a producer this story does not edit, inside a feature whose own LITMUS is

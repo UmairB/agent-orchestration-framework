@@ -4,7 +4,7 @@ number: 03
 slug: app-shell-and-entry
 title: "The three pages become one application — a thin entry, a shell with named regions, and navigation that has never existed"
 parent: 45
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-08-06
 updated: 2026-08-07
