@@ -52,13 +52,20 @@ Every degradation you find MUST be routed — waving it through silently is a fa
 structure or draw a boundary, consult the real call/dependency graph instead of inferring coupling from
 reading — run-then-consider, a silent no-op when graphify is absent (mirrors the memory-recall hook):
 
-1. **Build fresh at the decision point.** Run `aof graph build src` (the repo source root — where the
+1. **Build fresh at the decision point.** Run `aof graph build .` (the project root — where the
    call/dependency coupling lives) so the graph reflects current source. Read back the `builtAt`/`egress`/
    node-edge counts the `BuildResult` returns, so freshness is visible — never reason over a silently stale
    graph. (You MAY reuse an existing `graphify-out/graph.json` only by surfacing its age first.)
+   Pass NO `--backend`: that is the code-only build — the call/dependency coupling you need, no API key,
+   zero egress, and it works whether or not the repo contains docs. Graphify extraction replaces the single
+   project graph; never target a package or `src` subtree, because doing so evicts every file outside that subtree.
 2. **Get the EXACT coupling for the files you're reviewing.** Run `aof graph impact <the files under
    review or in the diff>` — it returns, deterministically from the graph's edges, each file's
-   **dependents** (`imported/called by ←` — the blast-radius) and **dependencies** (`imports/calls →`).
+   **dependents** (`imported/called by ←` — the blast-radius) and **dependencies** (`imports/calls →`),
+   plus the artifact's own `builtAt`. A file reported `present: false` is NOT covered by the graph: its
+   coupling is UNKNOWN, and recording it as "no coupling" is the one mistake this whole step exists to
+   prevent. Rebuild over the project root, or say the coupling is unknown — never infer isolation from a
+   coverage gap.
    This is the reliable primary signal: exact, not fuzzy. (For open-ended exploration only — "what is the
    god-node here" — you MAY also run `aof graph query "<question>"` and read its legible markdown answer,
    but treat that as a similarity-seeded hint, not fact; `graph impact` is the structured answer to
@@ -72,6 +79,11 @@ reading — run-then-consider, a silent no-op when graphify is absent (mirrors t
    status-write, or work-mutation.
 5. **No-op when absent.** If `aof graph build` returns the structured `graphify-missing` miss, note that
    the graph is unavailable and proceed on grep-and-infer exactly as before — no block, no crash, no noise.
+   A `graphify-build-failed` / `graphify-no-persist` failure is the SAME situation, not a worse one: no
+   usable graph was produced, so any graph still on disk describes an earlier state. Say the graph is
+   unavailable and infer from reading — never fall back onto the surviving artifact as if the build had
+   succeeded. A build reporting `unchanged: true` is the OPPOSITE case and a success: graphify rewrites
+   only on a topology change, so an untouched artifact means the graph is already current. Use it.
 </codebase-graph-grounding>
 
 <output>

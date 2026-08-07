@@ -75,8 +75,9 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
 
      **Ground boundaries in the codebase graph first.** Run unconditionally (a silent no-op when graphify
      is absent — mirrors the memory-recall hook above): **before** drawing any story boundary, build the
-     codebase graph fresh — `aof graph build src` (the repo source root, where call/dependency coupling
-     lives; read back the `builtAt`/`egress`/counts the `BuildResult` returns so freshness is visible) —
+     codebase graph fresh — `aof graph build .` (the project root, where call/dependency coupling
+     lives; NO `--backend` — that is the code-only build: no key, zero egress, docs in the tree are fine;
+     read back the `builtAt`/`egress`/counts the `BuildResult` returns so freshness is visible) —
      then run `aof graph impact <the candidate modules / files at each boundary>` to get the **exact**
      dependents + dependencies of each from the graph's edges (deterministic — not the fuzzy
      similarity-seeded `graph query`, which you may still use for open-ended "what's the god-node here"
@@ -84,9 +85,16 @@ refine cascades through every sub-stage of the item and stops once, at the end, 
      reports — a boundary that cuts a file away from the modules that import it is a bad cut — and **cite
      the graph-derived coupling** in the breakdown rationale / `ARCHITECTURE.md`. **Advisory only:** YOU
      draw the partition using your own judgment — the graph informs it, never auto-rewrites it; no graph
-     output feeds a gate or work-mutation. If
-     `aof graph build` returns the structured `graphify-missing` miss, note the graph is unavailable and
-     draw boundaries from reading the source exactly as before — no block, no crash, no noise.
+     output feeds a gate or work-mutation. Graphify extraction replaces the single project graph; never
+     target a package or `src` subtree, because doing so evicts every file outside that subtree. A module
+     `graph impact` reports `present: false` for is **not covered** by the graph — its coupling is UNKNOWN,
+     so never draw a boundary on the strength of an empty answer. A build reporting `unchanged: true`
+     **succeeded**: graphify rewrites only when the graph's topology actually changed, so that is "already
+     current", and the graph is yours to use. Only if `aof graph build` returns the structured
+     `graphify-missing` miss — or FAILS with `graphify-build-failed` / `graphify-no-persist`, which means
+     no usable graph was produced — note the graph is unavailable and draw boundaries from reading the
+     source exactly as before: no block, no crash, no noise, and no reading of a stale artifact as if it
+     were this build's output.
 
 - **story — Contract (Three Amigos):** author the task `.feature` files under `tasks/`: PO writes the
   headline Scenarios; `aof-qa` writes the Examples tables; `aof-developer` checks feasibility. **Litmus**

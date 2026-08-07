@@ -36,3 +36,9 @@ app/desktop/crates/app/target/
 app/desktop/crates/app/gen/
 
 MicrosoftEdgeWebview2Setup.exe 
+
+# aof mesh runtime: per-run git worktrees the worker daemon checks out to execute
+# assigned items — a full embedded checkout of this repo, never a record to commit.
+# (m43's bundle .gitignore stopped blanket-ignoring .aof/mesh/ because on a real node
+# the mesh dir IS the tracked bus; the worktrees under it are still runtime state.)
+.aof/mesh/worktrees/
