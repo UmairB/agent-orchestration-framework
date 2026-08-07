@@ -1410,7 +1410,14 @@ function BoardDrillIn({ board }: { board: FleetBoard }) {
     // embed/proxy — no /api/work is issued on drill-in's behalf).
     return (
       <a
-        href="/?mode=board"
+        // m45/ADR-002 — the board's PATH, and still RELATIVE, deliberately. On the fleet
+        // origin this resolves to :4181, which 404s `/api/work` (mesh-ui-serve.mjs) — so
+        // the board renders but cannot load its stream. That is TODAY's behaviour for the
+        // legacy `?mode=board` form, byte for byte; a URL migration that also changed
+        // where the link GOES would be two changes in one diff. Routed to milestone 47
+        // (m45/STATE, F-45-04-1); the likely fix is the `/api/mesh/board-url` route the
+        // peer-board branch below already uses.
+        href="/board"
         className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-primary transition hover:underline"
       >
         Open board →

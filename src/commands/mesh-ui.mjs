@@ -3,7 +3,7 @@
 // meshUiCommand + MESH_UI_FLAGS, both retired). `aof mesh ui` is a long-lived
 // serve verb (milestone 25 / story 02, ADR-003; milestone 34 / story 03,
 // ADR-006): it stands up its OWN thin fleet serve-face (serveMeshUi) — one
-// 127.0.0.1 server serving the ui/dist bundle with ?mode=fleet + the
+// 127.0.0.1 server serving the ui/dist bundle at the fleet's PATH (m45/ADR-002) + the
 // GET /api/mesh/status route — and mirrors the board's ui-build-missing +
 // EADDRINUSE friendly refusals (never a stack trace). Default port 4181 clears
 // assets-ui 4177/4178 + board 4180, so the fleet view runs ON TOP of a board on
@@ -22,7 +22,7 @@
 // workspace up front; the global read only opens the machine-wide projection
 // store). `--local` passes scope "local" + this directory as projectDir — the
 // pre-existing focused-workspace view, unchanged. The announced browser URL
-// always names the selected scope (`?mode=fleet&scope=<global|local>`) so a
+// always names the selected scope (m45/ADR-002: `/fleet?scope=<global|local>`) so a
 // bookmarked/shared link reproduces the same view.
 import path from "node:path";
 import { serveMeshUi, meshUiProbe, DEFAULT_MESH_UI_PORT } from "../mesh-ui-serve.mjs";
@@ -103,7 +103,16 @@ async function runFleetUi(input) {
   // as mesh-serve's; the fleet server's own faults land via its error paths below).
   const uiLogSink = createMeshLogSink("mesh-ui", { env: process.env });
   uiLogSink.write({ level: "info", code: "daemon-started", message: `mesh ui running (build ${buildInfoString(readBuildInfo())})` });
-  console.log(`Open this URL in your browser: ${fleetUrl}&scope=${scope}`);
+  // milestone 45 / story 04 (ADR-002) — the announce carries the started scope as a
+  // REAL search parameter on the fleet's PATH. It is SET through `searchParams`, never
+  // concatenated: this line used to read `${fleetUrl}&scope=${scope}` with the `&`
+  // hard-coded on the assumption that `fleetUrl` already carried a query string. Against
+  // the path URL `serveMeshUi` now returns, that concatenation would have produced
+  // `…/fleet&scope=global` — a PATHNAME of `/fleet&scope=global` with no `scope`
+  // parameter at all, which any `includes("scope=")` check would have accepted.
+  const announceUrl = new URL(fleetUrl);
+  announceUrl.searchParams.set("scope", scope);
+  console.log(`Open this URL in your browser: ${announceUrl.toString()}`);
   console.log(`Project: ${projectDir}`);
   console.log("Press Ctrl+C to stop the fleet view.");
 

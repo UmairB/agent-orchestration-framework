@@ -35,13 +35,26 @@ use tokio::sync::Notify;
 
 /// The web `aof mesh ui`'s real local URL (`src/mesh-ui-serve.mjs`: `http.createServer`
 /// bound to `127.0.0.1`, default port 4181) — the address the tray's "Open web UI"
-/// launches in the default browser. The SPA is mode-selected by query params: the bare
-/// `/` renders BLANK, so the URL MUST carry `?mode=fleet&scope=global` — the exact URL
-/// `aof mesh ui` itself advertises (`src/cli.mjs`: `${url}?mode=fleet` + `&scope=global`,
-/// the default scope for the plain `mesh ui` the supervisor spawns). The supervisor
-/// starts `aof mesh ui` on this port (the CLI default), so the URL is known without a
-/// second data path.
-pub const MESH_UI_URL: &str = "http://127.0.0.1:4181/?mode=fleet&scope=global";
+/// launches in the default browser.
+///
+/// The app is a PATH-routed SPA (milestone 45 / ADR-001, ADR-002): `/` renders the shell
+/// landing, `/fleet` the fleet, `/board` the board, `/config` the config editor. The
+/// warning that stood here — that the bare `/` renders BLANK and the URL therefore MUST
+/// carry `?mode=fleet&scope=global` — is RETIRED: `/` is now a real address with a real
+/// surface behind it. This constant still targets `/fleet` DIRECTLY rather than `/`,
+/// because the tray's "Open web UI" means "show me the fleet", and landing one click away
+/// from it would be a worse door, not a more honest one. The scope rides as an ordinary
+/// query parameter on that path — the exact URL `aof mesh ui` itself advertises
+/// (`src/commands/mesh-ui.mjs` sets `scope` on `serveMeshUi`'s `/fleet` URL; `global` is
+/// the default scope for the plain `mesh ui` the supervisor spawns).
+///
+/// The legacy `?mode=fleet&scope=global` address a PREVIOUSLY SHIPPED build compiled into
+/// this same constant still works: the entry translates it once, client-side, onto this
+/// URL (ADR-003, which sets no expiry precisely because this constant is compiled).
+///
+/// The supervisor starts `aof mesh ui` on this port (the CLI default), so the URL is
+/// known without a second data path.
+pub const MESH_UI_URL: &str = "http://127.0.0.1:4181/fleet?scope=global";
 
 /// How often the single fleet-data poll re-issues `aof mesh status --json` (DESIGN
 /// §Footer "refreshed Ns ago"). One poll feeds BOTH the fleet view and the

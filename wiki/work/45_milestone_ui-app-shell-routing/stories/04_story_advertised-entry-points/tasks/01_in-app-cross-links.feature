@@ -40,8 +40,16 @@
 #     build.
 #   - Fleet.tsx:1381,1393 — `BoardDrillIn` splits on `board.local`; the LOCAL
 #     branch renders the anchor and the PEER branch renders a copy-control with no
-#     `href` at all. Both branches are reachable from the fleet face's
-#     `/api/mesh/status` boards aggregate.
+#     `href` at all. CORRECTED at review (QA F-45-04-QA-2/QA-3, 2026-08-07): this
+#     note originally claimed both branches are reachable from the fleet face's
+#     `/api/mesh/status` boards aggregate — MEASURED FALSE on both scopes: since
+#     m34/ADR-006 that route's payload carries no `boards` key at all, so the
+#     shipped surface always renders the empty placeholder and neither branch ever
+#     mounts for an operator. The lanes are therefore PRODUCER-FED (real group
+#     registry → real `mesh:status` → its real `boards` payload served verbatim
+#     over HTTP → the real <Fleet/>) — honest evidence for the RENDER contract,
+#     not for operator reachability. The reachability gap is pre-existing, out of
+#     this story's scope, and routed to m47 (which owns the fleet surface).
 #
 # NOT ASSERTED HERE:
 #  - "no `?mode=` literal survives in `ui/src`" — a PLACEMENT invariant owned by
@@ -59,7 +67,7 @@
 #    no fixed port. That `/fleet` resolves at all is task 00's third scenario.
 #
 # OBSERVED, DEFERRED, AND DELIBERATELY NOT CHANGED HERE (QA finding F-45-04-1, in
-# VERIFICATION.md): `Fleet.tsx:1398`'s href is RELATIVE, so on the fleet origin
+# m45 STATE.md, labelled F-45-04-1): `Fleet.tsx:1398`'s href is RELATIVE, so on the fleet origin
 # (:4181) it resolves to the fleet's own origin — which answers 404 for
 # `/api/work` (mesh-ui-serve.mjs:541-543). A local board's "Open board →"
 # therefore lands on a board surface that cannot load its stream, TODAY, with
@@ -123,7 +131,16 @@ Feature: the three hard-coded cross-links between the board and the fleet are pa
     When I collect the href of every anchor in the rendered tree
     Then not one of them names a `mode` parameter, in its query or anywhere else
     And every href that is absolute names host "127.0.0.1" — no link points off-machine
-    And at least one anchor was collected, so the sweep is non-vacuous
+    And the anchor COUNT for this state equals its pinned value — the three anchor-less states are PINNED-ZERO, not swept — and across all six states at least one anchor was collected and the full href set is exactly the three migrated links
+    # AMENDED at review (QA F-45-04-QA-1, PO ruling 2026-08-07). As authored, "at least
+    # one anchor was collected" bound every row — but three of these states render ZERO
+    # anchors by measured design (the healthy board renders its links conditionally; the
+    # peer branch is a <button>, which is exactly what scenario 3 protects). The
+    # delivered reading is strictly stronger where it matters: per-state counts pinned
+    # exactly (so an anchor APPEARING is as loud as one disappearing), the href set
+    # closed over all six states, and non-vacuity held at the whole-sweep level where it
+    # is true. For the three pinned-zero rows the mode-sweep clause is knowingly vacuous
+    # — those rows prove the count, not the sweep.
 
     Examples:
       | case                             | state                                                                    |

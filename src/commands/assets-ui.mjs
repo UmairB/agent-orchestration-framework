@@ -2,7 +2,7 @@
 // command (m42 wave (d) leg d1, wave-3 tail; formerly cli.mjs's CLI-only
 // assetsUiCommand → setupUiCommand ladder branch). `aof assets ui` stands up the
 // setup-UI API server plus the DEV-ONLY vite frontend re-exec (below), announcing
-// the ?mode=assets editor URL.
+// the editor's `/config` URL (milestone 45 / ADR-002).
 //
 // The launcher seam splits its two faces:
 //   run (the probe) — what WOULD serve: the resolved ui/api ports, the editor
@@ -42,7 +42,12 @@ async function runSetupUi(input) {
   const { serveSetupUi } = await import("../setup-ui.mjs");
   const { server } = await serveSetupUi(null, { port: apiPort });
   const frontend = startSetupUiFrontend(uiPort, `http://127.0.0.1:${apiPort}`);
-  const uiUrl = `http://127.0.0.1:${uiPort}/?mode=assets`;
+  // milestone 45 / story 04 (ADR-002) — the config editor's PATH is `/config`, NOT
+  // `/assets`: `/assets` is the built bundle's OWN asset directory (ui/dist/assets/
+  // index-*.js), so a route by that name would collide with the JavaScript it serves.
+  // The verb stays `assets ui` and the command id stays `assets:ui`; ADR-002 names that
+  // divergence deliberately. The legacy `?mode=assets` address keeps working (ADR-003).
+  const uiUrl = `http://127.0.0.1:${uiPort}/config`;
 
   console.log("AOF assets UI is running locally.");
   console.log(`Open this URL in your browser: ${uiUrl}`);
@@ -86,8 +91,13 @@ function startSetupUiFrontend(port, apiUrl = "http://127.0.0.1:4178") {
     cwd: uiDir,
     stdio: "inherit",
     env: {
+      // `VITE_AOF_UI_MODE: "assets"` stood here and is RETIRED with the query selector it
+      // fed (milestone 45 / ADR-002). It was a build-time constant, set only here and read
+      // only by the pre-45 render root's ternary; keeping it would leave the route decision
+      // with two inputs — a URL and a baked env var — which is the two-homes-for-one-fact
+      // shape this milestone exists to remove. The address bar is the one input now, and
+      // the editor is reached at `/config`.
       ...process.env,
-      VITE_AOF_UI_MODE: "assets",
       VITE_AOF_API_URL: apiUrl,
       BROWSER: "none"
     }
@@ -114,7 +124,9 @@ export const assetsUiCommand = {
       uiPort: input.uiPort,
       apiPort: input.apiPort,
       projectDir: input.projectDir,
-      uiUrl: `http://127.0.0.1:${input.uiPort}/?mode=assets`,
+      // The probe's URL and the launch body's are separate strings that must never
+      // disagree — both name the ADR-002 `/config` path (see the note at the serve site).
+      uiUrl: `http://127.0.0.1:${input.uiPort}/config`,
     };
   },
 

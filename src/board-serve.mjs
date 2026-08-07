@@ -38,7 +38,10 @@ export function boardUiProbe({ projectDir = process.cwd(), port = 4180, repoRoot
     projectDir: path.resolve(projectDir),
     uiDist: dist,
     uiBuildPresent: existsSync(path.join(dist, "index.html")),
-    boardUrl: `http://127.0.0.1:${port}/?mode=board`,
+    // milestone 45 / story 04 (ADR-002) — the board's ADR-002 PATH. The legacy
+    // `?mode=board` form this used to advertise still works (ADR-003 translates it
+    // once, client-side, at the entry); it is simply no longer MINTED here.
+    boardUrl: `http://127.0.0.1:${port}/board`,
   };
 }
 
@@ -58,7 +61,11 @@ export async function serveBoard({ projectDir = process.cwd(), port = 4178, repo
   // real ~/.claude.json; this is the one place the real writer is wired, so the board's
   // spawned agent never hits claude's blocking folder-trust dialog.
   const { server, url } = await serveSetupUi(null, { projectDir, port, uiRoot: dist, spawn, which, recordSessions, trustCwd: ensureWorktreeTrusted });
-  // `url` already ends with "/", so this yields e.g. http://127.0.0.1:PORT/?mode=board.
-  const boardUrl = `${url}?mode=board`;
+  // milestone 45 / story 04 (ADR-002) — the announced URL is the board's PATH:
+  // e.g. http://127.0.0.1:PORT/board. Built with `new URL` against the server's own
+  // origin rather than concatenated, so the path can never be glued onto a query the
+  // origin string happens to carry. A bookmark of the legacy `?mode=board` form keeps
+  // working — ADR-003 translates it at the entry — this simply stops minting it.
+  const boardUrl = new URL("/board", url).toString();
   return { server, url, boardUrl };
 }

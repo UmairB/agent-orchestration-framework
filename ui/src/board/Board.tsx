@@ -430,7 +430,11 @@ export function Board() {
             <span>
               This board&apos;s server is gone (the daemon restarted — board ports are per-session). Buttons on this tab do
               nothing. Reopen the board from{" "}
-              <a className="underline" href="http://127.0.0.1:4181/?mode=fleet">
+              {/* m45/ADR-002 — the fleet's PATH. ABSOLUTE and hard-coded on purpose: a
+                  board port is ephemeral and the fleet's is fixed at 4181, which is the
+                  whole reason this banner can name it at all. No `scope`: this link never
+                  carried one and the migration invents nothing. */}
+              <a className="underline" href="http://127.0.0.1:4181/fleet">
                 the fleet
               </a>
               .

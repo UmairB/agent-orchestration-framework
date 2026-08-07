@@ -53,6 +53,24 @@ doc: state
       (content:page's document-scroll truth). **Carried to m46's brief:** `Fleet.tsx`'s inline
       `onRefresh` is one refactor from an infinite update loop (one-line `useCallback`; production
       survives only via the entry's referentially-stable element — the composition lane documents it).
+      **Operator ruling (2026-08-07): all verification is deferred to the end** — 45/03's `@uat`
+      visual review and the milestone acceptance run together after 45/04 lands. 45/04's build starts
+      on the operator's explicit instruction with 45/03 built-and-validated but not yet accepted; the
+      `@uat` gate is deferred, never skipped.
+      **04 advertised-entry-points: built, reviewed, validate PASS** (2026-08-07). All seven
+      producers migrated (board/fleet/assets servers + probes, board-url page URL, supervisor.rs
+      constant, three in-app links — Fleet's deliberately still relative, F-45-04-1); the
+      `${fleetUrl}&scope=` glue trap fixed via URL.searchParams (mutation-verified); the two target
+      fitness functions green — and `acd-no-surface-mode-url-literal` STRENGTHENED at review
+      (architect F1: the "no fifth producer unseen" name now has a closed route-path-vocabulary body,
+      4/4, shrink-only exemptions). New suites 7/7 + 5/5; five behavioural suites moved to parsed-URL
+      assertions; QA's independent e2e proved every advertised address renders the shell on its own
+      origin, the board-url round trip carries `#ref` through story-refs, and old/new addresses
+      CONVERGE through `legacyRedirectFor`. The pre-existing `work-ui-verb-rename` red (m42 usage
+      drift) repaired with its reason stated. Rust rebuild correctly deferred to the Windows deploy
+      loop (`--desktop`); until then the tray opens the legacy URL, which keeps working by ADR-003.
+      Task 02's `@manual` census runs at the end gate. Findings routed: BoardsRegion permanently
+      empty since m34 (+ the drill-in dead-end) → recorded in m47/STATE as the receiving side.
 
 **Story order.** `01` and `02` are parallel-eligible from day one and share nothing. `03` depends on
 `01`; `04` depends on `03`. The one cross-story rule, from the architect's seam analysis: everything
@@ -178,7 +196,7 @@ proceeded unchanged.
   assertion accepts. Swept at refine: `assets-ui.mjs:48` and `work-ui.mjs:52` interpolate cleanly, so
   this is the **only** instance. Story `04`'s scenarios read `new URL(...).searchParams.get("scope")`
   rather than a substring, precisely to catch it.
-- **Deferred, not fixed — `Fleet.tsx:1398`'s local-board drill-in dead-ends.** `href="/?mode=board"` is
+- **F-45-04-1 · Deferred, not fixed — `Fleet.tsx:1398`'s local-board drill-in dead-ends.** `href="/?mode=board"` is
   *relative*, so from the fleet origin it resolves to `:4181`, which deliberately 404s `/api/work`
   ([mesh-ui-serve.mjs:541-543](../../../src/mesh-ui-serve.mjs#L541-L543)) — the board surface loads but
   cannot load its stream. The component's own comment at `:1373-1380` claims it navigates out to its own
@@ -245,6 +263,24 @@ proceeded unchanged.
   parser edge, the harness must be checked against the same edge. — Raised by: orchestrator
 - Carried to 45/04 (QA F-3 of 45/02): `aof assets ui` starts `serveSetupUi` with no `uiRoot`, so its
   API port now serves the vite SOURCE dir's index.html with SPA fallback — worth a line when 45/04
-  moves that launcher's advertised URL to `/config`.
+  moves that launcher's advertised URL to `/config`. **Discharged at 45/04 review (architect F4,
+  2026-08-07), the line: measured — the API half-port (default 4178) serves the vite SOURCE dir with
+  the fallback, so `GET /config` there answers the dev `index.html`; nothing advertises that port
+  (vite proxies only `/api` to it) and no operator path reaches it. Out of scope, recorded so the
+  next reader does not re-derive it.**
+- 45/04 review (2026-08-07): **a red arch gate is live on `main`, predating m45** —
+  `acd-no-new-silent-catch` fails on `src/board-worker-stream.mjs` (1 silent catch, baseline 0),
+  introduced by PR #11 (`eacbd57`). Verified in a detached worktree at HEAD. Not m45's to fix; the
+  operator should route it to PR #11's owner — a red gate on main makes every later branch's sweep
+  noisy. — Raised by: architect
+- 45/04 review (2026-08-07): a fitness function whose NAME claims a property its body does not check
+  ("a fifth producer cannot appear unseen" over a hand-maintained four-entry loop) — proven by a
+  sandboxed fifth producer minting a path directly, which stayed green. Strengthened before close
+  with a path-literal subset sweep. Lesson: name assertions for what the body checks, or make the
+  body check the name. — Raised by: architect
+- 45/04 review (2026-08-07): a deferral routed one way only is a decision the receiving milestone
+  never meets — m45's STATE said "routed to m47" while m47's documents carried no trace. The
+  receiving-side line is now written (m47/STATE). Lesson: a cross-milestone routing is complete only
+  when it appears in the RECEIVER's record. — Raised by: architect
 
 - Refine trap, hit at m45 ARCHITECTURE authoring (2026-08-06): running `aof graph build .` under AOF_GLOBAL_HOME=$(mktemp -d) — the repo's own hook-enforced test-isolation idiom — returns the structured { code: "graphify-missing" } miss, because the managed tool store lives under the global home. An isolated home makes an INSTALLED graphify indistinguishable from an absent one, and the codebase-grounding step's documented response to that miss is 'proceed on grep-and-infer'. So an agent that correctly follows the test-isolation rule silently loses the graph. Two fixes worth considering: (a) the graphify tool-store resolution should not be scoped by AOF_GLOBAL_HOME, or (b) the graphify-missing envelope should say WHICH store it looked in, so the miss is diagnosable rather than just believable. Workaround used: re-run without the isolated home (graph build is read-only over src and writes only graphify-out/). — Raised by: architect

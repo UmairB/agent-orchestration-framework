@@ -183,7 +183,14 @@ export const boardServeTests = [
         let url;
         let boardUrl;
         ({ server, url, boardUrl } = await serveBoard({ projectDir: repo, port: 0, repoRoot, spawn: stubSpawn() }));
-        assert.ok(boardUrl.includes("mode=board"), "the returned boardUrl carries the board mode");
+        // m45 / story 04 (ADR-002) — the announced URL is the board's PATH, not the
+        // retired `?mode=board` selector. Read through `new URL` rather than as a
+        // substring: `…/board&x=1` would satisfy an `includes("/board")` while parsing as
+        // a pathname of `/board&x=1` (the glued-query failure this story's traps name).
+        const parsedBoardUrl = new URL(boardUrl);
+        assert.equal(parsedBoardUrl.pathname, "/board", "the returned boardUrl names the ADR-002 board path");
+        assert.equal(parsedBoardUrl.searchParams.get("mode"), null, "…and no `mode` selector survives on it");
+        assert.equal(parsedBoardUrl.search, "", "…nor any other parameter this URL never carried");
 
         const response = await fetch(new URL("/", url));
         assert.equal(response.status, 200, "it serves the built board on a single 127.0.0.1 origin");

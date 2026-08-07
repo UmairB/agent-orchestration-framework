@@ -2,7 +2,7 @@
 // (milestone 25 / story 02; ARCHITECTURE ADR-003/ADR-004). A SIBLING to
 // `board-serve.mjs`, NOT an extension of the work UI: it stands up its OWN single
 // `http.createServer` bound to `127.0.0.1`, serving the BUILT `ui/dist` bundle
-// announced with `?mode=fleet`, its `/api/mesh/status` read route, and its board drill-in URL route.
+// announced at the fleet's own PATH (milestone 45 / ADR-002), its `/api/mesh/status` read route, and its board drill-in URL route.
 //
 // milestone 34 / story 03 (34/ADR-006) — `GET /api/mesh/status` now DEFAULTS to
 // the machine-wide GLOBAL projection (via `queryGlobalMeshStatus`,
@@ -115,9 +115,10 @@ import { reportDegrade } from "./degrade.mjs";
 // so an operator legitimately runs the fleet view ON TOP of a board at once.
 export const DEFAULT_MESH_UI_PORT = 4181;
 
-// The built fleet bundle lives in the SAME ui/dist the board serves (the single
-// bundle carries every `?mode`); the fleet mode is selected by the `?mode=fleet`
-// query, not a separate build (task 00 DEV note; ADR-003 decision 4).
+// The built fleet bundle lives in the SAME ui/dist the board serves — ONE bundle
+// carrying every surface; which surface renders is decided by the PATH the operator
+// is on (milestone 45 / ADR-001's route table), never by a separate build and no
+// longer by a query selector (task 00 DEV note; ADR-003 decision 4).
 export function meshUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
@@ -148,7 +149,11 @@ export async function meshUiProbe({ projectDir = process.cwd(), port = DEFAULT_M
     uiDist: dist,
     uiBuildPresent: existsSync(path.join(dist, "index.html")),
     relayConfigured,
-    fleetUrl: `http://127.0.0.1:${port}/?mode=fleet&scope=${scope}`,
+    // milestone 45 / story 04 (ADR-002) — the fleet's ADR-002 PATH, carrying the
+    // scope it would serve as a REAL query parameter on that path. The legacy
+    // `?mode=fleet&scope=…` form still works (ADR-003 translates it once at the
+    // entry); it is simply no longer MINTED here.
+    fleetUrl: `http://127.0.0.1:${port}/fleet?scope=${scope}`,
   };
 }
 
@@ -760,9 +765,12 @@ export async function serveMeshUi({
 
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}/`;
-  // `url` ends with "/", so this yields e.g. http://127.0.0.1:PORT/?mode=fleet —
-  // the same single bundle, the fleet mode (task 00 DEV note; ADR-003 decision 4).
-  const fleetUrl = `${url}?mode=fleet`;
+  // milestone 45 / story 04 (ADR-002) — the fleet's PATH on this server's own origin:
+  // e.g. http://127.0.0.1:PORT/fleet. Built with `new URL` rather than concatenated, so
+  // the path can never be glued onto a query. It carries NO scope: the scope is the
+  // LAUNCHER's fact, and `src/commands/mesh-ui.mjs` sets it on this URL as a real search
+  // parameter before announcing it (the same value `serveMeshUi` was started with).
+  const fleetUrl = new URL("/fleet", url).toString();
   return { server, url, fleetUrl, terminalMirror: mirror };
 }
 

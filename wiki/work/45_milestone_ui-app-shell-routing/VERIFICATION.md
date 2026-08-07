@@ -170,3 +170,55 @@ yet** — task 04's `@uat` human visual review is open (the milestone's one desi
 Twenty current renders for it are at the session scratchpad `renders/` dir
 (`{landing,fleet,board,config,notfound}-{390,768,1280,desktop}.png`, post-fix); the `serverGone`
 rail renders remain to be staged during the session. `STORY.md` stays `in-review`.
+
+## 45/04 · Advertised entry points — verified 2026-08-07, PENDING `@manual`
+
+Lanes in scope: **`@executable`** (tasks 00–01) + **`@manual`** (task 02 — the operator census +
+the desktop tray, which needs the Windows `--desktop` cargo build). No `@uat`.
+
+**Memory recall** (`--kind near-miss`): empty block — nothing to surface.
+
+### Verification evidence
+
+- **`@executable` suites green — 12 lanes / 0 failed** (`test/advertised-paths.test.mjs` 7,
+  `test/in-app-cross-links.test.mjs` 5). QA's coverage audit: all 26 + 9 Examples rows present; hrefs
+  read off the rendered tree per the LITMUS; the one weakened Then (env-dependent `uiBuildPresent`
+  asserted by type) judged a net strengthening (exact key-set deepEqual).
+- **Both target fitness functions green**: `acd-ui-single-route-table` **5/5** (milestone-complete);
+  `acd-no-surface-mode-url-literal` **4/4** — strengthened at review from a 4-entry closed loop to a
+  closed route-path VOCABULARY sweep (295 files, 8 declared homes, shrink-only exemptions; a
+  sandboxed fifth producer minting `/fleet` directly now fails with a two-remedy message; a declared
+  file that stops minting fails as a stale exemption).
+- **QA end-to-end, independent of the suites**: every advertised address fetched on its own real
+  origin renders the shell; the `/api/mesh/board-url` round trip carries `#ref` intact through
+  milestone/story/task refs with the body exactly `{ url, workspaceId, ref }` (m46's `origin` stays
+  additive); every legacy form still 200s AND converges through `legacyRedirectFor` onto exactly the
+  address the new producers advertise; the announce line parses to `/fleet` + a real `scope` param
+  for both scopes; the shipped bundle census counts zero `?mode=` and the expected path literals.
+- **Mutations** (QA 3 + developer 1, all reverted sha-verified): re-glued announce → 4 lanes red
+  (and the arch gate structurally blind to it — the parsed-URL assertions are the only catch, which
+  is why they exist); board-url back to `?mode=` → 3 red; assets → `/assets` → 3 red; each caught.
+- **Graph grounding** (architect): fresh, `unchanged: true` on re-run; `routes.mjs` is the fan-in
+  hub (← 9, → 0) exactly as ADR-001 designed; no god-node touched; `/fleet`-homes question answered
+  with a reasoned NO-constant verdict (collapse is architecturally foreclosed in three of four
+  directions; the fitness function is the single home of the fact that matters).
+
+### Findings
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| arch F1 | the producer gate's NAME claimed a fifth-producer sweep its body (a closed 4-entry loop) did not perform — sandbox-proven | defect (fitness fn) | medium | strengthened before close (assertion 4, vocabulary sweep) | **fixed** |
+| QA-1 | task 01 sc.4's per-row non-vacuity Then unsatisfiable for 3 measured zero-anchor states | contract text | low | PO amended the feature to the pinned-count reading (three rows are pinned-zero) | **fixed** |
+| QA-2 | the feature's feasibility note claimed the fleet face serves a `boards` aggregate — measured false on both scopes | contract text | low-med | PO corrected the note (lanes are producer-fed; honest for the render contract, not reachability) | **fixed** |
+| QA-3 | `BoardsRegion` permanently empty on the shipped surface since m34/ADR-006 (the face's status payload has no `boards` key) — one migrated link operator-unreachable | defect (pre-existing) | medium | routed to **m47/STATE** (receiving side written) together with F-45-04-1's drill-in dead-end; task 02's census records it as unreachable, not clickable | **routed** |
+| QA-4 / arch F6 | `work-ui-verb-rename` 1 lane red at HEAD (m42 usage-string drift, `277ada5`) | defect (pre-existing) | low | assertion updated to the current usage with the reason inline; suite 5/5 | **fixed** |
+| QA-5 | stale test comment (peer-board row); the `/assets`-collision connective seam implicit | craft | low | comment corrected; the seam named in the feature amendments | **fixed** |
+| arch F2/F3/F4 | one-way deferral (m47 had no receiving-side record); dangling `F-45-04-1` citation; undischared 45/02-carried note | doc | nit | m47/STATE line written; STATE bullet labelled; carried note discharged with the measured line | **fixed** |
+| arch F5 | `acd-no-new-silent-catch` RED on `main` (`board-worker-stream.mjs`, arrived with PR #11 / `eacbd57`) — predates m45 | defect (pre-existing, main) | info | flagged to the operator; owner is PR #11 | **open (not m45's)** |
+
+### Verdict
+
+Automated + agent lanes **PASS**; validate gate **PASS** (`aof work validate 45/04`). **NOT accepted
+yet** — task 02's `@manual` census runs at the end gate (its desktop-tray scenario additionally
+needs the Windows `--desktop` rebuild; until then the tray's legacy URL keeps working via ADR-003).
+`STORY.md` stays `in-review`.

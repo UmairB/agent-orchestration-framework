@@ -885,7 +885,7 @@ import { meshFleetGracefulDegradationTests } from "../test/mesh-fleet-graceful-d
 // milestone 25 — mesh-ui (story 02: the read-only fleet web surface — the NEW
 // src/mesh-ui-serve.mjs thin serve-face (a board-serve.mjs sibling) behind the
 // CLI-only `aof mesh ui` verb; one 127.0.0.1 server on default port 4181 serving
-// ui/dist with ?mode=fleet + the single GET /api/mesh/status route
+// ui/dist at the fleet's own path (m45/ADR-002) + the single GET /api/mesh/status route
 // (invoke("mesh:status")). One @executable task feature (00_mesh-ui-serve): the verb
 // stands up ONE server, /api/mesh/status deep-equals `aof mesh status --json`, the
 // /api/mesh namespace is disjoint from /api/work, unknown-route + missing-bundle +
@@ -1671,6 +1671,25 @@ import { shellEntryPlanTests } from "../test/shell-entry-plan.test.mjs";
 import { shellRegionsTests } from "../test/shell-regions.test.mjs";
 import { shellNavigationTests } from "../test/shell-navigation.test.mjs";
 import { shellNotFoundAndFullscreenTests } from "../test/shell-not-found-and-fullscreen.test.mjs";
+// ── milestone 45 / story 04 — THE ADVERTISED ENTRY POINTS (ADR-002 + ADR-003). Every
+// producer that hands the operator a URL stops minting `?mode=` and mints the path it
+// actually serves: the board / fleet / config-editor launchers (probe AND announce, which
+// are separate strings), `GET /api/mesh/board-url` (whose body shape stays exactly
+// `{ url, workspaceId, ref }` so milestone 46's `origin` field stays additive), the
+// desktop tray's compiled `MESH_UI_URL`, and the three hard-coded cross-links between the
+// board and the fleet. The legacy addresses keep working — ADR-003 translates them once,
+// client-side, at the entry — so every lane that asserts a NEW address has a sibling that
+// asserts the OLD one still serves.
+//   00_servers-advertise-paths — the `--json` probes, the `Open this URL in your browser:`
+//     lines, real GETs of both the new and the legacy addresses on the servers that used
+//     to advertise them, and the drill-in route (its `#ref`, its origin, its refusals).
+//   01_in-app-cross-links — the three hrefs, read off the RENDERED tree of the REAL
+//     `<Board/>` / `<Fleet/>` mounted against real faces, in the states that render them.
+// (02_desktop-entry-and-no-literals-left is @manual — a compiled Rust constant behind a
+// Windows cargo build, plus a real-browser back-compat census — and deliberately has no
+// suite here. Its structural half is `acd-no-surface-mode-url-literal` above.)
+import { advertisedPathsTests } from "../test/advertised-paths.test.mjs";
+import { inAppCrossLinksTests } from "../test/in-app-cross-links.test.mjs";
 // milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
 // R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
 // byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
@@ -2445,6 +2464,9 @@ export const tests = [
   ...shellNotFoundAndFullscreenTests,
   // milestone 45 / story 02 — the static-serving leaf (tasks 00–02, all @executable)
   ...staticServeFallbackTests,
+  // milestone 45 / story 04 — the advertised entry points (tasks 00–01; 02 is @manual)
+  ...advertisedPathsTests,
+  ...inAppCrossLinksTests,
   // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
   ...itemLockScopeOneHomeTests,
   ...itemLockSymmetricScopeTests,

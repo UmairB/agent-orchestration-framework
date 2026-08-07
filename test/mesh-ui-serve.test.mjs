@@ -122,8 +122,15 @@ export const meshUiServeTests = [
         ({ server, url, fleetUrl } = await serveMeshUi({ projectDir: repo, port: 0, repoRoot: root, scope: "local", globalStoreOptions }));
         const address = server.address();
         assert.equal(address.address, "127.0.0.1", "the server binds 127.0.0.1");
-        // the announce carries the ?mode=fleet selector (the single bundle, fleet mode)
-        assert.ok(fleetUrl.includes("mode=fleet"), "the returned fleetUrl carries ?mode=fleet");
+        // m45 / story 04 (ADR-002) — the announce names the fleet's PATH on this server's
+        // own origin; the `?mode=fleet` selector it used to carry is retired (a bookmark
+        // of it still works — ADR-003 translates it at the entry — but nothing mints it).
+        // Parsed, never matched as a substring: `…/fleet&scope=global` would pass an
+        // `includes("/fleet")` while being a pathname with no parameters at all.
+        const parsedFleetUrl = new URL(fleetUrl);
+        assert.equal(parsedFleetUrl.pathname, "/fleet", "the returned fleetUrl names the ADR-002 fleet path");
+        assert.equal(parsedFleetUrl.searchParams.get("mode"), null, "…and no `mode` selector survives on it");
+        assert.equal(parsedFleetUrl.host, `127.0.0.1:${address.port}`, "…on this server's own origin");
 
         // the fleet page (static index) and its API answer on the SAME origin/port
         const page = await fetch(new URL("/", url));
@@ -300,8 +307,13 @@ export const meshUiServeTests = [
         const first = await firstResponse.json();
         assert.equal(first.workspaceId, workspaceId, "the response is for the selected workspace");
         assert.equal(first.ref, "34", "the response carries the requested milestone ref");
-        assert.ok(first.url.includes("mode=board"), "the drill-in URL selects board mode");
-        assert.ok(first.url.endsWith("#34"), "the drill-in URL selects the requested milestone hash");
+        // m45 / story 04 (ADR-002) — the drill-in URL is the board's PATH on the
+        // workspace's OWN board origin, and its `#ref` fragment is unchanged. Parsed
+        // rather than substring-matched, for the same reason as the announce above.
+        const parsedDrillIn = new URL(first.url);
+        assert.equal(parsedDrillIn.pathname, "/board", "the drill-in URL names the ADR-002 board path");
+        assert.equal(parsedDrillIn.searchParams.get("mode"), null, "…with no `mode` selector on it");
+        assert.equal(parsedDrillIn.hash, "#34", "…and it still selects the requested milestone by fragment");
 
         const boardList = await fetch(new URL("/api/work/list", first.url));
         assert.equal(boardList.status, 200, "the returned board origin serves /api/work/list");

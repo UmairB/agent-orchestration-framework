@@ -4,10 +4,10 @@ number: 04
 slug: advertised-entry-points
 title: "Every door still opens — the servers, the desktop app and the in-app links stop advertising `?mode=` and start advertising paths"
 parent: 45
-status: not-started
+status: in-review
 owner: product-owner
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-07
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -36,9 +36,9 @@ shim nobody remembers to remove.
      acceptance criteria. A task is done when its @executable feature is green. Keep tasks
      independent of OTHER stories' tasks; sequential within this story is fine. -->
 
-- [ ] `tasks/00_servers-advertise-paths.feature` — the board, fleet and assets servers and the
+- [x] `tasks/00_servers-advertise-paths.feature` — the board, fleet and assets servers and the
       `/api/mesh/board-url` route all emit path URLs, with that route's body shape left additive
-- [ ] `tasks/01_in-app-cross-links.feature` — the three hard-coded cross-links between board and fleet
+- [x] `tasks/01_in-app-cross-links.feature` — the three hard-coded cross-links between board and fleet
       point at paths
 - [ ] `tasks/02_desktop-entry-and-no-literals-left.feature` — the desktop app opens a path, and no
       `?mode=` surface literal survives anywhere in `ui/`, `src/` or `app/desktop/`
