@@ -160,6 +160,11 @@ function argsFor(sub) {
     case "update": return ["work", "update", "--dry-run", "--json"];
     case "find": return ["work", "find", "03", "--json"];
     case "observe": return ["work", "observe", "03", "--json"];
+    // 348 auto-resume — the BARE sweep (no ref) is the read face: it scans the
+    // fixture's items for retryable failed runs and finds none, so the document is
+    // { resumed: false, pending: [] } — exit 0. A ref would ACT (mint a retry),
+    // which is not what a spawn probe should do.
+    case "resume": return ["work", "resume", "--json"];
     case "use-headroom": return ["work", "use-headroom", "--json"];
     case "unuse-headroom": return ["work", "unuse-headroom", "--json"];
     // m42 wave (d) leg d1 (the CLI-only batch, closing half) — the model-config

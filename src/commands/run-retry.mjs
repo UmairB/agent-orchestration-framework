@@ -28,6 +28,11 @@ export const runRetryCommand = {
       ref: { type: "string" },
       runId: { type: "string" },
       maxAttempts: { type: "number" },
+      // 348 auto-resume — the operator override for the PARK gate. A `session_limit`
+      // prior is refused `retry-parked` until its stated reset passes; --force says
+      // "go now" (the reset was wrong, or the limit lifted early). Nothing else is
+      // overridden: not-retryable and attempts-exhausted still refuse.
+      force: { type: "boolean" },
       // `now` (ISO-8601 UTC-Z) is an INJECTED clock for timestamp-deterministic
       // assertions (the 22/R2 white-box idiom — a test input, never a CLI flag).
       now: { type: "string" },
@@ -75,7 +80,7 @@ export const runRetryCommand = {
     // a behaviour change and is deliberately not smuggled into a mechanical port.)
     const { record } = await transitionRunStart(
       item,
-      { mode: "retry", runId: input.runId, maxAttempts, now: input.now, node: meshNodeId },
+      { mode: "retry", runId: input.runId, maxAttempts, now: input.now, node: meshNodeId, force: Boolean(input.force) },
       { lock: lockContextFor(ctx.workspace, ctx), journalOptions: ctx.effectsJournalOptions ?? {} },
     );
     return record;
@@ -86,10 +91,11 @@ export const runRetryCommand = {
     // the ONE generic face; the cli.mjs face copy is deleted.
     route: ["work", "run-retry"],
     spec: {
-      usage: "aof work run-retry <ref> [--run <runId>] [--max-attempts N] [--json]",
+      usage: "aof work run-retry <ref> [--run <runId>] [--max-attempts N] [--force] [--json]",
       flags: {
         run: { type: "string", description: "the prior runId to resume (defaults to the latest retryable)" },
         maxAttempts: { type: "string", description: "override the retry attempt ceiling" },
+        force: { type: "boolean", description: "resume a parked (session_limit) run before its stated reset" },
       },
     },
 
@@ -99,6 +105,7 @@ export const runRetryCommand = {
       ref: positionals[0],
       runId: options.run,
       maxAttempts: options.maxAttempts != null ? Number(options.maxAttempts) : undefined,
+      ...(options.force ? { force: true } : {}),
     }),
 
     // Confirm the resumed run: the ref, the running state, the minted runId.

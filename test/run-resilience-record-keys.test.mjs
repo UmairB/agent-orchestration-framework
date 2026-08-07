@@ -24,7 +24,7 @@ import path from "node:path";
 // thirteen-key freeze): the original nine, then the four additive resilience keys,
 // then the one additive partition-provenance key (node). RESILIENCE_KEYS below is
 // untouched — the four m20 keys are still the resilience quartet.
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node", "resumeAfter"];
 // The original nine milestone-19 keys — a legacy record carries only these.
 const LEGACY_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt"];
 const RESILIENCE_KEYS = ["failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];

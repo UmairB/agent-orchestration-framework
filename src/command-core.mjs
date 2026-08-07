@@ -97,6 +97,8 @@ import { runStatusCommand } from "./commands/run-status.mjs";
 // m09–m19 door); it takes the precedented BOARD_DEFERRED carve-out (board = m21) but
 // inherits the generic command-cli bijection (08/ADR-004).
 import { runRetryCommand } from "./commands/run-retry.mjs";
+// 348 auto-resume — the deterministic re-entry face over the SAME retry authority.
+import { resumeCommand } from "./commands/resume.mjs";
 // milestone 22 — mesh-foundation (story 01: node-identity — mesh:identity / mesh:status
 // register into the SAME core; ADR-001/003). Thin over story 00's src/mesh-store.mjs
 // (the partition seam + opaque per-node persist/read) and story 01's
@@ -312,6 +314,7 @@ const COMMANDS = [
   runCompleteCommand,
   runStatusCommand,
   runRetryCommand,
+  resumeCommand,
   meshIdentityCommand,
   meshStatusCommand,
   meshHeartbeatCommand,

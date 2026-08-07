@@ -59,6 +59,7 @@ const COMMAND_IDS = [
   "insert-story",
   "insert-uat",
   "migrate",
+  "observe",
   "recent",
   "refine",
   "retrospective",
@@ -86,7 +87,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 23 commands, 6 templates, 3 skills, 3 hooks)",
+    name: "bundle/source-tree: the bundle root holds the complete ACD actor set (8 agents, 24 commands, 6 templates, 3 skills, 3 hooks)",
     run: async () => {
       const ids = new Set(memberIds());
       for (const id of AGENT_IDS) assert.ok(ids.has(id), `missing agent ${id}`);
@@ -96,7 +97,7 @@ export const bundleTests = [
       const byKind = (kind) => descriptorMembers().filter((m) => m.kind === kind).length;
       for (const id of HOOK_IDS) assert.ok(ids.has(id), `missing hook ${id}`);
       assert.equal(byKind("agent"), 8, "8 agents");
-      assert.equal(byKind("command"), 23, "23 commands (incl. the 4 insert-* placement twins, assimilate-code and delegate)");
+      assert.equal(byKind("command"), 24, "24 commands (incl. the 4 insert-* placement twins, assimilate-code, delegate and observe)");
       assert.equal(byKind("skill"), 3, "3 codex delegation skills");
       assert.equal(byKind("template"), 6, "milestone/story/task/uat/spike/chore templates");
       assert.equal(byKind("hook"), 3, "3 Codex session-presence lifecycle hooks");
@@ -169,7 +170,7 @@ export const bundleTests = [
   // ====================================================================
 
   {
-    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 23 commands, 6 templates, 3 skills, 3 hooks",
+    name: "bundle/descriptor: one typed entry per member — every member carries id + kind; 8 agents, 24 commands, 6 templates, 3 skills, 3 hooks",
     run: async () => {
       const members = descriptorMembers();
       for (const member of members) {
@@ -184,7 +185,7 @@ export const bundleTests = [
       assert.deepEqual(
         members.filter((m) => m.kind === "command").map((m) => m.id).sort(),
         [...COMMAND_IDS].sort(),
-        "23 commands declared"
+        "24 commands declared"
       );
       assert.deepEqual(
         members.filter((m) => m.kind === "hook").map((m) => m.id).sort(),
@@ -207,7 +208,7 @@ export const bundleTests = [
     name: "bundle/descriptor: every resource member (agent + command) names one or more target runtimes",
     run: async () => {
       const resourceMembers = descriptorMembers().filter((m) => m.kind === "agent" || m.kind === "command");
-      assert.equal(resourceMembers.length, 31, "31 resource members (8 agents + 23 commands)");
+      assert.equal(resourceMembers.length, 32, "32 resource members (8 agents + 24 commands)");
       for (const member of resourceMembers) {
         assert.ok(Array.isArray(member.runtimes) && member.runtimes.length >= 1, `${member.id} declares >=1 runtime`);
       }

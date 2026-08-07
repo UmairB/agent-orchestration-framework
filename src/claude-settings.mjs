@@ -107,7 +107,7 @@ export function claudeSettingsPatch(config, { targetDir, bundleHooks } = {}) {
 function markedEntry(hook, targetDir) {
   const extension = hook?.claude != null && typeof hook.claude === "object" && !Array.isArray(hook.claude) ? hook.claude : {};
   const entry = { type: hook?.type ?? "command", command: hook?.command };
-  const args = Array.isArray(extension.args) ? extension.args.map(checkoutRelativeArg) : null;
+  const args = Array.isArray(extension.args) ? extension.args.map(portableArg) : null;
   if (args != null) entry.args = args;
   for (const [key, value] of Object.entries(extension)) {
     if (key === "args") continue;
@@ -117,17 +117,30 @@ function markedEntry(hook, targetDir) {
   return entry;
 }
 
-// EVERY ARGV ELEMENT STAYS CHECKOUT-RELATIVE (ADR-013/C2). `.claude/settings.json` is a
-// tracked file and a `git worktree` inherits it verbatim, so an install-time absolute
-// path names another checkout's script — and a missing `args[0]` makes `node` itself
-// exit non-zero, defeating the enqueue script's "exit 0, always" from OUTSIDE the
-// script. The harness resolves a relative argv against the project directory, so the
-// entry is correct in every checkout of the file and on every OS. Forward slashes,
-// because a Windows-written entry has to spawn on the Mac and WSL workers too.
+// EVERY ARGV ELEMENT IS RESOLVED AT RUN TIME, VIA `${CLAUDE_PROJECT_DIR}` (ADR-013/C2).
+// `.claude/settings.json` is a tracked file and a `git worktree` inherits it verbatim, so
+// an install-time absolute path names another checkout's script — and a missing `args[0]`
+// makes `node` itself exit non-zero, defeating the enqueue script's "exit 0, always" from
+// OUTSIDE the script. Forward slashes, because a Windows-written entry has to spawn on the
+// Mac and WSL workers too.
+//
+// A BARE checkout-relative argv does NOT work, contrary to this comment's first version:
+// the harness does NOT resolve a relative argv against the project directory. It spawns the
+// hook with the session's PERSISTED SHELL CWD, so after any `cd` into a subdirectory the
+// path misses and node exits MODULE_NOT_FOUND. That surfaces as a `hook_non_blocking_error`
+// — NON-blocking, so the tool call proceeds and the hook silently does nothing. Measured
+// 2026-08-06 across real installs (voice-vox-web, whisper-guard-portal): 37 such misses,
+// from cwds like `<root>/packages/application/`. `${CLAUDE_PROJECT_DIR}` is substituted by
+// the harness into BOTH `command` and every `args` element before the spawn, so it stays
+// correct in every checkout and every worktree while never writing an absolute path into
+// the tracked file. It also makes `process.argv[1]` absolute, which is what the enqueue
+// script's `<root>/.claude/hooks/aof/<this>` -> `<root>/.aof/` walk needs to land the queue
+// at the project root instead of relative to whatever cwd the hook inherited.
 //
 // The durable class, bigger than this milestone: anything aof writes into a TRACKED
-// file must be checkout-relative or resolved at run time.
-function checkoutRelativeArg(arg) {
+// file must be checkout-relative or resolved at run time — and "the harness will resolve
+// it for me" is an assumption to MEASURE, not to assume.
+function portableArg(arg) {
   if (typeof arg !== "string") return arg;
   return arg.replaceAll("\\", "/").replace(/^\.\//, "");
 }

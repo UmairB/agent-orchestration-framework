@@ -20,7 +20,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node", "resumeAfter"];
 const RUNID_RE = /^(\d{8}T\d{9}Z)-(\d{4})$/;
 
 // --- fixture builders --------------------------------------------------------
@@ -88,6 +88,10 @@ async function writeRecord(item, overrides) {
     // so the fixture carries the additive node key too (a 13-key fixture would still
     // READ forward benignly — that read-forward property has its own coverage).
     node: null,
+    // …and the 348 fifteenth key (the session_limit park stamp), by the same rule:
+    // this fixture is written STRAIGHT to disk, bypassing buildRecord, so it has to
+    // track the freeze itself. A fourteen-key fixture still reads forward benignly.
+    resumeAfter: null,
   };
   const record = { ...base, ...overrides };
   await writeFile(path.join(runsDir, `${record.runId}.json`), JSON.stringify(record, null, 2), "utf8");

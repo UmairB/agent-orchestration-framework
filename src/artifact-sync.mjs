@@ -35,6 +35,17 @@ import { artifactForRelativePath, canonicalArtifactDocKey, hashArtifactBody, nor
 // end up talking about different files.
 export const ARTIFACT_SYNC_QUEUE_RELPATH = ".aof/artifact-sync-queue.ndjson";
 export const ARTIFACT_SYNC_SCRIPT_RELPATH = ".claude/hooks/aof/artifact-sync-enqueue.mjs";
+
+// …and the ONE spelling of the argv element the ENTRY carries. `${CLAUDE_PROJECT_DIR}`
+// is a token the harness substitutes into `command` and every `args` element at spawn
+// time — it is NOT a shell variable (exec form runs no shell) and is NOT read by the
+// script, so the committed entry stays correct in every checkout and every worktree
+// without an install-time absolute path ever entering the tracked file.
+//
+// A BARE relative path here does NOT work: hooks are spawned with the session's
+// PERSISTED SHELL CWD, not the project directory, so after any `cd` the path missed and
+// node exited MODULE_NOT_FOUND — a non-blocking hook error, i.e. a silent no-op.
+export const ARTIFACT_SYNC_SCRIPT_ARGV = `\${CLAUDE_PROJECT_DIR}/${ARTIFACT_SYNC_SCRIPT_RELPATH}`;
 const BATCH_SUFFIX = ".batch";
 
 export function artifactSyncQueuePath(root) {

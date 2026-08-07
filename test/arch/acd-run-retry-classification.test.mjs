@@ -1,7 +1,8 @@
 // Fitness function: acd-run-retry-classification (milestone 20, ADR-002).
 //
 // The classification table is CLOSED and the functions are PURE: runtime_offline /
-// timeout → retryable; agent_error / unknown / null → non-retryable; shouldRetry is
+// timeout / session_limit → retryable; agent_error / unknown / null → non-retryable;
+// shouldRetry is
 // true iff the reason is retryable AND attempt < maxAttempts (fails closed at the
 // ceiling); isRetryable/shouldRetry read NO clock/fs/config (the 06/ADR-003
 // single-pure-resolver discipline). Verdicts are imported + asserted; purity is a
@@ -20,6 +21,9 @@ export const archTests = [
       const table = [
         ["runtime_offline", true],
         ["timeout", true],
+        // 348 — the platform stopped us with a stated reset. Retryable as a CLASS;
+        // WHEN it may resume is retryReadiness's job, deliberately not this one's.
+        ["session_limit", true],
         ["agent_error", false],
         ["some_other_kind", false],
         [null, false],
@@ -44,6 +48,14 @@ export const archTests = [
       assert.equal(shouldRetry({ failureReason: "agent_error", attempt: 1 }, 3), false, "agent_error never retries");
       assert.equal(shouldRetry({ failureReason: null, attempt: 1 }, 3), false, "null never retries");
       assert.equal(shouldRetry({ failureReason: "some_other_kind", attempt: 1 }, 3), false, "unknown never retries");
+      // shouldRetry stays TIME-BLIND: a parked session_limit is still "retryable as
+      // a class" here. If this ever answers false for a parked record, the clock has
+      // leaked into the pure classifier and retryReadiness has lost its only job.
+      assert.equal(
+        shouldRetry({ failureReason: "session_limit", attempt: 1, resumeAfter: "2099-01-01T00:00:00.000Z" }, 3),
+        true,
+        "session_limit @1 of 3 → true (classification only; the park gate is retryReadiness)",
+      );
     },
   },
   {

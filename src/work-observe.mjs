@@ -277,24 +277,355 @@ function computeDiagnostics({ uses, results, editCounts, readCounts, cmdCounts, 
 // Total length of the union of a set of [start,end] intervals — concurrency-aware
 // (overlapping intervals counted once). Used to turn per-agent active/idle sums
 // (which overstate reality when agents run in parallel) into real wall-clock.
-export function unionMs(intervals) {
-  const valid = intervals.filter((iv) => iv && iv[0] != null && iv[1] != null && iv[1] >= iv[0]);
-  if (!valid.length) return 0;
-  valid.sort((a, b) => a[0] - b[0]);
-  let total = 0;
-  let [curStart, curEnd] = valid[0];
-  for (let i = 1; i < valid.length; i++) {
-    const [s, e] = valid[i];
-    if (s <= curEnd) {
-      if (e > curEnd) curEnd = e;
+export function mergeIntervals(intervals) {
+  const valid = intervals
+    .filter((iv) => iv && iv[0] != null && iv[1] != null && iv[1] >= iv[0])
+    .map((iv) => [iv[0], iv[1]])
+    .sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const [s, e] of valid) {
+    const last = out[out.length - 1];
+    if (last && s <= last[1]) {
+      if (e > last[1]) last[1] = e;
     } else {
-      total += curEnd - curStart;
-      curStart = s;
-      curEnd = e;
+      out.push([s, e]);
     }
   }
-  total += curEnd - curStart;
+  return out;
+}
+
+export function unionMs(intervals) {
+  return mergeIntervals(intervals).reduce((a, [s, e]) => a + (e - s), 0);
+}
+
+// How much of [start,end] is covered by an ALREADY-MERGED interval set. Used to
+// discount a quiet main thread by the agent work happening underneath it — an
+// orchestrator silent while a developer builds is idle BY DESIGN, not lost time.
+export function overlapMs([start, end], merged) {
+  let total = 0;
+  for (const [s, e] of merged) {
+    const lo = Math.max(start, s);
+    const hi = Math.min(end, e);
+    if (hi > lo) total += hi - lo;
+  }
   return total;
+}
+
+// ---- lost time: infra kills + human waits ----------------------------------
+//
+// WHY: `collectMilestoneAgents` only reads `subagents/**`, so it can see an agent
+// stall but never WHY the milestone stopped. The two causes that dominate a slow
+// run both live in the PARENT session thread, which nothing was reading:
+//
+//   1. an infra kill (API session/usage limit, overload) that terminates the
+//      orchestrator and every agent under it, and
+//   2. the wait that follows, because nothing restarts a dead orchestrator — a
+//      human has to notice and type a word.
+//
+// Measured on voice-vox 348: 3 kills, and the waits behind them were 13 of the
+// milestone's 28 calendar hours. An observe report that cannot name that is
+// reporting the symptom (idle agents) and hiding the cause.
+
+export const DEFAULT_HUMAN_WAIT_MS = 10 * 60 * 1000; // main thread quiet this long before a human turn => a wait
+
+// The infra failures that kill a run through no fault of the work. Deliberately
+// narrow: these are *terminations*, not any mention of an error.
+const INFRA_KILL_RE =
+  /(?:hit your (?:session|usage) limit|terminated early due to an API error|\brate.?limit(?:ed|s)?\b|overloaded_error|Claude Code is unable to respond)/i;
+// "…session limit · resets 8:10pm (Europe/London)" -> "8:10pm (Europe/London)"
+const RESETS_RE = /resets\s+(\d{1,2}:\d{2}\s*[ap]?m?(?:\s*\([^)\n]{1,32}\))?)/i;
+// A slash-command invocation is a human turn even though it arrives XML-wrapped.
+const COMMAND_NAME_RE = /<command-name>([^<]+)<\/command-name>/;
+const COMMAND_ARGS_RE = /<command-args>([^<]*)<\/command-args>/;
+
+// Flatten an event's content to searchable text (assistant prose AND tool_result
+// bodies — an agent's death arrives as a tool_result on the parent thread).
+function eventText(obj) {
+  const c = obj?.message?.content;
+  if (typeof c === "string") return c;
+  if (!Array.isArray(c)) return "";
+  const parts = [];
+  for (const b of c) {
+    if (b.type === "text" && b.text) parts.push(b.text);
+    else if (b.type === "tool_result") parts.push(typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? ""));
+  }
+  return parts.join("\n");
+}
+
+// The text of a genuine HUMAN turn, or null. Tool results, system reminders and
+// task notifications are plumbing wearing a `user` type — only real operator
+// input counts, plus slash-command invocations (XML-wrapped, but human-typed).
+export function humanTurnText(obj) {
+  if (obj?.type !== "user") return null;
+  const c = obj.message?.content;
+  let text = null;
+  if (typeof c === "string") text = c;
+  else if (Array.isArray(c)) {
+    if (c.some((b) => b.type === "tool_result")) return null;
+    text = c.filter((b) => b.type === "text" && b.text).map((b) => b.text).join(" ");
+  }
+  if (!text) return null;
+  const cmd = COMMAND_NAME_RE.exec(text);
+  if (cmd) {
+    const args = COMMAND_ARGS_RE.exec(text);
+    return `${cmd[1].trim()}${args && args[1].trim() ? ` ${args[1].trim()}` : ""}`;
+  }
+  text = text.trim();
+  if (!text || text.startsWith("<")) return null; // system-reminder / task-notification wrapper
+  return text;
+}
+
+// Parse ONE parent-session transcript for infra kills and human waits, bounded to
+// a time window (a session file spans many milestones). Pure over `text`.
+export function analyzeSessionThread(text, { windowStart = null, windowEnd = null, humanWaitMs = DEFAULT_HUMAN_WAIT_MS } = {}) {
+  const events = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const o = safeParse(line);
+    if (!o || o.isSidechain) continue; // MAIN thread only — subagents are collected separately
+    // ONLY assistant turns and user rows count as run activity. The bookkeeping
+    // rows Claude Code interleaves (`queue-operation`, `attachment`,
+    // `file-history-delta`) carry no work — and `queue-operation` is stamped with
+    // the SAME second as the human turn it queues, so counting it as activity
+    // collapses every wait to zero. That bug hid all 13h of 348's blocked time.
+    if (o.type !== "assistant" && o.type !== "user") continue;
+    const ts = o.timestamp ? Date.parse(o.timestamp) : null;
+    if (ts == null || Number.isNaN(ts)) continue;
+    if (windowStart != null && ts < windowStart) continue;
+    if (windowEnd != null && ts > windowEnd) continue;
+    events.push({ ts, o });
+  }
+  events.sort((a, b) => a.ts - b.ts);
+
+  const infraKills = [];
+  const quietGaps = [];
+  const humanTurns = [];
+  let prevTs = null;
+  for (const { ts, o } of events) {
+    const body = eventText(o);
+    if (body) {
+      const hit = INFRA_KILL_RE.exec(body);
+      if (hit) {
+        const resets = RESETS_RE.exec(body);
+        infraKills.push({
+          at: ts,
+          phrase: hit[0],
+          resets: resets ? resets[1].replace(/\s+/g, " ").trim() : null,
+          killedAgent: /terminated early due to an API error/i.test(body),
+        });
+      }
+    }
+    const human = humanTurnText(o);
+    const trimmed = human ? human.replace(/\s+/g, " ").slice(0, 140) : null;
+    if (trimmed) humanTurns.push({ at: ts, text: trimmed });
+    // Every quiet stretch on the main thread is lost time — but HOW it ends says
+    // what went wrong. Ending in a human turn means the run was waiting to be
+    // restarted by hand; ending in the run itself means nobody was driving and
+    // nothing noticed (a silent stall — the case a watchdog would close).
+    if (prevTs != null && ts - prevTs >= humanWaitMs) {
+      quietGaps.push({
+        fromTs: prevTs,
+        toTs: ts,
+        ms: ts - prevTs,
+        endedBy: trimmed ? "human" : "run",
+        resumedWith: trimmed || shortLabel(o),
+      });
+    }
+    prevTs = ts;
+  }
+  return { infraKills, quietGaps, humanTurns };
+}
+
+// Collapse the burst of near-simultaneous kill lines one limit produces (the
+// orchestrator's own message plus one `terminated early` per dying agent) into a
+// single event carrying how many agents it took down.
+export function clusterInfraKills(kills, { windowMs = 2 * 60 * 1000 } = {}) {
+  const sorted = [...kills].sort((a, b) => a.at - b.at);
+  const out = [];
+  for (const k of sorted) {
+    const last = out[out.length - 1];
+    if (last && k.at - last.at <= windowMs) {
+      last.agentsKilled += k.killedAgent ? 1 : 0;
+      last.resets ||= k.resets;
+      last.lastAt = k.at;
+      continue;
+    }
+    out.push({ at: k.at, lastAt: k.at, phrase: k.phrase, resets: k.resets, agentsKilled: k.killedAgent ? 1 : 0 });
+  }
+  return out;
+}
+
+// Read every parent session behind a milestone and derive the lost-time picture:
+// what killed the run, how long it then sat waiting for a human, and how much of
+// that wait is attributable to a kill rather than to ordinary think-time.
+export async function collectSessionSignals({ projectsDir, sessions = [], windowStart = null, windowEnd = null, humanWaitMs = DEFAULT_HUMAN_WAIT_MS, agentActive = [] } = {}) {
+  const rawKills = [];
+  const quietGaps = [];
+  const humanTurns = [];
+  for (const sessionId of sessions) {
+    let text;
+    try {
+      text = await fsp.readFile(path.join(projectsDir, `${sessionId}.jsonl`), "utf8");
+    } catch {
+      continue;
+    }
+    const r = analyzeSessionThread(text, { windowStart, windowEnd, humanWaitMs });
+    rawKills.push(...r.infraKills);
+    quietGaps.push(...r.quietGaps.map((g) => ({ ...g, sessionId })));
+    humanTurns.push(...r.humanTurns.map((t) => ({ ...t, sessionId })));
+  }
+  const infraKills = clusterInfraKills(rawKills);
+  humanTurns.sort((a, b) => a.at - b.at);
+
+  // Discount every gap by the agent work happening underneath it. A quiet main
+  // thread while a developer builds for two hours is idle BY DESIGN — counting it
+  // as lost time would drown the real signal. What remains (`unattendedMs`) is
+  // wall-clock where NOTHING at all was running.
+  const merged = mergeIntervals(agentActive);
+  for (const g of quietGaps) {
+    g.agentActiveMs = overlapMs([g.fromTs, g.toTs], merged);
+    g.unattendedMs = Math.max(0, g.ms - g.agentActiveMs);
+    // A gap is attributed to a kill when the kill lands inside it (or just before
+    // it opens) — the run stopped because of the kill and stayed stopped.
+    const cause = infraKills.find((k) => k.at >= g.fromTs - 5 * 60 * 1000 && k.at <= g.toTs);
+    if (cause) {
+      g.afterInfraKill = true;
+      g.resets = cause.resets || null;
+    }
+  }
+  // Only gaps that were genuinely unattended for the threshold survive.
+  const real = quietGaps.filter((g) => g.unattendedMs >= humanWaitMs).sort((a, b) => b.unattendedMs - a.unattendedMs);
+  const humanWaits = real.filter((g) => g.endedBy === "human");
+  const deadAir = real.filter((g) => g.endedBy === "run");
+  const blockedOnHumanMs = humanWaits.reduce((a, g) => a + g.unattendedMs, 0);
+  const deadAirMs = deadAir.reduce((a, g) => a + g.unattendedMs, 0);
+  const blockedAfterInfraKillMs = real.filter((g) => g.afterInfraKill).reduce((a, g) => a + g.unattendedMs, 0);
+  return { infraKills, quietGaps: real, humanWaits, deadAir, humanTurns, blockedOnHumanMs, deadAirMs, blockedAfterInfraKillMs };
+}
+
+// ---- concurrency: waves and serial chains ----------------------------------
+//
+// WHY: `activeUnionMs` already prices parallelism in aggregate, but it cannot say
+// WHICH work was needlessly serialized. Stories forced through one at a time (a
+// shared working tree, a `depends` edge added for build order) read as a role
+// whose agents never overlap — and the wall-clock that ordering cost is
+// sum(durations) - longest, recoverable in full if they could have run together.
+
+// Group agents into waves and measure, per role, how much of that role's work was
+// needlessly serialized. Pure over the agent records.
+//
+// Everything here runs on ACTIVE intervals, never lifetimes. A stalled agent's
+// lifetime can span half a day, so lifetime-overlap would report a role as
+// "concurrent" purely because one of its members sat frozen across the others.
+export function analyzeWaves(agents = []) {
+  const runs = agents
+    .filter((a) => (a.activeIntervals || []).length)
+    .map((a) => {
+      const merged = mergeIntervals(a.activeIntervals);
+      return {
+        id: a.id,
+        role: a.agentType,
+        desc: a.description,
+        merged,
+        start: merged[0][0],
+        end: merged[merged.length - 1][1],
+        activeMs: a.activeMs,
+      };
+    })
+    .sort((a, b) => a.start - b.start);
+
+  const waves = mergeIntervals(runs.flatMap((r) => r.merged)).map((iv, i) => ({
+    index: i + 1,
+    startTs: iv[0],
+    endTs: iv[1],
+    spanMs: iv[1] - iv[0],
+    agentCount: runs.filter((r) => overlapMs(iv, r.merged) > 0).length,
+  }));
+
+  const byRole = {};
+  for (const r of runs) (byRole[r.role] ||= []).push(r);
+  const roles = [];
+  for (const [role, list] of Object.entries(byRole)) {
+    if (list.length < 2) continue;
+    const sumActiveMs = list.reduce((a, r) => a + r.activeMs, 0);
+    const unionActiveMs = unionMs(list.flatMap((r) => r.merged));
+    const longestActiveMs = Math.max(...list.map((r) => r.activeMs));
+
+    // The longest set of runs that never once overlapped each other — greedy by
+    // earliest finish (activity selection), which is optimal for intervals and
+    // good enough for the fragmented sets a stall produces.
+    const chain = [];
+    for (const r of [...list].sort((a, b) => a.end - b.end)) {
+      if (chain.every((c) => overlapMs([r.start, r.end], c.merged) === 0)) chain.push(r);
+    }
+    // Link duration is ACTIVE work, not the span. A link that stalled for twelve
+    // hours did not cost twelve hours of serialization — that is the stall's bill,
+    // reported separately, and charging it here too would double-count it.
+    const chainSumMs = chain.reduce((a, r) => a + r.activeMs, 0);
+    const chainLongestMs = chain.length ? Math.max(...chain.map((r) => r.activeMs)) : 0;
+
+    roles.push({
+      role,
+      count: list.length,
+      sumActiveMs,
+      unionActiveMs,
+      // 1.0 = strictly one-at-a-time; 3.0 = three agents working at once on average.
+      concurrency: unionActiveMs ? +(sumActiveMs / unionActiveMs).toFixed(2) : 0,
+      serialChain: {
+        count: chain.length,
+        sumMs: chainSumMs,
+        longestMs: chainLongestMs,
+        // Wall-clock a parallel run of that chain would have returned.
+        costMs: Math.max(0, chainSumMs - chainLongestMs),
+        members: chain
+          .slice()
+          .sort((a, b) => a.start - b.start)
+          .map((r) => ({ id: r.id, desc: r.desc, ms: r.activeMs })),
+      },
+      longestActiveMs,
+    });
+  }
+  roles.sort((a, b) => b.serialChain.costMs - a.serialChain.costMs);
+
+  return {
+    waves,
+    roles,
+    // Roles worth calling out: three or more runs that never overlapped.
+    serialChains: roles.filter((r) => r.serialChain.count >= 3).map((r) => ({ role: r.role, ...r.serialChain })),
+  };
+}
+
+// ---- token split: build vs governance --------------------------------------
+//
+// WHY: a milestone that spends most of its generation on contract authoring and
+// review is making a depth trade the operator never got to price. Splitting the
+// output tokens by role turns "it took all day" into "40% of it was governance".
+
+// The roles that WRITE the product. Everything else (contract authoring, review,
+// design, research, compliance) is governance around that build.
+export const BUILD_ROLES = new Set(["aof-developer"]);
+
+export function tokenSplit(agents = []) {
+  let buildOut = 0;
+  let governanceOut = 0;
+  const byRole = {};
+  for (const a of agents) {
+    const out = a.tokens?.out || 0;
+    const role = a.agentType || "unknown";
+    byRole[role] = (byRole[role] || 0) + out;
+    if (BUILD_ROLES.has(role)) buildOut += out;
+    else governanceOut += out;
+  }
+  const totalOut = buildOut + governanceOut;
+  return {
+    buildOut,
+    governanceOut,
+    totalOut,
+    governancePct: totalOut ? Math.round((governanceOut / totalOut) * 100) : 0,
+    byRole: Object.entries(byRole)
+      .map(([role, out]) => ({ role, out, pct: totalOut ? Math.round((out / totalOut) * 100) : 0 }))
+      .sort((a, b) => b.out - a.out),
+  };
 }
 
 // Does a subagent's meta/prompt reference this milestone? We match the milestone
@@ -405,7 +736,7 @@ function shortModel(m) {
   return match ? match[1].toLowerCase() : m.replace(/^claude-/, "").slice(0, 8);
 }
 
-export function renderReportMarkdown({ id, folder, agents, sessions, generatedAt, stallMs }) {
+export function renderReportMarkdown({ id, folder, agents, sessions, generatedAt, stallMs, lostTime = null, concurrency = null, split = null }) {
   const totalOut = agents.reduce((a, x) => a + x.tokens.out, 0);
   const sumActive = agents.reduce((a, x) => a + x.activeMs, 0);
   const stalled = agents.filter((a) => a.stalls.length);
@@ -434,9 +765,27 @@ export function renderReportMarkdown({ id, folder, agents, sessions, generatedAt
   L.push(`- **Real idle time** inside the span: **${fmtDur(realIdle)}** ${realIdle >= stallMs ? "⚠️" : ""}`);
   L.push(`- **Sum of per-agent active time** (if run serially): ${fmtDur(sumActive)}`);
   L.push(`- **Total output tokens** (generation): **${fmtK(totalOut)}**`);
+  if (lostTime?.blockedOnHumanMs) {
+    const pct = spanMs ? Math.round((lostTime.blockedOnHumanMs / spanMs) * 100) : 0;
+    L.push(`- **Blocked waiting for a human**: **${fmtDur(lostTime.blockedOnHumanMs)}** (${pct}% of the span)`);
+  }
+  if (lostTime?.deadAirMs) {
+    const pct = spanMs ? Math.round((lostTime.deadAirMs / spanMs) * 100) : 0;
+    L.push(`- **Dead air** (main thread quiet, nothing driving, no human asked): **${fmtDur(lostTime.deadAirMs)}** (${pct}% of the span)`);
+  }
+  if (lostTime?.infraKills?.length) {
+    L.push(`- **Infra kills** (API session/usage limit, overload): **${lostTime.infraKills.length}**, costing **${fmtDur(lostTime.blockedAfterInfraKillMs)}** of the wait above`);
+  }
   if (stalled.length) {
     L.push("");
     L.push(`> ⚠️ **${stalled.length} agent(s) stalled.** The wall-clock below is dominated by idle gaps, not compute — see "Stalls".`);
+  }
+  if (lostTime?.blockedAfterInfraKillMs && spanMs && lostTime.blockedAfterInfraKillMs / spanMs >= 0.2) {
+    L.push("");
+    L.push(
+      `> ⛔ **${Math.round((lostTime.blockedAfterInfraKillMs / spanMs) * 100)}% of this milestone's calendar time was a dead run waiting to be restarted by hand.** ` +
+        "That is mechanism, not work — see \"Lost time\".",
+    );
   }
   L.push("");
   const grinders = agents.filter((a) => a.diagnostics?.grind?.flagged);
@@ -445,6 +794,84 @@ export function renderReportMarkdown({ id, folder, agents, sessions, generatedAt
     L.push(`> ⚙️ **${grinders.length} agent(s) grinding** — active time dominated by a fix-test-rerun loop, not the stall/idle. See "Why slow".`);
   }
   L.push("");
+
+  // Lost time first — an idle agent is a symptom; the kill and the wait behind it
+  // are the cause, and they are usually the largest single line in the report.
+  if (lostTime && (lostTime.infraKills.length || lostTime.quietGaps.length)) {
+    L.push("## Lost time — why the run stopped");
+    L.push("");
+    if (lostTime.infraKills.length) {
+      L.push("**Infra kills.** The run was terminated by the platform, not by the work. Nothing restarts a");
+      L.push("dead orchestrator, so each of these costs whatever it took a human to notice.");
+      L.push("");
+      L.push("| at | agents killed | resets | gap that followed |");
+      L.push("|----|---------------|--------|-------------------|");
+      for (const k of lostTime.infraKills) {
+        const gap = lostTime.quietGaps.find((g) => g.afterInfraKill && k.at >= g.fromTs - 5 * 60 * 1000 && k.at <= g.toTs);
+        L.push(`| ${fmtClock(k.at)} | ${k.agentsKilled || "—"} | ${k.resets || "—"} | ${gap ? `**${fmtDur(gap.unattendedMs)}** (${gap.endedBy === "human" ? "restarted by hand" : "run resumed itself"})` : "resumed promptly"} |`);
+      }
+      L.push("");
+    }
+    if (lostTime.humanWaits.length) {
+      L.push("**Waits for a human.** The run stopped and stayed stopped until the operator typed. Nothing");
+      L.push("here is work — it is the cost of having no way back in without a person.");
+      L.push("");
+      L.push("| from | nothing running for | after an infra kill? | restarted with |");
+      L.push("|------|---------------------|----------------------|----------------|");
+      for (const w of lostTime.humanWaits.slice(0, 10)) {
+        L.push(`| ${fmtClock(w.fromTs)} | **${fmtDur(w.unattendedMs)}** | ${w.afterInfraKill ? `yes — resets ${w.resets || "?"}` : "no"} | ${w.resumedWith} |`);
+      }
+      L.push("");
+    }
+    if (lostTime.deadAir.length) {
+      L.push("**Dead air.** The main thread went quiet with no human asked and nothing driving, then the run");
+      L.push("woke on its own. Each of these is a window a stall watchdog would have closed.");
+      L.push("");
+      L.push("| from | nothing running for | woke on |");
+      L.push("|------|---------------------|---------|");
+      for (const g of lostTime.deadAir.slice(0, 10)) {
+        L.push(`| ${fmtClock(g.fromTs)} | **${fmtDur(g.unattendedMs)}** | ${g.resumedWith.replace(/\s+/g, " ").slice(0, 70)} |`);
+      }
+      L.push("");
+    }
+  }
+
+  // Concurrency second — what was serialized, and what that ordering cost.
+  if (concurrency && (concurrency.serialChains.length || concurrency.waves.length > 1)) {
+    L.push("## Concurrency — waves and serial chains");
+    L.push("");
+    L.push(`- **${concurrency.waves.length} wave(s)** of agent activity across the span.`);
+    if (sumActive && activeUnion) {
+      L.push(`- **Parallelism factor:** ${(sumActive / activeUnion).toFixed(2)}× (sum of active ÷ wall-clock active). 1.00× means strictly one-at-a-time.`);
+    }
+    L.push("");
+    if (concurrency.roles.length) {
+      L.push("**Per role.** `concurrency` is how many of that role's agents worked at once on average.");
+      L.push("");
+      L.push("| role | runs | active (sum) | active (wall-clock) | concurrency |");
+      L.push("|------|------|--------------|---------------------|-------------|");
+      for (const r of concurrency.roles) {
+        L.push(`| ${r.role} | ${r.count} | ${fmtDur(r.sumActiveMs)} | ${fmtDur(r.unionActiveMs)} | ${r.concurrency.toFixed(2)}× |`);
+      }
+      L.push("");
+    }
+    if (concurrency.serialChains.length) {
+      L.push("**Serial chains** — runs of one role that never once overlapped, so they went one at a time.");
+      L.push("`cost` is the wall-clock a parallel run would have returned (chain total minus its longest link).");
+      L.push("");
+      L.push("| role | links | chain total | longest link | **cost of serializing** |");
+      L.push("|------|-------|-------------|--------------|-------------------------|");
+      for (const c of concurrency.serialChains) {
+        L.push(`| ${c.role} | ${c.count} | ${fmtDur(c.sumMs)} | ${fmtDur(c.longestMs)} | **${fmtDur(c.costMs)}** |`);
+      }
+      L.push("");
+      for (const c of concurrency.serialChains) {
+        L.push(`- **${c.role}:** ${c.members.map((m) => `${m.desc || m.id} (${fmtDur(m.ms)})`).join(" → ")}`);
+      }
+      L.push("");
+    }
+  }
+
   L.push("## Agents (ranked by active work time)");
   L.push("");
   L.push("| active | wall-clock | tool-wait | out tok | turns | model | agent | task |");
@@ -496,6 +923,23 @@ export function renderReportMarkdown({ id, folder, agents, sessions, generatedAt
     }
     L.push("");
   }
+  // Build vs governance — the depth trade, priced. A milestone spending most of its
+  // generation on contract authoring and review made a choice the operator never saw.
+  if (split && split.totalOut) {
+    L.push("## Where the generation went — build vs governance");
+    L.push("");
+    L.push(`- **Build** (${[...BUILD_ROLES].join(", ")}): **${fmtK(split.buildOut)}** (${100 - split.governancePct}%)`);
+    L.push(`- **Governance** (contract authoring, review, design, research): **${fmtK(split.governanceOut)}** (**${split.governancePct}%**)`);
+    L.push("");
+    L.push("| role | out tok | share |");
+    L.push("|------|---------|-------|");
+    for (const r of split.byRole) L.push(`| ${r.role} | ${fmtK(r.out)} | ${r.pct}% |`);
+    L.push("");
+    if (split.governancePct >= 40) {
+      L.push(`> ⚖️ **Governance took ${split.governancePct}% of the generation.** Worth checking that depth was priced with the operator before the run, not discovered after it.`);
+      L.push("");
+    }
+  }
   L.push("## Token detail");
   L.push("");
   L.push("| agent | out | input | cache-create | cache-read | model |");
@@ -540,6 +984,7 @@ export async function observeMilestone({
   home = os.homedir(),
   env = process.env,
   stallMs = DEFAULT_STALL_MS,
+  humanWaitMs = DEFAULT_HUMAN_WAIT_MS,
   generatedAt = null,
   write = false,
 } = {}) {
@@ -552,11 +997,28 @@ export async function observeMilestone({
   const { folder, id } = resolved;
   const projectsDir = claudeProjectsDir({ cwd, home, env });
   const { agents, sessions, found } = await collectMilestoneAgents({ projectsDir, id, slug: folder, stallMs });
-  const report = renderReportMarkdown({ id, folder, agents, sessions, generatedAt, stallMs });
   const firsts = agents.map((a) => a.firstTs).filter((t) => t != null);
   const lasts = agents.map((a) => a.lastTs).filter((t) => t != null);
   const spanMs = firsts.length ? Math.max(...lasts) - Math.min(...firsts) : 0;
   const activeUnionMs = unionMs(agents.flatMap((a) => a.activeIntervals || []));
+
+  // The parent-thread pass. Bounded to the milestone's span (± an hour of slack, so
+  // the invoking slash command and the closing report are inside the window) —
+  // a session file spans many milestones and must not leak another one's waits in.
+  const slackMs = 60 * 60 * 1000;
+  const lostTime = firsts.length
+    ? await collectSessionSignals({
+        projectsDir,
+        sessions,
+        windowStart: Math.min(...firsts) - slackMs,
+        windowEnd: Math.max(...lasts) + slackMs,
+        humanWaitMs,
+        agentActive: agents.flatMap((a) => a.activeIntervals || []),
+      })
+    : { infraKills: [], quietGaps: [], humanWaits: [], deadAir: [], humanTurns: [], blockedOnHumanMs: 0, deadAirMs: 0, blockedAfterInfraKillMs: 0 };
+  const concurrency = analyzeWaves(agents);
+  const split = tokenSplit(agents);
+  const report = renderReportMarkdown({ id, folder, agents, sessions, generatedAt, stallMs, lostTime, concurrency, split });
   const json = {
     milestone: id,
     folder,
@@ -574,7 +1036,33 @@ export async function observeMilestone({
       stalledAgents: agents.filter((a) => a.stalls.length).length,
       grindingAgents: agents.filter((a) => a.diagnostics?.grind?.flagged).length,
       agentCount: agents.length,
+      blockedOnHumanMs: lostTime.blockedOnHumanMs,
+      deadAirMs: lostTime.deadAirMs,
+      blockedAfterInfraKillMs: lostTime.blockedAfterInfraKillMs,
+      infraKills: lostTime.infraKills.length,
+      serializationCostMs: concurrency.serialChains.reduce((a, c) => a + c.costMs, 0),
+      governancePct: split.governancePct,
     },
+    lostTime: {
+      infraKills: lostTime.infraKills.map((k) => ({ at: new Date(k.at).toISOString(), agentsKilled: k.agentsKilled, resets: k.resets, phrase: k.phrase })),
+      quietGaps: lostTime.quietGaps.map((g) => ({
+        fromTs: new Date(g.fromTs).toISOString(),
+        toTs: new Date(g.toTs).toISOString(),
+        ms: g.ms,
+        unattendedMs: g.unattendedMs,
+        agentActiveMs: g.agentActiveMs,
+        endedBy: g.endedBy,
+        afterInfraKill: Boolean(g.afterInfraKill),
+        resets: g.resets || null,
+        resumedWith: g.resumedWith,
+        sessionId: g.sessionId,
+      })),
+      blockedOnHumanMs: lostTime.blockedOnHumanMs,
+      deadAirMs: lostTime.deadAirMs,
+      blockedAfterInfraKillMs: lostTime.blockedAfterInfraKillMs,
+    },
+    concurrency,
+    tokenSplit: split,
     agents: agents.map((a) => ({
       id: a.id,
       agentType: a.agentType,
@@ -606,9 +1094,18 @@ export async function observeMilestone({
   return { id, folder, projectsDir, found, agents, sessions, report, json, written };
 }
 
-// Read the opt-in flag from a loaded aof config object. Default OFF — the folder is
-// only auto-generated when `work.observability.enabled` is true. Explicit `aof work
-// observe` invocation bypasses this gate (an operator asked for it directly).
+// Read the observability flag from a loaded aof config object.
+//
+// DEFAULT ON (operator, 2026-08-07). It shipped opt-in and therefore never ran: the
+// 348 post-mortem had to be done by hand because no milestone in the repo had ever
+// written an `observability/` snapshot. A diagnostic that is off by default is a
+// diagnostic you only enable AFTER the day you needed it — so the default inverts,
+// and `enabled: false` is now the explicit opt-OUT.
+//
+// The cost is bounded and local: a read of this workspace's own Claude Code session
+// transcripts plus two files written into the milestone folder, on lifecycle calls
+// that already run. Explicit `aof work observe` bypasses this gate either way (an
+// operator asking directly is not a default).
 export function observabilityEnabled(config) {
-  return Boolean(config?.work?.observability?.enabled);
+  return config?.work?.observability?.enabled !== false;
 }

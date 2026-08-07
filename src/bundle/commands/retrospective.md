@@ -18,8 +18,9 @@ Parse "$ARGUMENTS":
 <process>
 For each target milestone NN:
 
-1. **Refresh observability (opt-in).** Run `aof work observe NN --write --if-enabled` — a
-   deterministic **no-op unless `work.observability.enabled` is set**, so it is always safe to call
+1. **Refresh observability (on by default).** Run `aof work observe NN --write --if-enabled` — the
+   CLI self-gates on `work.observability.enabled`, which now defaults **ON** (set it to `false` to opt
+   out), so it is always safe to call
    unconditionally (the CLI decides, not you). When enabled it (re)writes
    `NN/observability/{report.md,agents.json}` — the per-agent time / token / **stall** record mined
    from the session transcripts. It re-reads every transcript and overwrites, so a partial run is
@@ -49,6 +50,6 @@ For each target milestone NN:
 
 <output>
 Per milestone: created / updated / skipped-clean, with the `R<n>` count and a one-line digest of each
-lesson; note whether an `observability/` snapshot was written (or skipped: opt-in off). Modify only
+lesson; note whether an `observability/` snapshot was written (or skipped: `work.observability.enabled: false`). Modify only
 `RETROSPECTIVE.md` (the `observability/` folder is written by `aof work observe`, not by hand).
 </output>

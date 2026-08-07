@@ -41,7 +41,10 @@ export const bundleAssetManifestCompleteTests = [
       const manifest = generateAssetManifest(repoRoot);
       const direct = listFilesDirect(path.join(repoRoot, "src", "bundle"));
 
-      assert.equal(direct.length, 42, "the real src/bundle/** tree carries exactly 42 files (37 milestone-01 baseline + 4 milestone-37 spike/chore assets + 1 milestone-39 OUTCOME.md milestone template)");
+      // 57 = 2 root descriptors + 8 agents + 24 commands + 5 hooks + 3 skills + 15 templates.
+      // (This literal had drifted badly — it still read 42 while the tree carried 56. The
+      // load-bearing check is the set-equality below; this count is the tripwire for it.)
+      assert.equal(direct.length, 57, "the real src/bundle/** tree carries exactly 57 files");
       assert.deepEqual(manifest.bundle, direct, "the generated bundle manifest is byte-identical (set + order) to the real tree's direct enumeration");
 
       const manifestSet = new Set(manifest.bundle);

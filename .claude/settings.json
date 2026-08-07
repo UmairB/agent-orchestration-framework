@@ -52,10 +52,7 @@
       {
         "matcher": "Bash|PowerShell",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node \".claude/hooks/aof/guard-test-isolation.mjs\""
-          }
+          { "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/aof/guard-test-isolation.mjs\"" }
         ]
       }
     ]
