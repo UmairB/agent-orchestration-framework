@@ -73,6 +73,22 @@ const BUDGETS = [
     // create and must not be made to pay. The ceiling holds the line for the NEXT author.
     why: "the largest file in ui/ (508 -> 1,521). Its regions — nodes, boards, milestones, the assign affordance, diagnostics, the legend — are already separate components in one file; the next one belongs in its own.",
   },
+  {
+    file: "ui/src/config/App.tsx",
+    ceiling: 1300,
+    floor: 500,
+    // Added 2026-08-07 at the architect's structural review of 45/03, the milestone that
+    // MADE this a file: `<App>` was 1,260 of `ui/src/main.tsx`'s 1,267 lines, so the
+    // second-largest surface in `ui/` has never been visible to this ratchet — the budget
+    // could not name a file that did not exist. It does now (1,276 lines), and the moment
+    // a thing becomes a file is the moment to cap it.
+    // Set just ABOVE the delivered 1,276, the same asymmetry with DetailPanel's ceiling
+    // that Fleet's entry above records and for the identical reason: 45/03 MOVED this
+    // surface without touching one view of it (SPEC: "re-skinning the config editor is out
+    // of scope"), so its size is debt that story did not create and must not be made to
+    // pay. The ceiling holds the line for the NEXT author instead.
+    why: "the config editor — one file holding the sidebar, the section editors, the resource editors, the review panel and every dialog. Each milestone that adds a config section adds another block here; the next one belongs in its own module under ui/src/config/.",
+  },
 ];
 
 export const archTests = [

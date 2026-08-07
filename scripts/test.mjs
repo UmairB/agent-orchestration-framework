@@ -1623,6 +1623,17 @@ import { staticServeFallbackTests } from "../test/static-serve-fallback.test.mjs
 //                 at the call site. Ratchets the gap 45/03 closes so 46/47/49 cannot reopen it
 //                 — 49 being precisely the milestone that puts a surface fullscreen.
 import { archTests as acdShellZLadderSingleHomeTests } from "../test/arch/acd-shell-z-ladder-single-home.test.mjs";
+//   ADR-005     — the surface → shell channel has ONE host: `declareShellPresent()` is called
+//                 exactly once in ui/src, at MODULE scope, by the module that renders the shell
+//                 root, and NO routed surface imports the shell component. Added at the
+//                 architect's structural review of 45/03 (2026-08-07). The bus flag is set by
+//                 IMPORTING Shell.tsx, so a single stray import inside ui/src/{fleet,board,
+//                 config}/ — even a `type` one, which tsc erases but the bundler still follows —
+//                 would declare a shell that is not mounted, and every contributed control (the
+//                 fleet's scope switch, the board's sync, the board's serverGone notice) would
+//                 vanish with EVERY suite still green. Not reachable by review attention;
+//                 trivially greppable; therefore a ratchet.
+import { archTests as acdShellBusSingleHostTests } from "../test/arch/acd-shell-bus-single-host.test.mjs";
 
 // ── milestone 45 / story 01 — THE ROUTE MODEL (ADR-001/002/003/006): ui/src/app/routes.mjs,
 // the ONE pure route table (`routeFor`) plus the ONE legacy `?mode=` translation
@@ -1634,6 +1645,32 @@ import { archTests as acdShellZLadderSingleHomeTests } from "../test/arch/acd-sh
 // removed, idempotent), 02_query-and-fragment-passthrough (`?scope=`, unknown parameters and
 // the `#ref` fragment survive, in order).
 import { appRoutesTests } from "../test/app-routes.test.mjs";
+// ── milestone 45 / story 03 — THE APP SHELL & THE ENTRY (ADR-002 + ADR-005 with its five
+// [Build-N] amendments). `ui/src/main.tsx` stops being a surface (its 1,260-line config editor
+// moved to `ui/src/config/App.tsx`) and becomes three acts: mount, apply the legacy `?mode=`
+// translation ONCE as a replace, render the shell around the surface the ONE route table names.
+// Four @executable task features, each with its own suite:
+//   00_entry-selects-a-surface — the entry's decision (`ui/src/app/entry.mjs`): four canonical
+//     addresses, the whole advertised legacy set rewritten exactly once, the surface read from
+//     the POST-rewrite address, and every parameter and fragment reaching the surface in order.
+//   01_shell-regions — the layout MODEL (`ui/src/app/shell-layout.mjs`): five rows in one
+//     order, the 88px chrome budget with the notice rail exempt/additive/REPORTED, the one
+//     published `--aof-shell-chrome-height`, the two content modes, one banner and one `<main>`
+//     (driven through the REAL shell AND the real fleet/board, which is where the absorption of
+//     their own bars could regress), DG-45-1's one brand mark and DG-45-2's one ladder.
+//   02_navigation — the nav MODEL (`ui/src/app/shell-nav.mjs`): four real links from the ROUTE
+//     TABLE's order, three non-colour active signals, the positional href rule that carries the
+//     current address's own parameters and invents none, honest locality, the 390 disclosure,
+//     and the four-item/ten-character budget REPORTED rather than absorbed.
+//   03_unmatched-path-and-fullscreen — the two states that are not surfaces: an unknown path
+//     rendered in place with nothing marked current, and the ONE shell-owned fullscreen door
+//     whose closed transition set carries no path, no parameter and no history entry.
+// (04_app-shell-visual-review is @uat — a person's render verdict — and deliberately has no
+// suite here.)
+import { shellEntryPlanTests } from "../test/shell-entry-plan.test.mjs";
+import { shellRegionsTests } from "../test/shell-regions.test.mjs";
+import { shellNavigationTests } from "../test/shell-navigation.test.mjs";
+import { shellNotFoundAndFullscreenTests } from "../test/shell-not-found-and-fullscreen.test.mjs";
 // milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
 // R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
 // byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
@@ -2395,8 +2432,17 @@ export const tests = [
   ...acdSpaFallbackNeverMasksTests,
   ...acdRouteLogicFrameworkFreeTests,
   ...acdShellZLadderSingleHomeTests,
+  // …and the one m45 ratchet that is expected GREEN from the day 45/03 lands: it pins a
+  // property the delivered build already has, so the accident that would silently break it
+  // cannot happen (architect's structural review, 2026-08-07).
+  ...acdShellBusSingleHostTests,
   // milestone 45 / story 01 — the route model (tasks 00–02, all @executable)
   ...appRoutesTests,
+  // milestone 45 / story 03 — the app shell & the entry (tasks 00–03; 04 is @uat)
+  ...shellEntryPlanTests,
+  ...shellRegionsTests,
+  ...shellNavigationTests,
+  ...shellNotFoundAndFullscreenTests,
   // milestone 45 / story 02 — the static-serving leaf (tasks 00–02, all @executable)
   ...staticServeFallbackTests,
   // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)

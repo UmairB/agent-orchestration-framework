@@ -40,6 +40,19 @@ doc: state
       the suite's own `get()` helper needed the same lesson, sending `//` targets verbatim via
       pathname assignment). Neighbour suites re-run green (setup-ui 10, board-serve 4, mesh-ui-serve
       8, board-api 22, mesh-ui-global-scope 10); `acd-spa-fallback-never-masks` 7/7.
+      **03 app-shell-and-entry: built, reviewed, validate PASS — parked at the `@uat` gate**
+      (2026-08-07, attempt 2 of 3; attempt 1 was killed by an account session limit before any work —
+      run-store lineage carries the `runtime_offline` failure and resume). The main.tsx split verified
+      as a clean move (1,267 → 60-line entry; `<App>` → `ui/src/config/App.tsx`); shell + nav +
+      landing landed in `ui/src/app/` (TECH_DEBT 18a's layer now real); 46 behavioural lanes green;
+      z-ladder ratchet armed 3/3; NEW `acd-shell-bus-single-host` 4/4. Architect PASS (its one
+      branch blocker was 45/02's `//api/*` comment blinding a fitness function's naive stripper —
+      fixed, class-wide hazard = TECH_DEBT item 24); QA PASS (0 blockers; its mutation sweep drove 12
+      new lanes); designer GAPS → landing-card centring FIXED, config-sidebar brand duplication
+      CARRIED as DG-45-3 (PO: SPEC's config-editor boundary holds in m45). ADR-005 gained [Build-6]
+      (content:page's document-scroll truth). **Carried to m46's brief:** `Fleet.tsx`'s inline
+      `onRefresh` is one refactor from an infinite update loop (one-line `useCallback`; production
+      survives only via the entry's referentially-stable element — the composition lane documents it).
 
 **Story order.** `01` and `02` are parallel-eligible from day one and share nothing. `03` depends on
 `01`; `04` depends on `03`. The one cross-story rule, from the architect's seam analysis: everything

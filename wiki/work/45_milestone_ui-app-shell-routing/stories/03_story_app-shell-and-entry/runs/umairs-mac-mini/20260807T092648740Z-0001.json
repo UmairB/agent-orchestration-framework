@@ -1,0 +1,16 @@
+{
+  "runId": "20260807T092648740Z-0001",
+  "itemRef": "45/03",
+  "state": "done",
+  "attempt": 2,
+  "outcome": "done",
+  "sessionId": null,
+  "brief": {},
+  "createdAt": "2026-08-07T09:26:48.740Z",
+  "updatedAt": "2026-08-07T16:01:16.106Z",
+  "failureReason": null,
+  "heartbeatAt": null,
+  "retryOf": "20260806T235306456Z-0000",
+  "reclaimedAt": null,
+  "node": "umairs-mac-mini"
+}

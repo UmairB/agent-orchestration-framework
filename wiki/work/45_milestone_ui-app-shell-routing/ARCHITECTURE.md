@@ -111,6 +111,18 @@ doc: architecture
 >   structure of `chrome`.
 > - **[Build-5]** `--aof-shell-chrome-height` is **promoted out of the story-default paragraph into the
 >   contract list as point 7**. m46's drag-resize clamp needs the chrome height as a named primitive.
+>
+> **Amendment — post-build structural review, 2026-08-07.** ONE further finding, on ADR-005 again, and it
+> is of a **different kind from the five above**: [Build-1..5] were clauses the ADR was *missing*, folded
+> in before anything shipped. **[Build-6] corrects a sentence the ADR already had, and which the delivered
+> build shows was over-stated.** It is written here rather than as a superseding ADR-007 because it
+> narrows the scope of one clause without reversing any decision — the guarantee m46 and m49 actually bind
+> to survives verbatim — and because ADR-005's own two-content-modes text already implies it. Read it as
+> the correction of a drafting error, made visible only by the first implementation.
+> - **[Build-6]** *"The shell root is the ONLY element that is `100dvh` with `overflow: hidden`; the
+>   document and `body` never scroll"* is true of **`content:fixed` only**. In `content:page` the root is
+>   `min-h-dvh`, the document IS the scroll owner, and that is exactly what "scroll is owned by the
+>   surface" means for a page-mode surface. Marked at the point it changed, below.
 
 ---
 
@@ -594,9 +606,33 @@ This ADR is a CONTRACT. It fixes what 46 and 49 may rely on. It does not fix the
     binds to "the constants ADR-005 requires". Its five-row `Then` (*"their order is exactly: notice
     rail, top bar, surface bar, content, overlay"*) is an assertion about the model's yielded **rows**,
     not about the exported constant set. The two live at different altitudes on purpose.
-- **The shell root is the viewport and the ONLY element that is `100dvh` with `overflow: hidden`.** The
-  document and `body` never scroll. Consequence, and the reason it is in the contract: a surface can
+- **The shell root is the viewport and the ONLY element that is `100dvh` with `overflow: hidden`.** ~~The
+  document and `body` never scroll.~~ Consequence, and the reason it is in the contract: a surface can
   always derive its available height from the content region's own box.
+  - **[Build-6] NARROWED, 2026-08-07, at the post-build structural review — this clause is `content:fixed`
+    ONLY, and the struck sentence is wrong for the other mode.** The shell has TWO content modes (the
+    bullet immediately below, and DESIGN §"The shell's layout primitives" 2), and they take different
+    roots, which is the whole reason they are two modes rather than one:
+    - **`content:fixed`** (`/board`, and BINDING for every terminal-hosting surface from m46) — the root
+      is `100dvh` with `overflow: hidden`, the document and `body` never scroll, and the content box's
+      height is exactly `100dvh − var(--aof-shell-chrome-height)`. **The clause as originally written is
+      true here, and this is the mode the guarantee was written for.**
+    - **`content:page`** (`/`, `/fleet`, `/config`, and the not-found state) — the root is `min-h-dvh`
+      with no `overflow: hidden`, so an overflowing surface grows the root and **the DOCUMENT scrolls.
+      That is not a defect and it is not a compromise: it is what "SCROLL IS OWNED BY THE SURFACE" MEANS
+      for a page-mode surface.** The fleet scrolls its list the way it always has, and the shell does not
+      fight it. The content box's height here is a **floor** (`min-height`), not an identity.
+    **What this does NOT weaken, stated because it is the only thing downstream binds to:** the box is
+    still derivable without measuring the document in **both** modes, because `--aof-shell-chrome-height`
+    (point 7) is published in both. A surface that needs an EXACT box declares `content:fixed` — which
+    m46's terminals and m49's grid do by rule, not by choice.
+    **Why the sentence was wrong rather than merely imprecise.** As drafted it forbids page-mode
+    scrolling outright, which would have made `/fleet` — an existing, unchanged surface this milestone
+    promised not to touch — a violation of its own architecture on the day it shipped. The two-modes
+    bullet below and story 45/03's own locked feature (`01_shell-regions.feature`, whose `content:page`
+    rows name **"the page"** as the declared scroll owner) both already said so; only this sentence
+    disagreed, and a contract that contradicts itself is read by whoever reads it first. Struck rather
+    than deleted so a later reader meets the correction instead of a silently different document.
 - **`content` is a BOUNDED box with `min-height: 0`, and it does NOT scroll by default. SCROLL IS OWNED
   BY THE SURFACE.** The `min-height: 0` is load-bearing and non-obvious: a flex child defaults to
   `min-height: auto`, so an overflowing child silently grows the parent and every "size to the box"
@@ -766,6 +802,28 @@ This ADR is a CONTRACT. It fixes what 46 and 49 may rely on. It does not fix the
   identity-preserving DOM work in the shell component rather than in `shell-layout.mjs` is what keeps the
   module plain-node-loadable. Extra exports (the region constants, the chrome-height property name) are
   invisible to it: it selects the ladder export by name.
+- **[Build-6] Where the two-mode root is PINNED, since the narrowing above makes it a contract.** It is
+  not a source-read rule and it is not a fitness function: it is `contentModeFor(routeId).rootClass` in
+  `ui/src/app/shell-layout.mjs` — `h-dvh overflow-hidden flex flex-col` for `content:fixed`,
+  `min-h-dvh flex flex-col` for `content:page` — read by `Shell.tsx` and by nothing else, and asserted
+  per route by `test/shell-regions.test.mjs`'s content-mode lane. That is the honest pin available here:
+  whether the RENDERED page then double-scrolls is a browser fact and belongs to task 04's `@uat` render
+  verdict, exactly as the chrome budget's 432px does. The reviewer's check, made at 45/03 and recorded so
+  it is not re-derived: page-mode nests `min-h-dvh` root → `min-h-0 flex-1` main → the surface's own
+  `min-h-[calc(100dvh − var(--aof-shell-chrome-height,0px))]`, which yields ONE scrollbar (the
+  document's); fixed-mode nests `h-dvh overflow-hidden` → `min-h-0 flex-1 overflow-hidden` → the board's
+  own `h-[calc(…)]`, which yields none above the surface.
+- **[Build-6] `acd-shell-bus-single-host` is ADDED (2026-08-07), and it is the one m45 ratchet that is
+  expected GREEN on arrival.** It pins the surface → shell channel's single host: `declareShellPresent()`
+  has exactly ONE call site in `ui/src`, at MODULE scope, in the module that renders the shell root, and
+  no module under `ui/src/{fleet,board,config}/` imports `ui/src/app/Shell`. The bus's presence flag is
+  set by IMPORTING the shell component, so one stray import inside a surface — **including a `type`-only
+  one, which `tsc` erases but the bundler still follows** — would declare a shell that is never mounted,
+  and every contributed control (the fleet's scope switch, the board's sync, the board's `serverGone`
+  notice) would vanish with EVERY suite still green: `acd-mesh-ui-scope-visible` mounts `<Fleet>` alone,
+  so it cannot see it. A silent-disappearance failure that no review attention reliably catches and that
+  one grep does is the definition of a ratchet, and the module-scope declaration itself was reviewed and
+  ACCEPTED — this test protects that decision rather than second-guessing it.
 
 ---
 
@@ -826,11 +884,19 @@ moment it is redirected.
 
 ## Fitness functions
 
-Five, each pinning a structural invariant an ADR above implies (this paragraph originally said "four";
-[Amigos-5] added the fifth in prose and left this table un-recounted — corrected 2026-08-07, at the
-same build-start pass as the [Build-N] amendments). All five are **expected-RED until the
-stories land** — that is the house convention: an arch test written at refine time is part of the
-contract, not a report on the present. Each file states its own red/green expectation at the top.
+Five at refine, **six now**, each pinning a structural invariant an ADR above implies (this paragraph
+originally said "four"; [Amigos-5] added the fifth in prose and left this table un-recounted — corrected
+2026-08-07, at the same build-start pass as the [Build-N] amendments). The first five were
+**expected-RED until the stories land** — that is the house convention: an arch test written at refine
+time is part of the contract, not a report on the present. Each file states its own red/green expectation
+at the top.
+
+**The sixth is a different animal and is labelled as one.** `acd-shell-bus-single-host` was added AFTER
+45/03 landed, at the post-build structural review ([Build-6]), and is **green on arrival**: it pins a
+property the delivered build already has, so that the one accident that would silently break it cannot
+happen. A ratchet written at refine forecasts a contract; a ratchet written at review preserves one that
+was just built. Both are legitimate; conflating them is how a green test gets mistaken for a satisfied
+forecast.
 
 | file | pins | today |
 |---|---|---|
@@ -839,6 +905,7 @@ contract, not a report on the present. Each file states its own red/green expect
 | `test/arch/acd-spa-fallback-never-masks.test.mjs` | ADR-004 — one shared module imported by both servers; the fallback never shadows `/api/*` and never masks a missing asset (driven against the REAL `serveSetupUi` handler); `safeStaticPath` defined exactly once | **5 RED** |
 | `test/arch/acd-route-logic-framework-free.test.mjs` | ADR-001/006 — the route module is React-free, DOM-free and `node:test`-loadable; the legacy redirect preserves every other parameter and the fragment, and is idempotent | **5 RED** |
 | `test/arch/acd-shell-z-ladder-single-home.test.mjs` | ADR-005 [Amigos-5] — the z-ladder has ONE home in `shell-layout.mjs`; no `z-50` or undeclared rung anywhere else in `ui/src` (one named, shrink-only exemption retiring with m46) | **2 RED**, 1 green (declared-rung sweep) |
+| `test/arch/acd-shell-bus-single-host.test.mjs` **[Build-6], added 2026-08-07** | ADR-005 contract points 3/5 — `declareShellPresent()` has exactly ONE call site in `ui/src`, at MODULE scope, in the module rendering the shell root; no routed surface imports `ui/src/app/Shell` (a `type`-only import is just as fatal — `tsc` erases it, the bundler still runs the module) | **4 green on arrival** (added AFTER 45/03 landed, at the structural review — it protects a property the build already has) |
 
 18 assertions red, 3 green. The green ones are the **self-checks** and the declared-rung sweep, green on purpose:
 each runs its detector over the REAL pre-45 source lines (including the `?mode=` links that live inside
@@ -853,7 +920,7 @@ suites run — **every one of the 16 green** — and the prototypes then reverte
 buildable exactly as written; the two `ui/` assertions that need the `main.tsx` split were not
 prototyped (they are satisfiable by construction — a file move).
 
-All five are registered in `scripts/test.mjs`, per m43/ADR-014 E7 (`acd-test-suite-registration`, which
+All **six** are registered in `scripts/test.mjs`, per m43/ADR-014 E7 (`acd-test-suite-registration`, which
 is re-run and green) — an unregistered suite is no gate at all, including a red one nobody can see.
 
 ---

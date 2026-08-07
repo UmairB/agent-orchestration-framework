@@ -47,7 +47,8 @@ new scale.
 - **Nothing in the shell moves as you navigate.** Everything left of the surface slot — mark, wordmark,
   identity chip, nav — is byte-identical on every route, at every load state. This is the m43
   documented-default-3 rule ("the chip keeps its right-edge anchor so nothing moves at the threshold")
-  applied to a bar instead of a row.
+  applied to a bar instead of a row. *(Bounded by one measured tolerance — the ≤1px drift the active
+  item's own weight signal causes downstream of it; see §The navigation model, amended 2026-08-07.)*
 - **The address bar is the truth and is never rewritten behind the operator's back.** An unmatched path
   renders an in-shell not-found at the path they typed; it does not silently redirect. A milestone whose
   point is that URLs mean something cannot start by making one mean nothing.
@@ -165,6 +166,11 @@ QA's Outline models the breach at a 33px rail — the **one-line** case, which i
 must judge the wrapped case and not only the one-line one. Neither exceeds the 25% bound, which is what
 the bound exists for.
 
+*(Still MODELLED, not measured, as of 2026-08-07: story 03's first conformance render did not include a
+board origin with `serverGone` standing, so the reviewer returned that row NOT-JUDGED. The numbers above
+remain estimates until that render is handed to a review — it is the single highest-value missing
+render for this document.)*
+
 **Render targets** (the orchestration renders these and hands the reviewer the screenshots; the reviewer
 does not run the browser):
 
@@ -190,9 +196,10 @@ what the shell may do.
 | **No router library is installed** | [ui/package.json:11-32](../../../ui/package.json#L11) | The route table is the architect's; this document fixes the *regions*, not the paths. |
 | `?scope=global\|local` is a live deep-link contract with a visible control | [fleet/scope.mjs:24-54](../../../ui/src/fleet/scope.mjs#L24), rendered at [Fleet.tsx:323-343](../../../ui/src/fleet/Fleet.tsx#L323); consumed by the desktop entry URL ([supervisor.rs:44](../../../app/desktop/crates/app/src/supervisor.rs#L44)) | It stays a **query param on `/fleet`**, never a path segment — see §The scope-control ruling. |
 | The config editor carries **its own** `project \| global` two-way toggle, in the identical active treatment (`bg-primary text-primary-foreground`) | [main.tsx:245-256](../../../ui/src/main.tsx#L245) | A shell-level `Global \| Local` toggle would sit ~300px from a differently-meaning `project \| global` toggle. Decisive. |
+| The config editor's sidebar carries **its own identity block** — a 40px filled `✦` tile, an `AOF` wordmark and the config name | [main.tsx:241](../../../ui/src/main.tsx#L241) | Under the shell this repeats the bar's mark, wordmark and chip on `/config` — **design gap DG-45-3**, recorded and carried, not closed here. |
 | The fleet top bar is `sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4` | [Fleet.tsx:281](../../../ui/src/fleet/Fleet.tsx#L281) | This **is** the shell's top bar. It is not redesigned; it is promoted. |
 | The board top bar is the same 48px bar **without** `sticky` | [Board.tsx:423](../../../ui/src/board/Board.tsx#L423) | Same bar, different scroll model — see the two content modes. |
-| **Two different brand marks**: fleet paints a filled 24px tile (`grid h-6 w-6 rounded-md bg-primary text-primary-foreground ✦`), the board paints a bare `text-lg text-primary ✦` | [Fleet.tsx:283-285](../../../ui/src/fleet/Fleet.tsx#L283) vs [Board.tsx:425-427](../../../ui/src/board/Board.tsx#L425) | **Design gap DG-45-1** — one product, one mark. Resolved below. |
+| **Two different brand marks**: fleet paints a filled 24px tile (`grid h-6 w-6 rounded-md bg-primary text-primary-foreground ✦`), the board paints a bare `text-lg text-primary ✦` | [Fleet.tsx:283-285](../../../ui/src/fleet/Fleet.tsx#L283) vs [Board.tsx:425-427](../../../ui/src/board/Board.tsx#L425) | **Design gap DG-45-1** — one product, one mark **in the bar**. Resolved below. |
 | **Two scroll models**: fleet is `min-h-screen flex-col` (page scrolls); board is `h-screen overflow-hidden` with descendants owning scroll | [Fleet.tsx:208](../../../ui/src/fleet/Fleet.tsx#L208) vs [Board.tsx:409](../../../ui/src/board/Board.tsx#L409), [:463](../../../ui/src/board/Board.tsx#L463) | The shell must offer **both**, named and declared per route. This is the m46 contract. |
 | `z-50` is currently shared by three unrelated things: the board dispatch toast, the milestone-switcher listbox, and the fleet fullscreen terminal overlay | [Board.tsx:528](../../../ui/src/board/Board.tsx#L528), [BoardLanes.tsx:373](../../../ui/src/board/BoardLanes.tsx#L373), [FleetTerminalView.tsx:412](../../../ui/src/fleet/terminal-view/FleetTerminalView.tsx#L412) | **Design gap DG-45-2** — once a surface can go fullscreen inside a shell, a toast on the same rung paints unpredictably. The shell owns the ladder. |
 | A fullscreen escape **already exists**: `createPortal` → `fixed inset-0 z-50 flex flex-col`, `role="dialog" aria-modal="true"`, exit control at `ml-auto` | [FleetTerminalView.tsx:402-424](../../../ui/src/fleet/terminal-view/FleetTerminalView.tsx#L402) | m46 inherits this idiom rather than inventing one. The shell formalises it as a named slot. |
@@ -208,11 +215,11 @@ the origin's identity name — is already available or is the router's own state
 
 ---
 
-## The two design gaps this milestone closes
+## The design gaps — two this milestone closes, one it records and carries
 
-Both resolve as rules in this document plus a `@uat` visual-review scenario, not as a code patch alone.
+Each resolves as a rule in this document plus a `@uat` visual-review scenario, not as a code patch alone.
 
-### DG-45-1 — one product, one brand mark
+### DG-45-1 — one product, one brand mark IN THE BAR
 
 The fleet and the board paint different `✦` marks in the same bar position (table above). The shell paints
 **one**: the **fleet's filled 24px tile** —
@@ -226,6 +233,16 @@ bare glyph at `text-lg` changes optical size with the bar's type ramp, which a m
 **Consequence, recorded so a reviewer does not log it as a regression:** the board's bar **gains** a
 filled mark it did not have.
 
+**Scope — this rule governs R2, the bar, and only R2.** *(Scoped 2026-08-07, from the design-conformance
+review of story 03's renders. The rule was authored from the bar-vs-bar comparison in the constraint
+table and its title, "one product, one mark", was read wider than its body: the review found the
+config editor's sidebar repainting the mark, the wordmark and the identity a second time inside R4, and
+correctly reported the render as diverging from the rule's plain title while conforming to the R4
+checklist row that says the surface renders exactly as it does today. Both readings were right, which
+means the defect was the rule's silence about its own scope.)* A mark rendered by a **mounted surface
+inside R4** is that surface's own content and is out of this rule's reach; where that produces a visible
+duplication it is a gap of its own, named and carried below — **never** an unstated exception.
+
 ### DG-45-2 — the z-index ladder
 
 `z-50` is currently three different things (table above). Under a shell that can put a surface fullscreen,
@@ -237,11 +254,61 @@ others:**
 | content | auto | the mounted surface |
 | **sticky chrome** | `z-10` | notice rail, top bar, surface bar, and in-surface sticky headers ([BoardLanes.tsx:181](../../../ui/src/board/BoardLanes.tsx#L181)) |
 | **popover** | `z-20` | legends ([Fleet.tsx:360](../../../ui/src/fleet/Fleet.tsx#L360)), the nav disclosure, the milestone switcher |
-| **dock** | `z-30` | reserved for the unified terminal control in its in-flow/docked position (m46) |
+| **dock** | `z-30` | reserved for the unified terminal control in its docked (non-fullscreen) position (m46) — **out of flow, in the R5 overlay layer**: an open dock *overlays* the bottom of the content region, it does not shrink it |
 | **toast** | `z-40` | dispatch notices ([Board.tsx:528](../../../ui/src/board/Board.tsx#L528)), the config editor's message ([main.tsx:318](../../../ui/src/main.tsx#L318)) |
 | **fullscreen** | `z-50` | the `shell:fullscreen` occupant — **the top rung, alone** |
 
 An element that needs a rung not on this list is a GAP whose fix is to add the rung *here* first.
+
+*(Amended 2026-08-07, from ARCHITECTURE ADR-005 [Build-3]. The `dock` row read "in its **in-flow**/docked
+position", which contradicted this document's own other two answers — the region diagram's R5 and the
+binding checklist's R5 row both place the dock in the **out-of-flow** overlay layer. ADR-005 [Build-3] has
+now ruled the dock's region home: `overlay`, out of flow, a **sibling of `content`** — because a
+`content`-parented dock is unmounted by every route change and the PTY dies with it. `Board.tsx` already
+performs exactly that hoist against a **view** switch; under a router the shell must perform it one level
+up, against a **route** change. Only the word "in-flow" was wrong — the rung, its m46 reservation and
+every other row are unchanged. **The visible consequence, recorded so a conformance reviewer does not log
+it as a regression: an open dock overlays the bottom of the content region rather than shrinking it.** If
+m46 finds it needs the content region to *shrink* by the dock's height, that is a new named primitive of
+the same shape as `--aof-shell-chrome-height` — a published dock inset — and it comes back here and to
+ADR-005 as an amendment, never as a CSS decision taken inside a story.)*
+
+### DG-45-3 — the config editor's sidebar repeats the shell's identity (CARRIED — **not closed in m45**)
+
+*(Raised 2026-08-07, from the design-conformance review of story 03's renders — `config-1280.png`,
+`config-768.png`, `config-390.png`. PO ruling the same day: the fix is **declined for this milestone**;
+SPEC's "config editor views untouched" boundary holds and the duplication ships as a **recorded,
+accepted** one with this gap owning its close.)*
+
+**What the render shows.** On `/config`, at every width, the product's identity is painted **twice within
+~120px**: the shell's R2 carries the 24px `✦` tile, the `aof` wordmark and the identity chip
+`tmp.WTm6S9rqUu`; the config editor's own sidebar header, immediately beneath — directly under the bar at
+768 and 390 — repaints a **40px** `✦` tile, an **`AOF`** wordmark, and the **same** identity string. Two
+marks at two sizes, two wordmarks in two cases, one name said twice.
+
+**Why it is a real gap and not a nit.** It is the same fault the wordmark ruling below already names —
+*"a second word would say it twice"* — arriving by a second door. Before the shell existed the sidebar
+block was the only identity on screen and was doing necessary work; the shell now does that work above
+it, and what is left is a repetition an operator has to parse and discard on the one surface where the
+chrome is densest.
+
+**Why it is not closed here.** The fix touches `<App>`'s views, which SPEC puts out of scope, and this
+milestone's whole success condition is that *nothing* on the existing surfaces changes except the three
+knowing changes listed in §Surface 1. Spending that boundary on a duplication is the wrong trade in this
+milestone; recording it so it cannot be lost is the right one.
+
+**The fix shape, fixed here so whoever closes it is not re-deciding it.** The config editor's sidebar
+header **drops the 40px `✦` tile and the `AOF` wordmark** and **keeps the config/project name** (the one
+thing the shell's chip cannot say at that size), in its existing ramp and position. The shell says
+"which product" and "which origin"; the sidebar says "which config". No new token, no new component.
+
+**Close condition.** DG-45-3 closes in the first milestone that has `<App>`'s views legitimately in scope
+— it is **not** a licence to open them. Until then it stands as an accepted duplication, and a
+conformance reviewer must log it as **recorded, not a new finding**. It is carried as its own Outline row
+in
+[`stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature`](stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature)
+("on `/config` the operator sees the product's brand exactly once"), which is where the duplication stays
+visible to a human until it is gone.
 
 ---
 
@@ -314,6 +381,8 @@ A CSS custom property the shell sets to the **measured** height of everything ab
 - **It tracks the notice rail too.** When the rail is standing the variable grows by its measured height,
   so a terminal stays correctly sized straight through the breach the budget clause reports. The variable
   is the truth; the budget verdict is the commentary on it.
+- **It is also what a full-height content state centres against** — the landing and not-found cards use
+  `min-h-[calc(100dvh - var(--aof-shell-chrome-height))]`, never a hard-coded 48 or 88 (2026-08-07).
 
 ### 2 — Two content modes, declared per route
 
@@ -374,6 +443,23 @@ The active marking reuses the **doc-tab idiom already in the product**
 
 Each item is `-mb-px` so its rule sits flush on the bar's own `border-b border-border`, and each item fills
 the bar's full height (a 48px hit target, not a padded text run).
+
+**The ≤1px drift tolerance — and why closing it would be the wrong fix.** *(Added 2026-08-07, from the
+design-conformance review of story 03's renders, which measured it across `landing/fleet/board/config` at
+1280.)* Binding rail 2 says the nav is byte-identical on every route. The active treatment above changes
+the active item's **weight** (`font-semibold` vs `font-medium`), which changes its width, which shifts the
+items **after** it by up to **1px** as you navigate. Both rules are wanted and they cannot both be exactly
+true, so this one is bounded rather than argued away:
+
+- **The tolerance is ≤1px, and only downstream of the active item.** Everything left of the nav — mark,
+  wordmark, chip, divider — is **pixel-identical** on every route, which is what rail 2 exists to protect;
+  the review confirmed it on all five routes.
+- **A drift a reviewer can see, or one that moves anything left of the nav, is a GAP** and is not covered
+  by this clause.
+- **It is NEVER closed by deleting the weight signal.** The weight is one of the three non-colour signals
+  the accessibility contract requires (rule 3 below); trading it for a pixel would trade a real
+  accessibility guarantee for an invisible one. If exact invariance is ever wanted, the fix is fixed-width
+  nav items decided *here* first — not a lighter active item.
 
 **Why this and not the segmented pill.** The product already speaks both vocabularies and they mean
 different things. A `bg-primary text-primary-foreground` segment means **"pick one filter value"** — that
@@ -438,6 +524,20 @@ The 390 disclosure is the **existing milestone-switcher trigger shape**
 `flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1 text-sm font-medium`
 with a muted `▾`, `aria-haspopup="menu"`, `aria-expanded`. Its label is the **active surface's name**, so
 "you are here" survives the collapse.
+
+**The one case where the label is not a surface name: no route matched.** *(Added 2026-08-07, from the
+design-conformance review of story 03's renders — the checklist was silent here and the build answered it
+honestly; this clause ratifies that answer so it cannot drift.)* In the not-found state there **is** no
+active surface, and the not-found rule below forbids marking one. The disclosure therefore renders its
+**own landmark name** — **`Surfaces ▾`** — and:
+
+- **it never shows a surface's name in that state.** Falling back to `Terminals ▾`, or to the last route
+  visited, would say "you are here" about a place the operator is not — the same lie the wide layout is
+  forbidden to tell by marking a tab active;
+- **it carries no `aria-current`**, matching the wide layout's "`aria-current` absent everywhere" clause,
+  so the collapse changes the *form* of the answer and never its *content*;
+- **it is otherwise identical** — same trigger shape, same position, same menu, same rungs. Only the label
+  differs, and only in this state.
 
 **Never, at any width:** a truncated nav label; a hidden active item; two rows of nav; a
 horizontally-scrolling nav (the operator cannot see that there is more). Each is a GAP, and each is fixed
@@ -508,11 +608,13 @@ since "how the brand reads" is exactly a mock's call.)*
 conformance reviewer can tell a designed change from a regression:
 
 1. **The nav appears** on all four surfaces. Unavoidable — it is the milestone.
-2. **One brand mark** (DG-45-1): the board's bare glyph becomes the filled tile.
+2. **One brand mark in the bar** (DG-45-1): the board's bare glyph becomes the filled tile.
 3. **The wordmark loses its route word**: `Mesh` and `Work Board` are retired; the nav says it instead.
 
 Everything else on `<Fleet>`, `<Board>` and `<App>` is untouched — same regions, same components, same
-ramp, same copy.
+ramp, same copy. **One consequence of leaving `<App>` untouched is visible and is recorded, not hidden:**
+on `/config` the sidebar's own identity block repeats the bar's mark, wordmark and name — **DG-45-3**,
+carried and deliberately not closed here (2026-08-07). A reviewer logs it as *recorded*, never as new.
 
 #### Binding checklist (mandatory — this IS the baseline until `mocks/app-shell.png` lands)
 
@@ -522,7 +624,7 @@ ramp, same copy.
 |---|---|---|---|
 | **R1** | **Notice rail** — full-bleed, above everything, conditional | **measured** (exactly 0 when empty), capped at 25% of viewport height | none in the ordinary case — it **pushes**. Past the cap it owns its own vertical scroll and nothing else's |
 | **R2** | **Top bar** | fixed **48px** (`h-12 shrink-0`) | **none** — it never scrolls out of view (`sticky top-0` in `content:page`; a fixed flex child in `content:fixed`) |
-| **R3** | **Surface bar** — conditional (≤768, or a surface that declares one) | fixed **40px** | none |
+| **R3** | **Surface bar** — present at **≤768 on every route** (or where a surface declares one), **empty where the slot is empty** | fixed **40px** | none |
 | **R4** | **Content region** — the `<main>`, the one mount point | `flex-1` / `min-h-0 flex-1` | **`content:page`** → the page. **`content:fixed`** → descendants only, never the region |
 | **R5** | **Overlay layer** — dock, toasts, `shell:fullscreen` | out of flow | n/a — the fullscreen occupant's own body owns its scroll |
 
@@ -539,7 +641,18 @@ ramp, same copy.
   slot** (surface-contributed controls, empty on `/` and the config editor).
 - **R3** — the surface slot only, when it has dropped out of R2. Same contents, same order, same
   components — the slot **moves**, its contents never change form. It does **not** disappear when the
-  notice rail is standing.
+  notice rail is standing. **And it does not disappear when the slot is empty:** at ≤768 the bar is
+  present on **every** route, rendering as a 40px `bg-card` band with nothing in it on `/`, `/config` and
+  an unmatched path. *(Ratified 2026-08-07, from the design-conformance review of story 03's renders,
+  which found exactly that band and needed the baseline to say whether it was a defect. It is not, and the
+  reason is the one the whole document keeps returning to: a bar that appeared and disappeared per route
+  would move the content region as you navigate — binding rail 2 — and would make **its own absence a
+  covert signal** for "this surface contributes no controls", the m38 DG-20 lesson stated at §The chrome
+  budget clause 3. The steady 88px is the point. **This is NOT the reserved blank band R1 forbids**, and
+  the distinction is exact: R1's band would reserve space for a condition that is **almost never true**
+  and is **transient**; R3's band holds a region that is occupied on **half the routes** and is
+  **steady-state**. Reserving for the rare and transient is waste; holding a stable frame for the common
+  and permanent is the frame doing its job.)*
 - **R4** — exactly one mounted surface, or exactly one of the shell's three own states below.
 - **R5** — at most one `shell:fullscreen` occupant; the dock; toasts. Rungs per DG-45-2.
 
@@ -550,9 +663,20 @@ load / normal:**
   dashed placeholder** in the established empty language
   (`rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground`,
   [Board.tsx:458](../../../ui/src/board/Board.tsx#L458)) naming the path that did not match and pointing at
-  the nav. Three binding clauses: **the URL is not rewritten** (binding rail 3); it is **not** `accent` or
-  `destructive` (nothing failed — the path simply is not a surface); and **no nav item is marked active**
-  (`aria-current` absent everywhere), because none is, and marking one would lie about where you are.
+  the nav. Five binding clauses: **the URL is not rewritten** (binding rail 3); it is **not** `accent` or
+  `destructive` (nothing failed — the path simply is not a surface); **no nav item is marked active**
+  (`aria-current` absent everywhere), because none is, and marking one would lie about where you are;
+  **at 390 the nav disclosure reads `Surfaces ▾`**, never a surface name and with no `aria-current`
+  (§Responsive form, 2026-08-07); and **the card takes the same size and the same optical position as the
+  `/` landing card** — `w-full max-w-md`, centred on **both** axes within the content region — **one rule,
+  both places**. *(Added 2026-08-07, from the design-conformance review of story 03's renders, which found
+  the two cards rendering at two different content-shrunk widths, both top-anchored: `/` at ~250px and
+  `/nope` at ~306px, in the same position, in the same visual language. Two sizes for one primitive makes
+  an operator read them as two different components and makes the checklist unenforceable — the same
+  reasoning as the unavailable treatment being one rule in the nav and on the landing. The fix lands
+  concurrently with this amendment: the region gets
+  `min-h-[calc(100dvh - var(--aof-shell-chrome-height))]` and both-axis centring, the card gets
+  `w-full max-w-md`, and the landing and the not-found state use the identical container.)*
 - **loading ≡ A SURFACE STILL MOUNTING.** The shell chrome paints **first** and does not move. Two
   sub-cases, and they must look different:
   - *the surface's code is not yet loaded* (split chunk in flight) → R4 shows the shell's own neutral mount
@@ -588,7 +712,7 @@ load / normal:**
 | **R2 identity chip** | `mono text-xs text-muted-foreground` on `bg-muted` with `border-border`, `rounded-md px-2 py-0.5`. |
 | **R2 divider** | `h-4 w-px bg-border`. |
 | **R2 nav** | `text-sm`; active `border-primary text-primary font-semibold`; inactive `border-transparent text-muted-foreground font-medium`; unavailable `border-dashed border-muted-foreground/40 text-muted-foreground/60`. Focus ring on `--color-ring`. |
-| **R3 surface bar** | Same `bg-card` + `border-b border-border` as R2, one step shorter (40px), `px-4`. Visually a continuation of the bar, not a new band: **no** second background colour, **no** `bg-sidebar`. |
+| **R3 surface bar** | Same `bg-card` + `border-b border-border` as R2, one step shorter (40px), `px-4`. Visually a continuation of the bar, not a new band: **no** second background colour, **no** `bg-sidebar`. This holds when the bar is empty too — an empty R3 is the same band, not a tinted or hidden one. |
 | **R4 content region** | Nothing of its own — `bg-background text-foreground` inherited from the root. Its three shell states use: dashed `border-border` + `text-muted-foreground` (not-found), `animate-pulse bg-muted` (mounting), `accent` pill + `primary` outline Retry (failed). |
 | **R5 overlay** | The occupant's own ramp — the terminal surfaces stay dark (`#0b0f14` / `#0f1629`, [TerminalDock.tsx:287](../../../ui/src/board/TerminalDock.tsx#L287)); toasts keep `border-border bg-background shadow-lg`. |
 | **Type** | Inter throughout; `.mono` ([index.css:68-72](../../../ui/src/index.css#L68)) for the identity chip and any id. Bar type is `text-sm`; chip and slot controls `text-xs`. Hierarchy: **wordmark > nav > chip > slot**. |
@@ -633,15 +757,21 @@ and
 
 **Layout regions, in order, and who owns scroll:**
 
-1. **R1–R3** — the shell's chrome, unchanged. Surface slot is **empty** on this route.
+1. **R1–R3** — the shell's chrome, unchanged. Surface slot is **empty** on this route — and at ≤768 R3 is
+   still **present and empty**, per §Surface 1's R3 row (2026-08-07).
 2. **Content region (R4)** — mode **`content:page`**; the page owns scroll (which it will never need to
    use — the card fits every documented breakpoint).
-   1. **Placeholder card** — the only child, horizontally and vertically centred within the region.
-      Regions inside the card, in order: **mark** → **heading** → **sub-line** → **destination row**.
+   1. **Placeholder card** — the only child, horizontally and vertically centred within the region. The
+      region is given a real height to centre against —
+      `min-h-[calc(100dvh - var(--aof-shell-chrome-height))]`, never a hard-coded 48 or 88 — and the card
+      is `w-full max-w-md`, so it does not shrink to its own text (2026-08-07). Regions inside the card, in
+      order: **mark** → **heading** → **sub-line** → **destination row**.
 
 **Components each region holds:**
 
-- **Placeholder card** — `mx-auto max-w-md rounded-md border border-dashed border-border p-6 text-center`.
+- **Placeholder card** — `mx-auto w-full max-w-md rounded-md border border-dashed border-border p-6
+  text-center`. **The identical container and width bind the shell's not-found card** — one rule, both
+  places (§Surface 1, empty state, 2026-08-07).
 - **Mark** — the `✦` brand glyph at reduced opacity, `aria-hidden="true"`, decorative only.
 - **Heading** — one `<h1>`, `text-sm font-semibold text-foreground`. It is the **one `h1` on the page** and
   the target the shell moves focus to on a route change.
@@ -682,12 +812,15 @@ before — so several of these have no precedent to inherit.
 
 1. **The nav is real links in a real landmark.** `<nav aria-label="Surfaces">` containing `<a href>`, never
    `<button>` + `pushState`. Middle-click, Ctrl-click and "copy link address" must all work.
-2. **Exactly one `aria-current="page"`** — and in the not-found state, **none**. Never two.
+2. **Exactly one `aria-current="page"`** — and in the not-found state, **none**. Never two. At 390 the
+   disclosure follows the same rule: it carries no `aria-current` where no route matched, and its label is
+   the nav's own name (2026-08-07).
 3. **Active is never colour-only.** Three non-colour signals travel with it: the 2px bottom rule (shape),
    `font-semibold` vs `font-medium` (weight), and `aria-current` (programmatic). Colour is emphasis on top.
    **Contrast:** `--color-muted-foreground` `hsl(218 9% 38%)` and `--color-primary` `hsl(174 72% 27%)` both
    clear **4.5:1** on `--color-card` white at `text-sm`; the 2px `primary` rule clears the **3:1** non-text
-   bar, so it is permitted to carry meaning.
+   bar, so it is permitted to carry meaning. **The weight signal is not negotiable against layout
+   precision** — see the ≤1px drift tolerance in §The navigation model (2026-08-07).
 4. **The unavailable item stays focusable.** `aria-disabled="true"` + `title`, but **not** removed from the
    tab order — an item skipped by the keyboard hides its explanation from exactly the users who need it. It
    is focusable and does not navigate.
@@ -737,7 +870,10 @@ exist so the build has no open question.
    slot. `?scope=` stays a query param on `/fleet`, never a path segment.
 2. **The shell's top bar is deliberately non-uniform to the right of the slot and byte-identical to its
    left.** The slot grows leftward and can never push the nav.
-3. **One brand mark** (DG-45-1) — the fleet's filled 24px `✦` tile, on every route.
+3. **One brand mark in the BAR** (DG-45-1) — the fleet's filled 24px `✦` tile, on every route. The rule is
+   scoped to R2 (2026-08-07); a mark a mounted surface paints inside R4 is that surface's own, and the one
+   visible duplication it leaves — the config editor's sidebar identity block — is **DG-45-3**, recorded,
+   carried, and **not closed in m45** by PO ruling.
 4. **The wordmark is `aof` alone.** `Mesh` and `Work Board` are retired from the bar; the nav names the
    route.
 5. **The identity chip is the origin's identity**, mono, min/max-width, truncating, `title`-carrying, never
@@ -745,12 +881,15 @@ exist so the build has no open question.
 6. **The nav is underline tabs of real links**, because that idiom already means "which sibling view am I
    on" in this product — while the filled segment already means "which filter value is picked".
 7. **Nav form is pinned by breakpoint in whole discrete drops** (slot → surface bar at 768; nav →
-   disclosure at 390). Never a truncated label, never a scrolling nav, never two nav rows.
+   disclosure at 390). Never a truncated label, never a scrolling nav, never two nav rows. **The 390
+   disclosure is labelled with the active surface's name — and with the nav's own name, `Surfaces ▾`, when
+   no route matched** (2026-08-07).
 8. **Cross-origin nav items render identically to in-origin ones; unresolvable ones render dashed and
    `aria-disabled` with a `title` naming the command** — the peer-board honest-locality pattern, reused.
 9. **Two content modes, declared per route** (`content:page` / `content:fixed`), with scroll ownership
    declared and never emergent. A terminal-hosting surface is always `content:fixed`.
-10. **`--aof-shell-chrome-height` + `dvh`**, never a hard-coded 48, and it tracks the notice rail too.
+10. **`--aof-shell-chrome-height` + `dvh`**, never a hard-coded 48, and it tracks the notice rail too — and
+    it is what the shell's own full-height content states centre against.
 11. **`shell:fullscreen` is one named slot, one occupant, chrome hidden not overlaid, `Esc` + a visible
     control, and NOT a route** — no path, no query param, no history entry.
 12. **One z ladder** (DG-45-2), `z-50` reserved for fullscreen alone.
@@ -763,7 +902,17 @@ exist so the build has no open question.
     The content dip while a server is gone is accepted deliberately: the surface underneath is already
     inert, and every alternative either degrades a true signal or turns an absence into a covert one.
 16. **`/` is a placeholder card, not a redirect**, and it has no loading and no error state — stated
-    explicitly rather than left blank.
+    explicitly rather than left blank. **It and the not-found card share one container and one width** —
+    `w-full max-w-md`, both-axis centred — one rule, both places (2026-08-07).
+17. **R3 is present at ≤768 on every route, and empty where the slot is empty** (2026-08-07). A steady
+    88px frame beats a bar that comes and goes: the alternative moves the content region as you navigate
+    and turns an absence into a covert signal. **This is not R1's forbidden reserved band** — R1 would
+    reserve for a rare, transient condition; R3 holds a steady-state region that is occupied on half the
+    routes.
+18. **The nav carries a ≤1px drift tolerance downstream of the active item** (2026-08-07), caused by the
+    active weight signal and bounded to it — everything left of the nav stays pixel-identical on every
+    route. **It is never closed by removing the weight signal**, which the accessibility contract requires;
+    if exact invariance is ever wanted, fixed-width nav items are decided here first.
 
 ---
 
@@ -791,6 +940,10 @@ Listed so the review knows which rulings above are provisional and what it costs
    (2026-08-06). The regions above are written to hold any four-entry table; the nav's labels and order
    follow it. A table with **more than four** entries, or a label over 10 characters, needs this document
    amended.
+8. **Whether the config editor's sidebar keeps its own identity block** (DG-45-3, raised 2026-08-07;
+   ruled: kept in m45, carried as an accepted duplication). A mock that draws `/config` settles it — and if
+   it draws the sidebar without the tile and the wordmark, DG-45-3 closes with the mock's authority rather
+   than waiting for `<App>` to be in scope.
 
 ---
 

@@ -103,3 +103,70 @@ LITMUS = real HTTP against started servers). No `@manual`, no `@uat`, no rendere
 **ACCEPTED 2026-08-07.** Validate gate PASS (`aof work validate 45/02`). All `@executable` green, no
 open blocker (the one should-fix not fixed in-story — the symlink guard — is TECH_DEBT item 23 with
 its reachability assessed as not-client-reachable). `STORY.md` → `done`.
+
+## 45/03 · The shell and the entry rewrite — verified 2026-08-07, PENDING `@uat`
+
+Lanes in scope: **`@executable`** (tasks 00–03) + **`@uat`** (task 04, the human visual review — the
+one open gate). No `@manual`. Design conformance ran at build (below), so the human gate arrives
+pre-evidenced.
+
+**Memory recall** (`--kind near-miss`): empty block — nothing to surface.
+
+### Verification evidence
+
+- **`@executable` suites green — 46 lanes / 0 failed** (`test/shell-{entry-plan,regions,navigation,
+  not-found-and-fullscreen}.test.mjs`; 34 lanes at build + 12 added by review findings). Coverage:
+  85/85 Examples rows; both reviewers audited row-by-row. Driven through the house react-app-harness
+  (real production `.tsx` over mini-react), including a **real-composition lane** (`<Fleet/>` inside
+  the real `<Shell/>`, one bundle, one bus).
+- **Fitness functions**: `acd-ui-single-route-table` **4/5** (the 5th is 45/04's producer lane, by
+  design); `acd-shell-z-ladder-single-home` **3/3** (was 1/3); `acd-shell-bus-single-host` **4/4**
+  (NEW, written at review — the bus's single-host assumption ratcheted); `acd-ui-surface-file-budget`
+  **4/4** (config/App.tsx capped at 1,300); `acd-rendered-component-fed-by-route` **4/4** (was 3/4 —
+  see finding B1); `acd-mesh-ui-scope-visible` 3/3; `acd-route-logic-framework-free` 5/5; app-routes
+  20/20; neighbours 99/99 with zero harness edits. `npm --prefix ui run build` green.
+- **Non-vacuity**: 20 reviewer/developer mutations, every one caught by a named lane (incl. the
+  ladder-sharing, push-instead-of-replace, rescue-to-landing, stale-dismisser, and budget-model
+  mutations).
+- **The split verified as a MOVE**: `git diff HEAD:ui/src/main.tsx ↔ ui/src/config/App.tsx` is clean
+  — imports/export/`<main>`→`<div>`/4× `min-h-screen`→published-primitive only; not one view
+  touched. Entry is 60 lines; `ROUTES`-driven nav; legacy rewrite applied exactly once as
+  `replaceState` (now driven through a spy-history seam).
+- **[Build-1] verified against the real effect**: fullscreen ADOPTS a live DOM node (re-parent into a
+  dedicated React-childless host, same object returned home on dismiss, keyed on occupantId, layout
+  tick on both transitions) — m46 is unblocked; the socket-alive pin stays m46's.
+- **Design conformance (designer, over 20 real renders at 390/768/1280/760×520)**: **GAPS → one
+  fixed, one carried.** Chrome CONFORMS region-by-region at every judged width (nav drops incl. the
+  390 disclosure, slot moves to R3, 88px budget, one active item, none on not-found, chip never
+  blank, no truncation, no horizontal scroll). GAP-2 (landing/not-found cards top-anchored,
+  shrink-wrapped) **fixed** — shared wrapper, both-axis centring, `max-w-md`, re-rendered and
+  confirmed. GAP-1 (the config editor's sidebar repeats the shell's brand/identity) **carried as
+  DG-45-3** by PO ruling — SPEC's "config editor views untouched" boundary holds in m45; DESIGN.md
+  records the gap, its fix shape and close condition; task 04 gained a row so the human meets it as
+  recorded, not new. NOT-JUDGED (named): the board-origin `serverGone` rail at 768/390 (the one
+  missing render — needs a dying board server staged), skip-link focus state, the 390 disclosure
+  open, shell loading/error states, R5 occupants.
+
+### Findings
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| B1 (architect) | `acd-rendered-component-fed-by-route` blinded by 45/02's `//api/*` line comment — the suite's block-first comment stripper ate 39k chars (a green-turned-red missed at 45/02's own verify) | defect (test infra) | blocker (branch) | stripper reordered line-first + non-vacuity assertion added; the 23-suite class-wide hazard measured and recorded as **TECH_DEBT item 24** | **fixed** |
+| QA F-45-03-B | a stale fullscreen dismisser evicted the CURRENT occupant (m46's exact failure mode) | defect | should-fix | dismiss now carries its occupant id; non-current no-op; feature row pinned | **fixed** |
+| QA F-45-03-A | copy-and-delete re-spells surviving parameters (`a%20b`→`a+b`, `debug`→`debug=`) vs the feature's "never re-encoded" | contract wording | should-fix | PO ruling: ADR-006 [Amigos-3] reading (decoded-pairs, order, count); feature amended, three re-spelling rows pinned explicitly | **fixed** |
+| QA F-45-03-C | UNKNOWN nav availability announced `aria-disabled` with no title (pessimistic answer AT users only) | design-gap / a11y | should-fix | PO ruling: `aria-disabled` reserved for UNAVAILABLE; UNKNOWN gets the not-yet-known title; feature pinned | **fixed** |
+| QA F-45-03-D/E/F/G/H/L | five coverage holes proven by mutation (private budget model; undriven history wiring; undriven return-home/ticks; unasserted verdicts; undriven identity-unknown; undriven Escape/claimed-Escape) | coverage | should-fix/nit | real seams exported (`navBudgetFor`, `applyEntryPlan`), document stub added to the harness, 12 lanes added — all now mutation-caught | **fixed** |
+| architect F3/F4 + nits | bar-height two homes; unknown-route-id blank render; adoption insert-ordering; rail via querySelector; `unchanged()` alloc; stale comments | defect/craft | should-fix/nit | all applied (single-home classes, `surfaceMountFor` loudness, dedicated host div, ref, identity-stable reducer, comments corrected) | **fixed** |
+| architect F7 | ADR-005's "document never scrolls" false for `content:page` as the locked feature requires | doc (ADR) | should-fix | **[Build-6]** folded in — struck through in place, two modes spelled out | **fixed** |
+| QA F-45-03-K | not-found "verbatim" ambiguous (pathname vs full address) | contract wording | nit | PO ruling: FULL address (pathname+query+fragment); built + exact assertion | **fixed** |
+| QA F-45-03-I | notice rail's "first line pinned" clause unbuilt | design-gap | nit | built (sticky first element child, with the stated CSS limit); reads-right verdict stays task 04's | **fixed** |
+| dev (composition lane) | `Fleet.tsx`'s inline `onRefresh` is one refactor from an infinite update loop — production survives only via the entry's referentially-stable element | latent risk | nit | routed to **m46's brief** (m46 reworks these files; fix is a one-line `useCallback`) — recorded in STATE | **routed** |
+| designer GAP-1 | brand/identity duplicated on `/config` (shell bar + `<App>` sidebar) | design-gap | should-fix | **carried as DG-45-3** (PO: not closed in m45; fix shape + close condition recorded in DESIGN.md; task 04 row added) | **carried** |
+
+### Verdict
+
+Automated + agent lanes **PASS**; validate gate **PASS** (`aof work validate 45/03`). **NOT accepted
+yet** — task 04's `@uat` human visual review is open (the milestone's one designed human gate).
+Twenty current renders for it are at the session scratchpad `renders/` dir
+(`{landing,fleet,board,config,notfound}-{390,768,1280,desktop}.png`, post-fix); the `serverGone`
+rail renders remain to be staged during the session. `STORY.md` stays `in-review`.

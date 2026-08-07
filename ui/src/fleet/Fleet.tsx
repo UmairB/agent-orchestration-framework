@@ -4,6 +4,10 @@ import type { FleetBoard, FleetNode, RunState, MeshStatus, GlobalMeshStatus, Glo
 import { runStateChip, relativeTime, refreshedLabel } from "../board/runs.mjs";
 import { assignmentChip, assignmentSummary } from "./assignments.mjs";
 import { FleetTerminalView } from "./terminal-view/FleetTerminalView";
+// milestone 45 / story 03 — the shell's named surface slot. The fleet contributes its own
+// controls (scope, legend, refresh) into the shell's bar instead of painting a second one;
+// with no shell present (the headless harness) the contribution renders in place.
+import { SurfaceSlot } from "../app/SurfaceSlot";
 import { fleetCurrentWorkLines } from "./runs.mjs";
 import { StatusRing, StatusChip, StatusDot } from "../board/status";
 import type { WorkStatus } from "../board/api";
@@ -108,7 +112,6 @@ export function Fleet() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   // A live clock so the freshness label ages between polls.
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const groupName = useGroupName();
 
   // The m03 load({silent}) idiom (KEEP-LAST-GOOD): a SILENT refresh updates in
   // place — it never flips to the full-screen loading/error branch (that would
@@ -205,9 +208,12 @@ export function Fleet() {
     // guard ensures the PAGE body/root itself never grows a horizontal scrollbar
     // at a 360–414px viewport, matching task-02's "no text overlaps at 360px" for
     // the now-populated global state too.
-    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background text-foreground">
+    // milestone 45 / story 03 — `min-h-screen` was 100vh, which under the shell is taller than
+    // the content box by exactly the chrome height (the page would scroll with nothing in it).
+    // The published primitive (ADR-005 contract point 7) is the honest replacement, and its
+    // `0px` fallback keeps this identical when the surface is mounted with no shell.
+    <div className="flex min-h-[calc(100dvh_-_var(--aof-shell-chrome-height,0px))] flex-col overflow-x-hidden bg-background text-foreground">
       <TopBar
-        group={groupName}
         scope={scope}
         onScopeChange={onScopeChange}
         fetchedAt={fetchedAt}
@@ -230,12 +236,12 @@ export function Fleet() {
         // populated — the two LOCAL card grids. A stale node RENDERS (degraded
         // liveness, never dropped); a nodes-but-no-boards fleet shows the Boards
         // dashed placeholder, never an error.
-        <main className="flex-1 px-8 py-7">
+        <div className="flex-1 px-8 py-7">
           <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
             <NodesRegion nodes={status?.nodes ?? []} />
             <BoardsRegion boards={status?.boards ?? []} />
           </div>
-        </main>
+        </div>
       )}
     </div>
   );
@@ -253,8 +259,21 @@ function safeSearch(): string {
 
 // ─────────────────────────────────────────────────────────── top bar ──────────
 
+// milestone 45 / story 03 — THE BAR IS ABSORBED INTO THE SHELL. What used to be this
+// surface's own `<header>` (the mark, `aof`, `Mesh`, the group chip, a divider, then the
+// controls) is now the SHELL's top bar: DESIGN §Accessibility 6 allows exactly one `banner`
+// and one `<main>` in the document, and DG-45-1 allows exactly one brand mark. What survives
+// here is what is FLEET's — the scope control, the freshness legend and the ⟳ refresh — and it
+// is CONTRIBUTED to the shell's right-anchored surface slot rather than authored by the shell
+// (DESIGN §The scope-control ruling: the shell owns the bar, never scope semantics; `?scope=`
+// is a fleet contract end to end and would be inert on three of four routes).
+//
+// The function keeps its name, and `<TopBar>` keeps its unconditional position above the
+// loading/error/empty/populated ternary, because that is what makes the scope control present
+// in EVERY page state — the invariant `acd-mesh-ui-scope-visible` has pinned since m34/ADR-006.
+// It is no longer a `<header>`; it is a contribution, and when no shell is present (the
+// headless harness mounts <Fleet/> directly) it renders exactly where it always did.
 function TopBar({
-  group,
   scope,
   onScopeChange,
   fetchedAt,
@@ -262,7 +281,6 @@ function TopBar({
   stalenessWindow,
   onRefresh,
 }: {
-  group: string;
   scope: Scope;
   onScopeChange: (next: Scope) => void;
   fetchedAt: number | null;
@@ -278,23 +296,20 @@ function TopBar({
       ? "⟳ refreshed just now"
       : refreshedLabel(new Date(fetchedAt).toISOString(), nowIso);
   return (
-    <header className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
-      {/* the filled ✦ mark → aof · Mesh · <group chip> — echoing the board's top bar */}
-      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary text-sm font-bold text-primary-foreground" aria-hidden="true">
-        ✦
-      </span>
-      <span className="text-sm font-bold tracking-tight">aof</span>
-      <span className="text-sm text-muted-foreground">Mesh</span>
-      <span className="h-4 w-px bg-border" aria-hidden="true" />
-      <span className="mono rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">{group}</span>
+    // The fleet's contribution to the shell's surface slot, in the fleet's own order. `deps`
+    // are every value these nodes CAPTURE: omit one and the bar goes stale while the body
+    // updates — the one failure mode this mechanism has.
+    <SurfaceSlot
+      deps={[scope, onScopeChange, stalenessWindow, freshness, onRefresh]}
+      className="flex items-center gap-3 text-xs text-muted-foreground"
+    >
       {/* milestone 34 / story 03 (ADR-006; DESIGN "scope control") — the ALWAYS
           visible Global/Local switch. Present in every page state (loading/error/
           empty/populated — task 02 scenario 4's "the scope control region is
           visible" even while pending) since it lives in the top-level shell, not
           the body region that swaps under it. */}
-      <span className="h-4 w-px bg-border" aria-hidden="true" />
       <ScopeControl scope={scope} onScopeChange={onScopeChange} />
-      <span className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
+      <span className="flex items-center gap-4 text-xs text-muted-foreground">
         <Legend windowSeconds={stalenessWindow} />
         {/* ⟳ refresh — click re-polls in place (non-tearing, keep-last-good on a
             failed silent poll). NO push/stream chrome. It both shows freshness AND
@@ -310,7 +325,7 @@ function TopBar({
           {freshness}
         </button>
       </span>
-    </header>
+    </SurfaceSlot>
   );
 }
 
@@ -418,7 +433,7 @@ function GlobalScopeView({
   onAssigned: () => void;
 }) {
   return (
-    <main className="min-w-0 flex-1 px-4 py-7 sm:px-8">
+    <div className="min-w-0 flex-1 px-4 py-7 sm:px-8">
       <div className="mx-auto flex w-full min-w-0 max-w-[1240px] flex-col gap-8">
         {status.scope === "local" && status.workspaceId ? (
           <p className="mono text-xs text-muted-foreground">
@@ -430,7 +445,7 @@ function GlobalScopeView({
         <GlobalNodePanel nodes={status.nodes} />
         <DiagnosticsRegion status={status} />
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -1429,14 +1444,14 @@ function BoardDrillIn({ board }: { board: FleetBoard }) {
 // visible" — true even here, one level up from this body).
 function LoadingState() {
   return (
-    <main className="flex-1 px-4 py-7 sm:px-8">
+    <div className="flex-1 px-4 py-7 sm:px-8">
       <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-8">
         <RegionPlaceholder label="Workspaces" />
         <RegionPlaceholder label="Milestones" />
         <RegionPlaceholder label="Nodes" />
         <RegionPlaceholder label="Diagnostics" />
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -1516,17 +1531,3 @@ function plural(n: number, word: string): string {
   return n === 1 ? word : `${word}s`;
 }
 
-// The group name for the top bar. There is no group name in the mesh:status
-// aggregate (ADR-002 — one command, no second read), so the fleet view reads it from
-// the ?group= query when supplied, else a neutral default.
-function useGroupName(): string {
-  const ref = useRef<string>("");
-  if (!ref.current) {
-    try {
-      ref.current = new URLSearchParams(location.search).get("group") || "fleet";
-    } catch {
-      ref.current = "fleet";
-    }
-  }
-  return ref.current;
-}

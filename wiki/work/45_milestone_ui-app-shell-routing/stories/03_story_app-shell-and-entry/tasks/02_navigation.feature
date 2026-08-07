@@ -127,7 +127,13 @@ Feature: the nav offers all four surfaces as real links, marks the active one by
       | a board IS running on its ephemeral port      | fleet   | Board  | resolvable at an absolute URL | a live link to that absolute origin, identical in form to an in-origin item | (none) |
       | the config editor is not being served         | board   | Config | not resolvable                | present, marked unavailable, with no live `href`         | names the command `aof assets ui`       |
       | the fleet is always the fixed `:4181` origin  | board   | Fleet  | resolvable                    | a live link to the fixed fleet origin                    | (none)                                  |
-      | the probe has not answered yet                | fleet   | Board  | not yet known                 | present, occupying its slot, NOT yet a live link         | (none, or the not-yet-known form)       |
+      | the probe has not answered yet                | fleet   | Board  | not yet known                 | present, occupying its slot, NOT yet a live link         | the not-yet-known form — and NEVER `aria-disabled` |
+    # THE NOT-YET-KNOWN ROW's marking, pinned at review (QA F-45-03-C, PO ruling
+    # 2026-08-07): `aria-disabled="true"` belongs to the NOT-RESOLVABLE state alone. An
+    # undetermined destination is not disabled — announcing "unavailable" for a surface
+    # that is probably up, then silently becoming a link, is the pessimistic answer
+    # sighted users are deliberately NOT given. UNKNOWN renders present, non-link, with
+    # the not-yet-known title and no aria-disabled; the three states stay three states.
     # ROW 5 IS THE ONE TO SETTLE AT BUILD. DESIGN forbids both a dead `href` and a nav
     # that reflows when a board appears or disappears, which leaves exactly two honest
     # answers for the interval before the probe returns: hold the slot at its final

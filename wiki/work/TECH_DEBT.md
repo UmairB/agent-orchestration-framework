@@ -1048,3 +1048,63 @@ the fixture symlink to feed it. Two things to decide with it rather than after: 
 static request (cache the resolved root; the candidate still costs one), and whether a deliberately
 symlinked deploy layout must keep working — if so the rule is "the real path stays inside the real root",
 which a symlinked `ui/dist` itself still satisfies.
+
+---
+
+## 24. Twenty-three source-reading fitness functions can be BLINDED by a comment — a line comment containing `/*` deletes the rest of the file before the detector ever sees it
+
+**Measured 2026-08-07**, during the structural review of `45/03`, from a live failure rather than from
+reading. `test/arch/acd-rendered-component-fed-by-route.test.mjs` reported
+`the fleet face reads its status from exactly ONE query surface (found [])` — a fitness function failing
+about a subject that had not changed.
+
+**The mechanism, and it is worth stating exactly because it is invisible at the call site.** The house
+idiom for "comments are not code" is two chained replaces, and **the order is load-bearing**:
+
+```js
+source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, " ");   // BLOCK first — the trap
+source.replace(/^[ \t]*\/\/.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ");   // LINE first — correct
+```
+
+Stripping block comments FIRST means a **line** comment that merely contains the two characters `/*` —
+an API glob in prose, a path pattern, a regex quoted in English — opens a **phantom block comment** that
+runs to the next `*/` anywhere in the file and deletes everything between. Measured on the real case:
+`src/mesh-ui-serve.mjs:277` gained the comment `// … //api/* dodges the API guard …` in `45/02`
+(`64d471b`). Under the old order the stripper left **9,744 of 48,604 characters** standing — 39,000
+characters of code gone, every `queryGlobalMeshStatus(` call site with it. At `eacbd57` (before that
+comment existed) the same stripper left 16,917 characters and the suite was green. **A prose edit turned
+a fitness function red, and the failure message pointed at the subject rather than at the detector.**
+
+**How it bites.** Both directions, and the second is the dangerous one:
+
+- **False RED** (what happened): a suite fails for a reason unrelated to its subject, and the next
+  reviewer's cheapest hypothesis — "the diff broke it" — is wrong. This one cost a story review its
+  attention and was initially reported as pre-existing.
+- **False GREEN** (not yet observed, and the reason this is recorded rather than shrugged off): these
+  detectors overwhelmingly assert `deepEqual(violations, [])`. A stripper that eats the file finds no
+  violations in it. **A guard blinded this way passes.** The same comment that broke the one suite
+  asserting a *presence* would silently disarm every suite asserting an *absence* over that file.
+
+**The measured surface.** 23 suites carry the hazardous shape (block-strip-first, or block-strip with no
+line strip at all — same fuse); 118 already use the correct order, so this is a minority idiom and not a
+convention to overturn. Independently, **22 of 281** modules under `src/` and `ui/src` already contain a
+line comment with `/*` in it — the fuse is lit in 22 places today, and every new one is a coin flip
+against whichever suites read that file. The exposed suites include four of milestone 45's own ratchets
+(`acd-ui-single-route-table`, `acd-no-surface-mode-url-literal`, `acd-route-logic-framework-free`,
+`acd-spa-fallback-never-masks`) and, notably, `acd-no-new-silent-catch` — a guard whose whole job is to
+find something that must not be there.
+
+**Paid down so far.** `acd-rendered-component-fed-by-route` is fixed (line-comments-first, both of its
+strip sites now share one `stripComments`, plus a non-vacuity assertion that fires on the stripper rather
+than on the subject when the source comes back empty). The remaining **22** are untouched.
+
+**The fix.** One shared `stripComments(source)` in `test/support/` — line comments first, block comments
+second — imported by all 23, deleting 23 hand-rolled copies of a rule that is only correct in one order.
+This is TECH_DEBT item 0.2's shape ("the same fact derived independently, everywhere") landing on the
+test tier, which is why a sweep is the right size of fix rather than 23 individual corrections. Two
+things to do with it rather than after: (a) give the shared helper its own self-check, planting
+`// see //api/* here` above a marker line and asserting the marker survives — the regression that
+produced this item, pinned; (b) add a cheap non-vacuity assertion to each converted suite (*"the stripped
+source still contains «some code»"*), so a future blinding fails LOUDLY and names the stripper instead of
+quietly reporting no violations. Without (b) the sweep fixes today's 23 and leaves the false-green class
+open for the 24th.

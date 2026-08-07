@@ -7,7 +7,7 @@ parent: 45
 status: not-started
 owner: product-owner
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-08-07
 schema: 1
 aofVersion: 0.1.0
 ---
@@ -37,13 +37,13 @@ other. Every surface renders exactly what it renders today, inside the frame.
      acceptance criteria. A task is done when its @executable feature is green. Keep tasks
      independent of OTHER stories' tasks; sequential within this story is fine. -->
 
-- [ ] `tasks/00_entry-selects-a-surface.feature` — the entry mounts, applies the legacy redirect and
+- [x] `tasks/00_entry-selects-a-surface.feature` — the entry mounts, applies the legacy redirect and
       selects a surface; it defines none itself
-- [ ] `tasks/01_shell-regions.feature` — the five named regions in order, the chrome budget, and the
+- [x] `tasks/01_shell-regions.feature` — the five named regions in order, the chrome budget, and the
       surface owning scroll inside a bounded content box
-- [ ] `tasks/02_navigation.feature` — real links between the four surfaces, the active one marked
+- [x] `tasks/02_navigation.feature` — real links between the four surfaces, the active one marked
       without relying on colour, deep-link parameters preserved across a move
-- [ ] `tasks/03_unmatched-path-and-fullscreen.feature` — an unknown path renders the 404 surface
+- [x] `tasks/03_unmatched-path-and-fullscreen.feature` — an unknown path renders the 404 surface
       *inside* the shell; fullscreen is one shell-owned slot and is not a route
 - [ ] `tasks/04_app-shell-visual-review.feature` — a person judges the shell against the mock at four
       viewports on every route

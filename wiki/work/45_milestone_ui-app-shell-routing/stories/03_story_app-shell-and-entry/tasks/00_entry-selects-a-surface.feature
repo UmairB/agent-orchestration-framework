@@ -136,7 +136,7 @@ Feature: the entry mounts, translates a legacy address exactly once, and renders
     Then the surface selected is <surface>
     And the address it is handed carries <survives> — same keys, same values, same ORDER
     And <surface reads> reads its fact back unchanged
-    And no parameter has been added, reordered, re-encoded or dropped
+    And no parameter has been added, reordered, or dropped, and every surviving value DECODES to the same text it decoded to before
 
     Examples:
       | case                                  | address                                  | surface | survives                       | surface reads                                        |
@@ -146,9 +146,19 @@ Feature: the entry mounts, translates a legacy address exactly once, and renders
       | the board's fragment contract         | /?mode=board#42/03                       | Board   | #42/03                         | the board's own fragment read (Board.tsx:585) → "42/03" |
       | a fragment AND a query together       | /?mode=board&scope=local#42/03           | Board   | ?scope=local#42/03             | the fragment read → "42/03", the query intact         |
       | an encoded value                      | /?mode=fleet&q=a%2Fb                     | Fleet   | ?q=a%2Fb                       | the value decodes to "a/b", as it does today          |
-    # Order is asserted because ADR-006 preserves a URL as TEXT, not merely as a set —
-    # which is what makes a bookmark comparison and a test assertion honest. The rule
-    # that produces it is copy-the-incoming-params-and-delete-`mode`, never
+      | a percent-encoded space RE-SPELLS     | /?mode=fleet&q=a%20b                     | Fleet   | ?q=a+b (decodes "a b")         | the value decodes to "a b" — same text, new spelling |
+      | a value-less flag gains its equals    | /?mode=fleet&debug                       | Fleet   | ?debug= (present, empty)       | `has("debug")` true, reads "" — present-and-empty either way |
+      | sub-delimiters re-spell, decode same  | /?mode=fleet&q=~!*'()                    | Fleet   | ?q=%7E%21*%27%28%29            | the value decodes to "~!*'()" unchanged              |
+    # Order and ENTRY COUNT are asserted, read back decoded — the ADR-006 [Amigos-3]
+    # reading, restated at review (QA F-45-03-A, PO ruling 2026-08-07): the mandated
+    # copy-and-delete mechanism round-trips through the urlencoded serialiser, which may
+    # RE-SPELL a surviving parameter (`a%20b` → `a+b`; a value-less `debug` → `debug=`)
+    # while every consumer — all of which read through `URLSearchParams` or a
+    # server-side query parser — sees the same keys, same decoded values, same order.
+    # This scenario's earlier "re-encoded" wording asked for byte-stability the chosen
+    # mechanism cannot deliver and no consumer needs; the last three rows pin the
+    # re-spellings EXPLICITLY so they are met as decisions, not filed as bugs. The rule
+    # is still copy-the-incoming-params-and-delete-`mode`, never
     # build-a-fresh-set-from-a-known-list; the third row is the one that tells the two
     # apart, because a known-list builder drops `zz` and passes every other row.
 

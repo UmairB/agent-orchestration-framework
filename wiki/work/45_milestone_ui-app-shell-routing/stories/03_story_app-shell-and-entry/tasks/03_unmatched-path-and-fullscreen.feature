@@ -97,7 +97,7 @@ Feature: an unmatched path renders inside the shell at the address the operator 
   Scenario: the not-found state names the path that did not match, points at the nav, and uses the not-yet language rather than the error language
     Given the current address is `/nope?scope=local`
     When the not-found state is read
-    Then it carries the path that did not match, verbatim, as the operator typed it
+    Then it carries the FULL address that did not match — pathname, query and fragment, as the operator typed them — so `/nope?scope=local` and `/nope?scope=global` stay tellable apart (PO ruling 2026-08-07, resolving QA F-45-03-K: "verbatim" means the whole address, not the pathname alone — the binding rail is that a typo, a stale bookmark and a broken link remain distinguishable, and the query is often exactly where they differ)
     And it points at the navigation as the way on
     And it takes the established dashed empty-state form — the product's absent/not-yet primitive
     And it carries NO `accent` and NO `destructive` treatment: nothing failed, the path simply is not a surface
@@ -150,6 +150,14 @@ Feature: an unmatched path renders inside the shell at the address the operator 
       | the visible control dismisses         | presenting A    | the exit control is activated           | empty           | 0         | visible |
       | Esc with nothing presented is a no-op | empty           | `Esc` is pressed                        | empty           | 0         | visible |
       | dismissing twice is a no-op           | empty           | the exit control is activated again     | empty           | 0         | visible |
+      | a STALE dismisser aims at a PAST occupant | presenting B | surface A's own dismiss handle fires    | presenting B    | 1         | hidden  |
+    # THE STALE-DISMISSER ROW (added at review — QA F-45-03-B, PO ruling 2026-08-07): a
+    # dismissal names the occupant it aims at, and one that names an occupant no longer
+    # holding the slot is the SAME no-op as dismissing an empty slot. The failure it
+    # forecloses is m46's: surface A is replaced by surface B, A unmounts, A's own
+    # cleanup fires its dismiss handle — and without the guard it evicts B. shell-bus's
+    # own header promises m46 "a contract rather than a negotiation"; this row is that
+    # promise made checkable.
     # "Chrome hidden" is not "chrome covered": a translucent overlay would put a
     # light-theme bar behind a dark terminal. The measurable consequence is task 01's —
     # while an occupant is presented the published chrome height is 0, so the occupant

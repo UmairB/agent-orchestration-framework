@@ -263,6 +263,24 @@ Feature: the shell reads as ONE application — a design-conformance judgement o
     And `prefers-reduced-motion` gains no new surface
     And the verdict for this region is CONFORMS or names a specific GAP
 
+  # TWO ROWS ADDED AT REVIEW (designer conformance pass over 15 real renders,
+  # 2026-08-07). The first pins the one GAP that review found and the PO ruled CARRIED
+  # (DG-45-3 — SPEC's "config editor views untouched" boundary holds in m45), so the
+  # human reviewer meets it as a known, owned gap rather than logging it fresh. The
+  # second is the single highest-value render the review could not take: DESIGN's own
+  # budget table calls the 768/390 serverGone breach "the case the render must check",
+  # and it is still modelled, not measured.
+  Scenario Outline: the two review-added checks — the carried brand duplication, and the measured serverGone rail
+    Given the render named in <render>
+    When the designer judges it against <judge against>
+    Then <verdict rule>
+
+    Examples:
+      | render                                            | judge against                                  | verdict rule                                                                                                     |
+      | `/config` at any width                            | DG-45-1 (scoped to the bar) + carried DG-45-3  | the SHELL BAR carries the brand exactly once; the config sidebar's second tile/wordmark is the KNOWN carried gap DG-45-3 — record its presence, do not log it as a new finding, and any OTHER duplication is a fresh GAP |
+      | the board origin with `serverGone` standing, 768  | DESIGN §chrome budget (wrapped-rail row)       | the rail's MEASURED height replaces the ~48px estimate; the breach is REPORTED (verdict readable), nothing yields to the rail, and the first line stays visible |
+      | the board origin with `serverGone` standing, 390  | DESIGN §chrome budget (wrapped-rail row)       | the rail's MEASURED height replaces the ~64px estimate; ≤25% of the viewport, scrolling inside itself past the bound with its first line pinned |
+
   # THE BASELINE HAND-OFF. Stated once, so the follow-on has somewhere to attach.
   Scenario: an approved render becomes the visual-regression baseline
     Given the designer has judged the renders CONFORMS on every route at every documented breakpoint
