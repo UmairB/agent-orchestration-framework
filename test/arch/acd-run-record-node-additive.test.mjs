@@ -18,6 +18,11 @@ import path from "node:path";
 // resilience keys — unchanged in name/order, then `node` APPENDED.
 const THIRTEEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt"];
 const FOURTEEN_KEYS = [...THIRTEEN_KEYS, "node"];
+// 348 auto-resume SUPERSEDES the fourteen by the same additive discipline m26 used:
+// `resumeAfter` (the instant a session_limit failure may resume) appended LAST. A
+// fourteen-key record reads forward with resumeAfter: null — absence is benign, and
+// benign here means exactly "a failure with no stated reset", i.e. today's behaviour.
+const FIFTEEN_KEYS = [...FOURTEEN_KEYS, "resumeAfter"];
 
 async function makeItem() {
   const repo = await mkdtemp(path.join(os.tmpdir(), "aof-node-additive-"));
@@ -38,15 +43,17 @@ export const archTests = [
         // m20 freeze verbatim (names AND order — the supersede is additive-only).
         assert.deepEqual(FOURTEEN_KEYS.slice(0, 13), THIRTEEN_KEYS, "the first thirteen keys are 20/ADR-001's freeze, unchanged in name and order");
         assert.equal(FOURTEEN_KEYS[13], "node", "the fourteenth key is `node`, appended last");
+        assert.deepEqual(FIFTEEN_KEYS.slice(0, 14), FOURTEEN_KEYS, "the first fourteen keys are the m26 freeze, unchanged in name and order");
+        assert.equal(FIFTEEN_KEYS[14], "resumeAfter", "the fifteenth key is `resumeAfter`, appended last");
 
         // Minted WITH a node: fourteen keys, in order, node carrying the value.
         const withNode = await startRun(item, { node: "node-a", now: "2026-07-02T10:00:00.000Z" });
-        assert.deepEqual(Object.keys(withNode), FOURTEEN_KEYS, "a minted record carries exactly the fourteen keys, in order");
+        assert.deepEqual(Object.keys(withNode), FIFTEEN_KEYS, "a minted record carries exactly the fifteen keys, in order");
         assert.equal(withNode.node, "node-a", "the node key carries the injected node id");
         const onDisk = JSON.parse(
           await readFile(path.join(item.dir, "runs", "node-a", `${withNode.runId}.json`), "utf8")
         );
-        assert.deepEqual(Object.keys(onDisk), FOURTEEN_KEYS, "the ON-DISK record carries exactly the fourteen keys, in order");
+        assert.deepEqual(Object.keys(onDisk), FIFTEEN_KEYS, "the ON-DISK record carries exactly the fifteen keys, in order");
       } finally {
         await rm(repo, { recursive: true, force: true });
       }
@@ -59,10 +66,10 @@ export const archTests = [
       try {
         const { startRun } = await import("../../src/run-store.mjs");
         const record = await startRun(item, { now: "2026-07-02T10:00:00.000Z" });
-        assert.deepEqual(Object.keys(record), FOURTEEN_KEYS, "the no-node record still carries the fourteen keys, in order");
+        assert.deepEqual(Object.keys(record), FIFTEEN_KEYS, "the no-node record still carries the fifteen keys, in order");
         assert.equal(record.node, null, "node defaults to null");
         const onDisk = JSON.parse(await readFile(path.join(item.dir, "runs", `${record.runId}.json`), "utf8"));
-        assert.deepEqual(Object.keys(onDisk), FOURTEEN_KEYS, "the on-disk no-node record carries the fourteen keys, in order");
+        assert.deepEqual(Object.keys(onDisk), FIFTEEN_KEYS, "the on-disk no-node record carries the fifteen keys, in order");
         assert.equal(onDisk.node, null, "the on-disk node value is null");
       } finally {
         await rm(repo, { recursive: true, force: true });
@@ -96,7 +103,7 @@ export const archTests = [
 
         const runs = await readRuns(item);
         assert.equal(runs.length, 1, "the legacy record reads back as one run, no error");
-        assert.deepEqual(Object.keys(runs[0]), FOURTEEN_KEYS, "the normalized record carries the fourteen keys, in order");
+        assert.deepEqual(Object.keys(runs[0]), FIFTEEN_KEYS, "the normalized record carries the fifteen keys, in order");
         assert.equal(runs[0].node, null, "the missing node key reads as null (absence benign)");
         for (const key of THIRTEEN_KEYS) {
           assert.deepEqual(runs[0][key], thirteen[key], `the legacy "${key}" value is preserved verbatim`);

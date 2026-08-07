@@ -34,7 +34,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyClaudeSettingsMerge, claudeSettingsPath, formatClaudeSettingsOutcome, AOF_HOOK_MARKER } from "../src/claude-settings.mjs";
-import { ARTIFACT_SYNC_SCRIPT_RELPATH } from "../src/artifact-sync.mjs";
+import { ARTIFACT_SYNC_SCRIPT_ARGV, ARTIFACT_SYNC_SCRIPT_RELPATH } from "../src/artifact-sync.mjs";
 import { initWork } from "../src/work-init.mjs";
 import { updateWork } from "../src/work-update.mjs";
 import { assetsApplyCommand } from "../src/commands/assets-apply.mjs";
@@ -565,8 +565,11 @@ export const claudeSettingsMergeTests = [
 
         const settings = await readSettings(settingsPath);
         const bundleEntry = aofEntries(settings).find((entry) => entry[AOF_HOOK_MARKER] === "claude-artifact-sync");
-        assert.deepEqual(bundleEntry.args, [ARTIFACT_SYNC_SCRIPT_RELPATH], "the hook entry's argv still names the installed script — checkout-relative (ADR-013/C2), so a worktree of this file names ITS OWN copy");
-        assert.ok(existsSync(path.join(dir, ...bundleEntry.args[0].split("/"))), "…and that argv resolves to a file that really exists in this checkout");
+        assert.deepEqual(bundleEntry.args, [ARTIFACT_SYNC_SCRIPT_ARGV], "the hook entry's argv still names the installed script — resolved at run time (ADR-013/C2), so a worktree of this file names ITS OWN copy");
+        // …and that argv, once the harness substitutes the token for THIS checkout,
+        // resolves to a file that really exists here.
+        const resolvedArgv = bundleEntry.args[0].replaceAll("${CLAUDE_PROJECT_DIR}", dir);
+        assert.ok(existsSync(resolvedArgv), "…and that argv resolves to a file that really exists in this checkout");
       }, { settings: `${JSON.stringify(operator, null, 2)}\n` });
     },
   },

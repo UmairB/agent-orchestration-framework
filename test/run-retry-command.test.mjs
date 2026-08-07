@@ -20,7 +20,7 @@ import path from "node:path";
 import { loadWorkspace, findWork } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
 
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node", "resumeAfter"];
 
 // --- fixture builders --------------------------------------------------------
 

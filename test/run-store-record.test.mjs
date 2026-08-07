@@ -21,7 +21,7 @@ import path from "node:path";
 // unchanged in name/order/meaning, then the four additive resilience keys
 // (failureReason, heartbeatAt, retryOf, reclaimedAt), then the one additive
 // partition-provenance key (node, defaulting null).
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node", "resumeAfter"];
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const RUNID_RE = /^(\d{8}T\d{9}Z)-(\d{4})$/;

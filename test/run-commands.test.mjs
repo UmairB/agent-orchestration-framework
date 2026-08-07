@@ -22,7 +22,7 @@ import { loadWorkspace, findWork } from "../src/work.mjs";
 import { getCommand, listCommands, invoke } from "../src/command-core.mjs";
 
 const RUN_IDS = ["work:run-start", "work:run-complete", "work:run-status"];
-const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node"];
+const FROZEN_KEYS = ["runId", "itemRef", "state", "attempt", "outcome", "sessionId", "brief", "createdAt", "updatedAt", "failureReason", "heartbeatAt", "retryOf", "reclaimedAt", "node", "resumeAfter"];
 
 // Seed a SECOND running run by writing the record file directly. 20/ADR-006 dedup
 // forbids minting a second non-terminal run via the store, so the defensive

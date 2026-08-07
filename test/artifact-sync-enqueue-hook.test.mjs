@@ -21,13 +21,13 @@
 // identically on all three nodes) needs three machines and is NOT attempted here.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyClaudeSettingsMerge, claudeSettingsPath } from "../src/claude-settings.mjs";
-import { ARTIFACT_SYNC_SCRIPT_RELPATH, artifactSyncQueuePath } from "../src/artifact-sync.mjs";
+import { ARTIFACT_SYNC_SCRIPT_ARGV, ARTIFACT_SYNC_SCRIPT_RELPATH, artifactSyncQueuePath } from "../src/artifact-sync.mjs";
 // The last scenario needs a real worker daemon (the reconciliation tick is the whole
 // point of it), so it rides the story's shared fixture.
 import { withArtifactSyncFixture } from "./support/artifact-sync-fixture.mjs";
@@ -59,12 +59,29 @@ async function withCheckout(body) {
   }
 }
 
-// Deliver a payload on the script's stdin, exactly as Claude Code does: `node` plus
-// the entry's argv, with the process cwd set to the project directory (the harness's
-// own contract). `script` may be RELATIVE, which is how the committed entry spells it.
-function deliver(payload, { script, cwd, raw = null }) {
+// Deliver a payload on the script's stdin, exactly as Claude Code does: `node` plus the
+// entry's argv, with `${CLAUDE_PROJECT_DIR}` substituted the way the harness substitutes
+// it (into every args element, before the spawn).
+//
+// THE CWD IS DELIBERATELY NOT THE PROJECT DIRECTORY. An earlier version of this helper
+// spawned with `cwd` set to the project dir and called that "the harness's own contract"
+// — it is not. Hooks inherit the session's PERSISTED SHELL CWD, which is any directory
+// the session last `cd`-ed into, so a helper that hands the hook the project dir proves
+// nothing and is exactly why the bare-relative argv shipped broken. `cwd` therefore
+// defaults to a SUBDIRECTORY of the checkout: the realistic case, and the one that fails
+// loudly if the argv ever goes back to being project-relative.
+function deliver(payload, { script, cwd, projectDir = cwd, raw = null }) {
   const input = raw != null ? raw : JSON.stringify(payload);
-  return spawnSync(process.execPath, [script], { input, cwd, encoding: "utf8" });
+  const argv = String(script).replaceAll("${CLAUDE_PROJECT_DIR}", () => projectDir);
+  return spawnSync(process.execPath, [argv], { input, cwd, encoding: "utf8" });
+}
+
+// The cwd a real hook is most likely to inherit: somewhere INSIDE the checkout, not its
+// root. Created on demand so the spawn cannot fail for a missing directory.
+function driftedCwd(root) {
+  const nested = path.join(root, "packages", "app");
+  mkdirSync(nested, { recursive: true });
+  return nested;
 }
 
 function queueLines(queuePath) {
@@ -113,17 +130,27 @@ export const artifactSyncEnqueueHookTests = [
       assert.ok(Array.isArray(entry.args) && entry.args.length > 0, "a non-empty args array (exec form)");
       assert.doesNotMatch(entry.command, /[|&;<>$`"'\\]/, "the command carries no shell metacharacter — it is a bare executable");
 
-      assert.ok(entry.args.includes(ARTIFACT_SYNC_SCRIPT_RELPATH), "one args element names the enqueue script, checkout-relative");
+      assert.ok(entry.args.includes(ARTIFACT_SYNC_SCRIPT_ARGV), "one args element names the enqueue script, resolved at run time via ${CLAUDE_PROJECT_DIR}");
       for (const arg of entry.args) {
-        assert.equal(path.isAbsolute(arg), false, `no argv element is an install-time absolute path (${arg}) — ADR-013/C2`);
-        assert.doesNotMatch(arg, /^[A-Za-z]:/, `no drive-letter path in argv (${arg})`);
-        assert.doesNotMatch(arg, /\$\{?\w+\}?|%\w+%/, `no environment variable in argv (${arg})`);
+        // The install-time absolute path stays banned (ADR-013/C2's real constraint):
+        // a tracked file may not name THIS machine's checkout. The run-time token is
+        // how the entry gets an absolute path without writing one down — so it is the
+        // ONE substitution permitted here, and a bare relative path is now also wrong
+        // (the harness does not resolve it against the project dir).
+        const literal = arg.replace(/^\$\{CLAUDE_PROJECT_DIR\}\/?/, "");
+        assert.equal(path.isAbsolute(literal), false, `no argv element is an install-time absolute path (${arg}) — ADR-013/C2`);
+        assert.doesNotMatch(literal, /^[A-Za-z]:/, `no drive-letter path in argv (${arg})`);
+        assert.doesNotMatch(literal, /\$\{?\w+\}?|%\w+%/, `the only permitted substitution is \${CLAUDE_PROJECT_DIR} (${arg})`);
         assert.doesNotMatch(arg, /\\/, `argv uses forward slashes so the same entry spawns on the Mac and WSL workers (${arg})`);
       }
       // …and the argv the entry carries really is where the bundle installs the script.
       const installedTarget = JSON.parse(readFileSync(path.join(repoRoot, "src", "bundle", "bundle.json"), "utf8"))
         .members.find((member) => member.id === "artifact-sync-enqueue").target;
       assert.equal(installedTarget, ARTIFACT_SYNC_SCRIPT_RELPATH, "the bundle installs the script exactly where the entry names it");
+      // …and the bundle's own hook declaration spells the argv the ONE way src/ does —
+      // the two are separate files, and a drift between them is a silent no-op hook.
+      const declaredArgs = JSON.parse(readFileSync(path.join(repoRoot, "src", "bundle", "hooks", "claude-artifact-sync.json"), "utf8")).claude.args;
+      assert.deepEqual(declaredArgs, [ARTIFACT_SYNC_SCRIPT_ARGV], "the bundle hook declaration carries the run-time-resolved argv");
     }),
   },
   {
@@ -142,7 +169,12 @@ export const artifactSyncEnqueueHookTests = [
       await writeFile(claudeSettingsPath(second.dir), committed, "utf8");
       const entry = JSON.parse(committed).hooks.PostToolUse[0].hooks[0];
 
-      const result = deliver({ tool_name: "Write", tool_input: { file_path: `${second.dir}/STORY.md` } }, { script: entry.args[0], cwd: second.dir });
+      // The second checkout's OWN project dir is what the harness substitutes there —
+      // and the cwd is a subdirectory, as a real session's would be.
+      const result = deliver(
+        { tool_name: "Write", tool_input: { file_path: `${second.dir}/STORY.md` } },
+        { script: entry.args[0], cwd: driftedCwd(second.dir), projectDir: second.dir },
+      );
       assert.equal(result.status, 0, "the hook ran in the second checkout");
       assert.equal(queueLines(second.queuePath).length, 1, "the line lands in the SECOND workspace's queue file");
       assert.equal(queueLines(first.queuePath).length, 0, "no line is appended to the first workspace's queue");
@@ -161,10 +193,17 @@ export const artifactSyncEnqueueHookTests = [
       const absolute = deliver(payload, { script: foreign, cwd: dir });
       assert.notEqual(absolute.status, 0, "node itself fails on an absolute path that does not exist here (non-vacuous — this is the defeated AC4)");
 
-      // The shipped shape: relative, resolved by the harness against the project dir.
-      const relative = deliver(payload, { script: ARTIFACT_SYNC_SCRIPT_RELPATH, cwd: dir });
-      assert.equal(relative.status, 0, "the checkout-relative entry spawns and exits 0");
-      assert.equal(relative.stdout, "", "…and says nothing on stdout");
+      // A BARE relative argv — the shape that shipped broken. From a drifted cwd (the
+      // realistic case) node cannot find the script at all, which is the silent no-op
+      // this entry spelling exists to prevent. Kept as a live regression witness.
+      const bare = deliver(payload, { script: ARTIFACT_SYNC_SCRIPT_RELPATH, cwd: driftedCwd(dir), projectDir: dir });
+      assert.notEqual(bare.status, 0, "a project-relative argv misses from a drifted cwd — the harness does NOT resolve it (non-vacuous)");
+      assert.equal(queueLines(queuePath).length, 0, "…and nothing was enqueued: the silent no-op, reproduced");
+
+      // The shipped shape: the token, substituted by the harness before the spawn.
+      const resolved = deliver(payload, { script: ARTIFACT_SYNC_SCRIPT_ARGV, cwd: driftedCwd(dir), projectDir: dir });
+      assert.equal(resolved.status, 0, "the run-time-resolved entry spawns and exits 0 from ANY cwd");
+      assert.equal(resolved.stdout, "", "…and says nothing on stdout");
       assert.equal(queueLines(queuePath).length, 1, "…and enqueues the line, in this checkout's own queue");
     }),
   },
@@ -190,7 +229,7 @@ export const artifactSyncEnqueueHookTests = [
       for (const row of rows) {
         await withCheckout(async ({ dir, queuePath }) => {
           const payload = { tool_name: row.tool, ...(row.input === undefined ? {} : { tool_input: row.input }) };
-          const result = deliver(payload, { script: ARTIFACT_SYNC_SCRIPT_RELPATH, cwd: dir });
+          const result = deliver(payload, { script: ARTIFACT_SYNC_SCRIPT_ARGV, cwd: driftedCwd(dir), projectDir: dir });
           assert.equal(result.status, 0, `${row.tool}: exit 0`);
           assert.equal(result.stdout, "", `${row.tool}: nothing on stdout`);
           const lines = queueLines(queuePath);

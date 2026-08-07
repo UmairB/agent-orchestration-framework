@@ -18,10 +18,18 @@
 // inherits it verbatim, so an install-time absolute path in the entry names ANOTHER
 // checkout's queue — and, worse, another checkout's SCRIPT, which makes `node` itself
 // exit non-zero before this file's "exit 0, always" can apply. The entry therefore
-// carries a checkout-RELATIVE script path; the harness resolves it against the project
-// directory, so `process.argv[1]` is THIS checkout's script, and the queue is a fixed
-// walk from it: `<root>/.claude/hooks/aof/<this>` -> `<root>/.aof/`. No environment
-// variable, no cwd derivation, and no absolute path written into a tracked file.
+// carries `${CLAUDE_PROJECT_DIR}/.claude/hooks/aof/<this>` — a token the HARNESS
+// substitutes into the argv at spawn time, so `process.argv[1]` is THIS checkout's
+// script (correct in a worktree too), and the queue is a fixed walk from it:
+// `<root>/.claude/hooks/aof/<this>` -> `<root>/.aof/`. No cwd derivation, and no
+// absolute path written into a tracked file.
+//
+// A bare checkout-relative path was tried FIRST and is wrong: the harness spawns hooks
+// with the session's persisted shell cwd, NOT the project directory, so after any `cd`
+// the path missed and node exited MODULE_NOT_FOUND — a NON-blocking hook error, i.e. a
+// silent no-op (measured 2026-08-06: 37 misses across real installs). This script still
+// reads nothing but `process.argv[1]`; the token is resolved before it ever runs, so the
+// derivation-free property (ADR-001) is untouched.
 // ADR-001's "the queue destination is an ARGUMENT, never a derivation" survives intact:
 // its subject was workspace IDENTITY, not path composition (ADR-013/C2 says so).
 //

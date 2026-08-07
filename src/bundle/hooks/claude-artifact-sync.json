@@ -4,6 +4,6 @@
   "type": "command",
   "command": "node",
   "claude": {
-    "args": [".claude/hooks/aof/artifact-sync-enqueue.mjs"]
+    "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/aof/artifact-sync-enqueue.mjs"]
   }
 }

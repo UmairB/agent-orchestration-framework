@@ -112,10 +112,18 @@ export function isLegalTransition(from, to) {
 // The CLOSED retryable/non-retryable classification (20/ADR-002), the
 // isLegalTransition sibling (the 06/ADR-003 single-pure-resolver precedent):
 //   runtime_offline / timeout  → retryable     (infra: host down / no verdict in time)
+//   session_limit              → retryable     (infra: the PLATFORM stopped us, with a
+//                                               stated reset — see the parking gate below)
 //   agent_error                → non-retryable  (the agent ran and produced a bad output)
 //   anything else, or null     → non-retryable  (FAIL CLOSED — an unknown reason never auto-retries)
 // PURE: reads no clock/fs/config. A face never improvises which failures retry.
-const RETRYABLE_REASONS = new Set(["runtime_offline", "timeout"]);
+//
+// `session_limit` was added after the voice-vox 348 post-mortem, where three API
+// session limits cost 6h18m of dead run because the vocabulary had no word for them:
+// every kill was recorded as `runtime_offline` — retryable, but carrying no reset
+// time, so nothing could tell "retry now" from "retry at 1:10am". The reason is
+// distinct precisely so the record can carry `resumeAfter` and the retry can WAIT.
+const RETRYABLE_REASONS = new Set(["runtime_offline", "timeout", "session_limit"]);
 
 export function isRetryable(failureReason) {
   return RETRYABLE_REASONS.has(failureReason);
@@ -125,8 +133,132 @@ export function isRetryable(failureReason) {
 // IFF the reason is retryable AND the record is still below the ceiling. PURE over
 // (record, maxAttempts) — the resolved ceiling is passed in; the store never reads
 // config (08/ADR-002 basis-neutral). Fails closed at attempt >= maxAttempts.
+//
+// DELIBERATELY time-blind, and it stays that way: this answers "is this class of
+// failure resumable at all", not "may it resume yet". The clock gate is
+// retryReadiness below, which takes `nowMs` as data. Keeping them apart is what
+// lets the reclaim path (run-start) go on calling this with two arguments.
 export function shouldRetry(record, maxAttempts) {
   return isRetryable(record.failureReason) && record.attempt < maxAttempts;
+}
+
+// ------------------------------------------------- the parking gate (348) ----
+
+// Default park when a session limit arrives with no readable reset time. An hour is
+// the shortest window that is nearly always past the reset; the caller may override.
+export const DEFAULT_PARK_MINUTES = 60;
+
+// The zone offset (ms) in force AT a given instant for an IANA zone. Intl is the
+// only correct source for this — a fixed offset is wrong across a DST boundary, and
+// "resets 1:10am" lands on exactly that boundary twice a year.
+function zoneOffsetMs(instantMs, timeZone) {
+  // Align to the second FIRST. Intl formats to second precision, so differencing
+  // against an unaligned instant folds that instant's milliseconds into the
+  // "offset" — which then leaks into every park time as random sub-second noise.
+  const aligned = Math.floor(instantMs / 1000) * 1000;
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = {};
+  for (const part of dtf.formatToParts(new Date(aligned))) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  }
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUTC - aligned;
+}
+
+// The next instant at which the wall clock in `timeZone` reads hour:minute. Resolves
+// the offset AT the candidate (not at `now`), then rolls to tomorrow when the time
+// has already passed today — "resets 1:10am" seen at 21:05 means tomorrow, and
+// getting that wrong would resume four hours early into a still-limited window.
+function nextLocalInstant(nowMs, timeZone, hour, minute) {
+  const offsetNow = zoneOffsetMs(nowMs, timeZone);
+  const local = new Date(nowMs + offsetNow);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth();
+  const day = local.getUTCDate();
+  const resolve = (dayOffset) => {
+    const naive = Date.UTC(year, month, day + dayOffset, hour, minute, 0);
+    // One correction pass: re-resolve using the offset in force at the candidate.
+    return naive - zoneOffsetMs(naive - offsetNow, timeZone);
+  };
+  const today = resolve(0);
+  return today > nowMs ? today : resolve(1);
+}
+
+// Turn whatever the platform said into an absolute UTC-Z instant. Accepts:
+//   - a full ISO timestamp        → used as-is (the machine-friendly form)
+//   - "8:10pm (Europe/London)"    → the next 20:10 in that zone (what Claude Code prints)
+//   - "8:10pm" / "20:10"          → the next such time in `timeZone` (default UTC)
+//   - anything unreadable / absent → now + fallbackMinutes, flagged as a fallback
+// PURE over its inputs (`now` is injected). Never throws — an unreadable reset must
+// park conservatively, never crash the failure path that is already handling a crash.
+export function parseResumeAfter(value, { now = new Date().toISOString(), timeZone = "UTC", fallbackMinutes = DEFAULT_PARK_MINUTES } = {}) {
+  const nowMs = Date.parse(now);
+  const base = Number.isNaN(nowMs) ? Date.now() : nowMs;
+  const fallback = () => ({
+    resumeAfter: new Date(base + fallbackMinutes * 60 * 1000).toISOString(),
+    source: "fallback",
+    note: `no readable reset time — parked ${fallbackMinutes} min`,
+  });
+  if (value == null || String(value).trim() === "") return fallback();
+  const text = String(value).trim();
+
+  // The ISO form first — an explicit instant always wins over text parsing.
+  if (/^\d{4}-\d{2}-\d{2}[T ]/.test(text)) {
+    const parsed = Date.parse(text);
+    if (!Number.isNaN(parsed)) return { resumeAfter: new Date(parsed).toISOString(), source: "iso", note: null };
+  }
+
+  // "8:10pm (Europe/London)" / "20:10 (UTC)" / "8:10 pm" / "1:10am"
+  const clock = /(\d{1,2})[:.](\d{2})\s*([ap]\.?m\.?)?/i.exec(text);
+  if (!clock) return fallback();
+  let hour = Number(clock[1]);
+  const minute = Number(clock[2]);
+  const meridiem = clock[3] ? clock[3].toLowerCase().replace(/\./g, "") : null;
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) return fallback();
+
+  const zoneMatch = /\(([A-Za-z_]+\/[A-Za-z_+-]+|UTC|GMT)\)/.exec(text);
+  const zone = zoneMatch ? (zoneMatch[1] === "GMT" ? "UTC" : zoneMatch[1]) : timeZone;
+  try {
+    return { resumeAfter: new Date(nextLocalInstant(base, zone, hour, minute)).toISOString(), source: "clock", note: `next ${clock[0]} in ${zone}` };
+  } catch {
+    // An unknown zone name — park conservatively rather than guessing a zone.
+    return fallback();
+  }
+}
+
+// May this failed run resume YET? The clock half of the retry decision, split out so
+// shouldRetry stays time-blind. PURE over (record, maxAttempts, nowMs) — the ceiling
+// and the clock are both passed in (08/ADR-002 basis-neutral).
+//
+// States: `ready` (retry now) · `parked` (retryable, but resumeAfter is in the
+// future — `readyAt` says when) · `not-retryable` · `attempts-exhausted`.
+export function retryReadiness(record, maxAttempts, nowMs) {
+  if (!record) return { ready: false, state: "no-run", readyAt: null };
+  if (!isRetryable(record.failureReason)) return { ready: false, state: "not-retryable", readyAt: null };
+  if (record.attempt >= maxAttempts) return { ready: false, state: "attempts-exhausted", readyAt: null };
+  const readyAtMs = record.resumeAfter ? Date.parse(record.resumeAfter) : NaN;
+  if (!Number.isNaN(readyAtMs) && readyAtMs > nowMs) {
+    return { ready: false, state: "parked", readyAt: new Date(readyAtMs).toISOString() };
+  }
+  return { ready: true, state: "ready", readyAt: record.resumeAfter ?? null };
 }
 
 // ---------------------------------------------------- run-record helpers ----
@@ -203,6 +335,12 @@ async function persist(item, record) {
 // isolation knows its owner without path archaeology. attempt + retryOf carry the
 // retry lineage (20/ADR-003); a fresh start is attempt 1, retryOf null. The brief is
 // persisted OPAQUE/verbatim (never reshaped).
+//
+// The FIFTEEN-key record (348 auto-resume) SUPERSEDES the fourteen by that same
+// additive discipline: `resumeAfter` (UTC-Z string | null, defaulting null) appended
+// LAST — the instant a `session_limit` failure becomes resumable. A fourteen-key
+// record reads forward with resumeAfter: null (absence benign), which is exactly a
+// failure with no stated reset: retryable immediately, as it is today.
 function buildRecord({ runId, itemRef, sessionId, brief, createdAt, attempt = 1, retryOf = null, node = null }) {
   return {
     runId,
@@ -219,6 +357,7 @@ function buildRecord({ runId, itemRef, sessionId, brief, createdAt, attempt = 1,
     retryOf: retryOf ?? null,
     reclaimedAt: null,
     node: node ?? null,
+    resumeAfter: null,
   };
 }
 
@@ -244,6 +383,7 @@ function normalizeRecord(raw) {
     retryOf: raw.retryOf ?? null,
     reclaimedAt: raw.reclaimedAt ?? null,
     node: raw.node ?? null,
+    resumeAfter: raw.resumeAfter ?? null,
   };
 }
 
@@ -385,7 +525,7 @@ async function readRun(item, runId) {
 // the classifier failing closed, ADR-002, NOT a store rejection); reclaimedAt is set
 // when the reclaim scan supplies it. The other resilience keys are PRESERVED unless
 // the transition sets them. `now` is the injected UTC-Z clock (20/ADR-007).
-export async function applyTransition(item, runId, toState, { now, failureReason = null, reclaimedAt = null } = {}) {
+export async function applyTransition(item, runId, toState, { now, failureReason = null, reclaimedAt = null, resumeAfter = null } = {}) {
   const record = await readRun(item, runId);
   const from = record.state;
   if (!isLegalTransition(from, toState)) {
@@ -401,6 +541,9 @@ export async function applyTransition(item, runId, toState, { now, failureReason
   };
   if (toState === "failed") {
     updated.failureReason = failureReason ?? record.failureReason ?? null;
+    // The park stamp rides the SAME →failed edge that records the reason, so a
+    // record can never carry a session_limit without the reset that goes with it.
+    if (resumeAfter) updated.resumeAfter = resumeAfter;
   }
   if (reclaimedAt) {
     updated.reclaimedAt = reclaimedAt;
@@ -415,7 +558,7 @@ export async function applyTransition(item, runId, toState, { now, failureReason
 // is written onto the record (20/ADR-001 producer store half); a clean done/cancelled
 // records null. applyTransition naturally rejects a non-legal target (the outcome-set
 // validation done|failed|cancelled is the COMMAND's job).
-export async function completeRun(item, { runId, outcome, failureReason = null, now } = {}) {
+export async function completeRun(item, { runId, outcome, failureReason = null, resumeAfter = null, now } = {}) {
   let targetRunId = runId;
   if (!targetRunId) {
     const running = (await readRuns(item)).filter((run) => run.state === "running");
@@ -427,7 +570,7 @@ export async function completeRun(item, { runId, outcome, failureReason = null, 
     }
     targetRunId = running[0].runId;
   }
-  return applyTransition(item, targetRunId, outcome, { failureReason, now });
+  return applyTransition(item, targetRunId, outcome, { failureReason, resumeAfter, now });
 }
 
 // Resume a retryable failed run's lineage (20/ADR-003): resolve the prior run (a
@@ -447,7 +590,7 @@ export async function completeRun(item, { runId, outcome, failureReason = null, 
 // same-node resume semantics, byte-identical); when PASSED (a string or null) it
 // REPLACES the carry — the fleet-reclaim winner mints the reclaimed lineage under its
 // OWN session (or none), never the dead peer's (resume semantics do not cross hosts).
-export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now, node = null, sessionId } = {}) {
+export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now, node = null, sessionId, force = false } = {}) {
   const runs = await readRuns(item);
   let prior;
   if (runId) {
@@ -466,6 +609,20 @@ export async function retryRun(item, { runId, maxAttempts = Infinity, brief, now
   }
   if (prior.attempt >= maxAttempts) {
     throw runError(`run ${prior.runId} has exhausted its ${maxAttempts} attempt(s)`, "attempts-exhausted", 409);
+  }
+  // The PARK gate (348). A prior that failed on a stated reset (session_limit) is
+  // retryable but not YET: resuming into a still-limited window would burn an
+  // attempt on a kill that is certain to repeat, and three attempts spent that way
+  // exhaust the ceiling without a single line of work. Refuse coded, carrying the
+  // instant it becomes ready, and mint nothing. `force` is the operator override
+  // (the reset was wrong, or the limit lifted early).
+  if (!force) {
+    const readiness = retryReadiness(prior, maxAttempts, Date.parse(now ?? new Date().toISOString()));
+    if (readiness.state === "parked") {
+      const error = runError(`run ${prior.runId} is parked until ${readiness.readyAt} (${prior.failureReason})`, "retry-parked", 409);
+      error.readyAt = readiness.readyAt;
+      throw error;
+    }
   }
   // Resume: a NEW run carrying the prior sessionId (unless the caller overrides —
   // the cross-host reclaim never inherits a dead peer's session), attempt + 1,
