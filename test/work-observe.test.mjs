@@ -9,11 +9,18 @@ import path from "node:path";
 import {
   analyzeTranscript,
   unionMs,
+  mergeIntervals,
+  overlapMs,
   projectSlug,
   claudeProjectsDir,
   resolveMilestoneFolder,
   observeMilestone,
   observabilityEnabled,
+  analyzeSessionThread,
+  clusterInfraKills,
+  humanTurnText,
+  analyzeWaves,
+  tokenSplit,
 } from "../src/work-observe.mjs";
 
 const T0 = Date.parse("2026-07-19T01:00:00.000Z");
@@ -136,10 +143,20 @@ test("observeMilestone writes report.md + agents.json when --write and matches a
   }
 });
 
-test("observabilityEnabled reads the opt-in flag, default off", () => {
-  assert.equal(observabilityEnabled(undefined), false);
-  assert.equal(observabilityEnabled({ work: {} }), false);
-  assert.equal(observabilityEnabled({ work: { observability: { enabled: true } } }), true);
+test("observabilityEnabled defaults ON, and false is the explicit opt-out", () => {
+  // Inverted 2026-08-07 (operator). It shipped opt-in and so never ran once: the
+  // 348 post-mortem had to be reconstructed by hand because no milestone in the repo
+  // had ever written an observability/ snapshot. A diagnostic that is off by default
+  // is one you enable the day AFTER you needed it.
+  assert.equal(observabilityEnabled(undefined), true, "no config at all ⇒ on");
+  assert.equal(observabilityEnabled({}), true, "an empty config ⇒ on");
+  assert.equal(observabilityEnabled({ work: {} }), true, "a config with no observability block ⇒ on");
+  assert.equal(observabilityEnabled({ work: { observability: {} } }), true, "an empty observability block ⇒ on");
+  assert.equal(observabilityEnabled({ work: { observability: { enabled: true } } }), true, "explicit true ⇒ on");
+  // The ONLY way off — and it must be the literal `false`, not any falsy value, so a
+  // malformed config fails toward collecting diagnostics rather than silently losing them.
+  assert.equal(observabilityEnabled({ work: { observability: { enabled: false } } }), false, "explicit false ⇒ the opt-out");
+  assert.equal(observabilityEnabled({ work: { observability: { enabled: null } } }), true, "a null (unset) value is not an opt-out");
 });
 
 // A programmatic fix-test-rerun fixture: `cycles` of [edit router.ts → run the same
@@ -188,4 +205,152 @@ test("diagnostics: a toolchain command classifies as a test run; a plain command
 test("diagnostics: write-first pattern when tests run rarely", () => {
   const { diagnostics: d } = analyzeTranscript(fixtureGrind(1));
   assert.match(d.interleave.pattern, /write-first/);
+});
+
+// ---- lost time / concurrency / token split ---------------------------------
+// The four signals added after the voice-vox 348 post-mortem, where the report
+// could see idle agents but not the infra kills and hand-restarts behind them.
+
+const minM = 60 * 1000;
+const hrM = 60 * minM;
+
+// A parent-session fixture: a kill at +30m, the bookkeeping rows Claude Code
+// stamps at the human's own timestamp, and the operator's restart 2h later.
+function fixtureSession() {
+  const L = (o) => JSON.stringify(o);
+  return (
+    [
+      L({ type: "user", timestamp: iso(0), message: { content: "<command-message>aof:continue</command-message> <command-name>/aof:continue</command-name> <command-args>348</command-args>" } }),
+      L({ type: "assistant", timestamp: iso(5 * minM), message: { content: [{ type: "text", text: "Spawning the developer." }], usage: { output_tokens: 10 } } }),
+      L({ type: "user", timestamp: iso(30 * minM), message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "failed: Agent terminated early due to an API error: You have hit your session limit · resets 1:10am (Europe/London)" }] } }),
+      L({ type: "assistant", timestamp: iso(30 * minM + 1000), message: { content: [{ type: "text", text: "You have hit your session limit · resets 1:10am (Europe/London)" }], usage: { output_tokens: 5 } } }),
+      // Stamped at the SAME instant as the human turn below. If these count as
+      // run activity the 2h wait collapses to zero — the bug 348 hid behind.
+      L({ type: "queue-operation", timestamp: iso(2 * hrM + 30 * minM), message: { content: "" } }),
+      L({ type: "attachment", timestamp: iso(2 * hrM + 30 * minM), message: { content: "" } }),
+      L({ type: "user", timestamp: iso(2 * hrM + 30 * minM), message: { content: [{ type: "text", text: "continue please" }] } }),
+      L({ type: "assistant", timestamp: iso(2 * hrM + 31 * minM), message: { content: [{ type: "text", text: "Resuming on lineage." }], usage: { output_tokens: 20 } } }),
+      // Dead air: quiet for 3h, then the RUN wakes itself on a task notification.
+      L({ type: "user", timestamp: iso(5 * hrM + 31 * minM), message: { content: "<task-notification>agent done</task-notification>" } }),
+    ].join("\n") + "\n"
+  );
+}
+
+test("analyzeSessionThread finds the infra kill with its reset time", () => {
+  const r = analyzeSessionThread(fixtureSession());
+  assert.equal(r.infraKills.length, 2, "the tool_result and the assistant line both report the kill");
+  assert.equal(r.infraKills[0].resets, "1:10am (Europe/London)");
+  assert.equal(r.infraKills[0].killedAgent, true, "the tool_result form names a terminated agent");
+});
+
+test("clusterInfraKills collapses one limit's burst into a single event", () => {
+  const clustered = clusterInfraKills(analyzeSessionThread(fixtureSession()).infraKills);
+  assert.equal(clustered.length, 1, "two lines a second apart are one kill, not two");
+  assert.equal(clustered[0].agentsKilled, 1);
+  assert.equal(clustered[0].resets, "1:10am (Europe/London)");
+});
+
+test("REGRESSION: bookkeeping rows sharing the human's timestamp do not zero the wait", () => {
+  const wait = analyzeSessionThread(fixtureSession()).quietGaps.find((g) => g.endedBy === "human");
+  assert.ok(wait, "the hand-restart is detected at all");
+  // Last real run event was the kill at +30m+1s; the human typed at +2h30m.
+  assert.equal(wait.ms, 2 * hrM - 1000, "the wait runs from the last RUN event, not the bookkeeping row");
+  assert.equal(wait.resumedWith, "continue please");
+});
+
+test("analyzeSessionThread separates a hand-restart from dead air the run woke from itself", () => {
+  const r = analyzeSessionThread(fixtureSession());
+  const human = r.quietGaps.filter((g) => g.endedBy === "human");
+  const dead = r.quietGaps.filter((g) => g.endedBy === "run");
+  assert.equal(human.length, 1, "exactly one gap ended with the operator typing");
+  assert.equal(human[0].resumedWith, "continue please");
+  // The 3h gap before the run woke itself on a task notification. (The other
+  // `run` gap is the 25m the orchestrator sat waiting on the agent that died —
+  // real dead air in this fixture, which carries no agent activity to discount.)
+  assert.ok(
+    dead.some((g) => g.ms === 3 * hrM),
+    `3h of dead air before the run woke on its own, got ${JSON.stringify(dead.map((g) => g.ms))}`,
+  );
+});
+
+test("humanTurnText reads a slash-command invocation and rejects plumbing", () => {
+  assert.equal(
+    humanTurnText({ type: "user", message: { content: "<command-message>x</command-message> <command-name>/aof:continue</command-name> <command-args>348</command-args>" } }),
+    "/aof:continue 348",
+  );
+  assert.equal(humanTurnText({ type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } }), null, "tool results are not human turns");
+  assert.equal(humanTurnText({ type: "user", message: { content: "<task-notification>done</task-notification>" } }), null, "task notifications are not human turns");
+  assert.equal(humanTurnText({ type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }), null);
+  assert.equal(humanTurnText({ type: "user", message: { content: [{ type: "text", text: "continue please" }] } }), "continue please");
+});
+
+test("mergeIntervals + overlapMs discount a quiet main thread by the agent work under it", () => {
+  assert.deepEqual(mergeIntervals([[0, 10], [5, 15], [20, 25]]), [[0, 15], [20, 25]]);
+  const merged = mergeIntervals([[20, 70]]);
+  assert.equal(overlapMs([0, 100], merged), 50, "a 100-long gap with an agent working 20–70 is only 50 unattended");
+  assert.equal(overlapMs([80, 100], merged), 0, "no agent work in that window");
+  assert.equal(unionMs([[0, 10], [5, 15]]), 15, "unionMs still counts overlap once");
+});
+
+const wavesAgent = (id, role, start, end) => ({
+  id,
+  agentType: role,
+  description: id,
+  firstTs: start,
+  lastTs: end,
+  activeMs: end - start,
+  activeIntervals: [[start, end]],
+});
+
+test("analyzeWaves finds a serial chain on ACTIVE intervals, and spares a role that overlapped", () => {
+  const w = analyzeWaves([
+    wavesAgent("d1", "aof-developer", 0, 3 * hrM),
+    wavesAgent("d2", "aof-developer", 3 * hrM, 5 * hrM),
+    wavesAgent("d3", "aof-developer", 5 * hrM, 6 * hrM),
+    wavesAgent("q1", "aof-qa", 0, 1 * hrM),
+    wavesAgent("q2", "aof-qa", 0, 1 * hrM),
+  ]);
+  const dev = w.serialChains.find((c) => c.role === "aof-developer");
+  assert.ok(dev, "the developer chain is reported");
+  assert.equal(dev.count, 3);
+  assert.equal(dev.sumMs, 6 * hrM);
+  assert.equal(dev.longestMs, 3 * hrM);
+  assert.equal(dev.costMs, 3 * hrM, "parallelism would have returned the chain minus its longest link");
+  assert.equal(w.serialChains.find((c) => c.role === "aof-qa"), undefined, "a role that overlapped is not a serial chain");
+  assert.equal(w.roles.find((r) => r.role === "aof-qa").concurrency, 2, "two QA agents worked at once throughout");
+});
+
+test("analyzeWaves prices serialization in active work, never in a stall", () => {
+  // s1 worked 10m, froze 12h, worked 10m more — its stall must not be charged here.
+  const s1 = {
+    id: "s1",
+    agentType: "aof-qa",
+    description: "review 1",
+    firstTs: 0,
+    lastTs: 12 * hrM + 20 * minM,
+    activeMs: 20 * minM,
+    activeIntervals: [[0, 10 * minM], [12 * hrM + 10 * minM, 12 * hrM + 20 * minM]],
+  };
+  const w = analyzeWaves([
+    s1,
+    wavesAgent("s2", "aof-qa", 13 * hrM, 13 * hrM + 30 * minM),
+    wavesAgent("s3", "aof-qa", 14 * hrM, 14 * hrM + 30 * minM),
+  ]);
+  const qa = w.serialChains.find((c) => c.role === "aof-qa");
+  assert.equal(qa.count, 3);
+  assert.equal(qa.sumMs, 20 * minM + 30 * minM + 30 * minM, "links priced in ACTIVE work, not the 12h stall");
+  assert.equal(qa.longestMs, 30 * minM);
+});
+
+test("tokenSplit separates build generation from governance", () => {
+  const split = tokenSplit([
+    { agentType: "aof-developer", tokens: { out: 600 } },
+    { agentType: "aof-qa", tokens: { out: 300 } },
+    { agentType: "aof-architect", tokens: { out: 100 } },
+  ]);
+  assert.equal(split.buildOut, 600);
+  assert.equal(split.governanceOut, 400);
+  assert.equal(split.governancePct, 40);
+  assert.equal(split.byRole[0].role, "aof-developer");
+  assert.equal(split.byRole[0].pct, 60);
 });

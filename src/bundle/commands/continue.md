@@ -16,6 +16,15 @@ index). Items nest by scope: `milestone/ → stories/<story>/ → tasks/<task>.f
 </config>
 
 <process>
+**Re-entry first — before anything else, run `aof work resume`.** This command is the thing an operator
+types after a run died, so the first question is always "was something already in flight?". The sweep
+answers it deterministically: every retryable failed run, its reason, its attempt against the ceiling, and
+— for a run killed by an API session limit — whether its stated reset has passed. If the target ref is
+listed **READY**, resume its lineage with `aof work resume <ref>` and carry on from there rather than
+starting fresh: the prior session and its working tree are intact, and a fresh start pays for that work
+twice. If it is listed **parked**, say when it becomes ready and stop — retrying early burns one of three
+attempts on a kill that is certain to repeat. If the sweep is empty, proceed normally.
+
 Dispatch on the item's `type`:
 
 - **milestone** — the whole milestone, to completion: run `/aof:autonomous <NN>` (the SlashCommand

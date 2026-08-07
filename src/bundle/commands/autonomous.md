@@ -68,14 +68,31 @@ Loop until `aof work next <range> --json` returns `state: "done"`:
    **Track each item's processing as a run, and recover infra failures (resilience).** Wrap the work on a
    ready item in a run so a crash is detectable and recoverable: `aof work run-start <ref>` when you begin
    the attempt, `aof work run-complete <ref> --outcome done` on success, or `--outcome failed --reason
-   <runtime_offline|timeout|agent_error>` when it fails. On a **failed** run, let the store DECIDE
-   resume-vs-fresh — do **not** re-reason the failure table in prose; ask the verb and follow its coded result:
+   <runtime_offline|timeout|session_limit|agent_error>` when it fails. On a **failed** run, let the store
+   DECIDE resume-vs-fresh — do **not** re-reason the failure table in prose; ask the verb and follow its
+   coded result:
    - try `aof work run-retry <ref>` — on success it **resumed** the prior session on the same lineage (an
-     infra failure: `runtime_offline`/`timeout`), and the retry counts against `work.autonomous.maxAttempts`;
+     infra failure: `runtime_offline`/`timeout`/`session_limit`), and the retry counts against
+     `work.autonomous.maxAttempts`;
+   - if it returns **`retry-parked`**, the run hit an **API session/usage limit** and is waiting on the
+     stated reset. Do **not** retry in a loop — each early attempt is certain to die the same way and burns
+     one of three. The refusal carries `readyAt`; report it and stop. `aof work resume` lists everything
+     waiting and when, and `aof work resume <ref>` resumes it once the reset has passed.
    - if it returns **`not-retryable`** (an `agent_error` — you judged the output bad), start **fresh** with
      `aof work run-start <ref>` instead, so a poisoned session is never replayed;
    - if it returns **`attempts-exhausted`**, the ceiling is hit — hand back on the EXISTING **`maxAttempts`
      exhausted** stop (a genuinely-failing item halts instead of looping).
+
+   **A session limit is recorded with its reset, ALWAYS.** When a run (yours or an agent's) dies on
+   `You've hit your session limit · resets <time>`, close it with
+   `aof work run-complete <ref> --outcome failed --reason session_limit --resume-after "<time>"`, pasting
+   the platform's words verbatim — the CLI does the zone arithmetic. Recording it as `runtime_offline`
+   (the old habit, for want of a word) throws away the one fact that makes the resume automatic, and the
+   run then looks resumable *now* when it is not.
+
+   **NEVER redo a killed agent's work by hand.** A run killed by infra is RESUMABLE on its lineage with its
+   session intact. Re-authoring its output yourself discards completed work and pays for it twice — measured
+   on 348, where a killed architect's ARCHITECTURE.md was rewritten from scratch instead of resumed.
    A reclaim, an infra resume, a status rollback, and a `duplicate-run` rejection are all handled **in-loop**
    — they recover the cascade; none is a new hand-back (the `<stop_conditions>` set below is unchanged).
 

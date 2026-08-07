@@ -33,6 +33,7 @@ import { guardItemLock } from "../item-lock.mjs";
 //   item — { ref, dir, type } (resolveItemExact's shape)
 //   edge — { mode, runId, sessionId, brief, now, node, maxAttempts }
 //          mode "retry" resumes a failed run's lineage (retryRun's own contract,
+//          including 348's `force` override of the session_limit PARK gate,
 //          its coded rejections — no-retryable-run / not-retryable /
 //          attempts-exhausted / duplicate-run — propagating untouched, nothing
 //          appended); anything else is the fresh mint (startRun, whose
@@ -48,7 +49,7 @@ import { guardItemLock } from "../item-lock.mjs";
 //          `byAssignment` and is admitted by that identity; every other mint onto a
 //          held execution scope is refused `item-locked-by-assignment`.
 export async function transitionRunStart(item, edge = {}, opts = {}) {
-  const { mode = "start", runId, sessionId, brief, now, node = null, maxAttempts } = edge;
+  const { mode = "start", runId, sessionId, brief, now, node = null, maxAttempts, force = false } = edge;
   const { workspace = null, lock, publisherOptions = null, journalOptions = {}, drain = true } = opts;
 
   // (0) THE LOCK — the ONE enforcement door, in front of the fact. It outranks the
@@ -59,7 +60,7 @@ export async function transitionRunStart(item, edge = {}, opts = {}) {
   // (1) The FACT — the store's own guarded mint. A refusal here means no event.
   const record =
     mode === "retry"
-      ? await retryRun(item, { runId, maxAttempts, brief, now, node, sessionId })
+      ? await retryRun(item, { runId, maxAttempts, brief, now, node, sessionId, force })
       : await startRun(item, { sessionId: sessionId ?? null, brief: brief ?? {}, now, node });
 
   // (2) The EVENT — past tense, carrying its own evidence.
@@ -83,11 +84,13 @@ export async function transitionRunStart(item, edge = {}, opts = {}) {
 // cascade-before-return behaviour. Returns { record, eventId, effects }.
 //
 //   item — { ref, dir, type } (resolveItemExact's shape; type feeds recordDoc)
-//   edge — { runId, outcome, failureReason, now } (completeRun's own contract;
+//   edge — { runId, outcome, failureReason, resumeAfter, now } (completeRun's own
+//          contract; `resumeAfter` is the 348 park stamp, resolved at the command
+//          edge and passed through as data — this seam does no clock arithmetic;
 //          its coded rejections — no-running-run / ambiguous-run /
 //          illegal-transition — propagate untouched, and NOTHING is appended)
 //   opts — { workspace, journalOptions, drain = true }
-export async function transitionRunComplete(item, { runId, outcome, failureReason = null, now } = {}, opts = {}) {
+export async function transitionRunComplete(item, { runId, outcome, failureReason = null, resumeAfter = null, now } = {}, opts = {}) {
   const {
     workspace = null,
     publisherOptions = null,
@@ -97,7 +100,7 @@ export async function transitionRunComplete(item, { runId, outcome, failureReaso
 
   // (1) The FACT — the store's own guarded terminal transition. A refusal here
   // means no event: facts precede announcements.
-  const record = await completeRun(item, { runId, outcome, failureReason, now });
+  const record = await completeRun(item, { runId, outcome, failureReason, resumeAfter, now });
 
   // (2) The EVENT — past tense, carrying its own evidence (never a ping that
   // forces reactors to re-read racing state).
@@ -106,6 +109,7 @@ export async function transitionRunComplete(item, { runId, outcome, failureReaso
     runId: record.runId,
     outcome,
     failureReason: record.failureReason ?? null,
+    resumeAfter: record.resumeAfter ?? null,
     node: record.node ?? null,
     itemDir: item.dir,
     itemType: item.type ?? null,

@@ -67,6 +67,13 @@ const BOARD_DEFERRED = new Set([
   "run-start",
   "run-complete",
   "run-retry",
+  // 348 auto-resume — `resume` is run-retry's re-entry face (the sweep + the act
+  // over the SAME store authority), so it inherits run-retry's deferral for the
+  // SAME reason: resuming a killed run reaches the agent through the m03/ADR-006
+  // terminal launch, never a `/api/work` route. A board "what is waiting to come
+  // back" panel is a real future affordance — a separate, deliberate decision, and
+  // this carve-out records the deferral rather than an oversight.
+  "resume",
   "insert-milestone",
   "insert-uat",
   "insert-story",

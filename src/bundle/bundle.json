@@ -32,6 +32,7 @@
     { "id": "insert-story", "kind": "command", "file": "commands/insert-story.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "insert-uat", "kind": "command", "file": "commands/insert-uat.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "migrate", "kind": "command", "file": "commands/migrate.md", "runtimes": ["claude"], "commandNamespace": "aof" },
+    { "id": "observe", "kind": "command", "file": "commands/observe.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "recent", "kind": "command", "file": "commands/recent.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "refine", "kind": "command", "file": "commands/refine.md", "runtimes": ["claude"], "commandNamespace": "aof" },
     { "id": "retrospective", "kind": "command", "file": "commands/retrospective.md", "runtimes": ["claude"], "commandNamespace": "aof" },

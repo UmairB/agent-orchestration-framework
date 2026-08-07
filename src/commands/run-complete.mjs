@@ -17,6 +17,7 @@
 import { resolveItemExact, requireLocalCheckout } from "./resolve.mjs";
 import { commandError } from "../command-error.mjs";
 import { transitionRunComplete } from "../effects/run-transitions.mjs";
+import { parseResumeAfter } from "../run-store.mjs";
 import { renderWithPropagationWarnings, threadPropagationWarnings } from "../global-work-publisher.mjs";
 
 // The closed terminal-outcome set (ADR-001's machine: running → done|failed|cancelled).
@@ -36,6 +37,12 @@ export const runCompleteCommand = {
       // stays with the classifier failing closed (ADR-002), NOT a command rejection —
       // so an unrecognised reason is recorded, not rejected. Ignored on done/cancelled.
       reason: { type: "string" },
+      // 348 auto-resume — the PARK stamp that rides a `session_limit` failure. Takes
+      // the platform's own words ("8:10pm (Europe/London)") or an ISO instant; the
+      // parse is the CLI's job so the caller can copy the error text verbatim and
+      // never do zone arithmetic. Unreadable/absent ⇒ a conservative fallback park,
+      // never a rejection: this path is already handling a crash.
+      resumeAfter: { type: "string" },
       // `now` (ISO-8601 UTC-Z) is an INJECTED clock for timestamp-deterministic
       // assertions (the 22/R2 white-box idiom — a test input, never a CLI flag).
       now: { type: "string" },
@@ -71,9 +78,22 @@ export const runCompleteCommand = {
     // its checkout/local reactors (rollback-status, publish-projection — in that
     // declared order, so the published snapshot carries the rolled-back status).
     const reason = typeof input.reason === "string" ? input.reason : null;
+    // The park stamp is resolved HERE (the command edge owns the clock; the store
+    // stays basis-neutral and receives an absolute instant). Only a `session_limit`
+    // failure parks — every other reason keeps today's retry-immediately semantics
+    // byte-for-byte, so this cannot change the behaviour of an existing caller.
+    let resumeAfter = null;
+    let resumeAfterSource = null;
+    let resumeAfterNote = null;
+    if (outcome === "failed" && reason === "session_limit") {
+      const parked = parseResumeAfter(input.resumeAfter, { now: input.now ?? new Date().toISOString() });
+      resumeAfter = parked.resumeAfter;
+      resumeAfterSource = parked.source;
+      resumeAfterNote = parked.note;
+    }
     const { record, eventId, effects } = await transitionRunComplete(
       item,
-      { runId: input.runId, outcome, failureReason: reason, now: input.now },
+      { runId: input.runId, outcome, failureReason: reason, resumeAfter, now: input.now },
       { workspace: ctx.workspace, publisherOptions: ctx, journalOptions: ctx.effectsJournalOptions ?? {} },
     );
 
@@ -92,6 +112,12 @@ export const runCompleteCommand = {
         ...(error ? { error } : {}),
       })),
       ...(eventId ? { eventId } : {}),
+      // Additive PROVENANCE for the park, present only when one was stamped. The
+      // operator (and a machine reader) must be able to tell "parked until the
+      // stated reset" (`clock`/`iso`) from "parked an hour because the reset was
+      // unreadable" (`fallback`) — a guess that reads as an authority is how a
+      // resume lands back inside a still-limited window.
+      ...(resumeAfter ? { resumeAfterSource, resumeAfterNote } : {}),
     };
     return threadPropagationWarnings(result, effects);
   },
@@ -102,11 +128,12 @@ export const runCompleteCommand = {
     // for this verb (its single-envelope --json discipline is now the face's).
     route: ["work", "run-complete"],
     spec: {
-      usage: "aof work run-complete <ref> --outcome done|failed|cancelled [--run <runId>] [--reason <reason>] [--json]",
+      usage: "aof work run-complete <ref> --outcome done|failed|cancelled [--run <runId>] [--reason <reason>] [--resume-after <when>] [--json]",
       flags: {
         outcome: { type: "string", description: "terminal outcome: done|failed|cancelled" },
         run: { type: "string", description: "target run id (defaults to the single running run)" },
         reason: { type: "string", description: "failureReason recorded on --outcome failed" },
+        resumeAfter: { type: "string", description: "when a session_limit failure may resume — the platform's words (\"8:10pm (Europe/London)\") or an ISO instant" },
       },
     },
 
@@ -116,10 +143,19 @@ export const runCompleteCommand = {
       runId: options.run,
       outcome: options.outcome,
       reason: options.reason,
+      ...(options.resumeAfter !== undefined ? { resumeAfter: options.resumeAfter } : {}),
     }),
 
     // Confirm the terminal state the transition reached.
-    render: (result) => renderWithPropagationWarnings(`Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.`, result),
+    render: (result) =>
+      renderWithPropagationWarnings(
+        `Completed run ${result.runId} for ${result.itemRef} — state ${result.state}.` +
+          (result.resumeAfter
+            ? `
+Parked until ${result.resumeAfter}${result.resumeAfterSource === "fallback" ? ` (GUESSED — ${result.resumeAfterNote})` : result.resumeAfterNote ? ` (${result.resumeAfterNote})` : ""} — \`aof work resume\` reports it ready then.`
+            : ""),
+        result,
+      ),
 
     // No path in the result (records carry refs) — passes through unchanged.
     json: (result) => result,

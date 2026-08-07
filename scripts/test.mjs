@@ -831,6 +831,8 @@ import { archTests as acdRunDedupNoDuplicateTests } from "../test/arch/acd-run-d
 // (acd-status-rollback-bounded); the acd-run-retry-resumes-lineage arch-test (imported above)
 // gains a command-path test object riding the same import.
 import { runRetryCommandTests } from "../test/run-retry-command.test.mjs";
+// 348 auto-resume — the session_limit park gate + work:resume's re-entry face.
+import { runSessionLimitResumeTests } from "../test/run-session-limit-resume.test.mjs";
 import { runRetryCliFaceTests } from "../test/run-retry-cli-face.test.mjs";
 import { runStatusRollbackTests } from "../test/run-status-rollback.test.mjs";
 import { runResilienceAcceptanceTests } from "../test/run-resilience-acceptance.test.mjs";
@@ -1913,6 +1915,9 @@ export const tests = [
   ...acdRunDedupNoDuplicateTests,
   // milestone 20 — autonomous-run-resilience (story 01: resilience-commands)
   ...runRetryCommandTests,
+  // 348 auto-resume — session_limit parks on its stated reset; work:resume is the
+  // deterministic re-entry after an infra kill.
+  ...runSessionLimitResumeTests,
   ...runRetryCliFaceTests,
   ...runStatusRollbackTests,
   ...runResilienceAcceptanceTests,
