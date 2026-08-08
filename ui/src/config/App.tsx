@@ -37,6 +37,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { loadScope } from "./config-load.mjs";
+import { ConfigLoadFailed, ConfigLoading } from "./ConfigLoadFailed";
 
 type RuntimeId = "claude" | "codex";
 type ResourceKind = "skill" | "command" | "agent" | "rule";
@@ -141,6 +143,9 @@ export function App() {
   const [selectedSource, setSelectedSource] = useState<"project" | "global">("project");
   const [draft, setDraft] = useState<EditableResource | null>(null);
   const [message, setMessage] = useState("");
+  // The LOAD's own failure, distinct from `message` (which reports an operator ACTION inside a
+  // loaded editor — there is no editor to report into when the config never arrived).
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshConfig("project");
@@ -162,15 +167,20 @@ export function App() {
     setDraft(selectedResource ? cloneResource(selectedResource) : null);
   }, [selectedResource]);
 
+  // THE LOAD, AND THE ONE CHECK IT USED TO SKIP (finding F-45-M-1). The rule for "is this
+  // response actually a config" lives in ./config-load.mjs, with the full account of what went
+  // wrong; this is only the orchestration. `payload` is left UNTOUCHED on failure, so a
+  // transient error on a scope switch does not throw away the config already on screen.
   async function refreshConfig(nextScope = scope) {
-    const response = await fetch(`/api/config/${nextScope}`);
-    const nextPayload = await response.json();
-    setPayload(nextPayload);
-    if (nextScope === "project") {
-      setProjectPayload(nextPayload);
-    } else {
-      const projectResponse = await fetch("/api/config/project");
-      setProjectPayload(await projectResponse.json());
+    try {
+      const nextPayload = (await loadScope(fetch, nextScope)) as ConfigPayload;
+      setPayload(nextPayload);
+      setProjectPayload(
+        nextScope === "project" ? nextPayload : ((await loadScope(fetch, "project")) as ConfigPayload),
+      );
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "The configuration API could not be reached.");
     }
   }
 
@@ -243,12 +253,15 @@ export function App() {
     await refreshConfig(scope);
   }
 
+  // THE SURFACE'S OWN ERROR STATE (F-45-M-1). Checked BEFORE the loading state: with no
+  // payload and a failed load, "Loading AOF..." would spin forever on an origin that is never
+  // going to answer.
+  if (loadError && !payload) {
+    return <ConfigLoadFailed reason={loadError} onRetry={() => void refreshConfig(scope)} />;
+  }
+
   if (!payload) {
-    return (
-      <div className="grid min-h-[calc(100dvh_-_var(--aof-shell-chrome-height,0px))] place-items-center bg-background text-foreground">
-        <div className="mono text-sm text-muted-foreground">Loading AOF...</div>
-      </div>
-    );
+    return <ConfigLoading />;
   }
 
   const draftDiagnostics = draft ? validateDraft(draft, payload) : [];

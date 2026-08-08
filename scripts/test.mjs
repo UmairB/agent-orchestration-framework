@@ -1667,12 +1667,18 @@ import { appRoutesTests } from "../test/app-routes.test.mjs";
 //   03_unmatched-path-and-fullscreen — the two states that are not surfaces: an unknown path
 //     rendered in place with nothing marked current, and the ONE shell-owned fullscreen door
 //     whose closed transition set carries no path, no parameter and no history entry.
+//   05_surface-crash-degrades-in-shell — the @bug task raised at the milestone end gate
+//     (F-45-M-1): a surface that throws while rendering takes down ITSELF, never the chrome.
+//     `/config` on the fleet origin blanked the whole application; the shell now contains a
+//     throwing surface into the `failed` state it already rendered, and `<App>` degrades
+//     through its own error state before it ever gets there.
 // (04_app-shell-visual-review is @uat — a person's render verdict — and deliberately has no
 // suite here.)
 import { shellEntryPlanTests } from "../test/shell-entry-plan.test.mjs";
 import { shellRegionsTests } from "../test/shell-regions.test.mjs";
 import { shellNavigationTests } from "../test/shell-navigation.test.mjs";
 import { shellNotFoundAndFullscreenTests } from "../test/shell-not-found-and-fullscreen.test.mjs";
+import { shellSurfaceContainmentTests } from "../test/shell-surface-containment.test.mjs";
 // ── milestone 45 / story 04 — THE ADVERTISED ENTRY POINTS (ADR-002 + ADR-003). Every
 // producer that hands the operator a URL stops minting `?mode=` and mints the path it
 // actually serves: the board / fleet / config-editor launchers (probe AND announce, which
@@ -2467,6 +2473,7 @@ export const tests = [
   ...shellRegionsTests,
   ...shellNavigationTests,
   ...shellNotFoundAndFullscreenTests,
+  ...shellSurfaceContainmentTests,
   // milestone 45 / story 02 — the static-serving leaf (tasks 00–02, all @executable)
   ...staticServeFallbackTests,
   // milestone 45 / story 04 — the advertised entry points (tasks 00–01; 02 is @manual)

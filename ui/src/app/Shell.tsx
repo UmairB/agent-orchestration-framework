@@ -23,13 +23,14 @@
 // effect cleans up — `dataSub.dispose()`, `socket.close()`, `term.dispose()` — and fullscreen
 // becomes the one gesture that kills the session it exists to enlarge. Reviewers: this is the
 // adoption ADR-005's Consequences tell you to look for.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type * as React from "react";
 import type { RouteId } from "./routes.mjs";
 import {
   BRAND_MARK,
   CHROME_HEIGHT_PROPERTY,
   CONTENT_REGION_ID,
+  IDENTITY_CHIP_WIDTH_CLASS,
   NOTICE_RAIL_CLASS,
   SHELL_CARD_CLASS,
   SHELL_CARD_WRAPPER_CLASS,
@@ -173,8 +174,15 @@ export function Shell({
       ref={rootRef}
       // The shell root IS the viewport and the ONLY element that is 100dvh with hidden
       // overflow in `content:fixed`; the document and body never scroll. DESIGN GAP D1's
-      // `overflow-x: hidden` backstop stays in index.css and is not removed here.
-      className={`${contentMode.rootClass} overflow-x-hidden bg-background text-foreground`}
+      // `overflow-x: clip` backstop stays in index.css (on BOTH `html` and `body`) and is not
+      // removed here.
+      //
+      // The overflow comes from `rootClass` and from nowhere else. A hand-added
+      // `overflow-x-hidden` here used to sit on top of it, and in `content:page` that made the
+      // root a scrollport, which silently defeated the chrome's `sticky top-0` — the top bar
+      // scrolled out of view on `/fleet`, which is the one thing DESIGN's R2 row forbids by
+      // name. `contentModeFor` owns the answer per mode; see its `rootEstablishesScrollport`.
+      className={`${contentMode.rootClass} bg-background text-foreground`}
       style={{ [CHROME_HEIGHT_PROPERTY]: chrome.value } as React.CSSProperties}
       data-shell-chrome-height={chrome.value}
       data-shell-budget={chrome.verdict}
@@ -197,7 +205,19 @@ export function Shell({
       </a>
 
       {presenting ? null : (
-        <div className="shrink-0">
+        // THE CHROME BLOCK PINS, not the bar inside it (m45 GAP-5, measured at the @uat gate).
+        // DESIGN's R2 row says the top bar "never scrolls out of view (`sticky top-0` in
+        // `content:page`)", and the bar carried exactly that — but a sticky element can only
+        // travel within its PARENT's padding box, and its parent is this 88px wrapper. Measured:
+        // after a 1200px wheel on `/fleet` the bar had stuck for 40px and then left with the
+        // page. Pinning the WRAPPER is the smallest change that makes the stated rule true, and
+        // it keeps `--aof-shell-chrome-height` honest as well: what is above the content on
+        // screen stays equal to the number the shell publishes, which is what m46's dock and
+        // every `content:fixed` surface size against.
+        //
+        // In `content:fixed` this is inert — the root is the viewport, the document never
+        // scrolls, and this is an ordinary flex child, exactly as DESIGN's R2 row describes.
+        <div className="sticky top-0 z-10 shrink-0">
           {/* R1 — the notice rail: full-bleed, above everything, contributed BY the surface,
               zero-height when empty (never a reserved blank band, which would cost every
               surface ~33px for a condition that is almost never true). It PUSHES the chrome
@@ -221,7 +241,10 @@ export function Shell({
             data-shell-row="top-bar"
             // `TOP_BAR_CLASS`, never a retyped `h-12`: the bar's height is a number three
             // downstream milestones subtract from the viewport, and it had two homes.
-            className={`sticky top-0 z-10 flex ${TOP_BAR_CLASS} shrink-0 items-center gap-3 border-b border-border bg-card px-4`}
+            // The pin lives on the chrome wrapper above, not here — see its note. A second
+            // `sticky` here would be inert (it would stick within a box the same height as
+            // itself) and would read as the thing doing the work.
+            className={`flex ${TOP_BAR_CLASS} shrink-0 items-center gap-3 border-b border-border bg-card px-4`}
           >
             <span className={BRAND_MARK.className} aria-hidden="true">
               {BRAND_MARK.glyph}
@@ -272,7 +295,21 @@ export function Shell({
         ) : routeId === "landing" ? (
           <Landing destinations={nav.items.filter((item) => item.id !== "landing")} />
         ) : (
-          surface
+          // THE CONTAINMENT (finding F-45-M-1, `aof:verify 45`). A surface that throws while
+          // rendering takes down ITSELF, never the chrome. Keyed by route so a caught surface
+          // does not stay caught if the same shell is later asked for a different one.
+          //
+          // It wraps ONLY the mounted surface — not the nav, not the bars, not the not-found or
+          // landing states the shell renders itself. A boundary around the whole shell would
+          // catch the same throws and produce the same blank page it exists to prevent.
+          //
+          // This is a SAFETY NET, not the design. The designed path is the one this component's
+          // `resolvable` note describes and `<Board>`/`<App>` now both honour: a surface that
+          // cannot reach its API renders its OWN error state. The net is what stops the NEXT
+          // surface — 47's and 49's — from having to rediscover F-45-M-1 to learn the rule.
+          <SurfaceBoundary key={routeId} routeId={routeId} onRetry={onRetry}>
+            {surface}
+          </SurfaceBoundary>
         )}
       </main>
 
@@ -331,18 +368,23 @@ export function Shell({
 // different milestone). It never renders blank: while the name is unknown it renders a
 // SAME-SIZED pulse block rather than a collapsed chip that would then push the nav sideways.
 // The `ch` unit is honest here precisely because the chip is `mono`.
+//
+// Both elements take their width from the ONE constant in shell-layout.mjs — that sameness IS
+// the rule, and two hand-typed class strings are how it drifted (designer GAP-4: the shipped
+// `min-w-[7ch]` was a border-box minimum, so it reserved ~4.26 characters, not 7, and any
+// identity longer than that moved the nav the moment it resolved).
 function IdentityChip({ identity }: { identity: string | null }) {
   if (identity === null) {
     return (
       <span
-        className="mono h-5 min-w-[7ch] max-w-[18ch] animate-pulse rounded-md border border-border bg-muted px-2 py-0.5 text-xs"
+        className={`mono h-5 ${IDENTITY_CHIP_WIDTH_CLASS} animate-pulse rounded-md border border-border bg-muted px-2 py-0.5 text-xs`}
         aria-hidden="true"
       />
     );
   }
   return (
     <span
-      className="mono min-w-[7ch] max-w-[18ch] truncate rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+      className={`mono ${IDENTITY_CHIP_WIDTH_CLASS} truncate rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground`}
       title={identity}
     >
       {identity}
@@ -483,6 +525,44 @@ function MountPlaceholder({ routeId }: { routeId: RouteId }) {
 // must never trap the operator on it — and Retry re-attempts the MOUNT, not a fetch, which is
 // what distinguishes this from a surface's own data error. NEVER `destructive`: a chunk that
 // did not arrive is a retryable transport condition, not data loss.
+// The shell's containment boundary for a mounted surface (F-45-M-1). A class because
+// `getDerivedStateFromError` has no hook form — this is the one place in `ui/src/app/` that is
+// not a function component, and the reason is React's API, not a preference.
+//
+// It renders the SAME `SurfaceFailed` the `failed` content state renders, so a surface that
+// throws and a surface whose module never loaded look identical to the operator and are one
+// state in DESIGN, not two.
+interface SurfaceBoundaryProps {
+  routeId: RouteId;
+  onRetry?: () => void;
+  children?: React.ReactNode;
+}
+
+class SurfaceBoundary extends Component<SurfaceBoundaryProps, { threw: boolean }> {
+  constructor(props: SurfaceBoundaryProps) {
+    super(props);
+    this.state = { threw: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { threw: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    // Loud, not silent: the operator gets the failed state, and whoever opens the console gets
+    // the actual throw. A boundary that swallows the error is how the NEXT one of these takes a
+    // day to find.
+    console.error(`[shell] the ${this.props.routeId} surface threw while rendering`, error);
+  }
+
+  render() {
+    if (this.state.threw) {
+      return <SurfaceFailed routeId={this.props.routeId} onRetry={this.props.onRetry} />;
+    }
+    return this.props.children;
+  }
+}
+
 function SurfaceFailed({ routeId, onRetry }: { routeId: RouteId; onRetry?: () => void }) {
   const retry = useCallback(() => {
     if (onRetry) {

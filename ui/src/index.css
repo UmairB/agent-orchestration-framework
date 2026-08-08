@@ -31,15 +31,26 @@ html {
      scroll: a wide descendant (e.g. the fleet global scope's work-items table
      before it grew its own overflow-x-auto container) must never widen the ROOT
      past the viewport at a 360-414px mobile width. Scoped tables/panels still
-     scroll internally (their own overflow-x-auto); only the page root is clamped. */
-  overflow-x: hidden;
+     scroll internally (their own overflow-x-auto); only the page root is clamped.
+
+     `clip`, NOT `hidden` (m45 GAP-5, measured at the @uat gate 2026-08-08). They
+     clamp identically, but `hidden` computes the OTHER axis to `auto`, which makes
+     the element a scroll container — and `position: sticky` resolves against the
+     nearest scroll container. With `hidden` here, the shell's `sticky top-0` chrome
+     resolved against a box that never scrolls and rode the page out of view: measured
+     at y = -1200 after a 1200px wheel on `/fleet`, against DESIGN's R2 row which says
+     "none — it never scrolls out of view". `clip` establishes no scrollport, so the
+     chrome sticks to the document, and D1's clamp is unchanged. */
+  overflow-x: clip;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* `clip` for the same reason as `html` above (m45 GAP-5): `hidden` here makes BODY a
+     scroll container, which is the nearest one to the shell's sticky chrome. */
+  overflow-x: clip;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 

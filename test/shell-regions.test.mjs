@@ -39,6 +39,7 @@ import {
   SURFACE_BAR_CLASS,
   SURFACE_BAR_HEIGHT,
   TOP_BAR_CLASS,
+  IDENTITY_CHIP_WIDTH_CLASS,
   TOP_BAR_HEIGHT,
   TOP_BAR_LEFT_OF_SLOT,
   WORDMARK,
@@ -354,8 +355,13 @@ export const shellRegionsTests = [
         assert.ok(chip, "the chip renders its value");
         assert.equal(chip.type, "span", "…as a label, not a button");
         assert.equal(chip.props.onClick, undefined, "…that is not a control");
-        assert.match(chip.props.className, /min-w-\[7ch\]/);
-        assert.match(chip.props.className, /max-w-\[18ch\]/);
+        // Asserted through the SHARED CONSTANT, never a re-typed literal. These two lanes used
+        // to pin `min-w-[7ch]` by hand and so froze the very defect they existed to prevent
+        // (designer GAP-4 at the m45 end gate: under `border-box` that reserved ~4.26 characters
+        // of text, not 7, so any longer identity moved the nav when it resolved). A lane that
+        // names a class can only ever confirm the class; naming the constant makes the chip and
+        // its placeholder provably the same thing.
+        assert.ok(chip.props.className.includes(IDENTITY_CHIP_WIDTH_CLASS), "the chip takes its width from the one shared reservation");
       });
     },
   },
@@ -702,12 +708,13 @@ export const shellRegionsTests = [
 
       await withShellApp({ routeId: "landing", address, identity: null, viewportWidth: 1280 }, async (app) => {
         const bar = app.row("top-bar");
-        const chip = (bar.children ?? []).find((child) => typeof child.props?.className === "string" && child.props.className.includes("min-w-[7ch]"));
+        const chip = (bar.children ?? []).find((child) => typeof child.props?.className === "string" && child.props.className.includes(IDENTITY_CHIP_WIDTH_CLASS));
         assert.ok(chip, "a chip renders even with no name — an ABSENT chip is what pushes the nav sideways when the name lands");
         // NEVER BLANK: it is a sized block, not an empty string in a shrink-wrapped span.
         assert.match(chip.props.className, /animate-pulse/, "…as a pulse block");
-        assert.match(chip.props.className, /min-w-\[7ch\]/, "…at its FINAL minimum width");
-        assert.match(chip.props.className, /max-w-\[18ch\]/);
+        // AT ITS FINAL WIDTH — the same shared reservation the resolved chip uses, so "same-sized"
+        // is true by construction rather than by two literals happening to agree (GAP-4).
+        assert.ok(chip.props.className.includes(IDENTITY_CHIP_WIDTH_CLASS), "…at its FINAL minimum width, from the one reservation");
         assert.match(chip.props.className, /h-5/, "…and its final height, so the bar's own height never moves");
         assert.equal(textOf(chip), "", "it carries no text — an empty chip with a border reads as a loading state, which is exactly what it is");
         // Announced as decoration, not as an empty label: a screen reader must not read a

@@ -23,10 +23,21 @@ import { dismissFullscreen, requestFullscreen, resetShellBus } from "../../ui/sr
 (globalThis as Record<string, unknown>).__AOF_SHELL_BUS__ = { requestFullscreen, dismissFullscreen, resetShellBus };
 
 type HarnessProps = Record<string, unknown> & {
-  surface?: "none" | "plain" | "contributing";
+  surface?: "none" | "plain" | "contributing" | "throwing";
   slotLabels?: string[];
   noticeText?: string;
 };
+
+// The THROWING surface (m45 / F-45-M-1). It reproduces the measured production failure in
+// its exact shape rather than throwing a bare string: `<App>` on an origin with no
+// `/api/config` stored the 404 envelope as its payload and then read `.filter` off an
+// `undefined` — a TypeError raised inside a `useMemo` during render, which is precisely the
+// case a boundary must catch and a try/catch in a parent cannot.
+function ThrowingSurface() {
+  const payload = { ok: false, error: "not found", code: "not-found" } as unknown as { resources?: unknown[] };
+  const active = (payload.resources as unknown[]).filter(Boolean);
+  return <p data-stub-surface="">{active.length}</p>;
+}
 
 function readProps(): HarnessProps {
   return ((globalThis as Record<string, unknown>).__AOF_SHELL_PROPS__ as HarnessProps) ?? {};
@@ -58,9 +69,10 @@ function StubSurface({ slotLabels, noticeText }: { slotLabels: string[]; noticeT
 export function ShellHarness() {
   const { surface = "none", slotLabels = [], noticeText, ...rest } = readProps();
   const mounted =
-    surface === "none" ? null : surface === "plain" ? <p data-stub-surface="">surface body</p> : (
-      <StubSurface slotLabels={slotLabels} noticeText={noticeText ?? null} />
-    );
+    surface === "none" ? null
+      : surface === "plain" ? <p data-stub-surface="">surface body</p>
+      : surface === "throwing" ? <ThrowingSurface />
+      : <StubSurface slotLabels={slotLabels} noticeText={noticeText ?? null} />;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the lane's props are the shell's own, checked by tsc at every real call site.
   return <Shell {...(rest as any)} surface={mounted} />;
 }

@@ -36,6 +36,13 @@ export declare const NOTICE_RAIL_MAX_VIEWPORT_FRACTION: number;
 // The rail's cap AND its first-line pin, as one class.
 export declare const NOTICE_RAIL_CLASS: string;
 export declare const CONTENT_REGION_ID: string;
+
+// The identity chip's width reservation — ONE home, shared by the resolved chip and its loading
+// placeholder, because their measuring the SAME is the whole rule (designer GAP-4).
+export declare const IDENTITY_CHIP_WIDTH_CLASS: string;
+export declare const IDENTITY_CHIP_MIN_CH: number;
+export declare const IDENTITY_CHIP_MAX_CH: number;
+export declare const IDENTITY_CHIP_CHROME_REM: number;
 // The shell's own two card states (the landing and not-found) share one wrapper and one card.
 export declare const SHELL_CARD_WRAPPER_CLASS: string;
 export declare const SHELL_CARD_CLASS: string;
@@ -105,6 +112,10 @@ export interface ContentModeModel {
   readonly regionOwnsScroll: false;
   readonly minHeight: 0;
   readonly pageRootOverflowX: "hidden";
+  // Whether the shell ROOT establishes a scrollport. True only in `content:fixed`, where the
+  // root IS the viewport. In `content:page` it must be false, or the root's scrollport defeats
+  // the chrome's `sticky top-0` and the bar scrolls out of view (measured at the m45 @uat gate).
+  readonly rootEstablishesScrollport: boolean;
   readonly rootClass: string;
   readonly contentClass: string;
 }

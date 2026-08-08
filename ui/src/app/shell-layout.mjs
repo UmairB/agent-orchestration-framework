@@ -125,6 +125,38 @@ export const NOTICE_RAIL_CLASS =
 // The one id the skip link targets and the one element that carries `main`.
 export const CONTENT_REGION_ID = "aof-shell-content";
 
+// ─────────────────────────────────── the identity chip's width reservation ──
+//
+// ONE home for the chip's width, shared by the resolved chip AND its loading placeholder,
+// because the whole rule is that those two measure the SAME (DESIGN §R2: "a same-sized pulse
+// block, never a collapsed chip that then pushes the nav sideways"; m43 documented-default-3:
+// "the chip keeps its right-edge anchor so nothing moves at the threshold").
+//
+// WHY THIS IS A CONSTANT AND NOT TWO COPIES OF A CLASS STRING (designer GAP-4, measured at the
+// `aof:verify 45` end gate). The chip shipped as `min-w-[7ch]` on both elements — which LOOKS
+// like it reserves seven characters and does not. Tailwind sets `box-sizing: border-box`, so a
+// `min-width` is a BORDER-box minimum: subtract `px-2` (16px) and the border (2px) and
+// `min-w-[7ch]` reserves 7ch − 18px of TEXT room. Measured in the shipped bundle: 1ch = 6.609px,
+// so the reservation was 46.184px total = 28.18px of text ≈ **4.26 characters**. An identity of
+// five or more grew the box and took the nav with it — `fleet` measured 51px against the
+// placeholder's 46.184px, a 4.8px jump at the moment the identity resolved. The prose and the
+// class disagreed, and the class is what shipped.
+//
+// `calc(7ch + 1.125rem)` adds back the 16px of padding and the 2px of border, so the
+// reservation is what it says: seven characters of TEXT. `max-w-[18ch]` is left as-is — it is a
+// truncation ceiling, not an anchor, and `truncate` handles the overflow.
+//
+// The class is a LITERAL, never composed from the numbers below. Tailwind generates utilities by
+// scanning source text for class strings, so a template-interpolated `min-w-[calc(...)]` would
+// name a rule Tailwind never emits — the reservation would silently vanish and the chip would
+// fall back to its content width, which is a worse version of the bug being fixed here.
+export const IDENTITY_CHIP_WIDTH_CLASS = "min-w-[calc(7ch+1.125rem)] max-w-[18ch]";
+// …and the same numbers as values, so the arithmetic above is checkable rather than a claim in
+// a comment. `IDENTITY_CHIP_CHROME_REM` is px-2 (8+8) + border (1+1) = 18px = 1.125rem.
+export const IDENTITY_CHIP_MIN_CH = 7;
+export const IDENTITY_CHIP_MAX_CH = 18;
+export const IDENTITY_CHIP_CHROME_REM = 1.125;
+
 // ───────────────────────────────────── the shell's own card states, as classes ──
 //
 // The landing and the not-found state are the two things the SHELL renders in the content
@@ -370,6 +402,23 @@ export function contentModeFor(routeId) {
     // DESIGN GAP D1's backstop (index.css:27-36) survives in BOTH modes — the shell must
     // not remove it. Scoped regions still scroll internally.
     pageRootOverflowX: "hidden",
+    // THE ROOT MUST NOT ESTABLISH A SCROLLPORT IN `content:page` (measured at the m45 `@uat`
+    // gate, 2026-08-08). The shell root carried its own `overflow-x-hidden` — a THIRD copy of
+    // the D1 backstop, on top of `html` and `body`, which already have it. Under CSS, an
+    // element with `overflow-x: hidden` computes `overflow-y` to `auto` and therefore
+    // establishes a scrollport; `position: sticky` resolves against the nearest such ancestor.
+    // The root is `min-h-dvh` and grows to its content (measured 18,470px on `/fleet`), so it
+    // never scrolls — the `html` element does. The chrome's `sticky top-0` was therefore
+    // sticking to a box that does not move, and the top bar scrolled clean out of view:
+    // measured at y = −1200 after a 1200px wheel on `/fleet`, against DESIGN's R2 row which
+    // says in terms "none — it never scrolls out of view (`sticky top-0` in `content:page`)".
+    //
+    // So `content:page`'s root carries NO overflow of its own. `content:fixed` keeps
+    // `overflow-hidden` because there the root IS the viewport by design, the document never
+    // scrolls, and the bar is a fixed flex child rather than a sticky one — the two modes want
+    // genuinely different answers, which is why this belongs here and not in a class on the
+    // component.
+    rootEstablishesScrollport: mode === CONTENT_MODE_FIXED,
     rootClass: mode === CONTENT_MODE_FIXED ? "h-dvh overflow-hidden flex flex-col" : "min-h-dvh flex flex-col",
     contentClass: mode === CONTENT_MODE_FIXED ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1",
   });

@@ -46,7 +46,18 @@ export const useCallback = (...a) => R().useCallback(...a);
 export const useMemo = (...a) => R().useMemo(...a);
 export const useRef = (...a) => R().useRef(...a);
 export const Fragment = Symbol.for("aof.mini.fragment");
-export default { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment };
+// The class base, present for ONE reason: an error boundary has no function-component
+// form, so without it the shell's "a failing surface degrades in place" contract is
+// undrivable headlessly (m45 / F-45-M-1). \`isReactComponent\` on the prototype is the
+// same marker React itself uses, and it is what mini-react's renderer branches on.
+// \`setState\` is replaced per instance by the renderer, which owns the dirty flag.
+export class Component {
+  constructor(props) { this.props = props; this.state = null; }
+  setState() { throw new Error("setState called before the renderer mounted this component"); }
+  render() { return null; }
+}
+Component.prototype.isReactComponent = {};
+export default { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment, Component };
 `;
 
 const VIRTUAL_JSX = `
