@@ -10,6 +10,10 @@ import { Overview } from "./Overview";
 import { BoardLanes } from "./BoardLanes";
 import { DetailPanel } from "./DetailPanel";
 import { TerminalDock } from "./TerminalDock";
+// milestone 45 / story 03 — the shell's named regions. The board contributes its legend and
+// sync to the surface slot, and its `serverGone` strip to the notice rail; with no shell
+// present (the headless harness) both render exactly where they always did.
+import { SurfaceNotice, SurfaceSlot } from "../app/SurfaceSlot";
 import type { DockSession } from "./TerminalDock";
 import { StatusRing, statusMeta, LANE_ORDER } from "./status";
 
@@ -406,40 +410,54 @@ export function Board() {
   );
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    // milestone 45 / story 03 — the board is `content:fixed` (DESIGN §The shell's layout
+    // primitives 2): descendants own scroll, never the region itself. `h-screen` was 100vh,
+    // which under the shell overflows its box by exactly the chrome height; the published
+    // primitive (ADR-005 contract point 7) is the honest replacement, and its `0px` fallback
+    // keeps this identical when the surface is mounted with no shell. It is a `<div>` and no
+    // longer the document's `<main>`: DESIGN §Accessibility 6 allows exactly one, and the shell
+    // owns it.
+    <div className="flex h-[calc(100dvh_-_var(--aof-shell-chrome-height,0px))] flex-col overflow-hidden bg-background text-foreground">
+      {/* R1 — the notice rail. This strip is full-bleed and must sit ABOVE the chrome and push
+          it down; the shell is the only thing that can guarantee that, so the board CONTRIBUTES
+          it rather than painting it above a bar of its own. The strip itself is unchanged, down
+          to its `role="alert"` and its sentence. With no shell present it renders exactly where
+          it always did — first child of the board's root. */}
       {serverGone ? (
-        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive" role="alert">
-          <span aria-hidden="true">⚠</span>
-          <span>
-            This board&apos;s server is gone (the daemon restarted — board ports are per-session). Buttons on this tab do
-            nothing. Reopen the board from{" "}
-            <a className="underline" href="http://127.0.0.1:4181/?mode=fleet">
-              the fleet
-            </a>
-            .
-          </span>
-        </div>
+        <SurfaceNotice deps={[serverGone]} className="shrink-0">
+          <div className="flex shrink-0 items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive" role="alert">
+            <span aria-hidden="true">⚠</span>
+            <span>
+              This board&apos;s server is gone (the daemon restarted — board ports are per-session). Buttons on this tab do
+              nothing. Reopen the board from{" "}
+              {/* m45/ADR-002 — the fleet's PATH. ABSOLUTE and hard-coded on purpose: a
+                  board port is ephemeral and the fleet's is fixed at 4181, which is the
+                  whole reason this banner can name it at all. No `scope`: this link never
+                  carried one and the migration invents nothing. */}
+              <a className="underline" href="http://127.0.0.1:4181/fleet">
+                the fleet
+              </a>
+              .
+            </span>
+          </div>
+        </SurfaceNotice>
       ) : null}
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
-        <span className="flex items-center gap-2">
-          <span className="text-lg text-primary" aria-hidden="true">
-            ✦
-          </span>
-          <span className="text-sm font-bold">aof</span>
-          <span className="text-sm text-muted-foreground">Work Board</span>
-        </span>
-        <span className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
-          <StatusLegend windowSeconds={stalenessWindow} />
-          <button
-            type="button"
-            onClick={() => void load({ silent: true })}
-            className="transition hover:text-foreground"
-            aria-label="Sync work stream"
-          >
-            ⟳ sync
-          </button>
-        </span>
-      </header>
+      {/* The board's own `<header>` is ABSORBED into the shell's bar (DESIGN §Accessibility 6:
+          one banner; DG-45-1: one brand mark — the board's bare glyph becomes the shell's filled
+          tile; and the wordmark loses its route word, because the nav names the route and a
+          second word would say it twice). What survives is what is the BOARD's: its status
+          legend and its ⟳ sync, contributed to the shell's right-anchored surface slot. */}
+      <SurfaceSlot deps={[stalenessWindow, load]} className="flex items-center justify-end gap-4 px-4 py-2 text-xs text-muted-foreground">
+        <StatusLegend windowSeconds={stalenessWindow} />
+        <button
+          type="button"
+          onClick={() => void load({ silent: true })}
+          className="transition hover:text-foreground"
+          aria-label="Sync work stream"
+        >
+          ⟳ sync
+        </button>
+      </SurfaceSlot>
 
       {loading ? (
         <div className="mono p-6 text-sm text-muted-foreground">Loading work stream...</div>
@@ -525,7 +543,10 @@ export function Board() {
       {dispatch ? (
         <div
           role="status"
-          className={`fixed bottom-4 right-4 z-50 max-w-md rounded-md border px-3 py-2 text-sm shadow-lg ${
+          // DG-45-2 — the dispatch notice is a TOAST (z-40), not the shell's fullscreen
+          // occupant. The top rung means one thing now, and ui/src/app/shell-layout.mjs is
+          // where every rung is spelled.
+          className={`fixed bottom-4 right-4 z-40 max-w-md rounded-md border px-3 py-2 text-sm shadow-lg ${
             dispatch.error ? "border-accent bg-background text-accent" : "border-border bg-background text-foreground"
           }`}
         >
@@ -540,7 +561,7 @@ export function Board() {
       {dockOpen ? (
         <TerminalDock session={dockSession} onClose={() => setDockOpen(false)} />
       ) : null}
-    </main>
+    </div>
   );
 }
 
@@ -565,7 +586,8 @@ function StatusLegend({ windowSeconds }: { windowSeconds: number | null }) {
         ◷ status legend
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-border bg-card p-2 shadow-lg">
+        // DG-45-2 — a legend is a POPOVER (z-20).
+        <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-md border border-border bg-card p-2 shadow-lg">
           {LANE_ORDER.map((status) => (
             <p key={status} className="flex items-center gap-2 py-0.5 text-xs text-foreground">
               <StatusRing status={status} size={14} />

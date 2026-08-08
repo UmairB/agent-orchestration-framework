@@ -2,7 +2,7 @@
 // (milestone 25 / story 02; ARCHITECTURE ADR-003/ADR-004). A SIBLING to
 // `board-serve.mjs`, NOT an extension of the work UI: it stands up its OWN single
 // `http.createServer` bound to `127.0.0.1`, serving the BUILT `ui/dist` bundle
-// announced with `?mode=fleet`, its `/api/mesh/status` read route, and its board drill-in URL route.
+// announced at the fleet's own PATH (milestone 45 / ADR-002), its `/api/mesh/status` read route, and its board drill-in URL route.
 //
 // milestone 34 / story 03 (34/ADR-006) — `GET /api/mesh/status` now DEFAULTS to
 // the machine-wide GLOBAL projection (via `queryGlobalMeshStatus`,
@@ -59,6 +59,14 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { assetPath } from "./asset-base.mjs";
+// milestone 45 / story 02 (ADR-004): the THREE static-serving rules live ONCE, in a
+// pure leaf, and this face re-derives none of them. `safeStaticPath` and `contentType`
+// were defined here (:861-884) and again in setup-ui.mjs — the guard byte-identically,
+// the MIME table already drifted (this copy was the richer one, and the merged table is
+// its union, so nothing about THIS origin's MIME answers changes).
+// `shouldServeAppShell` is the predicate that TIGHTENS this face's previously
+// unconditional catch -> index.html fallback.
+import { contentType, safeStaticPath, shouldServeAppShell } from "./static-serve.mjs";
 import { serveBoard } from "./board-serve.mjs";
 // milestone 34 / story 03 (ADR-006) — the ONE global query surface this thin serve
 // face is allowed to reach for its GLOBAL `/api/mesh/status` read. `queryGlobalMeshStatus`
@@ -107,9 +115,10 @@ import { reportDegrade } from "./degrade.mjs";
 // so an operator legitimately runs the fleet view ON TOP of a board at once.
 export const DEFAULT_MESH_UI_PORT = 4181;
 
-// The built fleet bundle lives in the SAME ui/dist the board serves (the single
-// bundle carries every `?mode`); the fleet mode is selected by the `?mode=fleet`
-// query, not a separate build (task 00 DEV note; ADR-003 decision 4).
+// The built fleet bundle lives in the SAME ui/dist the board serves — ONE bundle
+// carrying every surface; which surface renders is decided by the PATH the operator
+// is on (milestone 45 / ADR-001's route table), never by a separate build and no
+// longer by a query selector (task 00 DEV note; ADR-003 decision 4).
 export function meshUiDist(repoRoot) {
   return path.join(repoRoot, "ui", "dist");
 }
@@ -140,7 +149,11 @@ export async function meshUiProbe({ projectDir = process.cwd(), port = DEFAULT_M
     uiDist: dist,
     uiBuildPresent: existsSync(path.join(dist, "index.html")),
     relayConfigured,
-    fleetUrl: `http://127.0.0.1:${port}/?mode=fleet&scope=${scope}`,
+    // milestone 45 / story 04 (ADR-002) — the fleet's ADR-002 PATH, carrying the
+    // scope it would serve as a REAL query parameter on that path. The legacy
+    // `?mode=fleet&scope=…` form still works (ADR-003 translates it once at the
+    // entry); it is simply no longer MINTED here.
+    fleetUrl: `http://127.0.0.1:${port}/fleet?scope=${scope}`,
   };
 }
 
@@ -265,7 +278,10 @@ export async function serveMeshUi({
   const server = http.createServer(async (request, response) => {
     let requestUrl;
     try {
-      requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      // A "//x" request target parses as PROTOCOL-RELATIVE — see the identical guard in
+      // setup-ui.mjs: without this, //api/* dodges the API guard and the SPA fallback
+      // answers HTML for it. Collapse LEADING slashes only.
+      requestUrl = new URL((request.url ?? "/").replace(/^\/\/+/, "/"), "http://127.0.0.1");
     } catch {
       sendApiError(response, 400, "Invalid request URL.", "invalid-url");
       return;
@@ -550,6 +566,12 @@ export async function serveMeshUi({
 
     // Everything else is the static bundle (the built ui/dist). A missing asset
     // is a friendly 404, never a crash.
+    //
+    // m45 / story 02 (ADR-004 [Amigos-2]) — THE ORDER IS THE DECISION: the traversal
+    // guard's `null` is TERMINAL. Several traversal encodings survive URL parsing intact
+    // AND end in an extension-less segment, so routing a REFUSED path into the fallback
+    // predicate would answer 200 text/html to an attempted directory escape — a refusal
+    // silently converted into a success.
     const filePath = safeStaticPath(dist, pathname);
     if (!filePath) {
       sendApiError(response, 404, "Mesh API route not found.", "not-found");
@@ -560,8 +582,20 @@ export async function serveMeshUi({
         send(response, 200, contentType(filePath), content);
       })
       .catch(() => {
-        // A missing static file falls back to index.html (the SPA entry) so a
-        // deep link renders; a missing index is the friendly not-found envelope.
+        // m45 / story 02 (ADR-004) — this fallback WAS UNCONDITIONAL, and that was a
+        // live defect on this origin: a missing `/assets/index-abc.js` was answered with
+        // index.html and `Content-Type: text/html`, so a deploy that shipped without its
+        // JavaScript arrived in the browser as `Uncaught SyntaxError: Unexpected token
+        // '<'`, arbitrarily far from its cause, while `curl` of the asset said 200. It is
+        // now gated behind the SHARED predicate, so a deep-linked `/fleet` still renders
+        // and a missing FILE stays loud. This is a deliberate NARROWING of live fleet
+        // behaviour, decided in ADR-004, not a regression.
+        if (!shouldServeAppShell(pathname)) {
+          sendApiError(response, 404, "Mesh API route not found.", "not-found");
+          return;
+        }
+        // A missing index is the friendly not-found envelope — ui-build-missing stays
+        // loud, never a blank 200.
         readFile(path.join(dist, "index.html"))
           .then((index) => send(response, 200, "text/html", index))
           .catch(() => sendApiError(response, 404, "Mesh API route not found.", "not-found"));
@@ -731,9 +765,12 @@ export async function serveMeshUi({
 
   const address = server.address();
   const url = `http://127.0.0.1:${address.port}/`;
-  // `url` ends with "/", so this yields e.g. http://127.0.0.1:PORT/?mode=fleet —
-  // the same single bundle, the fleet mode (task 00 DEV note; ADR-003 decision 4).
-  const fleetUrl = `${url}?mode=fleet`;
+  // milestone 45 / story 04 (ADR-002) — the fleet's PATH on this server's own origin:
+  // e.g. http://127.0.0.1:PORT/fleet. Built with `new URL` rather than concatenated, so
+  // the path can never be glued onto a query. It carries NO scope: the scope is the
+  // LAUNCHER's fact, and `src/commands/mesh-ui.mjs` sets it on this URL as a real search
+  // parameter before announcing it (the same value `serveMeshUi` was started with).
+  const fleetUrl = new URL("/fleet", url).toString();
   return { server, url, fleetUrl, terminalMirror: mirror };
 }
 
@@ -858,27 +895,8 @@ function send(response, status, contentTypeValue, body) {
   response.end(body);
 }
 
-function contentType(filePath) {
-  if (filePath.endsWith(".js")) return "text/javascript";
-  if (filePath.endsWith(".css")) return "text/css";
-  if (filePath.endsWith(".html")) return "text/html";
-  if (filePath.endsWith(".json")) return "application/json";
-  if (filePath.endsWith(".svg")) return "image/svg+xml";
-  return "application/octet-stream";
-}
-
-// The static-path guard (setup-ui.mjs's safeStaticPath, mirrored): map a pathname
-// to a file INSIDE the served root, refusing traversal (an absolute or escaping
-// path returns null → not-found).
-function safeStaticPath(uiRoot, pathname) {
-  let relativePath;
-  try {
-    relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-  } catch {
-    return null;
-  }
-  if (path.isAbsolute(relativePath)) return null;
-  const filePath = path.resolve(uiRoot, relativePath);
-  const root = path.resolve(uiRoot);
-  return filePath === root || filePath.startsWith(`${root}${path.sep}`) ? filePath : null;
-}
+// m45 / story 02 (ADR-004): `contentType` and `safeStaticPath` used to be defined here,
+// the guard byte-identically with setup-ui.mjs's copy and the MIME table already drifted
+// ahead of it. They now have ONE home — ./static-serve.mjs, imported at the top of this
+// file. The merged MIME table is the UNION, i.e. THIS copy, so no answer this origin
+// gives changes; it is the board/config origin that stops being one file type behind.

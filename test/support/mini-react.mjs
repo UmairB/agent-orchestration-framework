@@ -244,6 +244,63 @@ export function createRuntime() {
     if (type === FRAGMENT) {
       return renderNode(props.children ?? null, `${pathKey}<>${key ?? ""}`, seen);
     }
+    // CLASS COMPONENTS, and the ONE reason they are here: ERROR BOUNDARIES (milestone 45,
+    // finding F-45-M-1). A boundary is the only containment React offers for a surface that
+    // throws while rendering, and it has no function-component form — so a shell that
+    // promises "a failing surface degrades in place, the chrome survives" could not be
+    // driven headlessly at all. That is the same defect class this module's own header
+    // names: a rule nothing can check. Support is deliberately the minimum that makes a
+    // boundary real — construct, `state`, `setState`, `getDerivedStateFromError`,
+    // `componentDidCatch`, `render` — and nothing else (no lifecycle beyond the catch pair,
+    // no `forceUpdate`). React marks these with `prototype.isReactComponent`; so do we.
+    if (typeof type === "function" && type.prototype?.isReactComponent) {
+      const name = type.name || "anon";
+      const instanceKey = `${pathKey}/${name}#${key ?? ""}`;
+      seen.add(instanceKey);
+      let instance = instances.get(instanceKey);
+      if (!instance) {
+        instance = { hooks: [], key: instanceKey, classInstance: null };
+        instances.set(instanceKey, instance);
+      }
+      if (!instance.classInstance) {
+        const component = new type(props);
+        component.props = props;
+        component.state = component.state ?? null;
+        component.setState = (next) => {
+          const patch = typeof next === "function" ? next(component.state) : next;
+          const merged = { ...component.state, ...patch };
+          if (Object.keys(merged).every((k) => Object.is(merged[k], component.state?.[k]))) return;
+          component.state = merged;
+          dirty = true;
+        };
+        instance.classInstance = component;
+      }
+      const component = instance.classInstance;
+      component.props = props;
+
+      // The CATCH, and why it wraps the child render rather than `render()` alone: a
+      // throwing surface throws while ITS OWN subtree is being reconciled, which in this
+      // synchronous whole-tree renderer is inside `renderNode` of this boundary's output.
+      // Catching only `component.render()` would catch nothing at all — the exact
+      // false-green a boundary test must not produce.
+      const canCatch =
+        typeof type.getDerivedStateFromError === "function" || typeof component.componentDidCatch === "function";
+      try {
+        return renderNode(component.render(), instanceKey, seen);
+      } catch (error) {
+        if (!canCatch) throw error;
+        if (typeof type.getDerivedStateFromError === "function") {
+          component.state = { ...component.state, ...type.getDerivedStateFromError(error) };
+        }
+        if (typeof component.componentDidCatch === "function") {
+          component.componentDidCatch(error, { componentStack: instanceKey });
+        }
+        // Re-render the boundary with its caught state — the fallback IS the result of
+        // this pass, exactly as React re-renders the boundary rather than leaving a hole.
+        return renderNode(component.render(), instanceKey, seen);
+      }
+    }
+
     if (typeof type === "function") {
       const name = type.name || "anon";
       const instanceKey = `${pathKey}/${name}#${key ?? ""}`;

@@ -10,6 +10,12 @@ import { attachTerminalWebSocket } from "./terminal-ws.mjs";
 // — dev behaviour is byte-for-byte unchanged (an explicit options.uiRoot still
 // wins, exactly as before; only the DEFAULT resolution changes carrier).
 import { assetPath } from "./asset-base.mjs";
+// milestone 45 / story 02 (ADR-004): the THREE static-serving rules live ONCE, in a
+// pure leaf, and this server re-derives none of them. `safeStaticPath` and
+// `contentType` were defined here (:262-280) and again in mesh-ui-serve.mjs — the
+// guard byte-identically, the MIME table already drifted; `shouldServeAppShell` is
+// the new history-fallback predicate both origins now share.
+import { contentType, safeStaticPath, shouldServeAppShell } from "./static-serve.mjs";
 
 const MAX_BODY_BYTES = 1_000_000;
 const VALID_CONFIG_KINDS = new Set(supportedResourceKinds());
@@ -24,7 +30,11 @@ export async function serveSetupUi(catalog, options = {}) {
   const server = http.createServer(async (request, response) => {
     let requestUrl;
     try {
-      requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      // A "//x" request target parses as PROTOCOL-RELATIVE ("x" becomes the host and the
+      // pathname loses its first segment), so the /api/* guard below would never fire and
+      // the SPA fallback would answer HTML for a stray-double-slash API URL — the masking
+      // class ADR-004 (m45) exists to remove. Collapse LEADING slashes only.
+      requestUrl = new URL((request.url ?? "/").replace(/^\/\/+/, "/"), "http://127.0.0.1");
     } catch {
       sendApiError(response, 400, "Invalid request URL.", "invalid-url");
       return;
@@ -127,6 +137,18 @@ export async function serveSetupUi(catalog, options = {}) {
       return;
     }
 
+    // m45 / story 02 (ADR-004 [Amigos-2]) — THE ORDER IS THE DECISION, and it is
+    // security-adjacent:
+    //   1. /api/* answered above, unchanged;
+    //   2. the traversal guard, and its `null` is TERMINAL — a refused path 404s HERE
+    //      and never reaches the fallback predicate. Several traversal encodings survive
+    //      URL parsing intact AND end in an extension-less segment
+    //      (`/%2e%2e%2fetc%2fpasswd`, `/%2f%2fetc%2fpasswd`), so the tidy-looking
+    //      `if (!filePath) -> fall back` refactor would answer 200 text/html to an
+    //      attempted directory escape: it leaks no file, but it converts a refusal into
+    //      a success, silently;
+    //   3. only an ADMITTED path is read, and only a read that MISSES consults
+    //      shouldServeAppShell.
     const filePath = safeStaticPath(uiRoot, requestUrl.pathname);
     if (!filePath) {
       send(response, 404, "text/plain", "Not found");
@@ -136,7 +158,22 @@ export async function serveSetupUi(catalog, options = {}) {
     readFile(filePath).then((content) => {
       send(response, 200, contentType(filePath), content);
     }).catch(() => {
-      send(response, 404, "text/plain", "Not found");
+      // A client route that was deep-linked or refreshed renders the app shell instead
+      // of 404ing (the operator-facing gap this story closes: `/board` survives a
+      // reload). A request that names a FILE stays exactly as loud as it was — a
+      // missing `/assets/index-abc.js` must 404, or a broken deploy arrives as
+      // `Uncaught SyntaxError: Unexpected token '<'`, arbitrarily far from its cause.
+      if (!shouldServeAppShell(requestUrl.pathname)) {
+        send(response, 404, "text/plain", "Not found");
+        return;
+      }
+      // A missing index.html stays the friendly 404 — ui-build-missing is LOUD, never a
+      // blank 200.
+      readFile(path.join(uiRoot, "index.html")).then((index) => {
+        send(response, 200, "text/html", index);
+      }).catch(() => {
+        send(response, 404, "text/plain", "Not found");
+      });
     });
   });
 
@@ -259,25 +296,10 @@ function readJsonBody(request) {
   });
 }
 
-function contentType(filePath) {
-  if (filePath.endsWith(".js")) return "text/javascript";
-  if (filePath.endsWith(".css")) return "text/css";
-  if (filePath.endsWith(".html")) return "text/html";
-  return "application/octet-stream";
-}
-
-function safeStaticPath(uiRoot, pathname) {
-  let relativePath;
-  try {
-    relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
-  } catch {
-    return null;
-  }
-  if (path.isAbsolute(relativePath)) return null;
-  const filePath = path.resolve(uiRoot, relativePath);
-  const root = path.resolve(uiRoot);
-  return filePath === root || filePath.startsWith(`${root}${path.sep}`) ? filePath : null;
-}
+// m45 / story 02 (ADR-004): `contentType` and `safeStaticPath` used to be defined here.
+// They now have ONE home — ./static-serve.mjs, imported at the top of this file — with
+// the MIME table merged to the UNION of the two drifted copies (so this origin stops
+// answering application/octet-stream for .json and .svg).
 
 function decodeRoutePart(value) {
   try {

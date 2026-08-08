@@ -128,8 +128,22 @@ function renderedChildren(block) {
 // projection ("this calls nodeCurrentWork (./scope.mjs), the SAME fleetCurrentWorkLines
 // projection NodeCard already calls"). A guard that accepted a comment as the
 // derivation would be exactly the vacuous test this milestone is about.
+//
+// THE ORDER IS LOAD-BEARING AND IT IS LINE-COMMENTS-FIRST (fixed 2026-08-07, architect's
+// structural review of 45/03; the same order `acd-mesh-ui-scope-visible.test.mjs` has
+// always used). Stripping BLOCK comments first is silently catastrophic: a LINE comment
+// that happens to contain the two characters `/*` — an API glob in prose, a path pattern,
+// a regex quoted in English — opens a PHANTOM block comment that runs to the next `*/`
+// anywhere in the file and deletes everything between.
+// Measured, because this is not hypothetical: `src/mesh-ui-serve.mjs:277` gained the line
+// comment `// … //api/* dodges the API guard …` in 45/02 (64d471b). Under the old order
+// the stripper ate 39,000 characters of that file, every `queryGlobalMeshStatus(` call
+// site vanished, and PROOF 3 below started reporting `found []` — a fitness function
+// failing for a reason that had nothing to do with its own subject. A guard that can be
+// blinded by prose is a guard nobody can trust to stay honest.
+// (The wider sweep — ~30 arch suites carry this same idiom — is TECH_DEBT item 24.)
 function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, " ");
+  return source.replace(/^[ \t]*\/\/.*$/gm, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
 }
 
 // PROOF 2 — the per-node card renderers with NO current-work derivation anywhere in
@@ -215,9 +229,19 @@ export const archTests = [
     name: "arch/38 ADR-008 (acd-rendered-component-fed-by-route): the fleet route keeps ONE status data source — the payload shape the components are held to is the only one production can serve",
     run: async () => {
       const serve = await readFile(path.join(REPO, MESH_UI_SERVE), "utf8");
-      const code = serve.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, " ");
+      // The SAME stripper as the analyzer above, and for the same reason: this lane read
+      // `found []` for a week because it inlined the block-comments-first order and one
+      // line comment in the file it reads contains `//api/*`. One home for the rule.
+      const code = stripComments(serve);
       const statusQueries = [...code.matchAll(/\b(query\w*MeshStatus|meshStatus|handleMeshStatus)\s*\(/g)].map((match) => match[1]);
       const distinct = [...new Set(statusQueries.filter((name) => /MeshStatus$/.test(name)))];
+      // NON-VACUITY: the stripper really did leave the file's code standing. A future
+      // regression of the comment order would empty `code` and this assertion would fire
+      // FIRST, naming the stripper instead of blaming the subject.
+      assert.ok(
+        code.includes("http.createServer"),
+        "the stripped source still contains the server's own code — if this fails, the comment stripper ate the file (see stripComments' header: line comments FIRST)",
+      );
       assert.deepEqual(
         distinct,
         ["queryGlobalMeshStatus"],

@@ -159,9 +159,10 @@ async function isServing(url) {
 
 export const workUiVerbRenameTests = [
   // Scenario: aof work ui launches the per-stream board server (binds 127.0.0.1:4180
-  // by default; the human line reads "ui"; the announced URL still carries ?mode=board).
+  // by default; the human line reads "ui"; the announced URL names the board's PATH,
+  // `/board`, since m45/ADR-002 retired the `?mode=board` selector it used to carry).
   {
-    name: "work-ui-verb-rename/00 aof work ui launches the board on the default 127.0.0.1:4180 with the ui human line and the ?mode=board URL",
+    name: "work-ui-verb-rename/00 aof work ui launches the board on the default 127.0.0.1:4180 with the ui human line and the /board URL",
     async run() {
       const { root } = await makeFixture();
       // Default port 4180 may be held by a stray board on a dev box; only assert the
@@ -184,7 +185,12 @@ export const workUiVerbRenameTests = [
         assert.ok(!out.includes("AOF work board is running locally."), "the retired human line is gone");
         const url = announcedUrl(out);
         assert.ok(url, "the launch announces a board URL");
-        assert.ok(url.includes("?mode=board"), `the announced URL still carries the ?mode=board serve param (got: ${url})`);
+        // m45 / story 04 (ADR-002) — the announced URL is the board's PATH. Parsed, not
+        // substring-matched: a path with a query glued onto it (`/board&x=1`) would pass
+        // an `includes` and be a pathname nothing serves.
+        const announced = new URL(url);
+        assert.equal(announced.pathname, "/board", `the announced URL names the ADR-002 board path (got: ${url})`);
+        assert.equal(announced.searchParams.get("mode"), null, `…and mints no legacy \`mode\` selector (got: ${url})`);
         assert.ok(url.includes("127.0.0.1:4180"), `the board binds 127.0.0.1 on the documented default port 4180 (got: ${url})`);
         assert.equal(await isServing(url), true, "the board server is answering on the announced origin");
       } finally {
@@ -276,7 +282,12 @@ export const workUiVerbRenameTests = [
       const { root } = await makeFixture();
       try {
         const rows = [
-          { surface: "top-level aof usage", args: ["help"], channel: "stdout", exit: 0, lists: "aof work ui [--port]" },
+          // Usage literal updated 2026-08-07: the m42 command rewrite (277ada5) changed the
+          // printed usage to `aof work ui [--port 4180] [--target <dir>] [--json]` and this
+          // row was never updated — it was red at HEAD before m45 touched anything (verified
+          // in a detached worktree). The invariant this lane pins — the verb reads `work ui`,
+          // never `work board` — is unchanged; only the flag rendering drifted.
+          { surface: "top-level aof usage", args: ["help"], channel: "stdout", exit: 0, lists: "aof work ui [--port 4180]" },
           { surface: "work unknown-subcommand", args: ["work", "not-a-subcommand"], channel: "stderr", exit: 1, lists: "aof work ui [--port 4180]" },
         ];
         for (const { surface, args, channel, exit, lists } of rows) {

@@ -167,8 +167,8 @@ function announcedUrl(stdout) {
 // Confirm a 127.0.0.1:<port> fleet server is answering (the fleet page 200s on the origin).
 async function isServing(url) {
   try {
-    // The announced URL carries ?mode=fleet; fetch the origin root so a plain 200 proves
-    // the bind regardless of the query.
+    // The announced URL names the fleet's path (m45/ADR-002); fetch the origin root so a
+    // plain 200 proves the bind regardless of the path or the query.
     const origin = new URL(url);
     const response = await fetch(`${origin.protocol}//${origin.host}/`);
     return response.status === 200;
@@ -202,7 +202,16 @@ export const meshUiCliFaceTests = [
         );
         const url = announcedUrl(out);
         assert.ok(url, "the launch announces a fleet URL");
-        assert.ok(url.includes("mode=fleet"), `the announced URL carries the ?mode=fleet selector (got: ${url})`);
+        // m45 / story 04 (ADR-002) — the announced URL names the fleet's PATH, with the
+        // started scope as a REAL query parameter on it. Parsed, never substring-matched:
+        // the announce is composed in `src/commands/mesh-ui.mjs`, which used to glue
+        // `&scope=…` onto this string with a hard-coded `&`, and `…/fleet&scope=global`
+        // parses as a pathname with no `scope` parameter at all while satisfying every
+        // `includes` a reader would reach for.
+        const announced = new URL(url);
+        assert.equal(announced.pathname, "/fleet", `the announced URL names the ADR-002 fleet path (got: ${url})`);
+        assert.equal(announced.searchParams.get("mode"), null, `…and mints no legacy \`mode\` selector (got: ${url})`);
+        assert.equal(announced.searchParams.get("scope"), "global", `…and carries the started scope as a real parameter (got: ${url})`);
         assert.ok(
           url.includes("127.0.0.1:4181"),
           `the fleet binds 127.0.0.1 on the documented default port 4181 (got: ${url})`

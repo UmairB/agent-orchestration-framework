@@ -887,7 +887,7 @@ import { meshFleetGracefulDegradationTests } from "../test/mesh-fleet-graceful-d
 // milestone 25 — mesh-ui (story 02: the read-only fleet web surface — the NEW
 // src/mesh-ui-serve.mjs thin serve-face (a board-serve.mjs sibling) behind the
 // CLI-only `aof mesh ui` verb; one 127.0.0.1 server on default port 4181 serving
-// ui/dist with ?mode=fleet + the single GET /api/mesh/status route
+// ui/dist at the fleet's own path (m45/ADR-002) + the single GET /api/mesh/status route
 // (invoke("mesh:status")). One @executable task feature (00_mesh-ui-serve): the verb
 // stands up ONE server, /api/mesh/status deep-equals `aof mesh status --json`, the
 // /api/mesh namespace is disjoint from /api/work, unknown-route + missing-bundle +
@@ -1590,6 +1590,114 @@ import { archTests as acdTestSuiteRegistrationTests } from "../test/arch/acd-tes
 // ADR-008 — the gate-time branch advance can never discard a worker commit: no rebase,
 // no force, no reset on the branch path; a conflicting merge aborts and refuses.
 import { archTests as acdGatePropagationNeverDiscardsTests } from "../test/arch/acd-gate-propagation-never-discards.test.mjs";
+
+// ── milestone 45 · UI app shell & path routing — the fitness functions authored at refine.
+// EXPECTED RED until 45's stories land; that is the house convention (an arch test written
+// at refine time is part of the CONTRACT, not a report on the present), and they are
+// registered NOW because m43/ADR-014 E7 established that an unregistered suite is no gate
+// at all — including a red one nobody can see.
+//   ADR-001/002 — ONE route table; the render root selects through it and by nothing else;
+//                 the application entry imports surfaces and defines none.
+import { archTests as acdUiSingleRouteTableTests } from "../test/arch/acd-ui-single-route-table.test.mjs";
+//   ADR-002/003 — no `?mode=` surface URL is minted anywhere in src/ · ui/src/ · app/desktop/;
+//                 the legacy vocabulary is read-only and only the translator reads it.
+import { archTests as acdNoSurfaceModeUrlLiteralTests } from "../test/arch/acd-no-surface-mode-url-literal.test.mjs";
+//   ADR-004     — ONE shared static-serving module (src/static-serve.mjs) for BOTH servers:
+//                 the history fallback never shadows /api/* and never masks a missing asset
+//                 (driven against the REAL serveSetupUi handler, not a copy of its logic),
+//                 and the byte-identical, twice-defined safeStaticPath traversal guard
+//                 (setup-ui.mjs:269-280 == mesh-ui-serve.mjs:873-884) gets one definition.
+import { archTests as acdSpaFallbackNeverMasksTests } from "../test/arch/acd-spa-fallback-never-masks.test.mjs";
+//   ADR-001/006 — the route module is React-free, DOM-free and node:test-loadable, and the
+//                 legacy translation preserves every other query parameter and the fragment.
+import { archTests as acdRouteLogicFrameworkFreeTests } from "../test/arch/acd-route-logic-framework-free.test.mjs";
+// milestone 45 / story 02 (ADR-004) — the BEHAVIOURAL half of the static-serving rules, and
+// the traceability wiring for all three of that story's @executable task features
+// (00_one-traversal-guard, 01_history-fallback, 02_missing-asset-still-404s). Real HTTP
+// against real started servers — serveBoard, serveSetupUi and serveMeshUi on ephemeral
+// ports, all three serving one fixture bundle — because the features' own LITMUS is "every
+// Then is a real HTTP request against a started server", never "the predicate returns true".
+// The PLACEMENT invariants (one definition, pure leaf, guard-before-fallback ordering) stay
+// in acd-spa-fallback-never-masks above; that division is deliberate.
+import { staticServeFallbackTests } from "../test/static-serve-fallback.test.mjs";
+//   ADR-005     — the shell owns a CLOSED stacking ladder (DESIGN DG-45-2): `z-50` means the
+//                 shell's fullscreen occupant and nothing else, and no surface invents a rung
+//                 at the call site. Ratchets the gap 45/03 closes so 46/47/49 cannot reopen it
+//                 — 49 being precisely the milestone that puts a surface fullscreen.
+import { archTests as acdShellZLadderSingleHomeTests } from "../test/arch/acd-shell-z-ladder-single-home.test.mjs";
+//   ADR-005     — the surface → shell channel has ONE host: `declareShellPresent()` is called
+//                 exactly once in ui/src, at MODULE scope, by the module that renders the shell
+//                 root, and NO routed surface imports the shell component. Added at the
+//                 architect's structural review of 45/03 (2026-08-07). The bus flag is set by
+//                 IMPORTING Shell.tsx, so a single stray import inside ui/src/{fleet,board,
+//                 config}/ — even a `type` one, which tsc erases but the bundler still follows —
+//                 would declare a shell that is not mounted, and every contributed control (the
+//                 fleet's scope switch, the board's sync, the board's serverGone notice) would
+//                 vanish with EVERY suite still green. Not reachable by review attention;
+//                 trivially greppable; therefore a ratchet.
+import { archTests as acdShellBusSingleHostTests } from "../test/arch/acd-shell-bus-single-host.test.mjs";
+
+// ── milestone 45 / story 01 — THE ROUTE MODEL (ADR-001/002/003/006): ui/src/app/routes.mjs,
+// the ONE pure route table (`routeFor`) plus the ONE legacy `?mode=` translation
+// (`legacyRedirectFor`). Framework-free by contract — this repo has NO React test harness, so
+// the route decision lives in a plain .mjs that node:test drives headlessly, in the house
+// pattern of ui/src/fleet/scope.mjs + test/fleet-scope.test.mjs. Three @executable task
+// features: 00_route-table (four paths, one shared 404, frozen/origin-blind table),
+// 01_legacy-mode-redirect (every advertised ?mode= URL onto its path, `mode` the only thing
+// removed, idempotent), 02_query-and-fragment-passthrough (`?scope=`, unknown parameters and
+// the `#ref` fragment survive, in order).
+import { appRoutesTests } from "../test/app-routes.test.mjs";
+// ── milestone 45 / story 03 — THE APP SHELL & THE ENTRY (ADR-002 + ADR-005 with its five
+// [Build-N] amendments). `ui/src/main.tsx` stops being a surface (its 1,260-line config editor
+// moved to `ui/src/config/App.tsx`) and becomes three acts: mount, apply the legacy `?mode=`
+// translation ONCE as a replace, render the shell around the surface the ONE route table names.
+// Four @executable task features, each with its own suite:
+//   00_entry-selects-a-surface — the entry's decision (`ui/src/app/entry.mjs`): four canonical
+//     addresses, the whole advertised legacy set rewritten exactly once, the surface read from
+//     the POST-rewrite address, and every parameter and fragment reaching the surface in order.
+//   01_shell-regions — the layout MODEL (`ui/src/app/shell-layout.mjs`): five rows in one
+//     order, the 88px chrome budget with the notice rail exempt/additive/REPORTED, the one
+//     published `--aof-shell-chrome-height`, the two content modes, one banner and one `<main>`
+//     (driven through the REAL shell AND the real fleet/board, which is where the absorption of
+//     their own bars could regress), DG-45-1's one brand mark and DG-45-2's one ladder.
+//   02_navigation — the nav MODEL (`ui/src/app/shell-nav.mjs`): four real links from the ROUTE
+//     TABLE's order, three non-colour active signals, the positional href rule that carries the
+//     current address's own parameters and invents none, honest locality, the 390 disclosure,
+//     and the four-item/ten-character budget REPORTED rather than absorbed.
+//   03_unmatched-path-and-fullscreen — the two states that are not surfaces: an unknown path
+//     rendered in place with nothing marked current, and the ONE shell-owned fullscreen door
+//     whose closed transition set carries no path, no parameter and no history entry.
+//   05_surface-crash-degrades-in-shell — the @bug task raised at the milestone end gate
+//     (F-45-M-1): a surface that throws while rendering takes down ITSELF, never the chrome.
+//     `/config` on the fleet origin blanked the whole application; the shell now contains a
+//     throwing surface into the `failed` state it already rendered, and `<App>` degrades
+//     through its own error state before it ever gets there.
+// (04_app-shell-visual-review is @uat — a person's render verdict — and deliberately has no
+// suite here.)
+import { shellEntryPlanTests } from "../test/shell-entry-plan.test.mjs";
+import { shellRegionsTests } from "../test/shell-regions.test.mjs";
+import { shellNavigationTests } from "../test/shell-navigation.test.mjs";
+import { shellNotFoundAndFullscreenTests } from "../test/shell-not-found-and-fullscreen.test.mjs";
+import { shellSurfaceContainmentTests } from "../test/shell-surface-containment.test.mjs";
+// ── milestone 45 / story 04 — THE ADVERTISED ENTRY POINTS (ADR-002 + ADR-003). Every
+// producer that hands the operator a URL stops minting `?mode=` and mints the path it
+// actually serves: the board / fleet / config-editor launchers (probe AND announce, which
+// are separate strings), `GET /api/mesh/board-url` (whose body shape stays exactly
+// `{ url, workspaceId, ref }` so milestone 46's `origin` field stays additive), the
+// desktop tray's compiled `MESH_UI_URL`, and the three hard-coded cross-links between the
+// board and the fleet. The legacy addresses keep working — ADR-003 translates them once,
+// client-side, at the entry — so every lane that asserts a NEW address has a sibling that
+// asserts the OLD one still serves.
+//   00_servers-advertise-paths — the `--json` probes, the `Open this URL in your browser:`
+//     lines, real GETs of both the new and the legacy addresses on the servers that used
+//     to advertise them, and the drill-in route (its `#ref`, its origin, its refusals).
+//   01_in-app-cross-links — the three hrefs, read off the RENDERED tree of the REAL
+//     `<Board/>` / `<Fleet/>` mounted against real faces, in the states that render them.
+// (02_desktop-entry-and-no-literals-left is @manual — a compiled Rust constant behind a
+// Windows cargo build, plus a real-browser back-compat census — and deliberately has no
+// suite here. Its structural half is `acd-no-surface-mode-url-literal` above.)
+import { advertisedPathsTests } from "../test/advertised-paths.test.mjs";
+import { inAppCrossLinksTests } from "../test/in-app-cross-links.test.mjs";
 // milestone 43 / story 01 — THE EXCLUSIVE ITEM LOCK (ADR-003 + ADR-010's R1.1/R1.3/
 // R1.4/R1.5). Task 00: the scope rule moves down into the leaf and every face answers
 // byte-identically. Task 01: the predicate is SYMMETRIC over the execution scope. Task
@@ -2348,6 +2456,29 @@ export const tests = [
   ...acdUiSurfaceFileBudgetTests,
   ...acdGatePropagationNeverDiscardsTests,
   ...acdTestSuiteRegistrationTests,
+  // milestone 45 — UI app shell & path routing (EXPECTED RED until 45's stories land)
+  ...acdUiSingleRouteTableTests,
+  ...acdNoSurfaceModeUrlLiteralTests,
+  ...acdSpaFallbackNeverMasksTests,
+  ...acdRouteLogicFrameworkFreeTests,
+  ...acdShellZLadderSingleHomeTests,
+  // …and the one m45 ratchet that is expected GREEN from the day 45/03 lands: it pins a
+  // property the delivered build already has, so the accident that would silently break it
+  // cannot happen (architect's structural review, 2026-08-07).
+  ...acdShellBusSingleHostTests,
+  // milestone 45 / story 01 — the route model (tasks 00–02, all @executable)
+  ...appRoutesTests,
+  // milestone 45 / story 03 — the app shell & the entry (tasks 00–03; 04 is @uat)
+  ...shellEntryPlanTests,
+  ...shellRegionsTests,
+  ...shellNavigationTests,
+  ...shellNotFoundAndFullscreenTests,
+  ...shellSurfaceContainmentTests,
+  // milestone 45 / story 02 — the static-serving leaf (tasks 00–02, all @executable)
+  ...staticServeFallbackTests,
+  // milestone 45 / story 04 — the advertised entry points (tasks 00–01; 02 is @manual)
+  ...advertisedPathsTests,
+  ...inAppCrossLinksTests,
   // milestone 43 / story 01 — the exclusive item lock (tasks 00–05; 06 is @manual)
   ...itemLockScopeOneHomeTests,
   ...itemLockSymmetricScopeTests,

@@ -216,8 +216,18 @@ export const meshUiGlobalScopeTests = [
         // mesh-enabled workspace before starting" assertion.
         handle = await launchFleet(localOnlyDir, ["mesh", "ui", "--port", "0"], { AOF_GLOBAL_HOME: home });
         assert.ok(handle.stdout.includes("AOF mesh ui is running locally."), "prints the human announce line");
-        assert.match(handle.stdout, /Open this URL in your browser:\s*\S*mode=fleet\S*/, "the URL carries mode=fleet");
-        assert.match(handle.stdout, /scope=global/, "the URL carries scope=global by default");
+        // m45 / story 04 (ADR-002) — the announce names the fleet's PATH and carries the
+        // default scope as a REAL query parameter on it. Read through `new URL`: this is
+        // the exact line whose `&scope=` used to be concatenated onto a URL assumed to
+        // carry a query, and `…/fleet&scope=global` would satisfy `/scope=global/` while
+        // being a pathname with no parameters — the substring assertion could not tell
+        // the fix from the defect.
+        const announcedMatch = handle.stdout.match(/Open this URL in your browser:\s*(\S+)/);
+        assert.ok(announcedMatch, "the launch announces a fleet URL");
+        const announced = new URL(announcedMatch[1]);
+        assert.equal(announced.pathname, "/fleet", `the URL names the ADR-002 fleet path (got: ${announcedMatch[1]})`);
+        assert.equal(announced.searchParams.get("mode"), null, "…and mints no legacy `mode` selector");
+        assert.equal(announced.searchParams.get("scope"), "global", "the URL carries scope=global by default");
       } finally {
         if (handle) await handle.stop();
         await cleanup(localOnlyDir, home);
@@ -238,7 +248,13 @@ export const meshUiGlobalScopeTests = [
         handle = await launchFleet(repo, ["mesh", "ui", "--local", "--port", "0"], {}, {
           readyRe: /Open this URL in your browser:\s*\S+[\s\S]*Project:\s*\S+/,
         });
-        assert.match(handle.stdout, /scope=local/, "the URL carries scope=local under --local");
+        // m45 / story 04 (ADR-002) — same parsed read as the global row above: the path
+        // is the fleet's, and `scope` is a real parameter on it, never a glued substring.
+        const localMatch = handle.stdout.match(/Open this URL in your browser:\s*(\S+)/);
+        assert.ok(localMatch, "the launch announces a fleet URL");
+        const localAnnounced = new URL(localMatch[1]);
+        assert.equal(localAnnounced.pathname, "/fleet", `the URL names the ADR-002 fleet path (got: ${localMatch[1]})`);
+        assert.equal(localAnnounced.searchParams.get("scope"), "local", "the URL carries scope=local under --local");
         // path.resolve (not a literal string compare) — under a loaded aggregated
         // run Windows can answer a path with different separators/short-name
         // normalization for the SAME directory; comparing resolved paths keeps the

@@ -46,7 +46,18 @@ export const useCallback = (...a) => R().useCallback(...a);
 export const useMemo = (...a) => R().useMemo(...a);
 export const useRef = (...a) => R().useRef(...a);
 export const Fragment = Symbol.for("aof.mini.fragment");
-export default { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment };
+// The class base, present for ONE reason: an error boundary has no function-component
+// form, so without it the shell's "a failing surface degrades in place" contract is
+// undrivable headlessly (m45 / F-45-M-1). \`isReactComponent\` on the prototype is the
+// same marker React itself uses, and it is what mini-react's renderer branches on.
+// \`setState\` is replaced per instance by the renderer, which owns the dirty flag.
+export class Component {
+  constructor(props) { this.props = props; this.state = null; }
+  setState() { throw new Error("setState called before the renderer mounted this component"); }
+  render() { return null; }
+}
+Component.prototype.isReactComponent = {};
+export default { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Fragment, Component };
 `;
 
 const VIRTUAL_JSX = `
@@ -120,7 +131,7 @@ export async function bundleSurface({ entry, stubs = {}, resolve = [] }) {
 // crossing") cannot be driven otherwise — advancing timers alone would fire the
 // tick while `Date.now()` stayed put, and the assertion would measure nothing.
 export async function withMountedApp(options, fn) {
-  const { entry, exportName, stubs, resolve, url, search = "/", hash = "", epoch = null, accessors, settle = "flush" } = options;
+  const { entry, exportName, stubs, resolve, url, search = "/", hash = "", epoch = null, accessors, settle = "flush", holdFromStart = null } = options;
   const bundleSource = await bundleSurface({ entry, stubs, resolve });
   const tmp = await mkdtemp(path.join(os.tmpdir(), "aof-app-harness-"));
   const bundlePath = path.join(tmp, `app-${Date.now()}.mjs`);
@@ -152,6 +163,39 @@ export async function withMountedApp(options, fn) {
   const heldInflight = new Set();
   const holds = [];
   const realFetch = previous.fetch;
+
+  // createHold(fragment) — arm a hold and return its handle. Extracted from `holdNext` so a
+  // hold can also be armed BEFORE the mount (`holdFromStart`, below): an app's FIRST request
+  // is fired during its first render, so by the time a lane has a driver to call `holdNext`
+  // on, the one request it wanted to hold has already been delivered. On a loopback fixture
+  // that race is not close — it is lost every time — which is why a surface's own LOADING
+  // state was unreachable through this harness for anything that fetches on mount.
+  const createHold = (fragment) => {
+    let release = () => {};
+    let arrive = () => {};
+    const gate = new Promise((resolve) => { release = resolve; });
+    const arrived = new Promise((resolve) => { arrive = resolve; });
+    const entry = { fragment, gate, claimed: false, arrive: () => arrive() };
+    holds.push(entry);
+    return {
+      release() {
+        release();
+        const at = holds.indexOf(entry);
+        if (at >= 0) holds.splice(at, 1);
+      },
+      claimed: () => entry.claimed,
+      // answered() — resolves once the REAL server has answered this request, while its
+      // delivery to the app stays held. It is the join point between "the app is still
+      // waiting" and "the server-side effect has really happened", which is exactly the state
+      // DG-14's hung POST is about — and awaiting it also keeps a real request from outliving
+      // the fixture server's teardown.
+      answered: () => arrived,
+    };
+  };
+
+  // Holds armed before the first render, in declaration order. A lane reads them back off the
+  // driver (`driver.startHolds()`) to release them and watch the app settle.
+  const startHolds = (Array.isArray(holdFromStart) ? holdFromStart : holdFromStart === null || holdFromStart === undefined ? [] : [holdFromStart]).map(createHold);
 
   // The BODY the app actually put on the wire, recorded verbatim beside the URL
   // (parsed when it is JSON, which every write these faces make is). A lane that
@@ -222,9 +266,51 @@ export async function withMountedApp(options, fn) {
       text: () => track(response.text()),
     })), Boolean(hold));
   };
+  // A MINIMAL `document`, reachable as `window.document` only.
+  //
+  // It exists for one class of behaviour that is genuinely document-level and cannot be
+  // reached through a component's props: a DOCUMENT-scoped key listener. The app shell owns
+  // `Escape` for its fullscreen occupant (m45/ADR-005 [Build-2]) by adding a `keydown`
+  // listener to `document` — there is nowhere else to add it, because the point is that the
+  // key works wherever focus happens to be. Without this, the only way to drive that clause
+  // was to call the reducer directly, which is exactly the "a state satisfied by calling the
+  // reducer directly proved nothing" defect this harness exists to stop.
+  //
+  // DELIBERATELY NOT on `globalThis`. Production reads it as `window.document` behind a guard;
+  // publishing a bare `document` global would change what `typeof document === "undefined"`
+  // answers for every module in every surface's bundle, which is a much larger blast radius
+  // than the one behaviour this enables.
+  //
+  // The query methods answer EMPTY rather than throwing, and that is the honest answer: this
+  // is a mini-React tree, not a DOM, so nothing here can be found by selector and nothing has
+  // layout. A component that measures or queries must take a seam (the shell's `noticeHeight`
+  // / `viewportWidth` props) — a stub that pretended otherwise would let a lane assert against
+  // a measurement nobody made.
+  const documentListeners = new Map();
+  const documentStub = {
+    activeElement: null,
+    addEventListener(type, handler) {
+      if (typeof handler !== "function") return;
+      if (!documentListeners.has(type)) documentListeners.set(type, new Set());
+      documentListeners.get(type).add(handler);
+    },
+    removeEventListener(type, handler) {
+      documentListeners.get(type)?.delete(handler);
+    },
+    // dispatchEvent(event) — deliver to the listeners attached RIGHT NOW (a copy, so a handler
+    // that detaches during delivery does not mutate the set being iterated).
+    dispatchEvent(event) {
+      for (const handler of [...(documentListeners.get(event?.type) ?? [])]) handler(event);
+      return true;
+    },
+    listenerCount: (type) => documentListeners.get(type)?.size ?? 0,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+
   globalThis.location = { search, hash, pathname: "/", href: `${origin}/${search}${hash}`, assign() {} };
   globalThis.history = { pushState() {} };
-  globalThis.window = { location: globalThis.location, history: globalThis.history };
+  globalThis.window = { location: globalThis.location, history: globalThis.history, document: documentStub };
 
   clock.install();
   try {
@@ -279,8 +365,14 @@ export async function withMountedApp(options, fn) {
     // land — the only way to read a surface's own LOADING branch, which is a
     // state the DESIGN States tables assert ("no skeleton badge stands in for
     // one"). The lane settles the network itself afterwards.
+    //
+    // On a LOOPBACK fixture that is often not enough on its own: `renderOnly`
+    // yields to the event loop between render passes, and a same-machine
+    // response lands inside that window, so the tree read back is the populated
+    // one. Pair it with `holdFromStart` when the loading state must be genuinely
+    // frozen rather than merely raced for.
     if (settle === "render") await renderOnly();
-    else await flush();
+    else await flush({ ignoreHeld: startHolds.length > 0 });
 
     const driver = {
       clock,
@@ -294,28 +386,9 @@ export async function withMountedApp(options, fn) {
       requestsMatching: (fragment) => requests.filter((entry) => entry.url.includes(fragment)),
       // holdNext(fragment) — hold the DELIVERY of the next response whose URL
       // contains `fragment` until release() is called (see the fetch wrapper).
-      holdNext(fragment) {
-        let release = () => {};
-        let arrive = () => {};
-        const gate = new Promise((resolve) => { release = resolve; });
-        const arrived = new Promise((resolve) => { arrive = resolve; });
-        const entry = { fragment, gate, claimed: false, arrive: () => arrive() };
-        holds.push(entry);
-        return {
-          release() {
-            release();
-            holds.splice(holds.indexOf(entry), 1);
-          },
-          claimed: () => entry.claimed,
-          // answered() — resolves once the REAL server has answered this
-          // request, while its delivery to the app stays held. It is the join
-          // point between "the app is still waiting" and "the server-side
-          // effect has really happened", which is exactly the state DG-14's
-          // hung POST is about — and awaiting it also keeps a real request from
-          // outliving the fixture server's teardown.
-          answered: () => arrived,
-        };
-      },
+      holdNext: (fragment) => createHold(fragment),
+      // The holds armed BEFORE the mount, in declaration order (`holdFromStart`).
+      startHolds: () => startHolds.slice(),
       // advance(ms) — move the controllable clock, re-rendering between each
       // timer callback exactly as a browser would between paints.
       advance: (ms) => clock.advance(ms, flush),
@@ -326,6 +399,26 @@ export async function withMountedApp(options, fn) {
       // about. The app's own polls still land, so the tree read after the
       // advance is the settled one.
       advanceHeld: (ms) => clock.advance(ms, () => flush({ ignoreHeld: true })),
+      // The document the mounted app sees, for a lane that needs to inspect what
+      // the app attached to it.
+      document: () => documentStub,
+      // press(key, init) — a real `keydown` at the DOCUMENT, delivered to the
+      // listeners the app itself attached, then settled. This is how a
+      // document-scoped key (the shell's `Escape`) is driven through the REAL
+      // component rather than by calling its reducer.
+      async press(key, init = {}) {
+        let defaultPrevented = false;
+        documentStub.dispatchEvent({
+          type: "keydown",
+          key,
+          shiftKey: false,
+          ...init,
+          preventDefault() { defaultPrevented = true; },
+          stopPropagation() {},
+        });
+        await flush();
+        return { defaultPrevented };
+      },
     };
     Object.assign(driver, accessors ? accessors(driver) : {});
 

@@ -267,7 +267,10 @@ export function DetailPanel({
                   look. */}
               {item.execution.active && !item.execution.sessionId ? (
                 <a
-                  href="http://127.0.0.1:4181/?mode=fleet&scope=global"
+                  // m45/ADR-002 — the fleet's PATH, still carrying `scope=global` as a real
+                  // query parameter on it (the payload moves with the address, it is not
+                  // dropped). The fleet's port is fixed at 4181; the board's is not.
+                  href="http://127.0.0.1:4181/fleet?scope=global"
                   target="_blank"
                   rel="noreferrer"
                   className="underline underline-offset-2 hover:text-foreground"

@@ -370,7 +370,9 @@ function MilestoneSwitcher({
       {open && pos ? (
         <div
           role="listbox"
-          className="fixed z-50 max-h-[60vh] w-[320px] overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
+          // DG-45-2 — the milestone switcher's listbox is a POPOVER (z-20), not the shell's
+          // fullscreen occupant; the ladder in ui/src/app/shell-layout.mjs is its one home.
+          className="fixed z-20 max-h-[60vh] w-[320px] overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg"
           style={{ top: pos.top, left: pos.left }}
         >
           <SwitchRow active={focus === "all"} onClick={() => onSetFocus("all")}>
