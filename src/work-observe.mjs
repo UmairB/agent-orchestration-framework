@@ -631,12 +631,40 @@ export function tokenSplit(agents = []) {
 // Does a subagent's meta/prompt reference this milestone? We match the milestone
 // id (numeric) or its folder slug in the task description OR the agent's opening
 // prompt — robust to either the coordinator naming "346" or passing the folder path.
-function agentMatchesMilestone({ meta, firstUserText }, { id, slug }) {
-  const idRe = new RegExp(`(^|[^0-9])0*${id}([^0-9]|$)`);
-  const hay = `${meta?.description || ""}\n${firstUserText || ""}`;
-  if (idRe.test(meta?.description || "")) return true;
-  if (slug && hay.includes(slug)) return true;
-  if (idRe.test(firstUserText || "")) return true;
+//
+// THE BOUNDARY IS ALPHANUMERIC, NOT MERELY NON-DIGIT, and that is the whole
+// correctness of this function (fixed 2026-08-08, found at milestone 45's retro).
+// The id is matched with a leading `0*` so "milestone 45" also answers to "045" —
+// which means a bare `[^0-9]` boundary accepts a HEX neighbour. Session uuids are
+// hex, agent prompts routinely cite scratchpad paths that contain their own session
+// uuid, and so:
+//
+//   …/c--Source-umair-aof/1d576ebe-b72b-428e-8098-045f74122131/scratchpad/…
+//                                                 ^^^^^ `-` `0` `45` `f`
+//
+// matched milestone 45. A completely unrelated milestone-38 agent was pulled into
+// m45's observability snapshot on exactly that substring, and it took the reported
+// calendar span from ~2 days to 477 HOURS, invented two "dead air" windows three
+// weeks before the milestone existed, and put 26% of the token split under the
+// wrong milestone. The report was not slightly wrong; its headline numbers were
+// measuring a different fortnight.
+//
+// Requiring the neighbours to be non-alphanumeric costs nothing legitimate — `45/03`,
+// `45_milestone_…`, `#45`, `aof:verify 45`, `(45)` and a trailing `45` all still
+// match, because `/ _ # : ( )` and end-of-string are all non-alphanumeric — and it
+// makes an id inside a hex run, an identifier or a longer word unmatchable.
+//
+// The one alphanumeric prefix allowed is `m`, for the `m45` shorthand this repo's
+// records use throughout. It is safe precisely because the TRAILING lookahead is what
+// closes the hex hole: `m` before the digits cannot admit `…-045f…`, whose `f` fails
+// on the other side.
+export function agentMatchesMilestone({ meta, firstUserText }, { id, slug }) {
+  const idRe = new RegExp(`(?:^|[^0-9A-Za-z])m?0*${id}(?![0-9A-Za-z])`);
+  const description = meta?.description || "";
+  const prompt = firstUserText || "";
+  if (idRe.test(description)) return true;
+  if (slug && `${description}\n${prompt}`.includes(slug)) return true;
+  if (idRe.test(prompt)) return true;
   return false;
 }
 

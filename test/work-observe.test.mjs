@@ -21,6 +21,7 @@ import {
   humanTurnText,
   analyzeWaves,
   tokenSplit,
+  agentMatchesMilestone,
 } from "../src/work-observe.mjs";
 
 const T0 = Date.parse("2026-07-19T01:00:00.000Z");
@@ -353,4 +354,90 @@ test("tokenSplit separates build generation from governance", () => {
   assert.equal(split.governancePct, 40);
   assert.equal(split.byRole[0].role, "aof-developer");
   assert.equal(split.byRole[0].pct, 60);
+});
+
+// ── agentMatchesMilestone — attribution, and the hex-boundary bug it had ───────
+//
+// Found at milestone 45's retro (2026-08-08). The id is matched with a leading `0*`
+// so "45" also answers to "045"; with a merely non-DIGIT boundary that accepted a hex
+// neighbour, and agent prompts routinely cite scratchpad paths containing their own
+// session uuid. A milestone-38 agent was attributed to m45 on the substring `-045f`
+// inside `…-8098-045f74122131/scratchpad/…`, which took the reported calendar span
+// from ~2 days to 477 hours and moved a quarter of the token split under the wrong
+// milestone.
+
+test("agentMatchesMilestone: a session uuid containing the id does NOT match (the m45 regression)", () => {
+  const prompt =
+    "Run `node /c/Users/Umair/AppData/Local/Temp/claude/c--Source-umair-aof/"
+    + "1d576ebe-b72b-428e-8098-045f74122131/scratchpad/run-story05.mjs` and report.";
+  assert.equal(
+    agentMatchesMilestone(
+      { meta: { description: "Behavioural review of F-38.05 story-05" }, firstUserText: prompt },
+      { id: "45", slug: "ui-app-shell-routing" },
+    ),
+    false,
+    "a hex run that happens to contain the id is not a reference to the milestone",
+  );
+});
+
+test("agentMatchesMilestone: the id inside any alphanumeric run is not a match", () => {
+  const notRefs = [
+    "commit 0045fa9e touched it",      // hex sha
+    "the a45b identifier",              // embedded in an identifier
+    "see 12345 for context",            // inside a longer number
+    "issue 450 is unrelated",           // longer number, same prefix
+    "workspace 9db1fd84f5895e38",       // the real workspace id
+  ];
+  for (const text of notRefs) {
+    assert.equal(
+      agentMatchesMilestone({ meta: { description: "" }, firstUserText: text }, { id: "45", slug: "zzz" }),
+      false,
+      `must not match: ${text}`,
+    );
+  }
+});
+
+test("agentMatchesMilestone: every legitimate way of naming the milestone still matches", () => {
+  const refs = [
+    "aof:verify 45",                                  // trailing, end-of-string
+    "story 45/03 needs a contract",                   // a work ref
+    "wiki/work/45_milestone_ui-app-shell-routing/",   // the folder path
+    "milestone 45's shell",                           // possessive
+    "see m45 and m46",                                // the m-prefixed form
+    "(45) is the one",                                // bracketed
+    "refine 045 — the zero-padded form",              // 0*-padded, as the id regex intends
+  ];
+  for (const text of refs) {
+    assert.equal(
+      agentMatchesMilestone({ meta: { description: "" }, firstUserText: text }, { id: "45", slug: "zzz" }),
+      true,
+      `must match: ${text}`,
+    );
+  }
+});
+
+test("agentMatchesMilestone: the folder slug matches on its own, in the description or the prompt", () => {
+  const slug = "ui-app-shell-routing";
+  assert.equal(
+    agentMatchesMilestone({ meta: { description: `Design pass for ${slug}` }, firstUserText: "" }, { id: "99", slug }),
+    true,
+  );
+  assert.equal(
+    agentMatchesMilestone({ meta: { description: "" }, firstUserText: `judge ${slug} renders` }, { id: "99", slug }),
+    true,
+  );
+  // …and nothing matches when neither the id nor the slug is present.
+  assert.equal(
+    agentMatchesMilestone({ meta: { description: "unrelated" }, firstUserText: "also unrelated" }, { id: "99", slug }),
+    false,
+  );
+});
+
+test("agentMatchesMilestone: a short authored description still matches on the bare id", () => {
+  // The description is short and deliberate — "Refine 45" is exactly how a coordinator
+  // names the target, and it must keep working.
+  assert.equal(
+    agentMatchesMilestone({ meta: { description: "Refine 45" }, firstUserText: "" }, { id: "45", slug: "zzz" }),
+    true,
+  );
 });
