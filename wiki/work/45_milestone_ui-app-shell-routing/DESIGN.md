@@ -155,21 +155,29 @@ clears — at which point the rail returns to exactly 0 and the verdict returns 
 assumed; the figures below are estimates from the strip's own `px-4 py-2 text-xs` ramp and its ~145
 character sentence, and **the render is what confirms them**:
 
-| Viewport | Strip wraps to | Rail ≈ | Chrome ≈ | Content ≈ | Verdict |
+| Viewport | Strip wraps to | Rail | Chrome | Content (at 520 tall) | Verdict |
 |---|---|---|---|---|---|
-| 1280 × 520 | 1 line | 33px | 81px | 439px | within |
-| **768 × 520** (the desktop window) | **~2 lines** | **~48px** | **~136px** | **~384px** | **breach — reported** |
-| **390 × 520** | **~3 lines** | **~64px** | **~152px** | **~368px** | **breach — reported** |
+| 1280 × 520 | 1 line | 33px *(est.)* | 81px | 439px | within |
+| **768 × 520** (the desktop window) | **2 lines** | **49px — MEASURED** | **137px** | **383px** | **breach — reported** |
+| **390 × 520** | **3 lines** | **65px — MEASURED** | **153px** | **367px** | **breach — reported** |
 
 QA's Outline models the breach at a 33px rail — the **one-line** case, which is the 1280 measurement.
 **The realistic worst case at 768 and 390 is larger, because the sentence wraps**, and the render review
 must judge the wrapped case and not only the one-line one. Neither exceeds the 25% bound, which is what
 the bound exists for.
 
-*(Still MODELLED, not measured, as of 2026-08-07: story 03's first conformance render did not include a
-board origin with `serverGone` standing, so the reviewer returned that row NOT-JUDGED. The numbers above
-remain estimates until that render is handed to a review — it is the single highest-value missing
-render for this document.)*
+**MEASURED at the milestone end gate, 2026-08-08** (`aof:verify 45`; renders `board-servergone-768.png`
+and `board-servergone-390.png`, taken against a real `serveBoard` origin driven into `serverGone`
+through its OWN `⟳ sync` control — three consecutive silent load failures, the production door). The
+estimates above were right **to within a pixel**: 48→**49**, 64→**65**. Also confirmed at the render,
+and each one a clause this table could only assert:
+- the rail **PUSHES the bars down** rather than overlaying them — the top bar is fully painted below it
+  at both widths;
+- **nothing yields to it** — the nav keeps its declared form and R3 keeps `◷ status legend` + `⟳ sync`
+  (the DG-20 clause, holding under a second condition);
+- the sentence is **complete and unclipped**, first line visible, ending in the live fleet link;
+- against the binding 520 height the rail is **9.4%** (768) and **12.5%** (390) — at most half the 25%
+  bound, so it never needs to scroll inside itself.
 
 **Render targets** (the orchestration renders these and hands the reviewer the screenshots; the reviewer
 does not run the browser):
@@ -215,7 +223,11 @@ the origin's identity name — is already available or is the router's own state
 
 ---
 
-## The design gaps — two this milestone closes, one it records and carries
+## The design gaps — two this milestone closes, three it records and carries
+
+*(DG-45-4 and DG-45-5 were both raised at the milestone end gate on 2026-08-08 and both are carried, not
+closed. DG-45-5 lives at §Cross-origin honesty, where the rule it defers is written, rather than here —
+a deferred rule belongs beside the rule, so a reader meets the deferral and the rule together.)*
 
 Each resolves as a rule in this document plus a `@uat` visual-review scenario, not as a code patch alone.
 
@@ -309,6 +321,54 @@ in
 [`stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature`](stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature)
 ("on `/config` the operator sees the product's brand exactly once"), which is where the duplication stays
 visible to a human until it is gone.
+
+**Seen, 2026-08-08** (`aof:verify 45` end gate; renders `config-own-origin-{1280,768,390,desktop}.png`,
+the first captures in which `<App>` is actually mounted inside the shell — every earlier `/config` render
+was a failure state on the fleet origin, so the duplication had no pixels). Present at all four widths,
+in exactly the shape described above: the shell's 24px `✦` + `aof` + chip `aof`, and beneath it the
+editor's 40px `✦` + `AOF` + `aof`. **It is worst at 390 and 760×520**, where the empty R3 band leaves the
+40px tile roughly 60px below the 24px one with nothing between them — and because the sidebar's mark is
+*larger and higher-contrast than the shell's own*, at the two narrow viewports the duplicate visually
+outranks the original. That does not change the fix shape or the close condition; it ranks the fix.
+
+---
+
+### DG-45-4 — the origin-mismatch state speaks two languages (CARRIED — **not closed in m45**)
+
+**Raised 2026-08-08** at the `aof:verify 45` end gate, by the designer, on renders
+`config-gap1-1280.png` vs `board-fleet-origin-1280.png`. One condition — *a surface reached from an
+origin that cannot serve its API* — rendered two ways, on two routes one nav click apart:
+
+| | `/config` on the fleet origin | `/board` on the fleet origin |
+|---|---|---|
+| position in R4 | centred on both axes | top-left, flush, ~24px inset |
+| headline | accent pill with a filled `!` | none — a bare red sentence |
+| cause | its own labelled `upstream:` line | concatenated after a colon into the same sentence |
+| recovery | names the command (`aof assets ui`) | **nothing** — no command, no origin, no hint |
+| retry | tinted `⟳ Retry` | plain bordered `Retry`, no glyph |
+| ramp | accent pill on a low-alpha field | bare saturated red body text on `bg-background` |
+
+The board side additionally breaks two rules on its own: it is **colour-only** (no pill, no glyph — §R1
+binding rail 4 and §Accessibility 3), and **bare `destructive` prose in R4 is off the ramp** (§R1 makes
+the notice rail the only `destructive` in the shell; the R4 error language is the accent pill).
+
+**Why it is not closed here.** The board's error branch is `<Board>`'s own, which SPEC puts out of scope
+— the same boundary already ruled on for DG-45-3. And the divergence is only *visible* because m45 fixed
+the other half: before this milestone `/config`-on-fleet was a blank page, so there was no consistency to
+break. Fixing one and not the other is what created the split, which makes it real; it does not make
+`<Board>`'s views in scope.
+
+**The fix shape, fixed here so whoever closes it is not re-deciding it.** The origin-mismatch state is
+**not** a surface data error — it is the route/origin condition ADR-002 already names. The **shell** owns
+one such state for every route, in one language: centred, accent pill + `!`, a headline naming the
+surface, one recovery sentence naming the command that opens it on its own origin, and `⟳ Retry`. Both
+bespoke states then retire and no surface is opened. Whether the shell or the surface *produces* the
+signal is the architect's call and interlocks with **DG-45-5** — the shell cannot know an origin cannot
+serve a surface until the `resolvable` probe exists.
+
+**Close condition.** DG-45-4 closes when every route's origin-mismatch state renders in one language, and
+a render shows `/config`-on-fleet and `/board`-on-fleet side by side in that language. It is expected to
+close **with DG-45-5**, in milestone 47.
 
 ---
 
@@ -506,6 +566,30 @@ the origin you are on**.
   [Fleet.tsx:1096](../../../ui/src/fleet/Fleet.tsx#L1096), every dashed placeholder) — plus
   `aria-disabled="true"` plus the `title`.
 
+> **DEFERRED — this rule has NO PRODUCER in milestone 45 (DG-45-5, recorded 2026-08-08 at the
+> `aof:verify 45` end gate).** The unavailable treatment is built, modelled and unit-tested in
+> `shell-nav.mjs`, but **nothing in production ever reaches it**: the entry renders
+> `<Shell routeId address surface surfaceFailed />` and passes no `resolvable`, and `shell-nav.mjs`
+> documents absent-as-resolvable, so **every nav item renders as a live link on every origin** —
+> confirmed across all 34 end-gate renders, `navAvail` = `available` for all four items in every one.
+>
+> The cost is visible in `board-fleet-origin-1280.png`: from the fleet origin the nav offers `Board`
+> as a live link, and following it lands on a surface that cannot load its stream. The rule exists
+> precisely to stop that.
+>
+> **This is deferred, not abandoned, and it is named HERE so a reviewer can tell "not built" from
+> "built and never triggered"** — that ambiguity cost a full review round-trip at this gate. The
+> producer is the origin probe **milestone 47** owns (it becomes the fleet surface's owner and already
+> ships the peer-board honest-locality pattern this rule reuses). Until then the rule is aspirational
+> and a conformance reviewer must NOT log its absence as a fresh finding.
+>
+> **Close condition.** DG-45-5 closes when a production caller passes `resolvable` for every nav
+> destination and a render shows the dashed/`aria-disabled`/`title` treatment on a real unresolvable
+> item. The `@uat` scenario at
+> [`04_app-shell-visual-review.feature`](stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature)
+> ("an unreachable destination is visibly present, visibly unavailable and carries the command to run")
+> is **re-pointed to that milestone's gate**, not deleted.
+
 ### Responsive form — pinned by breakpoint, in whole discrete drops
 
 The bar's width **is** the viewport width, so keying its form to the viewport is honest here. *(This is
@@ -590,10 +674,34 @@ the served origin can name — the group on the fleet origin (`?group=`, else th
 name (`payload.name`, already rendered at [main.tsx:241](../../../ui/src/main.tsx#L241)) on the
 config-editor origin. It renders in the existing chip form
 (`mono rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground`,
-[Fleet.tsx:289](../../../ui/src/fleet/Fleet.tsx#L289)) with **`min-w-[7ch] max-w-[18ch] truncate`** and the
-full value in `title`. Three rules: it never renders blank (an empty chip reads as a loading state); while
-the name is unknown it renders a **same-sized** `animate-pulse` block, never a collapsed chip that then
-pushes the nav sideways; and it is a **label, not a control** — making it a workspace switcher is a
+[Fleet.tsx:289](../../../ui/src/fleet/Fleet.tsx#L289)), truncating, with the full value in `title`.
+
+**The rule is an INVARIANT, not a utility class** (amended 2026-08-08, designer GAP-4):
+
+> **The chip's box and its loading placeholder measure identically, and the box does not change
+> width when the identity resolves.** It reserves **7 characters of TEXT** at minimum and truncates
+> past 18.
+
+That wording is deliberate, and it replaces a clause that named `min-w-[7ch]`. Naming the class is what
+let the promise and the pixels drift apart with neither looking wrong: Tailwind sets `box-sizing:
+border-box`, so `min-w-[7ch]` is a BORDER-box minimum and `px-2` + the border eat 18px of it. Measured in
+the shipped bundle at the m45 end gate (1ch = 6.609px): the reservation was 46.184px total, i.e. **28.18px
+of text ≈ 4.26 characters, not 7**. `fleet` (33px) overflowed it and the box grew to 51px, taking the nav
+with it — a 4.828px shift between the fleet origin and a board/config origin, and by arithmetic the same
+jump at the loading→loaded threshold for any identity over ~4 characters, which is exactly what the
+"same-sized pulse block" promise and m43 documented-default-3 forbid.
+
+Fixed by reserving the CONTENT box — `min-w-[calc(7ch+1.125rem)]` — held in **one** constant
+(`IDENTITY_CHIP_WIDTH_CLASS`, [shell-layout.mjs](../../../ui/src/app/shell-layout.mjs)) that both the chip
+and the placeholder consume, so "same-sized" is true by construction rather than by two hand-typed strings
+agreeing. Re-measured after the fix: **64.172px on every origin, nav's first item at 173.375px on every
+origin** — the cross-origin shift is gone. A lane in
+[`test/shell-surface-containment.test.mjs`](../../../test/shell-surface-containment.test.mjs) pins the
+invariant and the arithmetic (and that the class stays a literal Tailwind's scanner can see).
+
+The other three rules are unchanged: it never renders blank (an empty chip reads as a loading state);
+while the name is unknown it renders a **same-sized** `animate-pulse` block, never a collapsed chip that
+then pushes the nav sideways; and it is a **label, not a control** — making it a workspace switcher is a
 different milestone. The `ch` unit is honest here precisely because the chip is `mono`.
 
 **R2's wordmark.** The bar renders **`aof` alone**. Today the fleet appends `Mesh`

@@ -4,10 +4,10 @@ number: 04
 slug: advertised-entry-points
 title: "Every door still opens — the servers, the desktop app and the in-app links stop advertising `?mode=` and start advertising paths"
 parent: 45
-status: in-review
+status: done
 owner: product-owner
 created: 2026-08-06
-updated: 2026-08-07
+updated: 2026-08-08
 schema: 1
 aofVersion: 0.1.0
 ---

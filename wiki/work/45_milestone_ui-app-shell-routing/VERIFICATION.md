@@ -1,9 +1,9 @@
 ---
 doc: verification
 milestone: 45
-verified: 2026-08-07
+verified: 2026-08-08
 verifier: aof:verify
-verdict: in-progress
+verdict: accepted
 ---
 <!--
   Milestone VERIFICATION.md — the verification record. Pointers, not restatements.
@@ -222,3 +222,363 @@ Automated + agent lanes **PASS**; validate gate **PASS** (`aof work validate 45/
 yet** — task 02's `@manual` census runs at the end gate (its desktop-tray scenario additionally
 needs the Windows `--desktop` rebuild; until then the tray's legacy URL keeps working via ADR-003).
 `STORY.md` stays `in-review`.
+
+## 45 · MILESTONE END GATE — verified 2026-08-07, **NOT ACCEPTED** (one blocker)
+
+The end gate the operator deferred 45/03's `@uat` and 45/04's `@manual` to. Run against the
+**deployed** system, not the tree: the m45 payload at `44f5b60`, the live fleet daemon on
+`127.0.0.1:4181`, and real `serveBoard` / `serveSetupUi` origins on ephemeral ports.
+
+### Verification evidence
+
+- **Regression sweep green — 165 lanes / 0 failed**, re-run at verify under
+  `AOF_GLOBAL_HOME="$(mktemp -d)"` via focused test-array imports (never the full suite —
+  `global-work-propagation` binds `:4182`, which the live control daemon holds):
+  m45's own eight suites **101/101** (app-routes 20, static-serve-fallback 23, shell-entry-plan 10,
+  shell-regions 16, shell-navigation 8, shell-not-found-and-fullscreen 12, advertised-paths 7,
+  in-app-cross-links 5), and the neighbour suites **64/64** (setup-ui 10, board-serve 4,
+  mesh-ui-serve 8, board-api 22, mesh-ui-global-scope 10, work-ui-verb-rename 5,
+  work-ui-board-serves-unchanged 5).
+- **Fitness functions green — 41/41** across all ten m45-relevant gates:
+  `acd-ui-single-route-table` 5/5 (milestone-complete), `acd-no-surface-mode-url-literal` 4/4,
+  `acd-spa-fallback-never-masks` 7/7, `acd-route-logic-framework-free` 5/5,
+  `acd-shell-z-ladder-single-home` 3/3, `acd-shell-bus-single-host` 4/4,
+  `acd-ui-surface-file-budget` 4/4, `acd-rendered-component-fed-by-route` 4/4,
+  `acd-mesh-ui-scope-visible` 3/3, `acd-test-suite-registration` 2/2.
+- **THE DEPLOY WAS STALE, AND THE HARNESS CAUGHT IT ON THE FIRST ROW.** The first census pass
+  reported the address bar UNCHANGED at `/?mode=fleet` and no shell in the DOM. The cause was not
+  the code: `~/.aof/bin/ui/dist` (and the repo's) held the **00:09:59** bundle — built before
+  45/03's commit `1282875` — with **zero** `data-shell-row` / `data-nav-item` / `Live terminals`
+  occurrences and a surviving `mode=fleet` + `Work Board`. `install-local.mjs` had last run
+  `--skip-ui`. Redeployed (`node scripts/install-local.mjs`, full) → `index-DgCM4Vjl.js`; the live
+  origin picked it up **without a restart**, because `dist` resolves once at server start but the
+  files themselves are read per request. Recorded because a census that read component source
+  instead of the rendered tree would have passed this run against pre-m45 code.
+- **45/04 task 02 — the `@manual` census, browser half: 8 of 8 legacy rows PASS.** Driven through
+  the cached ms-playwright Chromium over CDP (`npx playwright` is policy-blocked here), reading the
+  real `location.href` after ADR-003's client-side `replaceState` and counting `history.length` so
+  "rewritten exactly once, a replace not a push" is **measured**:
+
+  | row | legacy | address bar after | once? | Back ≠ legacy | reload stable |
+  |---|---|---|---|---|---|
+  | 1 board's advertised URL | `:PORT/?mode=board` | `:PORT/board` | ✓ Δ1 | ✓ | ✓ |
+  | 2 drill-in, fragment and all | `:PORT/?mode=board#34/01` | `:PORT/board#34/01` — **fragment intact** | ✓ Δ0 | ✓ | ✓ |
+  | 3 fleet's advertised URL | `:4181/?mode=fleet` | `:4181/fleet` | ✓ Δ1 | ✓ | ✓ |
+  | 4 the bookmarked fleet URL | `:4181/?mode=fleet&scope=global` | `:4181/fleet?scope=global` | ✓ Δ0 | ✓ | ✓ |
+  | 5 the local-scope fleet URL | `:4181/?mode=fleet&scope=local` | `:4181/fleet?scope=local` — local filter applied | ✓ Δ1 | ✓ | ✓ |
+  | 6 config editor's advertised URL | `:PORT/?mode=assets` | `:PORT/config` | ✓ Δ1 | ✓ | ✓ |
+  | 7 fleet-origin board link (NO-CHANGE row) | `:4181/?mode=board` | `:4181/board` | ✓ Δ1 | ✓ | ✓ |
+  | 8 an unrecognised mode value | `:PORT/?mode=banana` | `:PORT/config` | ✓ Δ0 | ✓ | ✓ |
+
+  No address bar carried `mode=` at any point. Row 7 reproduced today's behaviour **exactly** as the
+  feature demands — the board surface renders in-shell and degrades through its own
+  "Could not load the work stream: Mesh API route not found. Retry".
+  *verifies →* `stories/04_story_advertised-entry-points/tasks/02` scenario 2.
+- **Census scenario 3 — the retired blank, confirmed retired.** Bare `/` renders the shell landing
+  ("Live terminals") on the fleet origin (127 B) **and** on the board origin (125 B); not blank, not
+  a 404, not a redirect — the address bar still reads `/`, and the fleet is one nav click away.
+  *verifies →* `…/tasks/02` scenario 3.
+- **Census scenario 1 — the tray's compiled constant, verified in the shipped binary.** The
+  `--desktop` cargo rebuild HAS landed (`~/.aof/bin/aof-mesh-desktop.exe`, written
+  2026-08-07T21:21:02, replacing a 13 July build). Byte-scanned: the binary's only `:4181` literal
+  is `http://127.0.0.1:4181/fleet?scope=global`, and `mode=fleet` is **absent**. The operator's
+  tray CLICK remains the one step no lane can take — see the open items below.
+- **Census scenario 4 — no `?mode=` reaches the operator.** Every `href` the shell renders on every
+  origin is a bare ADR-002 path (`/`, `/fleet`, `/board`, `/config`); zero carry `mode=`. The
+  launcher announce lines and `--json` probe envelopes are covered by task 00's 7 `@executable`
+  lanes and `acd-no-surface-mode-url-literal`'s 295-file closed-vocabulary sweep.
+- **Design conformance — 16 fresh renders of the DEPLOYED bundle** (4 routes × 390 / 768 / 1280 /
+  760×520, cached Chromium at explicit device metrics, absolute screenshot paths). The chrome
+  arithmetic is **measured, not modelled**: at the desktop app's 760×520 window the chrome is
+  **exactly 88px** (`top-bar` 48 + `surface-bar` 40), verdict `at-budget`, content region starting
+  at y=88 → **432px**, the floor exactly met; at 1280 the slot lives in the top bar and chrome is
+  48px (`within`). Two chrome rows at every width, never three. No page-level horizontal scrollbar
+  at any breakpoint (`overflow-x: hidden` backstop in place). The 390 column collapses to the
+  disclosure, whose trigger names the active surface. Nav geometry is identical across routes
+  (each item's left edge at the same x on `/fleet` and `/nope`). First focusable is the skip link
+  → `#aof-shell-content` on every route; focus order is skip → nav in table order → slot → content.
+  Not-found renders in-shell as a centred dashed card naming `/nope`, with no nav item active and
+  no error treatment.
+
+### Findings
+
+| id | observed | type | severity | triage | routed-to | status — updated after the inline fix |
+|---|---|---|---|---|---|---|
+| **F-45-M-1** *(FIXED inline 2026-08-08 — see the fix section below)* | **`/config` on the FLEET origin renders a totally blank page** — no shell, no nav, no way back but the browser's Back button. `<App>` fetches `/api/config`; the fleet origin is the one origin that does not serve it, its coded 404 lands in `payload`, `payload.resources` is `undefined`, and a `useMemo` calls `.filter` on it → uncaught `TypeError` → React unmounts the **whole** tree. Measured on all 3 real origins × 5 paths: **14 of 15 cells render the shell; this one does not.** Reachable in ONE CLICK from the fleet's own nav, which advertises `Config` as `available` with `href="/config"` — and the fleet origin is exactly where the desktop tray lands. It contradicts the shell's own written contract (`Shell.tsx:91-94`: a surface "reached on an origin that cannot serve its API degrades through its OWN existing error state") — which `/board` on the same origin honours and this does not. | defect | **blocker** | PO ruling: the crashing `useMemo` is byte-identical to its pre-split original (`1282875^:main.tsx:124`) and SPEC puts `<App>`'s views out of scope — but m45 minted the `/config` path AND the nav item that advertises it, so the DOOR is m45's. Fix at the shell boundary, not in `<App>`: contain a throwing surface and enter the `failed` content state that `contentStateFor`/`SurfaceFailed` **already** render (nothing feeds it from a runtime throw today — only `surfaceMountFor`'s unknown-route-id path). No new state, no new DESIGN rule, no new token. | new `@bug` task `stories/03_story_app-shell-and-entry/tasks/05_surface-crash-degrades-in-shell.feature` (`@finding-F-45-M-1`) → fixed inline on operator instruction, 2026-08-08 | **FIXED — re-verified, 15/15 cells** |
+| F-45-M-2 | The m45 build never deployed its UI: `ui/dist` at verify was the 00:09:59 bundle, predating 45/03's commit, so the live fleet daemon served pre-m45 code for the whole of 45/04's build and review. | process | non-blocker | Redeployed at verify (full `install-local.mjs`); no code change. The lesson — a `@manual`/`@uat` lane must read the RENDERED tree, and a story that changes `ui/` is not deployed by a `--skip-ui` install — is a retro line. | STATE `## Feedback (for retro)` | **fixed (redeployed) / recorded** |
+| arch F5 (carried from 45/04) | `acd-no-new-silent-catch` RED — `board-worker-stream.mjs`, 1 silent catch, baseline 0. Re-confirmed at the end gate. | defect (pre-existing, `main`) | info | Re-verified NOT m45's: the file's last commit is `eacbd57` (PR #11) and it is absent from `git diff main...HEAD`. | PR #11's owner | **open (not m45's)** |
+
+## 45 · F-45-M-1 FIXED INLINE — 2026-08-08, on operator instruction
+
+Fixed in two halves, because the finding had two: a surface that manufactured a throw, and a shell
+with nothing to catch one.
+
+### The fix
+
+- **The designed path — the surface degrades through its OWN error state.** The fault was one
+  missing check: `App.tsx`'s loader was the only `fetch` in that file that did not test
+  `response.ok` before believing the body, and it is the one that runs on mount. The rule now lives
+  in a framework-free leaf, `ui/src/config/config-load.mjs` — `loadScope` returns a payload or
+  throws a coded `ConfigLoadError`, and `isConfigPayload` is the single positive definition of
+  "this response is a config" (it states the one good shape rather than listing bad ones, so the
+  next unanticipated shape is refused too). A failed load is now a STATE, not a poisoned payload;
+  `payload` is left untouched on failure, so a transient error on a scope switch no longer discards
+  the config already on screen.
+- **The safety net — the shell contains a throwing surface.** `SurfaceBoundary` (a class, because
+  `getDerivedStateFromError` has no hook form — the only non-function component in `ui/src/app/`)
+  wraps the mounted surface ONLY, keyed by route, and renders the `SurfaceFailed` state the shell
+  already had. Nothing fed that state from a runtime throw before; `surfaceMountFor`'s
+  unknown-route-id path was its only producer. The boundary is loud (`console.error` naming the
+  surface and the error), so a swallowed throw is not the next finding.
+- **Two extractions the file-budget ratchet required, and was right to.**
+  `acd-ui-surface-file-budget` went red at 1,358 lines with the message "extract the next region
+  into a sibling component with a prop boundary; do NOT trim comments to fit". So the load rule
+  went to `config-load.mjs` (+ `config-load.d.mts`, the house `.mjs` + declaration split) and both
+  pre-editor states to `ui/src/config/ConfigLoadFailed.tsx` (`ConfigLoading`, `ConfigLoadFailed`).
+  `App.tsx` ends at **1,297 / 1,300** and the gate is green — the account of the finding lives in
+  the module that owns the rule, not deleted to fit.
+- **Test infrastructure: `mini-react` grew class-component + error-boundary support.** Additive —
+  a new branch keyed on `prototype.isReactComponent`; every function-component path is untouched
+  (170 neighbouring lanes re-run green). It supports exactly construct / `state` / `setState` /
+  `getDerivedStateFromError` / `componentDidCatch` / `render` and nothing more. The catch wraps the
+  child render rather than `render()` alone — catching only the latter would catch nothing, which
+  is the precise false-green a boundary test must not produce. `react-app-harness`'s virtual
+  `react` gained the matching `Component` base. **This is why the contract could sit reviewed and
+  false for one surface in four: a boundary was undrivable headlessly, so nothing could check it.**
+
+### Re-verification evidence
+
+- **`test/shell-surface-containment.test.mjs` — 6 new lanes, all green**, registered the house way
+  in `scripts/test.mjs` (`acd-test-suite-registration` 2/2, `acd-roundtrip-registration` 1/1). They
+  cover the load rule against five real response shapes (the fleet's coded 404, a 200 with no
+  `resources`, a 200 carrying HTML, a 500, an explicit refusal) plus the positive; the chrome
+  surviving a throwing surface; containment for all three routed surfaces; the failed state keeping
+  all four nav destinations live; and failed / not-found / landing staying three distinct states.
+- **MUTATION-PROVEN, not asserted.** With `<SurfaceBoundary>` removed from `Shell.tsx`, **all 5
+  render lanes go RED** with the throw propagating out of the render pass — the measured blank
+  page, reproduced on demand. Reverted; `git diff` confirms the boundary restored.
+- **Regression sweep — 171 behavioural / 0 failed** (the 165 from the first gate, plus the 6 new
+  lanes) and **49 fitness lanes / 0 failed** across thirteen gates, including
+  `acd-ui-surface-file-budget` 4/4 and `acd-console-log-confined` 3/3 (the boundary's loud line is
+  within the confined surface).
+- **THE MEASUREMENT THAT MATTERS — the live three-origin matrix, re-run in a real browser against
+  the redeployed bundle: 15 of 15 cells render the shell, 0 exceptions** (was 14/15 with one
+  uncaught `TypeError`). `/config` on the fleet origin now renders full chrome, the nav with
+  `Config` still marked current, "Could not load the configuration", the server's own reason
+  ("Mesh API route not found."), the command that gets the operator a working editor
+  (`aof assets ui`) and a Retry — at 1280 and, in the disclosure form, at 390.
+- **Nothing else moved.** All 8 legacy census rows still PASS (canonical address bar, no `mode=`,
+  `#34/01` intact, rewritten exactly once, Back never returns to the legacy form, reload stable).
+  All 16 renders (4 routes × 390/768/1280/760×520) carry the shell; chrome is 48px at 1280 and
+  exactly 88px `at-budget` at the desktop 760×520 window on every route, content floor 432px met;
+  no horizontal scrollbar anywhere; skip link still the first focusable on every route.
+
+## 45 · DESIGN CONFORMANCE — 2026-08-08, verdict **GAPS** (none blocking)
+
+The ADR-001 hand-off, run twice: the orchestration rendered, `aof-designer` judged. **34 renders** of the
+deployed bundle across three real origins — the live fleet daemon, a real `serveBoard`, a real
+`serveSetupUi` — at 390 / 768 / 1280 and the desktop app's own 760×520. Baseline: `mocks/app-shell.png`
+has still not landed, so `DESIGN.md`'s binding checklists bound in full (and correctly did **not** yield
+an INCONCLUSIVE on the mock's absence — 07/ADR-003).
+
+**Round 1 returned INCONCLUSIVE on its own render gate, which is the gate working.** Two
+Background-required renders were missing, one of them the only capture in which the fourth routed surface
+actually mounts inside the shell. Both were produced and the verdict resolved.
+
+### What the designer confirmed CONFORMS
+
+The thesis (four surfaces read as one product; everything left of the surface slot identical across
+routes and across origins); the brand (one mark, one `aof` wordmark, `Mesh`/`Work Board` retired as
+designed changes); the 48/88px chrome budget and the **exactly 432px** floor at 760×520 — now confirmed
+with a real mounted surface, so the budget has zero headroom; rail-2 invariance; the 390 squeeze in whole
+discrete drops with nothing truncated; "you are here" identifiable from rule and weight alone with the
+hue removed; the unmatched path reading as "not a surface" (no red, no accent, nav un-marked, `Surfaces ▾`
+at 390); the `/` landing and its one-rule-both-places card container, pixel-identical to the not-found
+card at every width; and `/fleet?scope=local`.
+
+**The `serverGone` rail is now MEASURED, not modelled** — the row DESIGN itself called "the single
+highest-value missing render". Driven through the board's own `⟳ sync` control (three consecutive silent
+load failures, the production door): **49px at 768, 65px at 390** against DESIGN's ~48/~64 estimates —
+right to within a pixel. It pushes the bars down rather than overlaying them, nothing yields to it, the
+sentence is unclipped, and it is 9.4% / 12.5% of the binding 520 height against a 25% bound. `DESIGN.md`'s
+estimate table is replaced with the measurement.
+
+### Gaps, and what happened to each
+
+| gap | severity | verdict | disposition |
+|---|---|---|---|
+| **GAP-1** — the `/config` degraded state named two different APIs in adjacent lines, the raw upstream string second and unlabelled, so the wrong subsystem was the first thing the operator met | LOW | **FIXED + re-judged CLOSED** | Re-ordered to headline → recovery sentence naming `aof assets ui` → `upstream: <raw>` last, labelled, `text-xs` mono. Designer: "closed on the merits, not just on the bytes." |
+| **GAP-4** — the identity chip's `min-w-[7ch]` is a BORDER-box minimum, so with `px-2` + border it reserved **4.26 characters of text, not 7** | LOW | **FIXED + verified in the browser** | See below — this one was a documented promise that was false. |
+| **GAP-2** — `/board`-on-fleet and `/config`-on-fleet render one condition in two visual languages; the board side is colour-only, off-ramp, uncentred and offers no recovery command | MEDIUM | **CARRIED as DG-45-4** | PO ruling: the board's error branch is `<Board>`'s, which SPEC puts out of scope — the same boundary already ruled for DG-45-3. The divergence is only *visible* because m45 fixed the other half, which makes it real but does not open `<Board>`. Fix shape + close condition recorded in `DESIGN.md`; expected to close with DG-45-5 in m47. |
+| **GAP-3** — DESIGN's cross-origin honesty rule has **no producer**: nothing passes `resolvable`, so every nav item is a live link on every origin and the nav offers doors that dead-end | MEDIUM | **CARRIED as DG-45-5** | PO ruling: the probe is m47's (it owns the fleet surface and already ships the peer-board honest-locality pattern). Recorded **at the rule itself** in `DESIGN.md`, not in a gap list — a reviewer must be able to tell "not built" from "built and never triggered", and that exact ambiguity cost a review round-trip here. |
+| **DG-45-3** — the config sidebar repeats the shell's brand | — | **recorded, not re-litigated** | Now evidenced for the first time (`config-own-origin-*`), and ranked: worst at 390 and 760×520, where the sidebar's 40px mark visually outranks the shell's own 24px one across an empty R3 band. |
+| fullscreen | — | **deferred to m46** | `requestFullscreen` has no production caller in `ui/src/`; the door is built for m46's terminal. The `@uat` scenario is re-pointed to m46's gate, not deleted. |
+
+### GAP-4 — a documented promise that was false, and the lanes that froze it
+
+`Shell.tsx` promised "a **SAME-SIZED** pulse block rather than a collapsed chip that would then push the
+nav sideways", and DESIGN called it m43 documented-default-3. Measured in the shipped bundle: 1ch =
+6.609px, so `min-w-[7ch]` computed to a 46.184px **border**-box minimum; minus `px-2` (16px) and the
+border (2px) it reserved 28.18px of text — **4.26 characters**. `fleet` (33px) overflowed it, the box grew
+to 51px, and the nav went with it: **4.828px** between the fleet origin (`fleet`) and a board/config
+origin (`aof`), and by arithmetic the same jump at the loading→loaded threshold for any identity over ~4
+characters.
+
+Two `shell-regions` lanes existed over exactly this and **passed throughout**, because they asserted the
+string `min-w-[7ch]` rather than the invariant — they froze the defect they existed to prevent. Both are
+rewritten to assert through the shared constant.
+
+Fixed by reserving the CONTENT box (`min-w-[calc(7ch+1.125rem)]`) from **one** home,
+`IDENTITY_CHIP_WIDTH_CLASS`, consumed by both the chip and its placeholder so "same-sized" is true by
+construction. The class is kept a literal because Tailwind emits utilities by scanning source text — a
+composed one would name a rule never generated, silently removing the reservation altogether. Re-measured
+in the browser after the fix: **chip 64.172px and nav first item at 173.375px on all three origins** — the
+cross-origin shift is gone.
+
+Honest limit, recorded: the loading→loaded jump was never *captured*. The fleet origin resolves its
+identity synchronously (`useGroupName` → `?group=` else the literal `"fleet"`) so it has no pulse state,
+and this machine's workspace is named `aof`, which fit inside even the old reservation. The mechanism is
+arithmetic from measured values.
+
+### DESIGN.md amendments applied (authored by the designer, applied verbatim)
+
+The measured rail row replacing the estimates; the R2 chip clause rewritten to state the **invariant**
+rather than a utility class ("the chip's box and its loading placeholder measure identically, and the box
+does not change width when the identity resolves") — naming a class is what let the promise and the pixels
+drift apart with neither looking wrong; DG-45-4 added; DG-45-5 recorded at §Cross-origin honesty; DG-45-3's
+2026-08-08 evidence appended.
+
+### Verdict
+
+Validate gate **PASS**. Automated + agent lanes **PASS**. **F-45-M-1 closed**, re-verified against the
+deployed system. Design conformance **GAPS**, none blocking. Proceeded to the `@uat` gate below.
+
+## 45 · `@uat` — RUN, not delegated (2026-08-08)
+
+Four clauses had been parked as "only a person can settle these". On the operator's instruction they were
+run instead. Three of them a browser settles **better** than a person, and the fourth — the thesis — far
+better, because a browser can hold the pre-milestone build and the post-milestone build side by side and
+diff them, which no eye can do reliably.
+
+The instrument: the cached ms-playwright Chromium over CDP, against the **deployed** bundle on the live
+fleet daemon and real `serveBoard` / `serveSetupUi` origins.
+
+### The thesis — measured against the actual pre-m45 build
+
+SPEC's success condition is *"an outsider cannot tell what changed except that the address bar now means
+something and the three pages know about each other."* Tested by building the bundle at **`b9052ff`** —
+the commit before the shell landed, rebuilt to the byte-identical hashes that were deployed then
+(`index-DPMT8sAx.js`) — serving it through the **real** `serveMeshUi` (read-only by ratcheted invariant,
+so it reads the same live mesh state), and diffing every control an operator can reach:
+
+| | pre-m45 (`b9052ff`) | today |
+|---|---|---|
+| reachable controls | **462** | **467** |
+| controls an operator can no longer reach | — | **NONE** |
+| controls gained | — | `Skip to content`, `Terminals`, `Fleet`, `Board`, `Config` |
+| surface headings | identical | identical |
+
+**The only difference in what an operator can reach is the navigation itself.** That is the success
+condition, met and measured rather than asserted.
+
+### Scroll ownership — and the gap it found
+
+Real wheel gestures at 760×520 on all four routes. This is where **GAP-5** surfaced, and it could only
+have surfaced here: it is a fact about the CSS cascade, not about any value the shell computes, so no
+model lane and no screenshot could see it.
+
+**Measured before the fix: after a 1200px wheel on `/fleet` the top bar was at y = −1200 — scrolled clean
+out of view.** DESIGN's R2 row says in terms: *"none — it never scrolls out of view (`sticky top-0` in
+`content:page`)"*, and the bar carried exactly that class. Two independent causes, both found by walking
+the ancestor chain rather than guessing:
+
+1. **Three redundant copies of DESIGN GAP D1's clamp.** `overflow-x: hidden` computes the other axis to
+   `auto`, which makes an element a scroll container — and `position: sticky` resolves against the
+   nearest one. The shell root carried its own `overflow-x-hidden` (a third copy, on top of `html` and
+   `body`), and it is `min-h-dvh` so it grows to its content — measured **18,470px** on `/fleet` — and
+   never scrolls. Removing it exposed the same defect one level up in `body`. Fixed by moving the clamp
+   from `hidden` to **`clip`** on `html` and `body`: identical clamping, but `clip` establishes no
+   scrollport. Re-verified at 360/390/414 on both builds — no horizontal overflow, D1 intact.
+2. **A sticky child can only travel within its parent's box.** With the scrollports gone the bar stuck
+   for exactly 40px and then left (y = −1160) — its parent is the 88px chrome wrapper. Fixed by pinning
+   the **chrome block** rather than the bar inside it, which also keeps
+   `--aof-shell-chrome-height` honest: what is above the content on screen stays equal to the number the
+   shell publishes, which is what m46's dock sizes against.
+
+**After: all four routes PASS** — `/fleet` scrolls 1200px with the bar at y = 0; no route ever has a page
+scrollbar and a content scrollbar at once. Both halves are **mutation-proven** (revert `clip`→`hidden`,
+or unpin the wrapper: the lane goes red each time) and pinned by a lane in
+`test/shell-surface-containment.test.mjs`.
+
+### The keyboard pass — real Tab keystrokes
+
+| tab | element | size | focus ring |
+|---|---|---|---|
+| 1 | **Skip to content** | 119.97 × 34 | ✓ |
+| 2–5 | Terminals / Fleet / Board / Config | 38–68 × **48** | ✓ |
+| 6–8 | Global / Local / Refresh the fleet view | 44–152 × **24** | ✓ |
+
+The skip link is the first focusable element, targets `#aof-shell-content`, and **activating it moves
+focus there** (`document.activeElement` → `aof-shell-content`, hash set). Focus order is exactly DESIGN's:
+skip → nav in route-table order → surface slot → content. Every stop ≥ 24×24. **CONFORMS.**
+
+### Motion — **CONFORMS**
+
+400 shell elements audited for computed `animation` / `transition`. The only animation present anywhere
+is `pulse` (the pre-existing load placeholders). **Zero nav items carry any transition** — route changes
+are instant, as DESIGN requires. The 19 elements with transitions are all pre-existing hover ramps
+(`color`/`background-color`, 0.15s) on surface controls, none of them shell chrome.
+
+### 45/04 task 02 scenario 1 — the tray
+
+Discharged as a **chain**, each link verified, rather than as a click:
+
+1. The compiled constant, byte-scanned in the shipped `~/.aof/bin/aof-mesh-desktop.exe` (rebuilt
+   2026-08-07T21:21): its only `:4181` literal is `http://127.0.0.1:4181/fleet?scope=global`, and
+   `mode=fleet` is **absent**.
+2. The wiring, read: `supervisor.rs:57` `MESH_UI_URL` → `:101` `ui_url` (one assignment, no
+   transformation) → `main.rs:438` `opener::open_browser(&url)` on the `"open-web-ui"` menu event. No
+   branch alters the string.
+3. That URL's behaviour in a real browser: **verified** — it renders the fleet at global scope, the
+   address bar carries no `mode=` at any point, and a refresh re-renders rather than 404ing (it is the
+   canonical target of census row 4).
+4. `supervisor.rs:37-44`'s doc comment claiming the bare `/` renders BLANK is **already rewritten**, and
+   the behavioural half is measured: bare `/` renders the shell landing on both origins.
+
+**Not done, and stated plainly:** nobody clicked the tray. Automating a real tray menu on this machine
+means driving a menu whose adjacent item is **Quit**, which would stop the operator's running daemons —
+an unforced risk against a chain that is otherwise fully determined. The one unverified step is whether
+the OS opens a browser at a string handed to `opener`, which is not aof's behaviour.
+
+### Findings from the `@uat` gate
+
+| id | observed | type | severity | triage | status |
+|---|---|---|---|---|---|
+| **GAP-5** | The top bar scrolled out of view on `/fleet` (measured y = −1200 after a 1200px wheel), against DESIGN's R2 "it never scrolls out of view". Cause: D1's `overflow-x: hidden` clamp made `html`, `body` **and** a third redundant copy on the shell root into scroll containers, so `sticky` resolved against a box that never scrolls; and the bar's sticky was additionally confined to its 88px parent. | defect | **should-fix** | Fixed at the gate, both halves: D1's clamp → `overflow-x: clip` on `html`/`body` (same clamp, no scrollport), the redundant root copy deleted and the answer moved into `contentModeFor.rootEstablishesScrollport`, and the **chrome block** pinned instead of the bar. Mutation-proven; lane added. | **FIXED** |
+
+### Sign-off / verdict
+
+**`@uat` PASSED.** Every clause settled by measurement against the deployed build: the thesis (zero
+controls lost, five gained, all of them the navigation), scroll ownership (all four routes, after
+GAP-5), the keyboard pass, motion, and the tray chain. One defect found and fixed at the gate.
+
+Signed off by `aof:verify` on the operator's explicit instruction to run rather than delegate the gate
+(2026-08-08). The renders remain at the session scratchpad `renders/` + `renders-final/` dirs.
+
+## 45 · ACCEPT DECISION
+
+**ACCEPTED 2026-08-08.**
+
+- Validate gate **PASS** (`aof work validate 45` → "PASS — 45 is well-formed").
+- **173 behavioural lanes / 0 failed** and **45 fitness lanes / 0 failed**, re-run at accept against the
+  deployed build under an isolated global home.
+- The live three-origin matrix: **15/15 cells render the shell, 0 exceptions**. All **8** legacy census
+  rows pass. All **16** renders carry the shell with no horizontal scroll; chrome exactly 88px
+  `at-budget` at 760×520 on every route.
+- **No blocker finding is open.** F-45-M-1 and GAP-5 were found at this gate and fixed at it; GAP-1 and
+  GAP-4 fixed and re-judged; DG-45-3, DG-45-4 and DG-45-5 carried with fix shapes and close conditions,
+  all owned by m47 except DG-45-3.
+- One red gate remains on `main` and is **not m45's**: `acd-no-new-silent-catch` on
+  `board-worker-stream.mjs`, from PR #11 (`eacbd57`), absent from `git diff main...HEAD`.
+
+`SPEC.md` → `done`; `45/03` and `45/04` → `done`.

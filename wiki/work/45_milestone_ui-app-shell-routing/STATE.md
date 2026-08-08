@@ -72,6 +72,67 @@ doc: state
       Task 02's `@manual` census runs at the end gate. Findings routed: BoardsRegion permanently
       empty since m34 (+ the drill-in dead-end) → recorded in m47/STATE as the receiving side.
 
+**End gate run 2026-08-07 (`aof:verify 45`) — BLOCKED, not accepted.** Regression sweep green (165
+behavioural + 41 fitness, focused imports under an isolated global home); `aof work validate 45`
+PASS. 45/04's `@manual` census walked in a real browser over CDP against the LIVE fleet daemon and
+real `serveBoard`/`serveSetupUi` origins: **all 8 legacy rows pass** — canonical address bar, no
+`mode=` at any point, `#34/01` intact, rewritten exactly once as a replace, Back never returns to the
+legacy form, reload stable. Bare `/` renders the shell landing on both the fleet and board origins,
+retiring `supervisor.rs`'s blank-page warning. The tray's compiled constant is verified in the
+shipped binary (`/fleet?scope=global`, no `mode=`); the `--desktop` rebuild had already landed.
+**Two things the gate found.** (a) **The UI was never deployed** — `ui/dist` was still the 00:09:59
+bundle from before 45/03's commit, so the live daemon served pre-m45 code throughout 45/04's build
+and review; the census caught it on its first row because it reads the rendered tree. Redeployed at
+verify (no restart needed: `dist` resolves once at start, files are read per request). (b) **F-45-M-1,
+a blocker**: `/config` on the FLEET origin renders a totally blank page — `<App>`'s `/api/config`
+404s there, `payload.resources` is `undefined`, a `useMemo` calls `.filter` on it, and with no error
+boundary the throw unmounts the whole tree, shell and nav included. 14 of 15 measured (origin × path)
+cells render the shell; this is the one that does not, it is one click from the fleet's own nav, and
+it contradicts `Shell.tsx:91-94`'s own promise that such a surface "degrades through its OWN existing
+error state" — which `/board` on the same origin honours. The crashing line is byte-identical to its
+pre-split original, so the DOOR is m45's, not `<App>`'s: routed to a new `@bug` task
+`45/03/05_surface-crash-degrades-in-shell.feature` (`@finding-F-45-M-1`) → `aof:continue 45/03`. The
+fix is at the shell boundary and enters the `failed` state `contentStateFor`/`SurfaceFailed` already
+render.
+
+**F-45-M-1 FIXED INLINE 2026-08-08** (operator instruction), in the two halves the finding had. (a)
+The **designed path**: `App.tsx`'s loader was the only `fetch` in that file not testing
+`response.ok`, and the one that runs on mount — the rule moved to a framework-free leaf
+`ui/src/config/config-load.mjs` (`loadScope` + `isConfigPayload`, a POSITIVE definition of "this is
+a config" so unanticipated shapes are refused too), and a failed load is now a state rather than a
+poisoned payload. (b) The **safety net**: `SurfaceBoundary` in `Shell.tsx` — a class, because
+`getDerivedStateFromError` has no hook form — wraps the mounted surface only, keyed by route, and
+renders the `SurfaceFailed` state the shell already had but nothing could reach from a runtime
+throw. Two extractions the `acd-ui-surface-file-budget` ratchet demanded and was right to demand
+(`config-load.mjs` + `ConfigLoadFailed.tsx`; `App.tsx` ends at 1,297/1,300, comments moved rather
+than trimmed). **`mini-react` grew class + error-boundary support** (additive, `isReactComponent`-
+keyed) — without it a boundary was undrivable headlessly, which is exactly why the `Shell.tsx`
+contract could sit reviewed and false for one surface in four. Re-verified: **171 behavioural + 49
+fitness lanes green**, 6 new containment lanes MUTATION-PROVEN (remove the boundary → all 5 render
+lanes go red with the throw propagating), and the live three-origin matrix is **15/15 cells
+rendering the shell, 0 exceptions** (was 14/15). All 8 legacy census rows still pass; all 16 renders
+carry the shell; chrome still exactly 88px `at-budget` at 760×520.
+
+**Design conformance run 2026-08-08 — verdict GAPS, none blocking.** The ADR-001 hand-off, twice: 34
+renders across three real origins at four breakpoints, judged by `aof-designer` against DESIGN's binding
+checklists (the mock still has not landed). Round 1 returned INCONCLUSIVE on its own render gate — the
+gate working: `/config` had never been rendered on an origin that actually serves it, so the fourth
+surface had never been seen mounted in the shell. Produced, and the verdict resolved. **The `serverGone`
+rail is now MEASURED** (49px at 768, 65px at 390, against ~48/~64 estimated — right to a pixel), driven
+through the board's own `⟳ sync`; DESIGN's estimate table is replaced. Two gaps FIXED at the gate: GAP-1
+(the `/config` failure state named two APIs adjacently, the wrong one first) and **GAP-4** — the identity
+chip's `min-w-[7ch]` is a *border*-box minimum, so it reserved 4.26 characters of text, not 7, and the nav
+moved 4.828px between origins; two `shell-regions` lanes existed over exactly this and passed throughout
+because they asserted the class string instead of the invariant. Fixed from one shared constant, verified
+in the browser (chip 64.172px, nav at 173.375px on all three origins). Two gaps CARRIED with fix shapes
+and close conditions: **DG-45-4** (`/board`- and `/config`-on-fleet render one condition in two visual
+languages) and **DG-45-5** (the cross-origin honesty rule has no producer — nothing passes `resolvable`,
+so every nav item is a live link on every origin; recorded at the rule itself, and owned by m47). DG-45-3
+recorded and now evidenced for the first time; fullscreen deferred to m46, which owns its only caller.
+
+**Still parked: 45/03's `@uat` human visual review and 45/04's tray click** — the milestone's one designed
+human gate and the one producer no lane can read.
+
 **Story order.** `01` and `02` are parallel-eligible from day one and share nothing. `03` depends on
 `01`; `04` depends on `03`. The one cross-story rule, from the architect's seam analysis: everything
 in `ui/` waits on the route module, and nothing in `src/` waits on anything.
@@ -217,79 +278,56 @@ proceeded unchanged.
 
 ## Verification
 
-<!-- Pointers, not restatements. -->
-- [ ] `@executable` suite green
-- [ ] Fitness functions green — 5 registered, **18 red / 3 green** at refine, red for the right
-      reasons: `acd-ui-single-route-table`, `acd-no-surface-mode-url-literal`,
-      `acd-spa-fallback-never-masks`, `acd-route-logic-framework-free`,
-      `acd-shell-z-ladder-single-home`. Satisfiability was proven by throwaway prototype and reverted;
-      `src/` and `ui/` are unchanged by this refine.
-- [ ] `@manual` signed off — see `UAT.md`
-- [ ] `@uat` — `stories/03_story_app-shell-and-entry/tasks/04_app-shell-visual-review.feature`, judged
-      against `mocks/app-shell.png` (pending) or `DESIGN.md`'s binding checklist, at 1280 / 768 / 390
-      plus the desktop app's 760×520 window, on all four routes and an unmatched path.
+Settled at the end gate, 2026-08-08 — see `VERIFICATION.md` for the evidence and `OUTCOME.md` for
+what the milestone now delivers.
 
-## Feedback (for retro)
+- [x] `@executable` suite green — **173 lanes / 0 failed** at accept
+- [x] Fitness functions green — **45 lanes / 0 failed** across twelve gates (5 registered at refine,
+      18 red / 3 green then; all green now, plus `acd-shell-bus-single-host` written at 45/03's review)
+- [x] `@manual` — 45/04 task 02's back-compat census, walked in a real browser: all 8 legacy rows
+- [x] `@uat` — 45/03 task 04, RUN rather than delegated: the thesis measured against the pre-milestone
+      build at `b9052ff`, scroll ownership, the keyboard pass, motion, and the tray chain
 
-- 45/03 bookkeeping (2026-08-07, caught by the operator): after an infra-failure retry, the run
-  LINEAGE resumed but nothing re-asserted the ITEM status — `run-complete --outcome failed` rolls the
-  item to `not-started` (by design), `run-retry` does not roll it forward, and the orchestrator's
-  later status edit pattern-matched the pre-rollback value and silently no-opped. The board honestly
-  reported the wrong record for hours. Lessons: (a) after any run-retry, re-assert the item status
-  explicitly rather than assuming the pre-failure edit survived; (b) a status edit should verify its
-  own result (the sed printed nothing and nobody looked); (c) possibly a CLI gap — `run-retry` could
-  restore the status its own failure-path rolled back. — Raised by: operator + orchestrator
+## Accepted — 2026-08-08
 
-- 45/01 review (2026-08-07): a locked feature's Then can smuggle a cross-story coupling into a leaf
-  story. Feature 02 scenario 5's last Then ("board-url's response SHAPE is untouched by any of this")
-  is a claim about a producer this story does not edit, inside a feature whose own LITMUS is
-  "returned values only" — the developer discharged it the only way it literally reads (a source
-  read), which froze the exact body m46 must extend and coupled 45/01's suite to the file 45/02 was
-  editing concurrently. Refine lesson: a Then asserting "something else did not change" belongs in
-  the suite that owns the something else, or in the feature header as a non-goal — never as a Then.
-  — Raised by: architect + QA, convergent
-- 45/01 review (2026-08-07): `aof graph impact`'s remediation advice loops on this machine — when
-  `aof graph build .` answers `graphify-missing`, impact still prints "rebuild with `aof graph
-  build .`", which is unachievable; it should say `aof project provision graphify`. (The NOT-COVERED
-  labelling itself worked and prevented a false no-coupling read.) — Raised by: architect
-- Carried to 45/03: `legacyRedirectFor` tolerates a search missing its leading `?` but not a hash
-  missing its `#` (returns it verbatim; a caller composing `${pathname}${search}${hash}` from
-  hand-built parts gets `/board18`). Real `location.hash` always carries `#`; the entry must pass
-  `location`-shaped parts, not hand-composed ones. — Raised by: QA (F-45-01-G)
-- Carried to 45/04: two `?mode=` producers are absent from the features' cited lists but named by
-  `acd-no-surface-mode-url-literal` — `Board.tsx:416` and `DetailPanel.tsx:270`. The producer
-  rewrite must include them. — Raised by: QA (F-45-01-I)
-- 45/02 review (2026-08-07): a refine-time quantitative prediction went into the record unverified —
-  ARCHITECTURE's "net line-negative in `src/`" justified the 109th root module; measured: +134 total
-  / +9 code lines (the leaf carries 73 lines of house narration). Justify a module on coupling, not
-  a line forecast — or scope the forecast to code lines. — Raised by: architect
-- 45/02 review (2026-08-07): "we chose not to pin this" still deserves a row documenting the
-  resulting value — the deliberately-unpinned control-char status let `/%00` move from 404 to
-  200-shell unobserved, and the next reviewer re-derived it from scratch. — Raised by: architect + QA
-- 45/02 review (2026-08-07): a test helper can silently re-route the very input a row exists to
-  probe — `new URL("//x", base)` in the suite's `get()` resolved protocol-relative and sent the
-  request to host "api", so the double-slash row tested a stranger's server. When a row probes a
-  parser edge, the harness must be checked against the same edge. — Raised by: orchestrator
-- Carried to 45/04 (QA F-3 of 45/02): `aof assets ui` starts `serveSetupUi` with no `uiRoot`, so its
-  API port now serves the vite SOURCE dir's index.html with SPA fallback — worth a line when 45/04
-  moves that launcher's advertised URL to `/config`. **Discharged at 45/04 review (architect F4,
-  2026-08-07), the line: measured — the API half-port (default 4178) serves the vite SOURCE dir with
-  the fallback, so `GET /config` there answers the dev `index.html`; nothing advertises that port
-  (vite proxies only `/api` to it) and no operator path reaches it. Out of scope, recorded so the
-  next reader does not re-derive it.**
-- 45/04 review (2026-08-07): **a red arch gate is live on `main`, predating m45** —
-  `acd-no-new-silent-catch` fails on `src/board-worker-stream.mjs` (1 silent catch, baseline 0),
-  introduced by PR #11 (`eacbd57`). Verified in a detached worktree at HEAD. Not m45's to fix; the
-  operator should route it to PR #11's owner — a red gate on main makes every later branch's sweep
-  noisy. — Raised by: architect
-- 45/04 review (2026-08-07): a fitness function whose NAME claims a property its body does not check
-  ("a fifth producer cannot appear unseen" over a hand-maintained four-entry loop) — proven by a
-  sandboxed fifth producer minting a path directly, which stayed green. Strengthened before close
-  with a path-literal subset sweep. Lesson: name assertions for what the body checks, or make the
-  body check the name. — Raised by: architect
-- 45/04 review (2026-08-07): a deferral routed one way only is a decision the receiving milestone
-  never meets — m45's STATE said "routed to m47" while m47's documents carried no trace. The
-  receiving-side line is now written (m47/STATE). Lesson: a cross-milestone routing is complete only
-  when it appears in the RECEIVER's record. — Raised by: architect
+`SPEC.md` → `done`, all four stories `done`. Two defects were found at the end gate and fixed there
+(`F-45-M-1`, the blank `/config`; `GAP-5`, the top bar scrolling out of view), plus two design gaps
+fixed at the conformance pass. Three gaps are carried with fix shapes and close conditions —
+**DG-45-3** (the config sidebar's duplicate identity), **DG-45-4** (the origin-mismatch state's two
+visual languages) and **DG-45-5** (the cross-origin honesty rule with no producer) — the last two owned
+by milestone 47, which becomes the fleet surface's owner and ships the origin probe both need.
 
-- Refine trap, hit at m45 ARCHITECTURE authoring (2026-08-06): running `aof graph build .` under AOF_GLOBAL_HOME=$(mktemp -d) — the repo's own hook-enforced test-isolation idiom — returns the structured { code: "graphify-missing" } miss, because the managed tool store lives under the global home. An isolated home makes an INSTALLED graphify indistinguishable from an absent one, and the codebase-grounding step's documented response to that miss is 'proceed on grep-and-infer'. So an agent that correctly follows the test-isolation rule silently loses the graph. Two fixes worth considering: (a) the graphify tool-store resolution should not be scoped by AOF_GLOBAL_HOME, or (b) the graphify-missing envelope should say WHICH store it looked in, so the miss is diagnosable rather than just believable. Workaround used: re-run without the isolated home (graph build is read-only over src and writes only graphify-out/). — Raised by: architect
+### Compaction
+
+The blow-by-blow above is the milestone's narrative and is left intact; the two sections that had
+graduated are gone rather than duplicated:
+
+- **`## Feedback (for retro)`** — its ~20 running notes were triaged and distilled into
+  **`RETROSPECTIVE.md`** (12 lessons, `R1`–`R12`), then folded into memory via `aof work memory ingest`
+  (483 records reindexed) so they are recallable at milestone 46's refine. The section is archived
+  here rather than carried: its lessons have graduated, exactly as durable decisions graduate into ADRs.
+- **The refine-time verification checklist** — replaced above by the settled result.
+
+### Durable decisions, and where they now live
+
+Nothing is graduated into a new ADR: every durable decision this milestone took already has an ADR that
+owns it (ADR-001 the hand-rolled table, ADR-002 the four paths and origin-blind routing, ADR-003 the
+client-side legacy translation, ADR-004 the one static-serving leaf, ADR-005 the shell regions and the
+fullscreen door with its five `[Build-N]` amendments, ADR-006 the shell's parameter-blindness). Three
+decisions taken at the end gate were folded into the document that owns them rather than into a new ADR:
+
+- the identity chip's width rule, restated in `DESIGN.md` §R2 as an **invariant** rather than a utility
+  class (R3);
+- DESIGN GAP D1's page-level clamp, now `overflow-x: clip` on `html` and `body`, with the reason
+  recorded in `index.css` at the declaration (R4);
+- the shell root's overflow, moved out of a hand-typed class and into
+  `contentModeFor.rootEstablishesScrollport`, which answers it per content mode (R4).
+
+### Carried into milestone 46
+
+- `Fleet.tsx`'s inline `onRefresh` is one refactor from an infinite update loop — a one-line
+  `useCallback`; production survives only via the entry's referentially-stable element.
+- `shell:fullscreen` is built and unexercised: nothing in `ui/src/` calls `requestFullscreen`, so m46's
+  terminal is its first caller and its `@uat` scenario belongs to m46's gate.
+- TECH_DEBT items 23 (the lexical traversal guard) and 24 (the comment-stripper hazard across 23
+  arch-test suites) were opened by this milestone's reviews.

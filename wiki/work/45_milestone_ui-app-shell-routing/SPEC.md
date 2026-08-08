@@ -3,10 +3,10 @@ type: milestone
 number: 45
 slug: ui-app-shell-routing
 title: "UI app shell & path routing — three pages become one application"
-status: in-progress
+status: done
 owner: product-owner
 created: 2026-08-02
-updated: 2026-08-06
+updated: 2026-08-08
 origin: ../../planning/PRD-web-ui-restructure.md
 schema: 1
 aofVersion: 0.1.0
@@ -90,9 +90,9 @@ Out of scope:
       every legacy URL becomes.
 - [x] `02_story_static-serve-history-fallback` — a refreshed path renders instead of 404ing: one
       static-serving leaf, one traversal guard, and a fallback that never masks a missing asset.
-- [ ] `03_story_app-shell-and-entry` — the three pages become one application: a thin entry, a shell
+- [x] `03_story_app-shell-and-entry` — the three pages become one application: a thin entry, a shell
       with named regions, and navigation that has never existed.
-- [ ] `04_story_advertised-entry-points` — the servers, the desktop app and the in-app links stop
+- [x] `04_story_advertised-entry-points` — the servers, the desktop app and the in-app links stop
       advertising `?mode=` and start advertising paths.
 
 **Boundaries and order.** `01` and `02` are parallel-eligible from day one and share nothing:
